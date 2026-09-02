@@ -329,12 +329,16 @@ Last verified: 2026-09-01
   the existing durable owner horizon.
 - A completed hosted runtime does not depend on the originating
   `RunnerContainer` activation surviving long enough to deliver its result.
-  Before returning through that disposable activation, the container sends the
-  exact result, attempt, and generation over the existing bound internal route
-  to `UserRunner`, whose existing compare-and-swap remains the only write-fence
-  clear authority. The outer result is a fallback, duplicate or superseded
-  receipts are harmless, and outcomes are recorded as `recorded`,
-  `superseded`, or `failed`. There is no completion poller or recovery queue.
+  After a successful invocation, the container entrypoint clears its local wake
+  and abort pointers, decrements active work, and cleans request transport before
+  sending the exact result, attempt, and generation over the existing bound
+  internal route to `UserRunner`. That release-first order prevents the durable
+  fence from admitting a successor while the process still reports busy.
+  `UserRunner`'s existing compare-and-swap remains the only write-fence clear
+  authority. The ordinary outer result remains the normal path; duplicate or
+  stale receipts are harmless. The one-second best-effort receipt reports only
+  `recorded` or `not_recorded`, never changes the completed result, and adds no
+  completion poller or recovery queue.
 - Hosted background admission uses one capability-scoped projection on the
   existing workspace checkpoint row. A capable runtime checkpoints an absolute
   `systemMailboxProgressGeneration` plus the independently calculated next

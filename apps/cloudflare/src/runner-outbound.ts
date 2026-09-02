@@ -39,7 +39,6 @@ import {
   parseHostedBrowserVaultReplicaRef,
   parseHostedWorkspaceCheckpointRequest,
   parseHostedWorkspaceCheckpointResponse,
-  parseHostedWorkspaceInvocationResult,
   parseHostedWorkspaceReadResponse,
   parseHostedWorkspaceSnapshotV2Ref,
   readHostedExecutionSnapshotBaseRef,
@@ -77,13 +76,15 @@ import {
   readHostedRuntimeArtifactFetchTelemetry,
 } from "./runner-outbound/headers.ts";
 import {
-  requireRunnerRuntimeWriteFenceHeaders,
   requireRunnerRuntimeWriteFenceWrite,
   RunnerRuntimeWriteFenceError,
   requireRunnerRuntimeWriteFenceWorkspaceWrite,
   writeRunnerRuntimeWriteFenceHeaders,
 } from "./runner-outbound/write-fence.ts";
 import { handleRunnerResultsRequest } from "./runner-outbound/results.ts";
+import {
+  handleRunnerRuntimeCompletionRequest,
+} from "./runner-outbound/runtime-completion.ts";
 import { handleRunnerWebControlRequest } from "./runner-outbound/web-control.ts";
 import {
   readHostedRunnerDiagnosticMethod,
@@ -92,8 +93,8 @@ import {
 } from "./runner-outbound/diagnostics.ts";
 import {
   resolveRunnerOutboundUserCryptoContext,
-  resolveRunnerOutboundUserRunnerStub,
   requireRunnerOutboundUserStubMethod,
+  resolveRunnerOutboundUserRunnerStub,
   type RunnerOutboundEnvironmentSource,
 } from "./runner-outbound/shared.ts";
 import {
@@ -357,42 +358,6 @@ async function handleRunnerDedicatedPortRequest(input: {
     url: input.url,
     userId: input.userId,
   });
-}
-
-async function handleRunnerRuntimeCompletionRequest(input: {
-  env: RunnerOutboundEnvironmentSource;
-  request: Request;
-  userId: string;
-}): Promise<Response> {
-  const writeFence = requireRunnerRuntimeWriteFenceHeaders(input.request);
-  const body = await readJsonObject(input.request, { limitBytes: 64 * 1024 });
-  const result = parseHostedWorkspaceInvocationResult(body.result);
-  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
-  requireRunnerOutboundUserStubMethod(
-    stub,
-    "recordRuntimeCompletionFromContainer",
-  );
-  const receipt = await stub.recordRuntimeCompletionFromContainer({
-    attemptId: writeFence.attemptId,
-    generation: writeFence.generation,
-    result,
-    userId: input.userId,
-  });
-
-  emitHostedExecutionStructuredLog({
-    component: "runner.container",
-    details: {
-      runtimeCompletionReceiptOutcome: receipt.completed
-        ? "recorded"
-        : "superseded",
-      workspaceAttemptId: writeFence.attemptId,
-    },
-    level: receipt.completed ? "info" : "warn",
-    message: "Hosted container reported runtime completion to the durable fence owner.",
-    phase: "checkpoint",
-    userId: input.userId,
-  });
-  return json(receipt);
 }
 
 function safeRunnerOutboundRequestUrl(value: string): URL | null {

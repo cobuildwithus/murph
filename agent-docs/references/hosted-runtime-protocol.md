@@ -2882,22 +2882,27 @@ the fence regardless of whether a status read appears to show progress. Exact
 successful completion clears the fence only by the matching attempt identity.
 This prevents duplicate replacement while a live child may still be running and
 leaves replacement ownership in the exact identity-aware wake path.
-Before a successful hosted runtime invocation returns through the disposable
-RunnerContainer activation, the container process sends the parsed result plus
-its exact attempt and generation to the existing internal runner-control host.
-Outbound interception binds the request to the container's user and runner,
-then forwards it to that per-user UserRunner. UserRunner re-reads the current
-runtime fence and uses the existing full-token completion compare-and-swap; a
-stale, duplicate, wrong-user, or wrong-generation receipt is a no-op. The
-compare-and-swap winner alone may emit the existing owner-release callback.
-This process-origin receipt survives replacement of the RunnerContainer Durable
-Object activation and its in-memory active-operation record. Receipt failure is
-bounded and cannot change the completed runner result; the original outer
-RunnerContainer-to-UserRunner result remains the mixed-version and transient
-failure fallback. Structured outcomes distinguish `recorded`, `superseded`, and
-`failed`. The receipt adds no poller, queue, stored recovery job, or second
-completion authority, and does not make checkpoint success, idle expiry,
-container stop, or elapsed time completion authority.
+After a successful hosted runtime invocation settles, the container entrypoint
+clears the invocation's wake and abort pointers, decrements its active-job
+count, and cleans request transport. Only then does the container process send
+the parsed result plus its exact attempt and generation to the existing
+internal runner-control host. This release-first order lets a successor use the
+process as soon as the durable fence is cleared instead of receiving a busy
+response. Outbound interception binds the request to the container's user and
+runner, then forwards it to that per-user UserRunner. UserRunner re-reads the
+current runtime fence inside its atomic completion method and uses the existing
+full-token completion compare-and-swap; a stale, duplicate, wrong-user, or
+wrong-generation receipt is a no-op. The compare-and-swap winner alone may emit
+the existing owner-release callback. This process-origin receipt survives
+replacement of the RunnerContainer Durable Object activation and its in-memory
+active-operation record. Both a fetch abort and an independent hard deadline
+bound the receipt to one second, and any failure preserves the completed runner
+result. The ordinary outer RunnerContainer-to-UserRunner result remains the
+normal completion path. Structured receipt outcomes distinguish only
+`recorded` from `not_recorded`; UserRunner logs the exact durable reason. The
+receipt adds no poller, queue, stored recovery job, or second completion
+authority, and does not make checkpoint success, idle expiry, container stop,
+or elapsed time completion authority.
 When the outer RunnerContainer active-operation pointer is missing, a container
 wake response must carry explicit identity-checked wake metadata before an
 accepted wake is trusted; identity-blind accepted responses from deploy-skewed

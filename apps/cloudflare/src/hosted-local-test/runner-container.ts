@@ -15,9 +15,6 @@ import {
 import {
   RunnerContainer as BaseRunnerContainer,
 } from "../runner-container.ts";
-import type {
-  HostedExecutionRunnerJobResult,
-} from "../runner-job-transport.ts";
 import {
   handleHostedRunnerGeminiOutbound,
   handleHostedRunnerOpenAiOutbound,
@@ -72,18 +69,6 @@ export class RunnerContainer extends BaseRunnerContainer {
     }
     this.loseCompletedInvocationResultForTest = false;
     return await new Promise<never>(() => {});
-  }
-
-  protected override async recordRuntimeCompletionBestEffort(input: {
-    attemptId: string;
-    generation: string;
-    result: HostedExecutionRunnerJobResult;
-    userId: string;
-  }): Promise<void> {
-    if (this.loseCompletedInvocationResultForTest) {
-      return;
-    }
-    await super.recordRuntimeCompletionBestEffort(input);
   }
 
   async armGeneratedImageProviderBarrierForTest(

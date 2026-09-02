@@ -79,7 +79,7 @@ describe("hosted local Linq lost active-operation e2e", () => {
     });
   }, 300_000);
 
-  it("clears the durable fence after RunnerContainer activation-owned completion state is lost", async () => {
+  it("clears the durable fence after the RunnerContainer activation loses the outer result", async () => {
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(userId),
       memberId: userId,
@@ -167,7 +167,7 @@ describe("hosted local Linq lost active-operation e2e", () => {
 
     await waitForCondition(
       async () => await readActiveRuntimeFenceForTest() === null,
-      "Expected the container-origin completion receipt to clear the exact fence after activation-owned receipt state was lost.",
+      "Expected the container-origin completion receipt to clear the exact fence after the activation-owned outer result was lost.",
     );
     await requireScenario().harness.expireRunnerActivityForTest(userId);
     const outboundCountBeforeFreshWake = requireLinqStub().countObservedSends(replyPath);

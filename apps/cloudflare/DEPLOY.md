@@ -2058,12 +2058,23 @@ Worker replacement is checkpoint-safe at the runtime fence rather than through r
 
 A successful invocation also sends its exact result, attempt, and generation
 from the container process through the existing bound internal runner-control
-route before returning through `RunnerContainer`. `UserRunner` remains the sole
-durable completion authority and applies its existing write-fence
+route after the entrypoint has cleared invocation wake and abort pointers,
+decremented active work, and cleaned request transport. `UserRunner` remains the
+sole durable completion authority and applies its existing write-fence
 compare-and-swap; this lets completion survive a `RunnerContainer` Durable
-Object activation reset without a poller or recovery queue. The outer result is
-a fallback, stale or duplicate receipts are no-ops, and structured outcomes are
-`recorded`, `superseded`, or `failed`.
+Object activation reset without admitting a successor while the process still
+reports busy. The ordinary outer result remains the normal completion path,
+stale or duplicate receipts are no-ops, and structured receipt outcomes are
+`recorded` or `not_recorded`. The one-second best-effort receipt cannot change
+the completed result and adds no poller or recovery queue.
+
+The first deployment that introduces the container-process sender must use
+`container_rollout=immediate`. Worker code is available before its new container
+image, so a new process can safely reach the new route; an old process has no
+reset-safe sender once its disposable Worker activation is replaced. Immediate
+rollout closes that one-way mixed-version window. After managed-container smoke
+reports the candidate runner-bundle fingerprint, subsequent compatible deploys
+may return to the normal rollout policy.
 During gradual rollout, Worker code and runner container state may disagree for the rollout window. A newly deployed Worker version can handle provider egress or internal-host traffic from an already-running warm runner process whose bundle, process env, or provider-credential shape was created before the deploy. Treat this as expected rollout behavior, not proof that traffic is reaching an old Worker version. Any PR that changes a Worker/container contract, runner env shape, hosted provider credential, internal host route, parser/toolchain path, or bundle-owned runtime assumption must document the compatibility window in its PR description and final `DEPLOYMENT CONCERNS:` handoff: whether old containers can safely talk to new Worker code, whether new containers can safely talk to old web/control-plane code, whether `container_rollout=immediate` is required, and which deploy-smoke or Workers Observability checks prove the fleet has converged.
 
 The Junction scalar-timeseries continuation cutover is runner-only and requires

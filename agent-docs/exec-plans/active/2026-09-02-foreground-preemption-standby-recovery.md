@@ -17,8 +17,8 @@ Updated: 2026-09-02
 - Allocate mode has one prewarm owner: the standby pool, so an exact-user shell
   reservation cannot preempt a fresh foreground standby claim.
 - A completed runtime clears its exact durable write fence even when the
-  original `RunnerContainer` activation and every activation-owned completion
-  path disappear before the result is received.
+  original `RunnerContainer` activation and its outer result path disappear
+  before the result is received.
 - Temporal, spoofed-direct, retention, and system-mailbox requests remain
   ineligible for fresh standby claims.
 - The deterministic controller regression fails on the current action-derived
@@ -84,8 +84,10 @@ Updated: 2026-09-02
    Journal wake mismatch to its producer.
 2. Add red deterministic regressions for foreground replacement and
    allocate-mode prewarm ownership, plus the missing real Journal wake fixture.
-3. Route container-origin completion through the existing internal runner
-   control host to the exact `UserRunner` fence CAS, with reason-coded outcomes.
+3. After the container entrypoint releases every invocation-local wake, abort,
+   activity, and transport owner, route one container-origin completion through
+   the existing internal runner-control host to the exact `UserRunner` fence
+   CAS, with `recorded` or `not_recorded` outcomes.
 4. Delete the redundant action-derived standby gate and exact-user prewarm race,
    then align owning docs.
 5. Run focused tests, typecheck, complexity/diff checks, the reset-before-result
@@ -106,10 +108,19 @@ Updated: 2026-09-02
   default-request facts rather than `started` versus `replaced`.
 - The Journal mismatch is test-fixture drift introduced when the registered
   wake kind was added; keep the exhaustive contract and add the missing wake.
-- `UserRunner` remains the sole durable fence owner. The container that finishes
-  a runtime reports the exact result over the already-bound internal runner
-  control route before returning it to the disposable `RunnerContainer`
-  activation; the old return path remains a best-effort fallback.
+- `UserRunner` remains the sole durable fence owner. The container entrypoint
+  captures a successful result, clears the invocation's wake and abort
+  pointers, decrements active work, cleans request transport state, and only
+  then reports the exact result over the already-bound internal runner-control
+  route. This prevents durable release from racing a still-busy container.
+- The container entrypoint is the one completion sender. The old
+  activation-owned `RunnerContainer` sender is deleted; normal invocation
+  return remains the ordinary completion path, while an immediate container
+  rollout removes the only mixed-version window in which an old process lacks
+  the reset-safe sender.
+- The best-effort receipt has both a one-second fetch abort and a one-second
+  hard `Promise.race` deadline. Failure, non-2xx, invalid response, or a fetch
+  implementation that ignores abort cannot change the completed result.
 - In allocate mode, the standby coordinator is the sole shell-prewarm owner.
   Exact-user startup remains the normal fallback only after a claim miss.
 

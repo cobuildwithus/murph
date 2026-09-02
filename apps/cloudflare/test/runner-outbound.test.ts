@@ -131,6 +131,8 @@ import {
 import {
   HOSTED_RUNTIME_ARTIFACT_FETCH_CORRELATION_ID_HEADER,
   HOSTED_RUNTIME_ARTIFACT_READ_PURPOSE_HEADER,
+  HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
+  HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
   HOSTED_WEB_CONTROL_FORWARDED_RESPONSE_HEADER,
 } from "../src/runner-outbound/headers.ts";
 import {
@@ -2385,6 +2387,87 @@ describe("handleRunnerOutboundRequest", () => {
       },
       userId: "member_123",
     });
+  });
+
+  it("returns a not-recorded container completion without a second authority read", async () => {
+    const recordRuntimeCompletionFromContainer = vi.fn(async () => ({
+      completed: false,
+    }));
+    const response = await handleRunnerOutboundRequest(
+      new Request(CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_ENDPOINT, {
+        body: JSON.stringify({ result: { status: "idle" } }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt_stale",
+          [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: "8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName: () => ({ recordRuntimeCompletionFromContainer }),
+        },
+      }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ completed: false });
+    expect(recordRuntimeCompletionFromContainer).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    {
+      body: JSON.stringify({ result: { status: "idle" } }),
+      headers: createRunnerProxyHeaders({
+        "content-type": "application/json; charset=utf-8",
+      }),
+      name: "missing fence authority",
+      status: 401,
+    },
+    {
+      body: "{",
+      headers: createRunnerProxyHeaders({
+        "content-type": "application/json; charset=utf-8",
+        [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt_malformed",
+        [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: "9",
+      }),
+      name: "malformed input",
+      status: 400,
+    },
+    {
+      body: JSON.stringify({
+        padding: "x".repeat(256 * 1024),
+        result: { status: "idle" },
+      }),
+      headers: createRunnerProxyHeaders({
+        "content-type": "application/json; charset=utf-8",
+        [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt_oversized",
+        [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: "10",
+      }),
+      name: "an oversized body",
+      status: 413,
+    },
+  ])("rejects container completion with $name", async ({ body, headers, status }) => {
+    const recordRuntimeCompletionFromContainer = vi.fn(async () => ({
+      completed: true,
+    }));
+    const response = await handleRunnerOutboundRequest(
+      new Request(CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_ENDPOINT, {
+        body,
+        headers,
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName: () => ({ recordRuntimeCompletionFromContainer }),
+        },
+      }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(status);
+    expect(recordRuntimeCompletionFromContainer).not.toHaveBeenCalled();
   });
 
   it("rejects workspace checkpoints when the live invocation lease is stale", async () => {
