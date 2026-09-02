@@ -263,10 +263,16 @@ describe('assistant skill assets', () => {
     const daily = (await readSkillFile(dailySkill)).replace(/\s+/gu, ' ')
 
     expect(daily).toMatch(
-      /wearables day <date>.+wearables activity list.+canonical workout-day rollup/u,
+      /workout activity questions.+choose compact or detailed output from the user's question before the first and only activity-list data read; never use compact output as a probe before retrying with detail.+wearables activity list --date <date> --format json.+compact routine result.+Do not run `wearables day` first.+other date-specific wearable facts.+wearables day <date>/u,
     )
     expect(daily).toContain(
-      '`workoutFeatures` associates bounded heart-rate, cadence, power, speed, and split details',
+      'wearables activity list --date <date> --include-workout-details --format json',
+    )
+    expect(daily).toContain(
+      'Omit `--include-workout-details` only when the answer is entirely available from the day-level `sessionCount`, `sessionMinutes`, and distinct `activityTypes` fields. Pass it truthy whenever selecting, comparing, grouping, ordering, or attributing individual workouts, including type-specific count, duration, distance, start time, provider, heart rate, cadence, power, speed, or splits',
+    )
+    expect(daily).toContain(
+      '`workoutFeatures` associates the bounded detail with each workout by provider and start time',
     )
     expect(daily).toContain(
       'Treat an empty `splits` array as no retained split facets for that workout',
