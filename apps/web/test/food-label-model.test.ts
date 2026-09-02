@@ -4,7 +4,6 @@ import type { PublicProductDetail } from "@murphai/contracts";
 
 import {
   compareFoodMetrics,
-  getEvidenceMatrix,
   getFoodAlertLabel,
   getFoodCategoryAsset,
   getFoodEvidenceSummary,
@@ -156,27 +155,6 @@ describe("food label comparison model", () => {
     expect(getFoodAlertLabel(summary, true)).toBe(
       "At least 5 alerts among shown observations",
     );
-  });
-
-  test("maps measured results to honest semantic states", () => {
-    const product = makeFood("food_tested");
-    product.productTests.observations = [
-      observation("lead", "Lead", "does_not_exceed", "sample-a"),
-      observation("glyphosate", "Glyphosate", null, "sample-b", "not_detected"),
-      observation("cadmium", "Cadmium", null, "sample-a", "detected"),
-    ];
-    product.productTests.total = 3;
-    product.productTests.returned = 3;
-
-    expect(getEvidenceMatrix(product)).toEqual([
-      expect.objectContaining({ analyte: "Lead", status: "Below limit", tone: "affirmative" }),
-      expect.objectContaining({ analyte: "Glyphosate", status: "Not detected", tone: "affirmative" }),
-      expect.objectContaining({
-        analyte: "Cadmium",
-        status: "No comparable threshold",
-        tone: "unknown",
-      }),
-    ]);
   });
 
   test("selects a broad category illustration without using remote images", () => {

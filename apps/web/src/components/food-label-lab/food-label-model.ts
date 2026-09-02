@@ -61,16 +61,6 @@ export interface FoodEvidenceSummary {
   observationsTruncated: boolean;
 }
 
-export type EvidenceTone = "affirmative" | "warning" | "unknown" | "neutral";
-
-export interface EvidenceMatrixRow {
-  analyte: string;
-  status: string;
-  tone: EvidenceTone;
-  coveredSampleCount: number | null;
-  totalSampleCount: number | null;
-}
-
 const METRIC_BY_ID = new Map<FoodMetricId, FoodMetric>(
   FOOD_METRICS.map((metric) => [metric.id, metric]),
 );
@@ -254,55 +244,6 @@ export function getFoodObservationScope(summary: FoodEvidenceSummary): string {
   return `${summary.observationCount} ${summary.observationCount === 1 ? "observation" : "observations"}`;
 }
 
-export function getEvidenceMatrix(
-  product: PublicProductDetail,
-): EvidenceMatrixRow[] {
-  const allSampleKeys = distinctSampleKeys(product.productTests.observations);
-  const observationsByAnalyte = new Map<
-    string,
-    PublicProductDetail["productTests"]["observations"]
-  >();
-
-  for (const observation of product.productTests.observations) {
-    const current = observationsByAnalyte.get(observation.analyte.name) ?? [];
-    current.push(observation);
-    observationsByAnalyte.set(observation.analyte.name, current);
-  }
-
-  return [...observationsByAnalyte.entries()].map(([analyte, observations]) => {
-    const exceeds = observations.some(
-      (observation) => observation.screening?.comparison === "exceeds",
-    );
-    const belowLimit = observations.every(
-      (observation) => observation.screening?.comparison === "does_not_exceed",
-    );
-    const notDetected = observations.every(
-      (observation) => observation.result.operator === "not_detected",
-    );
-    const coveredSampleKeys = distinctSampleKeys(observations);
-
-    if (exceeds) {
-      return matrixRow(analyte, "Above limit", "warning", coveredSampleKeys, allSampleKeys);
-    }
-    if (belowLimit) {
-      return matrixRow(analyte, "Below limit", "affirmative", coveredSampleKeys, allSampleKeys);
-    }
-    if (notDetected) {
-      return matrixRow(analyte, "Not detected", "affirmative", coveredSampleKeys, allSampleKeys);
-    }
-    if (observations.some((observation) => observation.screening === null)) {
-      return matrixRow(
-        analyte,
-        "No comparable threshold",
-        "unknown",
-        coveredSampleKeys,
-        allSampleKeys,
-      );
-    }
-    return matrixRow(analyte, "Measured", "neutral", coveredSampleKeys, allSampleKeys);
-  });
-}
-
 export function formatFoodMetricValue(value: FoodMetricValue): string {
   const rounded = Math.abs(value.value - Math.round(value.value)) < 0.05
     ? String(Math.round(value.value))
@@ -355,43 +296,6 @@ export function getFoodCategoryAsset(product: PublicProductDetail): string {
   const category = categories.find(([, pattern]) => pattern.test(haystack))?.[0]
     ?? "snacks";
   return `/design-assets/food-label-lab/${category}.svg`;
-}
-
-function matrixRow(
-  analyte: string,
-  status: string,
-  tone: EvidenceTone,
-  coveredSampleKeys: Set<string>,
-  allSampleKeys: Set<string>,
-): EvidenceMatrixRow {
-  return {
-    analyte,
-    status,
-    tone,
-    coveredSampleCount: allSampleKeys.size > 0 ? coveredSampleKeys.size : null,
-    totalSampleCount: allSampleKeys.size > 0 ? allSampleKeys.size : null,
-  };
-}
-
-function distinctSampleKeys(
-  observations: PublicProductDetail["productTests"]["observations"],
-): Set<string> {
-  const keys = new Set<string>();
-  for (const observation of observations) {
-    const sample = observation.sample;
-    const key = sample?.sourceSampleId
-      ?? sample?.lotCode
-      ?? [
-        observation.source.key,
-        observation.source.reportDate,
-        observation.testedProduct.sourceProductId,
-        sample?.testedOn,
-      ].filter(Boolean).join(":");
-    if (key) {
-      keys.add(key);
-    }
-  }
-  return keys;
 }
 
 function normalizeMetricName(value: string): string {

@@ -1906,7 +1906,9 @@ scope, and the gaps sheet renders the DTO-owned unknown entries without a
 parallel completeness model. Compatible browsers receive four page-scoped
 WebMCP tools through
 `document.modelContext.registerTool`. These tools call the same bounded page
-actions as manual controls and disappear when the page unmounts. They do not
+actions as manual controls. Their comparison result carries the same four
+metric values, completeness, ties, winners, and win counts as the visible
+table. The tools disappear when the page unmounts. They do not
 create a remote MCP service, a second data owner, or an authenticated path.
 
 Each product-test observation may preserve evidence and sampling context,

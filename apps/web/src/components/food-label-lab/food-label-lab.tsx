@@ -506,6 +506,18 @@ function buildWebMcpComparison(
   const topMatch = getFoodTopMatch(products, comparisons);
   return {
     basis,
+    comparableMetricCount: topMatch.comparableMetricCount,
+    metrics: comparisons.map((comparison) => ({
+      metric: comparison.metric.id,
+      preference: comparison.metric.preference,
+      complete: comparison.complete,
+      values: [...comparison.values].map(([productRef, metricValue]) => ({
+        productRef,
+        value: metricValue.value,
+        unit: metricValue.unit,
+      })),
+      winnerProductRefs: [...comparison.winnerRefs],
+    })),
     topMatchProductRefs: [...topMatch.productRefs],
     products: products.map((product) => {
       const evidence = getFoodEvidenceSummary(product);
@@ -519,6 +531,7 @@ function buildWebMcpComparison(
         observationReturned: evidence.returnedObservationCount,
         observationsTruncated: evidence.observationsTruncated,
         evidence: evidence.level,
+        wins: topMatch.winsByProductRef.get(product.productRef) ?? 0,
       };
     }),
   };

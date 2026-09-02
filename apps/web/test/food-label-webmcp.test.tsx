@@ -1,7 +1,11 @@
-import { createElement, type ReactElement } from "react";
+import { act, createElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
+import { PUBLIC_PRODUCTS_SCHEMA_VERSION } from "@murphai/contracts";
+
+import { FOOD_LABEL_DESIGN_PRODUCTS } from "@/app/design/food-label-lab-study";
+import { FoodLabelLab } from "@/src/components/food-label-lab/food-label-lab";
 import {
   FOOD_WEBMCP_TOOL_NAMES,
   FoodLabelWebMcp,
@@ -9,6 +13,16 @@ import {
 } from "@/src/components/food-label-lab/food-label-webmcp";
 
 import { renderClientComponent } from "./render-client-component";
+
+vi.mock("next/image", () => ({
+  default: (props: {
+    alt?: string;
+    className?: string;
+    height?: number;
+    src: string;
+    width?: number;
+  }) => createElement("img", props),
+}));
 
 interface CapturedTool {
   name: string;
@@ -125,6 +139,82 @@ describe("FoodLabelWebMcp", () => {
     });
     expect(actions.showEvidence).toHaveBeenCalledWith("food_one", "gaps");
   });
+
+  test("returns the same bounded metric comparison that the page shows", async () => {
+    const products = structuredClone(FOOD_LABEL_DESIGN_PRODUCTS);
+    const [first, second, third] = products;
+    if (!first || !second || !third) {
+      throw new Error("Food Label Lab design products are missing.");
+    }
+    setMetricValue(first, "Total Sugars", 0);
+    setMetricValue(second, "Total Sugars", 0);
+    third.nutrition.rows = third.nutrition.rows.filter(
+      (row) => row.name !== "Total Fat",
+    );
+    const byRef = new Map(products.map((product) => [product.productRef, product]));
+    vi.stubGlobal("fetch", vi.fn(async (resource: RequestInfo | URL) => {
+      const url = readRequestUrl(resource);
+      const productRef = decodeURIComponent(url.split("/").at(-1) ?? "");
+      const product = byRef.get(productRef);
+      if (!product) {
+        return new Response("not found", { status: 404 });
+      }
+      return new Response(JSON.stringify({
+        schema: PUBLIC_PRODUCTS_SCHEMA_VERSION,
+        product,
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }));
+
+    const captured: unknown[] = [];
+    const rendered = await renderWithModelContext(
+      createElement(FoodLabelLab),
+      (tool: unknown) => captured.push(tool),
+    );
+    cleanup = rendered.cleanup;
+
+    const compare = findTool(captured, "compare_food_products");
+    let comparison: unknown;
+    await act(async () => {
+      comparison = await compare.execute({
+        productRefs: products.map((product) => product.productRef),
+      });
+      await Promise.resolve();
+    });
+    const comparisonRecord = requireRecord(comparison, "comparison result");
+    const metrics = requireRecordArray(comparisonRecord.metrics, "comparison metrics");
+    const sugars = findMetricResult(metrics, "sugars");
+    const fat = findMetricResult(metrics, "fat");
+
+    expect(sugars).toMatchObject({
+      complete: true,
+      winnerProductRefs: [first.productRef, second.productRef],
+    });
+    expect(sugars.values).toEqual(expect.arrayContaining([
+      { productRef: first.productRef, unit: "g", value: 0 },
+      { productRef: second.productRef, unit: "g", value: 0 },
+    ]));
+    expect(fat).toMatchObject({ complete: false, winnerProductRefs: [] });
+    expect(comparisonRecord.comparableMetricCount).toBe(3);
+    expect(rendered.container.textContent).toContain("0 gLowest0 gLowest");
+
+    const servingButton = rendered.container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Compare per serving"]',
+    );
+    if (!servingButton) {
+      throw new Error("Per-serving comparison button did not render.");
+    }
+    await act(async () => {
+      servingButton.click();
+      await Promise.resolve();
+    });
+    const current = await findTool(captured, "get_food_comparison").execute({});
+    const currentRecord = requireRecord(current, "current comparison");
+    expect(currentRecord.basis).toBe("per_serving");
+    expect(currentRecord.metrics).toHaveLength(4);
+  });
 });
 
 async function renderWithModelContext(
@@ -148,6 +238,16 @@ async function renderWithModelContext(
 function makeActions(): FoodLabelWebMcpActions {
   const comparison = {
     basis: "per_100_g" as const,
+    comparableMetricCount: 4,
+    metrics: [
+      {
+        metric: "calories" as const,
+        preference: "lower" as const,
+        complete: true,
+        values: [{ productRef: "food_one", value: 90, unit: "kcal" }],
+        winnerProductRefs: ["food_one"],
+      },
+    ],
     topMatchProductRefs: ["food_one"],
     products: [
       {
@@ -160,6 +260,7 @@ function makeActions(): FoodLabelWebMcpActions {
         observationReturned: 2,
         observationsTruncated: false,
         evidence: "partial",
+        wins: 4,
       },
     ],
   };
@@ -216,4 +317,48 @@ function findToolShape(value: unknown): CapturedTool {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function readRequestUrl(resource: RequestInfo | URL): string {
+  if (typeof resource === "string") return resource;
+  if (resource instanceof URL) return resource.href;
+  return resource.url;
+}
+
+function setMetricValue(
+  product: (typeof FOOD_LABEL_DESIGN_PRODUCTS)[number],
+  metricName: string,
+  value: number,
+) {
+  const metric = product.nutrition.rows.find((row) => row.name === metricName);
+  if (!metric?.amount) {
+    throw new Error(`Metric ${metricName} is missing from the design product.`);
+  }
+  metric.amount.value = value;
+  metric.amount.display = String(value);
+}
+
+function requireRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!isRecord(value)) {
+    throw new Error(`${label} must be an object.`);
+  }
+  return value;
+}
+
+function requireRecordArray(value: unknown, label: string): Record<string, unknown>[] {
+  if (!Array.isArray(value) || !value.every(isRecord)) {
+    throw new Error(`${label} must be an object array.`);
+  }
+  return value;
+}
+
+function findMetricResult(
+  metrics: Record<string, unknown>[],
+  metric: string,
+): Record<string, unknown> {
+  const result = metrics.find((candidate) => candidate.metric === metric);
+  if (!result) {
+    throw new Error(`Metric result ${metric} is missing.`);
+  }
+  return result;
 }

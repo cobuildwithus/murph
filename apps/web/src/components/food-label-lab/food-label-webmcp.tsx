@@ -20,8 +20,21 @@ export interface FoodWebMcpComparisonResult {
     observationReturned: number;
     observationsTruncated: boolean;
     evidence: string;
+    wins: number;
   }>;
   basis: "per_100_g" | "per_serving";
+  metrics: Array<{
+    metric: "calories" | "protein" | "sugars" | "fat";
+    preference: "higher" | "lower";
+    complete: boolean;
+    values: Array<{
+      productRef: string;
+      value: number;
+      unit: string;
+    }>;
+    winnerProductRefs: string[];
+  }>;
+  comparableMetricCount: number;
   topMatchProductRefs: string[];
 }
 
@@ -79,6 +92,7 @@ const PRODUCT_SUMMARY_SCHEMA = {
     observationReturned: { type: "integer", minimum: 0, maximum: 20 },
     observationsTruncated: { type: "boolean" },
     evidence: { type: "string", enum: ["limited", "partial", "reported"] },
+    wins: { type: "integer", minimum: 0, maximum: 4 },
   },
   required: [
     "productRef",
@@ -90,6 +104,7 @@ const PRODUCT_SUMMARY_SCHEMA = {
     "observationReturned",
     "observationsTruncated",
     "evidence",
+    "wins",
   ],
   additionalProperties: false,
 } as const;
@@ -99,13 +114,60 @@ const COMPARISON_OUTPUT_SCHEMA = {
   properties: {
     products: { type: "array", maxItems: 4, items: PRODUCT_SUMMARY_SCHEMA },
     basis: { type: "string", enum: ["per_100_g", "per_serving"] },
+    metrics: {
+      type: "array",
+      minItems: 4,
+      maxItems: 4,
+      items: {
+        type: "object",
+        properties: {
+          metric: { type: "string", enum: ["calories", "protein", "sugars", "fat"] },
+          preference: { type: "string", enum: ["higher", "lower"] },
+          complete: { type: "boolean" },
+          values: {
+            type: "array",
+            maxItems: 4,
+            items: {
+              type: "object",
+              properties: {
+                productRef: { type: "string" },
+                value: { type: "number" },
+                unit: { type: "string", enum: ["kcal", "g"] },
+              },
+              required: ["productRef", "value", "unit"],
+              additionalProperties: false,
+            },
+          },
+          winnerProductRefs: {
+            type: "array",
+            maxItems: 4,
+            items: { type: "string" },
+          },
+        },
+        required: [
+          "metric",
+          "preference",
+          "complete",
+          "values",
+          "winnerProductRefs",
+        ],
+        additionalProperties: false,
+      },
+    },
+    comparableMetricCount: { type: "integer", minimum: 0, maximum: 4 },
     topMatchProductRefs: {
       type: "array",
       maxItems: 4,
       items: { type: "string" },
     },
   },
-  required: ["products", "basis", "topMatchProductRefs"],
+  required: [
+    "products",
+    "basis",
+    "metrics",
+    "comparableMetricCount",
+    "topMatchProductRefs",
+  ],
   additionalProperties: false,
 } as const;
 

@@ -292,4 +292,6 @@ separate evidence row. Use a short popover for one metric and a side sheet for
 tests or gaps, with raw reports hidden until requested. Never rank an incomplete
 metric or assign unequal ranks to tied values. When evidence is bounded, show
 returned and total observation scope. Render the public DTO's unknowns directly
-instead of rebuilding evidence completeness in the page.
+instead of rebuilding evidence completeness in the page. Do not infer sample
+coverage from report or lot metadata. A screened observation must keep its
+measured result, threshold, basis, and authority inspectable.

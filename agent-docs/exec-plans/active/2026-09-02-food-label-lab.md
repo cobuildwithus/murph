@@ -144,6 +144,18 @@ The correction removes the duplicate evidence-dimension owner. It adds no new
 service, state owner, persistence, dependency, or lifecycle. Focused model,
 client, WebMCP, public-product, Murph Safe, type, lint, and complexity checks pass.
 
+ReviewGPT round 3 confirmed both round-2 corrections, then found two more
+original implementation errors. Both were accepted:
+
+- The tests sheet grouped observations and derived sample coverage from report
+  metadata. That local evidence matrix and its sample dots were deleted. The
+  optional disclosure now renders each returned result, its screening status,
+  named threshold, basis, authority, exposure policy, and source directly.
+- WebMCP returned top-match references without the visible nutrition facts that
+  explained them. The existing comparison result now serializes all four metric
+  values, completeness, ties, winners, comparable metric count, and product win
+  counts. It adds no tool, endpoint, state, or second calculation.
+
 ## Tasks
 
 1. Inspect current public product contracts, route privacy, design catalog, and tests.

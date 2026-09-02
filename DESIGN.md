@@ -503,6 +503,9 @@ ranks. Tests and gaps open in a right-side
 sheet with one large conclusion, simple status marks, and raw reports hidden by
 default. Observation summaries must show returned versus total scope when the
 public DTO is truncated. Gap rows use the DTO-owned titles and descriptions.
+The tests sheet must not infer sample identity or coverage from report metadata.
+Its optional observation disclosure shows each returned result separately and
+names the exact screening threshold and authority used for any status.
 At phone widths, preserve the first label column and let product columns scroll
 horizontally.
 

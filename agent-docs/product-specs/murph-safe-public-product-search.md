@@ -42,6 +42,9 @@ records are excluded because this experience is package and product oriented.
 - Bounded evidence states returned and total observation counts. Alert copy is
   scoped to shown observations, and the gap sheet renders the contract-owned
   unknown titles and descriptions directly.
+- The tests sheet does not group observations or infer sample coverage. Its
+  optional disclosure shows each returned result and the named threshold,
+  basis, authority, and exposure policy used for screening.
 - Category art is illustrative. It does not identify the package or certify the
   product category.
 
@@ -56,7 +59,9 @@ On compatible browsers, `/food` registers four read-only page tools:
 - `show_food_evidence` opens the tests or gaps sheet for a shown product.
 
 The tools use the same page state and public API as manual actions and return
-the same bounded observation scope as the visible comparison. They exist
+the same bounded observation scope as the visible comparison. Comparison
+results also include all four metric values, completeness, ties, winners, and
+win counts shown by the page. They exist
 only while `/food` is open and unregister through the browser-owned abort
 signal. Murph adds no remote MCP server, account access, vault access, writes,
 or food logging through this surface.
