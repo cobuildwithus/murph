@@ -189,7 +189,9 @@ describe("hosted-local E2E MinIO cleanup ownership", () => {
       });
 
       try {
-        await waitForFile(minioReadyPath, 5_000);
+        // Child startup is outside the cleanup invariant and can be delayed by
+        // sibling coverage workers. The measured cleanup bound begins below.
+        await waitForFile(minioReadyPath, 15_000);
         const interruptedAt = Date.now();
         wrapper.kill("SIGTERM");
         await new Promise((resolve) => setTimeout(resolve, 50));
@@ -223,7 +225,7 @@ describe("hosted-local E2E MinIO cleanup ownership", () => {
         await rm(tempDirectory, { force: true, recursive: true });
       }
     },
-    20_000,
+    35_000,
   );
 });
 
