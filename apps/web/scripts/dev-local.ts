@@ -8,7 +8,7 @@ import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
 import {
   HOSTED_LOCAL_DEV_CRYPTO_STATE_FILE,
   HOSTED_LOCAL_PERSISTED_STATE_ENV_NAMES,
-} from "@murphai/hosted-local-harness/dev-hosted-local/constants";
+} from "@murphai/hosted-local-harness/dev-hosted-local/persisted-state";
 
 import { resolveHostedWebDistDir } from "../next-artifacts";
 import { assertHostedWebDatabaseUrlConfigured } from "../src/lib/hosted-web/database-env";

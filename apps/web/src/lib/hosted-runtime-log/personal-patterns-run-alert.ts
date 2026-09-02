@@ -95,8 +95,9 @@ export async function reportHostedPersonalPatternsRunAlerts(
   try {
     await sendHostedPersonalPatternsRunAlerts(input);
   } catch {
+    const alertEntryCount = input.entries.length;
     console.warn("Personal Patterns run alert email failed.", {
-      alertEntryCount: input.entries.length,
+      alertEntryCount,
     });
   }
 }
