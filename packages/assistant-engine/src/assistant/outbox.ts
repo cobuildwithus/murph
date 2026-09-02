@@ -58,10 +58,10 @@ import {
   assistantDeliveryErrorPreventsFreshIntentRetry,
   createAssistantDeliveryAmbiguousError,
   createAssistantDeliveryConfirmationPendingError,
-  createAssistantDeliveryRetryExhaustedError,
   isAssistantOutboxRetryBudgetExhausted,
   isAssistantOutboxRetryableError,
   normalizeAssistantDeliveryError,
+  resolveAssistantOutboxRetryExhaustionDisposition,
   shouldBeginAssistantOutboxDispatch,
   shouldDispatchAssistantOutboxIntent,
 } from './outbox/retry-policy.js'
@@ -969,9 +969,9 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       }
     }
 
-    const retryExhaustedError =
-      createAssistantDeliveryRetryExhaustedError(prepared.intent.lastError)
-    const failedIntent = assistantOutboxIntentRequiresTerminalConfirmation({
+    const retryExhaustionDisposition =
+      resolveAssistantOutboxRetryExhaustionDisposition(prepared.intent)
+    const terminalIntent = assistantOutboxIntentRequiresTerminalConfirmation({
       dispatchHooks: input.dispatchHooks,
       intent: prepared.intent,
       vault: input.vault,
@@ -981,24 +981,24 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
           deliveryTransportIdempotent:
             prepared.intent.deliveryTransportIdempotent,
           dispatchHooks: input.dispatchHooks,
-          error: retryExhaustedError,
+          error: retryExhaustionDisposition.error,
           failedAt: now,
           intent: prepared.intent,
           intentPath: prepared.intentPath,
           vault: input.vault,
         })
       : await markAssistantOutboxIntentMirrorTerminal({
-          error: retryExhaustedError,
+          error: retryExhaustionDisposition.error,
           failedAt: now,
           intent: prepared.intent,
           intentPath: prepared.intentPath,
           onlyCurrentStatuses: ['retryable', 'sending'],
-          status: 'failed',
+          status: retryExhaustionDisposition.status,
           vault: input.vault,
         })
     return {
-      intent: failedIntent,
-      deliveryError: failedIntent.lastError,
+      intent: terminalIntent,
+      deliveryError: terminalIntent.lastError,
       session: null,
     }
   }
@@ -1497,6 +1497,7 @@ async function confirmAssistantOutboxTerminalIntent(input: {
     status: input.outcome.status === 'failed_ambiguous'
       ? 'abandoned'
       : 'failed',
+    terminalConfirmationCompleted: true,
     vault: input.vault,
   })
 }

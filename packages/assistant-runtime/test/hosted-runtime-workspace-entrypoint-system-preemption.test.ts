@@ -20,6 +20,7 @@ import {
   readConversationImportedSeqs,
   removeTempRoot,
   requireEventIndex,
+  runHostedWorkspaceRuntimeJobInProcess,
   waitUntil,
   withRealTimeout,
   writeMailboxImportStateFile,
@@ -49,6 +50,7 @@ import {
 import {
   VAULT_LAYOUT,
 } from "@murphai/contracts";
+import { readHostedExecutionSnapshotBaseRef } from "@murphai/hosted-execution/parsers";
 import {
   appendAssistantTranscriptEntries,
   createAssistantOutboxIntent,
@@ -95,7 +97,6 @@ import {
   HostedWorkspaceRunnerUserMismatchError,
   drainHostedRuntimeDeferredUsageCompletionsBestEffort,
   parseHostedAssistantWorkspaceRuntimeJobInput,
-  runHostedWorkspaceRuntimeJobInProcess,
   type HostedWorkspaceRuntimeJobOptions,
   type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
@@ -927,26 +928,26 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
       assert.equal(browserPublishCalls, 0);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "canonical_runtime_commit",
-        "canonical_runtime_commit",
         "idle_shutdown",
       ]);
       assert.equal(checkpointRequests[0]?.expectedWorkspaceVersion, "0");
       assert.equal(checkpointRequests[1]?.expectedWorkspaceVersion, "1");
-      assert.equal(checkpointRequests[2]?.expectedWorkspaceVersion, "2");
       assert.equal(checkpointRequests[0]?.nextWakeReason, "device-sync.reconcile");
       assert.equal(
-        typeof checkpointRequests[1]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
-        "string",
+        readHostedExecutionSnapshotBaseRef(
+          checkpointRequests[1]?.snapshotRef ?? null,
+        )?.key,
+        "users/bundles/member-synthetic/system-mailbox-device-host-abort-after-apply.bundle.json",
       );
       assert.equal(
-        checkpointRequests[2]?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
+        checkpointRequests[1]?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
         "0",
       );
-      assert.equal(typeof checkpointRequests[2]?.nextWakeAt, "string");
+      assert.equal(typeof checkpointRequests[1]?.nextWakeAt, "string");
       // The canonical write may make an immediate assistant snapshot refresh
       // earlier than the device continuation; either wake must be checkpointed.
       assert.match(
-        checkpointRequests[2]?.nextWakeReason ?? "",
+        checkpointRequests[1]?.nextWakeReason ?? "",
         /^(assistant|device-sync\.reconcile)$/u,
       );
       const retainedState = await readHostedSystemMailboxState(vaultRoot);

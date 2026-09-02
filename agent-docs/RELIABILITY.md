@@ -310,6 +310,12 @@ Last verified: 2026-09-01
   remain the fail-closed backstop. The existing `runtime_recheck_requested`
   signal remains facts-only. This adds no mailbox item, direct wake, provider
   fallback, queue, or second preference owner.
+- Exact Cloudflare runtime completion sends `runtime_owner_released` only when
+  Web observes actionable work. Its opaque runtime-attempt pointer may clear the
+  accepted-processing horizon only for that same owner; stale callbacks cannot
+  release a newer owner. The signal creates no work and normal reconciliation
+  facts still choose the processing mode. Callback or signal failure retains
+  the existing durable owner horizon.
 - Hosted background admission uses one capability-scoped projection on the
   existing workspace checkpoint row. A capable runtime checkpoints an absolute
   `systemMailboxProgressGeneration` plus the independently calculated next

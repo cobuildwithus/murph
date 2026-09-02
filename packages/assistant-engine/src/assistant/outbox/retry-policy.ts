@@ -235,6 +235,61 @@ export function createAssistantDeliveryAmbiguousError(
   }
 }
 
+type AssistantOutboxFailureDisposition = {
+  deliveryConfirmationPending: boolean
+  error: AssistantDeliveryError
+  status: 'abandoned' | 'failed' | 'retryable'
+}
+
+type AssistantOutboxAmbiguousFailureDisposition = {
+  deliveryConfirmationPending: false
+  error: AssistantDeliveryError
+  status: 'abandoned'
+}
+
+export function resolveAssistantOutboxHistoricalDeliveryUncertaintyAtTerminal<
+  TDisposition extends AssistantOutboxFailureDisposition,
+>(input: {
+  cause: unknown
+  historicalDeliveryConfirmationPending: boolean
+  otherwise: TDisposition
+}): TDisposition | AssistantOutboxAmbiguousFailureDisposition {
+  if (input.historicalDeliveryConfirmationPending) {
+    return {
+      deliveryConfirmationPending: false,
+      error: createAssistantDeliveryAmbiguousError(input.cause),
+      status: 'abandoned',
+    }
+  }
+
+  return input.otherwise
+}
+
+export function resolveAssistantOutboxRetryExhaustionDisposition(
+  intent: Pick<AssistantOutboxIntent, 'deliveryConfirmationPending' | 'lastError'>,
+): {
+  error: AssistantDeliveryError
+  status: 'abandoned' | 'failed'
+} {
+  const disposition =
+    resolveAssistantOutboxHistoricalDeliveryUncertaintyAtTerminal({
+      cause: intent.lastError,
+      historicalDeliveryConfirmationPending:
+        intent.deliveryConfirmationPending ||
+        intent.lastError?.code === 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+      otherwise: {
+        deliveryConfirmationPending: false,
+        error: createAssistantDeliveryRetryExhaustedError(intent.lastError),
+        status: 'failed',
+      },
+    })
+
+  return {
+    error: disposition.error,
+    status: disposition.status,
+  }
+}
+
 function readAssistantOutboxRetryableFlag(error: unknown): boolean | null {
   const contextRetryable = readBooleanProperty(readRecord(error)?.context, 'retryable')
   if (contextRetryable !== null) {

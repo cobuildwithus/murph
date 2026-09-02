@@ -220,6 +220,7 @@ import {
 } from '../src/assistant/cli-surface-bootstrap.ts'
 import {
   readAssistantCliLlmsFullManifest,
+  type AssistantCliLlmsManifestCommandSchema,
 } from '../src/assistant/cli-surface-manifest.ts'
 import {
   ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
@@ -286,6 +287,8 @@ const COMPACT_SUPPORT_KEEP_AUTOMATION_ID =
   'automation_01JNV447V6K3SW1Q9NJ7XVQZ7T'
 const COMPACT_SUPPORT_STALE_AUTOMATION_ID =
   'automation_01JNV447V6K3SW1Q9NJ7XVQZ7V'
+const WEARABLE_ACTIVITY_DETAIL_OPTION_DESCRIPTION =
+  'Include bounded workoutFeatures and splits (up to 32 workouts per day and 64 splits per workout). Choose compact or detailed output from the question before the first and only activity-list data read; never use compact output as a probe before retrying with detail. Omit this option only when the answer is entirely available from day-level sessionCount, sessionMinutes, and distinct activityTypes. Pass it truthy whenever selecting, comparing, grouping, ordering, or attributing individual workouts, including type-specific count, duration, distance, start time, provider, heart rate, cadence, power, speed, or splits.'
 const REPEATED_SET_ALPHA_EVENT_IDS = Array.from(
   { length: 5 },
   (_, index) => `evt_01JNV447V6K3SW1Q9NJ7XVQZ7${index + 1}`,
@@ -1732,6 +1735,89 @@ describe('onboarding policy read detection', () => {
 })
 
 describe('real Codex live fixture contracts', () => {
+  it('recognizes both wearable workout-detail option spellings in the compact fixture', async () => {
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-wearable-activity-compact-fixture-'),
+    )
+
+    try {
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const activitySchema = {
+        args: {
+          properties: {},
+          type: 'object',
+        },
+        options: {
+          properties: {
+            includeWorkoutDetails: {
+              description: WEARABLE_ACTIVITY_DETAIL_OPTION_DESCRIPTION,
+              type: 'boolean',
+            },
+          },
+          type: 'object',
+        },
+      } satisfies AssistantCliLlmsManifestCommandSchema
+      await materializeWearableActivityCompactionVaultCli({
+        activitySchema,
+        binDirectory,
+        commandLogPath: path.join(workingDirectory, 'commands.log'),
+      })
+      const executablePath = path.join(binDirectory, 'vault-cli')
+      const schemaResult = await execFileAsync(executablePath, [
+        'wearables',
+        'activity',
+        'list',
+        '--schema',
+        '--format',
+        'json',
+      ])
+      expect(JSON.parse(schemaResult.stdout)).toEqual(activitySchema)
+
+      const detailCases = [
+        { arguments: ['--include-workout-details'], detailed: true },
+        { arguments: ['--include-workout-details', 'true'], detailed: true },
+        { arguments: ['--include-workout-details=true'], detailed: true },
+        { arguments: ['--includeWorkoutDetails'], detailed: true },
+        { arguments: ['--includeWorkoutDetails', 'true'], detailed: true },
+        { arguments: ['--includeWorkoutDetails=true'], detailed: true },
+        { arguments: ['--include-workout-details', 'false'], detailed: false },
+        { arguments: ['--include-workout-details=false'], detailed: false },
+        { arguments: ['--includeWorkoutDetails', 'false'], detailed: false },
+        { arguments: ['--includeWorkoutDetails=false'], detailed: false },
+      ] as const
+      for (const detailCase of detailCases) {
+        const command = [
+          'wearables activity list --date 2026-08-31',
+          ...detailCase.arguments,
+        ].join(' ')
+        expect(commandIncludesWearableActivityWorkoutDetailOption(command))
+          .toBe(true)
+        expect(commandIncludesTruthyWearableActivityWorkoutDetailOption(command))
+          .toBe(detailCase.detailed)
+        const result = await execFileAsync(executablePath, [
+          'wearables',
+          'activity',
+          'list',
+          '--date',
+          '2026-08-31',
+          ...detailCase.arguments,
+          '--format',
+          'json',
+        ])
+        const parsed = JSON.parse(result.stdout) as {
+          items: Array<{ workoutFeatures?: unknown[] }>
+        }
+        if (detailCase.detailed) {
+          expect(parsed.items[0]?.workoutFeatures).toHaveLength(32)
+        } else {
+          expect(parsed.items[0]).not.toHaveProperty('workoutFeatures')
+        }
+      }
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+    }
+  })
+
   it('keeps the real workout CLI on the test-safe Node loader path', async () => {
     const workingDirectory = await mkdtemp(
       path.join(tmpdir(), 'murph-workout-cli-fixture-'),
@@ -4443,6 +4529,75 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         })
         expect(second.finalMessage).toMatch(/\b31\b/u)
         expect(second.finalMessage).toMatch(/\b72\b/u)
+        expect(second.finalMessage).not.toMatch(
+          /draft|held|not sent|previous response|re-?evaluat|review/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    480_000,
+  )
+
+  it(
+    'answers a rapid group clarification once after same-thread reconsideration',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-clarification-e2e-'),
+      )
+
+      try {
+        const commonInput = {
+          approvalPolicy: 'never' as const,
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildGroupPointOfViewDeveloperInstructions(),
+          dynamicTools: [],
+          env: config.env,
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low' as const,
+          sandbox: 'workspace-write' as const,
+          workingDirectory,
+        }
+        const initialBeat = [
+          'A participant: "The teammate completed the circuit with added resistance."',
+          'Another participant: "Murph, what kind of resistance did they use?"',
+        ].join('\n')
+        const first = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: initialBeat,
+        })
+        const second = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: [
+            REAL_GROUP_RECONSIDERATION_INSTRUCTION,
+            initialBeat,
+            'A third participant: "Murph, do we know the exact resistance level?"',
+          ].join('\n\n'),
+          resumeSessionId: first.sessionId,
+        })
+        process.stdout.write(
+          `[group-clarification-e2e] ${JSON.stringify({
+            finalMessage: second.finalMessage,
+            scenario: 'rapid clarification asks for one unspecified group detail',
+          })}\n`,
+        )
+
+        expect(second.sessionId).toBe(first.sessionId)
+        expect(second.finalMessage).toMatch(/resistance/iu)
+        expect(second.finalMessage).toMatch(
+          /(?:do not|don.t|does not|doesn.t|not|wasn.t|unknown|unspecified).{0,80}(?:kind|type|level)|(?:kind|type|level).{0,80}(?:do not|don.t|does not|doesn.t|not|wasn.t|unknown|unspecified)/iu,
+        )
         expect(second.finalMessage).not.toMatch(
           /draft|held|not sent|previous response|re-?evaluat|review/iu,
         )
@@ -11934,6 +12089,337 @@ describeRealCodex('real Codex product notes eligibility e2e', () => {
           workingDirectory,
           ...config.temporaryPaths,
         ])
+      }
+    },
+    720_000,
+  )
+})
+
+describeRealCodex('real Codex wearable activity compact read e2e', () => {
+  it(
+    'answers same-day workout count and duration without loading bounded split detail',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-wearable-activity-compact-e2e-'),
+      )
+
+      try {
+        const binDirectory = path.join(workingDirectory, 'bin')
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        const commandLogPath = path.join(
+          workingDirectory,
+          'wearable-activity-commands.log',
+        )
+        await initializeVault({
+          timezone: 'UTC',
+          vaultRoot: workingDirectory,
+        })
+        const [manifest] = await Promise.all([
+          readAssistantCliLlmsFullManifest({
+            timeoutMs: 5 * 60_000,
+            workingDirectory: fileURLToPath(
+              new URL('../../../', import.meta.url),
+            ),
+          }),
+          materializeAssistantSkill({ skillsRoot, slug: 'daily-activity' }),
+        ])
+        const activityManifest = manifest.commands.find(
+          (command) => command.name === 'wearables activity list',
+        )
+        if (!activityManifest?.schema) {
+          throw new Error(
+            'Expected generated wearables activity list command schema.',
+          )
+        }
+        expect(
+          activityManifest.schema.options?.properties
+            ?.includeWorkoutDetails?.description,
+        ).toBe(
+          WEARABLE_ACTIVITY_DETAIL_OPTION_DESCRIPTION,
+        )
+        await materializeWearableActivityCompactionVaultCli({
+          activitySchema: activityManifest.schema,
+          binDirectory,
+          commandLogPath,
+        })
+        const assistantCliContract = buildAssistantCliSurfaceContract(manifest)
+        expect(assistantCliContract).not.toBeNull()
+        expect(assistantCliContract).toContain('`wearables`')
+
+        const promptTimeContext = {
+          ...await resolveAssistantPromptTimeContext(workingDirectory),
+          currentLocalDate: '2026-08-31',
+        }
+        const prompt = await buildWearableArrivalPrompt({
+          occurredAt: '2026-08-31T20:00:00.000Z',
+          promptTimeContext,
+          text: 'How many workouts did I do today, and what is their total duration in minutes? Just the count and total.',
+          vaultRoot: workingDirectory,
+        })
+        const inheritedPath = normalizeEnvString(config.env.PATH)
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildWearableArrivalDeveloperInstructions(
+            promptTimeContext,
+            assistantCliContract,
+          ),
+          dynamicTools: [],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            PATH: inheritedPath
+              ? `${binDirectory}${path.delimiter}${inheritedPath}`
+              : binDirectory,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const activityListActions = actions.filter(
+          (action) =>
+            action.kind === 'command'
+            && action.command.includes('wearables activity list')
+            && action.command.includes('--date')
+            && action.command.includes('2026-08-31'),
+        )
+        const loggedCommands = (await readFile(commandLogPath, 'utf8'))
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+        process.stdout.write(
+          `[wearable-activity-compact-e2e] ${JSON.stringify({
+            commands: loggedCommands,
+            reply: result.finalMessage,
+          })}\n`,
+        )
+        expect(activityListActions).toHaveLength(1)
+        expect(commandIncludesWearableActivityWorkoutDetailOption(
+          activityListActions[0]?.kind === 'command'
+            ? activityListActions[0].command
+            : '',
+        )).toBe(false)
+        expect(
+          actions.filter(
+            (action) =>
+              action.kind === 'command'
+              && commandIncludesWearableActivityWorkoutDetailOption(
+                action.command,
+              ),
+          ),
+        ).toHaveLength(0)
+
+        const activityListReads = loggedCommands.filter(
+          (command) =>
+            command.includes('wearables activity list')
+            && !command.includes('--schema')
+            && !command.includes('--help'),
+        )
+        expect(activityListReads).toHaveLength(1)
+        expect(activityListReads[0]).toContain('--date')
+        expect(activityListReads[0]).toContain('2026-08-31')
+        expect(commandIncludesWearableActivityWorkoutDetailOption(
+          activityListReads[0] ?? '',
+        )).toBe(false)
+        expect(loggedCommands.some((command) => command.includes('wearables day'))).toBe(false)
+        expect(result.finalMessage).toMatch(/\b32\b/u)
+        expect(result.finalMessage).toMatch(/\b960\b/u)
+      } finally {
+        await removeRealCodexTemporaryPath(workingDirectory)
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+    720_000,
+  )
+
+  it(
+    'answers one run duration and distance from detailed workout data',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-wearable-activity-selection-e2e-'),
+      )
+
+      try {
+        const binDirectory = path.join(workingDirectory, 'bin')
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        const commandLogPath = path.join(
+          workingDirectory,
+          'wearable-activity-commands.log',
+        )
+        await initializeVault({
+          timezone: 'UTC',
+          vaultRoot: workingDirectory,
+        })
+        const [manifest] = await Promise.all([
+          readAssistantCliLlmsFullManifest({
+            timeoutMs: 5 * 60_000,
+            workingDirectory: fileURLToPath(
+              new URL('../../../', import.meta.url),
+            ),
+          }),
+          materializeAssistantSkill({ skillsRoot, slug: 'daily-activity' }),
+        ])
+        const activityManifest = manifest.commands.find(
+          (command) => command.name === 'wearables activity list',
+        )
+        if (!activityManifest?.schema) {
+          throw new Error(
+            'Expected generated wearables activity list command schema.',
+          )
+        }
+        await materializeWearableActivityCompactionVaultCli({
+          activityFixture: {
+            activityTypes: ['cycling', 'running'],
+            distanceKm: 31,
+            sessionCount: 2,
+            sessionMinutes: 105,
+            summaryProvider: 'multiple',
+            workoutFeatures: [
+              {
+                activityType: 'running',
+                distanceKm: 6.8,
+                durationMinutes: 42,
+                provider: 'garmin',
+                splits: [],
+                startedAt: '2026-08-31T07:00:00.000Z',
+              },
+              {
+                activityType: 'cycling',
+                distanceKm: 24.2,
+                durationMinutes: 63,
+                provider: 'strava',
+                splits: [],
+                startedAt: '2026-08-31T17:30:00.000Z',
+              },
+            ],
+          },
+          activitySchema: activityManifest.schema,
+          binDirectory,
+          commandLogPath,
+        })
+        const assistantCliContract = buildAssistantCliSurfaceContract(manifest)
+        expect(assistantCliContract).not.toBeNull()
+
+        const promptTimeContext = {
+          ...await resolveAssistantPromptTimeContext(workingDirectory),
+          currentLocalDate: '2026-08-31',
+        }
+        const prompt = await buildWearableArrivalPrompt({
+          occurredAt: '2026-08-31T20:00:00.000Z',
+          promptTimeContext,
+          text: 'How long and how far was my run?',
+          vaultRoot: workingDirectory,
+        })
+        const inheritedPath = normalizeEnvString(config.env.PATH)
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildWearableArrivalDeveloperInstructions(
+            promptTimeContext,
+            assistantCliContract,
+          ),
+          dynamicTools: [],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            PATH: inheritedPath
+              ? `${binDirectory}${path.delimiter}${inheritedPath}`
+              : binDirectory,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const activityListActions = actions.filter(
+          (action) =>
+            action.kind === 'command'
+            && action.command.includes('wearables activity list')
+            && action.command.includes('--date')
+            && action.command.includes('2026-08-31'),
+        )
+        const loggedCommands = (await readFile(commandLogPath, 'utf8'))
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+        process.stdout.write(
+          `[wearable-activity-selection-e2e] ${JSON.stringify({
+            commands: loggedCommands,
+            reply: result.finalMessage,
+          })}\n`,
+        )
+
+        expect(activityListActions).toHaveLength(1)
+        expect(commandIncludesTruthyWearableActivityWorkoutDetailOption(
+          activityListActions[0]?.kind === 'command'
+            ? activityListActions[0].command
+            : '',
+        )).toBe(true)
+
+        const activityListReads = loggedCommands.filter(
+          (command) =>
+            command.includes('wearables activity list')
+            && !command.includes('--schema')
+            && !command.includes('--help'),
+        )
+        expect(activityListReads).toHaveLength(1)
+        expect(activityListReads[0]).toContain('--date')
+        expect(activityListReads[0]).toContain('2026-08-31')
+        expect(commandIncludesTruthyWearableActivityWorkoutDetailOption(
+          activityListReads[0] ?? '',
+        )).toBe(true)
+        expect(
+          loggedCommands.some(
+            (command) =>
+              command.includes('wearables day')
+              || command.includes('wearables metric')
+              || command.includes('wearables sources')
+              || command.includes('measurement entry')
+              || /(?:^|\s)provider(?:\s|$)/u.test(command),
+          ),
+        ).toBe(false)
+
+        expect(result.finalMessage).toMatch(/\brun(?:ning)?\b/iu)
+        expect(result.finalMessage).toMatch(
+          /\b42(?:\.0)?\s*(?:minutes?|mins?)\b/iu,
+        )
+        expect(result.finalMessage).toMatch(
+          /\b6\.8\s*(?:km|kilomet(?:er|re)s?)\b/iu,
+        )
+        expect(result.finalMessage).not.toMatch(
+          /\b105(?:\.0)?\s*(?:minutes?|mins?)\b/iu,
+        )
+        expect(result.finalMessage).not.toMatch(
+          /\b31(?:\.0)?\s*(?:km|kilomet(?:er|re)s?)\b/iu,
+        )
+        expect(result.finalMessage).not.toMatch(
+          /\b63(?:\.0)?\s*(?:minutes?|mins?)\b/iu,
+        )
+        expect(result.finalMessage).not.toMatch(
+          /\b24\.2\s*(?:km|kilomet(?:er|re)s?)\b/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPath(workingDirectory)
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
       }
     },
     720_000,
@@ -27543,9 +28029,10 @@ async function buildWearableArrivalPrompt(input: {
 
 function buildWearableArrivalDeveloperInstructions(
   promptTimeContext: Awaited<ReturnType<typeof resolveAssistantPromptTimeContext>>,
+  assistantCliContract: string | null = null,
 ): string {
   return buildAssistantSystemPrompt({
-    assistantCliContract: null,
+    assistantCliContract,
     assistantContextSnapshotPrompt: null,
     assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
@@ -27619,6 +28106,190 @@ async function materializeWearableArrivalVaultCli(input: {
     { encoding: 'utf8', mode: 0o700 },
   )
   await chmod(executablePath, 0o700)
+}
+
+async function materializeWearableActivityCompactionVaultCli(input: {
+  activityFixture?: {
+    activityTypes: string[]
+    distanceKm?: number
+    sessionCount: number
+    sessionMinutes: number
+    summaryProvider?: string
+    workoutFeatures: Array<{
+      activityType?: string
+      distanceKm?: number
+      durationMinutes?: number
+      provider: string
+      splits: Array<Record<string, unknown>>
+      startedAt: string
+    }>
+  }
+  activitySchema: AssistantCliLlmsManifestCommandSchema
+  binDirectory: string
+  commandLogPath: string
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  const activityFixture: NonNullable<typeof input.activityFixture> = input.activityFixture ?? {
+    activityTypes: ['cycling', 'running'],
+    sessionCount: 32,
+    sessionMinutes: 960,
+    workoutFeatures: Array.from({ length: 32 }, (_, workoutIndex) => ({
+      provider: 'garmin',
+      splits: Array.from({ length: 64 }, (_, splitIndex) => ({
+        index: splitIndex + 1,
+      })),
+      startedAt: new Date(
+        Date.parse('2026-08-31T00:00:00.000Z')
+          + workoutIndex * 30 * 60_000,
+      ).toISOString(),
+    })),
+  }
+  const summaryProvider = activityFixture.summaryProvider ?? 'garmin'
+  const compactItem = {
+    activityTypes: activityFixture.activityTypes,
+    date: '2026-08-31',
+    ...(activityFixture.distanceKm === undefined
+      ? {}
+      : {
+          distanceKm: {
+            confidence: 'high',
+            metric: 'distanceKm',
+            provider: summaryProvider,
+            unit: 'kilometers',
+            value: activityFixture.distanceKm,
+          },
+        }),
+    sessionCount: {
+      confidence: 'high',
+      metric: 'sessionCount',
+      provider: summaryProvider,
+      unit: 'count',
+      value: activityFixture.sessionCount,
+    },
+    sessionMinutes: {
+      confidence: 'high',
+      metric: 'sessionMinutes',
+      provider: summaryProvider,
+      unit: 'minutes',
+      value: activityFixture.sessionMinutes,
+    },
+    summaryConfidence: {
+      level: 'high',
+      selectedProviders: summaryProvider === 'multiple'
+        ? ['garmin', 'strava']
+        : [summaryProvider],
+    },
+  }
+  const compactResult = JSON.stringify({
+    count: 1,
+    filters: {
+      date: '2026-08-31',
+      from: null,
+      limit: 3,
+      providers: [],
+      to: null,
+    },
+    items: [compactItem],
+  })
+  const detailedResult = JSON.stringify({
+    ...JSON.parse(compactResult),
+    items: [{
+      ...compactItem,
+      workoutFeatures: activityFixture.workoutFeatures,
+    }],
+  })
+  const dayResult = JSON.stringify({
+    activity: {
+      date: '2026-08-31',
+      steps: {
+        confidence: 'high',
+        metric: 'steps',
+        provider: 'garmin',
+        unit: 'count',
+        value: 12_345,
+      },
+    },
+    date: '2026-08-31',
+  })
+  const schemaResult = JSON.stringify(input.activitySchema)
+
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'set -eu',
+      'command="$*"',
+      `printf '%s\\n' "$command" >> ${quoteNutritionShellLiteral(input.commandLogPath)}`,
+      'include_workout_details=false',
+      'while [ "$#" -gt 0 ]; do',
+      '  case "$1" in',
+      '    --include-workout-details|--includeWorkoutDetails)',
+      '      if [ "${2-}" = "false" ]; then',
+      '        include_workout_details=false',
+      '      else',
+      '        include_workout_details=true',
+      '      fi',
+      '      ;;',
+      '    --include-workout-details=true|--includeWorkoutDetails=true)',
+      '      include_workout_details=true',
+      '      ;;',
+      '    --include-workout-details=false|--includeWorkoutDetails=false)',
+      '      include_workout_details=false',
+      '      ;;',
+      '  esac',
+      '  shift',
+      'done',
+      'case "$command" in',
+      '  *"wearables activity list"*"--schema"*)',
+      `    printf '%s\\n' ${quoteNutritionShellLiteral(schemaResult)}`,
+      '    exit 0',
+      '    ;;',
+      'esac',
+      'if [ "$include_workout_details" = true ]; then',
+      '  case "$command" in',
+      '    *"wearables activity list"*)',
+      `      printf '%s\\n' ${quoteNutritionShellLiteral(detailedResult)}`,
+      '      exit 0',
+      '      ;;',
+      '  esac',
+      'fi',
+      'case "$command" in',
+      '  *"wearables activity list"*"--date 2026-08-31"*|*"wearables activity list"*"--date=2026-08-31"*)',
+      `    printf '%s\\n' ${quoteNutritionShellLiteral(compactResult)}`,
+      '    ;;',
+      '  *"wearables day 2026-08-31"*)',
+      `    printf '%s\\n' ${quoteNutritionShellLiteral(dayResult)}`,
+      '    ;;',
+      '  *"wearables sources list"*)',
+      '    printf \'%s\\n\' \'{"sources":[{"provider":"garmin","status":"healthy","lastDate":"2026-08-31","stalenessVsNewestDays":0}]}\'',
+      '    ;;',
+      '  *)',
+      '    printf \'%s\\n\' \'unexpected wearable activity compaction command\' >&2',
+      '    exit 69',
+      '    ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(executablePath, 0o700)
+}
+
+function commandIncludesWearableActivityWorkoutDetailOption(
+  command: string,
+): boolean {
+  return command.includes('--include-workout-details')
+    || command.includes('--includeWorkoutDetails')
+}
+
+function commandIncludesTruthyWearableActivityWorkoutDetailOption(
+  command: string,
+): boolean {
+  const match = command.match(
+    /(?:^|\s)--include(?:-workout-details|WorkoutDetails)(?:(?:=|\s+)(true|false))?(?=\s|$)/u,
+  )
+  return match !== null && match[1] !== 'false'
 }
 
 async function materializeConnectedHealthVaultCli(input: {

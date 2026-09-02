@@ -47,6 +47,7 @@ const mocks = vi.hoisted(() => ({
   requireHostedCloudflareCallbackJsonRequest: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
   resolveHostedRuntimeAiUsageGate: vi.fn(),
+  signalHostedRuntimeOwnerReleasedRuntime: vi.fn(),
   signalHostedRuntimeRecheckRuntime: vi.fn(),
 }));
 
@@ -141,6 +142,8 @@ vi.mock("@/src/lib/hosted-runtime-latency/store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedRuntimeOwnerReleasedRuntime:
+    mocks.signalHostedRuntimeOwnerReleasedRuntime,
   signalHostedRuntimeRecheckRuntime: mocks.signalHostedRuntimeRecheckRuntime,
 }));
 
@@ -279,13 +282,18 @@ describe("hosted runtime internal web routes", () => {
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_routes_1",
     });
+    mocks.signalHostedRuntimeOwnerReleasedRuntime.mockResolvedValue({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:member_routes_1",
+    });
     mocks.isHostedRuntimeLogDatabaseConfigured.mockReturnValue(true);
     mocks.listHostedRuntimeLogs.mockResolvedValue([]);
   });
 
-  it("signals a facts recheck after an authenticated runtime owner release", async () => {
+  it("signals an exact authenticated runtime owner release", async () => {
     const request = new Request(
-      "https://join.example.test/api/internal/hosted-runtime/owner-released",
+      "https://join.example.test/api/internal/hosted-runtime/owner-released"
+        + "?runtimeAttemptId=runtime_attempt_routes_1",
       { method: "POST" },
     );
 
@@ -300,7 +308,8 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable).toHaveBeenCalledWith({
       userId: "member_routes_1",
     });
-    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
+    expect(mocks.signalHostedRuntimeOwnerReleasedRuntime).toHaveBeenCalledWith({
+      runtimeAttemptId: "runtime_attempt_routes_1",
       userId: "member_routes_1",
     });
   });
@@ -309,7 +318,8 @@ describe("hosted runtime internal web routes", () => {
     mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable.mockResolvedValue(false);
     const request = new Request(
       "https://join.example.test/api/internal/hosted-runtime/owner-released"
-        + "?immediateRecheckRequested=1",
+        + "?runtimeAttemptId=runtime_attempt_routes_1"
+        + "&immediateRecheckRequested=1",
       { method: "POST" },
     );
 
@@ -322,9 +332,26 @@ describe("hosted runtime internal web routes", () => {
       { maxBodyBytes: 0 },
     );
     expect(mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeOwnerReleasedRuntime).toHaveBeenCalledWith({
+      runtimeAttemptId: "runtime_attempt_routes_1",
+      userId: "member_routes_1",
+    });
+  });
+
+  it("keeps legacy owner releases on the facts-only recheck during rollout", async () => {
+    const request = new Request(
+      "https://join.example.test/api/internal/hosted-runtime/owner-released",
+      { method: "POST" },
+    );
+
+    const response = await runtimeOwnerReleasedRoute.POST(request);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ signaled: true });
     expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
       userId: "member_routes_1",
     });
+    expect(mocks.signalHostedRuntimeOwnerReleasedRuntime).not.toHaveBeenCalled();
   });
 
   it("rejects noncanonical owner-release queries after authentication", async () => {
@@ -342,28 +369,32 @@ describe("hosted runtime internal web routes", () => {
       { maxBodyBytes: 0 },
     );
     expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeOwnerReleasedRuntime).not.toHaveBeenCalled();
   });
 
   it("preserves the owner horizon when no durable work is visible", async () => {
     mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable.mockResolvedValue(false);
 
     const response = await runtimeOwnerReleasedRoute.POST(new Request(
-      "https://join.example.test/api/internal/hosted-runtime/owner-released",
+      "https://join.example.test/api/internal/hosted-runtime/owner-released"
+        + "?runtimeAttemptId=runtime_attempt_routes_1",
       { method: "POST" },
     ));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ signaled: false });
     expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeOwnerReleasedRuntime).not.toHaveBeenCalled();
   });
 
   it("surfaces runtime owner-release signal failures to Cloudflare", async () => {
-    mocks.signalHostedRuntimeRecheckRuntime.mockRejectedValueOnce(
+    mocks.signalHostedRuntimeOwnerReleasedRuntime.mockRejectedValueOnce(
       new Error("Temporal unavailable"),
     );
 
     const response = await runtimeOwnerReleasedRoute.POST(new Request(
-      "https://join.example.test/api/internal/hosted-runtime/owner-released",
+      "https://join.example.test/api/internal/hosted-runtime/owner-released"
+        + "?runtimeAttemptId=runtime_attempt_routes_1",
       { method: "POST" },
     ));
 

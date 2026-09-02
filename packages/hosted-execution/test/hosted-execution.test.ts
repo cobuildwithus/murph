@@ -38,6 +38,10 @@ import {
   HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
 } from "../src/bundles.ts";
 import {
+  buildHostedRuntimeOwnerReleaseSearch,
+  parseHostedRuntimeOwnerReleaseSearch,
+} from "../src/routes.ts";
+import {
   buildHostedComputerRunOperationPath,
   HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH,
   HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
@@ -1021,6 +1025,7 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH",
       "HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH",
       "HOSTED_RUNTIME_OWNER_RELEASED_PATH",
+      "HOSTED_RUNTIME_OWNER_RELEASE_ATTEMPT_QUERY",
       "HOSTED_RUNTIME_OWNER_RELEASE_IMMEDIATE_RECHECK_QUERY",
       "HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH",
       "HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH",
@@ -1035,7 +1040,9 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH",
       "HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH",
       "HOSTED_RUNTIME_WORKSPACE_PATH",
+      "buildHostedRuntimeOwnerReleaseSearch",
       "isHostedRuntimeVaultShareDeliverContinuation",
+      "parseHostedRuntimeOwnerReleaseSearch",
     ]);
     expect(routeModule.HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH).toBe(
       "/api/internal/hosted-mailbox/payload/fetch",
@@ -1098,6 +1105,40 @@ describe("hosted execution coverage gaps", () => {
     );
     expect("HOSTED_RUNTIME_SHARE_IMPORT_PATH" in routeModule).toBe(false);
     expect("buildHostedRuntimeSharePayloadPath" in routeModule).toBe(false);
+  });
+
+  it("builds and parses canonical runtime owner-release queries", () => {
+    const exactSearch = buildHostedRuntimeOwnerReleaseSearch({
+      immediateRecheckRequested: true,
+      runtimeAttemptId: "runtime_attempt_123",
+    });
+
+    expect(exactSearch).toBe(
+      "?runtimeAttemptId=runtime_attempt_123&immediateRecheckRequested=1",
+    );
+    expect(parseHostedRuntimeOwnerReleaseSearch(exactSearch)).toEqual({
+      immediateRecheckRequested: true,
+      runtimeAttemptId: "runtime_attempt_123",
+    });
+    expect(parseHostedRuntimeOwnerReleaseSearch("")).toEqual({
+      immediateRecheckRequested: false,
+      runtimeAttemptId: null,
+    });
+    expect(parseHostedRuntimeOwnerReleaseSearch(
+      "?immediateRecheckRequested=1",
+    )).toEqual({
+      immediateRecheckRequested: true,
+      runtimeAttemptId: null,
+    });
+    expect(() => parseHostedRuntimeOwnerReleaseSearch(
+      "?immediateRecheckRequested=1&runtimeAttemptId=runtime_attempt_123",
+    )).toThrow("Hosted runtime owner-release query is invalid.");
+    expect(() => buildHostedRuntimeOwnerReleaseSearch({
+      immediateRecheckRequested: false,
+      runtimeAttemptId: "not a bounded pointer",
+    })).toThrow(
+      "Hosted runtime owner-release runtimeAttemptId must be a bounded opaque identifier.",
+    );
   });
 
   it("defines hosted computer-use routes and the generic pause checkpoint contract", () => {

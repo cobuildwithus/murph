@@ -93,12 +93,28 @@ import {
   createTestSqlStorage,
 } from "./sql-storage.js";
 
+const mocks = vi.hoisted(() => ({
+  emitHostedExecutionStructuredLog: vi.fn(),
+}));
+
+vi.mock("@murphai/hosted-execution", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
+    "@murphai/hosted-execution",
+  );
+
+  return {
+    ...actual,
+    emitHostedExecutionStructuredLog: mocks.emitHostedExecutionStructuredLog,
+  };
+});
+
 const FIXED_NOW = "2026-06-03T00:00:00.000Z";
 const TEST_USER_ID = "member_123";
 describe("hosted runner container identity", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    mocks.emitHostedExecutionStructuredLog.mockReset();
   });
 
   it("round-trips a versioned runner container identity", () => {
@@ -186,13 +202,17 @@ describe("hosted runner container identity", () => {
       stateStore,
     });
 
-    await expect(controller.ensureForUser({
+    const response = await controller.ensureForUser({
       orchestrationAttemptId: "orchestration_attempt_1",
       userId: TEST_USER_ID,
-    })).resolves.toMatchObject({
+    });
+    expect(response).toMatchObject({
       action: "started",
       kind: "runtime_processing_accepted",
     });
+    if (response.kind !== "runtime_processing_accepted") {
+      throw new Error("Expected runtime processing acceptance.");
+    }
 
     const expectedRunnerContainerName = "member_123--v-worker-version-current";
     expect(invocationService.prepareTokens).toHaveLength(1);
@@ -203,6 +223,16 @@ describe("hosted runner container identity", () => {
       expect.objectContaining({
         runnerContainerName: expectedRunnerContainerName,
         userId: TEST_USER_ID,
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          orchestrationAttemptId: "orchestration_attempt_1",
+          standbyAllocationOutcome: "disabled",
+          workspaceAttemptId: response.runtimeAttemptId,
+        }),
+        message: "Hosted runner runtime processing accepted.",
       }),
     );
   });
@@ -922,13 +952,17 @@ describe("hosted runner container identity", () => {
       stateStore,
     });
 
-    await expect(controller.ensureForUser({
+    const response = await controller.ensureForUser({
       orchestrationAttemptId: "orchestration_attempt_standby",
       userId: TEST_USER_ID,
-    })).resolves.toMatchObject({
+    });
+    expect(response).toMatchObject({
       action: "started",
       kind: "runtime_processing_accepted",
     });
+    if (response.kind !== "runtime_processing_accepted") {
+      throw new Error("Expected runtime processing acceptance.");
+    }
 
     expect(standby.bindStandbySlot).toHaveBeenCalledTimes(1);
     expect(claimReadyStandby).toHaveBeenCalledTimes(1);
@@ -936,6 +970,16 @@ describe("hosted runner container identity", () => {
     await expect(stateStore.readState()).resolves.toMatchObject({
       writeFence: { runnerContainerName: slotName },
     });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          orchestrationAttemptId: "orchestration_attempt_standby",
+          standbyAllocationOutcome: "claimed",
+          workspaceAttemptId: response.runtimeAttemptId,
+        }),
+        message: "Hosted runner runtime processing accepted.",
+      }),
+    );
   });
 
   it("caps standby claim dispatch at the foreground command budget", async () => {

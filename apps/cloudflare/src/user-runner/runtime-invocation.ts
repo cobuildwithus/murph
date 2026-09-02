@@ -20,8 +20,8 @@ import {
   HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
+  buildHostedRuntimeOwnerReleaseSearch,
   HOSTED_RUNTIME_LOG_PATH,
-  HOSTED_RUNTIME_OWNER_RELEASE_IMMEDIATE_RECHECK_QUERY,
   HOSTED_RUNTIME_OWNER_RELEASED_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
@@ -767,12 +767,11 @@ export class RuntimeInvocationService {
         callbackSigning: this.input.env.webCallbackSigning,
         method: "POST",
         path: HOSTED_RUNTIME_OWNER_RELEASED_PATH,
-        ...(input.result.immediateRecheckRequested === true
-          ? {
-              search:
-                `?${HOSTED_RUNTIME_OWNER_RELEASE_IMMEDIATE_RECHECK_QUERY}=1`,
-            }
-          : {}),
+        search: buildHostedRuntimeOwnerReleaseSearch({
+          immediateRecheckRequested:
+            input.result.immediateRecheckRequested === true,
+          runtimeAttemptId: input.token.attemptId,
+        }),
         timeoutMs: Math.min(
           this.input.env.webControlTimeoutMs,
           RUNTIME_OWNER_RELEASE_CALLBACK_TIMEOUT_MS,

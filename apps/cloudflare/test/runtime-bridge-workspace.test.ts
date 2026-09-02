@@ -41,6 +41,9 @@ import {
   type HostedWorkspaceRuntimeBridgeOptionsInput,
 } from "@murphai/assistant-runtime/hosted-invocation-testkit";
 import {
+  drainHostedRuntimeLogWritesBestEffort,
+} from "@murphai/assistant-runtime/hosted-invocation";
+import {
   HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
   HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
 } from "@murphai/hosted-execution/bundles";
@@ -93,7 +96,7 @@ const blockedMailboxPayloadDecoder: HostedWorkspaceMailboxPayloadDecoder = {
 function createHostedWorkspaceRuntimeBridgeJobOptions(
   input: TestHostedWorkspaceRuntimeBridgeOptionsInput,
 ): HostedWorkspaceRuntimeJobOptions {
-  return createPackageHostedWorkspaceRuntimeBridgeJobOptions({
+  const options = createPackageHostedWorkspaceRuntimeBridgeJobOptions({
     ...input,
     decodeMailboxPayload: input.requireMailboxPayloadDecoder === true
       ? input.decodeMailboxPayload
@@ -103,9 +106,20 @@ function createHostedWorkspaceRuntimeBridgeJobOptions(
     waitForBackgroundAssistantWork:
       input.waitForBackgroundAssistantWork ?? (async () => {}),
   });
+  return {
+    ...options,
+    async createCheckpointSnapshot(checkpointInput, context) {
+      try {
+        return await options.createCheckpointSnapshot(checkpointInput, context);
+      } finally {
+        await drainHostedRuntimeLogWritesBestEffort();
+      }
+    },
+  };
 }
 
 afterEach(async () => {
+  await drainHostedRuntimeLogWritesBestEffort();
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   await Promise.all(cleanupPaths.splice(0).map((target) =>

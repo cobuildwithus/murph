@@ -22,6 +22,7 @@ const assistantCliSurfaceBootstrapAllOptionsCommandNames = new Set([
   'assistant onboarding resume-context',
   'goal save',
   'memory upsert',
+  'wearables activity list',
 ])
 export const assistantCliSurfacePrebuiltArtifactFileName =
   'cli-surface-contract.generated.json'

@@ -238,11 +238,14 @@ The final ReviewGPT gate never becomes a fallback product-decision owner.
 7. Commit and push the review candidate from the task worktree, open or update
    the PR, and keep any active plan open. For plan-bearing work this is
    an intermediate scoped commit, not the final task commit;
-   `scripts/finish-task` still owns plan closure later. Ensure the PR body
-   contains the outcome, Product UX result, direct evidence, non-obvious
-   surfaces, architecture and reuse, complexity impact, hot reply path impact,
-   provider-input impact, deployment and changelog decisions, the change-shape
-   breakdown, and applicable design proof required below.
+   `scripts/committer` requires every changed file to be listed explicitly and
+   rejects directory targets. Directory expansion belongs only to
+   `scripts/finish-task`, which still owns plan closure and the final task
+   commit later. Ensure the PR body contains the outcome, Product UX result,
+   direct evidence, non-obvious surfaces, architecture and reuse, complexity
+   impact, hot reply path impact, provider-input impact, deployment and
+   changelog decisions, the change-shape breakdown, and applicable design proof
+   required below.
 8. When the final ReviewGPT gate is selected, establish its immutable round-one
    baseline on the exact pushed candidate head. The candidate must already have
    focused local proof and a parent candidate review. Run final ReviewGPT

@@ -11,6 +11,7 @@ import {
   normalizeHostedLinqAttachmentUrl,
   withHostedLinqAttachmentDownloadRetry,
 } from "../src/hosted-runtime/events/linq.ts";
+import { drainHostedRuntimeLogWritesBestEffort } from "../src/hosted-runtime/runtime-logs.ts";
 
 const originalLinqApiBaseUrl = process.env.LINQ_API_BASE_URL;
 const originalLinqApiToken = process.env.LINQ_API_TOKEN;
@@ -45,7 +46,8 @@ function createInjectedFetchLinqDriver(
   });
 }
 
-afterEach(() => {
+afterEach(async () => {
+  await drainHostedRuntimeLogWritesBestEffort();
   vi.clearAllMocks();
   vi.useRealTimers();
   if (originalLinqApiBaseUrl === undefined) {
@@ -394,6 +396,7 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
       driver.downloadUrl("https://cdn.linqapp.com/files/ok.bin", undefined),
     ).resolves.toEqual(Uint8Array.from([7, 8, 9]));
 
+    await drainHostedRuntimeLogWritesBestEffort();
     expect(logRequests).toHaveLength(1);
     const entry = logRequests[0]?.entries[0];
     assert.ok(entry);
@@ -444,6 +447,7 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
     }, undefined)).rejects.toThrow("Hosted Linq attachment metadata lookup failed.");
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    await drainHostedRuntimeLogWritesBestEffort();
     expect(logRequests).toHaveLength(1);
     const entry = logRequests[0]?.entries[0];
     assert.ok(entry);
@@ -744,6 +748,7 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
     }, undefined)).rejects.toThrow(
       "Hosted Linq attachment download failed with 403 Forbidden.",
     );
+    await drainHostedRuntimeLogWritesBestEffort();
     expect(logRequests).toHaveLength(1);
     const entry = logRequests[0]?.entries[0];
     assert.ok(entry);
@@ -789,6 +794,7 @@ describe("createHostedLinqAttachmentDownloadDriver", () => {
       "Hosted Linq attachment download failed with 404 Not Found.",
     );
 
+    await drainHostedRuntimeLogWritesBestEffort();
     expect(logRequests).toHaveLength(1);
     const entry = logRequests[0]?.entries[0];
     assert.ok(entry);

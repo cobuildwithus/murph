@@ -2628,6 +2628,8 @@ export async function runHostedWorkspaceAssistantPhase(
               : {}),
             runtimeAttemptId: input.request.attemptId,
             runtimeEnv: input.runtimeEnv,
+            readForegroundInputIds: () =>
+              input.latestAssistantInputBatch?.()?.assistantInputIds ?? [],
             ...(input.beforeProviderAcceptedInputs
               ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
               : {}),

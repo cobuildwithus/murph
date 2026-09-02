@@ -152,6 +152,7 @@ export async function runHostedAssistantAutomationLane(input: {
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig"
   >;
   freshAssistantInputIds?: readonly string[] | null;
+  readForegroundInputIds?: (() => readonly string[]) | null;
   idleCheckpointDelayMs?: number | null;
   now?: Date | null;
   operatorHomeRoot?: string | null;
@@ -236,6 +237,7 @@ export async function runHostedAssistantAutomationLane(input: {
                   input.shouldYieldBackgroundMaintenance,
               }
             : {}),
+          readForegroundInputIds: input.readForegroundInputIds,
         },
       )
     : {
@@ -310,6 +312,7 @@ export async function runHostedAssistantAutomation(
     runtimeAttemptId?: string | null;
     beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null;
     providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null;
+    readForegroundInputIds?: (() => readonly string[]) | null;
     shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   },
 ): Promise<{
@@ -348,7 +351,9 @@ export async function runHostedAssistantAutomation(
   let activeProviderMilestoneTraceContext: HostedAssistantMilestoneTraceContext | null = null;
   const recordedProviderMilestones = new Set<string>();
   const freshAssistantInputIdCount = new Set(freshAssistantInputIds).size;
-  let providerStartCriticalPath = options?.providerStartCriticalPath ?? null;
+  const automationOptions = options ?? {};
+  let providerStartCriticalPath =
+    automationOptions.providerStartCriticalPath ?? null;
   const selectedInputIds = await selectHostedAssistantInputIds(
     freshAssistantInputIdCount > 0
         ? {
@@ -372,6 +377,7 @@ export async function runHostedAssistantAutomation(
       selectedInputIds.mode === "foreground" ? "none" : "compact",
     preserveSelectedInputOrder:
       selectedInputIds.preserveInputOrder,
+    readForegroundInputIds: automationOptions.readForegroundInputIds,
     selectedInputIds: selectedInputIds.inputIds,
     vaultRoot,
   });

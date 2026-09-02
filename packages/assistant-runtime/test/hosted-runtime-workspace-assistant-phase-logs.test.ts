@@ -1,13 +1,18 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildHostedRuntimeLogContextFields,
   compactHostedRuntimeLogCodes,
+  drainHostedRuntimeLogWritesBestEffort,
   summarizeHostedRuntimeStatusCounts,
   toHostedRuntimeLogCode,
   writeHostedRuntimeLogBestEffort,
 } from "../src/hosted-runtime/runtime-logs.ts";
 
 describe("hosted runtime log helpers", () => {
+  afterEach(async () => {
+    await drainHostedRuntimeLogWritesBestEffort();
+  });
+
   it("keeps helper logging best-effort and redacted", async () => {
     await expect(writeHostedRuntimeLogBestEffort({
       entry: {
@@ -37,6 +42,7 @@ describe("hosted runtime log helpers", () => {
           },
         },
       })).resolves.toBeUndefined();
+      await expect(drainHostedRuntimeLogWritesBestEffort()).resolves.toBeUndefined();
       expect(consoleWarn).toHaveBeenCalledWith(
         "Hosted runtime durable log write failed.",
         {

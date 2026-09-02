@@ -47,6 +47,7 @@ import {
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
+  HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH,
   HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH,
   HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH,
   HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
@@ -132,6 +133,7 @@ import {
 } from "../src/runtime-platform.ts";
 import {
   fetchHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   HostedWebControlPlaneResponseError,
 } from "../src/runtime-platform/web-control-transport.ts";
 import {
@@ -336,8 +338,7 @@ async function fetchDirectHostedWorkspaceReadWithHeaders(input: {
     description: "Hosted workspace read",
     fetchImpl: input.fetchImpl,
     headers: input.headers,
-    method: "GET",
-    path: "/api/internal/hosted-workspace",
+    route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.workspaceRead,
     ...(input.sensitiveResponseBody
       ? { sensitiveResponseBody: input.sensitiveResponseBody }
       : {}),
@@ -6508,6 +6509,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           status: 200,
         });
       }
+      if (url.pathname.endsWith(HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH)) {
+        return new Response(JSON.stringify({ status: "authorized" }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
       if (url.pathname.endsWith(HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH)) {
         const body = await request.clone().json() as { action?: unknown };
         if (body.action === HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION) {
@@ -6602,6 +6609,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(platform.issueExportPort).toBeDefined();
     expect(platform.usageRecordPort).toBeDefined();
     expect(platform.productFeedbackPort).toBeDefined();
+    expect(platform.effectsPort.controlOperatorTask).toBeDefined();
     expect(platform.assistantAskPort).toBeDefined();
     expect(platform.assistantPersonalizationToolPort).toBeDefined();
     expect(platform.groupToolPort).toBeDefined();
@@ -6653,6 +6661,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       relatedChangelogItemIds: ["native-message-formatting"],
       summary: "Interested in native message formatting.",
     });
+    await expect(platform.effectsPort.controlOperatorTask!({
+      action: "authorize",
+      expiresAt: "2026-04-26T00:05:00.000Z",
+      requestId: "operator_request_123",
+      taskId: "operator_task_123",
+    })).resolves.toEqual({ status: "authorized" });
     await expect(platform.assistantPersonalizationToolPort!.request({ action: "read" }))
       .resolves.toEqual({
         action: "read",
@@ -6715,7 +6729,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       connectionId: "conn_123",
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(15);
+    expect(fetchMock).toHaveBeenCalledTimes(16);
     const requests = fetchMock.mock.calls.map((call, index) =>
       requireFetchRequest(call, `callback web-control request ${index}`)
     );
@@ -6728,6 +6742,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       "http://web-control.worker/api/internal/hosted-execution/issues/record",
       "http://web-control.worker/api/internal/hosted-execution/usage/record",
       "http://web-control.worker/api/internal/hosted-execution/product-feedback/record",
+      `http://web-control.worker${HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH}`,
       `http://web-control.worker${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}`,
       `http://web-control.worker${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}?assistantInputId=ain_0123456789abcdef0123456789abcdef`,
       `http://web-control.worker${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}?assistantInputId=ain_0123456789abcdef0123456789abcdef`,
@@ -6742,7 +6757,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("6");
       expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
     }
-    await expect(requests[10]?.clone().json()).resolves.toEqual({
+    await expect(requests[11]?.clone().json()).resolves.toEqual({
       action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
       personality: {
         detail: null,

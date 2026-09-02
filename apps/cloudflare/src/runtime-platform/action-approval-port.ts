@@ -4,13 +4,8 @@ import {
   parseHostedActionApprovalResult,
 } from "@murphai/hosted-execution/action-approval";
 import {
-  HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH,
-  HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH,
-  HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
-} from "@murphai/hosted-execution/routes";
-
-import {
   fetchHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
 
@@ -31,7 +26,7 @@ export function createHostedWebActionApprovalPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted action approval consume",
         fetchImpl: input.fetchImpl,
-        path: HOSTED_RUNTIME_ACTION_APPROVAL_CONSUME_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.actionApprovalConsume,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });
@@ -49,7 +44,7 @@ export function createHostedWebActionApprovalPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted action approval read",
         fetchImpl: input.fetchImpl,
-        path: HOSTED_RUNTIME_ACTION_APPROVAL_READ_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.actionApprovalRead,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });
@@ -67,7 +62,7 @@ export function createHostedWebActionApprovalPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted action approval request",
         fetchImpl: input.fetchImpl,
-        path: HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.actionApprovalRequest,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });

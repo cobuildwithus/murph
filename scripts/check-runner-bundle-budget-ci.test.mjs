@@ -20,7 +20,7 @@ const workflowUrl = new URL(
 const comparisonScriptPath = fileURLToPath(
   new URL("./check-runner-bundle-budget-ci.mjs", import.meta.url),
 );
-const bundleRelativePath = path.join(
+const vaultCliBundleRelativePath = path.join(
   "apps",
   "cloudflare",
   ".deploy",
@@ -29,6 +29,13 @@ const bundleRelativePath = path.join(
   "@murphai",
   "murph",
   ".bundle",
+);
+const runnerEntrypointBundleRelativePath = path.join(
+  "apps",
+  "cloudflare",
+  ".deploy",
+  "runner-bundle",
+  "dist-bundled",
 );
 
 async function readWorkflow() {
@@ -43,7 +50,7 @@ function measurement(totalBytes, path = "bin.js") {
   return { outputs: [{ bytes: totalBytes, path }], totalBytes };
 }
 
-async function writeBundleOutputs(repoRoot, outputs) {
+async function writeBundleOutputs(repoRoot, bundleRelativePath, outputs) {
   const bundleRoot = path.join(repoRoot, bundleRelativePath);
   await mkdir(bundleRoot, { recursive: true });
   await Promise.all(
@@ -51,6 +58,13 @@ async function writeBundleOutputs(repoRoot, outputs) {
       writeFile(path.join(bundleRoot, name), Buffer.alloc(bytes)),
     ),
   );
+}
+
+async function writeRequiredBundleOutputs(repoRoot, outputs) {
+  await Promise.all([
+    writeBundleOutputs(repoRoot, vaultCliBundleRelativePath, outputs),
+    writeBundleOutputs(repoRoot, runnerEntrypointBundleRelativePath, outputs),
+  ]);
 }
 
 function runCheckoutComparison(baseRoot, candidateRoot) {
@@ -124,8 +138,8 @@ test("compares emitted checkout files through the production CLI boundary", asyn
   const candidateRoot = path.join(fixtureRoot, "candidate");
 
   try {
-    await writeBundleOutputs(baseRoot, [{ bytes: 100, name: "bin.js" }]);
-    await writeBundleOutputs(candidateRoot, [
+    await writeRequiredBundleOutputs(baseRoot, [{ bytes: 100, name: "bin.js" }]);
+    await writeRequiredBundleOutputs(candidateRoot, [
       { bytes: 100, name: "bin.js" },
       { bytes: 98_304, name: "lazy.js" },
     ]);
@@ -136,7 +150,7 @@ test("compares emitted checkout files through the production CLI boundary", asyn
     assert.match(atThreshold.stdout, /excess: 0B/u);
 
     await writeFile(
-      path.join(candidateRoot, bundleRelativePath, "lazy.js"),
+      path.join(candidateRoot, vaultCliBundleRelativePath, "lazy.js"),
       Buffer.alloc(98_305),
     );
     const oneByteOver = runCheckoutComparison(baseRoot, candidateRoot);
@@ -151,6 +165,30 @@ test("compares emitted checkout files through the production CLI boundary", asyn
   }
 });
 
+test("compares runner entrypoint output independently from the vault CLI", async () => {
+  const fixtureRoot = await mkdtemp(
+    path.join(tmpdir(), "murph-runner-bundle-budget-"),
+  );
+  const baseRoot = path.join(fixtureRoot, "base");
+  const candidateRoot = path.join(fixtureRoot, "candidate");
+
+  try {
+    await writeRequiredBundleOutputs(baseRoot, [{ bytes: 100, name: "entry.js" }]);
+    await writeRequiredBundleOutputs(candidateRoot, [{ bytes: 100, name: "entry.js" }]);
+    await writeBundleOutputs(candidateRoot, runnerEntrypointBundleRelativePath, [
+      { bytes: 98_305, name: "lazy.js" },
+    ]);
+
+    const result = runCheckoutComparison(baseRoot, candidateRoot);
+    assert.equal(result.status, 1, result.stdout);
+    assert.match(result.stderr, /runner entrypoint total output growth exceeds/u);
+    assert.match(result.stderr, /excess: 1B/u);
+    assert.doesNotMatch(result.stderr, /vault CLI total output growth exceeds/u);
+  } finally {
+    await rm(fixtureRoot, { force: true, recursive: true });
+  }
+});
+
 test("fails closed when the base checkout has no emitted bundle", async () => {
   const fixtureRoot = await mkdtemp(
     path.join(tmpdir(), "murph-runner-bundle-budget-"),
@@ -158,7 +196,7 @@ test("fails closed when the base checkout has no emitted bundle", async () => {
   const candidateRoot = path.join(fixtureRoot, "candidate");
 
   try {
-    await writeBundleOutputs(candidateRoot, [{ bytes: 100, name: "bin.js" }]);
+    await writeRequiredBundleOutputs(candidateRoot, [{ bytes: 100, name: "bin.js" }]);
     const result = runCheckoutComparison(
       path.join(fixtureRoot, "missing-base"),
       candidateRoot,
@@ -166,6 +204,31 @@ test("fails closed when the base checkout has no emitted bundle", async () => {
 
     assert.equal(result.status, 1, result.stdout);
     assert.match(result.stderr, /Missing runner bundle measurement at/u);
+  } finally {
+    await rm(fixtureRoot, { force: true, recursive: true });
+  }
+});
+
+test("fails closed when the entrypoint output surface is missing", async () => {
+  const fixtureRoot = await mkdtemp(
+    path.join(tmpdir(), "murph-runner-bundle-budget-"),
+  );
+  const baseRoot = path.join(fixtureRoot, "base");
+  const candidateRoot = path.join(fixtureRoot, "candidate");
+
+  try {
+    await Promise.all([
+      writeBundleOutputs(baseRoot, vaultCliBundleRelativePath, [
+        { bytes: 100, name: "bin.js" },
+      ]),
+      writeBundleOutputs(candidateRoot, vaultCliBundleRelativePath, [
+        { bytes: 100, name: "bin.js" },
+      ]),
+    ]);
+    const result = runCheckoutComparison(baseRoot, candidateRoot);
+
+    assert.equal(result.status, 1, result.stdout);
+    assert.match(result.stderr, /dist-bundled/u);
   } finally {
     await rm(fixtureRoot, { force: true, recursive: true });
   }

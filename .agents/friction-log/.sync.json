@@ -635,6 +635,10 @@
     {
       "issue": "cobuildwithus/murph#2498",
       "path": ".agents/friction-log/20260827150613-live-hosted-assistant/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2560",
+      "path": ".agents/friction-log/20260828164243-committer-rejects-directory/friction.md"
     }
   ],
   "version": 1

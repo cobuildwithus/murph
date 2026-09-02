@@ -2522,6 +2522,20 @@ function markHostedLinqAttachmentReservationMayHaveSucceeded(
   });
 }
 
+function markHostedLinqDeliveryMayHaveSucceeded(input: {
+  error: unknown;
+  hasVerifiedVaultAttachment: boolean;
+}): unknown {
+  if (
+    input.hasVerifiedVaultAttachment
+    && isHostedLinqProviderOutcomeAmbiguous(input.error)
+  ) {
+    return markHostedLinqAttachmentReservationMayHaveSucceeded(input.error);
+  }
+
+  return markHostedDeliveryMayHaveSucceeded(input.error);
+}
+
 function markHostedDeliveryPreProviderRetryable(error: unknown): unknown {
   if (typeof error === "object" && error !== null) {
     return Object.assign(error, {
@@ -4990,7 +5004,10 @@ function createHostedAssistantLinqSendDependency(input: {
         hostedDeliveryErrorProvesProviderWasSkipped(error)
         || isHostedLinqProviderOutcomeAmbiguous(error)
       ) {
-        throw markHostedDeliveryMayHaveSucceeded(error);
+        throw markHostedLinqDeliveryMayHaveSucceeded({
+          error,
+          hasVerifiedVaultAttachment,
+        });
       }
       queueHostedAssistantLinqDeliveryOutcomeWrite({
         effectsPort: input.effectsPort ?? null,
