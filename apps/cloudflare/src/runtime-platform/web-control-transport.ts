@@ -2,8 +2,10 @@ import { emitHostedExecutionStructuredLog, type HostedExecutionStructuredLogDeta
 
 import { CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS } from "../internal-hosts.ts";
 import {
+  HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED_ERROR_CODE,
   readHostedRunnerWebControlPolicy,
   readHostedRunnerWebControlRoute,
+  type HostedRunnerWebControlOperation,
 } from "../runner-outbound/shared-web-control-policy.ts";
 import {
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
@@ -41,7 +43,7 @@ import {
   type HostedWorkspaceCheckpointBridgeAuthority,
 } from "./authority-headers.ts";
 
-export type HostedWebControlTransport =
+type HostedWebControlTransportConfig =
   | {
     callbackSigning: HostedWebCallbackSigningEnvironment;
     mode: "direct";
@@ -51,6 +53,18 @@ export type HostedWebControlTransport =
   | {
     mode: "proxy";
   };
+
+export interface HostedWebControlPreflightRejection {
+  method: "GET" | "POST";
+  operation: HostedRunnerWebControlOperation;
+  transport: HostedWebControlTransportConfig["mode"];
+}
+
+export type HostedWebControlTransport = HostedWebControlTransportConfig & {
+  reportPreflightRejection?: (
+    rejection: HostedWebControlPreflightRejection,
+  ) => Promise<void>;
+};
 
 interface HostedWebControlPlaneJsonRequest {
   acceptedStatuses?: readonly number[];
@@ -124,11 +138,6 @@ class HostedWebControlPlaneSensitiveResponseInvalidJsonError extends Error {
   }
 }
 
-const HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED_ERROR_CODE =
-  "HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED" as const;
-const HOSTED_WEB_CONTROL_PREFLIGHT_REJECTED_EVENT_CODE =
-  "runner.web_control_preflight_rejected" as const;
-
 class HostedWebControlRouteNotAllowlistedError extends TypeError {
   readonly code = HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED_ERROR_CODE;
 
@@ -140,12 +149,11 @@ class HostedWebControlRouteNotAllowlistedError extends TypeError {
   }
 }
 
-function assertAllowedHostedWebControlPreflight(input: {
-  description: string;
-  method: string;
+async function assertAllowedHostedWebControlPreflight(input: {
+  method: "GET" | "POST";
   path: string;
-  transport: HostedWebControlTransport["mode"];
-}): void {
+  transport: HostedWebControlTransport;
+}): Promise<void> {
   const policy = readHostedRunnerWebControlPolicy({
     method: input.method,
     path: input.path,
@@ -158,21 +166,15 @@ function assertAllowedHostedWebControlPreflight(input: {
     method: input.method,
     path: input.path,
   });
-  emitHostedExecutionStructuredLog({
-    component: "hosted.runtime.control-plane",
-    details: {
-      description: input.description,
-      errorCode: error.code,
-      eventCode: HOSTED_WEB_CONTROL_PREFLIGHT_REJECTED_EVENT_CODE,
+  try {
+    await input.transport.reportPreflightRejection?.({
       method: input.method,
       operation: policy.operation,
-      reason: "not_allowlisted",
-      transport: input.transport,
-    },
-    level: "warn",
-    message: "Hosted runtime web-control request rejected before egress.",
-    phase: "runtime.starting",
-  });
+      transport: input.transport.mode,
+    });
+  } catch {
+    // Best-effort telemetry must never replace the fail-closed policy error.
+  }
   throw error;
 }
 
@@ -304,11 +306,10 @@ async function fetchHostedWebControlPlaneJsonAttempt(
 
   const method = input.method ?? (input.body === undefined ? "GET" : "POST");
   const route = readHostedRunnerWebControlRoute(input.path);
-  assertAllowedHostedWebControlPreflight({
-    description: input.description,
+  await assertAllowedHostedWebControlPreflight({
     method,
     path: route.pathname,
-    transport: input.transport.mode,
+    transport: input.transport,
   });
   const body = input.body === undefined ? undefined : JSON.stringify(input.body);
   const requestStartedAt = Date.now();

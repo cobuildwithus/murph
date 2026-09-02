@@ -121,6 +121,9 @@ import {
   readHostedRuntimeSafeErrorText,
 } from "@murphai/hosted-execution";
 import {
+  parseHostedRuntimeLogRequest,
+} from "@murphai/hosted-execution/parsers";
+import {
   buildHostedExecutionRuntimePlatform,
   createCloudflareHostedProviderFetch,
   createHostedBrowserVaultReplicaWriteHeaders,
@@ -5234,46 +5237,104 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     );
   });
 
-  it("logs web-control preflight rejections before egress", async () => {
+  it("persists web-control preflight rejections without target egress", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      loggedCount: 1,
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const privateMemberMaterial = "private-member-material";
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: privateMemberMaterial,
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "attempt_private",
+          leaseGeneration: "1",
+          userId: privateMemberMaterial,
+          workspaceVersion: "1",
+        }),
+      },
+    });
+
+    await expect(platform.deviceSyncPort!.createConnectLink({
+      connectTarget: "",
+    })).rejects.toMatchObject({
+      code: "HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED",
+      message:
+        "Hosted runtime web-control route is not allowlisted for proxy transport: POST /api/internal/device-sync/connect-targets//connect-link",
+      name: "HostedWebControlRouteNotAllowlistedError",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const logRequest = requireFetchRequest(
+      fetchMock.mock.calls[0],
+      "web-control preflight rejection log",
+    );
+    expect(logRequest.url).toBe(
+      "http://web-control.worker/api/internal/hosted-runtime/log",
+    );
+    expect(logRequest.method).toBe("POST");
+    const serializedLog = await logRequest.text();
+    expect(parseHostedRuntimeLogRequest(JSON.parse(serializedLog))).toEqual({
+      entries: [{
+        at: expect.any(String),
+        component: "runner",
+        errorCode: "HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED",
+        eventCode: "runner.web_control_preflight_rejected",
+        level: "warn",
+        phase: "invoke",
+        redactedJson: {
+          method: "POST",
+          operation: "web_control_blocked",
+          reason: "not_allowlisted",
+          transport: "proxy",
+        },
+      }],
+    });
+    expect(serializedLog).not.toContain(privateMemberMaterial);
+    expect(serializedLog).not.toContain("connect-targets");
+    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          eventCode: "runner.web_control_preflight_rejected",
+        }),
+      }),
+    );
+  });
+
+  it("preserves the policy error when the preflight log write fails", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
-    const privateRouteMaterial = "private-route-material";
+    const reportPreflightRejection = vi.fn(async () => {
+      throw new Error("Synthetic runtime-log transport failure.");
+    });
 
     await expect(fetchHostedWebControlPlaneJson({
       boundUserId: "member_123",
       description: "Hosted synthetic blocked control",
       fetchImpl: fetchMock as typeof fetch,
       method: "POST",
-      path: `/api/internal/hosted-execution/${privateRouteMaterial}`,
+      path: "/api/internal/hosted-execution/synthetic-blocked-control",
       timeoutMs: 1_000,
       transport: {
         mode: "proxy",
+        reportPreflightRejection,
       },
     })).rejects.toMatchObject({
       code: "HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED",
-      message:
-        `Hosted runtime web-control route is not allowlisted for proxy transport: POST /api/internal/hosted-execution/${privateRouteMaterial}`,
       name: "HostedWebControlRouteNotAllowlistedError",
     });
 
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledTimes(1);
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith({
-      component: "hosted.runtime.control-plane",
-      details: {
-        description: "Hosted synthetic blocked control",
-        errorCode: "HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED",
-        eventCode: "runner.web_control_preflight_rejected",
-        method: "POST",
-        operation: "web_control_blocked",
-        reason: "not_allowlisted",
-        transport: "proxy",
-      },
-      level: "warn",
-      message: "Hosted runtime web-control request rejected before egress.",
-      phase: "runtime.starting",
+    expect(reportPreflightRejection).toHaveBeenCalledOnce();
+    expect(reportPreflightRejection).toHaveBeenCalledWith({
+      method: "POST",
+      operation: "web_control_blocked",
+      transport: "proxy",
     });
-    expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls))
-      .not.toContain(privateRouteMaterial);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("preserves structured non-retryable web-control errors without raw JSON in the message", async () => {

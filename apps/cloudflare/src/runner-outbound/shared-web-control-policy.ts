@@ -138,6 +138,9 @@ export type HostedRunnerWebControlOperation =
   | "workspace_read"
   | "web_control_blocked";
 
+export const HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED_ERROR_CODE =
+  "HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED" as const;
+
 export interface HostedRunnerWebControlPolicy {
   allowed: boolean;
   operation: HostedRunnerWebControlOperation;
