@@ -237,6 +237,7 @@ export type HostedSystemMailboxRuntime = Pick<
 > & Partial<Pick<NormalizedHostedAssistantRuntimeConfig, "parserToolchain">>;
 
 interface HostedSystemMailboxPostCheckpointRecordResult {
+  newerRevisionPending: boolean;
   nextWakeAt: string | null;
   recorded: number;
   stillDirty: boolean;
@@ -905,8 +906,8 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
     const retainUntil = resolveHostedDeviceSyncMailboxRetentionAt(input.item);
     if (retainUntil) {
       await retainHostedDeviceSyncSystemMailboxItem({
-        connectionStillDirty: recordResult.stillDirty,
         item: input.item,
+        newerRevisionPending: recordResult.newerRevisionPending,
         nextAttemptAt: retainUntil,
         vaultRoot: input.vaultRoot,
       });
@@ -991,8 +992,8 @@ function resolveHostedDeviceSyncMailboxRetentionAt(
 }
 
 async function retainHostedDeviceSyncSystemMailboxItem(input: {
-  connectionStillDirty: boolean;
   item: HostedSystemMailboxPendingItem;
+  newerRevisionPending: boolean;
   nextAttemptAt: string;
   vaultRoot: string;
 }): Promise<void> {
@@ -1024,7 +1025,7 @@ async function retainHostedDeviceSyncSystemMailboxItem(input: {
           };
         }
         if (
-          input.connectionStillDirty
+          input.newerRevisionPending
           || admittedAt === null
           || connectionId === null
           || index < retainedIndex
@@ -1355,6 +1356,7 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
         );
       }
       return {
+        newerRevisionPending: false,
         nextWakeAt: null,
         recorded: result.outcome === "delivered" ? 1 : 0,
         stillDirty: false,
@@ -1373,6 +1375,7 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
         await port.recordOutcome(input.record.request);
       }
       return {
+        newerRevisionPending: false,
         nextWakeAt: null,
         recorded: 1,
         stillDirty: false,
@@ -1394,6 +1397,7 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
         await removeHostedCodexAuthJson(input.operatorHomeRoot);
       }
       return {
+        newerRevisionPending: false,
         nextWakeAt: null,
         recorded: response.status === "superseded" ? 0 : 1,
         stillDirty: false,
@@ -1409,6 +1413,7 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
       }
       await deleteEnvironmentVoice(input.record.audioKey);
       return {
+        newerRevisionPending: false,
         nextWakeAt: null,
         recorded: 1,
         stillDirty: false,
@@ -1426,6 +1431,7 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
         input.signal ? { signal: input.signal } : undefined,
       );
       return {
+        newerRevisionPending: false,
         nextWakeAt: null,
         recorded: 1,
         stillDirty: false,
@@ -1471,6 +1477,7 @@ async function recordHostedDeviceSyncDirtyProcessedRecords(input: {
   }
 
   let nextWakeAt = input.records.length === 0 ? input.nextWakeAt ?? null : null;
+  let newerRevisionPending = false;
   let recorded = 0;
   let stillDirty = false;
 
@@ -1493,6 +1500,12 @@ async function recordHostedDeviceSyncDirtyProcessedRecords(input: {
     if (response.recorded) {
       recorded += 1;
     }
+    newerRevisionPending = newerRevisionPending || (
+      response.stillDirty
+      && response.dirtyRevision !== null
+      && response.processedRevision !== null
+      && response.dirtyRevision !== response.processedRevision
+    );
     stillDirty = stillDirty || response.stillDirty;
     if (shouldUseHostedDirtyAckWake(index, input.records.length, response.stillDirty)) {
       const onlyRetainedPayloadsRemain = response.stillDirty
@@ -1506,6 +1519,7 @@ async function recordHostedDeviceSyncDirtyProcessedRecords(input: {
   }
 
   return {
+    newerRevisionPending,
     nextWakeAt,
     recorded,
     stillDirty,

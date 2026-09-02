@@ -6568,6 +6568,7 @@ describe("hosted device-sync runtime", () => {
         runtime: createDeviceSyncPostCheckpointRuntime(deviceSyncPort),
       });
       assert.deepEqual(recorded, {
+        newerRevisionPending: false,
         nextWakeAt: retryJob.availableAt,
         recorded: 1,
         stillDirty: true,
@@ -6619,6 +6620,7 @@ describe("hosted device-sync runtime", () => {
           runtime: createDeviceSyncPostCheckpointRuntime(deviceSyncPort),
         }),
         {
+          newerRevisionPending: false,
           nextWakeAt: null,
           recorded: 1,
           stillDirty: false,

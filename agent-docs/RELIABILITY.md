@@ -1234,9 +1234,10 @@ Last verified: 2026-09-01
   exact retained mailbox item so newly dirty data can enter the local worker
   without waiting behind a historical retry. That webhook remains available for
   an exact continuation when post-checkpoint acknowledgement reports a newer
-  coalesced dirty revision; once acknowledgement proves the connection clean,
-  the existing mailbox retention update atomically defers the webhook to the
-  historical retry. The retained wake's job hints suppress provider scheduling,
+  coalesced dirty revision; once acknowledgement proves no newer revision
+  remains, the existing mailbox retention update atomically defers the webhook
+  to the retained retry, including when payload-only work is still in backoff.
+  The retained wake's job hints suppress provider scheduling,
   and each local job keeps its own `availableAt`, so these bounded passes neither
   run the later mailbox item out of order nor bypass provider backoff.
   Scheduled-reconcile successors do not grant admission. Per-attempt
