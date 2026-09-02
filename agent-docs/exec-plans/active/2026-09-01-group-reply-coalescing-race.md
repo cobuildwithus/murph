@@ -23,6 +23,10 @@ Updated: 2026-09-01
 - The regression passes with one active-turn admission, while causal gaps,
   other conversations, direct-message foreground bounds, and the 50-input cap
   remain unchanged.
+- A notified successor whose predecessor notification was missed composes with
+  the invocation-local recovered prefix, and a fully missed multi-message
+  prefix drains in the same admission rather than one message per provider
+  request.
 - Focused runtime/engine tests, package typechecks, a production-derived
   synthetic real-Codex group journey, privacy/diff checks, exact-head
   ReviewGPT, and required CI pass.
@@ -80,6 +84,10 @@ Updated: 2026-09-01
 - No pre-controller notification buffer: it would add process-global lifetime,
   cleanup, and stale-turn semantics for a race that existing invocation state
   can derive directly.
+- Active-turn admission has one discovery path: refresh the invocation-local
+  source, retain its authoritative conversation prefix, add only notified or
+  route candidates not already discovered, order once, and accept the complete
+  valid prefix within the existing cumulative cap.
 
 ## Verification
 
@@ -88,11 +96,20 @@ Updated: 2026-09-01
 - Candidate proof: the same regression passes; the full hosted turn-input suite
   passes 39/39; the workspace-phase handoff test and the held-group single-
   commit test pass; the assistant-runtime package typecheck passes.
+- Review regression proof: both the missed-predecessor notification case and a
+  fully missed three-message room prefix failed before the admission collapse
+  and now pass; the full assistant auto-reply runtime suite passes 189/189 and
+  both assistant package typechecks pass.
 - Real-Codex journey: passed against the production group prompt/tool surface.
-  The synthetic rapid clarification produced one final response that plainly
-  said the resistance type and level were unknown. Product UX verdict: Ready.
-- Remaining: changelog fragment and Web checks, complexity/privacy/diff review,
-  exact-head CI, and ReviewGPT.
+  After the admission collapse, the synthetic rapid clarification again
+  produced one final response that plainly said the resistance type and level
+  were unknown. Product UX verdict: Ready.
+- Candidate checks: full assistant auto-reply runtime suite 189/189, hosted
+  turn-input suite 39/39, workspace foreground handoff suite 86/86, held-group
+  single-commit regression, both package typechecks, complexity guard, and
+  privacy/diff checks all pass.
+- Remaining: exact-head ReviewGPT, required CI, final parent diff review, and
+  plan closure.
 
 ## Progress
 
@@ -101,3 +118,8 @@ Updated: 2026-09-01
   pending-index scan or a new state owner.
 - 2026-09-01: completed focused deterministic tests, typecheck, owner docs, and
   the production-derived real-Codex group journey with a Ready UX result.
+- 2026-09-01: resolved the first review finding by making authenticated group
+  batching room-scoped across actors and reply anchors.
+- 2026-09-01: resolved the second review finding by composing recovered and
+  notified inputs at the existing admission owner and draining the bounded
+  valid prefix without adding state, a timer, or another queue.

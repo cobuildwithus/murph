@@ -2969,7 +2969,9 @@ response, and to 50 admitted messages cumulatively. Later or overflow rows
 stay pending for the next ordinary turn. Active-turn notification is a
 best-effort latency hint rather than the sole discovery boundary: foreground
 refresh may recover only exact input IDs already imported by the current
-workspace invocation, then applies the same replyability, conversation, route,
+workspace invocation. Admission composes that cursor-ordered prefix with
+notified exact IDs and accepts every valid same-room successor up to the
+existing cumulative cap, applying the same replyability, conversation, route,
 and exact-successor checks without reopening or mutating the pending index.
 
 The Environment walkthrough reuses that execution plane without turning audio
