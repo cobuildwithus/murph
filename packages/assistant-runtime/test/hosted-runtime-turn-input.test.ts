@@ -310,6 +310,7 @@ describe("createHostedAssistantInputSource", () => {
     const initial = await upsertAssistantInputEvent({
       vault: vaultRoot,
       event: createAssistantInputEvent({
+        actorId: "actor_a",
         causalSeq: "20",
         dedupeKey: "dedupe_pre_controller_initial",
         eventId: "evt_pre_controller_initial",
@@ -319,6 +320,7 @@ describe("createHostedAssistantInputSource", () => {
         occurredAt: "2026-04-23T00:00:01.000Z",
         receivedAt: "2026-04-23T00:00:02.000Z",
         routeAuthority: true,
+        replyToMessageId: "assistant_message_a",
         text: "initial group question",
         threadIsDirect: false,
       }),
@@ -339,6 +341,7 @@ describe("createHostedAssistantInputSource", () => {
     const successor = await upsertAssistantInputEvent({
       vault: vaultRoot,
       event: createAssistantInputEvent({
+        actorId: "actor_b",
         causalSeq: "21",
         dedupeKey: "dedupe_pre_controller_successor",
         eventId: "evt_pre_controller_successor",
@@ -348,7 +351,26 @@ describe("createHostedAssistantInputSource", () => {
         occurredAt: "2026-04-23T00:00:03.000Z",
         receivedAt: "2026-04-23T00:00:04.000Z",
         routeAuthority: true,
+        replyToMessageId: "assistant_message_b",
         text: "rapid group clarification",
+        threadIsDirect: false,
+      }),
+    });
+    const causalGap = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        actorId: "actor_c",
+        causalSeq: "23",
+        dedupeKey: "dedupe_pre_controller_gap",
+        eventId: "evt_pre_controller_gap",
+        itemId: "item_pre_controller_gap",
+        laneSeq: "23",
+        messageId: "msg_pre_controller_gap",
+        occurredAt: "2026-04-23T00:00:05.000Z",
+        receivedAt: "2026-04-23T00:00:06.000Z",
+        routeAuthority: true,
+        replyToMessageId: "assistant_message_c",
+        text: "same group message after a causal gap",
         threadIsDirect: false,
       }),
     });
@@ -369,12 +391,20 @@ describe("createHostedAssistantInputSource", () => {
         threadIsDirect: false,
       }),
     });
-    for (const inputId of [successor.inputId, otherConversation.inputId]) {
+    for (const inputId of [
+      successor.inputId,
+      causalGap.inputId,
+      otherConversation.inputId,
+    ]) {
       await enqueueHostedPendingAssistantInputId({ inputId, vaultRoot });
     }
     // The foreground importer already captured these exact IDs, but its
     // best-effort notification ran before an active-turn controller existed.
-    invocationInputIds = [successor.inputId, otherConversation.inputId];
+    invocationInputIds = [
+      successor.inputId,
+      causalGap.inputId,
+      otherConversation.inputId,
+    ];
 
     await expect(source.refresh()).resolves.toEqual({
       progressed: true,
@@ -396,6 +426,7 @@ describe("createHostedAssistantInputSource", () => {
     expect(source.readObservedInputIds()).toEqual([
       initial.inputId,
       successor.inputId,
+      causalGap.inputId,
       otherConversation.inputId,
     ]);
     await expect(source.refresh()).resolves.toEqual({

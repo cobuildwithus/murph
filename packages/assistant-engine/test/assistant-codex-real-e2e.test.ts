@@ -4495,7 +4495,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           prompt: [
             REAL_GROUP_RECONSIDERATION_INSTRUCTION,
             initialBeat,
-            'The same participant: "Murph, do we know the exact resistance level?"',
+            'A third participant: "Murph, do we know the exact resistance level?"',
           ].join('\n\n'),
           resumeSessionId: first.sessionId,
         })
