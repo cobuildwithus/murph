@@ -337,6 +337,8 @@ function collectFactorAccumulators(
       const existing = factors.get(candidate.token);
       if (existing) {
         if (candidate.state === "observed") {
+          existing.implicitAbsenceAllowed &&=
+            candidate.implicitAbsenceAllowed;
           existing.dates.add(candidate.date);
           existing.episodeIds.add(candidate.episodeId);
           addEpisodeDate(
@@ -347,7 +349,6 @@ function collectFactorAccumulators(
         } else {
           existing.absentDates.add(candidate.date);
         }
-        existing.implicitAbsenceAllowed ||= candidate.implicitAbsenceAllowed;
         existing.kinds.add(candidate.kind);
         continue;
       }
@@ -365,7 +366,8 @@ function collectFactorAccumulators(
         episodeIds: new Set(
           candidate.state === "observed" ? [candidate.episodeId] : [],
         ),
-        implicitAbsenceAllowed: candidate.implicitAbsenceAllowed,
+        implicitAbsenceAllowed:
+          candidate.state === "absent" || candidate.implicitAbsenceAllowed,
         kinds: new Set([candidate.kind]),
         token: candidate.token,
       });

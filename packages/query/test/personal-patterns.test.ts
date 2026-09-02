@@ -74,6 +74,7 @@ test("Personal Patterns keeps a repeated next-day link and matched comparison ev
     (cell) => cell.factorId === "running" && cell.outcomeId === "hrv",
   );
   assert.ok(hrv);
+  assert.equal(hrv.grade, "B");
   assert.equal(hrv.stage, "seen_again");
   assert.equal(hrv.direction, "higher");
   assert.equal(hrv.repeatedDirection, true);
@@ -802,6 +803,43 @@ test("Personal Patterns caps manual activities that use an unobserved baseline",
         }),
       ],
       vaultRoot: "test://manual-activity-pattern",
+    }),
+    { asOf: "2026-04-27", windowDays: 120 },
+  );
+
+  const cell = report.cells.find(
+    (candidate) => candidate.factorId === "running",
+  );
+  assert.equal(cell?.comparisonBasis, "unobserved_baseline");
+  assert.equal(cell?.grade, "D");
+});
+
+test("Personal Patterns caps mixed device and manual observations that use an unobserved baseline", () => {
+  const start = "2026-01-05";
+  const runningDates = Array.from({ length: 8 }, (_, index) =>
+    addDays(start, index * 14),
+  );
+  const report = buildPersonalPatternReport(
+    createVaultReadModel({
+      entities: [
+        ...runningDates.map((date, index) =>
+          event(`mixed_run_${index}`, date, "activity_session", {
+            activityType: "running",
+            source: index === runningDates.length - 1 ? "manual" : "device",
+          }),
+        ),
+        ...Array.from({ length: 112 }, (_, index) => {
+          const date = addDays(start, index);
+          return observation(
+            `mixed_run_hrv_${index}`,
+            date,
+            "hrv",
+            runningDates.includes(addDays(date, -1)) ? 75 : 50,
+            "ms",
+          );
+        }),
+      ],
+      vaultRoot: "test://mixed-activity-pattern",
     }),
     { asOf: "2026-04-27", windowDays: 120 },
   );

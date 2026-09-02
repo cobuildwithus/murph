@@ -132,15 +132,9 @@ test("Whoop persona exposes provider-specific sleep and recovery outcomes", asyn
     .flatMap((day) => day.events)
     .find((event) => event.kind === "sleep");
   assert.ok(sleep);
-  assert.match(
-    sleep.details.join(" "),
-    /recovery/iu,
-    sleep.records
-      .map((record) => `${record.label}:${record.source}:${record.summary}`)
-      .join(" | "),
-  );
-  assert.match(sleep.details.join(" "), /deep sleep/iu);
-  assert.match(sleep.details.join(" "), /SpO₂/iu);
+  assert.notEqual(sleep.metrics.recoveryScore, null);
+  assert.notEqual(sleep.metrics.deepSleepMinutes, null);
+  assert.notEqual(sleep.metrics.spo2Percent, null);
 
   const factorIds = new Set(
     replica.personalPatterns?.factors.map((factor) => factor.id),
