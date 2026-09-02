@@ -263,13 +263,13 @@ describe('assistant skill assets', () => {
     const daily = (await readSkillFile(dailySkill)).replace(/\s+/gu, ' ')
 
     expect(daily).toMatch(
-      /workout count, total duration, activity types.+wearables activity list --date <date> --format json.+compact routine result.+Do not run `wearables day` first.+other date-specific wearable facts.+wearables day <date>/u,
+      /workout activity questions.+choose compact or detailed output from the user's question before the first and only activity-list data read; never use compact output as a probe before retrying with detail.+wearables activity list --date <date> --format json.+compact routine result.+Do not run `wearables day` first.+other date-specific wearable facts.+wearables day <date>/u,
     )
     expect(daily).toContain(
       'wearables activity list --date <date> --include-workout-details --format json',
     )
     expect(daily).toContain(
-      'Count, duration, and activity-type questions must omit `--include-workout-details` entirely; do not pass it as true or false. Pass it truthy only when the user explicitly asks for workout-level heart rate, cadence, power, speed, or retained splits',
+      'Omit `--include-workout-details` only when the answer is entirely available from the day-level `sessionCount`, `sessionMinutes`, and distinct `activityTypes` fields. Pass it truthy whenever selecting, comparing, grouping, ordering, or attributing individual workouts, including type-specific count, duration, distance, start time, provider, heart rate, cadence, power, speed, or splits',
     )
     expect(daily).toContain(
       '`workoutFeatures` associates the bounded detail with each workout by provider and start time',

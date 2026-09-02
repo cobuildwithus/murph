@@ -31,6 +31,7 @@ interface CommandGuard {
 }
 
 interface ManifestCommand {
+  hint?: string
   name: string
   schema: JsonRecord
 }
@@ -660,7 +661,9 @@ test('murph age submitted-data commands stay in generated agent artifacts', asyn
 
 test('wearables activity list exposes explicit bounded workout detail on demand', async () => {
   const detailDescription =
-    'Include bounded workoutFeatures and splits (up to 32 workouts per day and 64 splits per workout). For count, duration, or activity-type questions, omit this option entirely; do not pass true or false. Pass it truthy only for explicit workout-level heart rate, cadence, power, speed, or split questions.'
+    'Include bounded workoutFeatures and splits (up to 32 workouts per day and 64 splits per workout). Choose compact or detailed output from the question before the first and only activity-list data read; never use compact output as a probe before retrying with detail. Omit this option only when the answer is entirely available from day-level sessionCount, sessionMinutes, and distinct activityTypes. Pass it truthy whenever selecting, comparing, grouping, ordering, or attributing individual workouts, including type-specific count, duration, distance, start time, provider, heart rate, cadence, power, speed, or splits.'
+  const activityHint =
+    'One data read only. Day totals (`sessionCount`, `sessionMinutes`, distinct `activityTypes`): omit detail; no false flag or schema read. Workout/subset facts: include detail first.'
   const commands = await loadFullLlmCommands()
   const generatedTypes = await readFile(
     new URL('../src/incur.generated.ts', import.meta.url),
@@ -686,6 +689,7 @@ test('wearables activity list exposes explicit bounded workout detail on demand'
     'wearables activity list schema includeWorkoutDetails',
   )
 
+  assert.equal(activityCommand.hint, activityHint)
   assert.equal(schemaIncludesProperty(activityCommand.schema, 'includeWorkoutDetails'), true)
   assert.equal(manifestDetailOption.type, 'boolean')
   assert.equal(manifestDetailOption.default, false)
@@ -841,8 +845,16 @@ async function loadFullLlmCommands(): Promise<ManifestCommand[]> {
       command.schema,
       `llms manifest commands[${index}].schema`,
     )
+    const hint =
+      command.hint === undefined
+        ? undefined
+        : requireString(command.hint, `llms manifest commands[${index}].hint`)
 
-    return { name, schema }
+    return {
+      ...(hint === undefined ? {} : { hint }),
+      name,
+      schema,
+    }
   })
 }
 
