@@ -151,7 +151,7 @@ test("Journal remains useful with notes only and keeps independent facts separat
   ]);
 });
 
-test("Journal includes canonical meals with a concise nutrition summary", () => {
+test("Journal keeps meal prose in details instead of the timeline", () => {
   const view = buildJournalView(
     createVaultReadModel({
       entities: [
@@ -161,6 +161,7 @@ test("Journal includes canonical meals with a concise nutrition summary", () => 
           "2026-08-20T12:30:00.000Z",
           {
             ingredients: ["Eggs", "Spinach", "Toast", "Olive oil"],
+            summary: "Photo estimate with ingredients and uncertain portions.",
             nutrition: {
               totals: {
                 calories: 540,
@@ -169,7 +170,7 @@ test("Journal includes canonical meals with a concise nutrition summary", () => 
             },
             source: "manual",
           },
-          "Meal",
+          "Eggs and spinach",
         ),
       ],
       vaultRoot: "test://journal-meal",
@@ -180,9 +181,13 @@ test("Journal includes canonical meals with a concise nutrition summary", () => 
 
   const meal = view.days[0]?.events[0];
   assert.equal(meal?.kind, "meal");
-  assert.equal(meal?.title, "Meal");
-  assert.equal(meal?.summary, "Eggs, Spinach, Toast");
-  assert.deepEqual(meal?.details, ["Energy: 540 kcal", "Protein: 31 g"]);
+  assert.equal(meal?.title, "Eggs and spinach");
+  assert.equal(meal?.summary, null);
+  assert.deepEqual(meal?.details, [
+    "Photo estimate with ingredients and uncertain portions.",
+    "Energy: 540 kcal",
+    "Protein: 31 g",
+  ]);
 });
 
 test("Journal turns dense wearable records into main sleep, naps, and grouped activity", () => {
@@ -370,8 +375,132 @@ test("Journal keeps useful workout detail in the activity popover", () => {
     "Strain: 14.2",
     "Active energy: 640 kcal",
     "Elevation gain: 310 m",
-    "Exercises: Front squat, Deadlift",
+    "Exercises: Deadlift, Front squat",
   ]);
+});
+
+test("Journal combines exercises across grouped activity sessions", () => {
+  const view = buildJournalView(
+    createVaultReadModel({
+      entities: [
+        event(
+          "strength_1",
+          "activity_session",
+          "2026-08-25T17:30:00.000Z",
+          {
+            activityType: "strength_training",
+            durationMinutes: 30,
+            workout: {
+              exercises: [{ name: "Bench press" }, { name: "Lunge" }],
+            },
+          },
+          "Strength training",
+        ),
+        event(
+          "strength_2",
+          "activity_session",
+          "2026-08-25T18:00:00.000Z",
+          {
+            activityType: "strength_training",
+            durationMinutes: 25,
+            workout: {
+              exercises: [{ name: "Lunge" }, { name: "Calf raise" }],
+            },
+          },
+          "Strength training",
+        ),
+      ],
+      vaultRoot: "test://journal-combined-exercises",
+    }),
+    [],
+    { asOf: "2026-08-25T22:00:00.000Z" },
+  );
+
+  assert.deepEqual(view.days[0]?.events[0]?.details, [
+    "Exercises: Bench press, Calf raise, Lunge",
+  ]);
+});
+
+test("Journal groups activity aliases with the shared vocabulary", () => {
+  const view = buildJournalView(
+    createVaultReadModel({
+      entities: [
+        event(
+          "dance_1",
+          "activity_session",
+          "2026-08-25T17:30:00.000Z",
+          { activityType: "dancing", durationMinutes: 30 },
+          "Dancing",
+        ),
+        event(
+          "dance_2",
+          "activity_session",
+          "2026-08-25T18:00:00.000Z",
+          { activityType: "cardio_dance", durationMinutes: 25 },
+          "Cardio dance",
+        ),
+      ],
+      vaultRoot: "test://journal-activity-vocabulary",
+    }),
+    [],
+    {
+      asOf: "2026-08-25T22:00:00.000Z",
+      vocabulary: {
+        concepts: [
+          {
+            aliases: ["cardio-dance", "dancing"],
+            icon: "dance",
+            id: "dance",
+            label: "Dance",
+          },
+        ],
+        version: 1,
+      },
+    },
+  );
+
+  assert.equal(view.eventCount, 1);
+  assert.equal(view.days[0]?.events[0]?.title, "Dance");
+  assert.equal(view.days[0]?.events[0]?.summary, "55 min across 2 sessions");
+});
+
+test("Journal uses structured results and hides generated image attachments", () => {
+  const hearingTest = event(
+    "hearing_test",
+    "test",
+    "2026-08-25T12:00:00.000Z",
+    {
+      note: "Screenshot provided by member.",
+      resultSummary: "Hearing result was within the expected range.",
+      testName: "AirPods hearing test",
+    },
+    "AirPods hearing test",
+  );
+  const generatedImage = {
+    ...event(
+      "generated_image",
+      "note",
+      "2026-08-25T12:01:00.000Z",
+      { note: "Saved for visual reuse." },
+      "Generated image",
+    ),
+    tags: ["assistant-generated-image", "generated-image"],
+  };
+  const view = buildJournalView(
+    createVaultReadModel({
+      entities: [hearingTest, generatedImage],
+      vaultRoot: "test://journal-structured-result",
+    }),
+    [],
+    { asOf: "2026-08-25T22:00:00.000Z" },
+  );
+
+  assert.equal(view.eventCount, 1);
+  assert.equal(view.days[0]?.events[0]?.title, "AirPods hearing test");
+  assert.equal(
+    view.days[0]?.events[0]?.summary,
+    "Hearing result was within the expected range.",
+  );
 });
 
 test("Journal omits missing and repeated activity details", () => {

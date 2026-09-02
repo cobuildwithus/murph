@@ -7,6 +7,10 @@ import {
 import { selectMetricSeries, type MetricPoint } from "./metrics/index.ts";
 import type { CanonicalEntity } from "./canonical-entities.ts";
 import type { VaultReadModel } from "./read-model.ts";
+import {
+  resolvePersonalPatternVocabularyConcept,
+  type PersonalPatternVocabulary,
+} from "./personal-patterns.ts";
 
 const DEFAULT_WINDOW_DAYS = 120;
 const MAX_RECORDS = 1_500;
@@ -100,6 +104,7 @@ interface JournalCandidate extends JournalRecord {
   date: string;
   detailItems: string[];
   durationMinutes: number | null;
+  exerciseNames: string[];
   groupHint: string | null;
   metricKey: string | null;
   metricValue: number | null;
@@ -111,14 +116,23 @@ interface JournalCandidate extends JournalRecord {
 export function buildJournalView(
   vault: VaultReadModel,
   metricPoints: readonly MetricPoint[] = [],
-  options: { asOf?: Date | string; windowDays?: number } = {},
+  options: {
+    asOf?: Date | string;
+    vocabulary?: PersonalPatternVocabulary | null;
+    windowDays?: number;
+  } = {},
 ): JournalView {
   const asOfDate = resolveDate(options.asOf);
   const windowDays = normalizeWindowDays(options.windowDays);
   const fromDate = addDays(asOfDate, -(windowDays - 1));
   const candidates = normalizeJournalCandidates([
     ...vault.events.flatMap((event) =>
-      journalCandidateFromEvent(event, fromDate, asOfDate),
+      journalCandidateFromEvent(
+        event,
+        fromDate,
+        asOfDate,
+        options.vocabulary,
+      ),
     ),
     ...journalCandidatesFromExperiments(
       vault.experiments,
@@ -159,20 +173,15 @@ function journalCandidateFromEvent(
   event: CanonicalEntity,
   fromDate: string,
   toDate: string,
+  vocabulary: PersonalPatternVocabulary | null | undefined,
 ): JournalCandidate[] {
   if (event.family !== "event" || !isJournalEventKind(event.kind)) return [];
-  if (isJournalProfileEvent(event)) return [];
+  if (isHiddenJournalEvent(event)) return [];
   const date = resolveEventDate(event);
   if (!date || date < fromDate || date > toDate) return [];
   const occurredAt = normalizeOccurredAt(event.occurredAt ?? undefined, date);
-  const observationMetric = journalObservationMetric(event);
-  const label = observationMetric?.label ?? eventLabel(event);
-  const activityKey =
-    event.kind === "activity_session"
-      ? resolveAdherenceObservationActivityKind({
-          attributes: event.attributes,
-        }) ?? "activity"
-      : null;
+  const presentation = journalEventPresentation(event, vocabulary);
+  const { activityKey, exerciseNames, label, observationMetric } = presentation;
   const durationMinutes = readNumber(event.attributes.durationMinutes);
   const sleepType =
     event.kind === "sleep_session"
@@ -192,6 +201,7 @@ function journalCandidateFromEvent(
       date,
       detailItems: journalEventDetailItems(event),
       durationMinutes,
+      exerciseNames,
       groupHint,
       id: event.entityId,
       kind: event.kind,
@@ -215,6 +225,41 @@ function journalCandidateFromEvent(
       timeZone: readEventTimeZone(event),
     },
   ];
+}
+
+function isHiddenJournalEvent(event: CanonicalEntity): boolean {
+  return isJournalProfileEvent(event) || event.tags.includes("generated-image");
+}
+
+function journalEventPresentation(
+  event: CanonicalEntity,
+  vocabulary: PersonalPatternVocabulary | null | undefined,
+): {
+  activityKey: string | null;
+  exerciseNames: string[];
+  label: string;
+  observationMetric: (typeof JOURNAL_METRICS)[number] | null;
+} {
+  const observationMetric = journalObservationMetric(event);
+  if (event.kind !== "activity_session") {
+    return {
+      activityKey: null,
+      exerciseNames: [],
+      label: observationMetric?.label ?? eventLabel(event),
+      observationMetric,
+    };
+  }
+  const rawKey =
+    resolveAdherenceObservationActivityKind({
+      attributes: event.attributes,
+    }) ?? "activity";
+  const concept = resolvePersonalPatternVocabularyConcept(vocabulary, rawKey);
+  return {
+    activityKey: concept?.id ?? rawKey,
+    exerciseNames: activityExerciseNames(event.attributes),
+    label: concept?.label ?? eventLabel(event),
+    observationMetric,
+  };
 }
 
 function journalCandidatesFromExperiments(
@@ -318,6 +363,7 @@ function appendExperimentPhaseCandidates(input: {
             `Progress: Day ${day} of ${totalDays}`,
           ],
           durationMinutes: null,
+          exerciseNames: [],
           groupHint,
           id: `${input.experiment.entityId}:${input.phase}:${date}`,
           kind: "experiment_context",
@@ -375,6 +421,7 @@ function journalMetricCandidates(
           date: row.date,
           detailItems: [],
           durationMinutes: null,
+          exerciseNames: [],
           groupHint: `${metric.group}:${row.date}`,
           id: `journal_metric_${metric.key}_${row.date}`,
           kind: "metric",
@@ -600,6 +647,7 @@ function groupJournalCandidates(
           date: _date,
           detailItems: _detailItems,
           durationMinutes: _durationMinutes,
+          exerciseNames: _exerciseNames,
           groupHint: _hint,
           metricKey: _metricKey,
           metricValue: _metricValue,
@@ -670,14 +718,16 @@ function eventLabel(event: CanonicalEntity): string {
 }
 
 function eventSummary(event: CanonicalEntity): string | null {
-  const note = readString(event.attributes.note);
-  if (note) return note;
   const summary = readString(event.attributes.summary);
   if (event.kind === "experiment_context") {
     return experimentJournalSummary(event, summary);
   }
-  if (summary) return summary;
   if (event.kind === "meal") return mealSummary(event.attributes);
+  const resultSummary = readString(event.attributes.resultSummary);
+  if (resultSummary) return resultSummary;
+  if (summary) return summary;
+  const note = readString(event.attributes.note);
+  if (note) return note;
   if (event.kind === "observation") {
     const value = readNumber(event.attributes.value);
     if (value !== null) {
@@ -700,13 +750,11 @@ function eventSummary(event: CanonicalEntity): string | null {
 }
 
 function mealSummary(attributes: Record<string, unknown>): string | null {
-  const ingredients = Array.isArray(attributes.ingredients)
-    ? attributes.ingredients
-        .map(readString)
-        .filter((value): value is string => value !== null)
-        .slice(0, 3)
-    : [];
-  return ingredients.length > 0 ? ingredients.join(", ") : "Meal recorded";
+  return (
+    readString(attributes.mealName) ??
+    readString(attributes.dishName) ??
+    null
+  );
 }
 
 function journalEventDetailItems(event: CanonicalEntity): string[] {
@@ -750,6 +798,7 @@ function mealDetailItems(attributes: Record<string, unknown>): string[] {
   const nutrition = readRecord(attributes.nutrition);
   const totals = readRecord(nutrition?.totals);
   return uniqueStrings([
+    readString(attributes.summary) ?? readString(attributes.note),
     formatJournalDetail("Energy", readNumber(totals?.calories), "kcal"),
     formatJournalDetail("Protein", readNumber(totals?.proteinGrams), "g"),
     formatJournalDetail(
@@ -846,7 +895,6 @@ function activityDetailItems(
     attributes.totalElevationGainMeters,
   );
   const averagePower = readNumber(metrics?.averagePowerWatts);
-  const exercises = readJournalExerciseNames(workout?.exercises);
   const energy = activeCalories === null ? totalCalories : activeCalories;
 
   return uniqueStrings([
@@ -863,8 +911,14 @@ function activityDetailItems(
     ),
     formatJournalDetail("Elevation gain", elevationGain, "m"),
     formatJournalDetail("Average power", averagePower, "W"),
-    exercises.length > 0 ? `Exercises: ${exercises.join(", ")}` : null,
   ]);
+}
+
+function activityExerciseNames(
+  attributes: Record<string, unknown>,
+): string[] {
+  const workout = readRecord(attributes.workout);
+  return readJournalExerciseNames(workout?.exercises);
 }
 
 function usefulActivityDetail(value: unknown, title: string): string | null {
@@ -981,12 +1035,20 @@ function buildEventPresentation(
     const activityMinutes = sumNumbers(
       activitySessions.map((record) => record.durationMinutes),
     );
+    const exerciseNames = uniqueStrings(
+      records.flatMap((record) => record.exerciseNames),
+    ).sort((left, right) => left.localeCompare(right));
     return {
       details: uniqueStrings(
-        records.flatMap((record) => [
-          ...record.detailItems,
-          ...(record.kind === "note" ? [record.summary] : []),
-        ]),
+        [
+          ...records.flatMap((record) => [
+            ...record.detailItems,
+            ...(record.kind === "note" ? [record.summary] : []),
+          ]),
+          exerciseNames.length > 0
+            ? `Exercises: ${exerciseNames.join(", ")}`
+            : null,
+        ],
       ),
       metrics: {
         ...emptyJournalEventMetrics(),
