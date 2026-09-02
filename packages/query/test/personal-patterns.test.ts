@@ -1429,6 +1429,40 @@ test("Personal Patterns keeps recognized factors when matched history is insuffi
   assert.equal(report.testedCellCount, 0);
 });
 
+test("Personal Patterns uses the concise label for evening light-filtering glasses", () => {
+  const start = "2026-03-02";
+  const entities: CanonicalEntity[] = [
+    ...Array.from({ length: 5 }, (_, index) => ({
+      ...event(`glasses_${index}`, addDays(start, index), "note", {}),
+      tags: [
+        "key-high-filtering-amber-red-or-orange-evening-glasses-with-spectral-data-when-available",
+      ],
+      attributes: { noteType: "journal-factor" },
+    })),
+    ...Array.from({ length: 6 }, (_, index) =>
+      observation(
+        `sleep_${index}`,
+        addDays(start, index + 1),
+        "sleep-score",
+        80,
+        "score",
+      ),
+    ),
+  ];
+  const report = buildPersonalPatternReport(
+    createVaultReadModel({
+      entities,
+      vaultRoot: "test://personal-pattern-light-filtering-glasses",
+    }),
+    { asOf: "2026-03-08T12:00:00.000Z" },
+  );
+
+  assert.deepEqual(
+    report.factors.map((factor) => [factor.id, factor.label]),
+    [["blue-light-blocking-glasses", "Blue-light blocking glasses"]],
+  );
+});
+
 test("Personal Patterns suppresses outcome-like activity and intervention factors", () => {
   const start = "2026-01-05";
   const factorDates = Array.from({ length: 8 }, (_, index) =>

@@ -236,7 +236,10 @@ const RULES: ReadonlyArray<{ icon: string; tokens: readonly string[] }> = [
     icon: habitat("night-temp"),
     tokens: ["bedroom-temperature", "night-temperature"],
   },
-  { icon: habitat("redlight"), tokens: ["red-light"] },
+  {
+    icon: habitat("redlight"),
+    tokens: ["red-light", "blue-light-blocking-glasses"],
+  },
 ];
 
 export function resolvePatternFactorIcon(

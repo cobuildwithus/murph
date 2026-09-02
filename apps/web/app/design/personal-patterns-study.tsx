@@ -31,6 +31,12 @@ const POPULATED_REPORT: PersonalPatternReport = {
       label: "Bedroom temperature",
       observedDays: 6,
     },
+    {
+      id: "blue-light-blocking-glasses",
+      kind: "intervention",
+      label: "Blue-light blocking glasses",
+      observedDays: 7,
+    },
     { id: "strength", kind: "activity", label: "Strength", observedDays: 9 },
     {
       id: "late-meal",
@@ -100,6 +106,16 @@ const POPULATED_REPORT: PersonalPatternReport = {
       45.4,
       43.6,
       6,
+    ),
+    cell(
+      "blue-light-blocking-glasses",
+      "hrv",
+      "new_clue",
+      "higher",
+      3.6,
+      45.2,
+      43.6,
+      7,
     ),
     cell("running", "spo2", "new_clue", "higher", 1, 97, 96, 8),
     cell(

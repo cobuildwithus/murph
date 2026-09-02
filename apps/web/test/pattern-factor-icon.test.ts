@@ -180,6 +180,12 @@ test("specific local factors resolve to their intended Quiver illustrations", ()
     resolvePatternFactorIcon(factor("Bedroom temperature", "intervention")),
     /night-temp\.svg$/u,
   );
+  assert.match(
+    resolvePatternFactorIcon(
+      factor("Blue-light blocking glasses", "intervention"),
+    ),
+    /redlight\.svg$/u,
+  );
 });
 
 test("unknown provider values use the neutral fallback illustration", () => {

@@ -275,7 +275,7 @@ test("JournalPage renders the derived private health timeline", () => {
     assert.doesNotMatch(markup, /10–16 August 2026/u);
     assert.match(markup, /Morning walk/u);
     assert.match(markup, /Last 7 days/u);
-    assert.match(markup, /To add, correct, or remove an entry, tell Murph/u);
+    assert.match(markup, /Update your journal in private chat with Murph/u);
     assert.match(markup, /journal-day-2026-08-12/u);
     assert.doesNotMatch(markup, /journal-day-2026-08-13/u);
     assert.doesNotMatch(markup, /No data/u);
