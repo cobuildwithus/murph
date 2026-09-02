@@ -192,7 +192,6 @@ const ROOMY_TEST_BUDGETS = {
   entryBytes: 10_000,
   staticClosureBytes: 10_000,
   staticChunkCount: 10,
-  totalBytes: 10_000,
 };
 const RUNNER_TREE_SHAKE_REQUIRED_PACKAGE_MANIFESTS = [
   ["@murphai/contracts", "packages/contracts/package.json"],
@@ -337,10 +336,9 @@ describe("runner bundle container-entrypoint esbuild step", () => {
         entryBytes: 1_000,
         staticClosureBytes: 10_000,
         staticChunkCount: 10,
-        totalBytes: 3_000,
       }),
     ).toThrow(
-      /total output 6000B exceeds budget 3000B; entry chunk dist-bundled\/container-entrypoint\.js 2000B exceeds budget 1000B[\s\S]*5000B node_modules\/heavy\/index\.js/,
+      /entry chunk dist-bundled\/container-entrypoint\.js 2000B exceeds budget 1000B[\s\S]*5000B node_modules\/heavy\/index\.js/,
     );
 
     expect(
@@ -647,7 +645,6 @@ describe("runner bundle container-entrypoint esbuild step", () => {
       entryBytes: 64_257 + 12_000,
       staticClosureBytes: 1_950_662 + 96_000,
       staticChunkCount: 24,
-      totalBytes: 11_678_063 + 32_768,
     });
   });
 
@@ -709,32 +706,24 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ).toThrow(/static boot closure chunk count .* exceeds budget/);
   });
 
-  it("gates total output at the production ratchet boundary", () => {
-    const { totalBytes } = resolveRunnerEntrypointBundleBudgets();
-    const dynamicChunkBytesAtBudget = totalBytes - 1_000;
+  it("leaves lazy-only total growth to the exact-base CI comparison", () => {
+    const dynamicChunkBytes = 20_000_000;
 
     expect(
       assertRunnerEntrypointBundleWithinBudgets(
-        dynamicOnlyChunkMetafile(dynamicChunkBytesAtBudget),
+        dynamicOnlyChunkMetafile(dynamicChunkBytes),
       ),
     ).toEqual({
       entryBytes: 1_000,
       staticClosureBytes: 1_000,
       staticChunkCount: 1,
-      totalBytes,
+      totalBytes: dynamicChunkBytes + 1_000,
     });
-
-    expect(() =>
-      assertRunnerEntrypointBundleWithinBudgets(
-        dynamicOnlyChunkMetafile(dynamicChunkBytesAtBudget + 1),
-      ),
-    ).toThrow(/total output .* exceeds budget/);
   });
 
   it("does not count dynamic-only chunks toward the static boot closure budget", () => {
-    const { staticClosureBytes, totalBytes } = resolveRunnerEntrypointBundleBudgets();
+    const { staticClosureBytes } = resolveRunnerEntrypointBundleBudgets();
     const dynamicChunkBytes = staticClosureBytes + 500_000;
-    expect(dynamicChunkBytes + 1_000).toBeLessThan(totalBytes);
 
     expect(
       assertRunnerEntrypointBundleWithinBudgets(
