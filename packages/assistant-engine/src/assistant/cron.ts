@@ -740,6 +740,7 @@ export async function processDueAssistantCronJobsLocal(
       errorCode: result.runErrorCode,
       errorMessage: result.run.error,
       errorPresent: result.run.error !== null,
+      retryScheduled: assistantCronRetryScheduled(result),
       job: result.job,
       onEvent: input.onEvent,
       occurrenceAt: nullableCronValue(result.run.scheduledOccurrenceAt),
@@ -765,6 +766,17 @@ function assistantCronRunCountsAsProcessSuccess(
   return run.outcome === 'delivered' ||
     (run.outcome === 'no_op' &&
       run.reason !== 'background_maintenance_non_replayable_work')
+}
+
+function assistantCronRetryScheduled(
+  result: AssistantCronRunExecutionResult,
+): boolean {
+  return result.run.outcome === 'failed' &&
+    !result.removedAfterRun &&
+    result.job.enabled &&
+    (result.run.reason === 'foreground_yielded' ||
+      result.job.state.consecutiveFailures > 0) &&
+    result.job.state.nextRunAt !== null
 }
 
 export { buildAssistantCronSchedule }
@@ -860,6 +872,7 @@ function emitAssistantCronJobCompletedEvent(input: {
   errorCode: string | null
   errorMessage: string | null
   errorPresent: boolean
+  retryScheduled: boolean
   job: AssistantCronJob
   onEvent?: (event: AssistantRunEvent) => void
   occurrenceAt: string | null
@@ -890,6 +903,7 @@ function emitAssistantCronJobCompletedEvent(input: {
       // log; the June 2026 quota incident was invisible there.
       errorCode: input.errorCode,
       errorPresent: input.errorPresent,
+      retryScheduled: input.retryScheduled,
       occurrenceAt: input.occurrenceAt,
       routeConfigured: assistantCronJobHasDeliveryRoute(
         input.job,

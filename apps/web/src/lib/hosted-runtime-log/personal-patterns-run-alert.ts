@@ -14,9 +14,6 @@ type HostedPersonalPatternsRunAlertEntry = {
 };
 
 type HostedPersonalPatternsRunAlert = {
-  errorCode: string;
-  kind: "failed" | "missed";
-  observedAt: string;
   occurrenceAt: string;
 };
 
@@ -34,11 +31,16 @@ export function hasHostedPersonalPatternsRunAlert(
 export async function sendHostedPersonalPatternsRunAlerts(input: {
   entries: readonly HostedPersonalPatternsRunAlertEntry[];
   env?: Readonly<Record<string, string | undefined>>;
-  memberId: string;
   sendEmail?: typeof sendHostedResendPlainTextEmail;
 }): Promise<HostedPersonalPatternsRunAlertOutcome> {
-  const alerts = input.entries.flatMap(readPersonalPatternsRunAlert);
-  if (alerts.length === 0) {
+  const occurrenceTimes = [
+    ...new Set(
+      input.entries
+        .flatMap(readPersonalPatternsRunAlert)
+        .map((alert) => alert.occurrenceAt),
+    ),
+  ];
+  if (occurrenceTimes.length === 0) {
     return "unrelated";
   }
 
@@ -50,13 +52,12 @@ export async function sendHostedPersonalPatternsRunAlerts(input: {
   }
 
   let firstFailure: unknown = null;
-  for (const alert of alerts) {
+  for (const occurrenceAt of occurrenceTimes) {
     const alertIdentity = createHash("sha256")
       .update([
-        input.memberId,
+        "v2",
         PERSONAL_PATTERNS_AUTOMATION_SLUG,
-        alert.kind,
-        alert.occurrenceAt,
+        occurrenceAt,
       ].join("\n"))
       .digest("hex")
       .slice(0, 32);
@@ -65,16 +66,13 @@ export async function sendHostedPersonalPatternsRunAlerts(input: {
       await (input.sendEmail ?? sendHostedResendPlainTextEmail)({
         config: emailConfig.resend,
         idempotencyKey: `personal-patterns-run-alert/${alertIdentity}`,
-        subject: `Murph Personal Patterns run ${alert.kind}`,
+        subject: "Murph Personal Patterns runs need attention",
         text: [
-          `A Personal Patterns run was ${alert.kind}.`,
+          "One or more Personal Patterns runs did not complete after automatic recovery.",
           "",
-          `observed at: ${alert.observedAt}`,
-          `scheduled occurrence: ${alert.occurrenceAt}`,
-          `member: ${input.memberId}`,
-          `error code: ${alert.errorCode}`,
+          `scheduled occurrence: ${occurrenceAt}`,
           "",
-          "Inspect the member's hosted runtime logs for the matching occurrence.",
+          "Inspect hosted runtime logs for the matching occurrence.",
         ].join("\n"),
         to: emailConfig.recipients,
       });
@@ -121,9 +119,6 @@ function readPersonalPatternsRunAlert(
   const eventType = readString(details, "type");
   if (eventType === "cron.occurrence.expired") {
     return [{
-      errorCode: "PERSONAL_PATTERNS_OCCURRENCE_EXPIRED",
-      kind: "missed",
-      observedAt: entry.at,
       occurrenceAt,
     }];
   }
@@ -131,17 +126,12 @@ function readPersonalPatternsRunAlert(
   if (
     eventType !== "cron.job.completed"
     || readString(details, "failureRunOutcome") !== "failed"
+    || readBoolean(details, "failureRetryScheduled") !== false
   ) {
     return [];
   }
 
   return [{
-    errorCode:
-      readString(details, "failureErrorCode")
-      ?? entry.errorCode
-      ?? "PERSONAL_PATTERNS_RUN_FAILED",
-    kind: "failed",
-    observedAt: entry.at,
     occurrenceAt,
   }];
 }
@@ -158,4 +148,12 @@ function readString(record: object | null, key: string): string | null {
   }
   const value = Reflect.get(record, key);
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function readBoolean(record: object | null, key: string): boolean | null {
+  if (!record) {
+    return null;
+  }
+  const value = Reflect.get(record, key);
+  return typeof value === "boolean" ? value : null;
 }

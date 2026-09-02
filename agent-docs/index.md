@@ -678,6 +678,12 @@ that generic capability directly, while Privy phone-conflict suppression reads
 only blind-index ownership and never decrypts an unprepared second member. The
 contract is specified by `ARCHITECTURE.md` and `agent-docs/RELIABILITY.md`.
 
+Personal Patterns operator email waits until automatic cron recovery ends.
+Terminal failures and expired occurrences for one scheduled time share one
+member-independent provider idempotency key. This contract is specified by
+`agent-docs/RELIABILITY.md` and
+`agent-docs/references/hosted-runtime-protocol.md`.
+
 ## Canonical Docs
 
 Member-owned device-provider application authority, including the shared
