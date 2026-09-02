@@ -1430,9 +1430,12 @@ Core execution tuning:
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000` (production sets `600000`) and controls the post-completion warm lease minted only by observed conversation activity. Reducing production from 20 minutes to 10 minutes means a follow-up in the former 11–20 minute warm window can take the existing cold-start path instead. `HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS` defaults to the idle TTL when absent for rollback compatibility. Leave it unset for the additive code deploy and one legacy-TTL observation window, drain old containers, then set it to `60000` for a canary before widening the rollout. Device sync, system maintenance, replay, and generic runner activity do not extend conversation warmth. RunnerContainer derives the lease directly from the resident child process's private health watermark on every expiry, re-arms the platform timeout while the lease or active work remains, yields on uncertain cleanup state, and otherwise destroys the idle shell. An inactive old child without the watermark is cleanup-eligible; active old-child work remains protected by its independent active-work count. A replacement child starts without inheriting the old process's warmth. Dirty foreground runtime state is checkpointed by the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` path before the invocation returns; RunnerContainer never records pending checkpoint intent.
 - `HOSTED_EXECUTION_STANDBY_MODE` defaults to `off`. `shadow` maintains one
   release-scoped ENAM standby and measures readiness without allocating it;
-  `allocate` lets `UserRunner` claim it with a 250 ms total coordinator/bind
-  deadline and uses the unchanged exact-user cold path when no ready slot is
-  available. Invalid values fail deploy/runtime parsing closed.
+  `allocate` lets only a fresh, authenticated Web-direct `default` start claim
+  it with a 250 ms total coordinator/bind deadline. Temporal starts, background
+  modes, and replacement of work already using the member's exact container use
+  the unchanged exact-user path. Pending or retained standby targets still
+  reconcile before that fresh-claim gate. Invalid values fail deploy/runtime
+  parsing closed.
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production` for
   direct/local artifact rendering. The manual deploy workflow derives it from
   the selected `preview` or `production` target; do not configure a conflicting
@@ -1462,7 +1465,10 @@ effective standby mode, expected Worker release, and runner bundle/source
 fingerprints first. Then use `shadow` for at least one ordinary
 observation window and verify that exactly one current-release ENAM slot stays
 ready, failed/stale slots retire, and no processing reports a claimed standby.
-Only then set `allocate`; no Web or Temporal deploy is required.
+Only then set `allocate`; no Web or Temporal deploy is required. In the bounded
+post-deploy observation, require every claimed allocation to be a validated
+Web-direct `default` attempt and require Temporal or background starts to report
+the exact-user path instead of a claim.
 
 At the current 2-vCPU, 6-GiB-memory, 6-GB-disk shape, one continuously ready
 slot costs about $40.52 per average 730-hour month for allocated memory and
