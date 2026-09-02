@@ -477,6 +477,24 @@ Cloudflare keeps only the wake-payload decryption lane plus the worker-owned cal
 
 ## Private Operational Telemetry
 
+### Web-control preflight rejections
+
+An unallowlisted runtime web-control request emits one persisted Workers
+structured warning before any network request. Filter for
+`details.eventCode = runner.web_control_preflight_rejected` and
+`details.errorCode = HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED`. The warning also
+contains the bounded request description, HTTP method, transport mode,
+`operation = web_control_blocked`, and `reason = not_allowlisted`. It never
+copies the route, query, payload, response, member id, or credentials into the
+structured log.
+
+The same typed error then follows the existing system-mailbox retry path, where
+the runtime-log warning retains
+`error_code = HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED`. This classification
+does not change retry, wake, delivery, or canonical-state behavior. Use the
+aggregate query in [`docs/hosted-runtime-log-database.md`](../../docs/hosted-runtime-log-database.md)
+to detect affected runtimes without returning subject keys or raw JSON.
+
 The `HOSTED_RUNTIME_RETRY_ANALYTICS` Analytics Engine binding records one
 identifier-free data point only after UserRunner has decided to return
 `retry_later`. `index1` is the sole index and `blob2` repeats the bounded retry

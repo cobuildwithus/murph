@@ -214,19 +214,6 @@ export function isAllowedHostedRunnerWebControlRequest(input: {
   return readHostedRunnerWebControlPolicy(input).allowed;
 }
 
-export function assertAllowedHostedRunnerWebControlRequest(input: {
-  method: string;
-  path: string;
-}): void {
-  if (isAllowedHostedRunnerWebControlRequest(input)) {
-    return;
-  }
-
-  throw new TypeError(
-    `Hosted runtime web-control route is not allowlisted for proxy transport: ${input.method} ${input.path}`,
-  );
-}
-
 export function readHostedRunnerWebControlOperation(input: {
   method: string;
   path: string;

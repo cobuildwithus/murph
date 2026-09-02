@@ -5234,6 +5234,48 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     );
   });
 
+  it("logs web-control preflight rejections before egress", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const privateRouteMaterial = "private-route-material";
+
+    await expect(fetchHostedWebControlPlaneJson({
+      boundUserId: "member_123",
+      description: "Hosted synthetic blocked control",
+      fetchImpl: fetchMock as typeof fetch,
+      method: "POST",
+      path: `/api/internal/hosted-execution/${privateRouteMaterial}`,
+      timeoutMs: 1_000,
+      transport: {
+        mode: "proxy",
+      },
+    })).rejects.toMatchObject({
+      code: "HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED",
+      message:
+        `Hosted runtime web-control route is not allowlisted for proxy transport: POST /api/internal/hosted-execution/${privateRouteMaterial}`,
+      name: "HostedWebControlRouteNotAllowlistedError",
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledTimes(1);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith({
+      component: "hosted.runtime.control-plane",
+      details: {
+        description: "Hosted synthetic blocked control",
+        errorCode: "HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED",
+        eventCode: "runner.web_control_preflight_rejected",
+        method: "POST",
+        operation: "web_control_blocked",
+        reason: "not_allowlisted",
+        transport: "proxy",
+      },
+      level: "warn",
+      message: "Hosted runtime web-control request rejected before egress.",
+      phase: "runtime.starting",
+    });
+    expect(JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls))
+      .not.toContain(privateRouteMaterial);
+  });
+
   it("preserves structured non-retryable web-control errors without raw JSON in the message", async () => {
     const requestId = `aask_req_${"a".repeat(64)}`;
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({

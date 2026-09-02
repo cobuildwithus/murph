@@ -101,6 +101,44 @@ conversation and turn-scoped automation overrides resolve and is the normalized
 value passed to the Codex provider attempt. Raw provider configuration, prompts,
 messages, credentials, and paths remain excluded.
 
+### Web-control preflight rejection attribution
+
+When a hosted runtime tries to use a web-control route that the shared
+Cloudflare policy does not allow, the preflight throws the dedicated
+`HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED` error before issuing a request. The
+existing `mailbox.system_processed` retry warning preserves that code in the
+typed `error_code` column. Cloudflare also emits the immediate structured event
+`runner.web_control_preflight_rejected`; that event contains only bounded policy
+metadata and deliberately omits the route, query, payload, member id, and
+credentials.
+
+Use a fixed half-open observation window to count affected runtimes without
+returning subject keys or raw JSON:
+
+```sql
+SELECT
+  redacted_json->>'status' AS status,
+  redacted_json->>'wakeKind' AS wake_kind,
+  redacted_json->>'routeAction' AS route_action,
+  COUNT(*) AS event_count,
+  COUNT(DISTINCT subject_key) AS distinct_subject_count,
+  MIN(at) AS first_at,
+  MAX(at) AS last_at
+FROM hosted_runtime_log
+WHERE at >= :window_start
+  AND at < :window_end
+  AND event_code = 'mailbox.system_processed'
+  AND error_code = 'HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED'
+GROUP BY
+  redacted_json->>'status',
+  redacted_json->>'wakeKind',
+  redacted_json->>'routeAction'
+ORDER BY status, wake_kind, route_action;
+```
+
+Return only those aggregates. Never return `subject_key` values or raw JSON.
+The error remains on the existing retry path and changes observability only.
+
 ### Assistant-notification validation attribution
 
 An existing `mailbox.system_processed` warning with
