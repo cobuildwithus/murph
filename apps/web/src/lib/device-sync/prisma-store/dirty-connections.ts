@@ -425,10 +425,7 @@ export class PrismaHostedDirtyConnectionStore {
 
     return prepareDirtyPayloadRows({
       connectionId: input.connectionId,
-      dirtyRevision: resolveDirtyPayloadRevision({
-        existing,
-        resourceBatch,
-      }),
+      dirtyRevision: resolveDirtyPayloadRevision(existing),
       provider: input.provider,
       resources: resourceBatch.payloadResources,
       traceId: input.traceId,
@@ -450,10 +447,7 @@ export class PrismaHostedDirtyConnectionStore {
       throw new TypeError("Dirty connection preparation owner did not match the dirty connection.");
     }
 
-    const dirtyRevision = resolveDirtyPayloadRevision({
-      existing,
-      resourceBatch,
-    });
+    const dirtyRevision = resolveDirtyPayloadRevision(existing);
     const payloadCrypto = resourceBatch.payloadResources.length === 0
       ? undefined
       : await prepareHostedDeviceSyncDirtyPayloadCrypto({
@@ -629,10 +623,7 @@ export class PrismaHostedDirtyConnectionStore {
     ) {
       preparedDirtyPayloadRows = await prepareDirtyPayloadRows({
         connectionId: input.connectionId,
-        dirtyRevision: resolveDirtyPayloadRevision({
-          existing,
-          resourceBatch: input.resourceBatch,
-        }),
+        dirtyRevision: resolveDirtyPayloadRevision(existing),
         provider: input.provider,
         resources: input.resourceBatch.payloadResources,
         traceId: input.traceId,
@@ -662,10 +653,7 @@ export class PrismaHostedDirtyConnectionStore {
       });
       if (
         !existing
-        || preparedDirtyPayloadRows?.dirtyRevision !== resolveDirtyPayloadRevision({
-          existing,
-          resourceBatch: input.resourceBatch,
-        })
+        || preparedDirtyPayloadRows?.dirtyRevision !== resolveDirtyPayloadRevision(existing)
       ) {
         throw createDirtyStateContentionError("update");
       }
@@ -748,30 +736,6 @@ export class PrismaHostedDirtyConnectionStore {
     }
 
     const becameDirty = existing.processedRevision >= existing.dirtyRevision;
-    if (
-      !becameDirty
-      && isPayloadOnlyDirtyAppend(resourceBatch)
-    ) {
-      const payloadCreateResult = await createDirtyPayloadRows({
-        connectionId: input.connectionId,
-        dirtyRevision: existing.dirtyRevision,
-        provider: input.provider,
-        precomputed: filteredPayloadRows,
-        resources: resourceBatch.payloadResources,
-        traceId: input.traceId,
-        tx: prisma,
-        userId: input.userId,
-      });
-
-      return {
-        dirty: withDirtyPayloadResources(
-          mapDirtyConnectionRecord(existing),
-          payloadCreateResult.resources,
-        ),
-        shouldRequestWake: false,
-      };
-    }
-
     const priorResources = becameDirty ? {} : readDirtyResourcesJson(existing.dirtyResourcesJson);
     const resources = mergeDirtyResources(
       priorResources,
@@ -1441,22 +1405,14 @@ async function mapLimit<TInput, TOutput>(
   return results;
 }
 
-function resolveDirtyPayloadRevision(input: {
-  existing: DeviceSyncDirtyConnectionPrismaRecord | null;
-  resourceBatch: DirtyResourceBatch;
-}): bigint {
-  if (!input.existing) {
+function resolveDirtyPayloadRevision(
+  existing: DeviceSyncDirtyConnectionPrismaRecord | null,
+): bigint {
+  if (!existing) {
     return 1n;
   }
 
-  if (
-    input.existing.processedRevision < input.existing.dirtyRevision
-    && isPayloadOnlyDirtyAppend(input.resourceBatch)
-  ) {
-    return input.existing.dirtyRevision;
-  }
-
-  return input.existing.dirtyRevision + 1n;
+  return existing.dirtyRevision + 1n;
 }
 
 function createDirtyConnectionPreparationSnapshot(
@@ -1503,11 +1459,6 @@ function requirePreparedDirtyConnectionUpsert(
     );
   }
   return details;
-}
-
-function isPayloadOnlyDirtyAppend(resourceBatch: DirtyResourceBatch): boolean {
-  return Object.keys(resourceBatch.compactResources).length === 0
-    && resourceBatch.payloadResources.length > 0;
 }
 
 function createDirtyPayloadId(input: {
