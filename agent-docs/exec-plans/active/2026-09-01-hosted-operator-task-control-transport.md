@@ -50,8 +50,8 @@ Updated: 2026-09-01
    operator-task route.
 2. Completed: added the exact route to the central Cloudflare POST policy.
 3. Completed locally: ran focused Cloudflare verification and typecheck.
-4. In progress: commit, open a draft PR, update changelog provenance, and run exact-head
-   ReviewGPT and required CI.
+4. In progress: draft PR 2708 is open; update changelog provenance and run
+   exact-head ReviewGPT and required CI.
 5. Pending: merge, deploy through the protected Cloudflare workflow, and prove the
    affected runtime converges without the prior allowlist failure.
 
