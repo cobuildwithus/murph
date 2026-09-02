@@ -34,7 +34,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberAssistantModelPreference: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
   readHostedActiveGroupRunningBit: vi.fn(),
-  readHostedRuntimeOwnerReleaseMailboxLagActionable: vi.fn(),
+  readHostedRuntimeOwnerReleaseActionable: vi.fn(),
   readHostedWorkspace: vi.fn(),
   recordHostedIngressAssistantInputStaged: vi.fn(),
   recordHostedIngressAssistantMilestone: vi.fn(),
@@ -139,8 +139,8 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/runtime-reconciliation-facts", () => ({
-  readHostedRuntimeOwnerReleaseMailboxLagActionable:
-    mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable,
+  readHostedRuntimeOwnerReleaseActionable:
+    mocks.readHostedRuntimeOwnerReleaseActionable,
 }));
 
 type MailboxFetchRoute = typeof import("../app/api/internal/hosted-mailbox/fetch/route");
@@ -262,7 +262,7 @@ describe("hosted runtime internal web routes", () => {
     });
     mocks.readHostedActiveGroupRunningBit.mockResolvedValue(null);
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveHostedMemberRecord());
-    mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable.mockResolvedValue(true);
+    mocks.readHostedRuntimeOwnerReleaseActionable.mockResolvedValue(true);
     mocks.claimHostedAcceptedAttemptFailureRecheck.mockResolvedValue(false);
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
       status: "allowed",
@@ -281,7 +281,7 @@ describe("hosted runtime internal web routes", () => {
   });
 
   it("signals an exact authenticated runtime owner release", async () => {
-    mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable.mockResolvedValue(false);
+    mocks.readHostedRuntimeOwnerReleaseActionable.mockResolvedValue(true);
     const request = new Request(
       "https://join.example.test/api/internal/hosted-runtime/owner-released"
         + "?runtimeAttemptId=runtime_attempt_routes_1",
@@ -296,7 +296,9 @@ describe("hosted runtime internal web routes", () => {
       request,
       { maxBodyBytes: 0 },
     );
-    expect(mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable).not.toHaveBeenCalled();
+    expect(mocks.readHostedRuntimeOwnerReleaseActionable).toHaveBeenCalledWith({
+      userId: "member_routes_1",
+    });
     expect(mocks.signalHostedRuntimeOwnerReleasedRuntime).toHaveBeenCalledWith({
       runtimeAttemptId: "runtime_attempt_routes_1",
       userId: "member_routes_1",
@@ -304,7 +306,7 @@ describe("hosted runtime internal web routes", () => {
   });
 
   it("signals an authenticated explicit immediate recheck without a mailbox read", async () => {
-    mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable.mockResolvedValue(false);
+    mocks.readHostedRuntimeOwnerReleaseActionable.mockResolvedValue(false);
     const request = new Request(
       "https://join.example.test/api/internal/hosted-runtime/owner-released"
         + "?immediateRecheckRequested=1",
@@ -319,7 +321,7 @@ describe("hosted runtime internal web routes", () => {
       request,
       { maxBodyBytes: 0 },
     );
-    expect(mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable).not.toHaveBeenCalled();
+    expect(mocks.readHostedRuntimeOwnerReleaseActionable).not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
       userId: "member_routes_1",
     });
@@ -360,16 +362,25 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.signalHostedRuntimeOwnerReleasedRuntime).not.toHaveBeenCalled();
   });
 
-  it("preserves the legacy owner horizon when no durable work is visible", async () => {
-    mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable.mockResolvedValue(false);
+  it.each([
+    ["exact", "?runtimeAttemptId=runtime_attempt_routes_1"],
+    ["legacy", ""],
+  ])("preserves the %s owner horizon when no durable work is visible", async (
+    _kind,
+    search,
+  ) => {
+    mocks.readHostedRuntimeOwnerReleaseActionable.mockResolvedValue(false);
 
     const response = await runtimeOwnerReleasedRoute.POST(new Request(
-      "https://join.example.test/api/internal/hosted-runtime/owner-released",
+      `https://join.example.test/api/internal/hosted-runtime/owner-released${search}`,
       { method: "POST" },
     ));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ signaled: false });
+    expect(mocks.readHostedRuntimeOwnerReleaseActionable).toHaveBeenCalledWith({
+      userId: "member_routes_1",
+    });
     expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeOwnerReleasedRuntime).not.toHaveBeenCalled();
   });

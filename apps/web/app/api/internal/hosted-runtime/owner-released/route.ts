@@ -6,7 +6,7 @@ import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
-  readHostedRuntimeOwnerReleaseMailboxLagActionable,
+  readHostedRuntimeOwnerReleaseActionable,
 } from "@/src/lib/hosted-orchestration/runtime-reconciliation-facts";
 import {
   signalHostedRuntimeOwnerReleasedRuntime,
@@ -21,22 +21,21 @@ export const POST = withJsonError(async (request: Request) => {
   });
   const ownerRelease = readOwnerRelease(request);
 
-  if (ownerRelease.runtimeAttemptId !== null) {
-    await signalHostedRuntimeOwnerReleasedRuntime({
-      runtimeAttemptId: ownerRelease.runtimeAttemptId,
-      userId,
-    });
-    return jsonOk({ signaled: true });
-  }
-
   if (
     !ownerRelease.immediateRecheckRequested
-    && !(await readHostedRuntimeOwnerReleaseMailboxLagActionable({ userId }))
+    && !(await readHostedRuntimeOwnerReleaseActionable({ userId }))
   ) {
     return jsonOk({ signaled: false });
   }
 
-  await signalHostedRuntimeRecheckRuntime({ userId });
+  if (ownerRelease.runtimeAttemptId === null) {
+    await signalHostedRuntimeRecheckRuntime({ userId });
+  } else {
+    await signalHostedRuntimeOwnerReleasedRuntime({
+      runtimeAttemptId: ownerRelease.runtimeAttemptId,
+      userId,
+    });
+  }
   return jsonOk({ signaled: true });
 });
 

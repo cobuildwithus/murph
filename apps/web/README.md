@@ -1328,17 +1328,18 @@ Callback auth contract:
   completion handoff. Web accepts a zero-byte body and a signed query containing
   the opaque released `runtimeAttemptId`, plus the optional exact
   `immediateRecheckRequested=1` positive edge. It binds the user through the
-  signed request plus normal nonce protection and emits one exact
-  `runtime_owner_released`; Temporal matches the attempt before releasing an
-  accepted-owner horizon. Legacy callbacks without the pointer remain
-  facts-only `runtime_recheck_requested` signals during rollout and are emitted
-  only for current runnable mailbox lag or the positive edge. A persisted
-  default or retention wake is not itself legacy signal authority. The positive
-  edge means the completed invocation newly committed an unserviced schedule
-  and carries no wake data. Known future mailbox retry continuations remain
-  deferred. Cloudflare calls the route at most once, with a timeout capped at
-  two seconds, only after exact write-fence completion; failure is non-fatal and
-  has no callback retry.
+  signed request plus normal nonce protection. Without the positive edge, Web
+  emits a signal only when current runnable mailbox lag or a live system mailbox
+  item beyond the handled-through frontier remains. Exact callbacks use
+  `runtime_owner_released`, which Temporal matches before releasing an
+  accepted-owner horizon; legacy pointerless callbacks use the facts-only
+  `runtime_recheck_requested` signal during rollout. A persisted default or
+  retention wake alone is not signal authority. The positive edge means the
+  completed invocation newly committed an unserviced schedule and carries no
+  wake data. Known future mailbox retry continuations remain deferred.
+  Cloudflare calls the route at most once, with a timeout capped at two seconds,
+  only after exact write-fence completion; failure is non-fatal and has no
+  callback retry.
 
 When you set `DEVICE_SYNC_PUBLIC_BASE_URL`, use the same stable production
 hostname as every first-party hosted app-session URL that can serve the OAuth
