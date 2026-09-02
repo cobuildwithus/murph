@@ -786,17 +786,22 @@ authoritative, while an interrupted or not-yet-checkpointed unit stays
 recoverable from the durable mailbox and its existing continuation contract.
 
 Default and `system_mailbox` remain separate bounded owners over one ordered
-mailbox, with default work retaining foreground priority. A non-direct default
-request behind `system_mailbox` wakes the exact active child, preserves its
-fence, and retries while that child checkpoints and releases. Authenticated
-Web-direct foreground work may instead preempt that exact system child through
-the existing abort seam. A `system_mailbox` request behind an active default
-owner only retries; it does not wake or interrupt the foreground child. This
-adds no queue, scheduler, feature-specific mode, persisted handoff state, or
-Environment-specific promotion rule. An already-default-owned assistant queue
-head may reuse the runtime's existing foreground phase inside a
-`system_mailbox` invocation, preserving the generic assistant anti-starvation
-behavior without changing the controller fence or persisting a mode switch.
+mailbox. When the runnable mailbox owner is model-free, the checkpoint
+projection does not publish a second ordinary default wake behind it. Default
+rows remain eligible inside an already-running pass and become independently
+wake-eligible whenever the model-free frontier is backed off or advances.
+Current conversation work and explicitly approved continuations retain
+foreground priority. A non-direct default request behind
+`system_mailbox` wakes the exact active child, preserves its fence, and retries
+while that child checkpoints and releases. Authenticated Web-direct foreground
+work may instead preempt that exact system child through the existing abort
+seam. A `system_mailbox` request behind an active default owner only retries; it
+does not wake or interrupt the foreground child. This adds no queue, scheduler,
+feature-specific mode, persisted handoff state, or Environment-specific
+promotion rule. An already-default-owned assistant queue head may reuse the
+runtime's existing foreground phase inside a `system_mailbox` invocation,
+preserving the generic assistant anti-starvation behavior without changing the
+controller fence or persisting a mode switch.
 `assistantExecutionBlocked` remains a hard boundary: that invocation retains
 the assistant wake for a later allowed foreground owner instead of promoting
 it.
