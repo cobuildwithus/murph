@@ -55,6 +55,7 @@ import {
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
   HOSTED_RUNTIME_MEMBER_ACTION_OUTCOME_PATH,
   HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH,
+  HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH,
   HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
   HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH,
   HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
@@ -117,6 +118,7 @@ export type HostedRunnerWebControlOperation =
   | "linq_delivery_outcome"
   | "linq_egress_engagement"
   | "outbound_message_volume_receipt"
+  | "operator_task_control"
   | "plan_usage_tool"
   | "subscription_tool"
   | "thread_route_authority"
@@ -182,6 +184,7 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
     HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH,
     "outbound_message_volume_receipt",
   ],
+  [HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH, "operator_task_control"],
   [HOSTED_RUNTIME_WORKSPACE_CHECKPOINT_PATH, "workspace_checkpoint"],
   [HOSTED_RUNTIME_ISSUE_RECORD_PATH, "assistant_runtime_issue_export"],
   [HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH, "product_feedback_recording"],
