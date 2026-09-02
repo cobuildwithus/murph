@@ -72,6 +72,7 @@ import {
   signalHostedMailboxAppendRuntime,
   signalHostedManualRunRuntime,
   signalHostedRetentionRuntimeRecheck,
+  signalHostedRuntimeOwnerReleasedRuntime,
   signalHostedRuntimeRecheckRuntime,
   signalHostedRuntimeMaintenanceRuntime,
   signalHostedRuntimeWakeRuntime,
@@ -337,6 +338,33 @@ describe("hosted runtime Temporal signaling", () => {
       expect.objectContaining({
         signalArgs: [{
           kind: "runtime_recheck_requested",
+        }],
+        workflowId: "hosted-user-runtime:member_123",
+      }),
+    );
+    expect(mocks.withAbortSignal).toHaveBeenCalledWith(
+      abortSignal,
+      expect.any(Function),
+    );
+  });
+
+  it("signals exact runtime owner releases without upserting workspace", async () => {
+    const abortSignal = new AbortController().signal;
+    await signalHostedRuntimeOwnerReleasedRuntime({
+      abortSignal,
+      client: buildClient(),
+      runtimeAttemptId: "runtime_attempt_123",
+      userId: "member_123",
+    });
+
+    expectHostedRuntimeActiveAccessRead(mocks.hostedMemberFindUnique, "member_123");
+    expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
+    expect(mocks.signalWithStart).toHaveBeenCalledWith(
+      HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
+      expect.objectContaining({
+        signalArgs: [{
+          kind: "runtime_owner_released",
+          runtimeAttemptId: "runtime_attempt_123",
         }],
         workflowId: "hosted-user-runtime:member_123",
       }),

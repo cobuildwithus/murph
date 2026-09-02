@@ -7,6 +7,11 @@ Last verified: 2026-08-31
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists only live architecture, product, verification, and package-boundary docs.
 
+The exact hosted runtime owner-release signal, its patch-introducing
+direct-Current consumer rollout, and its signal-history rollback floor are
+specified by `agent-docs/references/hosted-runtime-protocol.md` and
+`apps/cloudflare/DEPLOY.md`.
+
 Hosted retention is divided across four authenticated, staggered Web-owned
 Vercel cron routes for callback/browser nonces, ordinary control-plane data,
 external providers, and runtime/log maintenance. The nonce owner alone has the

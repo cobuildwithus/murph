@@ -3645,20 +3645,25 @@ invocation path; whichever path wins is the only owner that can release the
 runtime owner, while the outer path remains the mixed-version and callback-loss
 fallback. A checkpoint, elapsed time, or container lifecycle event is not a
 completion receipt. After an exact successful runtime completion clears its
-write fence, Cloudflare makes at most one signed, payload-free, best-effort
-callback to web with a timeout of at most two seconds; a known future mailbox
-retry continuation skips it. A
-completed invocation may attach one exact positive, signature-bound query when
-it newly committed an unserviced default or retention schedule. Web otherwise
-signals the existing payload-free `runtime_recheck_requested` Temporal workflow
-only for runnable mailbox lag and never converts a persisted due wake into a
-repeating level-triggered signal. The positive edge contains no wake data and is
-not persisted; it asks Temporal to re-read durable facts and own either due work
-or the exact future timer. Callback failure is non-fatal and is not retried by
-Cloudflare. Active, unsupported, error, and timeout liveness
-outcomes preserve the fence; only explicit inactive or mismatch proof, or exact
-successful completion, may enter the corresponding identity-safe recovery or
-clear path.
+write fence, Cloudflare makes at most one signed, bodyless, best-effort callback
+to web with a timeout of at most two seconds; a known future mailbox retry
+continuation skips it. The signed query binds the opaque released runtime
+attempt and may also carry one exact positive edge when that invocation newly
+committed an unserviced default or retention schedule. For actionable work, Web
+sends the pointer-only `runtime_owner_released` Temporal signal. Temporal may
+invalidate an accepted-owner horizon only when the attempt pointer matches;
+fresh reconciliation facts then choose the work mode. Legacy callbacks without
+the pointer remain facts-only `runtime_recheck_requested` signals during
+rollout. Neither signal converts a persisted due wake into a repeating
+level-triggered signal. Callback failure is non-fatal and is not retried by
+Cloudflare. Because an exact release changes Workflow command order, the
+private consumer deploys first as a patch-introducing direct-Current cutover
+with no prior or Ramping reader eligible. From the first possible signal until
+both public producers are disabled and signal-bearing histories drain, that
+consumer is a one-way rollback floor. Active, unsupported, error, and timeout
+liveness outcomes preserve the fence; only explicit inactive or mismatch proof,
+or exact successful completion, may enter the corresponding identity-safe
+recovery or clear path.
 
 The hosted Temporal hard-cut target is documented in
 `agent-docs/references/hosted-temporal-orchestration.md`. That ADR is the
