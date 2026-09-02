@@ -409,14 +409,18 @@ function resolveHostedSystemMailboxWakeCandidatesFromState(input: {
   defaultOwned: HostedRuntimeWakeCandidate;
   next: HostedSystemMailboxWakeCandidate;
 } {
-  const { now, state } = input;
-  const remainingState = input.excludeItemId
+  const { now } = input;
+  const remainingStateBeforeAdmission = input.excludeItemId
     ? {
-        pending: state.pending.filter((item) =>
+        pending: input.state.pending.filter((item) =>
           item.itemId !== input.excludeItemId
         ),
       }
-    : state;
+    : input.state;
+  const remainingState = projectHostedSystemMailboxRetainedDeviceWebhookAdmission({
+    now,
+    state: remainingStateBeforeAdmission,
+  });
   const wakeOwnerState = projectHostedSystemMailboxWakeOwnerFrontier(
     remainingState,
   );
@@ -539,10 +543,13 @@ export function findNextHostedSystemMailboxQueueItem(input: {
   now: string;
   state: HostedSystemMailboxState;
 }): HostedSystemMailboxPendingItem | null {
-  const state = excludeExpiredHostedGroupContextHandoffSystemMailboxItems(
-    input.state,
-    input.now,
-  );
+  const state = projectHostedSystemMailboxRetainedDeviceWebhookAdmission({
+    now: input.now,
+    state: excludeExpiredHostedGroupContextHandoffSystemMailboxItems(
+      input.state,
+      input.now,
+    ),
+  });
   if (input.allowedRouteActions == null) {
     const approvedContinuation = state.pending.find((item) =>
       systemMailboxItemIsDue(item, input.now)
@@ -568,6 +575,70 @@ export function findNextHostedSystemMailboxQueueItem(input: {
     ...input,
     state,
   });
+}
+
+export function projectHostedSystemMailboxRetainedDeviceWebhookAdmission(input: {
+  now: string;
+  state: HostedSystemMailboxState;
+}): HostedSystemMailboxState {
+  const futureRetainedByConnection = new Map<
+    string,
+    HostedSystemMailboxPendingItem
+  >();
+  const admittedItemIds = new Set<string>();
+
+  for (const item of input.state.pending) {
+    if (
+      item.routeAction !== "run-device-sync-wake"
+      || item.wake.kind !== "device-sync.wake"
+      || !item.wake.connectionId
+    ) {
+      continue;
+    }
+    const connectionId = item.wake.connectionId;
+    const retained = futureRetainedByConnection.get(connectionId);
+    if (!retained) {
+      if (isHostedFutureRetainedDeviceJobRetry(item, input.now)) {
+        futureRetainedByConnection.set(connectionId, item);
+      }
+      continue;
+    }
+    if (
+      item.wake.reason === "webhook_hint"
+      && systemMailboxItemIsDue(item, input.now)
+    ) {
+      admittedItemIds.add(retained.itemId);
+    }
+  }
+
+  return admittedItemIds.size === 0
+    ? input.state
+    : {
+        pending: input.state.pending.map((item) =>
+          admittedItemIds.has(item.itemId)
+            ? { ...item, nextAttemptAt: null }
+            : item
+        ),
+      };
+}
+
+function isHostedFutureRetainedDeviceJobRetry(
+  item: HostedSystemMailboxPendingItem,
+  now: string,
+): boolean {
+  if (
+    item.status !== "pending"
+    || item.postCheckpointRecord !== null
+    || item.nextAttemptAt === null
+    || item.wake.kind !== "device-sync.wake"
+    || !item.wake.connectionId
+    || systemMailboxItemIsDue(item, now)
+  ) {
+    return false;
+  }
+  return item.wake.hint?.jobs?.some((job) =>
+    job.availableAt === item.nextAttemptAt
+  ) === true;
 }
 
 function findNextHostedSystemMailboxQueueItemByOrder(input: {
@@ -1292,7 +1363,7 @@ function resolveHostedSystemMailboxSerializationKey(
   return item.routeAction;
 }
 
-function systemMailboxItemIsDue(
+export function systemMailboxItemIsDue(
   item: HostedSystemMailboxPendingItem,
   now: string,
 ): boolean {

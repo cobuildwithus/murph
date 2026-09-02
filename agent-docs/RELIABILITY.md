@@ -1244,7 +1244,19 @@ Last verified: 2026-09-01
   runner rebuilds from those owners; it never projects local retry timing into
   `nextReconcileAt`. Per-connection mailbox ordering and scheduler scoping
   prevent a future retry for one connection from blocking or advancing due work
-  for another. Per-attempt `device-sync.job_failed` telemetry has one owner:
+  for another. A later due webhook for that same connection may admit the older
+  exact retained mailbox item so newly dirty data can enter the local worker
+  without waiting behind a historical retry. That webhook remains available for
+  an exact continuation only when post-checkpoint acknowledgement reports a
+  newer coalesced dirty revision and the retained job hints prove the next pass
+  has admission capacity. Otherwise, the existing mailbox retention update
+  atomically defers the webhook to the retained retry, including payload-only
+  backoff and a full retained queue that cannot yet admit distinct dirty work.
+  The retained wake's job hints suppress provider scheduling,
+  and each local job keeps its own `availableAt`, so these bounded passes neither
+  run the later mailbox item out of order nor bypass provider backoff.
+  Scheduled-reconcile successors do not grant admission. Per-attempt
+  `device-sync.job_failed` telemetry has one owner:
   assistant-runtime maintenance emits it from the failed local job diagnostic
   before Web state application. Web persists canonical failure state and never
   translates state application or a persistence failure into another provider or
