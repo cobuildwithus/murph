@@ -13,9 +13,11 @@ import type {
 import {
   AVAILABILITY_CONFLICT_BLOCK_END,
   AVAILABILITY_CONFLICT_BLOCK_START,
+  readMemoryDocument,
   shouldSkipAutomationOccurrenceForAvailability,
   splitAutomationAvailabilityConflictBlock,
   stripAutomationAvailabilityConflictEvidenceForProvider,
+  upsertMemory,
 } from '@murphai/core'
 import {
   assistantCronJobSchema,
@@ -31,6 +33,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createAssistantGroupEmailOutboxTool,
 } from '../src/assistant/group-email-outbox.js'
+import {
+  executeMemberMemoryDynamicTool,
+} from '../src/assistant-codex/dynamic-tools/member-memory.js'
 import * as assistantDiagnostics from '../src/assistant/diagnostics.js'
 import * as assistantOutboxReceiptRepair from '../src/assistant/outbox/receipt-repair.js'
 import {
@@ -5143,7 +5148,7 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
-  it('aborts and releases overnight memory consolidation when hosted maintenance yields during provider work before side effects', async () => {
+  it('preserves shown memory and releases its retry when foreground work arrives before forget', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-09T03:10:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
@@ -5151,13 +5156,41 @@ describe('assistant cron runtime orchestration', () => {
     )
     const paths = resolveAssistantStatePaths(vaultRoot)
     addOvernightMemoryConsolidationAutomation(vaultRoot)
+    const saved = await upsertMemory(vaultRoot, {
+      section: 'Preferences',
+      text: 'Keep the saved value.',
+    })
     let shouldYield = false
     cronMocks.sendAssistantMessageLocal.mockImplementationOnce(
       async (input: { abortSignal?: AbortSignal }) => {
         expect(input.abortSignal?.aborted).toBe(false)
+        const shown = await executeMemberMemoryDynamicTool({
+          abortSignal: input.abortSignal ?? null,
+          managedMaintenanceAuthorized: true,
+          request: {
+            args: { action: 'show' },
+            kind: 'member-memory',
+          },
+          vaultRoot,
+        })
+        expect(shown.rpcResult.success).toBe(true)
         shouldYield = true
         await vi.advanceTimersByTimeAsync(300)
         expect(input.abortSignal?.aborted).toBe(true)
+        const forgotten = await executeMemberMemoryDynamicTool({
+          abortSignal: input.abortSignal ?? null,
+          managedMaintenanceAuthorized: true,
+          request: {
+            args: {
+              action: 'forget',
+              expectedUpdatedAt: saved.record.updatedAt,
+              memoryId: saved.record.id,
+            },
+            kind: 'member-memory',
+          },
+          vaultRoot,
+        })
+        expect(forgotten.rpcResult.success).toBe(false)
         throw input.abortSignal?.reason ??
           new VaultCliError(
             'ASSISTANT_TURN_ABORTED',
@@ -5196,6 +5229,25 @@ describe('assistant cron runtime orchestration', () => {
     expect(runtimeRecord?.state.lastRunAt).toBeNull()
     expect(runtimeRecord?.state.lastSucceededAt).toBeNull()
     expect(runtimeRecord?.state.lastFailedAt).toBeNull()
+    await expect(readMemoryDocument(vaultRoot)).resolves.toMatchObject({
+      records: [{
+        id: saved.record.id,
+        section: 'Preferences',
+        text: 'Keep the saved value.',
+      }],
+    })
+    await expect(getAssistantCronStatus(vaultRoot, {
+      executionContext: {
+        hosted: {
+          memberId: 'member-hosted',
+          userEnvKeys: [],
+        },
+      },
+      shouldYieldBackgroundMaintenance: () => true,
+    })).resolves.toMatchObject({
+      dueJobs: 0,
+      nextRunAt: runtimeRecord?.state.retryAfterAt,
+    })
     await expect(listAssistantCronRuns({
       job: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
       vault: vaultRoot,
@@ -9059,6 +9111,85 @@ describe('assistant cron runtime orchestration', () => {
     expect(stillRunning.state.runningAt).toBe('2026-04-08T12:30:00.000Z')
     expect(stillRunning.state.runningPid).toBe(222)
     expect(stillRunning.state.lastSucceededAt).toBeNull()
+  })
+
+  it('recovers a fresh one-shot canonical claim from its only future wake and becomes quiescent', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:10:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-running-recovery-wake-',
+    )
+    const job = await addAssistantCronJob({
+      channel: 'telegram',
+      deliveryTarget: 'room-1',
+      name: 'running-recovery-wake',
+      now: new Date('2026-04-08T08:00:00.000Z'),
+      prompt: 'Recover the stranded one-shot occurrence.',
+      resolveTargetDefaults: false,
+      schedule: {
+        at: '2026-04-08T10:00:00.000Z',
+        kind: 'at',
+      },
+      threadIsDirect: true,
+      vault: vaultRoot,
+    })
+
+    await updateCanonicalRuntimeState(vaultRoot, job.jobId, (record) => ({
+      ...record,
+      state: {
+        ...record.state,
+        pendingOccurrenceAt: '2026-04-08T10:00:00.000Z',
+        runningAt: '2026-04-08T10:05:00.000Z',
+        runningClaimId: 'claim_running_recovery_wake',
+        runningPid: 42,
+      },
+      updatedAt: '2026-04-08T10:05:00.000Z',
+    }))
+
+    await expect(getAssistantCronStatus(vaultRoot)).resolves.toEqual({
+      dueJobs: 0,
+      enabledJobs: 1,
+      nextRunAt: '2026-04-08T11:05:00.001Z',
+      runningJobs: 1,
+      totalJobs: 1,
+    })
+
+    vi.setSystemTime(new Date('2026-04-08T11:05:00.000Z'))
+    await expect(getAssistantCronStatus(vaultRoot)).resolves.toMatchObject({
+      dueJobs: 0,
+      nextRunAt: '2026-04-08T11:05:00.001Z',
+      runningJobs: 1,
+    })
+
+    vi.setSystemTime(new Date('2026-04-08T11:05:00.001Z'))
+    await expect(getAssistantCronStatus(vaultRoot)).resolves.toMatchObject({
+      dueJobs: 1,
+      nextRunAt: '2026-04-08T10:00:00.000Z',
+      runningJobs: 0,
+    })
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 0,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    await expect(getAssistantCronStatus(vaultRoot)).resolves.toMatchObject({
+      dueJobs: 0,
+      nextRunAt: null,
+      runningJobs: 0,
+    })
+
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(
+      resolveAssistantStatePaths(vaultRoot),
+      { reclaimStaleRunningClaims: false },
+    )
+    expect(runtimeStore.jobs.find((record) => record.jobId === job.jobId))
+      .toBeUndefined()
   })
 
   it('does not run or append a canonical cron result after the claim is replaced', async () => {

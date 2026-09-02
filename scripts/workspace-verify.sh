@@ -618,6 +618,8 @@ readonly cli_verify_test_files=(
   "packages/cli/test/health-tail.test.ts"
   "packages/cli/test/canonical-write-source-audit.test.ts"
   "packages/cli/test/assistant-cron.test.ts"
+  "packages/cli/test/incur-config-schema.test.ts"
+  "packages/cli/test/incur-skill-hash.test.ts"
   "packages/cli/test/incur-smoke.test.ts"
   "packages/cli/test/inbox-service-boundaries.test.ts"
   "packages/cli/test/search-runtime.test.ts"

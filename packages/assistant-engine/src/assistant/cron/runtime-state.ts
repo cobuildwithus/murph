@@ -12,6 +12,7 @@ const ASSISTANT_CRON_CANONICAL_RUNTIME_STORE_VERSION = 1
 const ASSISTANT_CRON_CANONICAL_RUNTIME_RECORD_SCHEMA =
   'murph.assistant-canonical-cron-runtime-state.v1'
 export const ASSISTANT_CRON_CANONICAL_RUNNING_STALE_AFTER_MS = 60 * 60 * 1000
+const ASSISTANT_CRON_CANONICAL_RUNNING_RECOVERY_EPSILON_MS = 1
 
 export interface AssistantCronCanonicalRuntimeNormalizationPolicy {
   now?: () => string
@@ -66,6 +67,26 @@ export type AssistantCronCanonicalRuntimeRecord = z.infer<
 export type AssistantCronCanonicalRuntimeStore = z.infer<
   typeof assistantCronCanonicalRuntimeStoreSchema
 >
+
+export function computeAssistantCronCanonicalRunningRecoveryAt(
+  runningAt: string | null,
+): string | null {
+  if (runningAt === null) {
+    return null
+  }
+
+  const runningAtMs = Date.parse(runningAt)
+  const recoveryAtMs =
+    runningAtMs
+    + ASSISTANT_CRON_CANONICAL_RUNNING_STALE_AFTER_MS
+    + ASSISTANT_CRON_CANONICAL_RUNNING_RECOVERY_EPSILON_MS
+  if (!Number.isFinite(runningAtMs) || !Number.isFinite(recoveryAtMs)) {
+    return null
+  }
+
+  const recoveryAt = new Date(recoveryAtMs)
+  return Number.isNaN(recoveryAt.getTime()) ? null : recoveryAt.toISOString()
+}
 
 export async function readAssistantCronCanonicalRuntimeStore(
   paths: AssistantStatePaths,

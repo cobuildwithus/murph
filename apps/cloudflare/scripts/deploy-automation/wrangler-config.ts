@@ -60,11 +60,13 @@ export function buildHostedWranglerDeployConfig(
   const deviceWebhookDlqName = `${environment.workerName}-${DEVICE_WEBHOOK_DLQ_SUFFIX}`;
   const buildRunnerContainerConfig = (input: {
     className: string;
+    constraints?: { regions: string[] };
     maxInstances: number;
     rolloutActiveGracePeriodSeconds: number;
   }): Record<string, unknown> => {
     const container: Record<string, unknown> = {
       class_name: input.className,
+      ...(input.constraints ? { constraints: input.constraints } : {}),
       image: "../../../Dockerfile.cloudflare-hosted-runner",
       image_build_context: "..",
       instance_type: environment.containerInstanceType,
@@ -99,6 +101,13 @@ export function buildHostedWranglerDeployConfig(
         rolloutActiveGracePeriodSeconds:
           DEPLOY_SMOKE_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
       }),
+      buildRunnerContainerConfig({
+        className: "StandbyRunnerContainer",
+        constraints: { regions: ["ENAM"] },
+        maxInstances: environment.standbyContainerMaxInstances,
+        rolloutActiveGracePeriodSeconds:
+          RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
+      }),
     ],
     durable_objects: {
       bindings: [
@@ -125,6 +134,14 @@ export function buildHostedWranglerDeployConfig(
         {
           name: "RUNNER_CONTAINER_SMOKE",
           class_name: "DeploySmokeRunnerContainer",
+        },
+        {
+          name: "STANDBY_COORDINATOR",
+          class_name: "StandbyRunnerCoordinatorDurableObject",
+        },
+        {
+          name: "STANDBY_RUNNER_CONTAINER",
+          class_name: "StandbyRunnerContainer",
         },
       ],
     },
@@ -155,6 +172,13 @@ export function buildHostedWranglerDeployConfig(
       {
         tag: "v6",
         new_sqlite_classes: ["OpenAiAuthorizationAlertDurableObject"],
+      },
+      {
+        tag: "v7",
+        new_sqlite_classes: [
+          "StandbyRunnerCoordinatorDurableObject",
+          "StandbyRunnerContainer",
+        ],
       },
     ],
     triggers: {

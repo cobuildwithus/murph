@@ -299,6 +299,7 @@ describe("cloudflare worker routes", () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       service: "cloudflare-hosted-runner",
+      standbyMode: "off",
     });
   });
 
@@ -312,6 +313,7 @@ describe("cloudflare worker routes", () => {
     await expect(rootResponse.json()).resolves.toEqual({
       ok: true,
       service: "cloudflare-hosted-runner",
+      standbyMode: "off",
     });
 
     const healthResponse = await worker.fetch(
@@ -323,6 +325,7 @@ describe("cloudflare worker routes", () => {
     await expect(healthResponse.json()).resolves.toEqual({
       ok: true,
       service: "cloudflare-hosted-runner",
+      standbyMode: "off",
     });
 
     const unknownResponse = await worker.fetch(
@@ -408,6 +411,7 @@ describe("cloudflare worker routes", () => {
           tag: "test",
           timestamp: "2026-04-24T00:00:00.000Z",
         },
+        HOSTED_EXECUTION_STANDBY_MODE: "shadow",
       },
     );
 
@@ -415,6 +419,7 @@ describe("cloudflare worker routes", () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       service: "cloudflare-hosted-runner",
+      standbyMode: "shadow",
       workerVersionId: "version-123",
     });
   });

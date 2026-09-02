@@ -21,6 +21,9 @@ import type {
 import {
   HOSTED_RUNTIME_SUBAGENT_MODEL_OVERRIDES_ALLOWED_ENV,
 } from "@murphai/hosted-execution/env";
+import {
+  HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS,
+} from "@murphai/hosted-execution/contracts";
 
 import {
   readHostedRunnerContainerIdentity,
@@ -36,6 +39,17 @@ import type {
   HostedExecutionContainerNamespaceLike,
   HostedExecutionContainerStubLike,
 } from "../src/runner-container.js";
+import {
+  createHostedRunnerContainerNamespaceRouter,
+  HOSTED_STANDBY_CLAIM_TIMEOUT_MS,
+  HOSTED_STANDBY_REGION,
+  type HostedStandbyClaimRequest,
+  type HostedStandbyCoordinatorNamespaceLike,
+  type HostedStandbyCoordinatorStubLike,
+  type HostedStandbyRunnerContainerNamespaceLike,
+  type HostedStandbyRunnerContainerStubLike,
+  type HostedStandbySlotBinding,
+} from "../src/standby-runner-contract.js";
 import {
   buildHostedRunnerJobRuntimeConfig,
 } from "../src/runner-env.js";
@@ -79,12 +93,28 @@ import {
   createTestSqlStorage,
 } from "./sql-storage.js";
 
+const mocks = vi.hoisted(() => ({
+  emitHostedExecutionStructuredLog: vi.fn(),
+}));
+
+vi.mock("@murphai/hosted-execution", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>(
+    "@murphai/hosted-execution",
+  );
+
+  return {
+    ...actual,
+    emitHostedExecutionStructuredLog: mocks.emitHostedExecutionStructuredLog,
+  };
+});
+
 const FIXED_NOW = "2026-06-03T00:00:00.000Z";
 const TEST_USER_ID = "member_123";
 describe("hosted runner container identity", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    mocks.emitHostedExecutionStructuredLog.mockReset();
   });
 
   it("round-trips a versioned runner container identity", () => {
@@ -172,13 +202,17 @@ describe("hosted runner container identity", () => {
       stateStore,
     });
 
-    await expect(controller.ensureForUser({
+    const response = await controller.ensureForUser({
       orchestrationAttemptId: "orchestration_attempt_1",
       userId: TEST_USER_ID,
-    })).resolves.toMatchObject({
+    });
+    expect(response).toMatchObject({
       action: "started",
       kind: "runtime_processing_accepted",
     });
+    if (response.kind !== "runtime_processing_accepted") {
+      throw new Error("Expected runtime processing acceptance.");
+    }
 
     const expectedRunnerContainerName = "member_123--v-worker-version-current";
     expect(invocationService.prepareTokens).toHaveLength(1);
@@ -189,6 +223,16 @@ describe("hosted runner container identity", () => {
       expect.objectContaining({
         runnerContainerName: expectedRunnerContainerName,
         userId: TEST_USER_ID,
+      }),
+    );
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          orchestrationAttemptId: "orchestration_attempt_1",
+          standbyAllocationOutcome: "disabled",
+          workspaceAttemptId: response.runtimeAttemptId,
+        }),
+        message: "Hosted runner runtime processing accepted.",
       }),
     );
   });
@@ -870,6 +914,305 @@ describe("hosted runner container identity", () => {
     );
     expect(invokedContainerNames).toEqual([]);
   });
+
+  it("persists an opaque stop target before binding a claimed standby and opening the write fence", async () => {
+    const durable = createRunnerDurableState();
+    const stateStore = new RunnerStateStore(durable.state);
+    const slotName =
+      "standby--v-release_1--0123456789abcdef0123456789abcdef";
+    const standby = createAllocatingStandbyHarness({ slotName, stateStore });
+    const runnerContainerNamespace = createHostedRunnerContainerNamespaceRouter({
+      exactUser: createRunnerContainerNamespace({}),
+      standby: standby.namespace,
+    });
+    const claimReadyStandby = vi.fn(async (_request: HostedStandbyClaimRequest) => ({
+      outcome: "claimed" as const,
+      slotName,
+    }));
+    const coordinatorNamespace: HostedStandbyCoordinatorNamespaceLike = {
+      getByName() {
+        return {
+          claimReadyStandby,
+          async ensureReadyStandby() {
+            return { accepted: true } as const;
+          },
+        };
+      },
+    };
+    const controller = new RuntimeProcessingController({
+      env: createHostedExecutionEnvironment(),
+      invocationService: new RecordingRuntimeInvocationService(),
+      runnerContainerNamespace,
+      runnerRuntimeEnvSource: {
+        CF_VERSION_METADATA: { id: "release_1" },
+        HOSTED_EXECUTION_STANDBY_MODE: "allocate",
+      },
+      standbyContainerNamespace: standby.namespace,
+      standbyCoordinatorNamespace: coordinatorNamespace,
+      stateStore,
+    });
+
+    const response = await controller.ensureForUser({
+      orchestrationAttemptId: "orchestration_attempt_standby",
+      userId: TEST_USER_ID,
+    });
+    expect(response).toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+    if (response.kind !== "runtime_processing_accepted") {
+      throw new Error("Expected runtime processing acceptance.");
+    }
+
+    expect(standby.bindStandbySlot).toHaveBeenCalledTimes(1);
+    expect(claimReadyStandby).toHaveBeenCalledTimes(1);
+    expect(claimReadyStandby.mock.calls[0]?.[0]).not.toHaveProperty("userId");
+    await expect(stateStore.readState()).resolves.toMatchObject({
+      writeFence: { runnerContainerName: slotName },
+    });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          orchestrationAttemptId: "orchestration_attempt_standby",
+          standbyAllocationOutcome: "claimed",
+          workspaceAttemptId: response.runtimeAttemptId,
+        }),
+        message: "Hosted runner runtime processing accepted.",
+      }),
+    );
+  });
+
+  it("caps standby claim dispatch at the foreground command budget", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const slotName =
+      "standby--v-release_1--0123456789abcdef0123456789abcdef";
+    const createController = (
+      claimReadyStandby: HostedStandbyCoordinatorStubLike["claimReadyStandby"],
+    ): RuntimeProcessingController => {
+      const durable = createRunnerDurableState();
+      const stateStore = new RunnerStateStore(durable.state);
+      return new RuntimeProcessingController({
+        env: createHostedExecutionEnvironment(),
+        invocationService: new RecordingRuntimeInvocationService(),
+        runnerContainerNamespace: createRunnerContainerNamespace({}),
+        runnerRuntimeEnvSource: {
+          CF_VERSION_METADATA: { id: "release_1" },
+          HOSTED_EXECUTION_STANDBY_MODE: "allocate",
+        },
+        standbyContainerNamespace: createStandbyNamespace({
+          slotName,
+          userId: TEST_USER_ID,
+        }),
+        standbyCoordinatorNamespace: {
+          getByName() {
+            return {
+              claimReadyStandby,
+              async ensureReadyStandby() {
+                return { accepted: true } as const;
+              },
+            };
+          },
+        },
+        stateStore,
+      });
+    };
+    const commandTimeoutMs =
+      HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS + 100;
+    const boundedClaim = vi.fn<HostedStandbyCoordinatorStubLike["claimReadyStandby"]>(
+      async () => ({ outcome: "no_ready_slot" }),
+    );
+
+    await createController(boundedClaim).ensureForUser({
+      commandTimeoutMs,
+      orchestrationAttemptId: "standby-budget-bounded",
+      userId: TEST_USER_ID,
+    });
+
+    expect(boundedClaim).toHaveBeenCalledWith(expect.objectContaining({
+      deadlineAtEpochMs: Date.now() + 100,
+    }));
+
+    const expiredClaim = vi.fn<HostedStandbyCoordinatorStubLike["claimReadyStandby"]>(
+      async () => ({ outcome: "no_ready_slot" }),
+    );
+    await createController(expiredClaim).ensureForUser({
+      commandStartedAtEpochMs: Date.now() - 101,
+      commandTimeoutMs,
+      orchestrationAttemptId: "standby-budget-expired",
+      userId: TEST_USER_ID,
+    });
+
+    expect(expiredClaim).not.toHaveBeenCalled();
+  });
+
+  it("keeps a late standby bind as the exact retry target", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const durable = createRunnerDurableState();
+    const stateStore = new RunnerStateStore(durable.state);
+    const slotName =
+      "standby--v-release_1--0123456789abcdef0123456789abcdef";
+    const claimDelayMs = 100;
+    const bindDelayMs = 200;
+    const standby = createAllocatingStandbyHarness({
+      bindDelayMs,
+      readDelayMs: 300,
+      slotName,
+      stateStore,
+    });
+    const claimReadyStandby = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, claimDelayMs));
+      return {
+        outcome: "claimed" as const,
+        slotName,
+      };
+    });
+    const controller = new RuntimeProcessingController({
+      env: createHostedExecutionEnvironment(),
+      invocationService: new RecordingRuntimeInvocationService(),
+      runnerContainerNamespace: createHostedRunnerContainerNamespaceRouter({
+        exactUser: createRunnerContainerNamespace({}),
+        standby: standby.namespace,
+      }),
+      runnerRuntimeEnvSource: {
+        CF_VERSION_METADATA: { id: "release_1" },
+        HOSTED_EXECUTION_STANDBY_MODE: "allocate",
+      },
+      standbyContainerNamespace: standby.namespace,
+      standbyCoordinatorNamespace: {
+        getByName() {
+          return {
+            claimReadyStandby,
+            async ensureReadyStandby() {
+              return { accepted: true } as const;
+            },
+          };
+        },
+      },
+      stateStore,
+    });
+
+    const first = controller.ensureForUser({
+      orchestrationAttemptId: "standby-bind-late",
+      userId: TEST_USER_ID,
+    });
+    await vi.waitFor(() => expect(claimReadyStandby).toHaveBeenCalledOnce());
+    await vi.advanceTimersByTimeAsync(claimDelayMs);
+    await vi.waitFor(() => expect(standby.bindStandbySlot).toHaveBeenCalledOnce());
+    await vi.advanceTimersByTimeAsync(
+      HOSTED_STANDBY_CLAIM_TIMEOUT_MS - claimDelayMs,
+    );
+
+    await expect(first).resolves.toMatchObject({ kind: "retry_later" });
+    await expect(stateStore.readState()).resolves.toMatchObject({
+      pendingRunnerContainerName: slotName,
+      writeFence: null,
+    });
+
+    await vi.advanceTimersByTimeAsync(
+      claimDelayMs + bindDelayMs - HOSTED_STANDBY_CLAIM_TIMEOUT_MS,
+    );
+    const retained = controller.ensureForUser({
+      orchestrationAttemptId: "standby-bind-retained",
+      userId: TEST_USER_ID,
+    });
+    await vi.waitFor(() =>
+      expect(standby.readStandbySlotBinding).toHaveBeenCalledOnce()
+    );
+    await vi.advanceTimersByTimeAsync(300);
+    await expect(retained).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+    expect(claimReadyStandby).toHaveBeenCalledOnce();
+    expect(standby.bindStandbySlot).toHaveBeenCalledOnce();
+    await expect(stateStore.readState()).resolves.toMatchObject({
+      writeFence: { runnerContainerName: slotName },
+    });
+  });
+
+  it("accepts an opaque standby target only after its durable binding proves the exact member", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const durable = createRunnerDurableState();
+    const stateStore = new RunnerStateStore(durable.state);
+    const slotName =
+      "standby--v-release_1--0123456789abcdef0123456789abcdef";
+    const readStandbySlotBinding = vi.fn<
+      HostedStandbyRunnerContainerStubLike["readStandbySlotBinding"]
+    >(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return {
+        claimId: "standby-claim-12345678-1234-4123-8123-123456789abc",
+        releaseId: "release_1",
+        region: HOSTED_STANDBY_REGION,
+        slotName,
+        state: "bound",
+        userId: TEST_USER_ID,
+      };
+    });
+    const service = createRuntimeInvocationService({
+      invokedContainerNames: [],
+      runnerRuntimeEnvSource: {
+        CF_VERSION_METADATA: { id: "release_1" },
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+          "provider-egress-signing-secret",
+        OPENAI_API_KEY: "test-openai-key",
+      },
+      standbyContainerNamespace: createStandbyNamespace({
+        readStandbySlotBinding,
+        slotName,
+        userId: TEST_USER_ID,
+      }),
+      state: durable.state,
+      stateStore,
+    });
+    const token = await stateStore.beginWriteFence({
+      runnerContainerName: slotName,
+      userId: TEST_USER_ID,
+    });
+
+    const prepared = service.prepareWithFence({
+      commandBudget: { deadlineAtMs: Date.now() + 1_000 },
+      input: {
+        orchestrationAttemptId: "orchestration_attempt_1",
+        userId: TEST_USER_ID,
+      },
+      token,
+    });
+    await vi.waitFor(() => expect(readStandbySlotBinding).toHaveBeenCalledOnce());
+    await vi.advanceTimersByTimeAsync(300);
+    await expect(prepared).resolves.toMatchObject({ runnerContainerName: slotName });
+
+    const mismatchedService = createRuntimeInvocationService({
+      invokedContainerNames: [],
+      runnerRuntimeEnvSource: {
+        CF_VERSION_METADATA: { id: "release_1" },
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+          "provider-egress-signing-secret",
+        OPENAI_API_KEY: "test-openai-key",
+      },
+      standbyContainerNamespace: createStandbyNamespace({
+        slotName,
+        userId: "member_456",
+      }),
+      state: durable.state,
+      stateStore,
+    });
+    await expect(mismatchedService.prepareWithFence({
+      input: {
+        orchestrationAttemptId: "orchestration_attempt_2",
+        userId: TEST_USER_ID,
+      },
+      token,
+    })).rejects.toThrow(
+      "Hosted standby slot binding did not match the runtime invocation user.",
+    );
+  });
+
 });
 
 class RecordingRuntimeInvocationService extends RuntimeInvocationService {
@@ -996,6 +1339,7 @@ function createRuntimeInvocationService(input: {
   invokedContainerNames: string[];
   platformAiUsageAllowed?: boolean;
   runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
+  standbyContainerNamespace?: HostedStandbyRunnerContainerNamespaceLike;
   state: DurableObjectStateLike;
   stateStore: RunnerStateStore;
   workspace?: HostedWorkspaceState | null;
@@ -1050,10 +1394,158 @@ function createRuntimeInvocationService(input: {
     runnerContainerNamespace: createRunnerContainerNamespace({
       invokedContainerNames: input.invokedContainerNames,
     }),
+    standbyContainerNamespace: input.standbyContainerNamespace ?? null,
     runnerRuntimeEnvSource: input.runnerRuntimeEnvSource,
     runnerStoreCache: new TestRunnerStoreCache(input.runnerRuntimeEnvSource),
     stateStore: input.stateStore,
   });
+}
+
+function createStandbyNamespace(input: {
+  readStandbySlotBinding?: HostedStandbyRunnerContainerStubLike["readStandbySlotBinding"];
+  slotName: string;
+  userId: string;
+}): HostedStandbyRunnerContainerNamespaceLike {
+  return {
+    getByName(name) {
+      return {
+        async bindStandbySlot(binding) {
+          return { bound: true, ...binding };
+        },
+        async destroyInstance() {},
+        async invoke() {
+          throw new Error("Invocation was not expected in this test.");
+        },
+        async prepareStandbySlot(preparation) {
+          return { prepared: true, ...preparation };
+        },
+        async readStandbySlotBinding() {
+          if (input.readStandbySlotBinding) {
+            return await input.readStandbySlotBinding();
+          }
+          return {
+            claimId: "standby-claim-12345678-1234-4123-8123-123456789abc",
+            releaseId: "release_1",
+            region: HOSTED_STANDBY_REGION,
+            slotName: input.slotName,
+            state: "bound" as const,
+            userId: input.userId,
+          };
+        },
+        async readStandbySlotCoordinatorState() {
+          return {
+            coordinatorOwned: false,
+            releaseId: "release_1",
+            slotName: input.slotName,
+            state: "bound" as const,
+          };
+        },
+        async retireStandbySlot() {
+          return { retired: true } as const;
+        },
+        async smokeHealth() {
+          return {
+            ok: true,
+            runnerBundle: null,
+            service: "test",
+            status: 200,
+          };
+        },
+      };
+    },
+  };
+}
+
+function createAllocatingStandbyHarness(input: {
+  bindDelayMs?: number;
+  readDelayMs?: number;
+  slotName: string;
+  stateStore: RunnerStateStore;
+}): {
+  bindStandbySlot: ReturnType<typeof vi.fn>;
+  namespace: HostedStandbyRunnerContainerNamespaceLike;
+  readStandbySlotBinding: ReturnType<typeof vi.fn>;
+} {
+  let binding: HostedStandbySlotBinding = {
+    claimId: null,
+    releaseId: "release_1",
+    region: HOSTED_STANDBY_REGION,
+    slotName: input.slotName,
+    state: "unbound" as const,
+    userId: null,
+  };
+  const bindStandbySlot = vi.fn(async (claim: {
+    claimId: string;
+    releaseId: string;
+    region: typeof HOSTED_STANDBY_REGION;
+    slotName: string;
+    userId: string;
+  }) => {
+    const persisted = await input.stateStore.readState();
+    if (persisted.pendingRunnerContainerName !== input.slotName) {
+      throw new Error("Standby bind ran before its exact stop target was persisted.");
+    }
+    if (input.bindDelayMs) {
+      await new Promise((resolve) => setTimeout(resolve, input.bindDelayMs));
+    }
+    const bound = {
+      claimId: claim.claimId,
+      releaseId: claim.releaseId,
+      region: claim.region,
+      slotName: claim.slotName,
+      state: "bound" as const,
+      userId: claim.userId,
+    };
+    binding = bound;
+    return { bound: true as const, ...claim };
+  });
+  const readStandbySlotBinding = vi.fn(async () => {
+    if (input.readDelayMs) {
+      await new Promise((resolve) => setTimeout(resolve, input.readDelayMs));
+    }
+    return binding;
+  });
+  return {
+    bindStandbySlot,
+    namespace: {
+      getByName() {
+        return {
+          bindStandbySlot,
+          async destroyInstance() {},
+          async ensureReadyForProcessing() {
+            return { kind: "ready" } as const;
+          },
+          async invoke() {
+            throw new Error("Direct invocation was not expected in this test.");
+          },
+          async prepareStandbySlot(preparation) {
+            return { prepared: true as const, ...preparation };
+          },
+          readStandbySlotBinding,
+          async readStandbySlotCoordinatorState() {
+            return {
+              coordinatorOwned: binding.userId === null,
+              releaseId: binding.releaseId,
+              slotName: binding.slotName,
+              state: binding.state,
+            };
+          },
+          async retireStandbySlot() {
+            return { retired: true } as const;
+          },
+          async smokeHealth() {
+            return {
+              ok: true,
+              runnerBundle: null,
+              service: "test",
+              status: 200,
+            };
+          },
+        };
+      },
+    },
+    readStandbySlotBinding,
+  };
 }
 
 function createHostedExecutionEnvironment() {

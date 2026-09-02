@@ -686,8 +686,11 @@ test.sequential(
     })
     assert.equal(unsupportedChannel.ok, false)
     if (!unsupportedChannel.ok) {
-      assert.match(unsupportedChannel.error.message ?? '', /telegram/u)
-      assert.doesNotMatch(unsupportedChannel.error.message ?? '', /email/u)
+      assert.equal(unsupportedChannel.error.code, 'VALIDATION_ERROR')
+      assert.equal(unsupportedChannel.error.message, 'The command input is invalid.')
+      assert.equal(unsupportedChannel.error.stage, 'validation')
+      assert.equal(unsupportedChannel.error.fieldErrors?.[0]?.path, 'channel')
+      assert.doesNotMatch(JSON.stringify(unsupportedChannel.error), /slack|email/u)
     }
 
     const invalidEmail = await runCli([
@@ -704,11 +707,11 @@ test.sequential(
     })
     assert.equal(invalidEmail.ok, false)
     if (!invalidEmail.ok) {
-      assert.match(invalidEmail.error.message ?? '', /telegram/u)
-      assert.doesNotMatch(
-        invalidEmail.error.message ?? '',
-        /single recipient email address/u,
-      )
+      assert.equal(invalidEmail.error.code, 'VALIDATION_ERROR')
+      assert.equal(invalidEmail.error.message, 'The command input is invalid.')
+      assert.equal(invalidEmail.error.stage, 'validation')
+      assert.equal(invalidEmail.error.fieldErrors?.[0]?.path, 'channel')
+      assert.doesNotMatch(JSON.stringify(invalidEmail.error), /email|not-an-email/u)
     }
 
     const invalidDirectEmail = await runCli([
@@ -728,11 +731,11 @@ test.sequential(
     })
     assert.equal(invalidDirectEmail.ok, false)
     if (!invalidDirectEmail.ok) {
-      assert.match(invalidDirectEmail.error.message ?? '', /telegram/u)
-      assert.doesNotMatch(
-        invalidDirectEmail.error.message ?? '',
-        /single recipient email address/u,
-      )
+      assert.equal(invalidDirectEmail.error.code, 'VALIDATION_ERROR')
+      assert.equal(invalidDirectEmail.error.message, 'The command input is invalid.')
+      assert.equal(invalidDirectEmail.error.stage, 'validation')
+      assert.equal(invalidDirectEmail.error.fieldErrors?.[0]?.path, 'channel')
+      assert.doesNotMatch(JSON.stringify(invalidDirectEmail.error), /email|not-an-email/u)
     }
   },
   ASSISTANT_CLI_TIMEOUT_MS,
@@ -762,7 +765,11 @@ test.sequential(
 
     assert.equal(result.ok, false)
     if (!result.ok) {
-      assert.match(result.error.message ?? '', /Unknown flag: --base-url|base-url/u)
+      assert.equal(result.error.code, 'VALIDATION_ERROR')
+      assert.equal(result.error.message, 'The command arguments are invalid.')
+      assert.equal(result.error.stage, 'validation')
+      assert.equal(result.error.fieldErrors?.[0]?.path, 'arguments')
+      assert.doesNotMatch(JSON.stringify(result.error), /base-url/u)
     }
   },
   ASSISTANT_CLI_TIMEOUT_MS,
@@ -1001,10 +1008,11 @@ test('model rejects unsupported legacy presets', async () => {
 
   assert.equal(result.exitCode, 1)
   assert.equal(result.envelope.ok, false)
-  assert.match(
-    result.envelope.error?.message ?? '',
-    /Invalid input|unsupported-provider/u,
-  )
+  assert.equal(result.envelope.error?.code, 'VALIDATION_ERROR')
+  assert.equal(result.envelope.error?.message, 'The command input is invalid.')
+  assert.equal(result.envelope.error?.stage, 'validation')
+  assert.equal(result.envelope.error?.fieldErrors?.[0]?.path, 'preset')
+  assert.doesNotMatch(JSON.stringify(result.envelope.error), /unsupported-provider/u)
 })
 
 test('model --show includes a note for an explicit saved Codex home', async () => {
@@ -1653,7 +1661,7 @@ test('root chat fails closed when the terminal cannot provide interactive raw-mo
   )
 })
 
-test('root chat surfaces the interactive-input failure before any json result can be emitted', async () => {
+test('root chat formats the interactive-input failure as JSON when explicitly requested', async () => {
   const result = await runInProcessCliWithTty([
     'chat',
     '--vault',
@@ -1663,10 +1671,13 @@ test('root chat surfaces the interactive-input failure before any json result ca
   ])
 
   assert.equal(result.stderr, '')
-  assert.equal(
-    result.stdout,
-    'Error (interactive_input_unavailable): Murph chat requires interactive terminal input. process.stdin does not support raw mode, and Murph could not open the controlling terminal for Ink input.\n',
-  )
+  assert.deepEqual(JSON.parse(result.stdout), {
+    code: 'interactive_input_unavailable',
+    message:
+      'Murph chat requires interactive terminal input. process.stdin does not support raw mode, and Murph could not open the controlling terminal for Ink input.',
+    retryable: false,
+    stage: 'configuration',
+  })
 })
 
 test.sequential(
@@ -1762,8 +1773,12 @@ async function runRegisteredCliJson<TData>(
     data?: TData
     error?: {
       code?: string
+      fieldErrors?: Array<{
+        path?: string
+      }>
       message?: string
       retryable?: boolean
+      stage?: string
     }
   }
   exitCode: number | null
@@ -1787,8 +1802,12 @@ async function runRegisteredCliJson<TData>(
       data?: TData
       error?: {
         code?: string
+        fieldErrors?: Array<{
+          path?: string
+        }>
         message?: string
         retryable?: boolean
+        stage?: string
       }
     },
     exitCode,

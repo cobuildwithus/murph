@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-29
+Last verified: 2026-08-31
 
 ## Decision
 
@@ -920,10 +920,13 @@ system-message execution and starts at most one `executeReadOnlyAssistantAsk`
 promise. That call launches a separate one-shot App Server process with the
 native `murph-group-read` profile, exact runtime workspace roots, `.runtime/**`,
 `.codex/**`, and environment-file denial, no tool network or inherited shell
-secrets, and only the consent-aware lazy `murph.group/read_shared` dynamic
-tool, with no mutation or delivery authority. The thread request supplies the
-exact profile, roots, sealed empty working directory, disabled instruction
-sources, and approval policy. Its response is not an authorization boundary;
+secrets, and no mutation or delivery authority. A joined-group child receives
+only the consent-aware lazy `murph.group/read_shared` dynamic tool; consented
+and operator candidates and disclosure reviewers receive no dynamic tools. The
+thread request supplies the exact profile, roots, disabled instruction sources,
+and approval policy. Every candidate and reviewer uses a sealed empty working
+directory; an authenticated operator diagnostic selected for read-tool inspection
+receives the exact target path as quoted host prompt data. Its response is not an authorization boundary;
 production-like Linux smoke proves the resulting filesystem, environment, and
 network enforcement. Further asks stay
 pending in the mailbox. The resident process remains the sole model-authored
@@ -1617,8 +1620,32 @@ the platform wait continues under the existing container lifecycle owner. It
 does not select a mailbox owner, create a write fence, wait for health
 readiness, or invoke workspace work. Withdrawal and account deletion consume
 the reserved exact target, and `destroyInstance()` supersedes an in-progress
-hint before stopping that container. A denied admission starts nothing. The
-  active-member replan durably
+hint before stopping that container. A denied admission starts nothing.
+
+The release-scoped ENAM standby is a separate optimization and does not trust
+that typing hint. A memberless coordinator maintains at most one advertised
+pristine slot after exact release, image fingerprints, architecture,
+heavy-runtime, and content-free Codex App Server initialize/stop readiness all
+pass. In allocation mode, one storage transaction removes that slot from ready
+and records an opaque claim tombstone. The requesting `UserRunner` durably
+reserves the opaque stop target before immutable bind-once member attachment,
+then opens its normal write fence and restores the encrypted workspace. The
+real resident Codex App Server remains post-restore because its launch identity
+is member-specific. Coordinator claim and bind share one 250 ms deadline;
+no-ready, stale-release, or coordinator failure before slot ownership uses the
+unchanged exact-user cold target. An ambiguous bind after the opaque target is
+reserved yields for retry against that exact target instead of starting a
+second container. Replenishment, readiness re-proving, orphan retirement, and
+stale-release drain run outside the accepted-message path. A bound slot can
+be retained only by that same member under the ordinary conversation idle
+lifecycle and is never returned to ready. Slot invocation,
+provider-credential minting, withdrawal, account deletion, and retirement all
+re-read the exact durable binding; a member mismatch fails closed. A successful
+fresh-start acceptance records its closed standby allocation outcome alongside
+the orchestration and workspace attempt identifiers in the existing structured
+log. Failed, retried, or superseded starts do not emit an accepted attribution.
+
+The active-member replan durably
 appends the original conversation item. For an exact model-approved instant
 start, Web may already have a bounded tool-free Murph result generated beside
 admission and enrollment after the exact chat/event acquired its delivery-ledger
@@ -2440,6 +2467,35 @@ and stop on the first unknown result. Each accepted request sends only
 grants no new work authority. Signal acceptance proves only that the runtime was
 asked to reread canonical facts, not that recovery completed.
 
+For those same at-most-three ids, a successful request captures one bounded
+request-time database read before signaling and returns a server-signed recovery
+witness. The signature protects only the witness's integrity across the browser
+round trip; it grants no mutation or signal authority. The witness fixes the
+request-time system-lane imported target from
+`redacted_status_json.hostedMailboxSystemImportedSeq` and records the live
+system-lane head plus the canonical
+`hosted_mailbox_lane_counter.consumed_seq`. A later, explicit Verify action
+performs one bounded read of current active access, workspace checkpoint, and
+system-lane facts. It neither polls nor persists recovery state, and it sends no
+signal. The browser presents at most one successful signaled batch at a time:
+another request stays disabled until every signaled witness is Recovered or the
+operator explicitly discards that ephemeral proof. A failed-only batch does not
+block another request, and discarding proof does not remove ids still queued in
+the editor.
+
+Recovery is proved only when canonical system-lane `consumed_seq` reaches the
+fixed imported target. Reaching the captured live head but not that target is
+progressing. A checkpoint-only intermediate result requires both a strictly
+higher workspace version and a strictly later checkpoint timestamp while the
+captured head remains live and unconsumed; changing only one member of that pair
+proves nothing. The verifier fails closed as Unknown when the signed baseline is
+missing, malformed, expired, or inconsistent; active access or workspace facts
+disappear; canonical counters regress; the captured head disappears before
+canonical consumption proves it; or the current facts otherwise cannot prove
+one of those states. Current imported-status projection, workflow handled
+diagnostics, progress-generation counters, logs, discovery, and signal
+acknowledgement are diagnostic context, never recovery authority.
+
 Automatic discovery may seed that same explicit-id control with active
 checkpointed system lanes matching the legacy device-sync stall signature for
 at least 15 minutes. Discovery and effect authority stay separate; manually
@@ -2731,6 +2787,14 @@ This matches the runner readiness ceiling without weakening invalidated-shell
 or destroy-settlement checks. Accepted background invocations begin their
 pending I/O before acceptance; Durable Object
 `waitUntil()` is not a lifecycle mechanism and is not used.
+Within that unchanged outer budget, the shell-prewarm, direct cold-start, and
+deploy-smoke paths make each native TCP readiness request abortable after 1.5
+seconds and retry sequentially on the existing 250 ms interval. The helper
+awaits cancellation before another probe begins. A probe timeout is therefore
+only a retry signal: it cannot publish healthy state, run `onStart`, invoke
+workspace work, or replace the existing crash and caller-abort paths. The
+helper's inherited implicit `containerFetch()` auto-start fallback retains the
+upstream five-second default.
 Container readiness receives at most 15 wall-clock seconds, including time
 queued for the container lifecycle lock. Once readiness-triggered cleanup starts, the RPC
 allows one absolute five-second fail-closed cleanup deadline shared by the
@@ -2989,6 +3053,13 @@ supported by the hosted foreground mailbox import loop plus the store-backed
 assistant input spine: a payloadless runtime wake causes the active child to
 import conversation mailbox rows, stage any new `AssistantInputEvent` records,
 run prompt-preparation effects best-effort, and notify active-turn admission.
+That notification is a best-effort latency hint. If it is early or missed,
+foreground refresh may recover only exact input IDs already imported by the
+current workspace invocation. Active-turn admission composes the recovered
+cursor-ordered prefix with any notified exact IDs and admits every valid
+same-room successor up to the existing cumulative cap. All candidates still
+pass the existing replyability, same-conversation, route, capacity, and
+exact-successor checks without broad pending-index discovery or mutation.
 The pre-delivery system-mailbox consistency barrier may pause that loop, but it
 must resume before post-checkpoint delivery or background drains continue. A
 source-less wake preempts those drains only after the resumed import proves new
@@ -3841,6 +3912,9 @@ An actual cold readiness RPC also carries optional numeric-only subdivisions.
 `freshStartContainerOnStartAtEpochMs` records Cloudflare's lifecycle hook; and
 `freshStartContainerPortsReadyAtEpochMs` records resolution of
 `startAndWaitForPorts`, after both the configured port and `onStart` are ready.
+The local cold-start benchmark reports start-to-ports, process-to-listen, and
+listen-to-ports percentiles from these stamps so a hosted canary can distinguish
+container boot time from managed port-proxy delay.
 The explicit private health fetch is bounded by
 `freshStartContainerHealthStartedAtEpochMs` and
 `freshStartContainerHealthFinishedAtEpochMs`, followed by

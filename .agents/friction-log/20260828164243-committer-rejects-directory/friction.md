@@ -1,6 +1,7 @@
 ---
 title: 'Committer rejects directory paths accepted by completion workflow'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2560'
 ---
 
 ## Expected Behavior

@@ -895,9 +895,14 @@ test('workout add and edit reject incomplete or ambiguous typed workout input', 
   ])
   assert.equal(mixedInputAndNestedSessionFlag.exitCode, 1)
   assert.equal(mixedInputAndNestedSessionFlag.envelope.ok, false)
-  assert.match(
-    mixedInputAndNestedSessionFlag.envelope.error.message ?? '',
-    /input/u,
+  assert.equal(mixedInputAndNestedSessionFlag.envelope.error.code, 'VALIDATION_ERROR')
+  assert.equal(
+    mixedInputAndNestedSessionFlag.envelope.error.message,
+    'The command arguments are invalid.',
+  )
+  assert.equal(
+    mixedInputAndNestedSessionFlag.envelope.error.fieldErrors?.[0]?.path,
+    'arguments',
   )
   assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeInvalidAdds)
 

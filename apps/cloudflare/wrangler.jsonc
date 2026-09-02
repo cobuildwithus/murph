@@ -35,6 +35,23 @@
       "rollout_active_grace_period": 0,
       "rollout_step_percentage": [100],
       "ssh": { "enabled": false }
+    },
+    {
+      "class_name": "StandbyRunnerContainer",
+      "image": "../../Dockerfile.cloudflare-hosted-runner",
+      "image_build_context": ".",
+      "instance_type": {
+        "vcpu": 2,
+        "memory_mib": 6144,
+        "disk_mb": 6000
+      },
+      "max_instances": 1000,
+      "constraints": {
+        "regions": ["ENAM"]
+      },
+      "rollout_active_grace_period": 300,
+      "rollout_step_percentage": [10, 25, 50, 100],
+      "ssh": { "enabled": false }
     }
   ],
   "durable_objects": {
@@ -62,6 +79,14 @@
       {
         "name": "RUNNER_CONTAINER_SMOKE",
         "class_name": "DeploySmokeRunnerContainer"
+      },
+      {
+        "name": "STANDBY_COORDINATOR",
+        "class_name": "StandbyRunnerCoordinatorDurableObject"
+      },
+      {
+        "name": "STANDBY_RUNNER_CONTAINER",
+        "class_name": "StandbyRunnerContainer"
       }
     ]
   },
@@ -92,6 +117,13 @@
     {
       "tag": "v6",
       "new_sqlite_classes": ["OpenAiAuthorizationAlertDurableObject"]
+    },
+    {
+      "tag": "v7",
+      "new_sqlite_classes": [
+        "StandbyRunnerCoordinatorDurableObject",
+        "StandbyRunnerContainer"
+      ]
     }
   ],
   "triggers": {
@@ -167,6 +199,7 @@
   // overrides live in GitHub `production` environment variables — check
   // `gh variable list --env production` before assuming a value here is live.
   "vars": {
+    "HOSTED_EXECUTION_STANDBY_MODE": "off",
     "HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION": "projects/.../cryptoKeyVersions/1",
     "HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM": "-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----",
     "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID": "cloudflare-automation:v1",

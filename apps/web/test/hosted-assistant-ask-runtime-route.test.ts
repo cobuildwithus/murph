@@ -129,6 +129,39 @@ describe("Hosted Assistant Ask runtime route", () => {
     expect(mocks.handleHostedRuntimeAssistantAskControl).not.toHaveBeenCalled();
   });
 
+  it("completes a group-runtime operator diagnostic without delivery", async () => {
+    const result = {
+      answer: "Synthetic group-runtime diagnostic.",
+      outcome: "answered" as const,
+    };
+    mocks.tryHandleHostedOperatorDiagnosticControl.mockResolvedValue({
+      mailboxWake: null,
+      response: { action: "complete", status: "completed" },
+    });
+
+    const response = await POST(runtimeRequest({
+      action: "complete",
+      requestId: `aask_req_${"b".repeat(64)}`,
+      result,
+    }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      action: "complete",
+      status: "completed",
+    });
+    expect(mocks.tryHandleHostedOperatorDiagnosticControl).toHaveBeenCalledWith({
+      boundRuntimeMemberId: "member-group-runtime",
+      request: {
+        action: "complete",
+        requestId: `aask_req_${"b".repeat(64)}`,
+        result,
+      },
+    });
+    expect(mocks.handleHostedRuntimeAssistantAskControl).not.toHaveBeenCalled();
+    expect(mocks.handoffHostedMailboxWake).not.toHaveBeenCalled();
+  });
+
   it("wakes only the committed private completion before responding", async () => {
     mocks.handleHostedRuntimeAssistantAskControl.mockResolvedValue({
       mailboxWake: {

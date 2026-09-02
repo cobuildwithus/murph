@@ -1,7 +1,7 @@
 # Incur Payload Schema Migration Guide
 
 Status: active migration guide
-Last verified: 2026-06-17
+Last verified: 2026-08-31
 
 ## Purpose
 
@@ -25,7 +25,7 @@ condition, blood-test, encounter, and event JSONL rows.
 
 ## Evidence From Incur
 
-Murph currently uses `incur@0.4.5` in the CLI packages. The upstream Incur docs
+Murph currently uses patched `incur@0.5.1` in the CLI packages. The upstream Incur docs
 describe discovery around command arguments, options, environment variables, and
 outputs. They do not describe a separate hidden file-body schema surface:
 https://github.com/wevm/incur

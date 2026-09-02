@@ -1,6 +1,7 @@
 ---
 title: 'Linq webhook E2E member labels can drift from local inbound allowlist'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2636'
 ---
 
 ## Expected Behavior

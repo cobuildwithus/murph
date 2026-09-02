@@ -195,6 +195,7 @@ export function createHostedAssistantInputSource(input: {
   initialPendingInputIds?: readonly string[] | null;
   pendingInputRefreshMode: HostedPendingInputRefreshMode;
   preserveSelectedInputOrder?: boolean;
+  readForegroundInputIds?: (() => readonly string[]) | null;
   selectedInputIds?: readonly string[] | null;
   vaultRoot: string;
 }): HostedAssistantInputSource {
@@ -205,6 +206,7 @@ export function createHostedAssistantInputSource(input: {
     ...(input.initialPendingInputIds ?? []),
     ...selectedInputIds,
   ]);
+  const foregroundInputIds: string[] = [];
   const emittedListInputCandidateCursorKeys = new Set<string>();
   let selectedCandidatesPromise: Promise<AssistantInputCandidate[]> | null = null;
   const readSelectedCandidates = () => {
@@ -229,9 +231,18 @@ export function createHostedAssistantInputSource(input: {
     async refresh(refreshInput) {
       assertHostedAssistantInputQueryNotAborted(refreshInput?.signal);
       if (input.pendingInputRefreshMode === "none") {
+        let added = 0;
+        for (const inputId of uniqueStrings(input.readForegroundInputIds?.() ?? [])) {
+          if (observedInputIds.has(inputId)) {
+            continue;
+          }
+          observedInputIds.add(inputId);
+          foregroundInputIds.push(inputId);
+          added += 1;
+        }
         return {
-          progressed: false,
-          reason: "no_new_input",
+          progressed: added > 0,
+          reason: added > 0 ? "ingested_input" : "no_new_input",
         };
       }
       await runHostedPendingAssistantInputContentRetention({
@@ -328,10 +339,38 @@ export function createHostedAssistantInputSource(input: {
     },
     async listNewConversationInputs(query) {
       assertHostedAssistantInputQueryNotAborted(query.signal);
-      const candidates = await readSelectedCandidates();
+      const selectedCandidates = await readSelectedCandidates();
+      const foregroundEvents = await readHostedAssistantInputEventsById({
+        inputIds: foregroundInputIds,
+        missingInput: "skip",
+        vaultRoot: input.vaultRoot,
+      });
+      const replyableEvents = await filterHostedReplyablePendingAssistantInputEvents({
+        events: foregroundEvents,
+        vaultRoot: input.vaultRoot,
+      });
+      const exactSuccessors = await selectHostedAssistantExactSuccessorEvents({
+        afterCursor: query.afterCursor ?? null,
+        events: foregroundEvents,
+        replyableInputIds: new Set(
+          replyableEvents.map((event) => event.inputId),
+        ),
+        vaultRoot: input.vaultRoot,
+      });
+      const foregroundCandidates = await createHostedAssistantInputCandidates({
+        events: exactSuccessors,
+        vaultRoot: input.vaultRoot,
+      });
+      const conversationAnchor = selectedCandidates.find((candidate) =>
+        isSameAssistantConversationRef(
+          candidate.event.conversation,
+          query.conversation,
+        )
+      );
       assertHostedAssistantInputQueryNotAborted(query.signal);
       return filterHostedAssistantNewConversationInputs({
-        candidates,
+        candidates: [...selectedCandidates, ...foregroundCandidates],
+        conversationAnchor,
         query,
       });
     },
@@ -663,17 +702,25 @@ async function selectHostedAssistantExactSuccessorEvents(input: {
   if (!anchor) {
     return [];
   }
+  const anchorCandidate = assistantInputCandidateFromStoredEvent(anchor);
 
-  // Exact notification avoids a global scan, but it does not weaken the
-  // compound-batch boundary. Ignore duplicate notifications at or behind the
-  // supplied frontier, then stop at the first missing causal successor,
-  // incomplete projection, or non-replyable event and leave later IDs pending.
+  // Exact invocation-local candidates avoid a global scan, but they do not
+  // weaken the compound-batch boundary. Ignore duplicate candidates at or
+  // behind the supplied frontier, then stop at the first missing causal
+  // successor, incomplete projection, or non-replyable event and leave later
+  // IDs pending.
   const successorEvents = [...input.events]
     .sort((left, right) =>
       compareAssistantInputCursors(left.cursor, right.cursor)
     )
     .filter((event) =>
       compareAssistantInputCursors(event.cursor, afterCursor) > 0
+    )
+    .filter((event) =>
+      shouldGroupAdjacentAssistantInputCandidates(
+        anchorCandidate,
+        assistantInputCandidateFromStoredEvent(event),
+      )
     );
   const selected: AssistantInputEventRecord[] = [];
   let previous = anchor;
@@ -871,6 +918,7 @@ function filterHostedAssistantInputCandidates(input: {
 
 function filterHostedAssistantNewConversationInputs(input: {
   candidates: readonly AssistantInputCandidate[];
+  conversationAnchor?: AssistantInputCandidate;
   query: AssistantTurnConversationInputQuery;
 }): AssistantInputCandidateBatch {
   const knownInputIds = new Set(input.query.knownInputIds ?? []);
@@ -893,6 +941,12 @@ function filterHostedAssistantNewConversationInputs(input: {
       return isSameAssistantConversationRef(
         candidate.event.conversation,
         input.query.conversation,
+      ) || (
+        input.conversationAnchor !== undefined
+        && isSameAuthenticatedAssistantGroupRoute(
+          input.conversationAnchor,
+          candidate,
+        )
       );
     }),
     limit: input.query.limit,

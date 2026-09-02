@@ -5234,6 +5234,35 @@ describe('assistant auto-reply runtime', () => {
       ...projectedLateInput,
       event: {
         ...projectedLateInput.event,
+        attachmentEvidence: {
+          attachments: [
+            {
+              byteSize: 128,
+              derived: null,
+              descriptorAttachmentId: 'late_voice_descriptor',
+              fileName: 'voice-note.m4a',
+              inlineFragments: [
+                {
+                  kind: 'attachment_transcript',
+                  label: 'attachment-1-transcript',
+                  text: 'That morning-summary preference was only temporary.',
+                  truncated: false,
+                },
+              ],
+              kind: 'audio',
+              mime: 'audio/m4a',
+              ordinal: 1,
+              parseState: 'succeeded',
+              raw: null,
+              sourceAttachmentId: 'late_voice_attachment',
+            },
+          ],
+          optionalInboxCaptureId: 'capture-late',
+          reasonCode: null,
+          source: 'local-parser-drain',
+          status: 'available',
+          updatedAt: '2026-04-08T00:03:01.000Z',
+        },
         replyTarget: {
           channel: 'telegram',
           messageId: 'late_msg_1',
@@ -5377,13 +5406,17 @@ describe('assistant auto-reply runtime', () => {
           expect.objectContaining({
             captureIds: ['capture-late'],
             id: lateInput.event.inputId,
+            promptFallbackText:
+              'Attachment 1 transcript:\nThat morning-summary preference was only temporary.',
           }),
         ])
         expect(admitted).toMatchObject({
           deliveryReplyToMessageId: 'late_msg_1',
         })
         expect(admitted).not.toHaveProperty('deliveryTarget')
-        expect(admitted.transcriptText).toBe('User sent an attachment.')
+        expect(admitted.transcriptText).toBe(
+          'Attachment 1 transcript:\nThat morning-summary preference was only temporary.',
+        )
         const duplicateAdmission = await input.activeTurnInput?.({
           sessionId: 'session-1',
           turnId: 'turn-1',
@@ -8983,7 +9016,7 @@ describe('assistant auto-reply runtime', () => {
     const checkpointAcceptedInput = vi.fn(async () => undefined)
     const refresh = vi.fn(async () => ({
       progressed: false,
-      reason: 'no_new_input' as const,
+      reason: 'source_unavailable' as const,
     }))
     const inputSource = {
       checkpointAcceptedInput,
@@ -9078,7 +9111,7 @@ describe('assistant auto-reply runtime', () => {
     })
     expect(listNewConversationInputs).not.toHaveBeenCalled()
     expect(listInputCandidatesByIds).toHaveBeenCalledTimes(1)
-    expect(refresh).not.toHaveBeenCalled()
+    expect(refresh).toHaveBeenCalledOnce()
     expect(checkpointAcceptedInput).toHaveBeenCalledWith(
       expect.objectContaining({
         acceptedInputIds: [hostedInput.event.inputId],
@@ -9693,8 +9726,8 @@ describe('assistant auto-reply runtime', () => {
 
     expect(result.replied).toBe(1)
     expect(listInputCandidatesByIds).toHaveBeenCalledTimes(1)
-    expect(listNewConversationInputs).not.toHaveBeenCalled()
-    expect(refresh).not.toHaveBeenCalled()
+    expect(listNewConversationInputs).toHaveBeenCalledOnce()
+    expect(refresh).toHaveBeenCalledOnce()
     expect(checkpointAcceptedInput).not.toHaveBeenCalled()
     expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
       .toHaveBeenCalledWith(expect.objectContaining({
@@ -10604,8 +10637,8 @@ describe('assistant auto-reply runtime', () => {
         { channel: 'linq', senderHandles: ['+15553330000'] },
       ])
     expect(listInputCandidatesByIds).toHaveBeenCalledTimes(5)
-    expect(listNewConversationInputs).not.toHaveBeenCalled()
-    expect(refresh).not.toHaveBeenCalled()
+    expect(listNewConversationInputs).toHaveBeenCalledTimes(5)
+    expect(refresh).toHaveBeenCalledTimes(5)
     expect(checkpointAcceptedInput).toHaveBeenCalledWith(
       expect.objectContaining({
         acceptedInputIds: [
@@ -10625,6 +10658,218 @@ describe('assistant auto-reply runtime', () => {
           laterActorA.event.inputId,
           unresolvedActorC.event.inputId,
           laterUnresolvedActorC.event.inputId,
+        ],
+      }))
+  })
+
+  it.each([
+    {
+      name: 'combines a later exact notification with its missed predecessor',
+      notifiedSuccessorIndex: 1,
+      successorCount: 2,
+    },
+    {
+      name: 'drains a fully missed three-message room prefix in one admission',
+      notifiedSuccessorIndex: null,
+      successorCount: 3,
+    },
+  ])('$name', async ({ notifiedSuccessorIndex, successorCount }) => {
+    const createGroupCandidate = (index: number) => {
+      const occurredAt = new Date(
+        Date.UTC(2026, 3, 8, 0, 0, index),
+      ).toISOString()
+      return createCapturelessAssistantInputCandidate({
+        accountId: 'safe_acct_group_recovery',
+        actorId: `safe_actor_${index}`,
+        conversationThreadId: 'hidden_group_recovery_thread',
+        inputId: `ain_${index.toString(16).padStart(32, '0')}`,
+        mailboxRow: {
+          dedupeKey: `dedupe_group_recovery_${index}`,
+          eventId: `event_group_recovery_${index}`,
+          itemId: `item_group_recovery_${index}`,
+          laneSeq: index.toString(),
+        },
+        occurredAt,
+        receivedAt: occurredAt,
+        replyTarget: {
+          channel: 'linq',
+          messageId: `group_recovery_message_${index}`,
+          threadId: 'real_group_recovery_thread',
+        },
+        source: 'linq',
+        sourceMetadata: {
+          externalThreadRouteAuthorityPresent: true,
+          kind: 'linq',
+          partCount: 1,
+          reactionEligible: true,
+          replyToMessageId: null,
+          senderHandle: `+1555888${index.toString().padStart(4, '0')}`,
+          service: 'iMessage',
+        },
+        text: `group recovery message ${index}`,
+        threadIsDirect: false,
+      })
+    }
+    const initialInput = createGroupCandidate(20)
+    const successors = Array.from(
+      { length: successorCount },
+      (_, index) => createGroupCandidate(index + 21),
+    )
+    let foregroundRefreshed = false
+    const refresh = vi.fn(async () => {
+      foregroundRefreshed = true
+      return {
+        progressed: true,
+        reason: 'ingested_input' as const,
+      }
+    })
+    const listNewConversationInputs = vi.fn(async (
+      input: AssistantTurnConversationInputQuery,
+    ) => {
+      const knownInputIds = new Set(input.knownInputIds ?? [])
+      const discoveredSuccessors = notifiedSuccessorIndex === null
+        ? successors
+        : successors.slice(0, notifiedSuccessorIndex)
+      const inputs = foregroundRefreshed
+        ? discoveredSuccessors.filter((candidate) =>
+            !knownInputIds.has(candidate.event.inputId)
+          )
+        : []
+      return {
+        inputs,
+        nextCursor: inputs.at(-1)?.event.cursor ?? input.afterCursor ?? null,
+      }
+    })
+    const listInputCandidatesByIds = vi.fn(async (input: {
+      afterCursor?: AssistantInputCandidate['event']['cursor'] | null
+      inputIds: readonly string[]
+      knownInputIds?: readonly string[]
+    }) => {
+      const requested = successors.filter((candidate) =>
+        input.inputIds.includes(candidate.event.inputId)
+      )
+      const firstRequestedIndex = successors.findIndex(
+        (candidate) => candidate.event.inputId === requested[0]?.event.inputId,
+      )
+      const predecessor = successors[firstRequestedIndex - 1]
+      const inputs = !predecessor || input.knownInputIds?.includes(
+        predecessor.event.inputId,
+      )
+        ? requested
+        : []
+      return {
+        inputs,
+        nextCursor: inputs.at(-1)?.event.cursor ?? input.afterCursor ?? null,
+      }
+    })
+    const listInputCandidates = vi.fn(async (input: {
+      afterCursor?: AssistantInputCandidate['event']['cursor'] | null
+    }) => ({
+      inputs: [],
+      nextCursor: input.afterCursor ?? null,
+    }))
+    const checkpointAcceptedInput = vi.fn(async () => undefined)
+    const inputSource = {
+      checkpointAcceptedInput,
+      listInputCandidates,
+      listInputCandidatesByIds,
+      listNewConversationInputs,
+      refresh,
+    }
+
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      activeTurnCheckpoint?: (
+        checkpoint: AssistantActiveTurnInputCheckpointInput,
+      ) => Promise<void>
+      activeTurnInput?: (admission: {
+        availableInputIds?: readonly string[]
+        sessionId: string
+        turnId: string
+        vault: string
+      }) => Promise<unknown>
+    }) => {
+      const notifiedInputIds = notifiedSuccessorIndex === null
+        ? []
+        : [successors[notifiedSuccessorIndex]!.event.inputId]
+      const admitted = await input.activeTurnInput?.({
+        availableInputIds: notifiedInputIds,
+        sessionId: 'session-group-recovery',
+        turnId: 'turn-group-recovery',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      expect(admitted).toMatchObject({
+        acceptedInputs: successors.map((candidate) =>
+          expect.objectContaining({ id: candidate.event.inputId })
+        ),
+        kind: 'accepted',
+      })
+      for (const [index] of successors.entries()) {
+        expect(admitted).toMatchObject({
+          prompt: expect.stringContaining(`group recovery message ${index + 21}`),
+        })
+      }
+
+      await input.activeTurnCheckpoint?.({
+        acceptedInputIds: [
+          initialInput.event.inputId,
+          ...successors.map((candidate) => candidate.event.inputId),
+        ],
+        providerRequestOrdinal: 1,
+        sessionId: 'session-group-recovery',
+        turnId: 'turn-group-recovery',
+        vault: '/tmp/assistant-automation-vault',
+      })
+      return {
+        delivery: {
+          channel: 'linq',
+          target: 'real_group_recovery_thread',
+          sentAt: '2026-04-08T00:10:00.000Z',
+        },
+        deliveryDeferred: false,
+        deliveryError: null,
+        deliveryIntentId: 'intent-group-recovery',
+        response: 'one room-scoped response',
+        session: { sessionId: 'session-group-recovery' },
+      }
+    })
+    const reply = await vi.importActual<
+      typeof import('../src/assistant/automation/reply.ts')
+    >('../src/assistant/automation/reply.ts')
+    const context = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(initialInput),
+    ])
+    if (!context) {
+      throw new Error('expected group recovery context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context,
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices({ show: vi.fn() }),
+      inputSource,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result.replied).toBe(1)
+    expect(replyMocks.sendAssistantMessage).toHaveBeenCalledOnce()
+    expect(refresh).toHaveBeenCalledOnce()
+    expect(listNewConversationInputs).toHaveBeenCalledOnce()
+    expect(checkpointAcceptedInput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedInputIds: [
+          initialInput.event.inputId,
+          ...successors.map((candidate) => candidate.event.inputId),
+        ],
+      }),
+    )
+    expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        inputIds: [
+          initialInput.event.inputId,
+          ...successors.map((candidate) => candidate.event.inputId),
         ],
       }))
   })
@@ -11757,9 +12002,9 @@ describe('assistant auto-reply runtime', () => {
       sessionMaxAgeMs: null,
       vault: '/tmp/assistant-automation-vault',
     })
-    expect(listInputCandidatesByIds).toHaveBeenCalledTimes(1)
-    expect(listNewConversationInputs).not.toHaveBeenCalled()
-    expect(refresh).not.toHaveBeenCalled()
+    expect(listInputCandidatesByIds).not.toHaveBeenCalled()
+    expect(listNewConversationInputs).toHaveBeenCalledOnce()
+    expect(refresh).toHaveBeenCalledOnce()
   })
 
   it.each([

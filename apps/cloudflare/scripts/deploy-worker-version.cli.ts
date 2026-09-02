@@ -15,10 +15,22 @@ import {
 import { assertHostedDeployEnvironmentAsync } from "./deploy-preflight.js";
 import { resolveDeployWorkerCliPaths } from "./deploy-worker-version-paths.js";
 import {
+  createCloudflareContainerProvider,
+  parseWranglerContainerActions,
+  parseWranglerWorkerVersionId,
+  readCloudflareContainerApplicationIdentities,
+  readRenderedContainerIdentities,
+  waitForCloudflareContainerReleaseEntries,
+} from "./container-release-receipt.js";
+import {
   buildHostedLifecycleWranglerArgs,
   resolveHostedLifecycleBucketNames,
 } from "./r2-lifecycle.js";
-import { runWranglerJson, runWranglerLogged } from "./wrangler-runner.js";
+import {
+  runWranglerJson,
+  runWranglerLogged,
+  runWranglerLoggedCaptured,
+} from "./wrangler-runner.js";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
@@ -50,7 +62,18 @@ export async function runDeployWorkerVersionCli(
           deployRoot,
           source: env,
         });
-        await runWranglerLogged([
+        const renderedContainers = await readRenderedContainerIdentities(input.configPath);
+        const containerProvider = createCloudflareContainerProvider({
+          accountId: requireConfiguredString(env.CLOUDFLARE_ACCOUNT_ID, "CLOUDFLARE_ACCOUNT_ID"),
+          apiToken: requireConfiguredString(env.CLOUDFLARE_API_TOKEN, "CLOUDFLARE_API_TOKEN"),
+        });
+        const before = await readCloudflareContainerApplicationIdentities(
+          renderedContainers,
+          containerProvider.listApplications,
+          "before",
+          containerProvider.readRollout,
+        );
+        const deployOutput = await runWranglerLoggedCaptured([
           "deploy",
           "--config",
           input.configPath,
@@ -63,6 +86,22 @@ export async function runDeployWorkerVersionCli(
           input.versionTag,
           ...(input.includeSecrets ? ["--secrets-file", input.secretsFilePath] : []),
         ]);
+        const actions = parseWranglerContainerActions(
+          `${deployOutput.stdout}\n${deployOutput.stderr}`,
+          renderedContainers,
+        );
+        return {
+          containers: await waitForCloudflareContainerReleaseEntries({
+            actions,
+            before,
+            expectedContainers: renderedContainers,
+            listApplications: containerProvider.listApplications,
+            readRollout: containerProvider.readRollout,
+          }),
+          workerVersionId: parseWranglerWorkerVersionId(
+            `${deployOutput.stdout}\n${deployOutput.stderr}`,
+          ),
+        };
       },
       mkdir,
       readCurrentDeployment,

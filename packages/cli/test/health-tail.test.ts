@@ -173,10 +173,9 @@ test("intake list rejects the removed assessment status filter", async () => {
     ]);
 
     assert.equal(result.ok, false);
-    assert.match(
-      result.error.message ?? "",
-      /status|unknown option|unexpected option/i,
-    );
+    assert.equal(result.error.code, "VALIDATION_ERROR");
+    assert.equal(result.error.message, "The command arguments are invalid.");
+    assert.equal(result.error.fieldErrors?.[0]?.path, "arguments");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -1447,7 +1446,9 @@ test("family import-json validates payloads through the shared schema and does n
     assert.equal(upsertResult.error?.code, "invalid_payload");
     assert.match(upsertResult.error?.message ?? "", /family payload failed validation/i);
     assert.equal(listResult.ok, false);
-    assert.match(listResult.error?.message ?? "", /status|unknown option|unexpected option/i);
+    assert.equal(listResult.error?.code, "VALIDATION_ERROR");
+    assert.equal(listResult.error?.message, "The command arguments are invalid.");
+    assert.equal(listResult.error?.fieldErrors?.[0]?.path, "arguments");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

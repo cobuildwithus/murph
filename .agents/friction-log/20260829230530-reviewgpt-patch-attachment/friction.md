@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT patch attachment download times out after response completion'
 severity: 'major'
+issue: 'cobuildwithus/murph#2588'
 ---
 
 ## Expected Behavior

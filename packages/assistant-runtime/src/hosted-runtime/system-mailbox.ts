@@ -47,6 +47,7 @@ import {
   isHostedGroupContextHandoffSystemMailboxItem,
   mergeHostedSystemMailboxRollbackItems,
   projectHostedSystemMailboxModelFreeFrontier,
+  projectHostedSystemMailboxWakeOwnerFrontier,
   readHostedSystemMailboxState,
   removeHostedSystemMailboxPendingItemIfCurrent,
   resolveHostedSystemMailboxNextWakeAt,
@@ -337,7 +338,9 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
           "assistant.notification.requested",
         ) === true
           ? projectHostedSystemMailboxModelFreeFrontier(state)
-          : state;
+          : input.allowedRouteActions == null
+            ? projectHostedSystemMailboxWakeOwnerFrontier(state)
+            : state;
       const selectionState = {
         pending: modelFreeProjectedState.pending.filter((item) =>
           (

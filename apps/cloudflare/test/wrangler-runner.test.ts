@@ -12,6 +12,7 @@ vi.mock("node:child_process", () => ({
 import {
   runWranglerJson,
   runWranglerLogged,
+  runWranglerLoggedCaptured,
 } from "../scripts/wrangler-runner.js";
 
 describe("wrangler runner helpers", () => {
@@ -61,6 +62,34 @@ describe("wrangler runner helpers", () => {
     });
   });
 
+  it("captures and preserves logged wrangler output", async () => {
+    const child = createSpawnedChild();
+    spawnMock.mockReturnValue(child);
+    const stdoutWrite = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stderrWrite = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    const command = runWranglerLoggedCaptured(["deploy", "--name", "worker"], {
+      cwd: "/tmp/cloudflare-app",
+    });
+    child.stdout.write("Modified application runner\n");
+    child.stderr.write("diagnostic\n");
+    child.emit("close", 0);
+
+    await expect(command).resolves.toEqual({
+      stderr: "diagnostic\n",
+      stdout: "Modified application runner\n",
+    });
+    expect(stdoutWrite).toHaveBeenCalledWith("Modified application runner\n");
+    expect(stderrWrite).toHaveBeenCalledWith("diagnostic\n");
+    expect(spawnMock).toHaveBeenCalledWith("pnpm", ["exec", "wrangler", "deploy", "--name", "worker"], {
+      cwd: "/tmp/cloudflare-app",
+      env: process.env,
+      stdio: ["inherit", "pipe", "pipe"],
+    });
+    stdoutWrite.mockRestore();
+    stderrWrite.mockRestore();
+  });
+
   it("appends stderr to JSON command failures but not logged command failures", async () => {
     const jsonChild = createSpawnedChild();
     spawnMock.mockReturnValueOnce(jsonChild);
@@ -92,6 +121,19 @@ describe("wrangler runner helpers", () => {
 
     await expect(runWranglerJson(["deployments", "status", "--json"])).rejects.toThrow(
       "wrangler json runner requires piped stdout and stderr streams.",
+    );
+  });
+
+  it("fails cleanly when captured logged stdio streams are unavailable", async () => {
+    const child = new EventEmitter();
+    Object.assign(child, {
+      stderr: null,
+      stdout: null,
+    });
+    spawnMock.mockReturnValueOnce(child);
+
+    await expect(runWranglerLoggedCaptured(["deploy"])).rejects.toThrow(
+      "wrangler captured runner requires piped stdout and stderr streams.",
     );
   });
 });

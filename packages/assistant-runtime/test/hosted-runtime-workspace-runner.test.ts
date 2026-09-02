@@ -65,7 +65,7 @@ import {
   createHostedWorkspaceCheckpointRequestBuilder,
   createHostedWorkspaceSnapshotCheckpointRequestBuilder,
   HostedWorkspaceRunnerUserMismatchError,
-  runHostedWorkspaceUntilIdleOrBudget,
+  runHostedWorkspaceUntilIdleOrBudget as runHostedWorkspaceUntilIdleOrBudgetWithoutDrain,
   type HostedMailboxImportCheckpointResult,
   type HostedRuntimeEffectsPort,
   type HostedWorkspaceRunnerRuntimeStatusCheckpointInput,
@@ -90,6 +90,7 @@ import {
   readHostedMailboxImportState,
   writeHostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
+import { drainHostedRuntimeLogWritesBestEffort } from "../src/hosted-runtime/runtime-logs.ts";
 import {
   enqueueHostedPendingAssistantInputId,
   ensureHostedPendingAssistantInputIndex,
@@ -151,6 +152,16 @@ const TEST_BROWSER_VAULT_REPLICA_REF = {
   schema: "murph.hosted-browser-vault-replica-ref.v1",
   sourceBundleHash: "bundle_hash_synthetic_runner",
 } as const;
+
+async function runHostedWorkspaceUntilIdleOrBudget(
+  ...args: Parameters<typeof runHostedWorkspaceUntilIdleOrBudgetWithoutDrain>
+) {
+  try {
+    return await runHostedWorkspaceUntilIdleOrBudgetWithoutDrain(...args);
+  } finally {
+    await drainHostedRuntimeLogWritesBestEffort();
+  }
+}
 
 describe("runHostedWorkspaceUntilIdleOrBudget", () => {
   test("carries two initial conversation inputs through singleton foreground reruns before checkpointing", async () => {
@@ -1595,18 +1606,21 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       }).catch(() => undefined);
       await Promise.resolve();
       assert.equal(deferredUsageCompletionSettled, true);
+      await drainHostedRuntimeLogWritesBestEffort();
+      const initialLogEntries = logRequests.flatMap((request) => request.entries);
       assert.deepEqual(
-        logRequests.map((request) => request.entries[0]?.eventCode),
+        initialLogEntries.map((entry) => entry.eventCode),
         ["mailbox.imported", "mailbox.imported"],
       );
       assert.deepEqual(
-        logRequests.map((request) => request.entries[0]?.mailboxLane),
+        initialLogEntries.map((entry) => entry.mailboxLane),
         ["conversation", "system"],
       );
 
       releaseEffect();
       assert.ok(result.mailboxPostCheckpointEffectsFinished);
       await result.mailboxPostCheckpointEffectsFinished;
+      await drainHostedRuntimeLogWritesBestEffort();
       assert.deepEqual(events, [
         "import:1",
         "assistant",
@@ -1614,7 +1628,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "mailbox:afterCheckpoint:done",
       ]);
       assert.deepEqual(
-        logRequests.map((request) => request.entries[0]?.eventCode),
+        logRequests.flatMap((request) => request.entries).map((entry) => entry.eventCode),
         [
           "mailbox.imported",
           "mailbox.imported",
@@ -3227,6 +3241,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       effectRelease.current?.();
       assert.ok(result.mailboxPostCheckpointEffectsFinished);
       await result.mailboxPostCheckpointEffectsFinished;
+      await drainHostedRuntimeLogWritesBestEffort();
       const effectLog = logRequests.flatMap((request) => request.entries)
         .find((entry) => entry.eventCode === "mailbox.post_checkpoint_effects_finished");
       assert.ok(effectLog);
@@ -3301,6 +3316,54 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         checkpointRequests.map((request) => request.reason),
         [],
       );
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("marks a projection-only assistant checkpoint request dirty without claiming application progress", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ items: [] });
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_projection_checkpoint",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("Import should not run without mailbox items.");
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_projection_checkpoint",
+        async runAssistantPhase() {
+          return {
+            progressed: false,
+            runtimeProjectionCheckpointRequested: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.equal(result.runtimeStateDirty, true);
+      assert.equal(result.assistantPhaseResult?.progressed, false);
+      assert.equal(result.assistantPhaseResult?.checkpointReason, undefined);
+      assert.deepEqual(checkpointRequests, []);
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -4546,6 +4609,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       await flushBackgroundMailboxEffects();
+      await drainHostedRuntimeLogWritesBestEffort();
 
       assert.deepEqual(events, [
         "import:1",
@@ -4554,12 +4618,13 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       ]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
       ]);
-      assert.deepEqual(logRequests.map((request) => request.entries[0]?.phase), [
+      const logEntries = logRequests.flatMap((request) => request.entries);
+      assert.deepEqual(logEntries.map((entry) => entry.phase), [
         "import",
         "import",
         "import",
       ]);
-      assert.deepEqual(logRequests[2]?.entries[0]?.redactedJson, {
+      assert.deepEqual(logEntries.at(-1)?.redactedJson, {
         attemptedCount: 1,
         effectAttachmentEvidenceUpdated: [true],
         effectKinds: ["inbox_projection"],
@@ -4712,20 +4777,18 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       await flushBackgroundMailboxEffects();
+      await drainHostedRuntimeLogWritesBestEffort();
 
       assert.equal(result.assistantPhaseResult?.progressed, true);
       assert.equal(result.latestWorkspace?.version, "0");
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
       ]);
-      assert.deepEqual(events, [
+      assert.deepEqual(events.filter((event) => event !== "optional:log"), [
         "import:1",
-        "optional:log",
-        "optional:log",
         "assistant",
-        "optional:log",
         "optional:projection",
-        "optional:log",
       ]);
+      assert.equal(events.filter((event) => event === "optional:log").length, 2);
     } finally {
       warn.mockRestore();
       await rm(vaultRoot, {
@@ -5301,11 +5364,18 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           { importedSeq: "1", lane: "conversation" },
         ],
       ]);
+      await drainHostedRuntimeLogWritesBestEffort();
+      const mailboxImportedEntries = logRequests
+        .flatMap((request) => request.entries)
+        .filter((entry) => entry.eventCode === "mailbox.imported");
       assert.deepEqual(
-        logRequests.map((request) => request.entries[0]?.eventCode).slice(0, 2),
+        mailboxImportedEntries.map((entry) => entry.eventCode).slice(0, 2),
         ["mailbox.imported", "mailbox.imported"],
       );
-      assert.deepEqual(logRequests[2]?.entries[0], {
+      assert.deepEqual(mailboxImportedEntries.find((entry) =>
+        entry.phase === "active_turn_input"
+        && entry.mailboxSeqEnd === "3"
+      ), {
         at: TEST_NOW,
         attemptId: "attempt_synthetic_runner_active_turn",
         component: "mailbox",
@@ -7304,15 +7374,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    let flushSawAssistantCheckpointLog = false;
     const usageRecordPort: HostedRuntimeUsageRecordPort = {
       async recordUsage(record) {
-        flushSawAssistantCheckpointLog = logRequests
-          .flatMap((request) => request.entries)
-          .some((entry) =>
-            entry.eventCode === "checkpoint.runtime_residue_deferred"
-            && entry.redactedJson?.checkpointPhase === "assistant"
-          );
         events.push("usage:flush");
         assert.equal(record.usageId, "turn_runner_usage.attempt-1");
         return {
@@ -7409,7 +7472,11 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(checkpointRequests, []);
       assert.equal(events.filter((event) => event === "usage:flush").length, 1);
       assert.equal(events.includes("assistant:afterCheckpoint"), false);
-      assert.equal(flushSawAssistantCheckpointLog, true);
+      await drainHostedRuntimeLogWritesBestEffort();
+      assert.equal(logRequests.flatMap((request) => request.entries).some((entry) =>
+        entry.eventCode === "checkpoint.runtime_residue_deferred"
+        && entry.redactedJson?.checkpointPhase === "assistant"
+      ), true);
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -7809,7 +7876,14 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           { importedSeq: "1", lane: "conversation" },
         ],
       ]);
-      assert.deepEqual(logRequests[2]?.entries[0]?.redactedJson, {
+      await drainHostedRuntimeLogWritesBestEffort();
+      const blockedImportLog = logRequests
+        .flatMap((request) => request.entries)
+        .find((entry) =>
+          entry.eventCode === "mailbox.imported"
+          && entry.redactedJson?.blockedCount === 1
+        );
+      assert.deepEqual(blockedImportLog?.redactedJson, {
         assistantInputCount: 1,
         assistantInputPresent: true,
         blockCodes: ["synthetic.retryable-block"],

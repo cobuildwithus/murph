@@ -153,8 +153,11 @@ question; the executor owns no membership, routing, mailbox, retry, or delivery
 state and returns only one schema-checked bounded answer.
 
 The child reuses the trusted hosted Codex home for minimum provider auth and
-configuration, but starts from a fresh empty working directory and removes that
-directory after the exact child exits. It uses process lifetime `one-shot`; its
+configuration. Every candidate and disclosure-review turn starts from a fresh
+empty working directory that is removed after the exact child exits. An
+authenticated operator diagnostic selected for read-tool inspection receives
+the exact authorized target path as quoted host prompt data instead of making
+that workspace the process working directory. It uses process lifetime `one-shot`; its
 `thread/start` request sets `permissions = "murph-group-read"`, exact
 `runtimeWorkspaceRoots`, `ephemeral = true`, and approval policy `never` without
 legacy `sandbox`. The App Server response is not an authorization boundary;
@@ -163,8 +166,9 @@ environment, and network enforcement. The profile permits read-only access to
 the exact target roots
 while denying `.runtime/**`, `.codex/**`, environment files, writes, other
 workspaces, and tool network. Model-run shell commands inherit no provider
-credential or hosted secret. The child's only dynamic tool is the consent-aware
-lazy `murph.group/read_shared` read. It receives no mutation or delivery route,
+credential or hosted secret. A joined-group child receives only the consent-aware
+lazy `murph.group/read_shared` dynamic read; consented and operator candidates
+and disclosure reviewers receive no dynamic tools. No child receives a mutation or delivery route,
 MCP, web search, memory, plugin, app, or multi-agent authority.
 
 The runtime may keep one such child beside foreground work. It owns the exact
@@ -175,9 +179,10 @@ existing hosted mailbox; assistant-engine does not add a process pool or
 scheduler.
 
 `executeConsentedReadOnlyAssistantAsk` is the disclosure-scoped composition of
-that primitive. Its first one-shot child reads the authorized personal
-workspace with the exact immutable permission context and proposes one bounded
-answer. A second, sequential, fresh-context one-shot child receives only that
+that primitive. An ordinary consented candidate reads the authorized personal
+workspace; an operator diagnostic candidate reads the bound personal or group
+target path supplied as quoted host data. Both use the exact immutable permission
+context and propose one bounded answer. A second, sequential, fresh-context one-shot child receives only that
 permission, the incoming question, and the proposed answer against an empty
 runtime root. It has no personal workspace, conversation history, dynamic
 tools, delivery route, network, or other authority and returns only `allow` or

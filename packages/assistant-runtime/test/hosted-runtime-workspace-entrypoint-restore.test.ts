@@ -22,6 +22,7 @@ import {
   readConversationImportedSeqs,
   removeTempRoot,
   requireEventIndex,
+  runHostedWorkspaceRuntimeJobInProcess,
   sha256Hex,
   stagePendingLinqAssistantInputForMailboxItem,
   summarizeStageTimings,
@@ -111,7 +112,6 @@ import {
   HostedWorkspaceRunnerUserMismatchError,
   drainHostedRuntimeDeferredUsageCompletionsBestEffort,
   parseHostedAssistantWorkspaceRuntimeJobInput,
-  runHostedWorkspaceRuntimeJobInProcess,
   type HostedWorkspaceRuntimeJobOptions,
   type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
@@ -135,6 +135,7 @@ import {
   writeHostedMailboxImportState,
   type HostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
+import { drainHostedRuntimeLogWritesBestEffort } from "../src/hosted-runtime/runtime-logs.ts";
 import {
   HostedRuntimeArtifactReadError,
   type HostedRuntimeDeviceSyncPort,
@@ -299,7 +300,8 @@ describe("hosted workspace runtime entrypoint", () => {
   });
 
   test("retains the default workspace read and restore path without prepared work", async () => {
-    const fixture = await createWorkspaceRestoreFixture("snapshot-default-restore-path");
+    const snapshotId = "snapshot-default-restore-path";
+    const fixture = await createWorkspaceRestoreFixture(snapshotId);
 
     try {
       const resultPromise = runHostedWorkspaceRuntimeJobInProcess(fixture.job, {
@@ -323,6 +325,12 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(fixture.events.filter((event) => event === "workspace.read").length, 1);
       assert.equal(fixture.events.filter((event) => event === "workspace.restore").length, 1);
       assert.ok(fixture.events.includes("mailbox.fetch"));
+      const checkpointBuilderInput =
+        mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder.mock.calls.at(-1)?.[0];
+      assert.deepEqual(
+        checkpointBuilderInput?.metadata.currentSnapshotRef,
+        createWorkspaceSnapshotV2Ref(snapshotId),
+      );
     } finally {
       fixture.mailboxRelease.resolve();
       await removeTempRoot(fixture.vaultRoot);
@@ -522,14 +530,15 @@ describe("hosted workspace runtime entrypoint", () => {
       await expect(resultPromise).rejects.toThrow(
         "Foreground test should not build checkpoint requests.",
       );
+      await drainHostedRuntimeLogWritesBestEffort();
 
       assert.deepEqual(events, [
         "workspace.read",
         "mailbox.fetch",
-        "runtime.log:mailbox.imported",
         "mailbox.fetch",
-        "runtime.log:mailbox.imported",
         "assistant.phase",
+        "runtime.log:mailbox.imported",
+        "runtime.log:mailbox.imported",
         "runtime.log:checkpoint.runtime_residue_deferred",
       ]);
       assert.deepEqual(checkpointRequests, []);
@@ -2877,6 +2886,7 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
+      await drainHostedRuntimeLogWritesBestEffort();
       const mailboxFetchIndex = requireEventIndex(events, "mailbox.fetch");
       assert.equal(events.includes("artifact.get:eager-raw-capture"), false);
       for (const [index] of artifactHashes.entries()) {
@@ -3106,7 +3116,6 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(importedSeqs, mailboxItems.map((item) => item.laneSeq));
       assert.equal(artifactPutCalls.length, 1);
       assert.ok(mailboxFetchIndex < mailboxImportedLogIndex);
-      assert.ok(mailboxImportedLogIndex < requireEventIndex(events, `snapshot.create:${mailboxItemCount}`));
       assert.equal(stageSummary["workspace.read"]?.count, 1);
       assert.equal(stageSummary["artifact.get"]?.count, 1);
       assert.equal(stageSummary["mailbox.fetch"]?.count, 1);

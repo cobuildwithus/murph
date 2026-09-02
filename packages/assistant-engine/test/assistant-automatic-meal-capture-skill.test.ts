@@ -11,6 +11,8 @@ import {
   ASSISTANT_SKILLS,
   resolveAssistantSkillsRoot,
 } from '../src/assistant-skill-assets.js'
+import { MURPH_ATTACH_RESPONSE_CARD_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.js'
+import { MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION } from '../src/assistant/managed-automations.js'
 import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
 
 function compact(value: string): string {
@@ -190,18 +192,32 @@ describe('assistant automatic meal capture skill', () => {
     expect(skill).toContain('vault-cli meal closeout-work')
     expect(skill).toContain('oldest bounded batch')
     expect(skill).not.toContain('preceding 31 local days')
+    const compactSkill = compact(skill)
     expect(compact(skill)).toContain('partial totals as partial')
     expect(skill).toContain('each retained photo as pending closeout work')
-    expect(skill).toContain('late import gets one dated catch-up')
+    expect(compactSkill).toContain(
+      'A capture is eligible for member-visible presentation only when its local capture date equals the engine-supplied `Occurrence local date`.',
+    )
+    expect(compactSkill).toContain(
+      'A late import from an earlier date remains full cleanup work, but it never authorizes a dated catch-up, card, question, or closeout text.',
+    )
+    expect(compactSkill).toContain(
+      'When current and historical captures are selected together, exclude every historical capture from current-date presentation inputs.',
+    )
+    expect(compactSkill).toContain(
+      '`{"kind":"skip","privateSummary":"Historical meal cleanup completed."}`',
+    )
+    expect(compactSkill).not.toContain(
+      'A late import gets one dated catch-up.',
+    )
     expect(skill).toContain('latest `recordedAt` is at or after')
     expect(skill).toContain('partial-cleanup failure loses no meal')
     expect(skill).toMatch(
-      /canonical\s+`vault-cli meal totals --from <date> --to\s+<date>` read/,
+      /canonical\s+`vault-cli meal totals --from <occurrence-local-date> --to\s+<occurrence-local-date>` read/,
     )
     expect(compact(skill)).toContain(
       'immediately before any response-card attachment',
     )
-    const compactSkill = compact(skill)
     expect(compactSkill).toContain(
       'Run `vault-cli goal list --status active --limit 200 --format json`.',
     )
@@ -272,10 +288,7 @@ describe('assistant automatic meal capture skill', () => {
       'on a scheduled occurrence, ask no question and use ordinary closeout text.',
     )
     expect(compactSkill).toContain(
-      'Keep the occurrence local date from step 1 only as the work and retry boundary.',
-    )
-    expect(compactSkill).toContain(
-      'Resolve target applicability against the single selected card `localDate`: the capture date whose totals and card are being closed out, including a historical catch-up date.',
+      'Keep the occurrence local date from step 1 as both the work boundary and the only scheduled card `localDate`. Historical captures are cleanup-only and never card inputs.',
     )
     expect(compactSkill).toContain(
       "A target qualifies only when that card date is on or after the containing Goal's `window.startAt`, on or before its optional `window.targetAt`, and inside the target's optional inclusive `startAt`/`targetAt` interval.",
@@ -300,7 +313,7 @@ describe('assistant automatic meal capture skill', () => {
       'The absence of that managed Goal is the first-run authority; add no flag or second state owner.',
     )
     expect(compactSkill).toContain(
-      'create that single canonical Goal as `paused`, with `window.startAt` equal to the selected capture/card local date.',
+      'create that single canonical Goal as `paused`, with `window.startAt` equal to the occurrence local date.',
     )
     expect(compactSkill).toContain(
       'Ask no question, attach no card, and never activate it on the scheduled turn.',
@@ -324,11 +337,11 @@ describe('assistant automatic meal capture skill', () => {
       "Never infer a target from this day's meal total or one wearable day.",
     )
     expect(compactSkill).toContain(
-      'When the run covers exactly one local date, the canonical read includes a calorie total',
+      'When the canonical read includes a calorie total',
     )
     expect(skill).toContain('`murph.attach_response_card`')
-    expect(skill).toContain(
-      '`card: { kind: "daily_nutrition", version: 2, localDate: <the single',
+    expect(compactSkill).toContain(
+      '`card: { kind: "daily_nutrition", version: 2, localDate: <occurrence-local-date>',
     )
     expect(skill).toContain('mealCount: <top-level mealCount>')
     expect(compactSkill).toContain(
@@ -349,12 +362,15 @@ describe('assistant automatic meal capture skill', () => {
       'Do not widen the scheduled-question exception above: a scheduled run follows its existing compact closeout when an unselected meal remains incomplete.',
     )
     expect(skill).toContain('Do not author a second nutrition summary')
-    expect(skill).toMatch(/For\s+multi-date catch-up, missing calories/u)
-    expect(skill).toMatch(
-      /retain the current compact text,\s+one-question, or non-numeric behavior/u,
+    expect(compactSkill).toContain(
+      'Historical-only work already returned the required skip before this step; historical captures never become presentation inputs for current-date work.',
+    )
+    expect(compactSkill).not.toContain('For multi-date catch-up')
+    expect(compactSkill).toContain(
+      'retain the current compact text, one-question, or non-numeric behavior',
     )
     expect(skill.indexOf('vault-cli meal remove-photo <meal-id>')).toBeLessThan(
-      skill.indexOf('vault-cli meal totals --from <date> --to'),
+      skill.indexOf('vault-cli meal totals --from <occurrence-local-date> --to'),
     )
     expect(skill.indexOf('retry `meal edit` once')).toBeLessThan(
       skill.indexOf('vault-cli meal remove-photo <meal-id>'),
@@ -366,7 +382,7 @@ describe('assistant automatic meal capture skill', () => {
       'A meal with neither saved nutrition nor that observation is not ready for cleanup.',
     )
     const compactClarification = compactSkill.indexOf(
-      'Before step 6, apply the estimation-eligibility rule above.',
+      'Before step 6, apply the estimation-eligibility rule above to those current-date captures.',
     )
     expect(compactClarification).toBeGreaterThan(
       compactSkill.indexOf('vault-cli meal remove-photo <meal-id>'),
@@ -381,7 +397,7 @@ describe('assistant automatic meal capture skill', () => {
       'When estimation is skipped, complete photo cleanup and stop with the established non-numeric closeout: ask no estimate-enabling question and run no Goal, totals, or card work.',
     )
     expect(compactSkill).toContain(
-      'Use local time when all share the occurrence date; include date and time for any historical or multi-date set.',
+      'Use local time for the occurrence date.',
     )
     expect(compactSkill).toContain(
       'Ask only for missing identity and amount, expose no meal ids, and do not substitute ordinary closeout or a dashboard refusal.',
@@ -390,7 +406,9 @@ describe('assistant automatic meal capture skill', () => {
       'call `murph.attach_response_card` with this exact mapping',
     )
     expect(
-      compactSkill.indexOf('vault-cli meal totals --from <date> --to'),
+      compactSkill.indexOf(
+        'vault-cli meal totals --from <occurrence-local-date> --to',
+      ),
     ).toBeLessThan(attachCardIndex)
     expect(skill).toContain('a delivery prerequisite, not a second automation opt-in')
     expect(skill).toContain('`--nutrition-source label`')
@@ -404,6 +422,57 @@ describe('assistant automatic meal capture skill', () => {
     )
     expect(skill).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/SKILL.md',
+    )
+  })
+
+  it('composes historical cleanup without catch-up presentation authority', async () => {
+    const skillsRoot = resolveAssistantSkillsRoot()
+    const [automaticCapture, dailyCardGoals] = await Promise.all([
+      readFile(
+        path.join(skillsRoot, 'automatic-meal-capture', 'SKILL.md'),
+        'utf8',
+      ),
+      readFile(
+        path.join(
+          skillsRoot,
+          'nutrition-strategy',
+          'references',
+          'daily-nutrition-card-goals.md',
+        ),
+        'utf8',
+      ),
+    ])
+    const instructions = compact([
+      buildPrompt({
+        currentLocalDate: '2026-08-27',
+        scheduledOccurrenceAt: '2026-08-28T01:00:00.000Z',
+      }),
+      MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions,
+      automaticCapture,
+      dailyCardGoals,
+      MURPH_ATTACH_RESPONSE_CARD_TOOL.description,
+    ].join('\n\n'))
+
+    expect(instructions).toContain(
+      '`{"kind":"skip","privateSummary":"Historical meal cleanup completed."}`',
+    )
+    expect(instructions).toContain(
+      'historical-only work returns its required `skip`',
+    )
+    expect(instructions).toContain(
+      'A historical automatic capture cannot authorize a scheduled card.',
+    )
+    expect(instructions).not.toContain(
+      'A late import gets one dated catch-up.',
+    )
+    expect(instructions).not.toContain(
+      'use the selected capture date for a scheduled closeout, which may differ from the occurrence date for a historical catch-up',
+    )
+    expect(instructions).not.toContain(
+      'the selected capture date for a scheduled closeout, which may be a historical catch-up date rather than the occurrence date',
+    )
+    expect(instructions).not.toContain(
+      'Suppress the message only when neither a retained photo nor a same-occurrence removal revision is selected.',
     )
   })
 

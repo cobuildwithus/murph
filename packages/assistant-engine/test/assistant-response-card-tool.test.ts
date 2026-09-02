@@ -495,13 +495,10 @@ async function persistWorkoutCardThroughLinq(input: {
     requests.push(
       typeof init.body === 'string' ? JSON.parse(init.body) : null,
     )
-    return {
-      arrayBuffer: async () => new ArrayBuffer(0),
-      json: async () => ({ message: { id: 'msg_workout_card' } }),
-      ok: true,
-      status: 200,
-      text: async () => '',
-    }
+    return new Response(
+      JSON.stringify({ message: { id: 'msg_workout_card' } }),
+      { headers: { 'Content-Type': 'application/json' } },
+    )
   }
   await sendLinqIMessageAppCard({
     card: persistedCard,
@@ -1008,7 +1005,13 @@ describe('murph.attach_response_card', () => {
       "For the exact card localDate, require the containing active Goal window and each target's optional startAt/targetAt interval to include that date, with inclusive boundaries",
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'use the selected capture date for a scheduled closeout, which may differ from the occurrence date for a historical catch-up, or the explicitly requested date, never wall-clock today',
+      'use the engine-supplied occurrence local date for a scheduled closeout, or the explicitly requested date for an interactive request, never wall-clock today',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'A historical automatic capture cannot authorize a scheduled card.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toContain(
+      'historical catch-up',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'Ignore out-of-window targets for current authority and conflicts, and never expose, compare, copy, derive from, or mutate a Goal because of them.',

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildHostedWorkerSecretsPayload,
   buildHostedWranglerDeployConfig,
+  HOSTED_DEPLOY_AUTOMATION_OPTIONAL_VAR_NAMES,
   HOSTED_WORKER_REQUIRED_SECRET_NAMES,
   HOSTED_WORKER_REQUIRED_VAR_NAMES,
   parseHostedContainerImageListOutput,
@@ -186,6 +187,13 @@ function findMutableActionRefs(workflow: string): Array<{ line: number; ref: str
 }
 
 describe("hosted deploy automation helpers", () => {
+  it("exports the exact deploy-only contract inputs", () => {
+    expect(HOSTED_DEPLOY_AUTOMATION_OPTIONAL_VAR_NAMES).toEqual([
+      "CF_STANDBY_CONTAINER_MAX_INSTANCES",
+      "HOSTED_EXECUTION_DEPLOY_TAG",
+    ]);
+  });
+
   it("builds a generated wrangler config for the native container worker", () => {
     const authorityVerifyKeyringJson = JSON.stringify({
       "projects/example/locations/global/keyRings/hosted/cryptoKeys/authority/cryptoKeyVersions/2": {
@@ -199,10 +207,12 @@ describe("hosted deploy automation helpers", () => {
       CF_BUNDLES_BUCKET: "hosted-bundles",
       CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
       CF_CONTAINER_INSTANCE_TYPE: "standard-1",
-      CF_CONTAINER_MAX_INSTANCES: "250",
+      CF_CONTAINER_MAX_INSTANCES: "648",
       CF_RUNNER_COMMIT_TIMEOUT_MS: "45000",
       CF_RUNNER_READY_TIMEOUT_MS: "65000",
+      CF_STANDBY_CONTAINER_MAX_INSTANCES: "100",
       CF_WORKER_NAME: "hosted-worker",
+      HOSTED_EXECUTION_DEPLOY_TAG: "run-123-2",
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
       HOSTED_WEB_BASE_URL: "https://web.example.test",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:v2",
@@ -228,6 +238,7 @@ describe("hosted deploy automation helpers", () => {
       };
       containers: Array<{
         class_name: string;
+        constraints?: { regions: string[] };
         image: string;
         image_build_context: string;
         instance_type: string | {
@@ -314,7 +325,7 @@ describe("hosted deploy automation helpers", () => {
         image: "../../../Dockerfile.cloudflare-hosted-runner",
         image_build_context: "..",
         instance_type: "standard-1",
-        max_instances: 250,
+        max_instances: 648,
         rollout_active_grace_period: 300,
         rollout_step_percentage: [10, 25, 50, 100],
         ssh: { enabled: false },
@@ -327,6 +338,17 @@ describe("hosted deploy automation helpers", () => {
         max_instances: 1,
         rollout_active_grace_period: 0,
         rollout_step_percentage: [100],
+        ssh: { enabled: false },
+      },
+      {
+        class_name: "StandbyRunnerContainer",
+        constraints: { regions: ["ENAM"] },
+        image: "../../../Dockerfile.cloudflare-hosted-runner",
+        image_build_context: "..",
+        instance_type: "standard-1",
+        max_instances: 100,
+        rollout_active_grace_period: 300,
+        rollout_step_percentage: [10, 25, 50, 100],
         ssh: { enabled: false },
       },
     ]);
@@ -354,6 +376,14 @@ describe("hosted deploy automation helpers", () => {
       {
         class_name: "DeploySmokeRunnerContainer",
         name: "RUNNER_CONTAINER_SMOKE",
+      },
+      {
+        class_name: "StandbyRunnerCoordinatorDurableObject",
+        name: "STANDBY_COORDINATOR",
+      },
+      {
+        class_name: "StandbyRunnerContainer",
+        name: "STANDBY_RUNNER_CONTAINER",
       },
     ]);
     expect(config.analytics_engine_datasets).toEqual([
@@ -386,6 +416,13 @@ describe("hosted deploy automation helpers", () => {
       {
         new_sqlite_classes: ["OpenAiAuthorizationAlertDurableObject"],
         tag: "v6",
+      },
+      {
+        new_sqlite_classes: [
+          "StandbyRunnerCoordinatorDurableObject",
+          "StandbyRunnerContainer",
+        ],
+        tag: "v7",
       },
     ]);
     expect(config).toMatchObject({
@@ -449,6 +486,9 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS).toBe("30000");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS).toBe("180000");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS).toBe("60000");
+    expect(config.vars.HOSTED_EXECUTION_STANDBY_MODE).toBe("off");
+    expect(config.vars.CF_STANDBY_CONTAINER_MAX_INSTANCES).toBeUndefined();
+    expect(config.vars.HOSTED_EXECUTION_DEPLOY_TAG).toBeUndefined();
     expect(config.vars.HOSTED_PHYSICAL_NOTES_ENABLED).toBe("true");
     expect(config.vars.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION).toContain("cryptoKeyVersions/1");
     expect(config.vars.HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM).toContain("BEGIN PUBLIC KEY");
@@ -510,6 +550,31 @@ describe("hosted deploy automation helpers", () => {
         }),
       ).toThrow(/CF_RUNNER_READY_TIMEOUT_MS must be a positive integer/u);
     }
+  });
+
+  it("defaults the standby container ceiling to the ordinary runner ceiling", () => {
+    const environment = readHostedDeployAutomationEnvironment({
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_CONTAINER_MAX_INSTANCES: "250",
+      CF_WORKER_NAME: "hosted-worker",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+    });
+
+    expect(environment.containerMaxInstances).toBe(250);
+    expect(environment.standbyContainerMaxInstances).toBe(250);
+  });
+
+  it("rejects an invalid standby container ceiling", () => {
+    expect(() =>
+      readHostedDeployAutomationEnvironment({
+        CF_BUNDLES_BUCKET: "hosted-bundles",
+        CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+        CF_STANDBY_CONTAINER_MAX_INSTANCES: "100x",
+        CF_WORKER_NAME: "hosted-worker",
+        ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+      }),
+    ).toThrow(/CF_STANDBY_CONTAINER_MAX_INSTANCES must be a positive integer/u);
   });
 
   it("binds generated deploy config to the prepared runner fingerprints", () => {
@@ -643,12 +708,16 @@ describe("hosted deploy automation helpers", () => {
     expect(generatedConfig.containers.map(({ instance_type }) => instance_type)).toEqual([
       expectedDefaultInstanceType,
       expectedDefaultInstanceType,
+      expectedDefaultInstanceType,
     ]);
     expect(checkedInConfig.containers).toHaveLength(generatedConfig.containers.length);
     for (const [index, generatedContainer] of generatedConfig.containers.entries()) {
       expect(generatedContainer.ssh).toEqual({ enabled: false });
       expect(checkedInConfig.containers[index]).toMatchObject({
         class_name: generatedContainer.class_name,
+        ...("constraints" in generatedContainer
+          ? { constraints: generatedContainer.constraints }
+          : {}),
         instance_type: generatedContainer.instance_type,
         max_instances: generatedContainer.max_instances,
         rollout_active_grace_period: generatedContainer.rollout_active_grace_period,
@@ -715,6 +784,7 @@ describe("hosted deploy automation helpers", () => {
       ...expectedRequiredHostedCryptoWorkerVars(),
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "exa,hosted-email,linq,mapbox,telegram",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "600000",
+      HOSTED_EXECUTION_STANDBY_MODE: "off",
       HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "production",
     });
   });
@@ -814,7 +884,7 @@ describe("hosted deploy automation helpers", () => {
       "nodejs_compat",
       "containers_pid_namespace",
     ]);
-    expect(config.containers).toHaveLength(2);
+    expect(config.containers).toHaveLength(3);
     for (const container of config.containers) {
       expect(container.ssh).toEqual({ enabled: false });
       expect(container).not.toHaveProperty("authorized_keys");

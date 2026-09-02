@@ -6,6 +6,7 @@ import type { HostedExecutionEnvironment } from "../env.js";
 import {
   readHostedRunnerContainerIdentity,
 } from "../hosted-runner-container-identity.js";
+import { isHostedStandbySlotName } from "../standby-runner-contract.js";
 import {
   resolveHostedExecutionRunnerContainerName,
   type HostedExecutionContainerNamespaceLike,
@@ -176,6 +177,10 @@ export function readActiveRuntimeRunnerContainerName(input: {
 }): string | null {
   if (!input.runnerContainerName) {
     return input.activeRuntime.userId;
+  }
+
+  if (isHostedStandbySlotName(input.runnerContainerName)) {
+    return input.runnerContainerName.trim();
   }
 
   const identity = readHostedRunnerContainerIdentity({

@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-30
+Last verified: 2026-08-31
 
 ## Non-Negotiable Rules
 
@@ -1327,6 +1327,17 @@ scope is metadata only; it is never evidence that the value can or should be
 read locally. Do not download, copy, inject, echo, or reconstruct a production
 secret in a local process, file, worktree, test, or debugging session.
 
+The sole local exception is the operator-provisioned Temporal diagnostics path
+documented in `agent-docs/references/hosted-temporal-orchestration.md`. It may
+pass an already-present Temporal API credential directly to one bounded CLI or
+SDK process without inspecting, printing, copying, persisting, or repackaging
+the value. This exception does not authorize pulling provider environment
+values, creating a persistent CLI profile, forwarding local environment state
+to CI or a remote runner, or mutating Temporal. Start with list, describe,
+query, and metadata-only history inspection; signals, starts, resets,
+terminations, schedule changes, and deployment routing still require explicit
+authorization for the current task.
+
 When requested work would require a production secret, stop before
 implementation or execution. Explain the exact blocked operation, the class of
 secret or protected identity it requires, and why a secret-free path is
@@ -1432,6 +1443,17 @@ locally readable.
   isolation flag enabled until the configured compatibility date provides the
   same boundary by default. Use structured logs, Durable Object status,
   Container inventory, and managed deploy smoke as the diagnostic boundary.
+- The ENAM runner standby must remain content-free and memberless until an
+  exact `UserRunner` claim. Its coordinator may persist only release/region,
+  opaque slot names, and opaque claim tombstones; it must never receive a
+  member id, workspace reference, provider credential, or canonical product
+  fact. The slot's immutable binding is the sole opaque-name-to-member mapping.
+  Before provider credential minting, invocation, wake, or cleanup, the
+  per-member owner must re-read that binding and require the exact member,
+  release, region, and slot. A claimed slot is never reusable across members;
+  terminal retirement destroys the container and scrubs claim/member identity.
+  Codex standby preflight uses a disposable content-free home and must not make
+  a provider request or retain a resident member-configured App Server.
 - The same protected-main Cloudflare workflow may attach the GitHub `Preview`
   Environment only for the explicit `preview` target. That environment must
   contain staging-only credentials and must not duplicate production database,
@@ -1488,7 +1510,7 @@ locally readable.
 - Runtime observability writes under `vault/.runtime/operations/assistant/diagnostics/**`, `vault/.runtime/operations/assistant/journals/**`, quarantine metadata, and persisted delivery errors must redact inline bearer tokens, cookies, API keys, and similar secret material before the artifact is committed.
 - Persisted runtime logs, CI logs, uploaded artifacts, and user/provider-facing output must never print raw PHI, health data, vault contents, model prompts, model messages, transcripts, request/response bodies, final provider requests, file text, lab reports, or similarly sensitive payloads. Local one-off diagnostics may inspect concrete payload shape or values when needed to prove root cause, but must stay out of commits, uploaded artifacts, and external surfaces, and must never expose secrets or raw credentials. The static `pnpm logs:guard` check blocks direct logging of variables named `prompt`, `messages`, `input`, `output`, `response`, `body`, `transcript`, `vault`, `finalRequest`, `fileText`, and `labReport` unless the value is passed through an explicit redaction, sanitization, or summarization helper, or reduced to counts/status for persisted or uploaded logs.
 - Device-sync account metadata is internal diagnostic state only. Hosted and local storage writes must sanitize it down to a compact shallow scalar record instead of persisting provider profile payloads, nested JSON blobs, or oversized string fields.
-- The resident Codex App Server is a privileged local adapter, not a sandbox boundary. Normal assistant turns should rely on the bound Murph runtime/tool surface and canonical write ownership in `packages/core`, not a second provider-workspace or canonical-write-guard safety model. The narrow exception is `executeReadOnlyAssistantAsk`: model-invoked commands in that one-shot child are confined by the native `murph-group-read` permission profile. The child reuses the trusted hosted Codex home for minimum auth/config lifecycle, but its thread request passes the named `permissions` override, exact runtime roots, empty working directory, disabled instruction sources, and approval policy `never`, and never passes a legacy `sandbox` field. The App Server response is not an authorization boundary. The profile grants read only to Codex's minimal runtime and exact group workspace roots, denies `.runtime/**`, `.codex/**`, retired vault-share projection roots, and environment files, disables tool network plus project config/instruction discovery, and gives shell commands an inherit-none environment with no provider credential or hosted secret. The supervising App Server may receive minimum provider auth, but the child's only dynamic tool is the consent-aware lazy `murph.group/read_shared` read. It receives no mutation or delivery tool, route grant, signing material, MCP, web search, memory, plugin, app, or multi-agent authority. A production-like Linux sandbox smoke must prove the actual profile enforcement or the feature remains disabled.
+- The resident Codex App Server is a privileged local adapter, not a sandbox boundary. Normal assistant turns should rely on the bound Murph runtime/tool surface and canonical write ownership in `packages/core`, not a second provider-workspace or canonical-write-guard safety model. The narrow exception is `executeReadOnlyAssistantAsk`: model-invoked commands in that one-shot child are confined by the native `murph-group-read` permission profile. The child reuses the trusted hosted Codex home for minimum auth/config lifecycle, but its answer-stage thread request passes the named `permissions` override, exact runtime root, disabled instruction sources, and approval policy `never`, and never passes a legacy `sandbox` field. Every candidate starts in an isolated temporary directory so target-local Codex config cannot become startup authority; an exact `operator_task` selected for read-tool inspection receives its bound workspace path as quoted host prompt data. A consented answer's separate disclosure reviewer remains tool-free in another isolated temporary directory. The App Server response is not an authorization boundary. The profile grants read only to Codex's minimal runtime and exact authorized workspace roots, denies `.runtime/**`, `.codex/**`, retired vault-share projection roots, and environment files, disables tool network plus project config/instruction discovery, and gives shell commands an inherit-none environment with no provider credential or hosted secret. The supervising App Server may receive minimum provider auth. An ordinary group Ask receives only the consent-aware lazy `murph.group/read_shared` dynamic tool; consented and operator candidates receive no dynamic tools. No child receives a mutation or delivery tool, route grant, signing material, MCP, web search, memory, plugin, app, or multi-agent authority. A production-like Linux sandbox smoke must prove the actual profile enforcement or the feature remains disabled.
 - Hosted process-only App Server initialization may begin only after workspace
   restore, final managed Codex config/auth preparation, and staging of the first
   fresh auto-reply-enabled pre-pass Linq or Telegram input candidate. Email,
@@ -1553,11 +1575,15 @@ neither capability.
 ## Hosted operator tasks
 
 Operator-task admission is restricted to the existing hosted Ops allowlist and
-same-origin mutation boundary. Every task is bound to one active member and the
-admitting operator, and a stable idempotency key is bound to an exact hashed
+same-origin mutation boundary. Every task is bound to one active target runtime
+and workspace plus the admitting operator, and a stable idempotency key is bound to an exact hashed
 request shape. A diagnostic receives one fixed read-only disclosure,
 cannot deliver to the member, and stores its bounded result with member-bound
 secure-box encryption. A message is restricted to an existing private direct
 route; Web reauthorizes the member-bound task immediately before model work and
 again at the normal notification/outbox boundary. Neither path creates
-first-contact, group, arbitrary tool, or runtime-shell authority.
+first-contact or group-delivery authority. A diagnostic candidate may use native read
+tools only inside the exact targeted workspace under `murph-group-read`; the
+profile denies writes, sensitive runtime/config roots, environment files, and
+network access, while the child has no dynamic effect or delivery tools. The
+disclosure reviewer remains isolated and tool-free.
