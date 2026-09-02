@@ -20,6 +20,7 @@ import type {
   AssistantExecutionContext,
 } from "@murphai/assistant-engine";
 
+import { HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT } from "../hosted-device-sync-limits.ts";
 import {
   createHostedAssistantChannelTypingDependencies,
 } from "./channel-activity.ts";
@@ -904,10 +905,13 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       vaultRoot: input.vaultRoot,
     });
     const retainUntil = resolveHostedDeviceSyncMailboxRetentionAt(input.item);
+    const immediateDirtyContinuationCanProgress = retainUntil !== null
+      && recordResult.newerRevisionPending
+      && hostedDeviceSyncRetainedWakeHasCapacity(input.item);
     if (retainUntil) {
       await retainHostedDeviceSyncSystemMailboxItem({
+        immediateDirtyContinuationCanProgress,
         item: input.item,
-        newerRevisionPending: recordResult.newerRevisionPending,
         nextAttemptAt: retainUntil,
         vaultRoot: input.vaultRoot,
       });
@@ -924,7 +928,9 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
         HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
       ),
       createHostedRuntimeWakeCandidate(
-        recordResult.nextWakeAt,
+        retainUntil === null || immediateDirtyContinuationCanProgress
+          ? recordResult.nextWakeAt
+          : null,
         HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
       ),
     ]);
@@ -991,9 +997,23 @@ function resolveHostedDeviceSyncMailboxRetentionAt(
   return item.postCheckpointRecord.retainMailboxItemUntil ?? null;
 }
 
+function hostedDeviceSyncRetainedWakeHasCapacity(
+  item: HostedSystemMailboxPendingItem,
+): boolean {
+  if (item.postCheckpointRecord?.kind !== "device-sync.dirty-processed-batch") {
+    return false;
+  }
+  const retainedWake = item.postCheckpointRecord.retainedWake ?? item.wake;
+  const retainedJobs = retainedWake.kind === "device-sync.wake"
+    ? retainedWake.hint?.jobs
+    : undefined;
+  return retainedJobs !== undefined
+    && retainedJobs.length < HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT;
+}
+
 async function retainHostedDeviceSyncSystemMailboxItem(input: {
+  immediateDirtyContinuationCanProgress: boolean;
   item: HostedSystemMailboxPendingItem;
-  newerRevisionPending: boolean;
   nextAttemptAt: string;
   vaultRoot: string;
 }): Promise<void> {
@@ -1025,7 +1045,7 @@ async function retainHostedDeviceSyncSystemMailboxItem(input: {
           };
         }
         if (
-          input.newerRevisionPending
+          input.immediateDirtyContinuationCanProgress
           || admittedAt === null
           || connectionId === null
           || index < retainedIndex

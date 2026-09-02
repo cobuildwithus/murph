@@ -1233,10 +1233,11 @@ Last verified: 2026-09-01
   for another. A later due webhook for that same connection may admit the older
   exact retained mailbox item so newly dirty data can enter the local worker
   without waiting behind a historical retry. That webhook remains available for
-  an exact continuation when post-checkpoint acknowledgement reports a newer
-  coalesced dirty revision; once acknowledgement proves no newer revision
-  remains, the existing mailbox retention update atomically defers the webhook
-  to the retained retry, including when payload-only work is still in backoff.
+  an exact continuation only when post-checkpoint acknowledgement reports a
+  newer coalesced dirty revision and the retained job hints prove the next pass
+  has admission capacity. Otherwise, the existing mailbox retention update
+  atomically defers the webhook to the retained retry, including payload-only
+  backoff and a full retained queue that cannot yet admit distinct dirty work.
   The retained wake's job hints suppress provider scheduling,
   and each local job keeps its own `availableAt`, so these bounded passes neither
   run the later mailbox item out of order nor bypass provider backoff.
