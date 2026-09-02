@@ -74,4 +74,22 @@ identity so a removed channel does not stay active or visible.
 
 ## Verification record
 
-Pending implementation.
+- Focused hosted-Web suite: 54 tests passed across account projection,
+  Settings rows/dialogs, removal retries, canonical projection cleanup, and the
+  authenticated DELETE route.
+- Changelog page suite: 9 tests passed.
+- `pnpm --dir apps/web typecheck:prepared`: passed.
+- `pnpm --dir apps/web lint`: passed with 44 pre-existing warnings and no
+  errors.
+- `pnpm test:frontend-design-proof`: 12 tests passed with a process-scoped
+  neutral Git identity; the fixture/privacy-hook conflict found on the first
+  run is recorded in Frog.
+- Dedicated Playwright proof: passed. The production removal confirmation,
+  disabled last-sign-in state, composed Settings rows, current changelog
+  edition, and changelog catalog study were inspected at 1440x1000 and
+  390x844 using synthetic data only.
+- Parent candidate review: provider-first unlink, exact-principal authorization,
+  alternative verified sign-in protection, provider propagation retry,
+  expected-identity race guard, idempotent cleanup, channel-specific routing
+  revocation, and post-commit mailbox wake paths walked without an open proof
+  gap.

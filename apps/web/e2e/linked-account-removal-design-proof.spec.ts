@@ -8,6 +8,10 @@ const REMOVAL_STUDY_SELECTOR = '[data-design-component="linked-account-removal"]
 const SETTINGS_DESIGN_ROUTE = "/screenshots/account#signup-referral-flow";
 const SETTINGS_STUDY_SELECTOR =
   '[data-design-section="signup-referral-flow"] > section:first-child';
+const CHANGELOG_ROUTE = "/changelog";
+const CHANGELOG_SELECTOR = 'section[aria-labelledby="edition-2026-09-02"]';
+const CHANGELOG_DESIGN_ROUTE = "/screenshots/ops#changelog-archive";
+const CHANGELOG_DESIGN_SELECTOR = '[data-design-study="changelog-archive"]';
 
 function isLoopbackUrl(rawUrl: string): boolean {
   try {
@@ -74,6 +78,7 @@ async function captureStudy({
       await new Promise((resolve) =>
         requestAnimationFrame(() => requestAnimationFrame(resolve)),
       );
+      document.querySelectorAll("nextjs-portal").forEach((portal) => portal.remove());
     });
 
     await study.screenshot({
@@ -131,6 +136,42 @@ test("capture linked-account removal design proof", async ({ browser }) => {
     outputDir,
     routePath: SETTINGS_DESIGN_ROUTE,
     selector: SETTINGS_STUDY_SELECTOR,
+    width: 390,
+  });
+  await captureStudy({
+    browser,
+    fileName: "changelog-desktop.png",
+    height: 1000,
+    outputDir,
+    routePath: CHANGELOG_ROUTE,
+    selector: CHANGELOG_SELECTOR,
+    width: 1440,
+  });
+  await captureStudy({
+    browser,
+    fileName: "changelog-mobile.png",
+    height: 844,
+    outputDir,
+    routePath: CHANGELOG_ROUTE,
+    selector: CHANGELOG_SELECTOR,
+    width: 390,
+  });
+  await captureStudy({
+    browser,
+    fileName: "changelog-design-desktop.png",
+    height: 1000,
+    outputDir,
+    routePath: CHANGELOG_DESIGN_ROUTE,
+    selector: CHANGELOG_DESIGN_SELECTOR,
+    width: 1440,
+  });
+  await captureStudy({
+    browser,
+    fileName: "changelog-design-mobile.png",
+    height: 844,
+    outputDir,
+    routePath: CHANGELOG_DESIGN_ROUTE,
+    selector: CHANGELOG_DESIGN_SELECTOR,
     width: 390,
   });
 });
