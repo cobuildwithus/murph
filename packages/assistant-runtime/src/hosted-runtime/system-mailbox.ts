@@ -398,8 +398,16 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
         };
       }
 
+      const originalPending = state.pending.find((item) =>
+        item.itemId === pending.itemId
+      ) ?? null;
+      const pendingState =
+        originalPending !== null
+        && originalPending.nextAttemptAt !== pending.nextAttemptAt
+          ? admissionState
+          : state;
       const collapsed = collapseConsecutiveHostedBrowserVaultRefreshItems({
-        pending: state.pending,
+        pending: pendingState.pending,
         selected: pending,
       });
 
