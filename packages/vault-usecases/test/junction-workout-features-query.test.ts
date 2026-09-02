@@ -153,13 +153,29 @@ test("wearables activity list associates corrected Junction features with same-d
       { corePort: coreRuntime },
     )
 
-    const afterCorrection = await createIntegratedVaultServices().query.listWearableActivity({
+    const services = createIntegratedVaultServices().query
+    const afterCorrection = await services.listWearableActivity({
       vault: vaultRoot,
       requestId: null,
       date: "2026-08-15",
       limit: 10,
     })
-    expect(afterCorrection.items[0]?.workoutFeatures).toEqual([
+    expect(afterCorrection.items[0]?.sessionCount).toEqual(
+      expect.objectContaining({ value: 2 }),
+    )
+    expect(afterCorrection.items[0]?.sessionMinutes).toEqual(
+      expect.objectContaining({ value: 60 }),
+    )
+    expect(afterCorrection.items[0]?.workoutFeatures).toBeUndefined()
+
+    const detailed = await services.listWearableActivity({
+      vault: vaultRoot,
+      requestId: null,
+      date: "2026-08-15",
+      limit: 10,
+      includeWorkoutDetails: true,
+    })
+    expect(detailed.items[0]?.workoutFeatures).toEqual([
       expect.objectContaining({
         activityType: "running",
         averageHeartRate: 142,
@@ -180,10 +196,10 @@ test("wearables activity list associates corrected Junction features with same-d
         startedAt: "2026-08-15T18:00:00.000Z",
       }),
     ])
-    expect(JSON.stringify(afterCorrection)).not.toContain("workout-morning")
-    expect(JSON.stringify(afterCorrection)).not.toContain("watch-primary")
-    expect(JSON.stringify(afterCorrection)).not.toContain("\"averagePower\":")
-    expect(JSON.stringify(afterCorrection)).not.toContain("\"averageSpeed\":")
+    expect(JSON.stringify(detailed)).not.toContain("workout-morning")
+    expect(JSON.stringify(detailed)).not.toContain("watch-primary")
+    expect(JSON.stringify(detailed)).not.toContain("\"averagePower\":")
+    expect(JSON.stringify(detailed)).not.toContain("\"averageSpeed\":")
   } finally {
     await rm(parentRoot, { recursive: true, force: true })
   }
@@ -317,12 +333,14 @@ test("wearables activity list preserves provider and vault-local workout days", 
       requestId: null,
       date: "2026-08-14",
       limit: 10,
+      includeWorkoutDetails: true,
     })
     const localDay = await services.listWearableActivity({
       vault: vaultRoot,
       requestId: null,
       date: "2026-08-15",
       limit: 10,
+      includeWorkoutDetails: true,
     })
     const adjacentUtcDay = await services.listWearableActivity({
       vault: vaultRoot,

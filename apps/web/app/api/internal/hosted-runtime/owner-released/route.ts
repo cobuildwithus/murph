@@ -1,5 +1,5 @@
 import {
-  HOSTED_RUNTIME_OWNER_RELEASE_IMMEDIATE_RECHECK_QUERY,
+  parseHostedRuntimeOwnerReleaseSearch,
 } from "@murphai/hosted-execution/routes";
 
 import {
@@ -9,6 +9,7 @@ import {
   readHostedRuntimeOwnerReleaseMailboxLagActionable,
 } from "@/src/lib/hosted-orchestration/runtime-reconciliation-facts";
 import {
+  signalHostedRuntimeOwnerReleasedRuntime,
   signalHostedRuntimeRecheckRuntime,
 } from "@/src/lib/hosted-orchestration/signal-runtime";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -18,30 +19,36 @@ export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: 0,
   });
-  const immediateRecheckRequested = readImmediateRecheckRequested(request);
+  const ownerRelease = readOwnerRelease(request);
 
   if (
-    !immediateRecheckRequested
+    !ownerRelease.immediateRecheckRequested
     && !(await readHostedRuntimeOwnerReleaseMailboxLagActionable({ userId }))
   ) {
     return jsonOk({ signaled: false });
   }
 
-  await signalHostedRuntimeRecheckRuntime({ userId });
+  if (ownerRelease.runtimeAttemptId === null) {
+    await signalHostedRuntimeRecheckRuntime({ userId });
+  } else {
+    await signalHostedRuntimeOwnerReleasedRuntime({
+      runtimeAttemptId: ownerRelease.runtimeAttemptId,
+      userId,
+    });
+  }
 
   return jsonOk({ signaled: true });
 });
 
-function readImmediateRecheckRequested(request: Request): boolean {
-  const search = new URL(request.url).search;
-  if (search === "") {
-    return false;
-  }
-  if (search !== `?${HOSTED_RUNTIME_OWNER_RELEASE_IMMEDIATE_RECHECK_QUERY}=1`) {
+function readOwnerRelease(request: Request): {
+  immediateRecheckRequested: boolean;
+  runtimeAttemptId: string | null;
+} {
+  try {
+    return parseHostedRuntimeOwnerReleaseSearch(new URL(request.url).search);
+  } catch {
     throw invalidOwnerReleaseQuery();
   }
-
-  return true;
 }
 
 function invalidOwnerReleaseQuery() {

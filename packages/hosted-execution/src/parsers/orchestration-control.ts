@@ -65,6 +65,20 @@ export function parseHostedRuntimeSignal(value: unknown): HostedRuntimeSignal {
         kind,
       };
     }
+    case "runtime_owner_released": {
+      assertExactKeys(record, "Hosted runtime owner-release signal", [
+        "kind",
+        "runtimeAttemptId",
+      ]);
+
+      return {
+        kind,
+        runtimeAttemptId: requireOpaqueIdentifier(
+          record.runtimeAttemptId,
+          "Hosted runtime owner-release signal runtimeAttemptId",
+        ),
+      };
+    }
     case "runtime_wake_requested": {
       assertExactKeys(record, "Hosted runtime wake signal", [
         "kind",

@@ -1736,18 +1736,31 @@ text(result.output);
         skillSlug: 'daily-activity',
       },
       {
-        answer: 'Your connected device recorded a 48-minute workout on July 12.',
-        command: 'measurement entry list --metric workout_duration --from 2026-07-12 --to 2026-07-12 --limit 50 --format json',
+        answer: 'Your connected device recorded one workout totaling 48 minutes on July 12.',
+        command: 'wearables activity list --date 2026-07-12 --format json',
         evidence: {
           count: 1,
           items: [{
-            eventId: 'evt_workout_duration_summary',
-            metric: 'workout-minutes',
-            occurredAt: '2026-07-12T15:00:00.000Z',
-            recordKind: 'observation',
-            source: 'device',
-            unit: 'minutes',
-            value: 48,
+            activityTypes: ['running'],
+            date: '2026-07-12',
+            sessionCount: {
+              confidence: 'high',
+              metric: 'sessionCount',
+              provider: 'garmin',
+              unit: 'count',
+              value: 1,
+            },
+            sessionMinutes: {
+              confidence: 'high',
+              metric: 'sessionMinutes',
+              provider: 'garmin',
+              unit: 'minutes',
+              value: 48,
+            },
+            summaryConfidence: {
+              level: 'high',
+              selectedProviders: ['garmin'],
+            },
           }],
         },
         prompt: 'How long was my workout on July 12?',
@@ -1756,7 +1769,7 @@ text(result.output);
       },
       {
         answer: 'Your morning run averaged 142 bpm and its corrected record has no retained splits. Your evening ride averaged 150 bpm with 90 rpm cadence, 5 m/s speed, and 220 W power; its first 1 km split took 300 seconds at 225 W.',
-        command: 'wearables activity list --date 2026-07-12 --format json',
+        command: 'wearables activity list --date 2026-07-12 --include-workout-details --format json',
         evidence: {
           count: 1,
           items: [{

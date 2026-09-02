@@ -386,6 +386,7 @@ describe("countAssistantCliSurfaceHotPathProofs", () => {
       "- `goal save`: args <title>; options --status=active|paused|completed|abandoned, --horizon=short_term|medium_term|long_term|ongoing, --priority=integer, repeat --domain=string.",
       "- `device account list`: options --provider=string, --source-provider=string.",
       "- `device connect`: args <provider>; options --returnTo=string.",
+      "- `wearables activity list`: options --date=string, --includeWorkoutDetails; hint One data read only. Day totals (`sessionCount`, `sessionMinutes`, distinct `activityTypes`): omit detail; no false flag or schema read. Workout/subset facts: include detail first.",
     ].join("\n");
 
     expect(countAssistantCliSurfaceHotPathProofs(detailedContract)).toBe(

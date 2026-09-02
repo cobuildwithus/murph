@@ -1561,10 +1561,12 @@ describe("HostedUserRunner execution coordination", () => {
     expect(ownerReleaseCalls[0]?.[0]).toMatchObject({
       boundUserId: TEST_USER_ID,
       method: "POST",
+      search: expect.stringMatching(
+        /^\?runtimeAttemptId=runtime-write-[A-Za-z0-9_-]+$/u,
+      ),
       timeoutMs: 2_000,
     });
     expect(ownerReleaseCalls[0]?.[0]).not.toHaveProperty("body");
-    expect(ownerReleaseCalls[0]?.[0]).not.toHaveProperty("search");
     expect(alarms).toEqual([]);
   });
 
@@ -1655,7 +1657,11 @@ describe("HostedUserRunner execution coordination", () => {
         (call) => call[0].path === HOSTED_RUNTIME_OWNER_RELEASED_PATH,
       );
     expect(ownerReleaseCalls).toHaveLength(1);
-    expect(ownerReleaseCalls[0]?.[0]).not.toHaveProperty("search");
+    expect(ownerReleaseCalls[0]?.[0]).toMatchObject({
+      search: expect.stringMatching(
+        /^\?runtimeAttemptId=runtime-write-[A-Za-z0-9_-]+$/u,
+      ),
+    });
   });
 
   it("carries an immediate recheck request in the signed owner-release query", async () => {
@@ -1695,7 +1701,9 @@ describe("HostedUserRunner execution coordination", () => {
       );
     expect(ownerReleaseCalls).toHaveLength(1);
     expect(ownerReleaseCalls[0]?.[0]).toMatchObject({
-      search: "?immediateRecheckRequested=1",
+      search: expect.stringMatching(
+        /^\?runtimeAttemptId=runtime-write-[A-Za-z0-9_-]+&immediateRecheckRequested=1$/u,
+      ),
     });
     expect(ownerReleaseCalls[0]?.[0]).not.toHaveProperty("body");
   });

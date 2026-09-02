@@ -31,6 +31,7 @@ interface CommandGuard {
 }
 
 interface ManifestCommand {
+  hint?: string
   name: string
   schema: JsonRecord
 }
@@ -658,6 +659,68 @@ test('murph age submitted-data commands stay in generated agent artifacts', asyn
   assert.deepEqual(commandConfigOptionNames(configSchema, 'age scaffold'), [])
 })
 
+test('wearables activity list exposes explicit bounded workout detail on demand', async () => {
+  const detailDescription =
+    'Include bounded workoutFeatures and splits (up to 32 workouts per day and 64 splits per workout). Choose compact or detailed output from the question before the first and only activity-list data read; never use compact output as a probe before retrying with detail. Omit this option only when the answer is entirely available from day-level sessionCount, sessionMinutes, and distinct activityTypes. Pass it truthy whenever selecting, comparing, grouping, ordering, or attributing individual workouts, including type-specific count, duration, distance, start time, provider, heart rate, cadence, power, speed, or splits.'
+  const activityHint =
+    'One data read only. Day totals (`sessionCount`, `sessionMinutes`, distinct `activityTypes`): omit detail; no false flag or schema read. Workout/subset facts: include detail first.'
+  const commands = await loadFullLlmCommands()
+  const generatedTypes = await readFile(
+    new URL('../src/incur.generated.ts', import.meta.url),
+    'utf8',
+  )
+  const configSchemaText = await readFile(
+    new URL('../config.schema.json', import.meta.url),
+    'utf8',
+  )
+  const configSchema = parseJsonObject(configSchemaText, 'config schema')
+  const activityCommand = requireManifestCommand(commands, {
+    label: 'wearables activity list',
+    commandNames: ['wearables activity list'],
+    fieldHints: ['includeWorkoutDetails'],
+  })
+  const activitySchema = await loadCommandSchema('wearables activity list')
+  const manifestDetailOption = requireRecord(
+    schemaProperties(activityCommand.schema, 'options').includeWorkoutDetails,
+    'wearables activity list manifest includeWorkoutDetails',
+  )
+  const directDetailOption = requireRecord(
+    schemaProperties(activitySchema, 'options').includeWorkoutDetails,
+    'wearables activity list schema includeWorkoutDetails',
+  )
+
+  assert.equal(activityCommand.hint, activityHint)
+  assert.equal(schemaIncludesProperty(activityCommand.schema, 'includeWorkoutDetails'), true)
+  assert.equal(manifestDetailOption.type, 'boolean')
+  assert.equal(manifestDetailOption.default, false)
+  assert.equal(manifestDetailOption.description, detailDescription)
+  assert.equal(directDetailOption.type, 'boolean')
+  assert.equal(directDetailOption.default, false)
+  assert.equal(directDetailOption.description, detailDescription)
+  assert.equal(
+    configSchemaText.includes(
+      `"description": ${JSON.stringify(detailDescription)}`,
+    ),
+    true,
+  )
+  assert.match(
+    generatedTypes,
+    /'wearables activity list': \{ args: \{\}; options: \{ requestId\?: string; date\?: string; from\?: string; to\?: string; provider\?: string\[\]; limit: number; includeWorkoutDetails: boolean \} \}/u,
+  )
+  assert.deepEqual(
+    commandConfigOptionNames(configSchema, 'wearables activity list').sort(),
+    [
+      'date',
+      'from',
+      'includeWorkoutDetails',
+      'limit',
+      'provider',
+      'requestId',
+      'to',
+    ],
+  )
+})
+
 test('patch-style edit commands expose typed fields instead of generic patch flags', async () => {
   const commands = await loadFullLlmCommands()
   const generatedTypes = await readFile(
@@ -782,8 +845,16 @@ async function loadFullLlmCommands(): Promise<ManifestCommand[]> {
       command.schema,
       `llms manifest commands[${index}].schema`,
     )
+    const hint =
+      command.hint === undefined
+        ? undefined
+        : requireString(command.hint, `llms manifest commands[${index}].hint`)
 
-    return { name, schema }
+    return {
+      ...(hint === undefined ? {} : { hint }),
+      name,
+      schema,
+    }
   })
 }
 
