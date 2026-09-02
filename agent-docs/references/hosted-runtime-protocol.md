@@ -786,10 +786,12 @@ authoritative, while an interrupted or not-yet-checkpointed unit stays
 recoverable from the durable mailbox and its existing continuation contract.
 
 Default and `system_mailbox` remain separate bounded owners over one ordered
-mailbox. An ordinary default-owned row does not publish a second runnable owner
-behind an earlier model-free durable frontier; it becomes eligible as soon as
-that frontier advances. Current conversation work and explicitly approved
-continuations retain foreground priority. A non-direct default request behind
+mailbox. When the runnable mailbox owner is model-free, the checkpoint
+projection does not publish a second ordinary default wake behind it. Default
+rows remain eligible inside an already-running pass and become independently
+wake-eligible whenever the model-free frontier is backed off or advances.
+Current conversation work and explicitly approved continuations retain
+foreground priority. A non-direct default request behind
 `system_mailbox` wakes the exact active child, preserves its fence, and retries
 while that child checkpoints and releases. Authenticated Web-direct foreground
 work may instead preempt that exact system child through the existing abort

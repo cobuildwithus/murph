@@ -842,7 +842,7 @@ describe("hosted runtime system mailbox state", () => {
     }
   });
 
-  it("keeps a later generic notification behind the device-sync owner", async () => {
+  it("keeps a later generic notification behind a runnable device-sync owner", async () => {
     const vaultRoot = await mkdtemp(
       path.join(tmpdir(), "murph-hosted-system-mailbox-state-"),
     );
@@ -900,13 +900,13 @@ describe("hosted runtime system mailbox state", () => {
         vaultRoot,
       })).resolves.toEqual({
         defaultOwned: {
-          at: null,
-          reason: null,
+          at: now,
+          reason: "assistant",
         },
         next: {
-          at: deviceRetryAt,
-          executionClass: null,
-          reason: "device-sync.reconcile",
+          at: now,
+          executionClass: "default_owned",
+          reason: "assistant",
         },
       });
 

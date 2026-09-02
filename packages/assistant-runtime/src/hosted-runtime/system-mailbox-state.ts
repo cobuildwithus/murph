@@ -420,11 +420,14 @@ function resolveHostedSystemMailboxWakeCandidatesFromState(input: {
   const wakeOwnerState = projectHostedSystemMailboxWakeOwnerFrontier(
     remainingState,
   );
+  const modelFreeFrontierState = projectHostedSystemMailboxModelFreeFrontier(
+    remainingState,
+  );
   const modelFreeProjectedState = shouldProjectHostedSystemMailboxModelFreeFrontier({
     allowedRouteActions: input.allowedRouteActions ?? null,
     allowedWakeKinds: input.allowedWakeKinds ?? null,
   })
-    ? projectHostedSystemMailboxModelFreeFrontier(remainingState)
+    ? modelFreeFrontierState
     : input.allowedRouteActions == null
       ? wakeOwnerState
       : remainingState;
@@ -444,20 +447,41 @@ function resolveHostedSystemMailboxWakeCandidatesFromState(input: {
     now,
     state: selectionState,
   });
-  const defaultOwnedItems = findNextHostedSystemMailboxQueueItemsForWake({
-    allowedRouteActions: null,
-    state: wakeOwnerState,
-  }).filter((item) =>
-    resolveHostedSystemMailboxItemExecutionClass(item) === "default_owned"
-  );
   const readyItemAcrossAllRoutes = findNextHostedSystemMailboxQueueItem({
     allowedRouteActions: null,
     now,
     state: wakeOwnerState,
   });
+  const runnableModelFreeFrontier = modelFreeFrontierState.pending[0] ?? null;
+  const defaultWakeOwnerState = runnableModelFreeFrontier !== null
+      && systemMailboxItemIsDue(runnableModelFreeFrontier, now)
+      && (
+        readyItemAcrossAllRoutes === null
+        || !isHostedApprovedContinuationSystemMailboxItem(
+          readyItemAcrossAllRoutes,
+        )
+      )
+    ? {
+        // Keep execution eligibility unchanged. Only the independently
+        // published default wake yields to a runnable model-free owner;
+        // explicitly approved continuations retain foreground priority.
+        pending: wakeOwnerState.pending.filter(
+          isHostedApprovedContinuationSystemMailboxItem,
+        ),
+      }
+    : wakeOwnerState;
+  const defaultOwnedItems = findNextHostedSystemMailboxQueueItemsForWake({
+    allowedRouteActions: null,
+    state: defaultWakeOwnerState,
+  }).filter((item) =>
+    resolveHostedSystemMailboxItemExecutionClass(item) === "default_owned"
+  );
   const readyDefaultOwnedItem = readyItemAcrossAllRoutes !== null
       && resolveHostedSystemMailboxItemExecutionClass(readyItemAcrossAllRoutes)
         === "default_owned"
+      && defaultWakeOwnerState.pending.some((item) =>
+        item.itemId === readyItemAcrossAllRoutes.itemId
+      )
     ? readyItemAcrossAllRoutes
     : findNextHostedSystemMailboxQueueItem({
         allowedRouteActions: null,
@@ -721,16 +745,10 @@ export function projectHostedSystemMailboxWakeOwnerFrontier(
     .pending[0] ?? null;
   return {
     pending: state.pending.filter((item) =>
-      // A durable model-free frontier owns ordinary background execution until
-      // it advances. Explicitly approved continuations keep foreground
-      // priority, and sequence-less dense retention keeps its existing owner.
-      (
-        resolveHostedSystemMailboxItemExecutionClass(item) === "default_owned"
-        && (
-          modelFreeFrontier === null
-          || isHostedApprovedContinuationSystemMailboxItem(item)
-        )
-      )
+      // Default-owned work remains independently eligible. Model-free work is
+      // serialized behind the durable frontier, except for its sequence-less
+      // dense-retention owner.
+      resolveHostedSystemMailboxItemExecutionClass(item) === "default_owned"
       || item.itemId === modelFreeFrontier?.itemId
       || isHostedDeviceSyncDenseRawRetentionMailboxItem(item)
     ),
