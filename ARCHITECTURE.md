@@ -1592,9 +1592,10 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   Temporal starts, and replacements of work already using the member's exact
   container retain that exact target. A previously reserved standby is
   reconciled before this eligibility check so retries cannot split ownership.
-  readiness warms the image, heavy runtime, and a disposable content-free Codex
-  initialization, while the member-specific resident Codex process remains
-  post-restore. Claimed containers are never returned for another member.
+  Standby readiness warms the image, heavy runtime, and a disposable
+  content-free Codex initialization, while the member-specific resident Codex
+  process remains post-restore. Claimed containers are never returned for
+  another member.
 - The same Cloudflare app owns one production database-health singleton that is
   deliberately independent of hosted Web and Postgres. A five-minute Cron
   Trigger asks a SQLite-backed `DatabaseHealthDurableObject` to discover and
