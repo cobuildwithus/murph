@@ -26,6 +26,7 @@ import {
   updateAssistantOutboxAfterDispatchFailure,
 } from '../src/assistant/outbox/dispatch-state.ts'
 import { resolveAssistantOutboxIntentPath } from '../src/assistant/outbox/intents.ts'
+import { ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS } from '../src/assistant/outbox/retry-policy.ts'
 import {
   createAssistantTurnReceipt,
   readAssistantTurnReceipt,
@@ -191,6 +192,7 @@ async function withTempVault(run: (vault: string) => Promise<void>): Promise<voi
 async function createSendingIntent(input: {
   attemptCount: number
   channel?: 'email' | 'linq' | 'telegram'
+  deliveryConfirmationPending?: boolean
   deliveryTransportIdempotent?: boolean
   vault: string
 }): Promise<Awaited<ReturnType<typeof saveAssistantOutboxIntent>>> {
@@ -215,7 +217,8 @@ async function createSendingIntent(input: {
   return await saveAssistantOutboxIntent(input.vault, {
     ...created,
     attemptCount: input.attemptCount,
-    deliveryConfirmationPending: input.attemptCount > 1,
+    deliveryConfirmationPending:
+      input.deliveryConfirmationPending ?? (input.attemptCount > 1),
     deliveryTransportIdempotent: input.deliveryTransportIdempotent ?? false,
     lastAttemptAt: '2026-04-13T00:00:00.000Z',
     nextAttemptAt: null,
@@ -297,6 +300,112 @@ describe('assistant outbox dispatch-state', () => {
       const diagnostics = await readAssistantDiagnosticsSnapshot(vault)
       expect(diagnostics.updatedAt).toBe(failed.updatedAt)
       expect(diagnostics.lastEventAt).toBe(failed.updatedAt)
+    })
+  })
+
+  it('preserves earlier delivery uncertainty when a later admitted attempt exhausts retries', async () => {
+    await withTempVault(async (vault) => {
+      const sending = await createSendingIntent({
+        attemptCount: ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS,
+        channel: 'linq',
+        deliveryTransportIdempotent: true,
+        vault,
+      })
+      const paths = resolveAssistantStatePaths(vault)
+
+      const failed = await updateAssistantOutboxAfterDispatchFailure({
+        deliveryMayHaveSucceeded: false,
+        deliveryTransportIdempotent: true,
+        error: Object.assign(new Error('later attempt failed before provider acceptance'), {
+          code: 'LINQ_API_REQUEST_FAILED',
+          retryable: true,
+        }),
+        failedAt: new Date('2030-04-13T00:01:00.000Z'),
+        intentPath: resolveAssistantOutboxIntentPath(paths.outboxDirectory, sending.intentId),
+        sending,
+        vault,
+      })
+
+      expect(failed.status).toBe('abandoned')
+      expect(failed.deliveryConfirmationPending).toBe(false)
+      expect(failed.nextAttemptAt).toBeNull()
+      expect(failed.lastError?.code).toBe('ASSISTANT_DELIVERY_AMBIGUOUS')
+    })
+  })
+
+  it('preserves earlier delivery uncertainty and its stable owner while another retry remains', async () => {
+    await withTempVault(async (vault) => {
+      const sending = await createSendingIntent({
+        attemptCount: 2,
+        channel: 'linq',
+        deliveryTransportIdempotent: true,
+        vault,
+      })
+      const deliveryIdempotencyKey = 'assistant-outbox:whole-effect-history'
+      const ownedSending = await saveAssistantOutboxIntent(vault, {
+        ...sending,
+        deliveryIdempotencyKey,
+        preparedDispatchToken: 'prepared_whole_effect_history',
+      })
+      const paths = resolveAssistantStatePaths(vault)
+
+      const retryable = await updateAssistantOutboxAfterDispatchFailure({
+        deliveryMayHaveSucceeded: false,
+        deliveryTransportIdempotent: true,
+        error: Object.assign(new Error('later attempt failed before provider acceptance'), {
+          code: 'LINQ_API_REQUEST_FAILED',
+          retryable: true,
+        }),
+        failedAt: new Date('2030-04-13T00:01:00.000Z'),
+        intentPath: resolveAssistantOutboxIntentPath(
+          paths.outboxDirectory,
+          ownedSending.intentId,
+        ),
+        sending: ownedSending,
+        vault,
+      })
+
+      expect(retryable.status).toBe('retryable')
+      expect(retryable.deliveryConfirmationPending).toBe(true)
+      expect(retryable.intentId).toBe(ownedSending.intentId)
+      expect(retryable.deliveryIdempotencyKey).toBe(deliveryIdempotencyKey)
+      expect(retryable.preparedDispatchToken).toBe(
+        ownedSending.preparedDispatchToken,
+      )
+      expect(retryable.attemptCount).toBe(ownedSending.attemptCount)
+      expect(retryable.nextAttemptAt).not.toBeNull()
+      expect(retryable.lastError?.code).toBe('LINQ_API_REQUEST_FAILED')
+    })
+  })
+
+  it('keeps definite-only retry exhaustion failed', async () => {
+    await withTempVault(async (vault) => {
+      const sending = await createSendingIntent({
+        attemptCount: ASSISTANT_OUTBOX_MAX_RETRY_ATTEMPTS,
+        channel: 'linq',
+        deliveryConfirmationPending: false,
+        deliveryTransportIdempotent: true,
+        vault,
+      })
+      const paths = resolveAssistantStatePaths(vault)
+
+      const failed = await updateAssistantOutboxAfterDispatchFailure({
+        deliveryMayHaveSucceeded: false,
+        deliveryTransportIdempotent: true,
+        error: Object.assign(new Error('definite final attempt failure'), {
+          code: 'LINQ_API_REQUEST_FAILED',
+          retryable: true,
+        }),
+        failedAt: new Date('2030-04-13T00:01:00.000Z'),
+        intentPath: resolveAssistantOutboxIntentPath(paths.outboxDirectory, sending.intentId),
+        sending,
+        vault,
+      })
+
+      expect(failed.status).toBe('failed')
+      expect(failed.deliveryConfirmationPending).toBe(false)
+      expect(failed.nextAttemptAt).toBeNull()
+      expect(failed.lastError?.code).toBe('ASSISTANT_DELIVERY_RETRY_EXHAUSTED')
     })
   })
 
@@ -1335,7 +1444,7 @@ describe('assistant outbox dispatch-state', () => {
     })
   })
 
-  it('records hosted mirror terminal failures without scheduling another retry', async () => {
+  it('terminalizes hosted mirror failures as ambiguous when earlier delivery remains uncertain', async () => {
     await withTempVault(async (vault) => {
       const sending = await createSendingIntent({
         attemptCount: 2,
@@ -1351,7 +1460,7 @@ describe('assistant outbox dispatch-state', () => {
         failedAt,
         intent: sending,
         intentPath: resolveAssistantOutboxIntentPath(paths.outboxDirectory, sending.intentId),
-        status: 'abandoned',
+        status: 'failed',
         vault,
       })
 
@@ -1359,21 +1468,90 @@ describe('assistant outbox dispatch-state', () => {
       expect(failed.deliveryConfirmationPending).toBe(false)
       expect(failed.updatedAt).toBe('2030-04-13T00:20:00.000Z')
       expect(failed.nextAttemptAt).toBeNull()
-      expect(failed.lastError?.code).toBe('HOSTED_ASSISTANT_OUTBOX_JOURNAL_FAILED')
+      expect(failed.lastError?.code).toBe('ASSISTANT_DELIVERY_AMBIGUOUS')
 
       const receipt = await readAssistantTurnReceipt(vault, sending.turnId)
       expect(receipt?.status).toBe('failed')
       expect(receipt?.deliveryDisposition).toBe('failed')
-      expect(receipt?.lastError?.code).toBe('HOSTED_ASSISTANT_OUTBOX_JOURNAL_FAILED')
+      expect(receipt?.lastError?.code).toBe('ASSISTANT_DELIVERY_AMBIGUOUS')
       expect(receipt?.timeline.at(-1)).toMatchObject({
         kind: 'delivery.failed',
-        detail: 'hosted mirror reconciliation refused the delivery',
+        detail: expect.stringContaining(
+          'hosted mirror reconciliation refused the delivery',
+        ),
       })
 
       const diagnostics = await readAssistantDiagnosticsSnapshot(vault)
       expect(diagnostics.counters.deliveriesFailed).toBe(1)
       expect(diagnostics.counters.deliveriesRetryable).toBe(0)
       expect(diagnostics.counters.outboxRetries).toBe(0)
+    })
+  })
+
+  it('preserves hosted mirror delivery uncertainty and prepared owner across a retryable condition', async () => {
+    await withTempVault(async (vault) => {
+      const sending = await createSendingIntent({
+        attemptCount: 2,
+        deliveryTransportIdempotent: true,
+        vault,
+      })
+      const ownedSending = await saveAssistantOutboxIntent(vault, {
+        ...sending,
+        deliveryIdempotencyKey: 'assistant-outbox:mirror-whole-effect-history',
+        preparedDispatchToken: 'prepared_mirror_whole_effect_history',
+      })
+      const paths = resolveAssistantStatePaths(vault)
+
+      const retryable = await markAssistantOutboxIntentMirrorRetryable({
+        error: Object.assign(new Error('hosted mirror journal remains unavailable'), {
+          code: 'HOSTED_ASSISTANT_OUTBOX_JOURNAL_FAILED',
+          retryable: true,
+        }),
+        failedAt: new Date('2030-04-13T00:21:00.000Z'),
+        intent: ownedSending,
+        intentPath: resolveAssistantOutboxIntentPath(
+          paths.outboxDirectory,
+          ownedSending.intentId,
+        ),
+        vault,
+      })
+
+      expect(retryable.status).toBe('retryable')
+      expect(retryable.deliveryConfirmationPending).toBe(true)
+      expect(retryable.deliveryIdempotencyKey).toBe(
+        ownedSending.deliveryIdempotencyKey,
+      )
+      expect(retryable.preparedDispatchToken).toBe(
+        ownedSending.preparedDispatchToken,
+      )
+      expect(retryable.nextAttemptAt).not.toBeNull()
+      expect(retryable.lastError?.code).toBe('HOSTED_ASSISTANT_OUTBOX_JOURNAL_FAILED')
+    })
+  })
+
+  it('keeps definite-only hosted mirror terminal failures failed', async () => {
+    await withTempVault(async (vault) => {
+      const sending = await createSendingIntent({
+        attemptCount: 1,
+        vault,
+      })
+      const paths = resolveAssistantStatePaths(vault)
+
+      const failed = await markAssistantOutboxIntentMirrorTerminal({
+        error: Object.assign(new Error('hosted mirror definite failure'), {
+          code: 'HOSTED_ASSISTANT_OUTBOX_JOURNAL_FAILED',
+        }),
+        failedAt: new Date('2030-04-13T00:22:00.000Z'),
+        intent: sending,
+        intentPath: resolveAssistantOutboxIntentPath(paths.outboxDirectory, sending.intentId),
+        status: 'failed',
+        vault,
+      })
+
+      expect(failed.status).toBe('failed')
+      expect(failed.deliveryConfirmationPending).toBe(false)
+      expect(failed.nextAttemptAt).toBeNull()
+      expect(failed.lastError?.code).toBe('HOSTED_ASSISTANT_OUTBOX_JOURNAL_FAILED')
     })
   })
 

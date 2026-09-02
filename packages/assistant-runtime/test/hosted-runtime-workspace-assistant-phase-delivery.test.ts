@@ -835,6 +835,81 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     }
   });
 
+  it("does not stage a definitive non-delivery note for an ambiguous Linq outcome", async () => {
+    const vaultRoot = await mkdtemp(path.join(
+      tmpdir(),
+      "murph-outbox-ambiguous-terminal-no-failure-note-",
+    ));
+    try {
+      const now = "2026-04-27T00:00:00.000Z";
+      const deliveryEffect = {
+        ...createDeliveryEffect(),
+        deliveryPhase: "background_retry" as const,
+        effectId: "intent_ambiguous_terminal_no_failure_note",
+        fingerprint: "fingerprint_ambiguous_terminal_no_failure_note",
+        payload: {
+          ...createDeliveryEffect().payload,
+          channel: "linq" as const,
+          idempotencyKey:
+            "assistant-outbox:intent_ambiguous_terminal_no_failure_note",
+        },
+      };
+      mocks.readAssistantOutboxIntent.mockResolvedValue(
+        createTerminalFailureOutboxIntent({
+          bindingDeliveryTarget: "linq_chat_direct",
+          channel: "linq",
+          createdAt: "2026-04-26T23:59:50.000Z",
+          effectId: deliveryEffect.effectId,
+          explicitTarget: null,
+        }),
+      );
+      mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+        deliveryEffect,
+      ]);
+      mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+        preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
+      });
+      mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+        {
+          ...createFailedDeliveryOutcome({
+            deliveryChannel: "linq",
+            deliveryErrorCode: "ASSISTANT_DELIVERY_AMBIGUOUS",
+            effectId: deliveryEffect.effectId,
+          }),
+          deliveryStatus: "failed_ambiguous" as const,
+          effectFingerprint: deliveryEffect.fingerprint,
+          retryable: false,
+        },
+      ]);
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        now: () => now,
+        vaultRoot,
+        workspace: createDueAssistantWorkspace(),
+      }));
+      const postCheckpoint = result.afterCheckpoint
+        ? await result.afterCheckpoint()
+        : result;
+
+      expect(postCheckpoint).toEqual(expect.objectContaining({
+        redactedStatus: expect.objectContaining({
+          hostedOutboxTerminalFailureInputsStaged: 0,
+          hostedOutboxTerminalizedSending: 1,
+        }),
+      }));
+      expect(mocks.readAssistantOutboxIntent).toHaveBeenCalledOnce();
+      expect(mocks.readAssistantOutboxIntent).toHaveBeenCalledWith(
+        vaultRoot,
+        deliveryEffect.effectId,
+      );
+      await expect(readExistingHostedPendingAssistantInputIds({
+        vaultRoot,
+      })).resolves.toEqual([]);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it.each([
     {
       bindingDelivery: { kind: "thread" as const, target: "linq_chat_direct" },
