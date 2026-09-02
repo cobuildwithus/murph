@@ -47,6 +47,7 @@ import {
   isHostedGroupContextHandoffSystemMailboxItem,
   mergeHostedSystemMailboxRollbackItems,
   projectHostedSystemMailboxModelFreeFrontier,
+  projectHostedSystemMailboxRetainedDeviceWebhookAdmission,
   projectHostedSystemMailboxWakeOwnerFrontier,
   readHostedSystemMailboxState,
   removeHostedSystemMailboxPendingItemIfCurrent,
@@ -326,6 +327,11 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   >(
     input.vaultRoot,
     (state) => {
+      const admissionState =
+        projectHostedSystemMailboxRetainedDeviceWebhookAdmission({
+          now: startedAt,
+          state,
+        });
       const modelFreeProjectedState =
         input.allowedRouteActions?.includes(
           "dispatch-assistant-notification",
@@ -337,10 +343,10 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
         && input.allowedWakeKinds?.includes(
           "assistant.notification.requested",
         ) === true
-          ? projectHostedSystemMailboxModelFreeFrontier(state)
+          ? projectHostedSystemMailboxModelFreeFrontier(admissionState)
           : input.allowedRouteActions == null
-            ? projectHostedSystemMailboxWakeOwnerFrontier(state)
-            : state;
+            ? projectHostedSystemMailboxWakeOwnerFrontier(admissionState)
+            : admissionState;
       const selectionState = {
         pending: modelFreeProjectedState.pending.filter((item) =>
           (

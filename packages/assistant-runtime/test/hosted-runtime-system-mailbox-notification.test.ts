@@ -3510,6 +3510,96 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
+  it("uses a fresh webhook to admit the older exact local device retry", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const retryAt = "2026-04-28T00:00:00.000Z";
+    const connectionId = "dsc_webhook_admits_retained_retry";
+    const retainedWake = buildHostedExecutionDeviceSyncWake({
+      connectionId,
+      eventId: "device-sync.wake:retained-local-retry",
+      hint: {
+        jobs: [{
+          availableAt: retryAt,
+          dedupeKey: "retained-historical-job",
+          kind: "resource",
+          maxAttempts: 1,
+          payload: {},
+          priority: 30,
+        }],
+      },
+      occurredAt: FIXED_NOW,
+      provider: "junction",
+      reason: "reconcile_due",
+      userId: "member_123",
+    });
+    const webhookWake = buildHostedExecutionDeviceSyncWake({
+      connectionId,
+      eventId: "device-sync.wake:fresh-webhook",
+      occurredAt: "2026-04-27T00:00:01.000Z",
+      provider: "junction",
+      reason: "webhook_hint",
+      userId: "member_123",
+    });
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedDeviceSyncItem({
+          id: "mailbox_item_retained_local_retry",
+          laneSeq: "1",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: retainedWake,
+      });
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedDeviceSyncItem({
+          id: "mailbox_item_fresh_webhook",
+          laneSeq: "2",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: webhookWake,
+      });
+      await updateHostedSystemMailboxState(workspace.vaultRoot, (state) => ({
+        pending: state.pending.map((item) =>
+          item.itemId === "mailbox_item_retained_local_retry"
+            ? {
+                ...item,
+                attemptCount: 1,
+                lastAttemptAt: FIXED_NOW,
+                nextAttemptAt: retryAt,
+              }
+            : item
+        ),
+      }));
+
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["run-device-sync-wake"],
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      assert.equal(prepared?.status, "processed");
+      assert.equal(prepared.itemId, "mailbox_item_retained_local_retry");
+      assert.equal(prepared.item.nextAttemptAt, null);
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          wake: retainedWake,
+        }),
+      );
+      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending)
+        .toEqual([
+          expect.objectContaining({
+            itemId: "mailbox_item_fresh_webhook",
+            wake: webhookWake,
+          }),
+        ]);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
   it("lets another connection run around a retained device-sync retry", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const olderWake = buildHostedExecutionDeviceSyncWake({
