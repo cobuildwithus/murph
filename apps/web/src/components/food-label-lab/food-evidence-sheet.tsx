@@ -25,6 +25,13 @@ import {
   getFoodEvidenceSummary,
   getFoodObservationScope,
 } from "./food-label-model";
+import {
+  formatEvidenceBasis,
+  formatNormalizedProductTestResult,
+  formatProductTestNumber,
+  formatProductTestResult,
+  hasDistinctNormalizedProductTestResult,
+} from "../murph-safe/product-test-presentation";
 
 export type FoodEvidencePanel = "tests" | "gaps";
 
@@ -123,7 +130,7 @@ function TestsPanel(input: { product: PublicProductDetail }) {
 
       <SheetFooter className="border-t border-border px-6 py-5">
         <p className="text-sm text-muted-foreground">
-          Shown observations cover exact samples, not every package.
+          Screening references are not product safety determinations.
         </p>
       </SheetFooter>
     </>
@@ -140,9 +147,14 @@ function ObservationRow(input: {
         <div>
           <p className="text-sm font-medium text-foreground">{observation.analyte.name}</p>
           <p className="mt-1 font-serif text-lg font-semibold text-foreground">
-            {formatTestResult(observation.result)}
+            {formatProductTestResult(observation.result)}
           </p>
-          <p className="mt-0.5 text-xs text-muted-foreground">{observation.result.basis}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{formatEvidenceBasis(observation.result.basis)}</p>
+          {observation.normalizedResult && hasDistinctNormalizedProductTestResult(observation) ? (
+            <p className="mt-2 text-xs leading-5 text-muted-foreground">
+              Normalized: {formatNormalizedProductTestResult(observation)} · {formatEvidenceBasis(observation.normalizedResult.basis)}
+            </p>
+          ) : null}
         </div>
         <ScreeningBadge screening={observation.screening} />
       </div>
@@ -152,11 +164,7 @@ function ObservationRow(input: {
           threshold={observation.screening.threshold}
           screeningPolicy={observation.screening.screeningPolicy}
         />
-      ) : (
-        <p className="mt-3 text-sm text-muted-foreground">
-          No comparable screening threshold.
-        </p>
-      )}
+      ) : null}
 
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <span>{observation.source.name}</span>
@@ -186,7 +194,7 @@ function ScreeningBadge(input: {
   if (!input.screening) {
     return (
       <Badge variant="outline" className="h-fit border-border bg-muted text-muted-foreground">
-        No threshold
+        No comparable screening threshold
       </Badge>
     );
   }
@@ -194,14 +202,14 @@ function ScreeningBadge(input: {
     return (
       <Badge variant="destructive" className="h-fit gap-1.5">
         <AlertTriangleIcon aria-hidden="true" />
-        Above threshold
+        Above this screening threshold
       </Badge>
     );
   }
   return (
     <Badge variant="outline" className="h-fit gap-1.5 border-primary/30 bg-primary/10 text-primary">
       <CheckIcon aria-hidden="true" />
-      Below threshold
+      Did not exceed this screening threshold
     </Badge>
   );
 }
@@ -214,15 +222,15 @@ function ThresholdFacts(input: {
     <div className="mt-3 text-sm text-muted-foreground">
       <p className="font-medium text-foreground">{input.threshold.name}</p>
       <p>
-        {formatNumber(input.threshold.value)} {input.threshold.unit} · {input.threshold.basis} · {input.threshold.authority}
+        {formatProductTestNumber(input.threshold.value)} {input.threshold.unit} · {formatEvidenceBasis(input.threshold.basis)} · {input.threshold.authority}
       </p>
       {input.screeningPolicy ? (
         <p className="mt-1 text-xs">
-          Exposure {formatNumber(input.screeningPolicy.exposure.value)} {input.screeningPolicy.exposure.unit}
-          {` · ${input.screeningPolicy.exposure.basis}`}
-          {` · ${formatNumber(input.screeningPolicy.assumedServingsPerDay)} servings/day`}
-          {` · ${formatNumber(input.screeningPolicy.assumedBodyWeightKg)} kg`}
-          {` · ${formatNumber(input.screeningPolicy.ratio)}× threshold`}
+          Exposure {formatProductTestNumber(input.screeningPolicy.exposure.value)} {input.screeningPolicy.exposure.unit}
+          {` · ${formatEvidenceBasis(input.screeningPolicy.exposure.basis)}`}
+          {` · ${formatProductTestNumber(input.screeningPolicy.assumedServingsPerDay)} servings/day`}
+          {` · ${formatProductTestNumber(input.screeningPolicy.assumedBodyWeightKg)} kg`}
+          {` · ${formatProductTestNumber(input.screeningPolicy.ratio)}× threshold`}
         </p>
       ) : null}
       {input.threshold.url ? (
@@ -238,27 +246,6 @@ function ThresholdFacts(input: {
       ) : null}
     </div>
   );
-}
-
-function formatTestResult(
-  result: PublicProductDetail["productTests"]["observations"][number]["result"],
-): string {
-  if (result.operator === "not_detected") return "Not detected";
-  if (result.operator === "detected") return "Detected";
-  if (result.operator === "trace") return "Trace detected";
-  if (result.operator === "range" && result.value !== null && result.upperValue != null) {
-    return `${formatNumber(result.value)}–${formatNumber(result.upperValue)} ${result.unit}`;
-  }
-  const symbols = { eq: "", gt: ">", gte: "≥", lt: "<", lte: "≤" } as const;
-  const symbol = result.operator === "range" ? "" : symbols[result.operator];
-  if (result.value === null) return result.qualifier ?? "Reported";
-  return `${symbol}${formatNumber(result.value)} ${result.unit}`;
-}
-
-function formatNumber(value: number): string {
-  return Number.isInteger(value) ? String(value) : value.toLocaleString("en-US", {
-    maximumFractionDigits: 3,
-  });
 }
 
 function GapsPanel(input: { product: PublicProductDetail }) {
