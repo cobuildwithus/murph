@@ -398,7 +398,7 @@ app_verify_parallel_default="$(resolve_local_parallel_default)"
 app_verify_parallel="$(resolve_profile_controlled_value 1 "$app_verify_parallel_default")"
 acceptance_app_verify_with_coverage="$(resolve_profile_controlled_value 1 "$app_verify_parallel_default")"
 test_lane_parallel="$(resolve_profile_controlled_value 1 "$app_verify_parallel_default")"
-package_coverage_shard="$(resolve_profile_controlled_value owners-a all)"
+package_coverage_shard="$(resolve_profile_controlled_value platform-a all)"
 
 log_acceptance_resource_plan
 `);
