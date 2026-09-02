@@ -50,6 +50,7 @@ import {
   buildIntegrationIngestRecord,
   findCaptureByLookup,
   initializeVault,
+  applyCanonicalWriteBatch,
   patchAutomation,
   readHabitatAspect,
   readJsonlRecords,
@@ -1792,6 +1793,13 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     },
     {
       channel: "linq" as const,
+      checkpointConversationInputAhead: false,
+      expectedProviderSends: 1,
+      initialOutboxState: "pending" as const,
+      providerOutcome: "success_with_post_provider_canonical_write" as const,
+    },
+    {
+      channel: "linq" as const,
       checkpointConversationInputAhead: true,
       expectedProviderSends: 0,
       initialOutboxState: "pending" as const,
@@ -1875,8 +1883,13 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     const exactDedupeKey =
       `assistant.notification.requested:${exactDeliveryKey}`;
     let providerFailuresRemaining =
-      providerOutcome === "success" ? 0 : 3;
-    const providerRetries = providerOutcome !== "success";
+      providerOutcome === "retryable_failure"
+        || providerOutcome === "retryable_failure_with_host_abort"
+        ? 3
+        : 0;
+    const providerRetries = providerFailuresRemaining > 0;
+    const actualDrainHostedPreparedAssistantDeliveries =
+      mocks.actualDrainHostedPreparedAssistantDeliveries;
     const retryWakeAt = new Date(
       Date.parse(TEST_NOW) + 5 * 60_000,
     ).toISOString();
@@ -1985,6 +1998,34 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       mocks.prepareHostedCodexAssistantProcess.mockClear();
       mocks.prepareHostedCodexRuntimeEnvironment.mockClear();
       mocks.runAssistantAutomationPass.mockClear();
+      if (
+        providerOutcome === "success_with_post_provider_canonical_write"
+      ) {
+        assert.ok(actualDrainHostedPreparedAssistantDeliveries);
+        mocks.drainHostedPreparedAssistantDeliveries.mockImplementation(
+          async (input) => {
+            const outcomes =
+              await actualDrainHostedPreparedAssistantDeliveries(input);
+            await applyCanonicalWriteBatch({
+              audit: {
+                action: "document_import",
+                commandName: "test.exactDeliveryPostProviderCanonicalWrite",
+                summary: "Synthetic post-provider exact-delivery write.",
+              },
+              operationType: "hosted_canonical_write_test",
+              summary: "Synthetic post-provider exact-delivery write",
+              textWrites: [{
+                content: "post-provider exact-delivery write\n",
+                overwrite: true,
+                relativePath:
+                  "bank/exact-delivery-post-provider-canonical-write.md",
+              }],
+              vaultRoot,
+            });
+            return outcomes;
+          },
+        );
+      }
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       await enqueueHostedSystemMailboxItem({
         item: {
@@ -2388,6 +2429,18 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
       assert.equal(mocks.prepareHostedCodexRuntimeEnvironment.mock.calls.length, 0);
       assert.equal(mocks.runAssistantAutomationPass.mock.calls.length, 0);
+      if (
+        providerOutcome === "success_with_post_provider_canonical_write"
+      ) {
+        const canonicalCheckpointIndex = checkpointRequests.findIndex(
+          (request) => request.reason === "canonical_runtime_commit",
+        );
+        const finalCheckpointIndex = checkpointRequests
+          .map((request) => request.reason)
+          .lastIndexOf("idle_shutdown");
+        assert.ok(canonicalCheckpointIndex >= 0);
+        assert.ok(canonicalCheckpointIndex < finalCheckpointIndex);
+      }
       if (providerRetries) {
         assert.equal(result.status, "scheduled");
         assert.equal(result.nextWakeAt, providerRetryWakeAt);
@@ -2792,6 +2845,11 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         assert.equal(resumedResult.status, "idle");
       }
     } finally {
+      if (actualDrainHostedPreparedAssistantDeliveries) {
+        mocks.drainHostedPreparedAssistantDeliveries.mockImplementation(
+          actualDrainHostedPreparedAssistantDeliveries,
+        );
+      }
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
     }

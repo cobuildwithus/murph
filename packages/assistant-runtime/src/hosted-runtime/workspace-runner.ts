@@ -1433,6 +1433,10 @@ export interface HostedWorkspaceCanonicalWriteCheckpointCoalescer {
     HostedDeferredCanonicalWriteCheckpointState,
     "checkpointRequired"
   > | null;
+  previewDeferredWrite(input: {
+    assistantAutomationScheduleChanged: boolean;
+    canonicalSystemProgressCommitted: boolean;
+  }): HostedDeferredCanonicalWriteCheckpointState;
   recordCheckpoint(): void;
   recordDeferredWrite(input: {
     assistantAutomationScheduleChanged: boolean;
@@ -1447,6 +1451,20 @@ HostedWorkspaceCanonicalWriteCheckpointCoalescer {
   let pendingWriteCount = 0;
   let assistantAutomationScheduleChanged = false;
   let canonicalSystemProgressCommitted = false;
+  const previewDeferredWrite = (input: {
+    assistantAutomationScheduleChanged: boolean;
+    canonicalSystemProgressCommitted: boolean;
+  }): HostedDeferredCanonicalWriteCheckpointState => ({
+    assistantAutomationScheduleChanged:
+      assistantAutomationScheduleChanged
+      || input.assistantAutomationScheduleChanged,
+    canonicalSystemProgressCommitted:
+      canonicalSystemProgressCommitted
+      || input.canonicalSystemProgressCommitted,
+    checkpointRequired:
+      pendingWriteCount + 1
+        >= HOSTED_DEFERRED_CANONICAL_WRITE_CHECKPOINT_LIMIT,
+  });
 
   return {
     pendingCheckpoint() {
@@ -1463,21 +1481,18 @@ HostedWorkspaceCanonicalWriteCheckpointCoalescer {
       assistantAutomationScheduleChanged = false;
       canonicalSystemProgressCommitted = false;
     },
+    previewDeferredWrite,
     recordDeferredWrite(input) {
+      const next = previewDeferredWrite(input);
       pendingWriteCount += 1;
-      assistantAutomationScheduleChanged ||=
-        input.assistantAutomationScheduleChanged;
-      canonicalSystemProgressCommitted ||=
-        input.canonicalSystemProgressCommitted;
+      assistantAutomationScheduleChanged =
+        next.assistantAutomationScheduleChanged;
+      canonicalSystemProgressCommitted =
+        next.canonicalSystemProgressCommitted;
       if (input.canonicalSystemProgressCommitted) {
         options.onCanonicalSystemProgressCommitted?.();
       }
-      return {
-        assistantAutomationScheduleChanged,
-        canonicalSystemProgressCommitted,
-        checkpointRequired:
-          pendingWriteCount >= HOSTED_DEFERRED_CANONICAL_WRITE_CHECKPOINT_LIMIT,
-      };
+      return next;
     },
   };
 }
@@ -2897,6 +2912,7 @@ function createHostedWorkspaceCanonicalWritePort(input: {
       HostedDeferredCanonicalWriteCheckpointState,
       "checkpointRequired"
     >,
+    redactedStatus = input.readPreviousRedactedStatus(),
   ): Promise<void> => {
     if (!input.input.checkpointRuntimeRedactedStatus) {
       throw new TypeError(
@@ -2928,7 +2944,7 @@ function createHostedWorkspaceCanonicalWritePort(input: {
       nextWakeAt: nextWake.at,
       nextWakeReason: nextWake.reason,
       reason: "canonical_runtime_commit",
-      redactedStatus: input.readPreviousRedactedStatus(),
+      redactedStatus,
       workspace: mergeGeneratedImageRetentionWakeIntoWorkspace({
         retentionWakeAt: input.generatedImageRetentionWakeAt ?? null,
         workspace,
@@ -3000,20 +3016,31 @@ function createHostedWorkspaceCanonicalWritePort(input: {
         });
         const receiptLogStatus = hostedCanonicalWriteReceiptLogStatusFields(receiptLogUpdate);
         if (input.deferRuntimeStatusCheckpoint === true) {
+          const coalescer = input.canonicalWriteCheckpointCoalescer;
+          const deferredWrite = {
+            assistantAutomationScheduleChanged,
+            canonicalSystemProgressCommitted:
+              writeInput.receipt.operationType === "device_batch_import",
+          };
+          const deferredCheckpoint = coalescer?.previewDeferredWrite(
+            deferredWrite,
+          );
+          if (deferredCheckpoint?.checkpointRequired === true) {
+            await checkpointDeferredRuntimeStatus(
+              deferredCheckpoint,
+              mergeHostedRuntimeRedactedStatusValues(
+                input.readPreviousRedactedStatus(),
+                receiptLogStatus,
+              ),
+            );
+          } else {
+            coalescer?.recordDeferredWrite(deferredWrite);
+          }
           input.recordRedactedStatus(receiptLogStatus);
           input.checkpointRequestBuilder.markRuntimeStateDirty();
           input.input.onCanonicalWriteReceiptLogUpdated?.(
             receiptLogUpdate.entryCount,
           );
-          const deferredCheckpoint =
-            input.canonicalWriteCheckpointCoalescer?.recordDeferredWrite({
-              assistantAutomationScheduleChanged,
-              canonicalSystemProgressCommitted:
-                writeInput.receipt.operationType === "device_batch_import",
-            });
-          if (deferredCheckpoint?.checkpointRequired === true) {
-            await checkpointDeferredRuntimeStatus(deferredCheckpoint);
-          }
         } else {
           const checkpointRedactedStatus =
             mergeHostedRuntimeRedactedStatusValues(
@@ -3983,6 +4010,13 @@ function cloneHostedRuntimeRedactedJson(
   return value ? { ...value } : null;
 }
 
+function mergeHostedRuntimeRedactedStatusValues(
+  first: HostedRuntimeRedactedJson | null | undefined,
+  second: HostedRuntimeRedactedJson,
+): HostedRuntimeRedactedJson;
+function mergeHostedRuntimeRedactedStatusValues(
+  ...values: Array<HostedRuntimeRedactedJson | null | undefined>
+): HostedRuntimeRedactedJson | null;
 function mergeHostedRuntimeRedactedStatusValues(
   ...values: Array<HostedRuntimeRedactedJson | null | undefined>
 ): HostedRuntimeRedactedJson | null {

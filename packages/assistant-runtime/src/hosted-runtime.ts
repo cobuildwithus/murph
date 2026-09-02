@@ -3459,13 +3459,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           }
           if (ownsExactModelFreeDelivery) {
             const persistedDelivery = await runHostedWorkspaceCanonicalWriteAtBoundary({
-              canonicalWriteCheckpointCoalescer,
-              onFailureRedactedStatusChanged(status) {
-                currentRedactedStatus = {
-                  ...currentRedactedStatus,
-                  ...status,
-                };
-              },
               previousRedactedStatus: currentRedactedStatus,
               runnerInput: {
                 ...baseRunnerInput,

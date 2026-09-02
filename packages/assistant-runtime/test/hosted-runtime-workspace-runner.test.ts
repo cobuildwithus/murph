@@ -76,6 +76,7 @@ import type {
 } from "../src/hosted-runtime/platform.ts";
 import {
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES,
+  readHostedCanonicalWriteReceiptLog,
 } from "../src/hosted-runtime/canonical-write-receipt-log.ts";
 import {
   collectHostedAssistantDeliverySideEffects,
@@ -3701,89 +3702,148 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("flushes deferred canonical progress when its owner boundary fails", async () => {
+  test("excludes a failed threshold write from the owner flush and publishes it once on retry", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     await initializeVault({
       createdAt: new Date(TEST_NOW),
       timezone: "UTC",
-      title: "Hosted Workspace Failed Deferred Canonical Write Test Vault",
+      title: "Hosted Workspace Threshold Rollback Test Vault",
       vaultRoot,
     });
     const checkpointInputs: HostedWorkspaceRunnerRuntimeStatusCheckpointInput[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const coalescer = createHostedWorkspaceCanonicalWriteCheckpointCoalescer();
+    let committedDeviceProgressCount = 0;
+    const coalescer = createHostedWorkspaceCanonicalWriteCheckpointCoalescer({
+      onCanonicalSystemProgressCommitted() {
+        committedDeviceProgressCount += 1;
+      },
+    });
     const artifactBytesByHash = new Map<string, Uint8Array>();
-    const workspace = createWorkspaceState({ version: "0" });
+    let checkpointFailurePending = true;
+    let workspace = createWorkspaceState({ version: "0" });
+    let redactedStatus = workspace.redactedStatus ?? null;
+    const platform = createPlatform({
+      artifactBytesByHash,
+      async artifactPut(artifact) {
+        artifactBytesByHash.set(artifact.sha256, artifact.bytes);
+      },
+      mailboxPort: createMailboxPort({ items: [] }).mailboxPort,
+      workspacePort: createWorkspacePort({ checkpointRequests }),
+    });
+    const runWrite = async (
+      writeIndex: number,
+      failAfterWrite = false,
+    ) => await runHostedWorkspaceCanonicalWriteAtBoundary({
+      canonicalWriteCheckpointCoalescer: coalescer,
+      previousRedactedStatus: workspace.redactedStatus ?? redactedStatus,
+      runnerInput: {
+        async checkpointRuntimeRedactedStatus(checkpointInput) {
+          checkpointInputs.push(checkpointInput);
+          if (checkpointFailurePending) {
+            checkpointFailurePending = false;
+            throw new Error("synthetic threshold checkpoint failure");
+          }
+          workspace = createWorkspaceState({
+            redactedStatus: checkpointInput.redactedStatus,
+            version: String(BigInt(workspace.version) + 1n),
+          });
+          return { checkpointed: true, workspace };
+        },
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: `attempt_threshold_rollback_${writeIndex}`,
+          expectedWorkspaceVersion: workspace.version,
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("Mailbox import is not used at a canonical boundary.");
+        },
+        limitPerLane: 10,
+        now: () => TEST_NOW,
+        platform,
+        requestId: `request_threshold_rollback_${writeIndex}`,
+        vaultRoot,
+        workspace,
+      },
+      async write() {
+        await applyCanonicalWriteBatch({
+          audit: {
+            action: "device_import",
+            commandName: "test.thresholdRollbackCanonicalWrite",
+            summary: `Synthetic threshold rollback write ${writeIndex}.`,
+          },
+          operationType: "device_batch_import",
+          summary: `Synthetic threshold rollback write ${writeIndex}`,
+          textWrites: [{
+            content: `threshold rollback write ${writeIndex}\n`,
+            overwrite: true,
+            relativePath: `bank/threshold-rollback-write-${writeIndex}.md`,
+          }],
+          vaultRoot,
+        });
+        if (failAfterWrite) {
+          throw new Error("synthetic owner failure after retry");
+        }
+      },
+    });
 
     try {
+      for (let writeIndex = 1; writeIndex <= 7; writeIndex += 1) {
+        const result = await runWrite(writeIndex);
+        redactedStatus = result.redactedStatus;
+        workspace = result.workspace ?? workspace;
+      }
+
       await assert.rejects(
-        runHostedWorkspaceCanonicalWriteAtBoundary({
-          canonicalWriteCheckpointCoalescer: coalescer,
-          previousRedactedStatus: workspace.redactedStatus ?? null,
-          runnerInput: {
-            async checkpointRuntimeRedactedStatus(checkpointInput) {
-              checkpointInputs.push(checkpointInput);
-              return {
-                checkpointed: true,
-                workspace: createWorkspaceState({
-                  redactedStatus: checkpointInput.redactedStatus,
-                  version: "1",
-                }),
-              };
-            },
-            checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
-              attemptId: "attempt_failed_deferred_canonical_write",
-              expectedWorkspaceVersion: "0",
-              leaseGeneration: "1",
-              nextWakeAt: null,
-              nextWakeReason: null,
-              snapshotRef: null,
-            }),
-            expectedUserId: TEST_USER_ID,
-            async importItem() {
-              throw new Error("Mailbox import is not used at a canonical boundary.");
-            },
-            limitPerLane: 10,
-            now: () => TEST_NOW,
-            platform: createPlatform({
-              artifactBytesByHash,
-              async artifactPut(artifact) {
-                artifactBytesByHash.set(artifact.sha256, artifact.bytes);
-              },
-              mailboxPort: createMailboxPort({ items: [] }).mailboxPort,
-              workspacePort: createWorkspacePort({ checkpointRequests }),
-            }),
-            requestId: "request_failed_deferred_canonical_write",
-            vaultRoot,
-            workspace,
-          },
-          async write() {
-            await applyCanonicalWriteBatch({
-              audit: {
-                action: "device_import",
-                commandName: "test.failedDeferredCanonicalWrite",
-                summary: "Synthetic canonical write before owner failure.",
-              },
-              operationType: "device_batch_import",
-              summary: "Synthetic canonical write before owner failure",
-              textWrites: [{
-                content: "deferred progress survives owner failure\n",
-                overwrite: true,
-                relativePath: "bank/failed-deferred-canonical-write.md",
-              }],
-              vaultRoot,
-            });
-            throw new Error("synthetic owner boundary failure");
-          },
-        }),
-        /synthetic owner boundary failure/,
+        runWrite(8),
+        /synthetic threshold checkpoint failure/,
       );
 
-      assert.equal(checkpointInputs.length, 1);
+      assert.deepEqual(
+        await Promise.all(checkpointInputs.map(async (input) =>
+          (await readHostedCanonicalWriteReceiptLog({
+            artifactStore: platform.artifactStore,
+            status: input.redactedStatus,
+          })).entryCount
+        )),
+        [8, 7],
+      );
+      assert.equal(committedDeviceProgressCount, 7);
       assert.equal(
-        typeof checkpointInputs[0]?.redactedStatus
-          ?.hostedCanonicalWriteReceiptLogSha256,
-        "string",
+        existsSync(path.join(vaultRoot, "bank/threshold-rollback-write-8.md")),
+        false,
+      );
+      assert.equal(
+        (await readHostedCanonicalWriteReceiptLog({
+          artifactStore: platform.artifactStore,
+          status: checkpointInputs[1]?.redactedStatus,
+        })).entryCount,
+        7,
+      );
+      assert.equal(coalescer.pendingCheckpoint(), null);
+
+      await assert.rejects(
+        runWrite(8, true),
+        /synthetic owner failure after retry/,
+      );
+
+      assert.equal(committedDeviceProgressCount, 8);
+      assert.equal(
+        await readFile(
+          path.join(vaultRoot, "bank/threshold-rollback-write-8.md"),
+          "utf8",
+        ),
+        "threshold rollback write 8\n",
+      );
+      assert.equal(
+        (await readHostedCanonicalWriteReceiptLog({
+          artifactStore: platform.artifactStore,
+          status: checkpointInputs[2]?.redactedStatus,
+        })).entryCount,
+        8,
       );
       assert.equal(coalescer.pendingCheckpoint(), null);
     } finally {
