@@ -2459,20 +2459,6 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
 
   const admit: AssistantActiveTurnInputAdmissionHook = async (admissionInput) => {
     const availableInputIds = admissionInput.availableInputIds ?? []
-    if (
-      availableInputIds.length === 0 ||
-      !input.inputSource.listInputCandidatesByIds
-    ) {
-      const refreshResult = await input.inputSource.refresh({
-        signal: admissionInput.signal,
-      })
-      if (refreshResult.reason === 'source_unavailable') {
-        throw new AssistantActiveTurnInputUnavailableError(
-          'same-conversation input source is temporarily unavailable during the active turn; will retry later.',
-        )
-      }
-    }
-
     const knownProjectionCaptureIds = [
       ...context.optionalInboxCaptureIds,
       ...pendingAcceptances.flatMap((pending) => pending.captureIds),
@@ -2498,11 +2484,27 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
     }
     const remainingInputCapacity =
       ASSISTANT_AUTO_REPLY_COMPOUND_INPUT_MAX - selectionContext.inputCount
+    const refreshResult = await input.inputSource.refresh({
+      signal: admissionInput.signal,
+    })
+    const exactLookupAvailable =
+      availableInputIds.length > 0 &&
+      input.inputSource.listInputCandidatesByIds !== undefined
+    if (
+      refreshResult.reason === 'source_unavailable' &&
+      !exactLookupAvailable
+    ) {
+      throw new AssistantActiveTurnInputUnavailableError(
+        'same-conversation input source is temporarily unavailable during the active turn; will retry later.',
+      )
+    }
     const availableLateInputs = await listAutoReplyActiveTurnInputs({
       afterCursor:
         pendingAcceptances.at(-1)?.lastInputCursor ?? context.lastInputCursor,
       conversation: readAutoReplyConversationRef(selectionContext),
       context: selectionContext,
+      discoverConversationInputs:
+        refreshResult.reason !== 'source_unavailable',
       inputIds: availableInputIds,
       inputSource: input.inputSource,
       knownProjectionCaptureIds,
@@ -2833,6 +2835,7 @@ async function listAutoReplyActiveTurnInputs(input: {
   afterCursor: AssistantInputCandidate['event']['cursor']
   context: AssistantAutoReplyGroupContext
   conversation: AssistantInputConversationRef
+  discoverConversationInputs: boolean
   inputIds: readonly string[]
   inputSource: AssistantActiveTurnInputSource
   knownProjectionCaptureIds: readonly string[]
@@ -2841,68 +2844,78 @@ async function listAutoReplyActiveTurnInputs(input: {
 }): Promise<AssistantInputCandidateBatch> {
   const expectedChannel = normalizeNullableString(input.context.firstItem.summary.source)
   const bindingDeliveryTarget = readAutoReplyBindingDeliveryTarget(input.context)
-  if (
-    input.inputIds.length > 0 &&
-    input.inputSource.listInputCandidatesByIds &&
-    expectedChannel &&
-    bindingDeliveryTarget
-  ) {
-    const exact = await input.inputSource.listInputCandidatesByIds({
-      afterCursor: input.afterCursor,
-      inputIds: input.inputIds,
-      knownInputIds: input.knownInputIds,
-      limit: 100,
-      signal: input.signal,
-      sourceId: expectedChannel,
-    })
-    return selectAutoReplyRouteInput({
-      acceptedLiveInputIds: input.context.inputIds,
-      afterCursor: input.afterCursor,
-      candidates: exact.inputs,
-      conversation: input.conversation,
-      deliveryTarget: bindingDeliveryTarget,
-      expectedChannel,
-      anchorSummary:
-        input.context.items.at(-1)?.summary ?? input.context.firstItem.summary,
-      knownProjectionCaptureIds: input.knownProjectionCaptureIds,
-    })
-  }
-
-  const strict = await input.inputSource.listNewConversationInputs({
-    afterCursor: input.afterCursor,
-    conversation: input.conversation,
-    knownProjectionCaptureIds: input.knownProjectionCaptureIds,
-    knownInputIds: input.knownInputIds,
-    signal: input.signal,
-  })
-  if (!input.inputSource.listInputCandidates || !expectedChannel || !bindingDeliveryTarget) {
+  const strict = input.discoverConversationInputs
+    ? await input.inputSource.listNewConversationInputs({
+        afterCursor: input.afterCursor,
+        conversation: input.conversation,
+        knownProjectionCaptureIds: input.knownProjectionCaptureIds,
+        knownInputIds: input.knownInputIds,
+        signal: input.signal,
+      })
+    : { inputs: [], nextCursor: input.afterCursor }
+  if (!expectedChannel || !bindingDeliveryTarget) {
     return strict
   }
 
-  const route = await input.inputSource.listInputCandidates({
-    afterCursor: input.afterCursor,
-    knownInputIds: [
-      ...input.knownInputIds,
+  const discoveredInputIds = new Set([
+    ...input.knownInputIds,
+    ...strict.inputs.map((candidate) => candidate.event.inputId),
+  ])
+  const exactInputIds = input.inputIds.filter(
+    (inputId) => !discoveredInputIds.has(inputId),
+  )
+  const exact = exactInputIds.length > 0 && input.inputSource.listInputCandidatesByIds
+    ? await input.inputSource.listInputCandidatesByIds({
+        afterCursor: input.afterCursor,
+        inputIds: exactInputIds,
+        knownInputIds: [...discoveredInputIds],
+        limit: 100,
+        signal: input.signal,
+        sourceId: expectedChannel,
+      })
+    : { inputs: [], nextCursor: strict.nextCursor }
+  const knownInputIds = [
+    ...discoveredInputIds,
+    ...exact.inputs.map((candidate) => candidate.event.inputId),
+  ]
+  const route = input.discoverConversationInputs && input.inputSource.listInputCandidates
+    ? await input.inputSource.listInputCandidates({
+        afterCursor: input.afterCursor,
+        knownInputIds,
+        limit: 100,
+        signal: input.signal,
+        sourceId: expectedChannel,
+      })
+    : { inputs: [], nextCursor: exact.nextCursor }
+  const lastStrictInput = strict.inputs.at(-1)
+  const additional = selectAutoReplyRouteInputs({
+    acceptedLiveInputIds: [
+      ...input.context.inputIds,
       ...strict.inputs.map((candidate) => candidate.event.inputId),
     ],
-    limit: 100,
-    signal: input.signal,
-    sourceId: expectedChannel,
-  })
-  return selectAutoReplyRouteInput({
-    acceptedLiveInputIds: input.context.inputIds,
-    afterCursor: input.afterCursor,
-    candidates: [...strict.inputs, ...route.inputs],
+    afterCursor: strict.nextCursor ?? input.afterCursor,
+    candidates: [...exact.inputs, ...route.inputs],
     conversation: input.conversation,
     deliveryTarget: bindingDeliveryTarget,
     expectedChannel,
     anchorSummary:
-      input.context.items.at(-1)?.summary ?? input.context.firstItem.summary,
-    knownProjectionCaptureIds: input.knownProjectionCaptureIds,
+      lastStrictInput
+        ? assistantAutomationInputSummaryFromCandidate(lastStrictInput)
+        : input.context.items.at(-1)?.summary ?? input.context.firstItem.summary,
+    knownProjectionCaptureIds: [
+      ...input.knownProjectionCaptureIds,
+      ...strict.inputs.flatMap((candidate) =>
+        candidate.projection.captureId ? [candidate.projection.captureId] : []
+      ),
+    ],
   })
+  return {
+    inputs: [...strict.inputs, ...additional.inputs],
+    nextCursor: additional.nextCursor,
+  }
 }
 
-function selectAutoReplyRouteInput(input: {
+function selectAutoReplyRouteInputs(input: {
   acceptedLiveInputIds: readonly string[]
   afterCursor: AssistantInputCandidate['event']['cursor']
   anchorSummary: AssistantAutomationInputSummary
@@ -2914,11 +2927,17 @@ function selectAutoReplyRouteInput(input: {
 }): AssistantInputCandidateBatch {
   const acceptedLiveInputIds = new Set(input.acceptedLiveInputIds)
   const knownProjectionCaptureIds = new Set(input.knownProjectionCaptureIds)
+  const seenInputIds = new Set<string>()
+  const selectedInputs: AssistantInputCandidate[] = []
   let nextCursor = input.afterCursor
 
   for (const candidate of [...input.candidates].sort((left, right) =>
     compareAssistantInputCursors(left.event.cursor, right.event.cursor),
   )) {
+    if (seenInputIds.has(candidate.event.inputId)) {
+      continue
+    }
+    seenInputIds.add(candidate.event.inputId)
     if (!isSameAutoReplyDeliveryRoute({
       accountId: input.conversation.accountId,
       candidate,
@@ -2958,14 +2977,11 @@ function selectAutoReplyRouteInput(input: {
     ) {
       continue
     }
-    return {
-      inputs: [candidate],
-      nextCursor,
-    }
+    selectedInputs.push(candidate)
   }
 
   return {
-    inputs: [],
+    inputs: selectedInputs,
     nextCursor,
   }
 }
