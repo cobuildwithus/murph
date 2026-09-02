@@ -1,6 +1,6 @@
 # Collapse group reply coalescing registration race
 
-Status: active
+Status: completed
 Created: 2026-09-01
 Updated: 2026-09-02
 
@@ -138,3 +138,4 @@ Updated: 2026-09-02
 - 2026-09-02: after the original change merged, reproduced a remaining
   strict-first ordering gap against the real store-backed input source and
   collapsed strict, exact, and route discoveries into one ordered selector.
+Completed: 2026-09-02
