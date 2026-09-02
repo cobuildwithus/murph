@@ -44,6 +44,7 @@ import {
 } from "../src/runner-injected-credential.ts";
 import {
   CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS,
+  CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_ENDPOINT,
 } from "../src/internal-hosts.ts";
 import {
   HOSTED_EXECUTION_RUNNER_PRIVATE_IMAGE_URL_PUBLISH_PATH,
@@ -184,6 +185,9 @@ describe("runHostedWorkspaceInvocation", () => {
     const abortController = new AbortController();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url === CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_ENDPOINT) {
+        return Response.json({ completed: true });
+      }
       if (request.url === "http://web-control.worker/api/internal/hosted-workspace/checkpoint") {
         return new Response(JSON.stringify({
           checkpointed: true,
@@ -340,9 +344,35 @@ describe("runHostedWorkspaceInvocation", () => {
       expect(providerResponse.status).toBe(200);
     }
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const checkpointRequest = requireFetchRequest(
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const completionRequest = requireFetchRequest(
       fetchMock.mock.calls[0],
+      "direct invocation runtime completion",
+    );
+    expect(completionRequest.headers.get(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)).toBe(
+      job.request.attemptId,
+    );
+    expect(completionRequest.headers.get(HOSTED_RUNTIME_LEASE_GENERATION_HEADER)).toBe(
+      job.request.leaseGeneration,
+    );
+    expect(completionRequest.headers.get(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER)).toBe(
+      job.request.workspaceVersion,
+    );
+    expect(completionRequest.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(
+      job.request.userId,
+    );
+    await expect(completionRequest.json()).resolves.toEqual({
+      result: {
+        immediateRecheckRequested: true,
+        nextWakeAt: null,
+        redactedStatus: {
+          importedCount: 0,
+        },
+        status: "idle",
+      },
+    });
+    const checkpointRequest = requireFetchRequest(
+      fetchMock.mock.calls[1],
       "direct invocation workspace checkpoint",
     );
     expect(checkpointRequest.headers.get(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)).toBe(
@@ -359,7 +389,7 @@ describe("runHostedWorkspaceInvocation", () => {
     );
 
     const providerRequest = requireFetchRequest(
-      fetchMock.mock.calls[1],
+      fetchMock.mock.calls[2],
       "direct invocation provider fetch",
     );
     expect(providerRequest.headers.has(HOSTED_RUNTIME_ATTEMPT_ID_HEADER)).toBe(false);
@@ -474,6 +504,9 @@ describe("runHostedWorkspaceInvocation", () => {
     ).toString();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url === CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_ENDPOINT) {
+        return Response.json({ completed: true });
+      }
       if (request.url !== publishUrl) {
         throw new Error(`Unexpected direct invocation request: ${request.url}`);
       }
@@ -508,7 +541,7 @@ describe("runHostedWorkspaceInvocation", () => {
       expiresAt,
       url: capabilityUrl.toString(),
     }]);
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("does not mutate warm state when the direct invocation signal is already aborted", async () => {

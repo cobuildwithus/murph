@@ -32,6 +32,7 @@ import {
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionEnvironmentInterviewCompletedWake,
   buildHostedExecutionEnvironmentVoiceCapturedWake,
+  buildHostedExecutionGroupJournalFactRecordedWake,
   buildHostedExecutionMealPhotoCapturedWake,
   buildHostedExecutionMemberActionCompletedWake,
   buildHostedExecutionMemberActionRequestedWake,
@@ -179,6 +180,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS:
           String(productionIdleCheckpointDelayMs),
         HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000",
+        HOSTED_EXECUTION_STANDBY_MODE: "allocate",
         HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
           [...allProbeIdentities, postEnrollmentConversationProbe]
             .map((identity) => identity.memberPhone)
@@ -213,6 +215,11 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
   }, 120_000);
 
   it("aborts and replaces generic model-free system work for a signed foreground reply", async () => {
+    // Production maintains the memberless standby before member traffic arrives.
+    // Establish that real precondition before starting the deliberately heavy
+    // system-mailbox runtime so the local machine does not provision both
+    // container roles concurrently.
+    const readyStandbySlotName = await waitForReadyStandbySlot();
     await seedProbe(systemMailboxProbe);
     const stagedMealPhoto = await stageMealPhotoForProbe(systemMailboxProbe);
     const stagedEnvironmentVoice = await stageEnvironmentVoiceForProbe(
@@ -270,6 +277,12 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       systemMailboxProbe.userId,
       latestAppend.wake.seq,
       systemWakes.length,
+    );
+    // The coordinator periodically re-proves its single ready slot. The wake
+    // storm intentionally runs long enough to overlap that interval, so wait
+    // for the same real slot to finish any in-flight reprobe before ingress.
+    await expect(waitForReadyStandbySlot()).resolves.toBe(
+      readyStandbySlotName,
     );
     const inboundText = "Reply while the full system mailbox is active.";
     const replyText = "Foreground reply won over the full system mailbox.";
@@ -360,6 +373,9 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       expect(providerStart.activeFence.processingMode).toBe("default");
       expect(providerStart.activeFence.attemptId).not.toBe(
         systemFence.attemptId,
+      );
+      expect(providerStart.activeFence.runnerContainerName).toBe(
+        readyStandbySlotName,
       );
       if (!providerStart.systemLane) {
         throw new Error(await requireScenario().buildFailureMessage(
@@ -2733,6 +2749,7 @@ async function readActiveRuntimeFenceForTest(userId: string): Promise<{
     | "default"
     | "inbox_media_retention"
     | "system_mailbox";
+  runnerContainerName: string | null;
 } | null> {
   return await requireScenario().harness.requestJson(
     `/__test/users/${encodeURIComponent(userId)}/active-runtime-fence`,
@@ -2743,6 +2760,32 @@ async function readActiveRuntimeFenceForTest(userId: string): Promise<{
       method: "POST",
     },
   );
+}
+
+async function waitForReadyStandbySlot(): Promise<string> {
+  const deadlineAt = Date.now() + 90_000;
+  type StandbyState = {
+    provisioningSlotName: string | null;
+    readySlotName: string | null;
+  };
+  let lastState: StandbyState | null = null;
+
+  while (Date.now() < deadlineAt) {
+    const state = await requireScenario().harness.requestJson<StandbyState>(
+      "/__test/standby/ensure-ready",
+      { method: "POST" },
+    );
+    lastState = state;
+    if (state.readySlotName) {
+      return state.readySlotName;
+    }
+    await sleep(250);
+  }
+
+  throw new Error(await requireScenario().buildFailureMessage(
+    systemMailboxProbe.userId,
+    [`Timed out waiting for a real standby slot: ${JSON.stringify(lastState)}`],
+  ));
 }
 
 async function requireSystemWakeStormPreserved(
@@ -3119,6 +3162,18 @@ function buildEverySystemWake(
       occurredAt: requestedAt,
       unit: "count",
       value: 8_000,
+    }),
+    buildHostedExecutionGroupJournalFactRecordedWake({
+      eventId: `journal.group-fact.recorded:priority:${runId}`,
+      journalFact: {
+        date: requestedAt.slice(0, 10),
+        factIndex: 1,
+        note: "A synthetic group Journal fact entered the system mailbox.",
+        noteType: "journal-factor",
+        title: "System mailbox fixture",
+      },
+      memberId: identity.userId,
+      occurredAt: requestedAt,
     }),
     buildHostedExecutionEnvironmentVoiceCapturedWake({
       audioKey: environmentVoice.audioKey,

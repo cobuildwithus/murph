@@ -377,6 +377,7 @@ describe("cloudflare worker routes", () => {
       "test-read-active-runtime-fence",
       "test-age-active-runtime-fence",
       "test-start-stuck-invocation",
+      "test-ensure-standby-ready",
       "test-temporal-mailbox-signal-fault-arm",
       "test-temporal-mailbox-signal-fault-clear",
       "test-temporal-mailbox-signal-fault-consume",

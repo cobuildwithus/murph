@@ -1587,15 +1587,29 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   readiness and atomic availability only; the per-member `UserRunner` persists
   the exact opaque stop target, binds it once, then owns the ordinary write
   fence, workspace restore, invocation, retention, and retirement. Standby
-  allocation is available only to a fresh, OIDC-authenticated Web-direct
-  `default` start with a validated direct-attempt identity. Background modes,
-  Temporal starts, and replacements of work already using the member's exact
-  container retain that exact target. A previously reserved standby is
-  reconciled before this eligibility check so retries cannot split ownership.
+  allocation is available only to a fence-free, OIDC-authenticated Web-direct
+  `default` request with a validated direct-attempt identity. Background modes
+  and Temporal requests retain the exact-user target. A foreground request that
+  has finished preempting an exact-user background child may claim the ready
+  standby instead of reusing the child while it shuts down. A previously
+  reserved standby is reconciled before this eligibility check so retries and
+  replacements already bound to a standby cannot split ownership. In
+  `allocate` mode the standby coordinator is the sole shell-prewarm owner; the
+  exact-user prewarm hint is skipped so it cannot reserve a competing target
+  before the claim, while the normal exact-user start remains the claim-miss
+  fallback.
   Standby readiness warms the image, heavy runtime, and a disposable
   content-free Codex initialization, while the member-specific resident Codex
   process remains post-restore. Claimed containers are never returned for
   another member.
+- `UserRunner` remains the sole durable runtime write-fence owner when a
+  `RunnerContainer` Durable Object activation is replaced. Before returning its
+  successful invocation result through that disposable activation, the running
+  container sends the exact result, attempt, and generation over the existing
+  bound internal runner-control route. `UserRunner` applies its existing exact
+  completion compare-and-swap; a duplicate or stale receipt is a no-op, and the
+  original outer result remains a best-effort fallback. This adds no recovery
+  queue, poller, or second completion authority.
 - The same Cloudflare app owns one production database-health singleton that is
   deliberately independent of hosted Web and Postgres. A five-minute Cron
   Trigger asks a SQLite-backed `DatabaseHealthDurableObject` to discover and

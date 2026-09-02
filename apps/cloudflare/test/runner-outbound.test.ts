@@ -122,6 +122,9 @@ import {
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import { clearHostedRuntimeCryptoContextEnvelopeCacheForTests } from "../src/hosted-crypto/runtime-user-crypto-context.ts";
 import {
+  CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_ENDPOINT,
+} from "../src/internal-hosts.ts";
+import {
   handleRunnerOutboundRequest,
   type RunnerOutboundEnvironmentSource,
 } from "../src/runner-outbound.ts";
@@ -2337,6 +2340,51 @@ describe("handleRunnerOutboundRequest", () => {
       userId: "member_123",
     });
     expect(ownsActiveInvocationLease).not.toHaveBeenCalled();
+  });
+
+  it("records a container-origin completion against the exact durable write fence", async () => {
+    const recordRuntimeCompletionFromContainer = vi.fn(async () => ({
+      completed: true,
+    }));
+    const response = await handleRunnerOutboundRequest(
+      new Request(CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_ENDPOINT, {
+        body: JSON.stringify({
+          result: {
+            nextWakeAt: null,
+            status: "idle",
+          },
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          "x-hosted-runtime-attempt-id": "attempt_1",
+          "x-hosted-runtime-lease-generation": "9",
+          "x-hosted-runtime-workspace-version": "4",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return {
+              recordRuntimeCompletionFromContainer,
+            };
+          },
+        },
+      }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ completed: true });
+    expect(recordRuntimeCompletionFromContainer).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "9",
+      result: {
+        nextWakeAt: null,
+        status: "idle",
+      },
+      userId: "member_123",
+    });
   });
 
   it("rejects workspace checkpoints when the live invocation lease is stale", async () => {

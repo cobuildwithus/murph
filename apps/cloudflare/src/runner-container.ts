@@ -724,7 +724,7 @@ export class RunnerContainer extends Container {
     return completedResult;
   }
 
-  private async recordRuntimeCompletionBestEffort(input: {
+  protected async recordRuntimeCompletionBestEffort(input: {
     attemptId: string;
     generation: string;
     result: HostedExecutionRunnerJobResult;

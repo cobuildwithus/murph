@@ -39,6 +39,7 @@ import {
   parseHostedBrowserVaultReplicaRef,
   parseHostedWorkspaceCheckpointRequest,
   parseHostedWorkspaceCheckpointResponse,
+  parseHostedWorkspaceInvocationResult,
   parseHostedWorkspaceReadResponse,
   parseHostedWorkspaceSnapshotV2Ref,
   readHostedExecutionSnapshotBaseRef,
@@ -67,7 +68,10 @@ import {
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
-import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "./internal-hosts.ts";
+import {
+  CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_PATH,
+  CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
+} from "./internal-hosts.ts";
 import { json, jsonError, methodNotAllowed, notFound, readJsonObject, unauthorized } from "./json.ts";
 import {
   readHostedRuntimeArtifactFetchTelemetry,
@@ -141,15 +145,15 @@ export async function handleRunnerOutboundRequest(
     const url = new URL(request.url);
 
     const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
-    if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort) {
-      return handleRunnerResultsRequest({
-        bucket: env.BUNDLES,
-        env,
-        environment,
-        request,
-        url,
-        userId,
-      });
+    const dedicatedPortResponse = await handleRunnerDedicatedPortRequest({
+      env,
+      environment,
+      request,
+      url,
+      userId,
+    });
+    if (dedicatedPortResponse) {
+      return dedicatedPortResponse;
     }
 
     if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane) {
@@ -324,6 +328,71 @@ export async function handleRunnerOutboundRequest(
       ...(errorName ? { errorName } : {}),
     }, 500);
   }
+}
+
+async function handleRunnerDedicatedPortRequest(input: {
+  env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  request: Request;
+  url: URL;
+  userId: string;
+}): Promise<Response | null> {
+  if (input.url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.runnerControl) {
+    if (input.url.pathname !== CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_PATH) {
+      return notFound();
+    }
+    if (input.request.method !== "POST") {
+      return methodNotAllowed();
+    }
+    return await handleRunnerRuntimeCompletionRequest(input);
+  }
+  if (input.url.hostname !== CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort) {
+    return null;
+  }
+  return await handleRunnerResultsRequest({
+    bucket: input.env.BUNDLES,
+    env: input.env,
+    environment: input.environment,
+    request: input.request,
+    url: input.url,
+    userId: input.userId,
+  });
+}
+
+async function handleRunnerRuntimeCompletionRequest(input: {
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  userId: string;
+}): Promise<Response> {
+  const writeFence = requireRunnerRuntimeWriteFenceHeaders(input.request);
+  const body = await readJsonObject(input.request, { limitBytes: 64 * 1024 });
+  const result = parseHostedWorkspaceInvocationResult(body.result);
+  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
+  requireRunnerOutboundUserStubMethod(
+    stub,
+    "recordRuntimeCompletionFromContainer",
+  );
+  const receipt = await stub.recordRuntimeCompletionFromContainer({
+    attemptId: writeFence.attemptId,
+    generation: writeFence.generation,
+    result,
+    userId: input.userId,
+  });
+
+  emitHostedExecutionStructuredLog({
+    component: "runner.container",
+    details: {
+      runtimeCompletionReceiptOutcome: receipt.completed
+        ? "recorded"
+        : "superseded",
+      workspaceAttemptId: writeFence.attemptId,
+    },
+    level: receipt.completed ? "info" : "warn",
+    message: "Hosted container reported runtime completion to the durable fence owner.",
+    phase: "checkpoint",
+    userId: input.userId,
+  });
+  return json(receipt);
 }
 
 function safeRunnerOutboundRequestUrl(value: string): URL | null {

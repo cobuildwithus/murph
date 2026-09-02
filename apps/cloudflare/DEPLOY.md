@@ -1430,12 +1430,17 @@ Core execution tuning:
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000` (production sets `600000`) and controls the post-completion warm lease minted only by observed conversation activity. Reducing production from 20 minutes to 10 minutes means a follow-up in the former 11–20 minute warm window can take the existing cold-start path instead. `HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS` defaults to the idle TTL when absent for rollback compatibility. Leave it unset for the additive code deploy and one legacy-TTL observation window, drain old containers, then set it to `60000` for a canary before widening the rollout. Device sync, system maintenance, replay, and generic runner activity do not extend conversation warmth. RunnerContainer derives the lease directly from the resident child process's private health watermark on every expiry, re-arms the platform timeout while the lease or active work remains, yields on uncertain cleanup state, and otherwise destroys the idle shell. An inactive old child without the watermark is cleanup-eligible; active old-child work remains protected by its independent active-work count. A replacement child starts without inheriting the old process's warmth. Dirty foreground runtime state is checkpointed by the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` path before the invocation returns; RunnerContainer never records pending checkpoint intent.
 - `HOSTED_EXECUTION_STANDBY_MODE` defaults to `off`. `shadow` maintains one
   release-scoped ENAM standby and measures readiness without allocating it;
-  `allocate` lets only a fresh, authenticated Web-direct `default` start claim
-  it with a 250 ms total coordinator/bind deadline. Temporal starts, background
-  modes, and replacement of work already using the member's exact container use
-  the unchanged exact-user path. Pending or retained standby targets still
-  reconcile before that fresh-claim gate. Invalid values fail deploy/runtime
-  parsing closed.
+  `allocate` lets only a fence-free, authenticated Web-direct `default` request
+  claim it with a 250 ms total coordinator/bind deadline. Temporal requests and
+  background modes use the unchanged exact-user path. A trusted foreground
+  replacement may claim the standby after clearing an exact-user background
+  fence so it does not reuse a child that is still shutting down. Pending or
+  retained standby targets still reconcile before that fresh-claim gate. In
+  `allocate` mode the standby coordinator is the sole shell-prewarm owner; the
+  exact-user prewarm hint is skipped so it cannot reserve a competing target
+  before the claim. An unsuccessful claim still uses the ordinary exact-user
+  fallback.
+  Invalid values fail deploy/runtime parsing closed.
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production` for
   direct/local artifact rendering. The manual deploy workflow derives it from
   the selected `preview` or `production` target; do not configure a conflicting
@@ -2050,6 +2055,15 @@ That command:
 
 The gradual container rollout keeps the production `RunnerContainer` and `StandbyRunnerContainer` `rollout_active_grace_period` at 300 seconds and rolls their instances through `10`, `25`, `50`, then `100` percent. Standby readiness is release-scoped, so a mixed rollout never advertises an old image for a new Worker release. The isolated `DeploySmokeRunnerContainer` uses zero active grace and a single 100 percent step: it carries no user work, and smoke probes must not defer the image replacement they are trying to verify. The manual workflow exposes a `container_rollout` input; its production default is currently `immediate` because selector-scoped vault-share deliveries are unsafe under gradual runner rollout. Selecting `immediate` passes Wrangler's `--containers-rollout=immediate` flag and can interrupt active runner containers.
 Worker replacement is checkpoint-safe at the runtime fence rather than through rollout timing alone. The snapshot-session handshake has one six-second total deadline; the runtime starts its first exact durable upload-session heartbeat immediately after that response, then keeps serialized attempts on a two-second start-to-start cadence throughout publication. `UserRunner` retains the fence and retries after one second only for that exact attempt and lease generation while its heartbeat is less than 10 seconds old and completion is absent. Successful foreground preemption bypasses this preservation and stops heartbeat liveness before detached cleanup. After Web accepts the checkpoint, the runtime stops heartbeating and best-effort marks completion; marker failure falls back to stale-heartbeat expiry. Other starts remain immediate; live snapshots have no artificial publication deadline, while a dead runtime can defer replacement for the 10-second liveness window plus at most one additional retry interval (one second) after its final heartbeat.
+
+A successful invocation also sends its exact result, attempt, and generation
+from the container process through the existing bound internal runner-control
+route before returning through `RunnerContainer`. `UserRunner` remains the sole
+durable completion authority and applies its existing write-fence
+compare-and-swap; this lets completion survive a `RunnerContainer` Durable
+Object activation reset without a poller or recovery queue. The outer result is
+a fallback, stale or duplicate receipts are no-ops, and structured outcomes are
+`recorded`, `superseded`, or `failed`.
 During gradual rollout, Worker code and runner container state may disagree for the rollout window. A newly deployed Worker version can handle provider egress or internal-host traffic from an already-running warm runner process whose bundle, process env, or provider-credential shape was created before the deploy. Treat this as expected rollout behavior, not proof that traffic is reaching an old Worker version. Any PR that changes a Worker/container contract, runner env shape, hosted provider credential, internal host route, parser/toolchain path, or bundle-owned runtime assumption must document the compatibility window in its PR description and final `DEPLOYMENT CONCERNS:` handoff: whether old containers can safely talk to new Worker code, whether new containers can safely talk to old web/control-plane code, whether `container_rollout=immediate` is required, and which deploy-smoke or Workers Observability checks prove the fleet has converged.
 
 The Junction scalar-timeseries continuation cutover is runner-only and requires

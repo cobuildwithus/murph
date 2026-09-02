@@ -59,6 +59,9 @@ import {
   isHostedRunnerLocalE2eParserToolchain,
 } from "./runner-native-parser-toolchain.ts";
 import {
+  recordHostedRuntimeCompletionFromContainerBestEffort,
+} from "./runtime-completion.ts";
+import {
   prepareHostedRunnerWarmWorkspaceVaultRoot,
 } from "./hosted-runner-warm-workspace.ts";
 export {
@@ -275,13 +278,18 @@ export async function runHostedWorkspaceInvocation(
       waitForBackgroundAssistantWork: options.waitForBackgroundAssistantWork,
     });
     acceptingRuntimeWakes = false;
-    return assertHostedExecutionRunnerJobResult(
+    const completedResult = assertHostedExecutionRunnerJobResult(
       preserveAcceptedRuntimeWake(
         result,
         runtimeWakeSignal.consumePending() !== null,
       ),
       job,
     );
+    await recordHostedRuntimeCompletionFromContainerBestEffort({
+      lease: currentLease,
+      result: completedResult,
+    });
+    return completedResult;
   } finally {
     acceptingRuntimeWakes = false;
   }
