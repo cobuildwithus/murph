@@ -1665,6 +1665,14 @@ Last verified: 2026-09-01
   `whoop`, but admission uses the Junction `whoop_v2` lifecycle source. Resume,
   omitted intent, stale
   events, and background work never clear the source fence.
+- Personal Patterns operator email is terminal-state only. A failed cron
+  attempt remains silent while the finalized job has a scheduled retry. Web
+  treats an absent retry disposition from an older runner as non-terminal, so
+  the consumer can deploy first. Terminal failures and expired occurrences for
+  one scheduled time share one generic body and one member-independent Resend
+  idempotency key. Concurrent failures therefore produce at most one operator
+  email for that occurrence without adding a database row, queue, or second
+  retry owner.
 - The hosted reply-latency operator alert remains one singleton incident owner.
   Fresh conversation mailbox rows that the existing Web AI usage gate
   intentionally denies receive one assign-once timestamp at the mutating

@@ -7832,6 +7832,7 @@ describe('assistant cron runtime orchestration', () => {
           failureContext: expect.objectContaining({
             errorCode: 'ASSISTANT_CODEX_USAGE_LIMIT',
             errorPresent: true,
+            retryScheduled: true,
             runOutcome: 'failed',
             scheduleKind: 'at',
             sourceKind: 'automation',
@@ -7866,9 +7867,16 @@ describe('assistant cron runtime orchestration', () => {
       },
     )
     cronMocks.sendAssistantMessageLocal.mockRejectedValueOnce(error)
+    const events: Array<{
+      failureContext?: Record<string, boolean | number | string | null>
+      type: string
+    }> = []
 
     const summary = await processDueAssistantCronJobsLocal({
       limit: 1,
+      onEvent: (event) => {
+        events.push(event)
+      },
       vault: vaultRoot,
     })
 
@@ -7888,6 +7896,15 @@ describe('assistant cron runtime orchestration', () => {
       'Hosted Linq egress authority assertion request failed.',
     )
     expect(runtimeRecord?.state.consecutiveFailures).toBe(0)
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        failureContext: expect.objectContaining({
+          retryScheduled: false,
+          runOutcome: 'failed',
+        }),
+        type: 'cron.job.completed',
+      }),
+    ]))
     await expect(
       listAssistantCronRuns({
         job: canonicalJob.jobId,
