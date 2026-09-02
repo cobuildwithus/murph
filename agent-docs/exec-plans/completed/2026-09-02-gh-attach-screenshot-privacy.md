@@ -1,6 +1,6 @@
 # Use privacy-safe GitHub CLI screenshot attachments
 
-Status: active
+Status: completed
 Created: 2026-09-02
 Updated: 2026-09-02
 
@@ -71,3 +71,4 @@ Updated: 2026-09-02
   passed; docs drift, doc gardening, complexity, whitespace, announcement-link,
   and identifier scans passed. Complexity reported no authored JavaScript or
   TypeScript changes.
+Completed: 2026-09-02
