@@ -441,6 +441,7 @@ const HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES = ["conversation", "system"] as c
 const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS = [
   "apply-runtime-control-request",
   "dispatch-assistant-notification",
+  "import-reported-daily-metric",
   "run-device-sync-wake",
   "run-environment-interview",
 ] as const;
@@ -1342,6 +1343,18 @@ function recordHostedRuntimeLatencyMilestoneBestEffort(input: {
   } catch {
     // Latency traces are diagnostic-only and must not affect runtime progress.
   }
+}
+
+function resolveHostedSystemMailboxProjectionMode(
+  item: HostedSystemMailboxPendingItem,
+): HostedVaultShareProjectionMode | undefined {
+  if (
+    item.postCheckpointRecord?.kind !== "vault-share.projection"
+    || item.wake.kind !== "runtime.maintenance-requested"
+  ) {
+    return undefined;
+  }
+  return HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE;
 }
 
 export async function runHostedWorkspaceRuntimeJobInProcess(
@@ -3529,9 +3542,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             recordItem.postCheckpointRecord?.kind === "vault-share.projection";
           const projectionOpportunity =
             await offerVaultShareProjectionBeforeRecording(
-              isVaultShareProjectionRecord
-                ? HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE
-                : undefined,
+              resolveHostedSystemMailboxProjectionMode(recordItem),
             );
           if (projectionOpportunity.outcome === "preempted") {
             return { preempted: true, prepared: true };
