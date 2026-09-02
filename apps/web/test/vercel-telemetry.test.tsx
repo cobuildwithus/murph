@@ -502,6 +502,10 @@ test("redactPrivateAnalyticsUrl canonicalizes allowlisted routes", () => {
     redactPrivateAnalyticsUrl("/home?clinicalRecords=failed#clinicalRecordsIntent=not-a-claim"),
     "/home",
   );
+  assert.equal(
+    redactPrivateAnalyticsUrl("/food?query=private-product#comparison"),
+    "/food",
+  );
 });
 
 test("Vercel telemetry has one fail-closed root owner", () => {

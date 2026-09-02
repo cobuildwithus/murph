@@ -16,6 +16,7 @@ export const VERCEL_TELEMETRY_PATHNAMES = [
   "/experiments",
   "/family/setup",
   "/farewell",
+  "/food",
   "/groups/start",
   "/growth",
   "/history",

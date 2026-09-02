@@ -146,8 +146,13 @@ describe("FoodLabelWebMcp", () => {
     if (!first || !second || !third) {
       throw new Error("Food Label Lab design products are missing.");
     }
-    setMetricValue(first, "Total Sugars", 0);
-    setMetricValue(second, "Total Sugars", 0);
+    setMetricValue(first, "Total Sugars", 5, "per_serving");
+    setMetricValue(second, "Total Sugars", 4, "per_serving");
+    setMetricValue(third, "Total Sugars", 4);
+    if (!second.serving) {
+      throw new Error("Second Food Label Lab product serving is missing.");
+    }
+    second.serving.grams = 121;
     third.nutrition.rows = third.nutrition.rows.filter(
       (row) => row.name !== "Total Fat",
     );
@@ -193,12 +198,12 @@ describe("FoodLabelWebMcp", () => {
       winnerProductRefs: [first.productRef, second.productRef],
     });
     expect(sugars.values).toEqual(expect.arrayContaining([
-      { productRef: first.productRef, unit: "g", value: 0 },
-      { productRef: second.productRef, unit: "g", value: 0 },
+      { productRef: first.productRef, unit: "g", value: 3.3 },
+      { productRef: second.productRef, unit: "g", value: 3.3 },
     ]));
     expect(fat).toMatchObject({ complete: false, winnerProductRefs: [] });
     expect(comparisonRecord.comparableMetricCount).toBe(3);
-    expect(rendered.container.textContent).toContain("0 gLowest0 gLowest");
+    expect(rendered.container.textContent).toContain("3.3 gLowest3.3 gLowest");
 
     const servingButton = rendered.container.querySelector<HTMLButtonElement>(
       'button[aria-label="Compare per serving"]',
@@ -214,6 +219,15 @@ describe("FoodLabelWebMcp", () => {
     const currentRecord = requireRecord(current, "current comparison");
     expect(currentRecord.basis).toBe("per_serving");
     expect(currentRecord.metrics).toHaveLength(4);
+    const currentSugars = findMetricResult(
+      requireRecordArray(currentRecord.metrics, "current comparison metrics"),
+      "sugars",
+    );
+    expect(currentSugars.values).toEqual(expect.arrayContaining([
+      { productRef: first.productRef, unit: "g", value: 5 },
+      { productRef: second.productRef, unit: "g", value: 4 },
+    ]));
+    expect(currentSugars.winnerProductRefs).toEqual([second.productRef]);
   });
 });
 
@@ -329,6 +343,7 @@ function setMetricValue(
   product: (typeof FOOD_LABEL_DESIGN_PRODUCTS)[number],
   metricName: string,
   value: number,
+  basis: "per_100_g" | "per_serving" = "per_100_g",
 ) {
   const metric = product.nutrition.rows.find((row) => row.name === metricName);
   if (!metric?.amount) {
@@ -336,6 +351,7 @@ function setMetricValue(
   }
   metric.amount.value = value;
   metric.amount.display = String(value);
+  metric.basis = basis;
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {

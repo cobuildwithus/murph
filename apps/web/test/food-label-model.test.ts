@@ -96,6 +96,41 @@ describe("food label comparison model", () => {
     );
   });
 
+  test("uses the visible one-decimal value for converted winners", () => {
+    const first = makeFood("food_first", { servingGrams: 150, sugars: 5 });
+    const second = makeFood("food_second", { servingGrams: 121, sugars: 4 });
+    setMetricBasis(first, "Total Sugars", "per_serving");
+    setMetricBasis(second, "Total Sugars", "per_serving");
+
+    const comparisons = compareFoodMetrics([first, second], "per_100_g");
+    const sugars = comparisons.find((row) => row.metric.id === "sugars");
+    if (!sugars) {
+      throw new Error("Sugar comparison did not render.");
+    }
+
+    expect([...sugars.values.values()]).toEqual([
+      { unit: "g", value: 3.3 },
+      { unit: "g", value: 3.3 },
+    ]);
+    expect(sugars.winnerRefs).toEqual(
+      new Set([first.productRef, second.productRef]),
+    );
+    expect(getFoodTopMatch([first, second], comparisons).winsByProductRef)
+      .toEqual(new Map([[first.productRef, 4], [second.productRef, 4]]));
+
+    const secondSugars = second.nutrition.rows.find(
+      (row) => row.name === "Total Sugars",
+    );
+    if (!secondSugars?.amount) {
+      throw new Error("Second sugar value did not render.");
+    }
+    secondSugars.amount.value = 4.2;
+    const visibleDifference = compareFoodMetrics([first, second], "per_100_g")
+      .find((row) => row.metric.id === "sugars");
+    expect(visibleDifference?.values.get(second.productRef)?.value).toBe(3.5);
+    expect(visibleDifference?.winnerRefs).toEqual(new Set([first.productRef]));
+  });
+
   test("uses exact alerts and known gaps without producing a safety score", () => {
     const limited = makeFood("food_limited");
     limited.productTests = {
@@ -234,6 +269,18 @@ function row(name: string, value: number, unit: string) {
     dailyValuePercent: null,
     basis: "per_100_g" as const,
   };
+}
+
+function setMetricBasis(
+  product: PublicProductDetail,
+  metricName: string,
+  basis: "per_100_g" | "per_serving",
+) {
+  const metric = product.nutrition.rows.find((row) => row.name === metricName);
+  if (!metric) {
+    throw new Error(`Metric ${metricName} is missing from the product.`);
+  }
+  metric.basis = basis;
 }
 
 function unknown(

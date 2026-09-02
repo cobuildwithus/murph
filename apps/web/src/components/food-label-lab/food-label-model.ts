@@ -96,7 +96,7 @@ export function getFoodMetricValue(
   }
 
   if (row.basis === basis) {
-    return { value: amount.value, unit: expectedUnit };
+    return foodMetricValue(amount.value, expectedUnit);
   }
 
   const servingGrams = product.serving?.grams;
@@ -108,7 +108,7 @@ export function getFoodMetricValue(
     ? amount.value * (100 / servingGrams)
     : amount.value * (servingGrams / 100);
 
-  return { value, unit: expectedUnit };
+  return foodMetricValue(value, expectedUnit);
 }
 
 export function compareFoodMetrics(
@@ -135,7 +135,7 @@ export function compareFoodMetrics(
 
     if (winningValue !== null) {
       for (const [productRef, value] of values) {
-        if (nearlyEqual(value.value, winningValue)) {
+        if (value.value === winningValue) {
           winnerRefs.add(productRef);
         }
       }
@@ -245,10 +245,15 @@ export function getFoodObservationScope(summary: FoodEvidenceSummary): string {
 }
 
 export function formatFoodMetricValue(value: FoodMetricValue): string {
-  const rounded = Math.abs(value.value - Math.round(value.value)) < 0.05
-    ? String(Math.round(value.value))
+  const display = Number.isInteger(value.value)
+    ? String(value.value)
     : value.value.toFixed(1);
-  return `${rounded} ${value.unit}`;
+  return `${display} ${value.unit}`;
+}
+
+function foodMetricValue(value: number, unit: string): FoodMetricValue {
+  const rounded = Math.round((value + Number.EPSILON) * 10) / 10;
+  return { value: Object.is(rounded, -0) ? 0 : rounded, unit };
 }
 
 export function getFoodCategoryAsset(product: PublicProductDetail): string {
@@ -311,8 +316,4 @@ function normalizeUnit(value: string): string {
     return "g";
   }
   return normalized;
-}
-
-function nearlyEqual(left: number, right: number): boolean {
-  return Math.abs(left - right) <= Math.max(0.0001, Math.abs(right) * 0.000001);
 }
