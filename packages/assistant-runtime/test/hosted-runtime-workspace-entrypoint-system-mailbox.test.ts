@@ -70,6 +70,7 @@ import {
 } from "@murphai/hosted-execution";
 import {
   HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+  type HostedVaultShareDeliverRequest,
 } from "@murphai/hosted-execution/vault-share";
 import {
   appendAssistantTranscriptEntries,
@@ -175,6 +176,9 @@ import type {
 import {
   enqueueHostedSystemMailboxItem,
 } from "../src/hosted-runtime/system-mailbox.ts";
+import {
+  importHostedReportedDailyMetricMailboxItem,
+} from "../src/hosted-runtime/reported-daily-metric-import.ts";
 import {
   findNextHostedSystemMailboxQueueItem,
   isHostedSystemMailboxModelFreeExactNotificationItem,
@@ -4735,8 +4739,10 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
     const deviceSyncPort = createEmptyDeviceSyncPort();
+    const deliveredProjectionRequests: HostedVaultShareDeliverRequest[] = [];
     const projectionModes: Array<string | null> = [];
     const maintenanceItem = createMailboxItem({
+      causalSeq: "1",
       dedupeKey,
       id: "mailbox_item_system_mailbox_operator_maintenance",
       kind,
@@ -4749,34 +4755,51 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       vi.setSystemTime(new Date(TEST_NOW));
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       const resolvedItem = createResolvedRuntimeControlSystemMailboxItem(maintenanceItem);
-      await enqueueHostedSystemMailboxItem({
-        item: kind === "health.daily-metric.reported"
-          ? {
-              ...resolvedItem,
-              route: {
-                ...resolvedItem.route,
-                action: "import-reported-daily-metric",
-              },
-            }
-          : resolvedItem,
-        vaultRoot,
-        wake: kind === "health.daily-metric.reported"
-          ? buildHostedExecutionDailyMetricReportedWake({
-              date: "2026-04-27",
-              eventId: maintenanceItem.dedupeKey,
-              memberId: TEST_USER_ID,
-              metric: "steps",
-              occurredAt: maintenanceItem.occurredAt,
-              unit: "count",
-              value: 8_000,
-            })
-          : buildHostedExecutionRuntimeControlWake({
-              eventId: maintenanceItem.dedupeKey,
-              kind,
-              occurredAt: maintenanceItem.occurredAt,
-              userId: TEST_USER_ID,
-            }),
-      });
+      if (kind === "health.daily-metric.reported") {
+        const dailyMetricItem: HostedMailboxResolvedImportItem = {
+          ...resolvedItem,
+          route: {
+            ...resolvedItem.route,
+            action: "import-reported-daily-metric",
+          },
+        };
+        const dailyMetricWake = buildHostedExecutionDailyMetricReportedWake({
+          date: "2026-04-26",
+          eventId: maintenanceItem.dedupeKey,
+          memberId: TEST_USER_ID,
+          metric: "steps",
+          occurredAt: maintenanceItem.occurredAt,
+          unit: "count",
+          value: 8_000,
+        });
+        assert.deepEqual(
+          await importHostedReportedDailyMetricMailboxItem({
+            item: dailyMetricItem,
+            vaultRoot,
+            wake: dailyMetricWake,
+          }),
+          {
+            reasonCode: "daily_metric_report.imported",
+            status: "imported",
+          },
+        );
+        await enqueueHostedSystemMailboxItem({
+          item: dailyMetricItem,
+          vaultRoot,
+          wake: dailyMetricWake,
+        });
+      } else {
+        await enqueueHostedSystemMailboxItem({
+          item: resolvedItem,
+          vaultRoot,
+          wake: buildHostedExecutionRuntimeControlWake({
+            eventId: maintenanceItem.dedupeKey,
+            kind,
+            occurredAt: maintenanceItem.occurredAt,
+            userId: TEST_USER_ID,
+          }),
+        });
+      }
       const importState = createEmptyHostedMailboxImportState();
       importState.watermarks.system = "1";
       await writeMailboxImportStateFile(vaultRoot, importState);
@@ -4814,6 +4837,18 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             vaultSharePort: {
               async listActiveProjectionScopes(input) {
                 projectionModes.push(input?.projectionMode ?? null);
+                if (
+                  kind === "health.daily-metric.reported"
+                  && input?.projectionMode === undefined
+                ) {
+                  return {
+                    generationTokensByProjectionScopeKey: {
+                      "steps-days.v0": "a".repeat(43),
+                    },
+                    projectionKinds: ["steps-days.v0" as const],
+                    projectionScopes: [{ projectionKind: "steps-days.v0" as const }],
+                  };
+                }
                 return {
                   ...(input?.projectionMode
                     ? { projectionMode: input.projectionMode }
@@ -4822,8 +4857,12 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
                   projectionScopes: [],
                 };
               },
-              async deliver() {
-                throw new Error("No inactive vault-share projection should be delivered.");
+              async deliver(request) {
+                if (kind !== "health.daily-metric.reported") {
+                  throw new Error("No inactive vault-share projection should be delivered.");
+                }
+                deliveredProjectionRequests.push(request);
+                return { status: "delivered" };
               },
             },
             workspacePort: createWorkspacePort({
@@ -4850,9 +4889,34 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(result.status, "idle");
       assert.deepEqual(projectionModes, [expectedProjectionMode]);
       assert.equal(
+        deliveredProjectionRequests.length,
+        kind === "health.daily-metric.reported" ? 1 : 0,
+      );
+      if (kind === "health.daily-metric.reported") {
+        const delivery = deliveredProjectionRequests[0];
+        assert.ok(delivery);
+        assert.equal(delivery.projectionMode, undefined);
+        assert.equal(delivery.projectionKind, "steps-days.v0");
+        assert.equal(delivery.expectedGenerationToken, "a".repeat(43));
+        expect(delivery.records).toEqual([
+          expect.objectContaining({
+            data: expect.objectContaining({
+              date: "2026-04-26",
+              metricKey: "steps",
+              unit: "count",
+              value: 8_000,
+            }),
+            recordKey: "2026-04-26.manual",
+            source: { label: "Manual", source: "manual" },
+          }),
+        ]);
+      }
+      assert.equal(
         checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
         "1",
       );
+      assert.equal(checkpointRequests.at(-1)?.nextDefaultProcessingWakeAt, null);
+      assert.equal(checkpointRequests.at(-1)?.nextDefaultProcessingWakeReason, null);
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
