@@ -68,6 +68,9 @@ import {
   deriveHostedExecutionErrorCode,
 } from "@murphai/hosted-execution";
 import {
+  HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+} from "@murphai/hosted-execution/vault-share";
+import {
   appendAssistantTranscriptEntries,
   createAssistantOutboxIntent,
   ensureAutomaticMealCloseoutAutomation,
@@ -4708,16 +4711,33 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
   });
 
   test.each([
-    "runtime.maintenance-requested",
-    "runtime.browser-vault-refresh-requested",
-    "health.daily-metric.reported",
-  ] as const)("system mailbox mode drains model-free %s work", async (kind) => {
+    {
+      dedupeKey: "runtime-control:group-share-projection:synthetic",
+      expectedProjectionMode: HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
+      kind: "runtime.maintenance-requested",
+    },
+    {
+      dedupeKey: "runtime.browser-vault-refresh-requested:synthetic",
+      expectedProjectionMode: null,
+      kind: "runtime.browser-vault-refresh-requested",
+    },
+    {
+      dedupeKey: "health.daily-metric.reported:synthetic",
+      expectedProjectionMode: null,
+      kind: "health.daily-metric.reported",
+    },
+  ] as const)("system mailbox mode drains model-free $kind work", async ({
+    dedupeKey,
+    expectedProjectionMode,
+    kind,
+  }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
     const deviceSyncPort = createEmptyDeviceSyncPort();
+    const projectionModes: Array<string | null> = [];
     const maintenanceItem = createMailboxItem({
-      dedupeKey: "runtime.maintenance-requested:device-recovery-owner",
+      dedupeKey,
       id: "mailbox_item_system_mailbox_operator_maintenance",
       kind,
       lane: "system",
@@ -4793,6 +4813,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             mailboxPort: createMailboxPort({ events, items: [] }),
             vaultSharePort: {
               async listActiveProjectionScopes(input) {
+                projectionModes.push(input?.projectionMode ?? null);
                 return {
                   ...(input?.projectionMode
                     ? { projectionMode: input.projectionMode }
@@ -4827,6 +4848,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(result.nextWakeAt, null);
       assert.equal(result.nextWakeReason ?? null, null);
       assert.equal(result.status, "idle");
+      assert.deepEqual(projectionModes, [expectedProjectionMode]);
       assert.equal(
         checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
         "1",

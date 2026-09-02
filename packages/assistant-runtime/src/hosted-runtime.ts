@@ -1345,6 +1345,18 @@ function recordHostedRuntimeLatencyMilestoneBestEffort(input: {
   }
 }
 
+function resolveHostedSystemMailboxProjectionMode(
+  item: HostedSystemMailboxPendingItem,
+): HostedVaultShareProjectionMode | undefined {
+  if (
+    item.postCheckpointRecord?.kind !== "vault-share.projection"
+    || item.wake.kind !== "runtime.maintenance-requested"
+  ) {
+    return undefined;
+  }
+  return HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE;
+}
+
 export async function runHostedWorkspaceRuntimeJobInProcess(
   input: HostedAssistantWorkspaceRuntimeJobInput,
   options: HostedWorkspaceRuntimeJobOptions,
@@ -3529,9 +3541,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             recordItem.postCheckpointRecord?.kind === "vault-share.projection";
           const projectionOpportunity =
             await offerVaultShareProjectionBeforeRecording(
-              isVaultShareProjectionRecord
-                ? HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE
-                : undefined,
+              resolveHostedSystemMailboxProjectionMode(recordItem),
             );
           if (projectionOpportunity.outcome === "preempted") {
             return { preempted: true, prepared: true };
