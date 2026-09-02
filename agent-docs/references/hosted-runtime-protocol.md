@@ -1640,7 +1640,10 @@ stale-release drain run outside the accepted-message path. A bound slot can
 be retained only by that same member under the ordinary conversation idle
 lifecycle and is never returned to ready. Slot invocation,
 provider-credential minting, withdrawal, account deletion, and retirement all
-re-read the exact durable binding; a member mismatch fails closed.
+re-read the exact durable binding; a member mismatch fails closed. A successful
+fresh-start acceptance records its closed standby allocation outcome alongside
+the orchestration and workspace attempt identifiers in the existing structured
+log. Failed, retried, or superseded starts do not emit an accepted attribution.
 
 The active-member replan durably
 appends the original conversation item. For an exact model-approved instant
