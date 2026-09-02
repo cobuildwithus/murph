@@ -6,7 +6,9 @@ import {
 } from "@murphai/hosted-execution/assistant-personalization";
 
 import {
+  bindHostedRunnerWebControlRoutePath,
   fetchHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
 
@@ -23,9 +25,12 @@ export function createHostedRuntimeAssistantPersonalizationToolPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted assistant personalization tool",
         fetchImpl: input.fetchImpl,
-        path: authority
-          ? buildAssistantPersonalizationAuthorityPath(authority)
-          : HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH,
+        route: authority
+          ? bindHostedRunnerWebControlRoutePath(
+            HOSTED_RUNNER_WEB_CONTROL_ROUTES.assistantPersonalizationTool,
+            buildAssistantPersonalizationAuthorityPath(authority),
+          )
+          : HOSTED_RUNNER_WEB_CONTROL_ROUTES.assistantPersonalizationTool,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });

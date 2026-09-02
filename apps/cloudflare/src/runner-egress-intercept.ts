@@ -25,9 +25,6 @@ import {
   HOSTED_GEMINI_VIDEO_ANALYSIS_MODEL,
 } from "@murphai/hosted-execution/assistant-capabilities";
 import {
-  HOSTED_RUNTIME_LOG_PATH,
-} from "@murphai/hosted-execution/routes";
-import {
   buildHostedCodexMemoryUsageRecord,
   buildHostedElevenLabsMusicUsageRecord,
   buildHostedElevenLabsTtsUsageRecord,
@@ -65,6 +62,9 @@ import {
   readHostedRunnerInternalOperation,
   readHostedRunnerSafeResponseBodyMetadata,
 } from "./runner-outbound/diagnostics.ts";
+import {
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
+} from "./runner-outbound/shared-web-control-policy.ts";
 import {
   applyRunnerRuntimeUsageSettlement,
   requireRunnerRuntimeWriteFenceWrite,
@@ -2935,12 +2935,13 @@ async function writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog(input: {
   userId: string;
   writeFence: HostedProviderEgressWriteFenceMetadata | null;
 }): Promise<void> {
+  const route = HOSTED_RUNNER_WEB_CONTROL_ROUTES.runtimeLogWrite;
   const writeFence = input.writeFence ?? readRuntimeLogWriteFenceMetadata({
     headers: input.request.headers,
     userId: input.userId,
   });
   const response = await handleRunnerOutboundRequest(
-    new Request(`${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane}${HOSTED_RUNTIME_LOG_PATH}`, {
+    new Request(`${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane}${route.path}`, {
       body: JSON.stringify({
         entries: [{
           at: new Date().toISOString(),
@@ -2970,7 +2971,7 @@ async function writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog(input: {
             }
           : {}),
       },
-      method: "POST",
+      method: route.method,
     }),
     input.env,
     input.userId,

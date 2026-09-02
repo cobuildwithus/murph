@@ -9,15 +9,8 @@ import {
   parseHostedOperatorTaskControlResponse,
 } from "@murphai/hosted-execution";
 import {
-  HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH,
   HOSTED_RUNTIME_LINQ_DELIVERY_BLOCK_CODES,
   HOSTED_RUNTIME_LINQ_DELIVERY_POSTURES,
-  HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
-  HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
-  HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH,
-  HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH,
-  HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH,
-  HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
 } from "@murphai/hosted-execution/routes";
 
 import { CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS } from "../internal-hosts.ts";
@@ -44,6 +37,7 @@ import {
 } from "./hosted-http.ts";
 import {
   fetchHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
 
@@ -248,7 +242,7 @@ export function createCloudflareEffectsPort(input: {
                 description,
                 workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
               }),
-              path: HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
+              route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.threadRouteAuthority,
               signal: context?.signal ?? null,
               timeoutMs: input.timeoutMs,
               transport: webControlTransport,
@@ -284,7 +278,7 @@ export function createCloudflareEffectsPort(input: {
                 description: "Hosted external thread route authority assertion",
                 workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
               }),
-              path: HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
+              route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.threadRouteAuthority,
               signal: context?.signal ?? null,
               timeoutMs: input.timeoutMs,
               transport: webControlTransport,
@@ -321,7 +315,7 @@ export function createCloudflareEffectsPort(input: {
                   description: "Hosted operator task control",
                   workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
                 }),
-                path: HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH,
+                route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.operatorTaskControl,
                 signal: context?.signal ?? null,
                 timeoutMs: input.timeoutMs,
                 transport: webControlTransport,
@@ -338,7 +332,7 @@ export function createCloudflareEffectsPort(input: {
                 description: "Hosted email recipient authority resolution",
                 workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
               }),
-              path: HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH,
+              route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.emailEgressRecipient,
               signal: context?.signal ?? null,
               timeoutMs: input.timeoutMs,
               transport: webControlTransport,
@@ -371,7 +365,7 @@ export function createCloudflareEffectsPort(input: {
                 description: "Hosted Linq egress authority assertion",
                 workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
               }),
-              path: HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
+              route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.linqEgressEngagement,
               signal: context?.signal ?? null,
               timeoutMs: input.timeoutMs,
               transport: webControlTransport,
@@ -388,7 +382,7 @@ export function createCloudflareEffectsPort(input: {
                 description: "Hosted Linq delivery outcome recording",
                 workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
               }),
-              path: HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
+              route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.linqDeliveryOutcome,
               signal: context?.signal ?? null,
               timeoutMs: input.timeoutMs,
               transport: webControlTransport,
@@ -407,7 +401,7 @@ export function createCloudflareEffectsPort(input: {
                 workspaceCheckpointBridge:
                   input.workspaceCheckpointBridge ?? null,
               }),
-              path: HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH,
+              route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.phoneCallResultDelivery,
               signal: context?.signal ?? null,
               timeoutMs: input.timeoutMs,
               transport: webControlTransport,
@@ -423,7 +417,7 @@ export function createCloudflareEffectsPort(input: {
                 description: "Hosted outbound message-volume receipt recording",
                 workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
               }),
-              path: HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH,
+              route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.outboundMessageVolumeReceipt,
               signal: context?.signal ?? null,
               timeoutMs: input.timeoutMs,
               transport: webControlTransport,
