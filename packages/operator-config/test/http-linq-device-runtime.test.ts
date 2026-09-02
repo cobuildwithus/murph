@@ -1450,6 +1450,39 @@ test('linq runtime keeps created-chat media on the primary message before the ri
   ])
 })
 
+test('linq runtime keeps an identity-less ordinary chat creation retryable', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const fetchImplementation = vi.fn(async () => createJsonResponse({
+    chat: {
+      id: 'chat-created',
+      message: {},
+    },
+  }))
+
+  await assert.rejects(
+    () => createLinqChat(
+      {
+        from: '+15550000000',
+        idempotencyKey: 'create-ordinary-123',
+        message: 'Hello',
+        to: ['+15550000001'],
+      },
+      { env, fetchImplementation },
+    ),
+    (error) => error instanceof VaultCliError
+      && error.code === 'LINQ_API_REQUEST_FAILED'
+      && error.context?.failureStage === 'http'
+      && error.context?.operation === 'create_chat'
+      && error.context?.retryable === true
+      && 'deliveryMayHaveSucceeded' in error
+      && error.deliveryMayHaveSucceeded === true,
+  )
+  expect(fetchImplementation).toHaveBeenCalledTimes(1)
+})
+
 test.each(incompleteTwoPartMessageIdentityCases)(
   'linq runtime keeps a new-chat rich-link delivery terminal with $label',
   async ({
@@ -3683,7 +3716,7 @@ test('linq runtime covers optional payload omissions, fallback http messages, an
           chat: {
             id: '   ',
             message: {
-              id: null,
+              id: 'message-default',
             },
           },
         })
@@ -3693,7 +3726,11 @@ test('linq runtime covers optional payload omissions, fallback http messages, an
 
   assert.deepEqual(defaultBaseResult, {
     chatId: null,
-    messageId: null,
+    messageId: 'message-default',
+    providerMessageEffects: [{
+      message: 'hello',
+      providerMessageId: 'message-default',
+    }],
   })
   assert.equal(
     seenRequests[0]?.url,

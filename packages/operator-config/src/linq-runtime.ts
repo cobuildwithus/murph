@@ -1214,11 +1214,7 @@ export async function createLinqChat(
     dependencies,
   )
   const chatId = requireLinqCreatedChatIdForRichLink(result)
-  const primaryMessageId = requireLinqPrimaryMessageId({
-    messageId: result.messageId,
-    operation: 'create_chat',
-    richLinkFollowUp: true,
-  })
+  const primaryMessageId = result.messageId
   let linkResponse: LinqMessageSendResponse
   try {
     linkResponse = await sendLinqChatRichLinkWithTextFallback(
@@ -1279,7 +1275,7 @@ async function createLinqChatWithPrimaryMessage(
     fetchImplementation?: LinqFetch
     signal?: AbortSignal
   },
-): Promise<CreateLinqChatResult> {
+): Promise<CreateLinqChatResult & { messageId: string }> {
   const from = normalizeRequiredString(input.from, 'from')
   const recipients = normalizeLinqStringList(input.to, 'recipient')
   const idempotencyKey = normalizeNullableString(input.idempotencyKey)
@@ -1310,7 +1306,10 @@ async function createLinqChatWithPrimaryMessage(
     signal: dependencies.signal,
   })
 
-  const messageId = normalizeNullableString(response.chat?.message?.id ?? null)
+  const messageId = requireLinqPrimaryMessageId({
+    messageId: response.chat?.message?.id,
+    operation: 'create_chat',
+  })
   const providerMessageEffects = buildLinqProviderMessageEffects({
     body: messageBody,
     providerMessageId: messageId,
@@ -1345,7 +1344,6 @@ function requireLinqCreatedChatIdForRichLink(result: CreateLinqChatResult): stri
 function requireLinqPrimaryMessageId(input: {
   messageId: unknown
   operation: 'create_chat' | 'send_imessage_app_card' | 'send_message'
-  richLinkFollowUp?: boolean
 }): string {
   const messageId = normalizeNullableString(
     typeof input.messageId === 'string' ? input.messageId : null,
@@ -1357,9 +1355,7 @@ function requireLinqPrimaryMessageId(input: {
   throw Object.assign(
     new VaultCliError(
       'LINQ_API_REQUEST_FAILED',
-      `Linq response was missing the primary message identity${
-        input.richLinkFollowUp ? ' for a rich-link follow-up' : ''
-      }.`,
+      'Linq response was missing the primary message identity.',
       {
         failureStage: 'http',
         operation: input.operation,
