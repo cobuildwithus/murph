@@ -1,23 +1,23 @@
 ---
-title: 'Hosted-local process integration readiness deadline flakes under coverage'
+title: 'Hosted-local process integration masks fresh-checkout child import failure'
 severity: 'minor'
 ---
 
 ## Expected Behavior
 
-The synthetic MinIO child may take longer to start on a shared CI runner, while the process-cleanup assertion remains independently bounded after readiness.
+The process integration test should execute source imports with the repository's workspace-source resolver and surface a child exit before reporting a readiness timeout.
 
 ## Current Behavior
 
-The integration test allowed only five seconds for its synthetic child to create a readiness marker. Two exact-head package-coverage runs timed out at that precondition even though the unchanged cleanup behavior was never exercised; the focused test and full package coverage pass locally.
+The integration test spawned raw Node to import the hosted-local E2E source. Vitest resolved workspace dependencies from source locally, but the raw child followed package exports to build output that is absent in a fresh CI checkout. Because the test ignored child stderr and exit before readiness, the module-resolution failure appeared as a MinIO readiness timeout.
 
 ## Possible Solution
 
-Keep the cleanup deadline unchanged, but give the scheduler-dependent startup precondition a separate allowance and size the outer test timeout for both phases.
+Run the child through the existing workspace-source resolver and TypeScript loader, preserve the cleanup deadline, and race readiness against child exit with redacted diagnostics.
 
 ## Minimal Reproducible Example
 
-Run the hosted-local-harness coverage suite on a GitHub-hosted Ubuntu runner with half of the available Vitest workers. The process-ownership integration test can time out waiting for its synthetic readiness marker before beginning the cleanup assertion.
+Run the hosted-local-harness coverage suite from a fresh checkout without prebuilt workspace package output. The process-ownership integration test reports a MinIO readiness timeout instead of the child process's module-resolution failure.
 
 ## Context
 
