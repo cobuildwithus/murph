@@ -49,6 +49,7 @@ export {
 } from "./workspace-snapshot-v2.ts";
 export * from "./contracts.ts";
 export * from "./daily-metric.ts";
+export * from "./group-journal-fact.ts";
 export * from "./browser-vault.ts";
 export * from "./connected-apps.ts";
 export * from "./computer-use.ts";

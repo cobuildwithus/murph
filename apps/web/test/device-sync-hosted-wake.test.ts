@@ -5109,6 +5109,52 @@ describe("hosted device-sync wakes", () => {
     }));
   });
 
+  it("starts a fresh Junction link when the stored connection already requires reauthorization", async () => {
+    const failedConnection = buildHostedConnection({
+      lastErrorCode: "CONNECTION_SETUP_FAILED",
+      provider: "junction",
+      setupPhase: "failed",
+      status: "reauthorization_required",
+    });
+    mocks.listConnectionsForUser.mockResolvedValue([failedConnection]);
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request(
+        "https://control.example.test/api/connect-sources/oura/start",
+        {
+          method: "POST",
+        },
+      ),
+    );
+
+    await expect(
+      controlPlane.prepareConnectionStart("user-123", {
+        connectSourceId: "oura",
+        connectTarget: "oura",
+        label: "Oura",
+        provider: "junction",
+        sourceProviderSlug: "oura",
+      }),
+    ).resolves.toBeUndefined();
+    await controlPlane.startConnection("user-123", "junction", null, {
+      connectSourceId: "oura",
+      connectTarget: "oura",
+      sourceProviderSlug: "oura",
+    });
+
+    expect(mocks.registryGet).not.toHaveBeenCalled();
+    expect(mocks.upsertConnectionSource).not.toHaveBeenCalled();
+    const ingress = mocks.createDeviceSyncPublicIngress.mock.results.at(-1)
+      ?.value as {
+      startConnection: ReturnType<typeof vi.fn>;
+    };
+    expect(ingress.startConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceLifecycleProof: null,
+        sourceProviderSlug: "oura",
+      }),
+    );
+  });
+
   it("keeps history coverage scheduler-owned while provider cleanup prepares reconnect", async () => {
     let currentConnection = buildHostedConnection({
       displayName: "Junction",

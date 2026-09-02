@@ -83,6 +83,8 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     "emailPublicBootstrapAttempts HostedEmailPublicBootstrapAttempt[]",
     'groupCurrentSenderClarificationsAsRuntime HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationRuntime")',
     'groupCurrentSenderClarificationsAsTarget HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationTarget")',
+    'groupJournalCaptureConsentRequestedAt DateTime? @map("group_journal_capture_consent_requested_at")',
+    'groupJournalCaptureEnabled Boolean? @map("group_journal_capture_enabled")',
     'groupPrivateConversionTrackedAt DateTime? @map("group_private_conversion_tracked_at")',
     'groupSponsorshipMomentsCreated HostedGroupSponsorshipMoment[] @relation("HostedGroupSponsorshipMomentCreator")',
     'groupSponsorshipsPaid HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationPayer")',
@@ -1181,6 +1183,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260826230000_hosted_stripe_payment_notification_email",
       "20260830150000_hosted_system_progress_projection",
       "20260830170000_hosted_account_cleanup_temporal",
+      "20260831150000_group_journal_capture",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(

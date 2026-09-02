@@ -98,6 +98,7 @@ import {
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GROUP_CHAT_TOOL,
+  MURPH_GROUP_DATA_TOOL,
   MURPH_GROUP_MEMBERSHIP_TOOL,
   MURPH_GROUP_SHARED_READ_TOOL,
   MURPH_GROUP_USAGE_TOOL,
@@ -115,7 +116,6 @@ import {
   MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL,
   MURPH_CREATE_CALENDAR_LINK_TOOL,
   MURPH_GROUP_CONSULT_TOOL,
-  MURPH_GROUP_DATA_TOOL,
   MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
 } from '../src/assistant-codex/dynamic-tool-catalog.ts'
 import {
@@ -124,6 +124,7 @@ import {
 } from '../src/assistant-codex/dynamic-tools/physical-notes.ts'
 import {
   MURPH_CONNECTED_APPS_EXECUTE_TOOL,
+  MURPH_CONNECTED_APPS_MANAGE_TOOL,
   MURPH_CONNECTED_APPS_SEARCH_TOOL,
 } from '../src/assistant-codex/dynamic-tools/connected-apps.ts'
 import {
@@ -10876,10 +10877,667 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
   )
 })
 
-describeRealCodex('real Codex weekly health insight evidence fallback e2e', () => {
-  it(
-    'falls back from an unavailable personal-pattern report and accepts a usable no-clear report',
-    async () => {
+describeRealCodex('real Codex Personal Patterns first complete digest e2e', () => {
+  it('sends one bounded digest after the first complete import', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const automation = MURPH_MANAGED_AUTOMATIONS.find(
+      (candidate) => candidate.slug === 'personal-patterns-update',
+    )
+    if (!automation) {
+      throw new Error('Expected the managed Personal Patterns automation.')
+    }
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-personal-pattern-baseline-e2e-'),
+    )
+
+    try {
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const ledgerCapturePath = path.join(workingDirectory, 'ledger-write.txt')
+      await materializePersonalPatternsBaselineVaultCli({
+        binDirectory,
+        ledgerCapturePath,
+      })
+      await writeFile(
+        path.join(workingDirectory, '.zprofile'),
+        `export PATH=${JSON.stringify(binDirectory)}:$PATH\n`,
+        'utf8',
+      )
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: true,
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildWeeklyHealthInsightDeveloperInstructions(),
+        dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+        env: {
+          ...config.env,
+          PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          ZDOTDIR: workingDirectory,
+        },
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          automation.instructions,
+          'Scheduled occurrence context:',
+          '- Current local date: 2026-08-29.',
+          '- This is a controlled synthetic fixture.',
+          '- Complete the normal scheduled decision.',
+        ].join('\n\n'),
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      const patternReads = actions.filter(
+        (action) =>
+          action.kind === 'command' &&
+          action.command.includes('vault-cli wearables patterns'),
+      )
+      const ledgerReads = actions.filter(
+        (action) =>
+          action.kind === 'command' &&
+          action.command.includes(
+            'vault-cli knowledge show personal-pattern-notifications',
+          ),
+      )
+      const sourceReads = actions.filter(
+        (action) =>
+          action.kind === 'command' &&
+          action.command.includes('vault-cli wearables sources list'),
+      )
+      const ledgerWrites = actions.filter(
+        (action) =>
+          action.kind === 'command' &&
+          action.command.includes(
+            'vault-cli knowledge upsert --slug personal-pattern-notifications',
+          ),
+      )
+      const finishCalls = actions.filter(
+        (action) =>
+          action.kind === 'dynamic' &&
+          action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name,
+      )
+
+      expect(patternReads).toHaveLength(1)
+      expect(ledgerReads.length).toBeGreaterThanOrEqual(1)
+      expect(ledgerReads.length).toBeLessThanOrEqual(2)
+      expect(sourceReads.length).toBeGreaterThanOrEqual(1)
+      expect(sourceReads.length).toBeLessThanOrEqual(2)
+      expect(ledgerWrites).toHaveLength(1)
+      expect(await readFile(ledgerCapturePath, 'utf8')).toContain('yard-work')
+      expect(finishCalls).toHaveLength(0)
+      expect(result.finalMessage).toMatch(/yard work/iu)
+      expect(result.finalMessage).toMatch(/grade D|D-grade/iu)
+      process.stdout.write(
+        `[personal-pattern-baseline-e2e] ${JSON.stringify({
+          finalMessage: result.finalMessage,
+          ledgerWrites: ledgerWrites.length,
+        })}\n`,
+      )
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 720_000)
+})
+
+describeRealCodex('real Codex Journal connected account notice e2e', () => {
+  it('notices a new calendar before reading its events', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const automation = MURPH_MANAGED_AUTOMATIONS.find(
+      (candidate) => candidate.slug === 'journal-connected-context-morning',
+    )
+    if (!automation) {
+      throw new Error('Expected the managed Journal connected-context automation.')
+    }
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-journal-connected-notice-e2e-'),
+    )
+
+    try {
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      const ledgerCapturePath = path.join(workingDirectory, 'ledger-write.txt')
+      await Promise.all([
+        materializeAssistantSkill({ skillsRoot, slug: 'connected-apps' }),
+        materializeAssistantSkill({
+          skillsRoot,
+          slug: 'journal-connected-context',
+        }),
+        materializeJournalConnectedContextVaultCli({
+          binDirectory,
+          ledgerCapturePath,
+        }),
+      ])
+      const connectedAppRequests: Array<{ operation: string }> = []
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: true,
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildWeeklyHealthInsightDeveloperInstructions(),
+        dynamicTools: [
+          MURPH_CONNECTED_APPS_MANAGE_TOOL,
+          MURPH_CONNECTED_APPS_SEARCH_TOOL,
+          MURPH_CONNECTED_APPS_EXECUTE_TOOL,
+          MURPH_FINISH_WITHOUT_REPLY_TOOL,
+        ],
+        env: {
+          ...config.env,
+          [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+        },
+        excludeResumeTurns: true,
+        hostedToolContext: {
+          computerToolsAvailable: false,
+          connectedApps: {
+            request: async (request) => {
+              connectedAppRequests.push({ operation: request.operation })
+              if (request.operation !== 'manage') {
+                throw new Error('The notice run must not read provider content.')
+              }
+              return {
+                result: {
+                  accounts: [
+                    {
+                      alias: 'Personal',
+                      connectedAt: '2026-08-31T06:30:00.000Z',
+                      id: 'calendar_new',
+                      status: 'ACTIVE',
+                      toolkit: 'googlecalendar',
+                    },
+                  ],
+                },
+              }
+            },
+          },
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => {
+            throw new Error('Vault file sends are unavailable in this test.')
+          },
+          vaultFileSendAvailable: false,
+        },
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          automation.instructions,
+          'Scheduled occurrence context:',
+          '- Current local date: 2026-08-31.',
+          '- Current local time: 08:00 Europe/Warsaw.',
+          '- Complete the normal scheduled decision.',
+        ].join('\n\n'),
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+
+      expect(connectedAppRequests).toEqual([{ operation: 'manage' }])
+      expect(await readFile(ledgerCapturePath, 'utf8')).toContain('calendar_new')
+      expect(result.finalMessage).toMatch(/calendar|Journal/iu)
+      expect(result.finalMessage).toMatch(/stop|opt out|turn off/iu)
+      process.stdout.write(
+        `[journal-connected-notice-e2e] ${JSON.stringify({
+          finalMessage: result.finalMessage,
+          providerOperations: connectedAppRequests.map(
+            (request) => request.operation,
+          ),
+        })}\n`,
+      )
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 720_000)
+})
+
+describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
+  it('saves a clear training plan and excludes medical and private events', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const automation = MURPH_MANAGED_AUTOMATIONS.find(
+      (candidate) => candidate.slug === 'journal-connected-context-morning',
+    )
+    if (!automation) {
+      throw new Error('Expected the managed Journal connected-context automation.')
+    }
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-journal-connected-calendar-e2e-'),
+    )
+
+    try {
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      const ledgerCapturePath = path.join(workingDirectory, 'ledger-write.txt')
+      const commandLogPath = path.join(workingDirectory, 'vault-commands.txt')
+      await Promise.all([
+        materializeAssistantSkill({ skillsRoot, slug: 'connected-apps' }),
+        materializeAssistantSkill({
+          skillsRoot,
+          slug: 'journal-connected-context',
+        }),
+        materializeJournalConnectedContextVaultCli({
+          binDirectory,
+          commandLogPath,
+          ledgerCapturePath,
+          ledgerText: [
+            '# Journal connected context',
+            '',
+            '- account: calendar_ready',
+            '  toolkit: googlecalendar',
+            '  state: notice-sent',
+          ].join('\n'),
+        }),
+      ])
+      const connectedAppRequests: Array<{
+        input: Record<string, unknown>
+        operation: string
+      }> = []
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: true,
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildWeeklyHealthInsightDeveloperInstructions(),
+        dynamicTools: [
+          MURPH_AUTOMATION_TOOL,
+          MURPH_CONNECTED_APPS_MANAGE_TOOL,
+          MURPH_CONNECTED_APPS_SEARCH_TOOL,
+          MURPH_CONNECTED_APPS_EXECUTE_TOOL,
+          MURPH_FINISH_WITHOUT_REPLY_TOOL,
+        ],
+        env: {
+          ...config.env,
+          [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+        },
+        excludeResumeTurns: true,
+        hostedToolContext: {
+          automationTool: {
+            request: async (request) => {
+              if (request.action !== 'save') {
+                throw new Error('Expected an automation save request.')
+              }
+              automationRequests.push(request)
+              return {
+                action: 'save',
+                automationId: 'automation_calendar_tennis_followup',
+                created: true,
+                effectiveTimeZone: 'Europe/Warsaw',
+                lookupId: 'automation_calendar_tennis_followup',
+                occurrenceProjection: {
+                  nextOccurrenceAt: '2026-08-31T17:00:00.000Z',
+                  status: 'resolved' as const,
+                },
+                routeBinding: 'current_conversation',
+                schedule: request.schedule,
+                status: 'active',
+                updatedAt: '2026-08-31T06:00:00.000Z',
+              }
+            },
+          },
+          computerToolsAvailable: false,
+          connectedApps: {
+            request: async (request) => {
+              connectedAppRequests.push({
+                input: request.input,
+                operation: request.operation,
+              })
+              if (request.operation === 'manage') {
+                return {
+                  result: {
+                    accounts: [{
+                      alias: 'Personal',
+                      connectedAt: '2026-08-30T06:30:00.000Z',
+                      id: 'calendar_ready',
+                      status: 'ACTIVE',
+                      toolkit: 'googlecalendar',
+                    }],
+                  },
+                }
+              }
+              if (request.operation === 'search') {
+                return {
+                  result: {
+                    success: true,
+                    tool_schemas: {
+                      GOOGLECALENDAR_LIST_EVENTS: {
+                        input_schema: {
+                          additionalProperties: false,
+                          properties: {
+                            timeMax: { type: 'string' },
+                            timeMin: { type: 'string' },
+                          },
+                          required: ['timeMin', 'timeMax'],
+                          type: 'object',
+                        },
+                      },
+                    },
+                  },
+                }
+              }
+              if (request.operation === 'execute') {
+                return {
+                  result: {
+                    items: [
+                      {
+                        end: { dateTime: '2026-08-31T19:00:00+02:00' },
+                        id: 'calendar_evt_tennis',
+                        start: { dateTime: '2026-08-31T18:00:00+02:00' },
+                        summary: 'Tennis training',
+                      },
+                      {
+                        end: { dateTime: '2026-09-01T10:00:00+02:00' },
+                        id: 'calendar_evt_dentist',
+                        start: { dateTime: '2026-09-01T09:00:00+02:00' },
+                        summary: 'Dentist appointment',
+                      },
+                      {
+                        end: { dateTime: '2026-08-31T21:00:00+02:00' },
+                        id: 'calendar_evt_dinner',
+                        start: { dateTime: '2026-08-31T20:00:00+02:00' },
+                        summary: 'Dinner with Alex',
+                      },
+                    ],
+                  },
+                }
+              }
+              throw new Error('Unexpected connected-app operation.')
+            },
+          },
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => {
+            throw new Error('Vault file sends are unavailable in this test.')
+          },
+          vaultFileSendAvailable: false,
+        },
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          automation.instructions,
+          'Scheduled occurrence context:',
+          '- Current local date: 2026-08-31.',
+          '- Current local time: 08:00 Europe/Warsaw.',
+          '- Complete the normal scheduled decision.',
+        ].join('\n\n'),
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+
+      const providerOperations = connectedAppRequests.map(
+        (request) => request.operation,
+      )
+      expect(providerOperations).toContain('manage')
+      expect(providerOperations).toContain('search')
+      expect(providerOperations).toContain('execute')
+      const executeRequest = connectedAppRequests.find(
+        (request) => request.operation === 'execute',
+      )
+      expect(executeRequest?.input.account).toBe('calendar_ready')
+      const vaultCommands = (await readFile(commandLogPath, 'utf8'))
+        .split('\n')
+        .filter(Boolean)
+      const journalWrites = vaultCommands.filter((command) =>
+        command.includes('event note add')
+      )
+      expect(journalWrites).toHaveLength(1)
+      expect(journalWrites[0]).toMatch(/tennis/iu)
+      expect(journalWrites[0]).not.toMatch(/dentist|dinner|Alex/iu)
+      expect(automationRequests).toHaveLength(1)
+      const followupRequest = automationRequests[0]
+      if (!followupRequest || followupRequest.action !== 'save') {
+        throw new Error('Expected one saved calendar follow-up.')
+      }
+      expect(followupRequest).toMatchObject({
+        action: 'save',
+        schedule: { kind: 'at' },
+      })
+      expect(JSON.stringify(followupRequest.schedule)).toMatch(
+        /19:00|17:00/iu,
+      )
+      expect(await readFile(ledgerCapturePath, 'utf8')).toContain(
+        'calendar_evt_tennis',
+      )
+      process.stdout.write(
+        `[journal-connected-calendar-e2e] ${JSON.stringify({
+          finalMessage: result.finalMessage,
+          journalWrites: journalWrites.length,
+          providerOperations,
+        })}\n`,
+      )
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 720_000)
+})
+
+describeRealCodex('real Codex Journal connected email travel capture e2e', () => {
+  it('groups one trip without retaining booking secrets or exact addresses', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const automation = MURPH_MANAGED_AUTOMATIONS.find(
+      (candidate) => candidate.slug === 'journal-connected-context-morning',
+    )
+    if (!automation) {
+      throw new Error('Expected the managed Journal connected-context automation.')
+    }
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-journal-connected-email-e2e-'),
+    )
+
+    try {
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      const ledgerCapturePath = path.join(workingDirectory, 'ledger-write.txt')
+      const commandLogPath = path.join(workingDirectory, 'vault-commands.txt')
+      await Promise.all([
+        materializeAssistantSkill({ skillsRoot, slug: 'connected-apps' }),
+        materializeAssistantSkill({
+          skillsRoot,
+          slug: 'journal-connected-context',
+        }),
+        materializeJournalConnectedContextVaultCli({
+          binDirectory,
+          commandLogPath,
+          ledgerCapturePath,
+          ledgerText: [
+            '# Journal connected context',
+            '',
+            '- account: gmail_ready',
+            '  toolkit: gmail',
+            '  state: notice-sent',
+          ].join('\n'),
+        }),
+      ])
+      const connectedAppRequests: Array<{
+        input: Record<string, unknown>
+        operation: string
+      }> = []
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: true,
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildWeeklyHealthInsightDeveloperInstructions(),
+        dynamicTools: [
+          MURPH_AUTOMATION_TOOL,
+          MURPH_CONNECTED_APPS_MANAGE_TOOL,
+          MURPH_CONNECTED_APPS_SEARCH_TOOL,
+          MURPH_CONNECTED_APPS_EXECUTE_TOOL,
+          MURPH_FINISH_WITHOUT_REPLY_TOOL,
+        ],
+        env: {
+          ...config.env,
+          [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+        },
+        excludeResumeTurns: true,
+        hostedToolContext: {
+          automationTool: {
+            request: async (request) => {
+              if (request.action !== 'save') {
+                throw new Error('Expected an automation save request.')
+              }
+              automationRequests.push(request)
+              return {
+                action: 'save',
+                automationId: 'automation_lisbon_followup',
+                created: true,
+                effectiveTimeZone: 'Europe/Lisbon',
+                lookupId: 'automation_lisbon_followup',
+                occurrenceProjection: {
+                  nextOccurrenceAt: '2026-09-12T14:00:00.000Z',
+                  status: 'resolved' as const,
+                },
+                routeBinding: 'current_conversation',
+                schedule: request.schedule,
+                status: 'active',
+                updatedAt: '2026-08-31T06:00:00.000Z',
+              }
+            },
+          },
+          computerToolsAvailable: false,
+          connectedApps: {
+            request: async (request) => {
+              connectedAppRequests.push({
+                input: request.input,
+                operation: request.operation,
+              })
+              if (request.operation === 'manage') {
+                return {
+                  result: {
+                    accounts: [{
+                      alias: 'Personal',
+                      connectedAt: '2026-08-30T06:30:00.000Z',
+                      id: 'gmail_ready',
+                      status: 'ACTIVE',
+                      toolkit: 'gmail',
+                    }],
+                  },
+                }
+              }
+              if (request.operation === 'search') {
+                return {
+                  result: {
+                    success: true,
+                    tool_schemas: {
+                      GMAIL_SEARCH_EMAILS: {
+                        input_schema: {
+                          additionalProperties: false,
+                          properties: { query: { type: 'string' } },
+                          required: ['query'],
+                          type: 'object',
+                        },
+                      },
+                    },
+                  },
+                }
+              }
+              if (request.operation === 'execute') {
+                return {
+                  result: {
+                    messages: [
+                      {
+                        id: 'mail_flight_out',
+                        snippet: 'Warsaw to Lisbon, 12 Sep, arrive 13:00. Booking code ZX9Q. Price PLN 1200.',
+                        subject: 'Flight confirmation to Lisbon',
+                      },
+                      {
+                        id: 'mail_hotel',
+                        snippet: 'Lisbon stay 12-15 Sep at 18 Rua Example. Confirmation HTL-4431.',
+                        subject: 'Hotel confirmation Lisbon',
+                      },
+                      {
+                        id: 'mail_flight_back',
+                        snippet: 'Lisbon to Warsaw, 15 Sep, depart 18:00.',
+                        subject: 'Return flight confirmation',
+                      },
+                    ],
+                  },
+                }
+              }
+              throw new Error('Unexpected connected-app operation.')
+            },
+          },
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => {
+            throw new Error('Vault file sends are unavailable in this test.')
+          },
+          vaultFileSendAvailable: false,
+        },
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          automation.instructions,
+          'Scheduled occurrence context:',
+          '- Current local date: 2026-08-31.',
+          '- Current local time: 08:00 Europe/Warsaw.',
+          '- Complete the normal scheduled decision.',
+        ].join('\n\n'),
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+
+      const providerOperations = connectedAppRequests.map(
+        (request) => request.operation,
+      )
+      expect(providerOperations).toContain('manage')
+      expect(providerOperations).toContain('search')
+      expect(providerOperations).toContain('execute')
+      const executeRequests = connectedAppRequests.filter(
+        (request) => request.operation === 'execute',
+      )
+      expect(executeRequests.every((request) =>
+        request.input.account === 'gmail_ready'
+      )).toBe(true)
+      const vaultCommands = (await readFile(commandLogPath, 'utf8'))
+        .split('\n')
+        .filter(Boolean)
+      const journalWrites = vaultCommands.filter((command) =>
+        command.includes('event note add')
+      )
+      expect(journalWrites).toHaveLength(1)
+      expect(journalWrites[0]).toMatch(/Lisbon/iu)
+      expect(journalWrites[0]).toMatch(/12|15/iu)
+      expect(journalWrites[0]).not.toMatch(
+        /ZX9Q|HTL-4431|1200|Rua Example/iu,
+      )
+      expect(await readFile(ledgerCapturePath, 'utf8')).toMatch(
+        /mail_flight_out|mail_hotel|mail_flight_back/iu,
+      )
+      process.stdout.write(
+        `[journal-connected-email-e2e] ${JSON.stringify({
+          automationWrites: automationRequests.length,
+          finalMessage: result.finalMessage,
+          journalWrites: journalWrites.length,
+          providerOperations,
+        })}\n`,
+      )
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 720_000)
+})
+
+describeRealCodex(
+  'real Codex weekly health insight evidence fallback e2e',
+  () => {
+    it('falls back from an unavailable personal-pattern report and accepts a usable no-clear report', async () => {
       const config = await resolveRealCodexE2eConfig()
       const weeklyHealthInsight = MURPH_MANAGED_AUTOMATIONS.find(
         (automation) =>
@@ -10991,6 +11649,350 @@ describeRealCodex('real Codex weekly health insight evidence fallback e2e', () =
     },
     720_000,
   )
+})
+
+describeRealCodex('real Codex Journal and Patterns help e2e', () => {
+  it('recalculates Patterns and explains Journal corrections in plain language', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-journal-patterns-help-e2e-'),
+    )
+
+    try {
+      const binDirectory = path.join(workingDirectory, 'bin')
+      await materializeWeeklyHealthInsightVaultCli({
+        binDirectory,
+        patternResult: 'no-clear',
+      })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildDirectConversationDeveloperInstructions(),
+        env: {
+          ...config.env,
+          PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+        },
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          'Please recalculate my Patterns now.',
+          'Then explain when Patterns refreshes and how I can correct or delete a Journal entry.',
+        ].join(' '),
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      const patternReads = actions.flatMap((action) =>
+        action.kind === 'command' &&
+        action.command.includes('vault-cli wearables patterns')
+          ? [action.command]
+          : [],
+      )
+      const journalWrites = actions.flatMap((action) =>
+        action.kind === 'command' &&
+        /vault-cli event (?:note add|edit|delete)/u.test(action.command)
+          ? [action.command]
+          : [],
+      )
+
+      expect(patternReads).toHaveLength(1)
+      expect(patternReads[0]).toMatch(
+        /vault-cli wearables patterns --date \d{4}-\d{2}-\d{2} --format json/u,
+      )
+      expect(journalWrites).toHaveLength(0)
+      expect(result.finalMessage).toMatch(/Patterns/iu)
+      expect(result.finalMessage).toMatch(/Journal/iu)
+      expect(result.finalMessage).toMatch(/correct|edit|delete|remove/iu)
+      expect(result.finalMessage).toMatch(/ask|message|tell|through Murph/iu)
+      expect(result.finalMessage).toMatch(/13:00|daily|stale|refresh/iu)
+      expect(result.finalMessage).not.toMatch(
+        /open (?:that|the) (?:Journal )?entry|edit button|delete button/iu,
+      )
+      expect(result.finalMessage).not.toMatch(
+        /(?:refreshed|updated) (?:the )?(?:web|page)/iu,
+      )
+      process.stdout.write(
+        `[real-codex] Journal and Patterns help reply: ${JSON.stringify(
+          result.finalMessage,
+        )}\n`,
+      )
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 720_000)
+})
+
+describeRealCodex('real Codex private group Journal capture e2e', () => {
+  it('routes high and medium confidence privately and ignores low confidence', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const messageRef = `ain_${'7'.repeat(32)}`
+    const workingDirectories: string[] = []
+    const scenarios = [
+      {
+        expectedConfidence: 'high' as const,
+        expectedFactPatterns: [/\bleg(?:s| soreness)?\b/iu, /\bcoffee\b/iu],
+        expectedMinimumRequests: 2,
+        label: 'clear current-sender facts',
+        prompt: [
+          'Visible group exchange:',
+          'Sam: Yesterday\'s football game was great.',
+          `Accepted message from the current sender, ref ${messageRef}: It was. My legs are still sore after playing yesterday. I also drank coffee at 4 pm yesterday.`,
+          'Handle private Journal capture under the group policy. Do not discuss it in the group.',
+        ].join('\n'),
+      },
+      {
+        expectedConfidence: 'medium' as const,
+        label: 'explicit private clarification',
+        prompt: [
+          'Visible group exchange:',
+          `Accepted message from the current sender, ref ${messageRef}: Murph, yesterday I said my heart was racing. I may mean it literally or figuratively. Ask me privately which one before recording anything.`,
+          'Handle private Journal capture under the group policy. Do not discuss it in the group.',
+        ].join('\n'),
+      },
+      {
+        expectedConfidence: null,
+        label: 'third-party joke',
+        prompt: [
+          'Visible group exchange:',
+          'Sam: Alex says his knee is wrecked.',
+          `Accepted message from the current sender, ref ${messageRef}: lol classic Alex`,
+          'Handle private Journal capture under the group policy. Do not discuss it in the group.',
+        ].join('\n'),
+      },
+    ]
+
+    try {
+      for (const scenario of scenarios) {
+        const workingDirectory = await mkdtemp(
+          path.join(tmpdir(), 'murph-group-journal-capture-e2e-'),
+        )
+        workingDirectories.push(workingDirectory)
+        const requests: Array<{
+          action: string
+          confidence?: string
+          factIndex?: number
+          privateQuestion?: string
+        }> = []
+        const result = await executeRealCodexAppServerTurn({
+          allowFinishWithoutReply: true,
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildGroupPointOfViewDeveloperInstructions({
+            hostedRuntime: true,
+          }),
+          dynamicTools: [
+            MURPH_GROUP_DATA_TOOL,
+            MURPH_FINISH_WITHOUT_REPLY_TOOL,
+          ],
+          env: config.env,
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: [messageRef],
+              conversationId: 'conversation-group-journal',
+              conversationScope: 'group',
+              inboundMailboxItemIds: ['mailbox-group-journal'],
+              originSessionId: 'session-group-journal',
+              recipientKey: 'recipient-group-journal',
+            }),
+            groupTool: {
+              request: async (request) => {
+                requests.push({
+                  action: request.action,
+                  ...('confidence' in request
+                    ? { confidence: request.confidence }
+                    : {}),
+                  ...(request.action === 'record_current_sender_journal_fact'
+                    ? {
+                        factIndex: request.journalFact.factIndex,
+                        privateQuestion: request.privateQuestion,
+                      }
+                    : {}),
+                })
+                if (request.action !== 'record_current_sender_journal_fact') {
+                  throw new Error(`Unexpected group Journal action: ${request.action}`)
+                }
+                return {
+                  action: request.action,
+                  result: { status: 'handled' },
+                }
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: scenario.prompt,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        process.stdout.write(
+          `[real-codex] group Journal ${scenario.label}: ${JSON.stringify({
+            finalMessage: result.finalMessage,
+            requests,
+          })}\n`,
+        )
+        const journalRequests = requests.filter(
+          (request) => request.action === 'record_current_sender_journal_fact',
+        )
+        if (scenario.expectedConfidence === null) {
+          expect(journalRequests).toHaveLength(0)
+        } else {
+          expect(journalRequests.length).toBeGreaterThanOrEqual(
+            scenario.expectedMinimumRequests ?? 1,
+          )
+          expect(journalRequests.every(
+            (request) => request.confidence === scenario.expectedConfidence,
+          )).toBe(true)
+          if (scenario.expectedFactPatterns) {
+            const firstQuestion = journalRequests.find(
+              (request) => request.factIndex === 1,
+            )?.privateQuestion
+            expect(firstQuestion).toBeTruthy()
+            for (const pattern of scenario.expectedFactPatterns) {
+              expect(firstQuestion).toMatch(pattern)
+            }
+          }
+        }
+        expect(result.finalMessage.trim()).toBe('')
+      }
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        ...workingDirectories,
+        ...config.temporaryPaths,
+      ])
+    }
+  }, 720_000)
+
+  it('accepts private consent and saves every fact named in the question', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-group-journal-consent-e2e-'),
+    )
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const commandLogPath = path.join(workingDirectory, 'journal-commands.log')
+    const groupRequests: unknown[] = []
+
+    try {
+      await mkdir(binDirectory, { recursive: true })
+      const executablePath = path.join(binDirectory, 'vault-cli')
+      await writeFile(
+        executablePath,
+        [
+          '#!/bin/sh',
+          `printf '%s\\n' "$*" >> ${JSON.stringify(commandLogPath)}`,
+          'printf \'%s\\n\' \'{"ok":true}\'',
+          '',
+        ].join('\n'),
+        { encoding: 'utf8', mode: 0o700 },
+      )
+      await chmod(executablePath, 0o700)
+
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: true,
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildDirectConversationDeveloperInstructions(),
+        dynamicTools: [
+          MURPH_GROUP_MEMBERSHIP_TOOL,
+          MURPH_FINISH_WITHOUT_REPLY_TOOL,
+        ],
+        env: {
+          ...config.env,
+          PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+        },
+        excludeResumeTurns: true,
+        hostedToolContext: {
+          computerToolsAvailable: false,
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          currentUserActionScope: () => ({
+            acceptedInputIds: ['input_group_journal_consent'],
+            conversationId: 'conversation_group_journal_consent',
+            conversationScope: 'direct',
+            inboundMailboxItemIds: ['mailbox_group_journal_consent'],
+            originSessionId: 'session_group_journal_consent',
+            recipientKey: 'recipient_group_journal_consent',
+          }),
+          groupTool: {
+            request: async (request) => {
+              groupRequests.push(request)
+              if (request.action !== 'set_journal_capture') {
+                throw new Error(`Unexpected private consent action: ${request.action}`)
+              }
+              return {
+                action: request.action,
+                result: { enabled: request.enabled, status: 'updated' },
+              }
+            },
+          },
+          sendVaultFile: async () => {
+            throw new Error('Vault file sends are unavailable in this test.')
+          },
+          vaultFileSendAvailable: false,
+        },
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          'Private conversation context:',
+          'Murph asked: May I save these private Journal facts from your group: sore legs after football yesterday, and coffee at 4 pm yesterday?',
+          'Accepted current message: Yes.',
+          'Handle this consent answer and the named facts now.',
+        ].join('\n'),
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      process.stdout.write(
+        `[real-codex] private group Journal consent: ${JSON.stringify({
+          actions,
+          finalMessage: result.finalMessage,
+          groupRequests,
+        })}\n`,
+      )
+      expect(groupRequests).toEqual([{
+        action: 'set_journal_capture',
+        enabled: true,
+      }])
+      const journalCommands = (await readFile(commandLogPath, 'utf8'))
+        .split('\n')
+        .filter((command) => command && !command.endsWith('--help'))
+      expect(journalCommands).toHaveLength(2)
+      expect(journalCommands.every((command) =>
+        command.includes('event note add')
+      )).toBe(true)
+      expect(journalCommands.join('\n')).toMatch(/leg/iu)
+      expect(journalCommands.join('\n')).toMatch(/coffee/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
+    }
+  }, 720_000)
 })
 
 describeRealCodex('real Codex product notes eligibility e2e', () => {
@@ -26644,6 +27646,119 @@ async function materializeHealthCommonsKnowledgeVaultCli(input: {
       '  exit 70',
       'fi',
       `exec ${quoteNutritionShellLiteral(process.execPath)} --import ${quoteNutritionShellLiteral(HABITAT_VOICE_E2E_TSX_LOADER)} "$HEALTH_COMMONS_E2E_CLI_ENTRYPOINT" "$@"`,
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(executablePath, 0o700)
+}
+
+async function materializePersonalPatternsBaselineVaultCli(input: {
+  binDirectory: string
+  ledgerCapturePath: string
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  const report = JSON.stringify({
+    filters: { date: '2026-08-29', windowDays: 120 },
+    report: {
+      asOfDate: '2026-08-29',
+      cells: [
+        {
+          classification: 'early_signal',
+          comparisonBasis: 'matched_weekday',
+          comparisonDays: 8,
+          comparisonMean: 50,
+          delta: 20,
+          deltaPercent: 40,
+          direction: 'higher',
+          exposedDays: 8,
+          exposedMean: 70,
+          factorId: 'yard-work',
+          grade: 'D',
+          lagDays: 1,
+          outcomeId: 'hrv',
+          stage: 'seen_again',
+        },
+      ],
+      factors: [
+        {
+          id: 'yard-work',
+          kind: 'activity',
+          label: 'Yard work',
+          observedDays: 8,
+        },
+      ],
+      lagDays: 1,
+      outcomes: [{ id: 'hrv', label: 'HRV', unit: 'ms' }],
+    },
+  })
+
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'case "$*" in',
+      '  *"wearables patterns"*)',
+      `    printf '%s\\n' '${report}'`,
+      '    ;;',
+      '  *"wearables sources list"*)',
+      "    printf '%s\\n' '{\"sources\":[{\"provider\":\"fixture\",\"status\":\"healthy\",\"firstDate\":\"2026-05-02\",\"lastDate\":\"2026-08-29\",\"stalenessVsNewestDays\":0}]}'",
+      '    ;;',
+      '  *"knowledge show personal-pattern-notifications"*)',
+      "    printf '%s\\n' 'knowledge page not found' >&2",
+      '    exit 1',
+      '    ;;',
+      '  *"knowledge upsert --slug personal-pattern-notifications"*)',
+      `    printf '%s\\n' "$*" > ${JSON.stringify(input.ledgerCapturePath)}`,
+      "    printf '%s\\n' '{\"ok\":true}'",
+      '    ;;',
+      '  *)',
+      '    printf \'%s\\n\' \'{"data":[],"ok":true}\'',
+      '    ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(executablePath, 0o700)
+}
+
+async function materializeJournalConnectedContextVaultCli(input: {
+  binDirectory: string
+  commandLogPath?: string
+  ledgerCapturePath: string
+  ledgerText?: string
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      ...(input.commandLogPath
+        ? [`printf '%s\\n' "$*" >> ${JSON.stringify(input.commandLogPath)}`]
+        : []),
+      'case "$*" in',
+      '  *"knowledge show journal-connected-context"*)',
+      `    printf '%s\\n' ${JSON.stringify(
+        input.ledgerText
+        ?? '# Journal connected context\\n\\n- account: calendar_old\\n  toolkit: googlecalendar\\n  state: baseline',
+      )}`,
+      '    ;;',
+      '  *"knowledge upsert --slug journal-connected-context"*)',
+      `    printf '%s\\n' "$*" > ${JSON.stringify(input.ledgerCapturePath)}`,
+      "    printf '%s\\n' '{\"ok\":true}'",
+      '    ;;',
+      '  *)',
+      ...(input.commandLogPath
+        ? ["    printf '%s\\n' '{\"id\":\"evt_fixture\",\"ok\":true}'"]
+        : [
+            '    printf \'unsupported Journal connected-context command: %s\\n\' "$*" >&2',
+            '    exit 64',
+          ]),
+      '    ;;',
+      'esac',
       '',
     ].join('\n'),
     { encoding: 'utf8', mode: 0o700 },

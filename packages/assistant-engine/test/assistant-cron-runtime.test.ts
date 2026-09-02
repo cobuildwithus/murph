@@ -7107,13 +7107,16 @@ describe('assistant cron runtime orchestration', () => {
           failureContext: expect.objectContaining({
             automationSlug: 'expired-one-shot-reminder',
             latenessMinutes: 240,
+            occurrenceAt: '2026-04-08T09:00:00.000Z',
           }),
           safeDetails: 'cron_occurrence_expired',
           type: 'cron.occurrence.expired',
         }),
         expect.objectContaining({
           failureContext: expect.objectContaining({
+            automationSlug: 'expired-one-shot-reminder',
             errorPresent: true,
+            occurrenceAt: '2026-04-08T09:00:00.000Z',
             runOutcome: 'expired',
             scheduleKind: 'at',
             sourceKind: 'automation',

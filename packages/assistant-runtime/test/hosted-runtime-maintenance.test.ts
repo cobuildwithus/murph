@@ -593,8 +593,10 @@ describe("runHostedAssistantAutomation", () => {
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
       input.onEvent?.({
         failureContext: {
+          automationSlug: "personal-patterns-update",
           errorCode: "ASSISTANT_CODEX_USAGE_LIMIT",
           errorPresent: true,
+          occurrenceAt: "2026-04-08T13:00:00.000Z",
           routeConfigured: true,
           runStatus: "failed",
           scheduleKind: "at",
@@ -635,6 +637,8 @@ describe("runHostedAssistantAutomation", () => {
           redacted: expect.objectContaining({
             failureErrorCode: "ASSISTANT_CODEX_USAGE_LIMIT",
             failureErrorPresent: true,
+            failureAutomationSlug: "personal-patterns-update",
+            failureOccurrenceAt: "2026-04-08T13:00:00.000Z",
             failureRunStatus: "failed",
             failureScheduleKind: "at",
             safeDetails: "cron_job_enqueue_failed",
@@ -643,6 +647,64 @@ describe("runHostedAssistantAutomation", () => {
             safeErrorMessage:
               "Codex app-server failed before producing a reply.",
             safeErrorPresent: true,
+            type: "cron.job.completed",
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it("persists Personal Patterns failures after the ordinary event cap", async () => {
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      for (let index = 0; index < 13; index += 1) {
+        input.onEvent?.({
+          safeDetails: "scan_started",
+          type: "scan.started",
+        });
+      }
+      input.onEvent?.({
+        failureContext: {
+          automationSlug: "personal-patterns-update",
+          errorCode: "ASSISTANT_CODEX_USAGE_LIMIT",
+          errorPresent: true,
+          occurrenceAt: "2026-04-08T13:00:00.000Z",
+          runOutcome: "failed",
+          scheduleKind: "cron",
+          sourceKind: "automation",
+        },
+        safeDetails: "cron_job_enqueue_failed",
+        type: "cron.job.completed",
+      });
+      return {
+        nextWakeAt: null,
+        progressed: true,
+      };
+    });
+
+    const result = await runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_patterns_failure_cap",
+      {
+        hosted: {
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      {
+        eventId: "evt_patterns_failure_cap",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    );
+
+    expect(result.redactedLogEntries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          redacted: expect.objectContaining({
+            failureAutomationSlug: "personal-patterns-update",
+            failureRunOutcome: "failed",
             type: "cron.job.completed",
           }),
         }),

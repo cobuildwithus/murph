@@ -303,11 +303,13 @@ describe("murph.group dynamic tool", () => {
         "question",
       ],
       group_data: [
-        "action", "audience", "date", "displayName", "grantId", "message_ref",
-        "metric", "permissionText", "projectionScopes", "standaloneLink", "unit", "value",
+        "action", "audience", "confidence", "date", "displayName", "factIndex",
+        "grantId", "message_ref", "metric", "note", "noteType", "permissionText",
+        "privateQuestion", "projectionScopes", "standaloneLink", "title", "unit", "value",
       ],
       group_membership: [
-        "action", "cursor", "disclosureGrantCursor", "membershipId", "setup",
+        "action", "cursor", "disclosureGrantCursor", "enabled", "membershipId",
+        "message_ref", "scope", "setup",
       ],
       group_usage: ["action", "message_ref", "policyCode", "policyCodes"],
       group_chat: [

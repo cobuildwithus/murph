@@ -736,11 +736,13 @@ export async function processDueAssistantCronJobsLocal(
       summary.failed += 1
     }
     emitAssistantCronJobCompletedEvent({
+      automationSlug: result.automationSlug,
       errorCode: result.runErrorCode,
       errorMessage: result.run.error,
       errorPresent: result.run.error !== null,
       job: result.job,
       onEvent: input.onEvent,
+      occurrenceAt: nullableCronValue(result.run.scheduledOccurrenceAt),
       routeValidationProfile:
         assistantCronDeliveryRouteValidationProfileForExecutionContext(
           input.executionContext,
@@ -751,6 +753,10 @@ export async function processDueAssistantCronJobsLocal(
   }
 
   return summary
+}
+
+function nullableCronValue<T>(value: T | undefined): T | null {
+  return value ?? null
 }
 
 function assistantCronRunCountsAsProcessSuccess(
@@ -850,11 +856,13 @@ async function emitAssistantCronScanEvents(input: {
 }
 
 function emitAssistantCronJobCompletedEvent(input: {
+  automationSlug: string | null
   errorCode: string | null
   errorMessage: string | null
   errorPresent: boolean
   job: AssistantCronJob
   onEvent?: (event: AssistantRunEvent) => void
+  occurrenceAt: string | null
   routeValidationProfile: AssistantCronDeliveryRouteValidationProfile
   runOutcome: AssistantCronRunRecord['outcome']
   sourceKind: string
@@ -876,11 +884,13 @@ function emitAssistantCronJobCompletedEvent(input: {
         }
       : {}),
     failureContext: {
+      automationSlug: input.automationSlug,
       // Typed VaultCliError code (e.g. ASSISTANT_CODEX_USAGE_LIMIT) so
       // provider-level outages are queryable in the persisted hosted runtime
       // log; the June 2026 quota incident was invisible there.
       errorCode: input.errorCode,
       errorPresent: input.errorPresent,
+      occurrenceAt: input.occurrenceAt,
       routeConfigured: assistantCronJobHasDeliveryRoute(
         input.job,
         input.routeValidationProfile,

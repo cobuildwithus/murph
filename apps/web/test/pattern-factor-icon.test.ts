@@ -167,7 +167,22 @@ test("common Oura tags resolve to relevant intervention icons", () => {
   );
 });
 
-test("unexpected provider values use kind-specific fallbacks", () => {
+test("specific local factors resolve to their intended Quiver illustrations", () => {
+  assert.match(
+    resolvePatternFactorIcon(factor("House work", "activity")),
+    /housework\.svg$/u,
+  );
+  assert.match(
+    resolvePatternFactorIcon(factor("Mobility", "activity")),
+    /mobility\.svg$/u,
+  );
+  assert.match(
+    resolvePatternFactorIcon(factor("Bedroom temperature", "intervention")),
+    /night-temp\.svg$/u,
+  );
+});
+
+test("unknown provider values use the neutral fallback illustration", () => {
   assert.equal(
     resolvePatternFactorIcon(factor("New sport from a provider", "activity")),
     ACTIVITY_FALLBACK_ICON,
@@ -176,12 +191,20 @@ test("unexpected provider values use kind-specific fallbacks", () => {
     resolvePatternFactorIcon(factor("Unmapped custom tag", "intervention")),
     INTERVENTION_FALLBACK_ICON,
   );
+  assert.equal(
+    resolvePatternFactorIcon(factor("High strain", "intervention")),
+    ACTIVITY_FALLBACK_ICON,
+  );
+  assert.equal(INTERVENTION_FALLBACK_ICON, ACTIVITY_FALLBACK_ICON);
 });
 
 test("every resolved local SVG asset exists", async () => {
   const factors = [
     ...WHOOP_SPORTS.map((label) => factor(label, "activity")),
     factor("Late meal", "intervention"),
+    factor("House work", "activity"),
+    factor("Mobility", "activity"),
+    factor("Bedroom temperature", "intervention"),
     factor("Unmapped custom tag", "intervention"),
   ];
 

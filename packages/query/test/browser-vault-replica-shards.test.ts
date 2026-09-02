@@ -94,41 +94,57 @@ test("browser vault replicas split into independently parseable core, metrics in
   assert.equal("labResultRows" in shards.core, false);
   assert.equal("searchRows" in shards.core, false);
   assert.equal("experimentOutcomes" in shards.core, false);
+  assert.deepEqual(shards.core.journal, replica.journal);
   assert.equal("entities" in shards.metrics, false);
   assert.equal("metricRows" in shards.metrics, false);
   assert.deepEqual(shards.metrics.experimentOutcomes, [outcome]);
   assert.equal(shards.metrics.metricRowCount, 1);
-  assert.deepEqual(shards.metrics.metricDirectory, [{
-    bucketId: await getBrowserVaultMetricBucketId("steps"),
-    metricKey: "steps",
-    rowCount: 1,
-  }]);
+  assert.deepEqual(shards.metrics.metricDirectory, [
+    {
+      bucketId: await getBrowserVaultMetricBucketId("steps"),
+      metricKey: "steps",
+      rowCount: 1,
+    },
+  ]);
   const stepsBucketId = await getBrowserVaultMetricBucketId("steps");
-  const physicalRow = shards.metricBuckets[stepsBucketId].series[0]?.rows[0] ?? {};
+  const physicalRow =
+    shards.metricBuckets[stepsBucketId].series[0]?.rows[0] ?? {};
   assert.equal("rowSchema" in physicalRow, false);
   assert.equal("metricKey" in physicalRow, false);
-  assert.equal(shards.metricBuckets[stepsBucketId].schema, BROWSER_VAULT_METRIC_BUCKET_SHARD_SCHEMA);
+  assert.equal(
+    shards.metricBuckets[stepsBucketId].schema,
+    BROWSER_VAULT_METRIC_BUCKET_SHARD_SCHEMA,
+  );
 
   const outcomeHeavyShards = await splitBrowserVaultReplica({
     ...replica,
     experimentOutcomes: Array.from({ length: 10 }, (_, index) =>
-      createCurrentOutcome(index)
+      createCurrentOutcome(index),
     ),
   });
-  assert.equal(JSON.stringify(outcomeHeavyShards.core), JSON.stringify(shards.core));
+  assert.equal(
+    JSON.stringify(outcomeHeavyShards.core),
+    JSON.stringify(shards.core),
+  );
   assert.ok(
-    JSON.stringify(outcomeHeavyShards.metrics).length
-      > JSON.stringify(shards.metrics).length,
+    JSON.stringify(outcomeHeavyShards.metrics).length >
+      JSON.stringify(shards.metrics).length,
   );
 
-  const serialized = JSON.parse(JSON.stringify(shards)) as unknown;
+  const serialized = JSON.parse(JSON.stringify(shards));
   const parsedShards = await parseBrowserVaultReplicaShards(serialized);
 
   assert.deepEqual(parseBrowserVaultCoreShard(shards.core), parsedShards.core);
-  assert.deepEqual(parseBrowserVaultMetricsShard(shards.metrics), parsedShards.metrics);
+  assert.deepEqual(
+    parseBrowserVaultMetricsShard(shards.metrics),
+    parsedShards.metrics,
+  );
   assert.deepEqual(parseBrowserVaultLabsShard(shards.labs), parsedShards.labs);
   assert.deepEqual(
-    await parseBrowserVaultMetricBucketShard(shards.metricBuckets[stepsBucketId], stepsBucketId),
+    await parseBrowserVaultMetricBucketShard(
+      shards.metricBuckets[stepsBucketId],
+      stepsBucketId,
+    ),
     parsedShards.metricBuckets[stepsBucketId],
   );
   assert.deepEqual(
@@ -148,7 +164,9 @@ test("browser vault replica payload parsing preserves legacy monolith compatibil
   assert.equal(parsedLegacy.generation, undefined);
   assert.deepEqual(parsedLegacy, parseBrowserVaultReplica(legacyReplica));
   assert.deepEqual(
-    assembleBrowserVaultReplicaShards(await splitBrowserVaultReplica(parsedLegacy)),
+    assembleBrowserVaultReplicaShards(
+      await splitBrowserVaultReplica(parsedLegacy),
+    ),
     parsedLegacy,
   );
 });
@@ -169,29 +187,46 @@ test("browser vault shard assembly rejects mixed replica versions", async () => 
 test("browser vault assembly requires hash-verified buckets and exact partial index coverage", async () => {
   const replica = createReplica();
   replica.metricRows.push({
-    biomarkerKey: null, comparator: null, confidence: "high", context: {}, date: "2026-08-12",
-    grain: "day", id: "row", metricKey: "steps", observedAt: "2026-08-12T00:00:00.000Z",
-    pointIds: [], recordIds: [], rowSchema: "murph.browser-vault.metric-row.v1", sourceFamily: null,
-    sourceKind: null, sourceLabel: null, statistic: "value", unit: "count", value: 1, valueLabel: null,
+    biomarkerKey: null,
+    comparator: null,
+    confidence: "high",
+    context: {},
+    date: "2026-08-12",
+    grain: "day",
+    id: "row",
+    metricKey: "steps",
+    observedAt: "2026-08-12T00:00:00.000Z",
+    pointIds: [],
+    recordIds: [],
+    rowSchema: "murph.browser-vault.metric-row.v1",
+    sourceFamily: null,
+    sourceKind: null,
+    sourceLabel: null,
+    statistic: "value",
+    unit: "count",
+    value: 1,
+    valueLabel: null,
   });
   const shards = await splitBrowserVaultReplica(replica);
   const stepsBucketId = await getBrowserVaultMetricBucketId("steps");
   const unverifiedBucket = { ...shards.metricBuckets[stepsBucketId] };
 
   assert.throws(
-    () => createBrowserVaultLoadedQueryClients({
-      core: shards.core,
-      metricBuckets: { [stepsBucketId]: unverifiedBucket },
-      metrics: shards.metrics,
-    }),
+    () =>
+      createBrowserVaultLoadedQueryClients({
+        core: shards.core,
+        metricBuckets: { [stepsBucketId]: unverifiedBucket },
+        metrics: shards.metrics,
+      }),
     /must come from the bucket parser or replica splitter/u,
   );
   assert.throws(
-    () => createBrowserVaultLoadedQueryClients({
-      core: shards.core,
-      metricBuckets: { [stepsBucketId]: shards.metricBuckets[stepsBucketId] },
-      metrics: { ...shards.metrics, metricDirectory: [] },
-    }),
+    () =>
+      createBrowserVaultLoadedQueryClients({
+        core: shards.core,
+        metricBuckets: { [stepsBucketId]: shards.metricBuckets[stepsBucketId] },
+        metrics: { ...shards.metrics, metricDirectory: [] },
+      }),
     /does not match the metrics index directory/u,
   );
 });
@@ -235,10 +270,17 @@ test("browser vault loaded clients distinguish unloaded, loaded-empty, and loade
     metrics: shards.metrics,
   });
   assert.equal(withMetrics.metrics, null);
-  assert.equal(withMetrics.interactiveMetrics?.metricCoverage.get("steps").status, "unloaded");
-  assert.equal(withMetrics.interactiveMetrics?.metricCoverage.get("unknown-metric").status, "loaded-empty");
+  assert.equal(
+    withMetrics.interactiveMetrics?.metricCoverage.get("steps").status,
+    "unloaded",
+  );
+  assert.equal(
+    withMetrics.interactiveMetrics?.metricCoverage.get("unknown-metric").status,
+    "loaded-empty",
+  );
   assert.throws(
-    () => withMetrics.interactiveMetrics?.metrics.series({ metricKey: "steps" }),
+    () =>
+      withMetrics.interactiveMetrics?.metrics.series({ metricKey: "steps" }),
     /is not loaded for steps/u,
   );
   assert.equal(withMetrics.labs, null);
@@ -249,9 +291,18 @@ test("browser vault loaded clients distinguish unloaded, loaded-empty, and loade
     metricBuckets: { [stepsBucketId]: shards.metricBuckets[stepsBucketId] },
     metrics: shards.metrics,
   });
-  assert.equal(withSteps.interactiveMetrics?.metricCoverage.get("steps").status, "loaded");
-  assert.deepEqual(withSteps.interactiveMetrics?.metrics.series({ metricKey: "steps" }), replica.metricRows);
-  assert.equal("metricRows" in (withSteps.interactiveMetrics?.replica ?? {}), false);
+  assert.equal(
+    withSteps.interactiveMetrics?.metricCoverage.get("steps").status,
+    "loaded",
+  );
+  assert.deepEqual(
+    withSteps.interactiveMetrics?.metrics.series({ metricKey: "steps" }),
+    replica.metricRows,
+  );
+  assert.equal(
+    "metricRows" in (withSteps.interactiveMetrics?.replica ?? {}),
+    false,
+  );
 
   const all = createBrowserVaultLoadedQueryClients(shards);
   assert.equal(all.full?.capability, "core+metrics+labs");
@@ -260,10 +311,25 @@ test("browser vault loaded clients distinguish unloaded, loaded-empty, and loade
 test("browser vault shard parsers validate schemas, bucket placement, and generation metadata", async () => {
   const replica = createReplica();
   replica.metricRows.push({
-    biomarkerKey: null, comparator: null, confidence: "high", context: {}, date: "2026-08-12",
-    grain: "day", id: "row", metricKey: "steps", observedAt: "2026-08-12T00:00:00.000Z",
-    pointIds: [], recordIds: [], rowSchema: "murph.browser-vault.metric-row.v1", sourceFamily: null,
-    sourceKind: null, sourceLabel: null, statistic: "value", unit: "count", value: 1, valueLabel: null,
+    biomarkerKey: null,
+    comparator: null,
+    confidence: "high",
+    context: {},
+    date: "2026-08-12",
+    grain: "day",
+    id: "row",
+    metricKey: "steps",
+    observedAt: "2026-08-12T00:00:00.000Z",
+    pointIds: [],
+    recordIds: [],
+    rowSchema: "murph.browser-vault.metric-row.v1",
+    sourceFamily: null,
+    sourceKind: null,
+    sourceLabel: null,
+    statistic: "value",
+    unit: "count",
+    value: 1,
+    valueLabel: null,
   });
   const shards = await splitBrowserVaultReplica(replica);
 
@@ -272,19 +338,23 @@ test("browser vault shard parsers validate schemas, bucket placement, and genera
     /core shard\.schema must be murph\.browser-vault-replica\.core\.v1/u,
   );
   assert.throws(
-    () => parseBrowserVaultMetricsShard({
-      ...shards.metrics,
-      identity: { ...shards.metrics.identity, generation: 0 },
-    }),
+    () =>
+      parseBrowserVaultMetricsShard({
+        ...shards.metrics,
+        identity: { ...shards.metrics.identity, generation: 0 },
+      }),
     /metrics shard\.identity\.generation must be a positive safe integer/u,
   );
   const stepsBucketId = await getBrowserVaultMetricBucketId("steps");
-  const wrongBucketId = BROWSER_VAULT_METRIC_BUCKET_IDS.find((id) => id !== stepsBucketId)!;
+  const wrongBucketId = BROWSER_VAULT_METRIC_BUCKET_IDS.find(
+    (id) => id !== stepsBucketId,
+  )!;
   await assert.rejects(
-    () => parseBrowserVaultMetricBucketShard(
-      { ...shards.metricBuckets[stepsBucketId], bucketId: wrongBucketId },
-      wrongBucketId,
-    ),
+    () =>
+      parseBrowserVaultMetricBucketShard(
+        { ...shards.metricBuckets[stepsBucketId], bucketId: wrongBucketId },
+        wrongBucketId,
+      ),
     /contains a metric key assigned to bucket/u,
   );
 });
@@ -292,7 +362,7 @@ test("browser vault shard parsers validate schemas, bucket placement, and genera
 test("browser vault metric bucket assignment has stable SHA-256 test vectors", async () => {
   // Changing any vector requires a generation bump so old refs are never read
   // with a new canonical-key placement rule.
-  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 10);
+  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 14);
   assert.equal(await getBrowserVaultMetricBucketId("spo2"), "02");
   assert.equal(await getBrowserVaultMetricBucketId("lowest-spo2"), "19");
   assert.equal(await getBrowserVaultMetricBucketId("estimated-vo2-max"), "0d");
@@ -311,6 +381,56 @@ function createReplica(): BrowserVaultReplica {
     generatedAt: "2026-08-13T12:00:00.000Z",
     generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
     hasLabBiomarkers: false,
+    journal: {
+      days: [
+        {
+          date: "2026-08-12",
+          events: [
+            {
+              date: "2026-08-12",
+              details: [],
+              occurredAt: "2026-08-12T09:00:00.000Z",
+              id: "journal-event-1",
+              kind: "note",
+              metrics: {
+                activityMinutes: 0,
+                deepSleepMinutes: null,
+                hrvMs: null,
+                readinessScore: null,
+                recoveryScore: null,
+                remSleepMinutes: null,
+                respiratoryRate: null,
+                restingHeartRateBpm: null,
+                sleepEfficiencyPercent: null,
+                sleepMinutes: null,
+                sleepScore: null,
+                spo2Percent: null,
+              },
+              records: [
+                {
+                  id: "journal-record-1",
+                  kind: "note",
+                  label: "Felt rested",
+                  occurredAt: "2026-08-12T09:00:00.000Z",
+                  source: "manual",
+                  summary: null,
+                  tags: ["journal"],
+                  timeZone: "Europe/Warsaw",
+                },
+              ],
+              summary: null,
+              timing: "timed",
+              timeZone: "Europe/Warsaw",
+              title: "Felt rested",
+            },
+          ],
+        },
+      ],
+      eventCount: 1,
+      recordCount: 1,
+      weeks: [],
+      windowDays: 120,
+    },
     labResultRows: [],
     metricGoalProgressRows: [],
     metricRows: [],
@@ -360,26 +480,28 @@ function createCurrentOutcome(sequence: number): ExperimentOutcome {
       title: `Saved outcome ${suffix}`,
     },
     generatedAt: "2026-08-13T12:00:00.000Z",
-    metricResults: [{
-      baseline: { daysWithData: 1, mean: 62, totalDays: 1, unit: "bpm" },
-      baselineDayCount: 1,
-      baselineMean: 62,
-      biomarkerKey: "biomarker:resting-heart-rate",
-      completeness: "good",
-      deltaAbs: -4,
-      deltaPct: -6.45,
-      expectedDirection: "decrease",
-      intervention: { daysWithData: 1, mean: 58, totalDays: 1, unit: "bpm" },
-      interventionDayCount: 1,
-      interventionMean: 58,
-      label: "Resting heart rate",
-      movedAsExpected: true,
-      points: [
-        { date: "2026-08-11", phase: "baseline", unit: "bpm", value: 62 },
-        { date: "2026-08-12", phase: "intervention", unit: "bpm", value: 58 },
-      ],
-      unit: "bpm",
-    }],
+    metricResults: [
+      {
+        baseline: { daysWithData: 1, mean: 62, totalDays: 1, unit: "bpm" },
+        baselineDayCount: 1,
+        baselineMean: 62,
+        biomarkerKey: "biomarker:resting-heart-rate",
+        completeness: "good",
+        deltaAbs: -4,
+        deltaPct: -6.45,
+        expectedDirection: "decrease",
+        intervention: { daysWithData: 1, mean: 58, totalDays: 1, unit: "bpm" },
+        interventionDayCount: 1,
+        interventionMean: 58,
+        label: "Resting heart rate",
+        movedAsExpected: true,
+        points: [
+          { date: "2026-08-11", phase: "baseline", unit: "bpm", value: 62 },
+          { date: "2026-08-12", phase: "intervention", unit: "bpm", value: 58 },
+        ],
+        unit: "bpm",
+      },
+    ],
     outcomeId: `outcome-${suffix}`,
     protocolRef: null,
     schemaVersion: "murph.experiment-outcome.v2",

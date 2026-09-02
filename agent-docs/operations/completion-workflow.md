@@ -389,7 +389,11 @@ Every PR includes:
   Select `Deployment: applicable` and complete the deployment contract when the
   change crosses a deploy boundary; otherwise select
   `Deployment: not applicable` with a concrete reason. The pull-request
-  evidence guard validates this section.
+  evidence guard validates this section. For a shared protocol between
+  independently deployed components, identify the producer and consumer, use a
+  consumer-first safe order, and name direct proof for every supported
+  mixed-version pair. Current-head producer/consumer proof alone is
+  insufficient.
 - **Changelog.** Add exactly one `## Changelog` section with
   `Changelog: updated` and its item IDs, or `Changelog: not applicable` with a
   concrete reason. The changelog guard validates this section.

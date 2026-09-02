@@ -132,7 +132,7 @@ test('typed event write schemas expose concrete fields and keep JSON input on ex
     assert.equal('input' in schema.options.properties, false)
   }
 
-  assertSchemaProperties(noteSchema, ['note', 'tag'])
+  assertSchemaProperties(noteSchema, ['note', 'noteType', 'relatedId', 'tag'])
   assertRequiredOptions(noteSchema, ['vault', 'note'])
 
   assertSchemaProperties(symptomSchema, ['symptom', 'severity', 'bodyRegion', 'note', 'tag'])
@@ -182,6 +182,10 @@ test.sequential('typed event write commands persist common event records without
       '2026-03-12T12:15:00.000Z',
       '--tag',
       'reflection',
+      '--note-type',
+      'journal-outcome',
+      '--related-id',
+      'evt_01ARZ3NDEKTSV4RRFFQ69G5FAV',
       '--vault',
       vaultRoot,
     ])
@@ -315,6 +319,11 @@ test.sequential('typed event write commands persist common event records without
     assert.equal(requireData(shownNote).entity.kind, 'note')
     assert.equal(requireData(shownNote).entity.title, 'Lunch note')
     assert.equal(requireData(shownNote).entity.data.note, 'Felt steady after lunch.')
+    assert.equal(requireData(shownNote).entity.data.noteType, 'journal-outcome')
+    assert.deepEqual(requireData(shownNote).entity.data.links, [{
+      targetId: 'evt_01ARZ3NDEKTSV4RRFFQ69G5FAV',
+      type: 'related_to',
+    }])
     assert.deepEqual(requireData(shownNote).entity.data.tags, ['reflection'])
 
     assert.equal(shownSymptom.ok, true)

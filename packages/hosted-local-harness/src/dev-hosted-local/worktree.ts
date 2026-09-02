@@ -11,7 +11,10 @@ import {
 import {
   DEFAULT_LINQ_WEBHOOK_TUNNEL_CONFIG,
   DEFAULT_DATABASE_URL,
+  HOSTED_LOCAL_CLOUDFLARE_ACCOUNT_ID,
+  HOSTED_LOCAL_HTTPS_ORIGIN,
   HOSTED_LOCAL_PERSISTED_STATE_ENV_NAMES,
+  HOSTED_LOCAL_PUBLIC_WEB_BASE_URL_ENV,
   HOSTED_LOCAL_WORKTREE_ROOT,
   HOSTED_LOCAL_WORKTREE_SCOPE_ENV,
   HOSTED_RUNNER_LOCAL_BUILD_ID_ENV,
@@ -127,7 +130,14 @@ export function buildHostedLocalWorktreeConfig(input: {
   const databaseUrl = buildHostedLocalWorktreeDatabaseUrl(databaseName, genericEnvironment);
   const buildId = `worktree-${slug}`;
   const webHost = resolveHostedLocalWorktreeWebHost(genericEnvironment);
-  const webOrigin = buildHostedLocalWorktreeWebOrigin(webHost, input.ports.web);
+  const internalWebOrigin = buildHostedLocalWorktreeWebOrigin(
+    webHost,
+    input.ports.web,
+  );
+  const webOrigin = resolveHostedLocalWorktreePublicWebOrigin(
+    genericEnvironment,
+    internalWebOrigin,
+  );
   const rootDir = path.join(HOSTED_LOCAL_WORKTREE_ROOT, slug);
   const paths = {
     cryptoStatePath: path.join(rootDir, "hosted-local-crypto-state.dev.vars"),
@@ -389,6 +399,7 @@ export function formatHostedLocalWorktreeEnv(
 ): string {
   const entries = [
     ["MURPH_HOSTED_LOCAL_PROFILE", config.profileName],
+    ["CLOUDFLARE_ACCOUNT_ID", config.env.CLOUDFLARE_ACCOUNT_ID],
     [HOSTED_LOCAL_WORKTREE_SCOPE_ENV, config.env[HOSTED_LOCAL_WORKTREE_SCOPE_ENV]],
     [HOSTED_RUNNER_LOCAL_BUILD_ID_ENV, config.buildId],
     [HOSTED_LOCAL_WORKTREE_DATABASE_URL_ENV, "[redacted]"],
@@ -398,6 +409,10 @@ export function formatHostedLocalWorktreeEnv(
     ],
     ["MURPH_DEV_WEB_HOST", config.env.MURPH_DEV_WEB_HOST],
     ["MURPH_DEV_WEB_PORT", config.env.MURPH_DEV_WEB_PORT],
+    [
+      HOSTED_LOCAL_PUBLIC_WEB_BASE_URL_ENV,
+      config.env[HOSTED_LOCAL_PUBLIC_WEB_BASE_URL_ENV],
+    ],
     ["DEVICE_SYNC_PUBLIC_BASE_URL", config.env.DEVICE_SYNC_PUBLIC_BASE_URL],
     ["HOSTED_ONBOARDING_PUBLIC_BASE_URL", config.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL],
     [
@@ -658,12 +673,22 @@ function buildHostedLocalWorktreeEnv(input: {
 
   return {
     ...env,
+    CLOUDFLARE_ACCOUNT_ID:
+      input.baseEnv.CLOUDFLARE_ACCOUNT_ID?.trim() ||
+      HOSTED_LOCAL_CLOUDFLARE_ACCOUNT_ID,
     [HOSTED_RUNNER_LOCAL_BUILD_ID_ENV]: input.buildId,
     [HOSTED_LOCAL_WORKTREE_SCOPE_ENV]: input.slug,
     [USE_REMOTE_HOSTED_CRYPTO_KEYS_ENV]: "0",
+    [HOSTED_LOCAL_PUBLIC_WEB_BASE_URL_ENV]:
+      input.webOrigin === HOSTED_LOCAL_HTTPS_ORIGIN
+        ? input.webOrigin
+        : undefined,
     DEVICE_SYNC_PUBLIC_BASE_URL: `${input.webOrigin}/api/device-sync`,
     HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS:
-      buildHostedLocalWorktreeAllowedMutationOrigins(input.ports.web),
+      buildHostedLocalWorktreeAllowedMutationOrigins({
+        browserOrigin: input.webOrigin,
+        port: input.ports.web,
+      }),
     HOSTED_ONBOARDING_PUBLIC_BASE_URL: input.webOrigin,
     HOSTED_WEB_BASE_URL: input.webOrigin,
     MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "0",
@@ -722,10 +747,35 @@ function buildHostedLocalWorktreeWebOrigin(
   return `http://${host}:${port}`;
 }
 
-function buildHostedLocalWorktreeAllowedMutationOrigins(port: number): string {
-  return HOSTED_LOCAL_WORKTREE_WEB_HOSTS
-    .map((host) => buildHostedLocalWorktreeWebOrigin(host, port))
-    .join(",");
+function resolveHostedLocalWorktreePublicWebOrigin(
+  env: Readonly<Record<string, string | undefined>>,
+  fallbackOrigin: string,
+): string {
+  const configured = env[HOSTED_LOCAL_PUBLIC_WEB_BASE_URL_ENV]?.trim();
+  if (!configured) {
+    return env.MURPH_DEV_SKIP_TLS_PROXY?.trim() === "1"
+      ? fallbackOrigin
+      : HOSTED_LOCAL_HTTPS_ORIGIN;
+  }
+  if (configured === HOSTED_LOCAL_HTTPS_ORIGIN) {
+    return configured;
+  }
+  throw new Error(
+    `${HOSTED_LOCAL_PUBLIC_WEB_BASE_URL_ENV} must be ${HOSTED_LOCAL_HTTPS_ORIGIN}.`,
+  );
+}
+
+function buildHostedLocalWorktreeAllowedMutationOrigins(input: {
+  browserOrigin: string;
+  port: number;
+}): string {
+  const internalOrigins = HOSTED_LOCAL_WORKTREE_WEB_HOSTS.map((host) =>
+    buildHostedLocalWorktreeWebOrigin(host, input.port)
+  );
+  const browserOrigins = internalOrigins.includes(input.browserOrigin)
+    ? []
+    : [input.browserOrigin];
+  return [...browserOrigins, ...internalOrigins].join(",");
 }
 
 function buildHostedLocalWorktreeLinqEnv(input: {

@@ -690,16 +690,34 @@ function resolveHostedUsageReferralSourceContext(
   };
 }
 
-function buildHostedGroupEmailRestrictedActionUnavailable(
-  request: Exclude<
-    HostedRuntimeGroupToolRequest,
+type HostedGroupEmailRestrictedRequest = Exclude<
+  HostedRuntimeGroupToolRequest,
+  {
+    action: "read_current" | "read_shared" | "read_usage";
+  }
+>;
+
+function buildHostedGroupJournalActionUnavailable(
+  request: Extract<
+    HostedGroupEmailRestrictedRequest,
     {
       action:
-        | "read_current"
-        | "read_shared"
-        | "read_usage";
+        | "prepare_email"
+        | "record_current_sender_journal_fact"
+        | "set_current_sender_journal_capture"
+        | "set_journal_capture";
     }
   >,
+  unavailableReason: "authenticated_sender_required",
+): HostedRuntimeGroupToolResponse {
+  return {
+    action: request.action,
+    result: { status: "unavailable", unavailableReason },
+  };
+}
+
+function buildHostedGroupEmailRestrictedActionUnavailable(
+  request: HostedGroupEmailRestrictedRequest,
 ): HostedRuntimeGroupToolResponse {
   const unavailableReason = "authenticated_sender_required";
   switch (request.action) {
@@ -754,7 +772,6 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
     case "read_next_group":
     case "cancel_next_group":
     case "revoke_own_email_share":
-    case "prepare_email":
       return {
         action: request.action,
         result: { status: "unavailable", unavailableReason },
@@ -770,8 +787,12 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
           unavailableReason,
         },
       };
+    default:
+      return buildHostedGroupJournalActionUnavailable(
+        request,
+        unavailableReason,
+      );
   }
-  return assertNever(request);
 }
 
 /**

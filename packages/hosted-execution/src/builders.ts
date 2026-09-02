@@ -19,6 +19,7 @@ import type {
   HostedExecutionDeviceSyncWake,
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionDailyMetricReportedWake,
+  HostedExecutionGroupJournalFactRecordedWake,
   HostedExecutionEnvironmentInterviewCompletedWake,
   HostedExecutionEnvironmentVoiceCapturedWake,
   HostedExecutionEmailConversationMessagePayload,
@@ -50,7 +51,7 @@ import type {
   HostedExecutionTelegramConversationMessagePayload,
   HostedRuntimeTimerTriggerKind,
 } from "./contracts.ts";
-
+import { parseHostedExecutionGroupJournalFactPayload } from "./group-journal-fact.ts";
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
   HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS,
@@ -989,6 +990,21 @@ export function buildHostedExecutionDailyMetricReportedWake(input: {
     dailyMetric,
     eventId: input.eventId,
     kind: "health.daily-metric.reported",
+    occurredAt: input.occurredAt,
+    userId: input.memberId,
+  };
+}
+
+export function buildHostedExecutionGroupJournalFactRecordedWake(input: {
+  eventId: string;
+  journalFact: HostedExecutionGroupJournalFactRecordedWake["journalFact"];
+  memberId: string;
+  occurredAt: string;
+}): HostedExecutionGroupJournalFactRecordedWake {
+  return {
+    eventId: input.eventId,
+    journalFact: parseHostedExecutionGroupJournalFactPayload(input.journalFact),
+    kind: "journal.group-fact.recorded",
     occurredAt: input.occurredAt,
     userId: input.memberId,
   };
