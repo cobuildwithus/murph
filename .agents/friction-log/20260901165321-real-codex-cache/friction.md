@@ -1,6 +1,7 @@
 ---
 title: 'Real-Codex cache probe fails before focused assistant journeys start'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2695'
 ---
 
 ## Expected Behavior

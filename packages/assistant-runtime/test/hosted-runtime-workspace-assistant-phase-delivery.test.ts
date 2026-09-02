@@ -14,6 +14,7 @@ import {
   loadHostedSystemMailboxRealImplementation,
   mocks,
   resolveHostedPendingAssistantInputWakeAtWithRealImplementation,
+  runHostedWorkspaceAssistantPhase,
   seedDirectLinqAssistantInputRoute,
   withoutAssistantTurnTimingLogs,
 } from "./hosted-runtime-workspace-assistant-phase.harness.ts";
@@ -58,10 +59,10 @@ import {
 import {
   executeCodexAppServerTurn,
 } from "@murphai/assistant-engine/assistant-codex";
-import {
-  runHostedWorkspaceAssistantPhase,
-  type HostedWorkspaceRuntimeAssistantPhaseInput,
+import type {
+  HostedWorkspaceRuntimeAssistantPhaseInput,
 } from "../src/hosted-runtime/workspace-assistant-phase.ts";
+import { drainHostedRuntimeLogWritesBestEffort } from "../src/hosted-runtime/runtime-logs.ts";
 import {
   enqueueHostedPendingAssistantInputId,
   inspectHostedPendingAssistantInputWakeCandidate,
@@ -131,27 +132,31 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     expect(result.afterCheckpoint).toEqual(expect.any(Function));
     expect(
       logRequests
-        .map((request) => request.entries[0]?.redactedJson?.turnTimingStage)
+        .flatMap((request) => request.entries)
+        .map((entry) => entry.redactedJson?.turnTimingStage)
         .filter(Boolean),
     ).not.toContain("foreground-delivery-phase-finished");
 
     await result.afterCheckpoint?.();
+    await drainHostedRuntimeLogWritesBestEffort();
 
     expect(
       logRequests
-        .map((request) => request.entries[0]?.redactedJson?.turnTimingStage)
+        .flatMap((request) => request.entries)
+        .map((entry) => entry.redactedJson?.turnTimingStage)
         .filter(Boolean),
     ).toEqual(expect.arrayContaining([
       "foreground-delivery-phase-started",
       "foreground-delivery-phase-finished",
     ]));
-    const finishLogIndex = logRequests.findIndex(
-      (request) =>
-        request.entries[0]?.redactedJson?.turnTimingStage
+    const logEntries = logRequests.flatMap((request) => request.entries);
+    const finishLogIndex = logEntries.findIndex(
+      (entry) =>
+        entry.redactedJson?.turnTimingStage
           === "foreground-delivery-phase-finished",
     );
-    const outboxLogIndex = logRequests.findIndex(
-      (request) => request.entries[0]?.eventCode === "outbox.delivery_finished",
+    const outboxLogIndex = logEntries.findIndex(
+      (entry) => entry.eventCode === "outbox.delivery_finished",
     );
     expect(outboxLogIndex).toBeGreaterThanOrEqual(0);
     expect(finishLogIndex).toBeGreaterThan(outboxLogIndex);
@@ -825,6 +830,81 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       expect(event?.content.text).toContain(
         "A text-only substitute is not equivalent; do not offer or send one as recovery",
       );
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("does not stage a definitive non-delivery note for an ambiguous Linq outcome", async () => {
+    const vaultRoot = await mkdtemp(path.join(
+      tmpdir(),
+      "murph-outbox-ambiguous-terminal-no-failure-note-",
+    ));
+    try {
+      const now = "2026-04-27T00:00:00.000Z";
+      const deliveryEffect = {
+        ...createDeliveryEffect(),
+        deliveryPhase: "background_retry" as const,
+        effectId: "intent_ambiguous_terminal_no_failure_note",
+        fingerprint: "fingerprint_ambiguous_terminal_no_failure_note",
+        payload: {
+          ...createDeliveryEffect().payload,
+          channel: "linq" as const,
+          idempotencyKey:
+            "assistant-outbox:intent_ambiguous_terminal_no_failure_note",
+        },
+      };
+      mocks.readAssistantOutboxIntent.mockResolvedValue(
+        createTerminalFailureOutboxIntent({
+          bindingDeliveryTarget: "linq_chat_direct",
+          channel: "linq",
+          createdAt: "2026-04-26T23:59:50.000Z",
+          effectId: deliveryEffect.effectId,
+          explicitTarget: null,
+        }),
+      );
+      mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+        deliveryEffect,
+      ]);
+      mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+        preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
+      });
+      mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+        {
+          ...createFailedDeliveryOutcome({
+            deliveryChannel: "linq",
+            deliveryErrorCode: "ASSISTANT_DELIVERY_AMBIGUOUS",
+            effectId: deliveryEffect.effectId,
+          }),
+          deliveryStatus: "failed_ambiguous" as const,
+          effectFingerprint: deliveryEffect.fingerprint,
+          retryable: false,
+        },
+      ]);
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        now: () => now,
+        vaultRoot,
+        workspace: createDueAssistantWorkspace(),
+      }));
+      const postCheckpoint = result.afterCheckpoint
+        ? await result.afterCheckpoint()
+        : result;
+
+      expect(postCheckpoint).toEqual(expect.objectContaining({
+        redactedStatus: expect.objectContaining({
+          hostedOutboxTerminalFailureInputsStaged: 0,
+          hostedOutboxTerminalizedSending: 1,
+        }),
+      }));
+      expect(mocks.readAssistantOutboxIntent).toHaveBeenCalledOnce();
+      expect(mocks.readAssistantOutboxIntent).toHaveBeenCalledWith(
+        vaultRoot,
+        deliveryEffect.effectId,
+      );
+      await expect(readExistingHostedPendingAssistantInputIds({
+        vaultRoot,
+      })).resolves.toEqual([]);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -3467,6 +3547,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       workspace: createDueAssistantWorkspace(),
     }));
     await result.afterCheckpoint?.();
+    await drainHostedRuntimeLogWritesBestEffort();
     const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
     expect(filteredLogRequests.map((request) => request.entries[0]?.eventCode)).toEqual([
@@ -3527,6 +3608,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       workspace: createDueAssistantWorkspace(),
     }));
     await result.afterCheckpoint?.();
+    await drainHostedRuntimeLogWritesBestEffort();
     const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
     expect(filteredLogRequests[1]?.entries[0]).toEqual(expect.objectContaining({
@@ -3583,6 +3665,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       workspace: createDueAssistantWorkspace(),
     }));
     await result.afterCheckpoint?.();
+    await drainHostedRuntimeLogWritesBestEffort();
     const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
     const deliveryLogRequest = filteredLogRequests[1];
 
@@ -3628,6 +3711,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       workspace: createDueAssistantWorkspace(),
     }));
     await result.afterCheckpoint?.();
+    await drainHostedRuntimeLogWritesBestEffort();
     const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
     const deliveryLogRequest = filteredLogRequests[1];
 
@@ -3694,6 +3778,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       workspace: createDueAssistantWorkspace(),
     }));
     await result.afterCheckpoint?.();
+    await drainHostedRuntimeLogWritesBestEffort();
     const deliveryLogRequest = withoutAssistantTurnTimingLogs(logRequests)[1];
 
     expect(deliveryLogRequest?.entries[0]?.redactedJson).toEqual(expect.objectContaining({
@@ -3790,6 +3875,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       workspace: createDueAssistantWorkspace(),
     }));
     await result.afterCheckpoint?.();
+    await drainHostedRuntimeLogWritesBestEffort();
     const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
     expect(filteredLogRequests[1]?.entries[0]).toEqual(expect.objectContaining({
@@ -5051,6 +5137,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
     }));
 
     const postCheckpoint = await result.afterCheckpoint?.();
+    await drainHostedRuntimeLogWritesBestEffort();
     const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
     expect(postCheckpoint).toBeUndefined();
@@ -5129,13 +5216,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("writes fore
       nextWakeReason: "device-sync.reconcile",
       progressed: true,
     }));
-    expect(logRequests.map((request) => request.entries[0]?.eventCode)).toContain(
+    await drainHostedRuntimeLogWritesBestEffort();
+    expect(logRequests.flatMap((request) => request.entries).map((entry) => entry.eventCode)).toContain(
       "assistant.pass_finished",
     );
-    const passFinishedLog = logRequests.find(
-      (request) => request.entries[0]?.eventCode === "assistant.pass_finished",
+    const passFinishedLog = logRequests.flatMap((request) => request.entries).find(
+      (entry) => entry.eventCode === "assistant.pass_finished",
     );
-    expect(passFinishedLog?.entries[0]?.redactedJson).toEqual(expect.objectContaining({
+    expect(passFinishedLog?.redactedJson).toEqual(expect.objectContaining({
       nextWakeAtPresent: true,
       progressed: true,
     }));

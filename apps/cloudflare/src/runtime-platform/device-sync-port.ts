@@ -4,14 +4,7 @@ import type {
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_BODY_LIMIT_BYTES,
-  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
-  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH,
-  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH,
-  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
-  HOSTED_EXECUTION_DEVICE_SYNC_FITBIT_MIGRATION_CUTOVER_PATH,
-  HOSTED_EXECUTION_DEVICE_SYNC_NO_DATA_OUTREACH_PATH,
-  HOSTED_EXECUTION_DEVICE_SYNC_RECONCILE_PATH,
   buildHostedExecutionDeviceSyncConnectLinkPath,
   type HostedExecutionDeviceSyncCompletedImport,
   type HostedExecutionDeviceSyncRuntimeApplyRequest,
@@ -27,7 +20,12 @@ import {
   type HostedExecutionDeviceSyncRuntimeSnapshotCursor,
 } from "@murphai/device-syncd/hosted-runtime";
 
-import { fetchHostedWebControlPlaneJson, type HostedWebControlTransport } from "./web-control-transport.ts";
+import {
+  createHostedRunnerDeviceSyncConnectLinkRoute,
+  fetchHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
+  type HostedWebControlTransport,
+} from "./web-control-transport.ts";
 
 export function createHostedWebDeviceSyncPort(input: {
   boundUserId: string;
@@ -49,7 +47,7 @@ export function createHostedWebDeviceSyncPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted device no-data outreach preference",
         fetchImpl: input.fetchImpl,
-        path: HOSTED_EXECUTION_DEVICE_SYNC_NO_DATA_OUTREACH_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.deviceSyncNoDataOutreach,
         signal: runtimeInput.signal ?? null,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
@@ -67,7 +65,7 @@ export function createHostedWebDeviceSyncPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted Fitbit migration cutover",
         fetchImpl: input.fetchImpl,
-        path: HOSTED_EXECUTION_DEVICE_SYNC_FITBIT_MIGRATION_CUTOVER_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.deviceSyncFitbitMigrationCutover,
         signal: runtimeInput.signal ?? null,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
@@ -86,7 +84,7 @@ export function createHostedWebDeviceSyncPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted device-sync reconcile",
         fetchImpl: input.fetchImpl,
-        path: HOSTED_EXECUTION_DEVICE_SYNC_RECONCILE_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.deviceSyncReconcile,
         signal: runtimeInput.signal ?? null,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
@@ -113,7 +111,7 @@ export function createHostedWebDeviceSyncPort(input: {
           boundUserId: input.boundUserId,
           description: "Hosted device-sync runtime apply",
           fetchImpl: input.fetchImpl,
-          path: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
+          route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.deviceSyncRuntimeApply,
           signal: runtimeInput.signal ?? null,
           timeoutMs: input.timeoutMs,
           transport: input.transport,
@@ -148,8 +146,9 @@ export function createHostedWebDeviceSyncPort(input: {
         boundUserId: input.boundUserId,
         description: `Hosted device-sync connect link ${runtimeInput.connectTarget}`,
         fetchImpl: input.fetchImpl,
-        method: "POST",
-        path: buildHostedExecutionDeviceSyncConnectLinkPath(runtimeInput.connectTarget),
+        route: createHostedRunnerDeviceSyncConnectLinkRoute(
+          buildHostedExecutionDeviceSyncConnectLinkPath(runtimeInput.connectTarget),
+        ),
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });
@@ -184,7 +183,7 @@ export function createHostedWebDeviceSyncPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted device-sync runtime snapshot",
         fetchImpl: input.fetchImpl,
-        path: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.deviceSyncRuntimeSnapshot,
         signal: runtimeInput.signal ?? null,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
@@ -216,7 +215,7 @@ export function createHostedWebDeviceSyncPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted device-sync pending dirty state",
         fetchImpl: input.fetchImpl,
-        path: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.deviceSyncPendingDirtyState,
         signal: runtimeInput?.signal ?? null,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
@@ -254,7 +253,7 @@ export function createHostedWebDeviceSyncPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted device-sync dirty ack",
         fetchImpl: input.fetchImpl,
-        path: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.deviceSyncDirtyAck,
         signal: runtimeInput.signal ?? null,
         timeoutMs: input.timeoutMs,
         transport: input.transport,

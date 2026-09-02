@@ -4,9 +4,15 @@ const mocks = vi.hoisted(() => ({
   fetchHostedWebControlPlaneJson: vi.fn(),
 }));
 
-vi.mock("../src/runtime-platform/web-control-transport.ts", () => ({
-  fetchHostedWebControlPlaneJson: mocks.fetchHostedWebControlPlaneJson,
-}));
+vi.mock(
+  "../src/runtime-platform/web-control-transport.ts",
+  async (importOriginal) => ({
+    ...await importOriginal<
+      typeof import("../src/runtime-platform/web-control-transport.ts")
+    >(),
+    fetchHostedWebControlPlaneJson: mocks.fetchHostedWebControlPlaneJson,
+  }),
+);
 
 import {
   createHostedRuntimeAssistantPersonalizationToolPort,
@@ -49,9 +55,11 @@ describe("hosted assistant personalization tool port", () => {
 
     expect(mocks.fetchHostedWebControlPlaneJson).toHaveBeenCalledWith(
       expect.objectContaining({
-        path: expect.stringContaining(
-          "?assistantInputId=ain_0123456789abcdef0123456789abcdef&toolCallId=call_style_one",
-        ),
+        route: expect.objectContaining({
+          path: expect.stringContaining(
+            "?assistantInputId=ain_0123456789abcdef0123456789abcdef&toolCallId=call_style_one",
+          ),
+        }),
       }),
     );
   });
@@ -74,11 +82,11 @@ describe("hosted assistant personalization tool port", () => {
     );
 
     const request = mocks.fetchHostedWebControlPlaneJson.mock.calls[0]?.[0];
-    expect(request?.path).toContain("automationId=automation_daily_style");
-    expect(request?.path).toContain(
+    expect(request?.route.path).toContain("automationId=automation_daily_style");
+    expect(request?.route.path).toContain(
       "occurrenceAt=2026-08-06T14%3A30%3A00.000Z",
     );
-    expect(request?.path).toContain("toolCallId=call_style_two");
-    expect(request?.path).not.toContain("assistantInputId=");
+    expect(request?.route.path).toContain("toolCallId=call_style_two");
+    expect(request?.route.path).not.toContain("assistantInputId=");
   });
 });

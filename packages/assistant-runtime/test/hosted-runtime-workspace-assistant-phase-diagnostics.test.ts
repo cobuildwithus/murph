@@ -4,7 +4,7 @@ import { buildHostedExecutionRuntimeControlWake } from "@murphai/hosted-executio
 import type {
   HostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/runtime-control";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   collectHostedAssistantDeliverySideEffects: vi.fn(),
@@ -148,17 +148,38 @@ import {
   emitHostedAssistantProviderTraceLog,
 } from "../src/hosted-runtime/events.ts";
 import {
-  runHostedWorkspaceAssistantPhase,
+  runHostedWorkspaceAssistantPhase as runHostedWorkspaceAssistantPhaseWithoutDrain,
   type HostedWorkspaceRuntimeAssistantPhaseInput,
 } from "../src/hosted-runtime/workspace-assistant-phase.ts";
+import { drainHostedRuntimeLogWritesBestEffort } from "../src/hosted-runtime/runtime-logs.ts";
+
+afterEach(async () => {
+  await drainHostedRuntimeLogWritesBestEffort();
+});
+
+async function runHostedWorkspaceAssistantPhase(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+) {
+  try {
+    return await runHostedWorkspaceAssistantPhaseWithoutDrain(input);
+  } finally {
+    await drainHostedRuntimeLogWritesBestEffort();
+  }
+}
 
 function withoutAssistantTurnTimingLogs(
   logRequests: HostedRuntimeLogRequest[],
 ): HostedRuntimeLogRequest[] {
-  return logRequests.filter(
-    (request) =>
-      request.entries[0]?.redactedJson?.schema
-        !== "murph.assistant-turn-timing.v1",
+  return logRequests.flatMap((request) =>
+    request.entries
+      .filter(
+        (entry) =>
+          entry.redactedJson?.schema !== "murph.assistant-turn-timing.v1",
+      )
+      .map((entry) => ({
+        ...request,
+        entries: [entry],
+      }))
   );
 }
 
@@ -342,6 +363,7 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
     });
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
+    await drainHostedRuntimeLogWritesBestEffort();
     const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
     expect(filteredLogRequests[0]?.entries[0]).toEqual(expect.objectContaining({
@@ -436,6 +458,7 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
     });
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
+    await drainHostedRuntimeLogWritesBestEffort();
     const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
     expect(filteredLogRequests[0]?.entries[0]).toEqual(expect.objectContaining({
@@ -544,6 +567,7 @@ describe("hosted workspace assistant diagnostics detail logs", () => {
     });
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
+    await drainHostedRuntimeLogWritesBestEffort();
     const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
     expect(filteredLogRequests[0]?.entries[0]).toEqual(expect.objectContaining({

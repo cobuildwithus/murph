@@ -2607,6 +2607,8 @@ export async function runHostedWorkspaceAssistantPhase(
               : {}),
             runtimeAttemptId: input.request.attemptId,
             runtimeEnv: input.runtimeEnv,
+            readForegroundInputIds: () =>
+              input.latestAssistantInputBatch?.()?.assistantInputIds ?? [],
             ...(input.beforeProviderAcceptedInputs
               ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
               : {}),
@@ -4934,6 +4936,16 @@ async function resolveHostedDefaultProcessingWakeState(input: {
   readAssistantCronWakeState: () => Promise<HostedAssistantCronWakeState>;
 }): Promise<HostedAssistantCronWakeState> {
   const nowMs = resolveHostedAssistantPhaseNowMs(input.phaseInput);
+  const systemMailboxWake = await resolveHostedSystemMailboxNextWakeCandidate({
+    now: () => new Date(nowMs).toISOString(),
+    vaultRoot: input.phaseInput.restored.vaultRoot,
+  });
+  if (
+    systemMailboxWake.executionClass === "default_owned"
+    && hostedRuntimeWakeCandidateIsDue(systemMailboxWake, nowMs)
+  ) {
+    return createUnavailableHostedAssistantCronWakeState();
+  }
   const providerCleanupWake = createHostedRuntimeWakeCandidate(
     await resolveHostedProviderCleanupScheduledWakeAt({
       nowMs,

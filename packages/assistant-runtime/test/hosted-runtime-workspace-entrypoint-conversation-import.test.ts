@@ -19,6 +19,7 @@ import {
   readConversationImportedSeqs,
   removeTempRoot,
   requireEventIndex,
+  runHostedWorkspaceRuntimeJobInProcess,
   stageAssistantInputEventForMailboxItem,
   stagePendingLinqAssistantInputForMailboxItem,
   waitUntil,
@@ -80,7 +81,6 @@ import {
   HostedWorkspaceRunnerUserMismatchError,
   drainHostedRuntimeDeferredUsageCompletionsBestEffort,
   parseHostedAssistantWorkspaceRuntimeJobInput,
-  runHostedWorkspaceRuntimeJobInProcess,
   type HostedWorkspaceRuntimeJobOptions,
   type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";

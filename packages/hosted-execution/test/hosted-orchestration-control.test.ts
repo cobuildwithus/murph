@@ -349,6 +349,10 @@ describe("hosted orchestration control contracts", () => {
       dedupeKey: "assistant.notification.requested:generic",
       kind: "assistant.notification.requested",
     })).toBe("default_owned");
+    expect(classifyHostedSystemMailboxExecutionClass({
+      dedupeKey: "health.daily-metric.reported:synthetic",
+      kind: "health.daily-metric.reported",
+    })).toBe("model_free");
   });
 
   it("rejects raw payload-shaped fields in reconciliation facts contracts", () => {
