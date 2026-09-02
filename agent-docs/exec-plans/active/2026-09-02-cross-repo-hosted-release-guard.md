@@ -72,7 +72,8 @@ the targeted hosted execution proof.
 - Public controller and workflow contract tests cover closed dispatch modes,
   exact pair identity, stale-head rejection, failed and missing receipts,
   dispatch/run identity, cancellation, and deployment admission wiring.
-- Public manifest tests cover the private JSON scenario source and required
+- Private planner and workflow tests cover the one JSON scenario source, its
+  compatibility projection for the released public checker, and the required
   canonical foreground lane.
 - Hosted-local environment tests prove explicit allocation reaches generated
   Wrangler configuration and is observable by the foreground scenario.

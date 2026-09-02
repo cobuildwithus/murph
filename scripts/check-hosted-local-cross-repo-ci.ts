@@ -17,32 +17,6 @@ export interface HostedLocalCrossRepoCiCoverage {
 export function readHostedLocalWorkflowScenarioSelections(
   workflowText: string,
 ): string[] {
-  const trimmed = workflowText.trim();
-  if (trimmed.startsWith("[")) {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(trimmed);
-    } catch {
-      throw new Error("Hosted-local scenario manifest is invalid JSON.");
-    }
-    if (!Array.isArray(parsed)) {
-      throw new Error("Hosted-local scenario manifest must be an array.");
-    }
-    return parsed.flatMap((entry) => {
-      if (
-        entry === null
-        || typeof entry !== "object"
-        || Array.isArray(entry)
-      ) {
-        throw new Error("Hosted-local scenario manifest entry is invalid.");
-      }
-      const scenarios = Reflect.get(entry, "scenarios");
-      if (typeof scenarios !== "string" || scenarios.trim().length === 0) {
-        throw new Error("Hosted-local scenario manifest entry is invalid.");
-      }
-      return scenarios.trim().split(/\s+/u);
-    });
-  }
   const selections: string[] = [];
 
   for (const line of workflowText.split(/\r?\n/u)) {

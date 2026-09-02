@@ -22,19 +22,6 @@ describe("hosted-local cross-repository CI coverage", () => {
     ]);
   });
 
-  it("reads the private workflow's data-only scenario manifest", () => {
-    expect(readHostedLocalWorkflowScenarioSelections(JSON.stringify([
-      { scenarios: "device-connect junction-link-connect" },
-      { scenarios: "foreground-reply-priority" },
-    ]))).toEqual([
-      "device-connect",
-      "junction-link-connect",
-      "foreground-reply-priority",
-    ]);
-    expect(() => readHostedLocalWorkflowScenarioSelections('[{"scenarios":""}]'))
-      .toThrow("scenario manifest entry is invalid");
-  });
-
   it("accepts a workflow that covers every public requirement", () => {
     const workflowText = hostedLocalCrossRepoCiRequirements
       .map(({ scenario }) => `          - scenarios: ${scenario}`)
