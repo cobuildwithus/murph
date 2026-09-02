@@ -21,6 +21,14 @@ export const POST = withJsonError(async (request: Request) => {
   });
   const ownerRelease = readOwnerRelease(request);
 
+  if (ownerRelease.runtimeAttemptId !== null) {
+    await signalHostedRuntimeOwnerReleasedRuntime({
+      runtimeAttemptId: ownerRelease.runtimeAttemptId,
+      userId,
+    });
+    return jsonOk({ signaled: true });
+  }
+
   if (
     !ownerRelease.immediateRecheckRequested
     && !(await readHostedRuntimeOwnerReleaseMailboxLagActionable({ userId }))
@@ -28,15 +36,7 @@ export const POST = withJsonError(async (request: Request) => {
     return jsonOk({ signaled: false });
   }
 
-  if (ownerRelease.runtimeAttemptId === null) {
-    await signalHostedRuntimeRecheckRuntime({ userId });
-  } else {
-    await signalHostedRuntimeOwnerReleasedRuntime({
-      runtimeAttemptId: ownerRelease.runtimeAttemptId,
-      userId,
-    });
-  }
-
+  await signalHostedRuntimeRecheckRuntime({ userId });
   return jsonOk({ signaled: true });
 });
 

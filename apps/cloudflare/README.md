@@ -671,9 +671,11 @@ cleared and may include the exact positive `immediateRecheckRequested` edge. A
 known future mailbox retry continuation skips the callback unless the result
 carries that edge. The edge means the invocation newly committed an unserviced
 default or retention schedule; it does not carry the schedule itself. Without
-the edge, Web signals Temporal only for current runnable mailbox lag and never
-turns a persisted due wake into a repeated level-triggered signal. Callback
-failure is logged and ignored with no retry or result mutation.
+the edge, Web still forwards an exact attempt release for Temporal to match at
+the accepted-owner boundary. Only legacy pointerless callbacks require current
+runnable mailbox lag, so a persisted due wake never becomes a repeated
+level-triggered signal. Callback failure is logged and ignored with no retry or
+result mutation.
 
 ## Deploy Artifacts
 

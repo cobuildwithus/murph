@@ -281,35 +281,10 @@ describe("hosted runtime internal web routes", () => {
   });
 
   it("signals an exact authenticated runtime owner release", async () => {
-    const request = new Request(
-      "https://join.example.test/api/internal/hosted-runtime/owner-released"
-        + "?runtimeAttemptId=runtime_attempt_routes_1",
-      { method: "POST" },
-    );
-
-    const response = await runtimeOwnerReleasedRoute.POST(request);
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ signaled: true });
-    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledWith(
-      request,
-      { maxBodyBytes: 0 },
-    );
-    expect(mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable).toHaveBeenCalledWith({
-      userId: "member_routes_1",
-    });
-    expect(mocks.signalHostedRuntimeOwnerReleasedRuntime).toHaveBeenCalledWith({
-      runtimeAttemptId: "runtime_attempt_routes_1",
-      userId: "member_routes_1",
-    });
-  });
-
-  it("signals an authenticated explicit immediate recheck without a mailbox read", async () => {
     mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable.mockResolvedValue(false);
     const request = new Request(
       "https://join.example.test/api/internal/hosted-runtime/owner-released"
-        + "?runtimeAttemptId=runtime_attempt_routes_1"
-        + "&immediateRecheckRequested=1",
+        + "?runtimeAttemptId=runtime_attempt_routes_1",
       { method: "POST" },
     );
 
@@ -326,6 +301,29 @@ describe("hosted runtime internal web routes", () => {
       runtimeAttemptId: "runtime_attempt_routes_1",
       userId: "member_routes_1",
     });
+  });
+
+  it("signals an authenticated explicit immediate recheck without a mailbox read", async () => {
+    mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable.mockResolvedValue(false);
+    const request = new Request(
+      "https://join.example.test/api/internal/hosted-runtime/owner-released"
+        + "?immediateRecheckRequested=1",
+      { method: "POST" },
+    );
+
+    const response = await runtimeOwnerReleasedRoute.POST(request);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ signaled: true });
+    expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledWith(
+      request,
+      { maxBodyBytes: 0 },
+    );
+    expect(mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
+      userId: "member_routes_1",
+    });
+    expect(mocks.signalHostedRuntimeOwnerReleasedRuntime).not.toHaveBeenCalled();
   });
 
   it("keeps legacy owner releases on the facts-only recheck during rollout", async () => {
@@ -362,12 +360,11 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.signalHostedRuntimeOwnerReleasedRuntime).not.toHaveBeenCalled();
   });
 
-  it("preserves the owner horizon when no durable work is visible", async () => {
+  it("preserves the legacy owner horizon when no durable work is visible", async () => {
     mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable.mockResolvedValue(false);
 
     const response = await runtimeOwnerReleasedRoute.POST(new Request(
-      "https://join.example.test/api/internal/hosted-runtime/owner-released"
-        + "?runtimeAttemptId=runtime_attempt_routes_1",
+      "https://join.example.test/api/internal/hosted-runtime/owner-released",
       { method: "POST" },
     ));
 
