@@ -53,6 +53,7 @@ import {
   removeHostedSystemMailboxPendingItemIfCurrent,
   resolveHostedSystemMailboxNextWakeAt,
   resolveHostedSystemMailboxNextWakeCandidate,
+  systemMailboxItemIsDue,
   updateHostedSystemMailboxPendingItem,
   updateHostedSystemMailboxState,
   type HostedSystemMailboxPendingItem,
@@ -398,16 +399,8 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
         };
       }
 
-      const originalPending = state.pending.find((item) =>
-        item.itemId === pending.itemId
-      ) ?? null;
-      const pendingState =
-        originalPending !== null
-        && originalPending.nextAttemptAt !== pending.nextAttemptAt
-          ? admissionState
-          : state;
       const collapsed = collapseConsecutiveHostedBrowserVaultRefreshItems({
-        pending: pendingState.pending,
+        pending: state.pending,
         selected: pending,
       });
 
@@ -912,6 +905,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
     const retainUntil = resolveHostedDeviceSyncMailboxRetentionAt(input.item);
     if (retainUntil) {
       await retainHostedDeviceSyncSystemMailboxItem({
+        connectionStillDirty: recordResult.stillDirty,
         item: input.item,
         nextAttemptAt: retainUntil,
         vaultRoot: input.vaultRoot,
@@ -997,14 +991,27 @@ function resolveHostedDeviceSyncMailboxRetentionAt(
 }
 
 async function retainHostedDeviceSyncSystemMailboxItem(input: {
+  connectionStillDirty: boolean;
   item: HostedSystemMailboxPendingItem;
   nextAttemptAt: string;
   vaultRoot: string;
 }): Promise<void> {
-  await updateHostedSystemMailboxState(input.vaultRoot, (state) => ({
-    pending: state.pending.map((item) =>
+  await updateHostedSystemMailboxState(input.vaultRoot, (state) => {
+    const retainedIndex = state.pending.findIndex((item) =>
       hostedSystemMailboxPendingItemsMatchForClaim(item, input.item)
-        ? {
+    );
+    if (retainedIndex < 0) {
+      return state;
+    }
+
+    const admittedAt = input.item.lastAttemptAt;
+    const connectionId = input.item.wake.kind === "device-sync.wake"
+      ? input.item.wake.connectionId ?? null
+      : null;
+    return {
+      pending: state.pending.map((item, index) => {
+        if (index === retainedIndex) {
+          return {
             ...input.item,
             lastErrorCode: null,
             lastErrorMessage: null,
@@ -1014,10 +1021,25 @@ async function retainHostedDeviceSyncSystemMailboxItem(input: {
             wake: input.item.postCheckpointRecord?.kind === "device-sync.dirty-processed-batch"
               ? input.item.postCheckpointRecord.retainedWake ?? input.item.wake
               : input.item.wake,
-          }
-        : item
-    ),
-  }));
+          };
+        }
+        if (
+          input.connectionStillDirty
+          || admittedAt === null
+          || connectionId === null
+          || index < retainedIndex
+          || item.routeAction !== "run-device-sync-wake"
+          || item.wake.kind !== "device-sync.wake"
+          || item.wake.connectionId !== connectionId
+          || item.wake.reason !== "webhook_hint"
+          || !systemMailboxItemIsDue(item, admittedAt)
+        ) {
+          return item;
+        }
+        return { ...item, nextAttemptAt: input.nextAttemptAt };
+      }),
+    };
+  });
 }
 
 export async function deferHostedSystemMailboxItemAfterVaultShareProjectionFailure(input: {

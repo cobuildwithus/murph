@@ -586,7 +586,6 @@ export function projectHostedSystemMailboxRetainedDeviceWebhookAdmission(input: 
     HostedSystemMailboxPendingItem
   >();
   const admittedItemIds = new Set<string>();
-  const deferredWebhookRetryAtByItemId = new Map<string, string>();
 
   for (const item of input.state.pending) {
     if (
@@ -608,29 +607,18 @@ export function projectHostedSystemMailboxRetainedDeviceWebhookAdmission(input: 
       item.wake.reason === "webhook_hint"
       && systemMailboxItemIsDue(item, input.now)
     ) {
-      const retainedRetryAt = retained.nextAttemptAt;
-      if (retainedRetryAt === null) {
-        continue;
-      }
       admittedItemIds.add(retained.itemId);
-      deferredWebhookRetryAtByItemId.set(item.itemId, retainedRetryAt);
     }
   }
 
   return admittedItemIds.size === 0
     ? input.state
     : {
-        pending: input.state.pending.map((item) => {
-          if (admittedItemIds.has(item.itemId)) {
-            return { ...item, nextAttemptAt: null };
-          }
-          const deferredRetryAt = deferredWebhookRetryAtByItemId.get(
-            item.itemId,
-          );
-          return deferredRetryAt
-            ? { ...item, nextAttemptAt: deferredRetryAt }
-            : item;
-        }),
+        pending: input.state.pending.map((item) =>
+          admittedItemIds.has(item.itemId)
+            ? { ...item, nextAttemptAt: null }
+            : item
+        ),
       };
 }
 
@@ -1375,7 +1363,7 @@ function resolveHostedSystemMailboxSerializationKey(
   return item.routeAction;
 }
 
-function systemMailboxItemIsDue(
+export function systemMailboxItemIsDue(
   item: HostedSystemMailboxPendingItem,
   now: string,
 ): boolean {
