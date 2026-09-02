@@ -6,6 +6,7 @@ import {
   createSystemMailboxItem,
   expectAssistantLaneCallWithoutDeviceSyncOptions,
   mocks,
+  runHostedWorkspaceAssistantPhase,
   withoutAssistantTurnTimingLogs,
   writeHostedPhaseExperimentSource,
 } from "./hosted-runtime-workspace-assistant-phase.harness.ts";
@@ -53,10 +54,10 @@ import {
   type AssistantAutomationOperationScope,
   type AssistantExecutionContext,
 } from "@murphai/assistant-engine";
-import {
-  runHostedWorkspaceAssistantPhase,
-  type HostedWorkspaceRuntimeAssistantPhaseInput,
+import type {
+  HostedWorkspaceRuntimeAssistantPhaseInput,
 } from "../src/hosted-runtime/workspace-assistant-phase.ts";
+import { drainHostedRuntimeLogWritesBestEffort } from "../src/hosted-runtime/runtime-logs.ts";
 
 type AssembledHostedDeviceTool = NonNullable<
   NonNullable<AssistantExecutionContext["hosted"]>["deviceTool"]
@@ -1247,6 +1248,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
         version: "8",
       },
     }));
+    await drainHostedRuntimeLogWritesBestEffort();
 
     expect(result).toEqual({
       checkpointReason: "canonical_runtime_commit",
@@ -1257,7 +1259,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
         hostedAssistantProgressed: true,
       }),
     });
-    expect(logRequests.at(-1)?.entries[0]).toEqual(expect.objectContaining({
+    expect(logRequests.flatMap((request) => request.entries).find(
+      (entry) => entry.eventCode === "assistant.pass_finished",
+    )).toEqual(expect.objectContaining({
       eventCode: "assistant.pass_finished",
       redactedJson: expect.objectContaining({
         assistantAutomationProgressed: false,
@@ -1286,6 +1290,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
       now: () => "2026-04-27T00:00:00.000Z",
       workspace: null,
     }));
+    await drainHostedRuntimeLogWritesBestEffort();
 
     expect(result).toEqual({
       checkpointReason: "canonical_runtime_commit",
@@ -1296,7 +1301,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
         hostedAssistantProgressed: true,
       }),
     });
-    expect(logRequests.at(-1)?.entries[0]).toEqual(expect.objectContaining({
+    expect(logRequests.flatMap((request) => request.entries).find(
+      (entry) => entry.eventCode === "assistant.pass_finished",
+    )).toEqual(expect.objectContaining({
       eventCode: "assistant.pass_finished",
       redactedJson: expect.objectContaining({
         assistantAutomationProgressed: false,
@@ -2234,6 +2241,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
       { connectTarget: "dexcom", messagingReturnTarget: "telegram" },
     ]);
     await Promise.resolve();
+    await drainHostedRuntimeLogWritesBestEffort();
     const deviceConnectLogs = logRequests
       .flatMap((request) => request.entries)
       .filter((entry) => entry.eventCode === "assistant.device_connect");
@@ -3018,6 +3026,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
       logRequests,
       now: () => "2026-04-27T00:00:00.000Z",
     }));
+    await drainHostedRuntimeLogWritesBestEffort();
     const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
     expect(result.progressed).toBe(true);
@@ -3162,6 +3171,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
     });
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
+    await drainHostedRuntimeLogWritesBestEffort();
     const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
     expect(filteredLogRequests[0]?.entries[0]).toEqual(expect.objectContaining({
       component: "assistant",
@@ -3223,6 +3233,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
     });
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
+    await drainHostedRuntimeLogWritesBestEffort();
     const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
     expect(filteredLogRequests[0]?.entries[0]?.redactedJson).toEqual(expect.objectContaining({
@@ -3263,6 +3274,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
     });
 
     await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
+    await drainHostedRuntimeLogWritesBestEffort();
     const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
     expect(filteredLogRequests[0]?.entries[0]).toEqual(expect.objectContaining({
@@ -3342,6 +3354,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
       workspace: createDueAssistantWorkspace(),
     }));
     await result.afterCheckpoint?.();
+    await drainHostedRuntimeLogWritesBestEffort();
     const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
 
     expect(filteredLogRequests.map((request) => request.entries[0]?.eventCode)).toEqual([

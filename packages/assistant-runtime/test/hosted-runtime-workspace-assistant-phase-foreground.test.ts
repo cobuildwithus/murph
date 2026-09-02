@@ -22,6 +22,7 @@ import {
   expectAssistantLaneCallWithoutDeviceSyncOptions,
   loadHostedSystemMailboxRealImplementation,
   mocks,
+  runHostedWorkspaceAssistantPhase,
   runHostedWorkspaceDurableCheckpointEffects,
   runRealForegroundApprovalAdmissionScenario,
   withoutAssistantTurnTimingLogs,
@@ -65,10 +66,10 @@ import {
   splitAutomationAvailabilityConflictBlock,
   upsertAutomation,
 } from "@murphai/core";
-import {
-  runHostedWorkspaceAssistantPhase,
-  type HostedWorkspaceRuntimeAssistantPhaseInput,
+import type {
+  HostedWorkspaceRuntimeAssistantPhaseInput,
 } from "../src/hosted-runtime/workspace-assistant-phase.ts";
+import { drainHostedRuntimeLogWritesBestEffort } from "../src/hosted-runtime/runtime-logs.ts";
 import {
   readHostedSystemMailboxState,
   updateHostedSystemMailboxState,
@@ -3836,12 +3837,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
       logRequests,
       now: () => "2026-04-27T00:10:00.000Z",
     }));
+    await drainHostedRuntimeLogWritesBestEffort();
 
     expect(callOrder).toEqual(["system-mailbox", "assistant-1"]);
     expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
     expect(
       logRequests
-        .map((request) => request.entries[0]?.redactedJson)
+        .flatMap((request) => request.entries)
+        .map((entry) => entry.redactedJson)
         .filter((redactedJson) =>
           redactedJson?.detailComponent === "runtime.provider" &&
           redactedJson?.type === "assistant.turn.timing"
@@ -3918,11 +3921,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
       logRequests,
       now: () => "2026-04-27T00:10:00.000Z",
     }));
+    await drainHostedRuntimeLogWritesBestEffort();
 
     expect(callOrder).toEqual(["system-mailbox", "assistant-1"]);
     expect(
       logRequests
-        .map((request) => request.entries[0]?.redactedJson)
+        .flatMap((request) => request.entries)
+        .map((entry) => entry.redactedJson)
         .filter((redactedJson) =>
           redactedJson?.detailComponent === "runtime.provider" &&
           redactedJson?.type === "assistant.turn.timing"
@@ -4245,6 +4250,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
       }));
 
     const postCheckpoint = await result.afterCheckpoint?.();
+    await drainHostedRuntimeLogWritesBestEffort();
 
     expect(postCheckpoint).toEqual(expect.objectContaining({
       checkpointReason: "outbox_receipt",
@@ -4256,7 +4262,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
         hostedSystemMailboxRecorded: 1,
       }),
     }));
-    expect(logRequests.map((request) => request.entries[0]?.eventCode)).toEqual([
+    expect(logRequests.flatMap((request) => request.entries).map((entry) => entry.eventCode)).toEqual([
       "mailbox.system_processed",
       "mailbox.system_processed",
       "outbox.delivery_finished",
@@ -4708,6 +4714,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("passes fore
       logRequests,
       now: () => now,
     }));
+    await drainHostedRuntimeLogWritesBestEffort();
 
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "canonical_runtime_commit",

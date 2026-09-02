@@ -448,7 +448,7 @@ import {
   HostedWorkspaceRunnerUserMismatchError,
   drainHostedRuntimeDeferredUsageCompletionsBestEffort,
   parseHostedAssistantWorkspaceRuntimeJobInput,
-  runHostedWorkspaceRuntimeJobInProcess,
+  runHostedWorkspaceRuntimeJobInProcess as runHostedWorkspaceRuntimeJobInProcessWithoutDrain,
   type HostedWorkspaceRuntimeJobOptions,
   type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
@@ -2586,6 +2586,16 @@ async function waitUntil(assertion: () => void, timeoutMs = 1_000): Promise<void
   throw lastError instanceof Error ? lastError : new Error("Timed out waiting for assertion.");
 }
 
+async function runHostedWorkspaceRuntimeJobInProcess(
+  ...args: Parameters<typeof runHostedWorkspaceRuntimeJobInProcessWithoutDrain>
+) {
+  try {
+    return await runHostedWorkspaceRuntimeJobInProcessWithoutDrain(...args);
+  } finally {
+    await drainHostedRuntimeLogWritesBestEffort();
+  }
+}
+
 export {
   HOSTED_CONTAINER_CA_ENV_KEYS,
   HOSTED_UNSTABLE_PROCESS_ENV_KEYS,
@@ -2648,6 +2658,7 @@ export {
   readConversationImportedSeqs,
   removeTempRoot,
   requireEventIndex,
+  runHostedWorkspaceRuntimeJobInProcess,
   runOpenAiHttpsProbe,
   sha256Hex,
   stageAssistantInputEventForMailboxItem,

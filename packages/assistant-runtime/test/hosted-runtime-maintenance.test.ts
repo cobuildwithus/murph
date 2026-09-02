@@ -2124,6 +2124,7 @@ describe("runHostedDeviceSyncPass", () => {
         runtimeLogPlatform: { logPort },
       },
     );
+    await drainHostedRuntimeLogWritesBestEffort();
 
     await vi.waitFor(() => {
       expect(logPort.write).toHaveBeenCalled();
@@ -2797,6 +2798,7 @@ describe("runHostedDeviceSyncPass", () => {
       5_000,
     );
 
+    await drainHostedRuntimeLogWritesBestEffort();
     assert.equal(logRequests.length, 1);
     const entry = logRequests[0]?.entries[0];
     assert.ok(entry);
@@ -6908,6 +6910,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
     });
     const deviceSyncPort = createMaintenanceDeviceSyncPortStub();
 
+    let pendingLogDrain: Promise<void> | null = null;
     try {
       const result = await runHostedDeviceSyncWakeLane({
         deviceSyncPort,
@@ -6947,12 +6950,19 @@ describe("runHostedDeviceSyncWakeLane", () => {
       expect(Object.hasOwn(result, "systemProgressed")).toBe(false);
       expect(deviceSyncPort.fetchSnapshot).toHaveBeenCalledTimes(1);
       expect(drainWorker).toHaveBeenCalled();
+      pendingLogDrain = drainHostedRuntimeLogWritesBestEffort();
+      await vi.waitFor(() => {
+        expect(logRequests).toHaveLength(1);
+      });
       expect(logRequests.flatMap((request) => request.entries).map((entry) =>
         entry.eventCode
-      )).toEqual(["device-sync.pass_started"]);
+      )).toEqual([
+        "device-sync.pass_started",
+        "device-sync.pass_finished",
+      ]);
     } finally {
       releaseFirstLogWrite();
-      await drainHostedRuntimeLogWritesBestEffort();
+      await (pendingLogDrain ?? drainHostedRuntimeLogWritesBestEffort());
     }
 
     const lifecycleEntries = logRequests.flatMap((request) => request.entries);
@@ -7035,6 +7045,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
       });
 
       await flushHostedRuntimeLogMicrotasks();
+      await drainHostedRuntimeLogWritesBestEffort();
       expect(logRequests.flatMap((request) => request.entries)).toEqual([
         expect.objectContaining({
           attemptId: "attempt_device_sync_timeout",

@@ -582,13 +582,15 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       return result;
     });
 
+    let pendingLogDrain: Promise<void> | null = null;
     try {
-      await vi.waitFor(() => {
-        expect(calls.logWrite).toHaveBeenCalledOnce();
-      });
       await vi.waitFor(() => {
         expect(checkpointSettled).toBe(true);
       }, { timeout: 250 });
+      pendingLogDrain = drainHostedRuntimeLogWritesBestEffort();
+      await vi.waitFor(() => {
+        expect(calls.logWrite).toHaveBeenCalledOnce();
+      });
       expect(finishedLogSettled).toBe(false);
       await expect(checkpoint).resolves.toMatchObject({
         snapshotRef: {
@@ -597,6 +599,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       });
     } finally {
       releaseFinishedLog();
+      await pendingLogDrain;
       await checkpoint;
     }
 
@@ -741,6 +744,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(calls.abortSnapshotSession).toHaveBeenCalledOnce();
     expect(calls.putSnapshotObjectDirect).not.toHaveBeenCalled();
     expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
+    await drainHostedRuntimeLogWritesBestEffort();
     await vi.waitFor(() => {
       const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
       expect(entries.some((entry) => entry.eventCode === "checkpoint.snapshot_preempted"))
@@ -1394,6 +1398,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(checkpointRequest?.idleCheckpointTrigger).toBe("shutdown_signal");
     expect(checkpointRequest?.runtimeWakePendingAtCheckpoint).toBe(false);
 
+    await drainHostedRuntimeLogWritesBestEffort();
     const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
     expect(JSON.stringify(entries)).not.toContain("item_terminal_7");
     const lifecycleEntries = entries.filter((entry) =>
@@ -1488,6 +1493,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
 
     await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
 
+    await drainHostedRuntimeLogWritesBestEffort();
     const lifecycleEntries = calls.logWrite.mock.calls
       .flatMap(([request]) => request.entries)
       .filter((entry) => entry.eventCode.startsWith("checkpoint.snapshot_"));
@@ -1761,6 +1767,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     await expectPresent(path.join(vaultRoot, nestedRef));
     await expectPresent(path.join(vaultRoot, legacyRef));
 
+    await drainHostedRuntimeLogWritesBestEffort();
     const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
     expect(entries.some((entry) =>
       entry.redactedJson?.prunedAssistantRuntimeGeneratedDeliveryFileCount === 1
@@ -1924,6 +1931,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     await expectPresent(path.join(vaultRoot, activeRef));
     expect(await readHostedWorkspaceSkippedInlineFiles({ vaultRoot })).toEqual([]);
 
+    await drainHostedRuntimeLogWritesBestEffort();
     const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
     expect(entries.some((entry) =>
       entry.redactedJson?.prunedAssistantRuntimeGeneratedDeliveryFileCount === 1
