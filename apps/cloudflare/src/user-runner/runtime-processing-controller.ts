@@ -528,10 +528,7 @@ export class RuntimeProcessingController {
 
     const requestedProcessingMode = normalizeRuntimeProcessingMode(input.input.processingMode);
     const triggeredByTrustedWebDirect =
-      input.input.orchestration?.triggeredByWebDirect === true
-      && isHostedRuntimeDirectEnsureOrchestrationAttemptId(
-        input.input.orchestrationAttemptId,
-      );
+      isTrustedWebDirectRuntimeProcessing(input.input);
     const cooperativeMailboxOwnerHandoff =
       activeFence.processingMode === "system_mailbox"
       && requestedProcessingMode === "default";
@@ -1009,6 +1006,7 @@ export class RuntimeProcessingController {
   }
 
   private async resolveFreshRunnerContainer(input: {
+    allowFreshStandbyClaim: boolean;
     commandBudget: RuntimeProcessingCommandBudget;
     exactRunnerContainerName: string;
     initialRecord: RunnerStateRecord;
@@ -1047,7 +1045,12 @@ export class RuntimeProcessingController {
       }
     }
 
-    if (readHostedStandbyMode(this.input.runnerRuntimeEnvSource) !== "allocate") {
+    if (
+      readHostedStandbyMode(this.input.runnerRuntimeEnvSource) !== "allocate"
+      || !input.allowFreshStandbyClaim
+      || normalizeRuntimeProcessingMode(input.input.processingMode) !== "default"
+      || !isTrustedWebDirectRuntimeProcessing(input.input)
+    ) {
       return {
         kind: "ready",
         runnerContainerName: input.exactRunnerContainerName,
@@ -1349,6 +1352,7 @@ export class RuntimeProcessingController {
       throw new Error("Hosted runner container identity did not match the runtime start user.");
     }
     const resolution = await this.resolveFreshRunnerContainer({
+      allowFreshStandbyClaim: input.action === "started",
       commandBudget: input.commandBudget,
       exactRunnerContainerName: runnerContainerIdentity.runnerContainerName,
       initialRecord,
@@ -1972,4 +1976,13 @@ function normalizeRuntimeProcessingMode(
       || value === "system_mailbox"
     ? value
     : "default";
+}
+
+function isTrustedWebDirectRuntimeProcessing(
+  input: RuntimeProcessingInput,
+): boolean {
+  return input.orchestration?.triggeredByWebDirect === true
+    && isHostedRuntimeDirectEnsureOrchestrationAttemptId(
+      input.orchestrationAttemptId,
+    );
 }

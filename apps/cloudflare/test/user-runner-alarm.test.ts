@@ -1154,7 +1154,9 @@ describe("HostedUserRunner execution coordination", () => {
     const ensure = harness.runner.ensureRuntimeProcessingForUser({
       commandTimeoutMs:
         HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS + foregroundBudgetMs,
-      orchestrationAttemptId: "standby-binding-timeout",
+      orchestration: { triggeredByWebDirect: true },
+      orchestrationAttemptId:
+        "web-ingress-99999999-9999-4999-8999-999999999999",
       userId: TEST_USER_ID,
     });
     await bindingReadStarted.promise;
@@ -4215,21 +4217,43 @@ describe("HostedUserRunner execution coordination", () => {
     const runnerRuntimeEnvSource = {
       ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
       CF_VERSION_METADATA: { id: "current" },
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
     };
     const priorRunnerContainerName = `${TEST_USER_ID}--v-prior`;
     const currentRunnerContainerName = `${TEST_USER_ID}--v-current`;
+    const activeRunnerContainerName = triggeredByWebDirect
+      ? currentRunnerContainerName
+      : priorRunnerContainerName;
+    const claimReadyStandby = vi.fn(async () => ({
+      outcome: "no_ready_slot" as const,
+    }));
     const { invoke, runner, runnerContainerNames, sql } = createRunnerHarness({
       abortWorkspaceInvocation,
       ensureProcessing,
       invocationResults: [invocationResult.promise],
       readActiveRuntimeUserFence,
       runnerRuntimeEnvSource,
+      standbyContainerNamespace: {
+        getByName() {
+          throw new Error("Background preemption must reuse the exact-user container.");
+        },
+      },
+      standbyCoordinatorNamespace: {
+        getByName() {
+          return {
+            claimReadyStandby,
+            async ensureReadyStandby() {
+              return { accepted: true } as const;
+            },
+          };
+        },
+      },
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
     const token = writeRuntimeFenceForTest(sql, {
       processingMode: activeProcessingMode,
-      runnerContainerName: priorRunnerContainerName,
+      runnerContainerName: activeRunnerContainerName,
       workspaceVersion: "7",
     });
     activeAttemptId = token.attemptId;
@@ -4278,7 +4302,7 @@ describe("HostedUserRunner execution coordination", () => {
     expect(abortWorkspaceInvocation).toHaveBeenCalledOnce();
     expect(ensureRuntimeProcessingSettled).toBe(false);
     expect(invoke).not.toHaveBeenCalled();
-    expect(runnerContainerNames[0]).toBe(priorRunnerContainerName);
+    expect(runnerContainerNames[0]).toBe(activeRunnerContainerName);
     abortResult.resolve("accepted");
 
     await expect(ensureRuntimeProcessing).resolves.toMatchObject({
@@ -4295,6 +4319,7 @@ describe("HostedUserRunner execution coordination", () => {
       userId: TEST_USER_ID,
     });
     expect(ensureProcessing).not.toHaveBeenCalled();
+    expect(claimReadyStandby).not.toHaveBeenCalled();
     expect(ensureRuntimeProcessingSettled).toBe(true);
     expect(invoke).toHaveBeenCalledOnce();
     expect(runnerContainerNames).toContain(currentRunnerContainerName);

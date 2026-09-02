@@ -1587,6 +1587,11 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   readiness and atomic availability only; the per-member `UserRunner` persists
   the exact opaque stop target, binds it once, then owns the ordinary write
   fence, workspace restore, invocation, retention, and retirement. Standby
+  allocation is available only to a fresh, OIDC-authenticated Web-direct
+  `default` start with a validated direct-attempt identity. Background modes,
+  Temporal starts, and replacements of work already using the member's exact
+  container retain that exact target. A previously reserved standby is
+  reconciled before this eligibility check so retries cannot split ownership.
   readiness warms the image, heavy runtime, and a disposable content-free Codex
   initialization, while the member-specific resident Codex process remains
   post-restore. Claimed containers are never returned for another member.

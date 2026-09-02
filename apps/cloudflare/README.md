@@ -74,9 +74,11 @@ HTTP route. `HOSTED_EXECUTION_STANDBY_MODE` has three strict values:
 - `off` (the default) advertises no slot and retires any still-unclaimed slot.
 - `shadow` keeps one release-scoped ENAM slot ready but never gives it to real
   processing.
-- `allocate` atomically claims that one ready slot, immediately starts a
-  replacement in background work, and falls back to the ordinary exact-user
-  container when the claim does not finish within 250 ms.
+- `allocate` lets only a fresh, authenticated Web-direct `default` start claim
+  that one ready slot, immediately starts a replacement in background work, and
+  falls back to the ordinary exact-user container when the claim does not
+  finish within 250 ms. Temporal starts, background modes, and foreground
+  replacement of work already using the exact-user container do not claim it.
 
 The public banner and health response report the canonical effective mode.
 Deployment smoke pins the newly deployed Worker version and requires its live
@@ -96,7 +98,9 @@ slot as its exact stop target, then binds the slot once to that member and
 claim, opens the normal write fence, restores the workspace, and invokes the
 ordinary runner path. A claimed slot may remain warm only for that same member
 under the existing conversation idle lifecycle; it is retired and scrubbed,
-never returned to the standby for another member.
+never returned to the standby for another member. Pending and retained standby
+targets are resolved before fresh-claim eligibility, so a later Temporal retry
+continues the same reserved target rather than creating a second container.
 
 Hosted assistant delivery recovery comes from the encrypted local runtime outbox state inside the workspace checkpoint plus web-owned hosted-runtime logs/status.
 The runner container sends runtime internal Worker requests to normal virtual hosts such as `results.worker` and `web-control.worker`. Cloudflare Container outbound interception routes those requests back into Worker-owned handlers, using the runtime write-fence headers as authority.

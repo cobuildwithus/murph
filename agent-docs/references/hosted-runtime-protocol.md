@@ -1627,17 +1627,23 @@ that typing hint. A memberless coordinator maintains at most one advertised
 pristine slot after exact release, image fingerprints, architecture,
 heavy-runtime, and content-free Codex App Server initialize/stop readiness all
 pass. In allocation mode, one storage transaction removes that slot from ready
-and records an opaque claim tombstone. The requesting `UserRunner` durably
-reserves the opaque stop target before immutable bind-once member attachment,
-then opens its normal write fence and restores the encrypted workspace. The
-real resident Codex App Server remains post-restore because its launch identity
-is member-specific. Coordinator claim and bind share one 250 ms deadline;
-no-ready, stale-release, or coordinator failure before slot ownership uses the
-unchanged exact-user cold target. An ambiguous bind after the opaque target is
-reserved yields for retry against that exact target instead of starting a
-second container. Replenishment, readiness re-proving, orphan retirement, and
-stale-release drain run outside the accepted-message path. A bound slot can
-be retained only by that same member under the ordinary conversation idle
+and records an opaque claim tombstone only for a fresh `started` action whose
+`default` work came from authenticated Web-direct ingress with a validated
+direct-attempt identity. Temporal starts, background processing modes, spoofed
+direct inputs, and replacement of work already using the member's exact
+container keep the unchanged exact-user target. The requesting `UserRunner`
+durably reserves the opaque stop target before immutable bind-once member
+attachment, then opens its normal write fence and restores the encrypted
+workspace. The real resident Codex App Server remains post-restore because its
+launch identity is member-specific. Coordinator claim and bind share one 250 ms
+deadline; no-ready, stale-release, or coordinator failure before slot ownership
+uses the unchanged exact-user cold target. A pending or retained standby target
+is reconciled before fresh-claim eligibility. An ambiguous bind after the
+opaque target is reserved therefore yields for retry against that exact target
+instead of starting a second container, even when the retry arrives through
+Temporal. Replenishment, readiness re-proving, orphan retirement, and
+stale-release drain run outside the accepted-message path. A bound slot can be
+retained only by that same member under the ordinary conversation idle
 lifecycle and is never returned to ready. Slot invocation,
 provider-credential minting, withdrawal, account deletion, and retirement all
 re-read the exact durable binding; a member mismatch fails closed. A successful

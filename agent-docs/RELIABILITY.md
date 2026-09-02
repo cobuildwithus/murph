@@ -376,10 +376,13 @@ Last verified: 2026-09-01
 - Cloudflare standby allocation is an optional one-slot optimization, not a
   scheduler. `off` is the source-controlled default, `shadow` maintains and
   re-proves one current-release ENAM slot without allocating it, and `allocate`
-  uses one 250 ms claim/bind deadline. A miss before slot ownership uses the
-  ordinary exact-user fallback; an ambiguous bind after the per-member stop
-  target is durably reserved retries that exact target instead of risking two
-  live containers.
+  offers one 250 ms claim/bind deadline only to a fresh, authenticated
+  Web-direct `default` start. Temporal and background starts, plus foreground
+  replacement of work already using the member's exact container, keep the
+  ordinary exact-user target. A miss before slot ownership uses that same
+  fallback; an ambiguous bind after the per-member stop target is durably
+  reserved retries that exact target instead of risking two live containers.
+  Pending and retained targets are reconciled before fresh-claim eligibility.
   A coordinator transaction admits at most one winner, then replacement
   provisioning runs under `waitUntil`; alarms re-prove readiness, retry failed
   retirement, expire unbound claim tombstones, and drain stale releases. The
