@@ -383,7 +383,7 @@ function isAllowedHostSupportTypeScriptCache(
   if (description === 'actions/cache') {
     const cacheUses = workflow.match(/uses:\s+actions\/cache@[^\s]+/gu) ?? []
     return (
-      cacheUses.length === 2 &&
+      cacheUses.length === 1 &&
       cacheUses.every(
         (entry) =>
           entry ===
@@ -393,7 +393,7 @@ function isAllowedHostSupportTypeScriptCache(
   }
 
   if (description === 'cache restore keys') {
-    return (workflow.match(/^\s+restore-keys:/gmu) ?? []).length === 2
+    return (workflow.match(/^\s+restore-keys:/gmu) ?? []).length === 1
   }
 
   return false

@@ -127,6 +127,13 @@ contract and proof are specified by
 `agent-docs/operations/verification-and-runtime.md` and
 `agent-docs/references/testing-ci-map.md`.
 
+Host Support CI consumes that same validated release plan for six isolated
+package jobs and four hosted-Web test jobs. Web build verification and
+Cloudflare verification run on separate bounded runners, and the stable final
+release check fails closed over every branch. The job-graph and verification
+contracts are specified by `agent-docs/operations/verification-and-runtime.md`
+and `agent-docs/references/testing-ci-map.md`.
+
 Every pull request carries one mechanically validated, field-complete
 deployment-concerns disposition. Applicable deploy boundaries record supported skew, safe order,
 rollback floor, expected exposure, reversibility, convergence proof, and
