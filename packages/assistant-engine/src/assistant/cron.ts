@@ -774,7 +774,8 @@ function assistantCronRetryScheduled(
   return result.run.outcome === 'failed' &&
     !result.removedAfterRun &&
     result.job.enabled &&
-    result.job.state.consecutiveFailures > 0 &&
+    (result.run.reason === 'foreground_yielded' ||
+      result.job.state.consecutiveFailures > 0) &&
     result.job.state.nextRunAt !== null
 }
 
