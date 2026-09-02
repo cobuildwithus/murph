@@ -238,7 +238,11 @@ const RULES: ReadonlyArray<{ icon: string; tokens: readonly string[] }> = [
   },
   {
     icon: habitat("redlight"),
-    tokens: ["red-light", "blue-light-blocking-glasses"],
+    tokens: [
+      "red-light",
+      "blue-light-blocking-glasses",
+      "red-amber-evening-glasses",
+    ],
   },
 ];
 

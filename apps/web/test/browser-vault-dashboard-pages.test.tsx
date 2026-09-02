@@ -749,7 +749,7 @@ test("Personal Patterns reveals factors after the first 15 on request", async ()
   try {
     assert.match(
       rendered.container.textContent ?? "",
-      /Showing 15 of 17 factors/u,
+      /Showing 15 of 19 factors/u,
     );
     assert.doesNotMatch(rendered.container.textContent ?? "", /Yoga/u);
     assert.doesNotMatch(rendered.container.textContent ?? "", /Reading/u);
@@ -764,7 +764,7 @@ test("Personal Patterns reveals factors after the first 15 on request", async ()
 
     assert.match(
       rendered.container.textContent ?? "",
-      /Showing 17 of 17 factors/u,
+      /Showing 19 of 19 factors/u,
     );
     assert.match(rendered.container.textContent ?? "", /Yoga/u);
     assert.match(rendered.container.textContent ?? "", /Reading/u);
