@@ -103,16 +103,18 @@ messages, credentials, and paths remain excluded.
 
 ### Web-control preflight rejection attribution
 
-When a hosted runtime tries to use a web-control route that the shared
-Cloudflare policy does not allow, the preflight throws the dedicated
-`HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED` error before issuing a request. The
-existing `mailbox.system_processed` retry warning preserves that code in the
-typed `error_code` column. Before throwing, Cloudflare writes the immediate
-event `runner.web_control_preflight_rejected` through the existing durable
-runtime-log port. That event contains only bounded policy metadata and
-deliberately omits the route, query, payload, description, member id, and
-credentials. Failure to persist telemetry never replaces the original typed
-error.
+Ordinary hosted-runtime callers select branded route descriptors from the same
+registry that derives the shared Cloudflare allowlist. If runtime validation
+nevertheless detects a descriptor/policy mismatch, it throws the dedicated
+`HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED` error before issuing a request.
+Before throwing, Cloudflare writes the immediate event
+`runner.web_control_preflight_rejected` through the existing durable runtime-log
+port. That event contains only bounded policy metadata and deliberately omits
+the route, query, payload, description, member id, and credentials. Failure to
+persist telemetry never replaces the original typed error. When the rejected
+call belongs to retained system-mailbox work, the existing
+`mailbox.system_processed` retry warning preserves that code in the typed
+`error_code` column.
 
 Use a fixed half-open observation window to count all observed preflight
 rejections without returning subject keys or raw JSON:

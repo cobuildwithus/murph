@@ -100,6 +100,7 @@ never returned to the standby for another member.
 
 Hosted assistant delivery recovery comes from the encrypted local runtime outbox state inside the workspace checkpoint plus web-owned hosted-runtime logs/status.
 The runner container sends runtime internal Worker requests to normal virtual hosts such as `results.worker` and `web-control.worker`. Cloudflare Container outbound interception routes those requests back into Worker-owned handlers, using the runtime write-fence headers as authority.
+Shared runtime ports cannot supply raw Web-control methods or paths. They must use a branded route descriptor from the same registry that derives the Worker proxy allowlist; bounded query-bearing and device-connect variants can only bind to an already-registered pathname. Cloudflare typecheck rejects an unregistered caller at compile time, and the Node route-contract suite enumerates the registry to prove each exact method/path is allowed while the opposite method and path variants remain blocked.
 The phone-call start port is one bounded `web-control.worker` callback into `apps/web`; its protocol floor is 45 seconds even when the generic web-control timeout is 30 seconds, so the web-owned 40-second aggregate deadline finishes before the caller gives up. Deploy and prove convergence of this 45-second Cloudflare caller before deploying a web build with the 40-second deadline. The longer caller is backward compatible with older web builds; an old 30-second caller is not compatible with the 40-second web deadline, so Cloudflare cannot be rolled back below 45 seconds while that web build is active. Retell credentials and provider calls remain web-owned and are never forwarded into the runner.
 `murph.plan_usage` uses one allowlisted signed `web-control.worker` callback.
 Cloudflare transports and validates the strict result but owns no billing or
@@ -479,17 +480,19 @@ Cloudflare keeps only the wake-payload decryption lane plus the worker-owned cal
 
 ### Web-control preflight rejections
 
-An unallowlisted runtime web-control request writes one warning through the
+Ordinary runtime callers select a branded route descriptor from the same
+registry that derives the proxy allowlist. If runtime validation nevertheless
+detects a descriptor/policy mismatch, it writes one warning through the
 existing durable runtime-log port before any request reaches the rejected
 target. Filter `hosted_runtime_log` for
 `event_code = runner.web_control_preflight_rejected` and
 `error_code = HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED`. The warning contains
-only the HTTP method, transport mode, `operation = web_control_blocked`, and
+only the HTTP method, transport mode, policy-derived operation, and
 `reason = not_allowlisted`. It never copies the route, query, payload,
 description, response, member id, or credentials into the log request.
 
-The same typed error then follows the existing system-mailbox retry path, where
-the runtime-log warning retains
+When the rejected call belongs to retained system-mailbox work, the same typed
+error follows its existing retry path, where the runtime-log warning retains
 `error_code = HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED`. This classification
 does not change retry, wake, delivery, or canonical-state behavior. A runtime-log
 write failure cannot replace or suppress the original fail-closed error. Use

@@ -3,11 +3,8 @@ import {
   parseHostedRuntimeLabsToolResponse,
 } from "@murphai/hosted-execution/labs";
 import {
-  HOSTED_RUNTIME_LABS_TOOL_PATH,
-} from "@murphai/hosted-execution/routes";
-
-import {
   fetchHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
 
@@ -28,8 +25,7 @@ export function createHostedRuntimeLabsToolPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted labs tool",
         fetchImpl: input.fetchImpl,
-        method: "POST",
-        path: HOSTED_RUNTIME_LABS_TOOL_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.labsTool,
         sensitiveResponseBody: {
           maxBytes: HOSTED_LABS_TOOL_RESPONSE_MAX_BYTES,
         },

@@ -17,7 +17,9 @@ import {
 } from "@murphai/hosted-execution/vault-share";
 
 import {
+  bindHostedRunnerWebControlRoutePath,
   fetchHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
 
@@ -66,7 +68,10 @@ export function createHostedRuntimeGroupToolPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted group tool",
         fetchImpl: input.fetchImpl,
-        path: buildHostedRuntimeGroupToolPath(),
+        route: bindHostedRunnerWebControlRoutePath(
+          HOSTED_RUNNER_WEB_CONTROL_ROUTES.groupTool,
+          buildHostedRuntimeGroupToolPath(),
+        ),
         replayOnceOnRetryableFailure: isHostedReplaySafeGroupToolRequest(request),
         ...(isParticipantDisplayNameRead
           ? {

@@ -108,15 +108,17 @@ Last verified: 2026-09-01
   credential, or provider body values. Transport ambiguity, timeouts, rate
   limits, and server failures remain failed delivery attempts and must not
   start a second send.
-- A runtime web-control allowlist rejection writes one bounded warning through
-  the existing durable runtime-log port before any request reaches the rejected
+- Every ordinary runtime web-control caller selects a branded descriptor from
+  the policy-owned route registry. If runtime validation still finds a
+  descriptor/policy mismatch, it writes one bounded warning through the
+  existing durable runtime-log port before any request reaches the rejected
   target. The entry contains only its dedicated error code, HTTP method,
-  allowlist operation, rejection reason, and transport mode; it omits route,
-  query, payload, description, member, response, and credential material. The
-  log port uses the unadorned allowlisted transport so reporting cannot recurse.
-  A log-write failure is best-effort and never replaces or suppresses the
-  original typed policy error. This observability adds no queue, persisted
-  state, retry owner, or fallback egress path.
+  policy-derived operation, rejection reason, and transport mode; it omits
+  route, query, payload, description, member, response, and credential
+  material. The log port uses the unadorned allowlisted transport so reporting
+  cannot recurse. A log-write failure is best-effort and never replaces or
+  suppresses the original typed policy error. This observability adds no queue,
+  persisted state, retry owner, or fallback egress path.
 - Newly authored ordinary assistant responses attach at most eight images,
   below Linq's 40-public-media provider ceiling. This keeps full-motion
   exercise sequences bounded without adding a second message or partial-send
