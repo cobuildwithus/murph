@@ -4175,9 +4175,10 @@ describe("HostedUserRunner execution coordination", () => {
   });
 
   it.each([
-    ["retention-only", "default", "inbox_media_retention", undefined, false],
-    ["retention-only", "system-mailbox", "inbox_media_retention", "system_mailbox", false],
-    ["system-mailbox", "default", "system_mailbox", undefined, true],
+    ["retention-only", "default", "inbox_media_retention", undefined, false, false],
+    ["retention-only", "system-mailbox", "inbox_media_retention", "system_mailbox", false, false],
+    ["system-mailbox", "default", "system_mailbox", undefined, true, false],
+    ["completing system-mailbox", "default", "system_mailbox", undefined, true, true],
   ] as const)(
     "preempts active %s work before starting %s processing",
     async (
@@ -4186,6 +4187,7 @@ describe("HostedUserRunner execution coordination", () => {
       activeProcessingMode,
       processingMode,
       triggeredByWebDirect,
+      completeDuringAbort,
     ) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -4303,6 +4305,15 @@ describe("HostedUserRunner execution coordination", () => {
     expect(ensureRuntimeProcessingSettled).toBe(false);
     expect(invoke).not.toHaveBeenCalled();
     expect(runnerContainerNames[0]).toBe(activeRunnerContainerName);
+    if (completeDuringAbort) {
+      await expect(runner.recordRuntimeCompletionFromContainer({
+        attemptId: token.attemptId,
+        generation: String(token.generation),
+        result: { nextWakeAt: null, status: "idle" },
+        userId: TEST_USER_ID,
+      })).resolves.toEqual({ completed: true });
+      expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+    }
     abortResult.resolve("accepted");
 
     await expect(ensureRuntimeProcessing).resolves.toMatchObject({
@@ -4327,7 +4338,7 @@ describe("HostedUserRunner execution coordination", () => {
       processingMode,
     );
     expect(invoke.mock.calls[0]?.[0].orchestration).toMatchObject({
-      replacedStaleFence: false,
+      ...(completeDuringAbort ? {} : { replacedStaleFence: false }),
       ...(triggeredByWebDirect
         ? {
             runtimeInvocationOrchestrationAttemptId: orchestrationAttemptId,
@@ -4335,6 +4346,11 @@ describe("HostedUserRunner execution coordination", () => {
           }
         : {}),
     });
+    if (completeDuringAbort) {
+      expect(invoke.mock.calls[0]?.[0].orchestration).not.toHaveProperty(
+        "replacedStaleFence",
+      );
+    }
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: expect.not.stringMatching(token.attemptId),
       active_expires_at: null,

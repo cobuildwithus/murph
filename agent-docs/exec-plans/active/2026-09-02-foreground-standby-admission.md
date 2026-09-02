@@ -54,6 +54,10 @@ Updated: 2026-09-02
 3. Risk: the direct foreground request can lose the existing race to Temporal.
    Mitigation: retain ordinary exact-user startup and measure the resulting
    claimed/fallback cohort before considering any pool expansion.
+4. Risk: background completion can clear the observed fence while foreground
+   preemption awaits its abort, making the continuation look like a fresh start.
+   Mitigation: keep fence-free clear loss on the existing `replaced` path; only
+   a returned live successor fence re-enters generic convergence.
 
 ## Tasks
 
@@ -79,6 +83,10 @@ Updated: 2026-09-02
   evidence.
 - Keep one ready shell. Raising `max_instances` alone does not create a pool and
   a multi-shell coordinator would not remove background priority inversion.
+- ReviewGPT round 1 found a valid replacement-completion race. The correction
+  changes no state or contract: both clear outcomes share the existing
+  replacement start, with replacement timing recorded only when this request
+  actually cleared the fence.
 
 ## Verification
 
@@ -91,3 +99,6 @@ Updated: 2026-09-02
   remains intact; no new hot-path await or provider-input change; live claimed
   events carry trusted direct identity and background work no longer drains the
   shared ready slot.
+- Review remediation proof: the combined controller and container-identity
+  suite passes 197 tests, including completion clearing the exact fence before
+  abort acceptance; Cloudflare typecheck and `git diff --check` pass.
