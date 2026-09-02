@@ -446,8 +446,12 @@ conversation lag or a due assistant workspace wake selects default processing;
 system-only lag selects `system_mailbox` processing; a due inbox media retention
 wake selects `inbox_media_retention` processing when foreground/default work is
 not runnable; future or absent wakes wait. These modes are invocation input, not
-new scheduler state. Foreground/default work must replace an active
-system-mailbox or retention owner instead of waiting for its idle checkpoint.
+new scheduler state. The runtime publishes an ordinary default-owned mailbox
+wake only when that row owns the executable frontier; a later default row does
+not compete with an earlier model-free frontier. Explicitly approved
+continuations retain their foreground priority. Foreground/default work must
+replace an active system-mailbox or retention owner instead of waiting for its
+idle checkpoint.
 If a default invocation's live checks disprove its overdue projection and the
 next due frontier belongs to a model-free owner, the runtime first checkpoints
 the corrected projections without advancing handled-through or the system

@@ -2,6 +2,9 @@ import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import {
+  buildHostedExecutionAssistantNotificationRequestedWake,
+} from "@murphai/hosted-execution";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -821,6 +824,102 @@ describe("hosted runtime system mailbox state", () => {
     }
   });
 
+  it("keeps a later generic notification behind the device-sync owner", async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-hosted-system-mailbox-state-"),
+    );
+    const now = "2026-04-27T00:00:00.000Z";
+    const deviceRetryAt = "2026-04-27T00:05:00.000Z";
+    const deviceWake: HostedSystemMailboxPendingItem = {
+      ...buildPendingDeviceSyncMailboxItem({
+        itemId: "pending_device_sync_before_generic_notification",
+        mailboxLaneSeq: "1",
+      }),
+      attemptCount: 1,
+      lastAttemptAt: now,
+      postCheckpointRecord: {
+        connectionId: "device_sync_connection_synthetic",
+        kind: "device-sync.dirty-processed",
+        processedRevision: "7",
+      },
+      status: "recording",
+    };
+    const notification = buildPendingAssistantNotificationMailboxItem({
+      itemId: "pending_generic_notification_after_device_sync",
+      mailboxLaneSeq: "2",
+    });
+
+    try {
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [deviceWake, notification],
+      }));
+
+      await expect(resolveHostedSystemMailboxWakeCandidates({
+        now: () => now,
+        vaultRoot,
+      })).resolves.toEqual({
+        defaultOwned: {
+          at: null,
+          reason: null,
+        },
+        next: {
+          at: now,
+          executionClass: "model_free",
+          reason: "device-sync.reconcile",
+        },
+      });
+
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [{
+          ...deviceWake,
+          lastErrorCode: "device_sync_retry",
+          lastErrorMessage: "redacted",
+          nextAttemptAt: deviceRetryAt,
+        }, notification],
+      }));
+      await expect(resolveHostedSystemMailboxWakeCandidates({
+        now: () => now,
+        vaultRoot,
+      })).resolves.toEqual({
+        defaultOwned: {
+          at: null,
+          reason: null,
+        },
+        next: {
+          at: deviceRetryAt,
+          executionClass: null,
+          reason: "device-sync.reconcile",
+        },
+      });
+
+      const retainedDeviceWake = (await readHostedSystemMailboxState(vaultRoot))
+        .pending.find((item) => item.itemId === deviceWake.itemId);
+      if (!retainedDeviceWake) {
+        throw new Error("Expected the synthetic device frontier to remain pending.");
+      }
+      await removeHostedSystemMailboxPendingItemIfCurrent({
+        item: retainedDeviceWake,
+        vaultRoot,
+      });
+      await expect(resolveHostedSystemMailboxWakeCandidates({
+        now: () => now,
+        vaultRoot,
+      })).resolves.toEqual({
+        defaultOwned: {
+          at: now,
+          reason: "assistant",
+        },
+        next: {
+          at: now,
+          executionClass: "default_owned",
+          reason: "assistant",
+        },
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it("keeps a distinct dense raw retention successor after dirty receipt recording", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
 
@@ -1253,6 +1352,49 @@ function buildPendingDeviceSyncMailboxItem(input: {
       reason: "reconcile_due",
       userId: "member_123",
     },
+  };
+}
+
+function buildPendingAssistantNotificationMailboxItem(input: {
+  itemId: string;
+  mailboxLaneSeq: string;
+}): HostedSystemMailboxPendingItem {
+  const mailboxDedupeKey =
+    `assistant.notification.requested:${input.itemId}`;
+  return {
+    attemptCount: 0,
+    itemId: input.itemId,
+    lastAttemptAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    mailboxDedupeKey,
+    mailboxLaneSeq: input.mailboxLaneSeq,
+    nextAttemptAt: null,
+    occurredAt: "2026-04-27T00:00:00.000Z",
+    postCheckpointRecord: null,
+    preferenceCausalSeq: null,
+    requestId: `request_${input.itemId}`,
+    routeAction: "dispatch-assistant-notification",
+    status: "pending",
+    wake: buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: mailboxDedupeKey,
+      memberId: "member_123",
+      notification: {
+        instructions: "Handle one synthetic background notification.",
+        route: {
+          actorId: null,
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "synthetic_notification_thread",
+          },
+          identityId: "synthetic_notification_identity",
+          threadId: "synthetic_notification_thread",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-27T00:00:00.000Z",
+    }),
   };
 }
 

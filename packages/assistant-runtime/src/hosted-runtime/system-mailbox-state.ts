@@ -417,13 +417,16 @@ function resolveHostedSystemMailboxWakeCandidatesFromState(input: {
         ),
       }
     : state;
+  const wakeOwnerState = projectHostedSystemMailboxWakeOwnerFrontier(
+    remainingState,
+  );
   const modelFreeProjectedState = shouldProjectHostedSystemMailboxModelFreeFrontier({
     allowedRouteActions: input.allowedRouteActions ?? null,
     allowedWakeKinds: input.allowedWakeKinds ?? null,
   })
     ? projectHostedSystemMailboxModelFreeFrontier(remainingState)
     : input.allowedRouteActions == null
-      ? projectHostedSystemMailboxWakeOwnerFrontier(remainingState)
+      ? wakeOwnerState
       : remainingState;
   const selectionState = input.allowedWakeKinds == null
     ? modelFreeProjectedState
@@ -443,14 +446,14 @@ function resolveHostedSystemMailboxWakeCandidatesFromState(input: {
   });
   const defaultOwnedItems = findNextHostedSystemMailboxQueueItemsForWake({
     allowedRouteActions: null,
-    state: remainingState,
+    state: wakeOwnerState,
   }).filter((item) =>
     resolveHostedSystemMailboxItemExecutionClass(item) === "default_owned"
   );
   const readyItemAcrossAllRoutes = findNextHostedSystemMailboxQueueItem({
     allowedRouteActions: null,
     now,
-    state: remainingState,
+    state: wakeOwnerState,
   });
   const readyDefaultOwnedItem = readyItemAcrossAllRoutes !== null
       && resolveHostedSystemMailboxItemExecutionClass(readyItemAcrossAllRoutes)
@@ -718,10 +721,16 @@ export function projectHostedSystemMailboxWakeOwnerFrontier(
     .pending[0] ?? null;
   return {
     pending: state.pending.filter((item) =>
-      // Default-owned work remains independently eligible. Model-free work is
-      // serialized behind the durable frontier, except for its sequence-less
-      // dense-retention owner.
-      resolveHostedSystemMailboxItemExecutionClass(item) === "default_owned"
+      // A durable model-free frontier owns ordinary background execution until
+      // it advances. Explicitly approved continuations keep foreground
+      // priority, and sequence-less dense retention keeps its existing owner.
+      (
+        resolveHostedSystemMailboxItemExecutionClass(item) === "default_owned"
+        && (
+          modelFreeFrontier === null
+          || isHostedApprovedContinuationSystemMailboxItem(item)
+        )
+      )
       || item.itemId === modelFreeFrontier?.itemId
       || isHostedDeviceSyncDenseRawRetentionMailboxItem(item)
     ),
