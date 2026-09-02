@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-09-01
-Updated: 2026-09-01
+Updated: 2026-09-02
 
 ## Goal
 
@@ -27,6 +27,8 @@ Updated: 2026-09-01
   the invocation-local recovered prefix, and a fully missed multi-message
   prefix drains in the same admission rather than one message per provider
   request.
+- Exact-conversation and room-route discoveries share one global cursor order,
+  so a later same-actor message cannot leapfrog an earlier group participant.
 - Focused runtime/engine tests, package typechecks, a production-derived
   synthetic real-Codex group journey, privacy/diff checks, exact-head
   ReviewGPT, and required CI pass.
@@ -74,6 +76,8 @@ Updated: 2026-09-01
 4. Inspect complexity, privacy, docs/changelog, final diff, and close the plan.
 5. Commit, push, open the PR, then run exact-head ReviewGPT concurrently with
    required CI and resolve any accepted findings.
+6. Follow up the merged change by proving the store-backed A1-B1-A2 ordering
+   gap and removing the strict-first composition path.
 
 ## Decisions
 
@@ -88,6 +92,10 @@ Updated: 2026-09-01
   source, retain its authoritative conversation prefix, add only notified or
   route candidates not already discovered, order once, and accept the complete
   valid prefix within the existing cumulative cap.
+- Exact-conversation discovery remains the eligibility authority for its
+  results, but those results enter the same sorted selector as notification and
+  route discoveries. This preserves compatibility without a second ordering
+  path or another frontier.
 
 ## Verification
 
@@ -98,16 +106,20 @@ Updated: 2026-09-01
   commit test pass; the assistant-runtime package typecheck passes.
 - Review regression proof: both the missed-predecessor notification case and a
   fully missed three-message room prefix failed before the admission collapse
-  and now pass; the full assistant auto-reply runtime suite passes 189/189 and
-  both assistant package typechecks pass.
+  and now pass. A production-faithful store-backed A1-B1-A2 regression then
+  failed because A2 was admitted ahead of B1; it passes after globally ordering
+  all discovery results. The full assistant auto-reply runtime suite passes
+  190/190.
 - Real-Codex journey: passed against the production group prompt/tool surface.
   After the admission collapse, the synthetic rapid clarification again
   produced one final response that plainly said the resistance type and level
   were unknown. Product UX verdict: Ready.
-- Candidate checks: full assistant auto-reply runtime suite 189/189, hosted
+- Candidate checks: full assistant auto-reply runtime suite 190/190, hosted
   turn-input suite 39/39, workspace foreground handoff suite 86/86, held-group
   single-commit regression, both package typechecks, complexity guard, and
-  privacy/diff checks all pass.
+  privacy/diff checks all pass. The follow-up assistant-engine package suite
+  also passes 4,296 tests across 268 files, alongside its package typecheck,
+  complexity guard, docs drift, and diff hygiene checks.
 - Remaining: exact-head ReviewGPT, required CI, final parent diff review, and
   plan closure.
 
@@ -123,3 +135,6 @@ Updated: 2026-09-01
 - 2026-09-01: resolved the second review finding by composing recovered and
   notified inputs at the existing admission owner and draining the bounded
   valid prefix without adding state, a timer, or another queue.
+- 2026-09-02: after the original change merged, reproduced a remaining
+  strict-first ordering gap against the real store-backed input source and
+  collapsed strict, exact, and route discoveries into one ordered selector.
