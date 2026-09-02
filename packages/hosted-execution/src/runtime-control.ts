@@ -3679,6 +3679,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "runner.lease_superseded",
   "runner.provider_egress_diagnostic",
   "runner.started",
+  "runner.web_control_preflight_rejected",
   "runtime.invocation_finished",
   "workspace.codex_home_snapshot",
 ] as const;

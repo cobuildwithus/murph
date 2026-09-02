@@ -122,6 +122,9 @@ import {
   readHostedRuntimeSafeErrorText,
 } from "@murphai/hosted-execution";
 import {
+  parseHostedRuntimeLogRequest,
+} from "@murphai/hosted-execution/parsers";
+import {
   buildHostedExecutionRuntimePlatform,
   createCloudflareHostedProviderFetch,
   createHostedBrowserVaultReplicaWriteHeaders,
@@ -136,6 +139,9 @@ import {
   HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   HostedWebControlPlaneResponseError,
 } from "../src/runtime-platform/web-control-transport.ts";
+import {
+  createHostedWebControlLoggingTransport,
+} from "../src/runtime-platform/log-port.ts";
 import {
   fetchHostedExecutionWebControlPlaneResponse,
 } from "../src/web-control-plane.ts";
@@ -5233,6 +5239,115 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         userId: "member_123",
       }),
     );
+  });
+
+  it("persists registered-route contract rejections without target egress", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      loggedCount: 1,
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const privateMemberMaterial = "private-member-material";
+    const { transport } = createHostedWebControlLoggingTransport({
+      boundUserId: privateMemberMaterial,
+      fetchImpl: fetchMock as typeof fetch,
+      timeoutMs: 1_000,
+      transport: { mode: "proxy" },
+    });
+    if (!transport) {
+      throw new Error("Expected a reporting web-control transport.");
+    }
+    const blockedRoute = {
+      ...HOSTED_RUNNER_WEB_CONTROL_ROUTES.runtimeLogWrite,
+      path: "/api/internal/hosted-execution/synthetic-blocked-control",
+    };
+
+    await expect(fetchHostedWebControlPlaneJson({
+      boundUserId: privateMemberMaterial,
+      description: "Hosted synthetic blocked control",
+      fetchImpl: fetchMock as typeof fetch,
+      route: blockedRoute,
+      timeoutMs: 1_000,
+      transport,
+    })).rejects.toMatchObject({
+      code: "HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED",
+      message:
+        "Hosted runtime web-control route is not allowlisted for proxy transport: POST /api/internal/hosted-execution/synthetic-blocked-control",
+      name: "HostedWebControlRouteNotAllowlistedError",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const logRequest = requireFetchRequest(
+      fetchMock.mock.calls[0],
+      "web-control preflight rejection log",
+    );
+    expect(logRequest.url).toBe(
+      "http://web-control.worker/api/internal/hosted-runtime/log",
+    );
+    expect(logRequest.method).toBe("POST");
+    const serializedLog = await logRequest.text();
+    expect(parseHostedRuntimeLogRequest(JSON.parse(serializedLog))).toEqual({
+      entries: [{
+        at: expect.any(String),
+        component: "runner",
+        errorCode: "HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED",
+        eventCode: "runner.web_control_preflight_rejected",
+        level: "warn",
+        phase: "invoke",
+        redactedJson: {
+          method: "POST",
+          operation: "web_control_blocked",
+          reason: "not_allowlisted",
+          transport: "proxy",
+        },
+      }],
+    });
+    expect(serializedLog).not.toContain(privateMemberMaterial);
+    expect(serializedLog).not.toContain("synthetic-blocked-control");
+    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          eventCode: "runner.web_control_preflight_rejected",
+        }),
+      }),
+    );
+  });
+
+  it("preserves the policy error when the preflight log write fails", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const reportPreflightRejection = vi.fn(async () => {
+      throw new Error("Synthetic runtime-log transport failure.");
+    });
+    const blockedRoute = {
+      ...HOSTED_RUNNER_WEB_CONTROL_ROUTES.runtimeLogWrite,
+      path: "/api/internal/hosted-execution/synthetic-blocked-control",
+    };
+
+    await expect(fetchHostedWebControlPlaneJson({
+      boundUserId: "member_123",
+      description: "Hosted synthetic blocked control",
+      fetchImpl: fetchMock as typeof fetch,
+      route: blockedRoute,
+      timeoutMs: 1_000,
+      transport: {
+        mode: "proxy",
+        reportPreflightRejection,
+      },
+    })).rejects.toMatchObject({
+      code: "HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED",
+      name: "HostedWebControlRouteNotAllowlistedError",
+    });
+
+    expect(reportPreflightRejection).toHaveBeenCalledOnce();
+    expect(reportPreflightRejection).toHaveBeenCalledWith({
+      method: "POST",
+      operation: "web_control_blocked",
+      transport: "proxy",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("preserves structured non-retryable web-control errors without raw JSON in the message", async () => {
