@@ -491,17 +491,20 @@ must break without horizontal scrolling.
 ### Food Label Lab
 The public `/food` page uses the same editorial paper system with less text.
 Start with one search field, then show a two-to-four-column comparison table.
-Put category art and the product name in each column. Mark the winner in each
-complete metric row with a sage check and light sage tint. A top-match badge may
-count metric wins, but must not read as a health or safety score.
+Put category art, the brand, the differentiating product name, and the package
+or serving size in each column. Mark the winner in each complete metric row with
+one sage check only; no tinted rows, no Lowest or Highest labels. Each row states
+its rule as "Lowest marked" or "Highest marked". One optional plain sentence may
+count visible rows led, but nothing may read as a health or safety score. The
+table stays visible with one product, and empty columns are dashed add targets.
 
-Keep evidence in one separate row. Use sienna only for a real exact-sample
-alert. Show missing evidence with muted or amber-neutral treatments. One metric
-cell opens a compact comparison-bar popover. Never assign a winner when a
-selected product lacks that metric, and never give tied values unequal ordinal
-ranks. Tests and gaps open in a right-side
-sheet with one large conclusion, simple status marks, and raw reports hidden by
-default. Observation summaries must show returned versus total scope when the
+Keep evidence in one separate row as a five-segment coverage meter that opens
+one combined evidence drawer. Use sienna only for a confirmed result above an
+available screening limit, amber for unknown or not comparable, and sage for
+within a comparable limit. One metric cell opens a compact comparison-bar
+popover. Never assign a winner when a selected product lacks that metric, and
+never give tied values unequal ordinal ranks. The drawer starts with coverage,
+then statuses, then gaps, with raw reports hidden by default. Observation summaries must show returned versus total scope when the
 public DTO is truncated. Gap rows use the DTO-owned titles and descriptions.
 The tests sheet must not infer sample identity or coverage from report metadata.
 Its optional observation disclosure shows each returned result separately and

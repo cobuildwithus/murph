@@ -1,11 +1,14 @@
-import { act, createElement, type ReactNode } from "react";
+import { act, createElement, type ComponentProps, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import type { PublicProductDetail } from "@murphai/contracts";
 import { PUBLIC_PRODUCTS_SCHEMA_VERSION } from "@murphai/contracts";
 
 import { FOOD_LABEL_DESIGN_PRODUCTS } from "@/app/design/food-label-lab-study";
-import { FoodLabelLab } from "@/src/components/food-label-lab/food-label-lab";
+import {
+  FOOD_EXAMPLES,
+  FoodLabelLab,
+} from "@/src/components/food-label-lab/food-label-lab";
 
 import { renderClientComponent } from "./render-client-component";
 
@@ -17,6 +20,20 @@ vi.mock("next/image", () => ({
     src: string;
     width?: number;
   }) => createElement("img", props),
+}));
+
+vi.mock("@/src/components/ui/input", () => ({
+  Input({ inputSize, onChange, ...props }: ComponentProps<"input"> & {
+    inputSize?: string;
+  }) {
+    void inputSize;
+    return createElement("input", { ...props, onInput: onChange });
+  },
+}));
+
+vi.mock("@/src/components/ui/scroll-area", () => ({
+  ScrollArea: (input: { children?: ReactNode }) =>
+    createElement("div", null, input.children),
 }));
 
 vi.mock("@/src/components/ui/sheet", () => ({
@@ -51,7 +68,53 @@ afterEach(async () => {
 });
 
 describe("FoodLabelLab", () => {
-  test("keeps the query in a private POST and builds the visible comparison", async () => {
+  test("an example loads exact product details and keeps a partial example usable", async () => {
+    const [first, second] = FOOD_LABEL_DESIGN_PRODUCTS;
+    const example = FOOD_EXAMPLES[0];
+    if (!first || !second || !example) {
+      throw new Error("Food Label Lab design products are missing.");
+    }
+    fetchMock.mockImplementation(async (resource) => {
+      const url = String(resource);
+      if (url.endsWith(encodeURIComponent(example.productRefs[0]))) {
+        return detailResponse(first);
+      }
+      if (url.endsWith(encodeURIComponent(example.productRefs[1]))) {
+        return detailResponse(second);
+      }
+      return new Response("missing", { status: 404 });
+    });
+
+    const rendered = await renderClientComponent(
+      createElement(FoodLabelLab, { webMcpEnabled: false }),
+      { requireButton: false },
+    );
+    cleanup = rendered.cleanup;
+    await click(findButton(rendered.container, example.label));
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    for (const [url, init] of fetchMock.mock.calls) {
+      expect(String(url)).toMatch(/^\/api\/public\/v1\/products\/food_/u);
+      expect(init?.credentials).toBe("omit");
+      expect(init?.referrerPolicy).toBe("no-referrer");
+      expect(init?.cache).toBe("no-store");
+    }
+    expect(rendered.replaceState).not.toHaveBeenCalled();
+
+    const text = rendered.container.textContent ?? "";
+    expect(rendered.container.querySelector('section[aria-label="Food comparison"]')).not.toBeNull();
+    expect(text).toContain("2 of 4 products");
+    expect(text).toContain("Chobani");
+    expect(text).toContain("Straus");
+    expect(text).toContain("Add another product");
+    expect(text).toContain("Lowest marked");
+    expect(text).toContain("leads 3 of 4 comparable rows");
+    expect(text).not.toContain("Top match");
+    expect(text).not.toContain("observations");
+    expect(text).not.toContain("Evidence: partial");
+  });
+
+  test("typing shows deduplicated suggestions and a pick starts the comparison with one product", async () => {
     const [first, second] = FOOD_LABEL_DESIGN_PRODUCTS;
     if (!first || !second) {
       throw new Error("Food Label Lab design products are missing.");
@@ -61,81 +124,122 @@ describe("FoodLabelLab", () => {
         schema: PUBLIC_PRODUCTS_SCHEMA_VERSION,
         results: {
           supplements: [],
-          foods: [searchHit(first), searchHit(second)],
+          foods: [
+            searchHit(first),
+            { ...searchHit(second), productRef: "food_design_duplicate", upc: first.upc },
+            searchHit(second),
+          ],
         },
       }))
       .mockResolvedValueOnce(detailResponse(first))
-      .mockResolvedValueOnce(detailResponse(second));
+      .mockResolvedValueOnce(jsonResponse({
+        schema: PUBLIC_PRODUCTS_SCHEMA_VERSION,
+        results: { supplements: [], foods: [searchHit(second)] },
+      }));
 
     const rendered = await renderClientComponent(
       createElement(FoodLabelLab, { webMcpEnabled: false }),
       { requireButton: false },
     );
     cleanup = rendered.cleanup;
-    await click(findButton(rendered.container, "plain Greek yogurt"));
+    const input = rendered.container.querySelector<HTMLInputElement>("#food-comparison-search");
+    if (!input) {
+      throw new Error("Search input did not render.");
+    }
+    expect(input.getAttribute("role")).toBe("combobox");
+    expect(input.placeholder).toContain("UPC");
+
+    await act(async () => {
+      input.value = "chobani";
+      input.dispatchEvent(new rendered.window.Event("input", { bubbles: true }));
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 350));
+    });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [searchUrl, searchInit] = fetchMock.mock.calls[0] ?? [];
     expect(searchUrl).toBe("/api/public/v1/products/search");
     expect(searchInit?.method).toBe("POST");
     expect(searchInit?.credentials).toBe("omit");
-    expect(searchInit?.referrerPolicy).toBe("no-referrer");
-    expect(searchInit?.cache).toBe("no-store");
     expect(JSON.parse(String(searchInit?.body))).toEqual({
-      query: "plain Greek yogurt",
+      query: "chobani",
       kinds: ["food"],
       limitPerKind: 6,
     });
-    expect(rendered.replaceState).not.toHaveBeenCalled();
 
-    const addButtons = findProductButtons(rendered.container);
-    expect(addButtons).toHaveLength(2);
+    const options = findProductButtons(rendered.container);
+    expect(options).toHaveLength(2);
+    expect(options.map((option) => option.getAttribute("role"))).toEqual(["option", "option"]);
+    expect(options[0]?.textContent).toContain("Chobani");
+    expect(options[0]?.textContent).toContain("Plain Nonfat Greek Yogurt");
+    expect(options[0]?.textContent).toContain("57 linked tests");
+    expect(options[1]?.textContent).toContain("32 oz");
+    expect(rendered.container.textContent).not.toContain("GREEK YOGURT");
+    expect(rendered.container.textContent).not.toContain("0 observations");
 
-    await click(addButtons[0]);
-    await click(findProductButtons(rendered.container).find(
-      (button) => !button.disabled,
-    ));
+    await click(options[0]);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(rendered.container.textContent).toContain("Top match · 3 of 4");
-    expect(rendered.container.textContent).toContain("Evidence: partial");
-    expect(rendered.container.textContent).toContain("No alerts shown");
-    expect(rendered.container.textContent).toContain("4 of 57 observations");
-    expect(rendered.container.querySelector('section[aria-label="Food comparison"]'))
-      .not.toBeNull();
+    const text = rendered.container.textContent ?? "";
+    expect(rendered.container.querySelector('section[aria-label="Food comparison"]')).not.toBeNull();
+    expect(text).toContain("1 of 4 products");
+    expect(text).toContain("Add a product to compare");
+    expect(text).toContain("Similar by name");
+    expect(input.value).toBe("");
+    expect(findProductButtons(rendered.container).map((button) => button.dataset.foodProductRef))
+      .toEqual([second.productRef]);
   });
 
   test("shows a short rate-limit recovery state", async () => {
-    fetchMock.mockResolvedValueOnce(new Response("rate limited", { status: 429 }));
+    fetchMock.mockResolvedValue(new Response("rate limited", { status: 429 }));
     const rendered = await renderClientComponent(
       createElement(FoodLabelLab, { webMcpEnabled: false }),
       { requireButton: false },
     );
     cleanup = rendered.cleanup;
-    await click(findButton(rendered.container, "plain Greek yogurt"));
+    await click(findButton(rendered.container, FOOD_EXAMPLES[0]?.label ?? ""));
 
     expect(rendered.container.textContent).toContain(
       "Too many searches. Wait a minute and try again.",
     );
   });
 
-  test("keeps exact test semantics in the compact evidence sheet", async () => {
+  test("the evidence meter opens one combined drawer with honest statuses", async () => {
     const product = makeEvidenceProduct();
-    const secondProduct = FOOD_LABEL_DESIGN_PRODUCTS[1];
-    if (!secondProduct) {
-      throw new Error("Second Food Label Lab design product is missing.");
+    const [, straus, fage] = FOOD_LABEL_DESIGN_PRODUCTS;
+    if (!straus || !fage) {
+      throw new Error("Food Label Lab design products are missing.");
     }
     const rendered = await renderClientComponent(
       createElement(FoodLabelLab, {
-        initialProducts: [product, secondProduct],
+        initialProducts: [product, straus, fage],
         webMcpEnabled: false,
       }),
       { requireButton: false },
     );
     cleanup = rendered.cleanup;
-    await click(findButton(rendered.container, "0 alerts"));
+
+    const tableText = rendered.container.querySelector('section[aria-label="Food comparison"]')?.textContent ?? "";
+    expect(tableText).toContain("1 above a screening limit");
+    expect(tableText).not.toContain("No observations");
+    expect(tableText).not.toContain("gaps");
+
+    const meters = [...rendered.container.querySelectorAll<HTMLButtonElement>("button")]
+      .filter((button) => /of 5 record parts/u.test(button.textContent ?? ""));
+    expect(meters).toHaveLength(3);
+    await click(meters[0]);
 
     const text = document.body.textContent ?? rendered.container.textContent ?? "";
+    expect(text).toContain("of 5 record parts");
+    expect(text).toContain("1 above a screening limit");
+    expect(text).toContain("1 within a comparable limit");
+    expect(text).toContain("6 measured, no comparable limit");
+    expect(text).toContain("known gaps");
+    expect(text).toContain("Show 8 returned results");
     expect(text).toContain("0.00001 ppm");
     expect(text).toContain("From 0.1 ppm (upper bound not reported)");
     expect(text).toContain("Up to 0.2 ppm (lower bound not reported)");
@@ -146,11 +250,54 @@ describe("FoodLabelLab", () => {
     expect(text).toContain("Above this screening threshold");
     expect(text).toContain("Did not exceed this screening threshold");
     expect(text).toContain("No comparable screening threshold");
-    expect(text).toContain("Screening references are not product safety determinations.");
+    expect(text).toContain("Screening limits are references, not safety verdicts.");
     expect(text).not.toContain("Below threshold");
-    expect(text).not.toContain("Shown observations cover exact samples");
+
+    await click(meters[2]);
+    const fageText = document.body.textContent ?? "";
+    expect(fageText).toContain("1 result shown");
+    expect(fageText).toContain("1 above a screening limit");
+    expect(fageText).not.toContain("no comparable limit");
   });
 
+  test("an untested product reads as not tested, never as safe", async () => {
+    const [first, second] = FOOD_LABEL_DESIGN_PRODUCTS;
+    if (!first || !second) {
+      throw new Error("Food Label Lab design products are missing.");
+    }
+    const untested = structuredClone(first);
+    untested.productRef = "food_design_untested";
+    untested.productTests = {
+      status: "no_known_product_tests",
+      total: 0,
+      returned: 0,
+      truncated: false,
+      observations: [],
+      alerts: [],
+    };
+    untested.unknowns = [
+      { code: "NO_LINKED_PRODUCT_TESTS", title: "No linked product tests", description: "Synthetic gap." },
+    ];
+    const rendered = await renderClientComponent(
+      createElement(FoodLabelLab, {
+        initialProducts: [untested, second],
+        webMcpEnabled: false,
+      }),
+      { requireButton: false },
+    );
+    cleanup = rendered.cleanup;
+
+    const meter = [...rendered.container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => /of 5 record parts/u.test(button.textContent ?? ""));
+    expect(meter?.textContent).toContain("3 of 5 record parts");
+    await click(meter);
+
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("Not tested");
+    expect(text).toContain("No product-level test is linked to this exact record.");
+    expect(text).toContain("No other known gaps");
+    expect(text).not.toContain("within a comparable limit");
+  });
 });
 
 function makeEvidenceProduct(): PublicProductDetail {
@@ -252,6 +399,14 @@ function makeEvidenceProduct(): PublicProductDetail {
   product.productTests.returned = product.productTests.observations.length;
   product.productTests.total = product.productTests.observations.length;
   product.productTests.truncated = false;
+  product.productTests.alerts = [{
+    analyte: normalized.analyte,
+    concernLevel: "medium",
+    result: normalized.result,
+    threshold: normalized.screening.threshold,
+    source: normalized.source,
+    testedProduct: normalized.testedProduct,
+  }];
   return product;
 }
 

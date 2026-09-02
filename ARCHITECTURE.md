@@ -1902,13 +1902,14 @@ and the production build verifies their exact active configuration.
 nutrition comparisons plus a separate exact-evidence summary from existing
 public DTOs. A nutrition winner exists only when every compared product has the
 metric. Evidence keeps the DTO's returned, total, and truncated observation
-scope, and the gaps sheet renders the DTO-owned unknown entries without a
-parallel completeness model. Compatible browsers receive four page-scoped
+scope. The evidence meter and drawer statuses derive only from DTO fields
+(nutrition rows, serving mass, ingredients, returned observations and their
+screening results), and the drawer renders the DTO-owned unknown entries. Compatible browsers receive four page-scoped
 WebMCP tools through
 `document.modelContext.registerTool`. These tools call the same bounded page
 actions as manual controls. Their comparison result carries the same four
-metric values, completeness, ties, winners, and win counts as the visible
-table. The tools disappear when the page unmounts. They do not
+metric values, completeness, ties, and winners as the visible table, plus the
+per-product row-win counts behind its rows-led caption. The tools disappear when the page unmounts. They do not
 create a remote MCP service, a second data owner, or an authenticated path.
 
 Each product-test observation may preserve evidence and sampling context,

@@ -4,9 +4,10 @@ import { FoodLabelLab } from "@/src/components/food-label-lab/food-label-lab";
 
 const CHOBANI = createFood({
   productRef: "food_design_chobani",
-  name: "Plain Nonfat",
-  brand: "Chobani",
+  name: "PLAIN NONFAT GREEK YOGURT, PLAIN",
+  brand: "CHOBANI",
   upc: "818290012108",
+  servingDescription: "1 Container",
   servingGrams: 150,
   calories: 53,
   protein: 9.3,
@@ -14,13 +15,15 @@ const CHOBANI = createFood({
   fat: 0,
   testCount: 57,
   analytes: ["Lead", "Cadmium", "Arsenic", "Mercury", "Glyphosate", "Aflatoxin M1"],
+  screening: "none",
 });
 
 const STRAUS = createFood({
   productRef: "food_design_straus",
-  name: "Whole Milk",
+  name: "Organic Plain Whole Milk Greek Yogurt, 32 oz",
   brand: "Straus",
   upc: "074305110403",
+  servingDescription: "3/4 cup",
   servingGrams: 170,
   calories: 106,
   protein: 10,
@@ -28,13 +31,15 @@ const STRAUS = createFood({
   fat: 5.9,
   testCount: 57,
   analytes: ["Lead", "Cadmium", "Arsenic", "Mercury"],
+  screening: "within",
 });
 
 const FAGE = createFood({
   productRef: "food_design_fage",
-  name: "Total 5%",
+  name: "Total 5% Plain Greek Yogurt",
   brand: "Fage",
   upc: "689544080110",
+  servingDescription: "1 cup",
   servingGrams: 170,
   calories: 93,
   protein: 9,
@@ -42,6 +47,7 @@ const FAGE = createFood({
   fat: 5,
   testCount: 1,
   analytes: ["Lead"],
+  screening: "exceeds",
 });
 
 export const FOOD_LABEL_DESIGN_PRODUCTS = [CHOBANI, STRAUS, FAGE];
@@ -51,6 +57,9 @@ export function FoodLabelLabStudy() {
     <div className="flex flex-col gap-8" data-design-section="food-label-lab" id="food-label-lab">
       <div data-design-state="comparison" className="overflow-hidden rounded-xl border border-border">
         <FoodLabelLab initialProducts={FOOD_LABEL_DESIGN_PRODUCTS} webMcpEnabled={false} />
+      </div>
+      <div data-design-state="single" className="overflow-hidden rounded-xl border border-border">
+        <FoodLabelLab initialProducts={[STRAUS]} webMcpEnabled={false} />
       </div>
       <div data-design-state="empty" className="overflow-hidden rounded-xl border border-border">
         <FoodLabelLab webMcpEnabled={false} />
@@ -64,6 +73,7 @@ function createFood(input: {
   name: string;
   brand: string;
   upc: string;
+  servingDescription: string;
   servingGrams: number;
   calories: number;
   protein: number;
@@ -71,9 +81,22 @@ function createFood(input: {
   fat: number;
   testCount: number;
   analytes: string[];
+  screening: "none" | "within" | "exceeds";
 }): PublicProductDetail {
   const observations = input.analytes.map((analyte, index) =>
     createObservation(input, analyte, index),
+  );
+  const alerts = observations.flatMap((observation) =>
+    observation.screening?.comparison === "exceeds"
+      ? [{
+          analyte: observation.analyte,
+          concernLevel: "medium" as const,
+          result: observation.result,
+          threshold: observation.screening.threshold,
+          source: observation.source,
+          testedProduct: observation.testedProduct,
+        }]
+      : [],
   );
   return {
     productRef: input.productRef,
@@ -83,7 +106,7 @@ function createFood(input: {
     upc: input.upc,
     marketStatus: "active",
     serving: {
-      description: `${input.servingGrams} g cup`,
+      description: input.servingDescription,
       amount: 1,
       unit: "cup",
       grams: input.servingGrams,
@@ -110,7 +133,7 @@ function createFood(input: {
       returned: observations.length,
       truncated: input.testCount > observations.length,
       observations,
-      alerts: [],
+      alerts,
     },
     source: {
       key: "brand_site",
@@ -122,11 +145,13 @@ function createFood(input: {
       importedAt: "2026-08-12T12:00:00.000Z",
     },
     unknowns: [
-      unknown("FORMULA_REVISION_NOT_TRACKED", "Formula revision"),
-      unknown("TESTED_LOT_NOT_REPORTED", "Current lot"),
-      unknown("INGREDIENTS_STATEMENT_ONLY", "Ingredient structure"),
-      unknown("TEST_METHOD_NOT_REPORTED", "Test method"),
-      unknown("TEST_THRESHOLD_NOT_COMPARABLE", "Screening limit"),
+      unknown("FORMULA_REVISION_NOT_TRACKED", "Formula revision not tracked"),
+      unknown("TESTED_LOT_NOT_REPORTED", "Tested lot not reported"),
+      unknown("INGREDIENTS_STATEMENT_ONLY", "Ingredient structure unavailable"),
+      unknown("TEST_METHOD_NOT_REPORTED", "Test method not reported"),
+      ...(input.screening === "none"
+        ? [unknown("TEST_THRESHOLD_NOT_COMPARABLE", "Screening threshold unavailable")]
+        : []),
     ],
   };
 }
@@ -145,14 +170,15 @@ function createObservation(
   analyte: string,
   index: number,
 ): PublicProductDetail["productTests"]["observations"][number] {
+  const exceeds = product.screening === "exceeds" && index === 0;
   return {
     id: `${product.productRef}_${index}`,
     analyte: { key: analyte.toLowerCase().replace(/\s+/gu, "_"), name: analyte },
     result: {
-      operator: index >= 4 ? "not_detected" : "lt",
-      value: index >= 4 ? null : 0.5,
-      unit: index >= 4 ? "ppb" : "ppb",
-      basis: "tested sample",
+      operator: exceeds ? "eq" : index >= 4 ? "not_detected" : "lt",
+      value: exceeds ? 12 : index >= 4 ? null : 0.5,
+      unit: "ppb",
+      basis: "product_mass",
     },
     normalizedResult: null,
     source: {
@@ -185,19 +211,19 @@ function createObservation(
     },
     labName: "Independent lab",
     testMethod: null,
-    screening: index < 4
-      ? {
-          comparison: "does_not_exceed",
+    screening: product.screening === "none"
+      ? null
+      : {
+          comparison: exceeds ? "exceeds" : "does_not_exceed",
           threshold: {
             value: 5,
             unit: "ppb",
-            basis: "tested sample",
+            basis: "product_mass",
             authority: "Synthetic design threshold",
             name: "Design study limit",
             url: "https://example.com/limit",
           },
-        }
-      : null,
+        },
   };
 }
 

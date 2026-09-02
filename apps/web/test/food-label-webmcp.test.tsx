@@ -203,7 +203,7 @@ describe("FoodLabelWebMcp", () => {
     ]));
     expect(fat).toMatchObject({ complete: false, winnerProductRefs: [] });
     expect(comparisonRecord.comparableMetricCount).toBe(3);
-    expect(rendered.container.textContent).toContain("3.3 gLowest3.3 gLowest");
+    expect(rendered.container.textContent).toContain("3.3 glowest3.3 glowest");
 
     const servingButton = rendered.container.querySelector<HTMLButtonElement>(
       'button[aria-label="Compare per serving"]',

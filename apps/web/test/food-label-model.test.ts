@@ -3,13 +3,18 @@ import { describe, expect, test } from "vitest";
 import type { PublicProductDetail } from "@murphai/contracts";
 
 import {
+  FOOD_CATEGORY_FALLBACK_ASSET,
   compareFoodMetrics,
-  getFoodAlertLabel,
+  dedupeFoodSearchHits,
   getFoodCategoryAsset,
+  getFoodEvidenceCoverage,
+  getFoodEvidenceStatuses,
   getFoodEvidenceSummary,
+  getFoodLeadSummary,
   getFoodMetricConclusion,
   getFoodMetricValue,
-  getFoodObservationScope,
+  getFoodPackageSize,
+  getFoodProductIdentity,
   getFoodTopMatch,
 } from "@/src/components/food-label-lab/food-label-model";
 
@@ -153,28 +158,85 @@ describe("food label comparison model", () => {
     );
   });
 
-  test("preserves bounded observation scope in evidence summaries", () => {
+  test("keeps the lead summary on visible rows only", () => {
+    const first = makeFood("food_first", { calories: 50, protein: 9, sugars: 2, fat: 0 });
+    first.brand = "Chobani";
+    first.name = "Plain Nonfat Greek Yogurt";
+    const second = makeFood("food_second", { calories: 100, protein: 10, sugars: 3, fat: 5 });
+    const comparisons = compareFoodMetrics([first, second], "per_100_g");
+    const topMatch = getFoodTopMatch([first, second], comparisons);
+
+    expect(getFoodLeadSummary([first, second], topMatch)).toBe(
+      "Chobani Plain Nonfat Greek Yogurt leads 3 of 4 comparable rows.",
+    );
+    expect(getFoodLeadSummary([first], getFoodTopMatch([first], []))).toBeNull();
+
+    const twin = makeFood("food_twin", { calories: 50, protein: 9, sugars: 2, fat: 0 });
+    twin.brand = "Chobani";
+    twin.name = "Plain Nonfat Greek Yogurt";
+    const tiedComparisons = compareFoodMetrics([first, twin], "per_100_g");
+    expect(getFoodLeadSummary([first, twin], getFoodTopMatch([first, twin], tiedComparisons))).toBe(
+      "All 2 products lead 4 of 4 comparable rows.",
+    );
+  });
+
+  test("keeps evidence statuses separate for above, within, and no comparable limit", () => {
     const product = makeFood("food_bounded");
     product.productTests.total = 21;
     product.productTests.returned = 20;
     product.productTests.truncated = true;
-    product.productTests.observations = Array.from({ length: 20 }, (_, index) =>
-      observation(`lead-${index}`, "Lead", "does_not_exceed", `sample-${index}`),
-    );
+    product.productTests.observations = [
+      observation("bpa", "BPA", "exceeds", "sample-0"),
+      observation("lead", "Lead", "does_not_exceed", "sample-1"),
+      ...Array.from({ length: 18 }, (_, index) =>
+        observation(`dehp-${index}`, "DEHP", null, `sample-${index + 2}`),
+      ),
+    ];
 
-    const summary = getFoodEvidenceSummary(product);
-    expect(summary).toEqual(
+    expect(getFoodEvidenceSummary(product)).toEqual(
       expect.objectContaining({
-        alertCount: 0,
         observationCount: 21,
         returnedObservationCount: 20,
         observationsTruncated: true,
       }),
     );
-    expect(getFoodAlertLabel(summary, true)).toBe(
-      "No alerts among shown observations",
-    );
-    expect(getFoodObservationScope(summary)).toBe("Showing 20 of 21 observations");
+    expect(getFoodEvidenceStatuses(product)).toEqual([
+      expect.objectContaining({ id: "tests", tone: "neutral", detail: "20 of 21 results shown" }),
+      expect.objectContaining({ id: "above", tone: "alert", title: "1 above a screening limit" }),
+      expect.objectContaining({ id: "within", tone: "supported", title: "1 within a comparable limit" }),
+      expect.objectContaining({ id: "no_limit", tone: "unknown", title: "18 measured, no comparable limit" }),
+    ]);
+
+    const untested = makeFood("food_untested");
+    untested.productTests = {
+      status: "no_known_product_tests",
+      total: 0,
+      returned: 0,
+      truncated: false,
+      observations: [],
+      alerts: [],
+    };
+    expect(getFoodEvidenceStatuses(untested)).toEqual([
+      expect.objectContaining({ id: "tests", tone: "unknown", title: "Not tested" }),
+    ]);
+  });
+
+  test("meters record coverage, never safety", () => {
+    const product = makeFood("food_coverage");
+    product.productTests.observations = [observation("bpa", "BPA", null, "sample-0")];
+    if (product.serving) {
+      product.serving.grams = null;
+    }
+
+    const coverage = getFoodEvidenceCoverage(product);
+    expect(coverage.segments.map((segment) => [segment.id, segment.covered])).toEqual([
+      ["nutrition", true],
+      ["serving", false],
+      ["ingredients", true],
+      ["tests", true],
+      ["limits", false],
+    ]);
+    expect(coverage.coveredCount).toBe(3);
   });
 
   test("treats the five-alert response cap as a lower bound", () => {
@@ -183,22 +245,108 @@ describe("food label comparison model", () => {
       alert(index),
     );
 
-    const summary = getFoodEvidenceSummary(product);
-    expect(summary).toEqual(
+    expect(getFoodEvidenceSummary(product)).toEqual(
       expect.objectContaining({ alertCount: 5, alertsLowerBound: true }),
-    );
-    expect(getFoodAlertLabel(summary, true)).toBe(
-      "At least 5 alerts among shown observations",
     );
   });
 
-  test("selects a broad category illustration without using remote images", () => {
-    const yogurt = makeFood("food_yogurt");
-    yogurt.name = "Plain Greek Yogurt";
+  test("matches the product name before ingredients and falls back to generic packaged food", () => {
+    const bar = makeFood("food_bar");
+    bar.name = "DARK CHOCOLATE NUTS & SEA SALT BAR";
+    bar.brand = "KIND";
+    bar.ingredients.statement = "ALMONDS, PEANUTS, MILK, CREAM, CHOCOLATE.";
+    expect(getFoodCategoryAsset(bar)).toBe("/design-assets/food-label-lab/bars.svg");
 
-    expect(getFoodCategoryAsset(yogurt)).toBe(
-      "/design-assets/food-label-lab/yogurt.svg",
-    );
+    const shake = makeFood("food_shake");
+    shake.name = "CHOCOLATE HIGH PROTEIN MILK SHAKE, CHOCOLATE";
+    expect(getFoodCategoryAsset(shake)).toBe("/design-assets/food-label-lab/protein-shake.svg");
+
+    const yogurt = makeFood("food_yogurt");
+    yogurt.name = "PLAIN ORGANIC GREEK WHOLE MILK YOGURT, PLAIN";
+    expect(getFoodCategoryAsset(yogurt)).toBe("/design-assets/food-label-lab/yogurt.svg");
+
+    const bites = makeFood("food_bites");
+    bites.name = "RXBAR Dark Chocolate Peanut Butter Bites";
+    bites.brand = "RXBAR";
+    expect(getFoodCategoryAsset(bites)).toBe("/design-assets/food-label-lab/bars.svg");
+
+    const pops = makeFood("food_pops");
+    pops.name = "OAT MILK POPS, OAT MILK";
+    pops.brand = "JONNY POPS";
+    expect(getFoodCategoryAsset(pops)).toBe("/design-assets/food-label-lab/frozen-desserts.svg");
+
+    const brandOnly = makeFood("food_brand_only");
+    brandOnly.name = "WASABI PEAS";
+    brandOnly.brand = "Mountain Man Nut & Fruit Co.";
+    brandOnly.ingredients.statement = null;
+    expect(getFoodCategoryAsset(brandOnly)).toBe(FOOD_CATEGORY_FALLBACK_ASSET);
+
+    const cola = makeFood("food_cola");
+    cola.name = "Coca-Cola 2 litre Non-Refillable Plastic Bottle";
+    cola.brand = "Coca-Cola";
+    cola.ingredients.statement = "CARBONATED WATER, HIGH FRUCTOSE CORN SYRUP.";
+    expect(getFoodCategoryAsset(cola)).toBe("/design-assets/food-label-lab/sweet-drinks.svg");
+
+    const byIngredients = makeFood("food_ingredients");
+    byIngredients.name = "ORIGINAL";
+    byIngredients.brand = "Example";
+    byIngredients.ingredients.statement = "CULTURED PASTEURIZED MILK.";
+    expect(getFoodCategoryAsset(byIngredients)).toBe("/design-assets/food-label-lab/yogurt.svg");
+
+    const unknownFood = makeFood("food_unknown");
+    unknownFood.name = "ORIGINAL";
+    unknownFood.brand = "Example";
+    unknownFood.ingredients.statement = null;
+    expect(getFoodCategoryAsset(unknownFood)).toBe(FOOD_CATEGORY_FALLBACK_ASSET);
+    expect(FOOD_CATEGORY_FALLBACK_ASSET).toBe("/design-assets/food-label-lab/packaged-food.svg");
+  });
+
+  test("cleans shouting names, repeated flavors, and package sizes without inventing data", () => {
+    expect(getFoodProductIdentity({
+      name: "STRAWBERRY PROTEIN BAR, STRAWBERRY",
+      brand: "RXBAR",
+      serving: { description: "1 bar", amount: 52, unit: "GRM", grams: 52 },
+    })).toEqual({ brand: "RXBAR", title: "Strawberry Protein Bar", size: "52 g serving" });
+
+    expect(getFoodProductIdentity({
+      name: "Organic Plain Nonfat Greek Yogurt, 32 oz",
+      brand: "Straus",
+    })).toEqual({ brand: "Straus", title: "Organic Plain Nonfat Greek Yogurt, 32 oz", size: "32 oz" });
+
+    expect(getFoodProductIdentity({
+      name: "RXBAR Protein Bars, Blueberry Cashew Butter",
+      brand: "RXBAR",
+    }).title).toBe("Blueberry Cashew Butter Protein Bars");
+    expect(getFoodProductIdentity({
+      name: "COMPLETE PROTEIN 42 G ELITE HIGH PROTEIN MILK SHAKE, VANILLA, VANILLA",
+      brand: "CORE POWER",
+    }).title).toBe("Vanilla Complete Protein 42 G Elite High Protein Milk Shake");
+
+    expect(getFoodProductIdentity({ name: "GREEK YOGURT", brand: "CORE POWER" }).brand).toBe("Core Power");
+    expect(getFoodPackageSize("BLUEBERRY 12 G. PROTEIN BAR, BLUEBERRY")).toBeNull();
+    expect(getFoodPackageSize("Coca-Cola 24-16.9 fluid ounce (US) Bottle")).toBe("24 × 16.9 fl oz");
+    expect(getFoodProductIdentity({
+      name: "RXBAR PROTEIN BAR, 1.83 OZ, 10 COUNT",
+      brand: "RXBAR",
+    })).toEqual({ brand: "RXBAR", title: "Protein Bar, 1.83 Oz, 10 Count", size: "10 × 1.83 oz" });
+    expect(getFoodPackageSize("COMPLETE PROTEIN 42 G ELITE HIGH PROTEIN MILK SHAKE")).toBeNull();
+  });
+
+  test("collapses duplicate non-null UPC rows and keeps distinct packages", () => {
+    const hits = [
+      { productRef: "food_a", upc: "00049000050103" },
+      { productRef: "food_b", upc: "49000050103" },
+      { productRef: "food_c", upc: "00049000012590" },
+      { productRef: "food_d", upc: null },
+      { productRef: "food_e", upc: null },
+    ];
+
+    expect(dedupeFoodSearchHits(hits).map((hit) => hit.productRef)).toEqual([
+      "food_a",
+      "food_c",
+      "food_d",
+      "food_e",
+    ]);
   });
 });
 

@@ -4,7 +4,6 @@ import type { PublicProductDetail } from "@murphai/contracts";
 import { CheckIcon, PlusIcon, XIcon } from "lucide-react";
 import Image from "next/image";
 
-import { Badge } from "@/src/components/ui/badge";
 import { Button } from "@/src/components/ui/button";
 import {
   Popover,
@@ -12,25 +11,26 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "@/src/components/ui/popover";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@/src/components/ui/toggle-group";
 import { cn } from "@/src/lib/utils";
 
 import {
+  FOOD_COMPARISON_LIMIT,
   compareFoodMetrics,
   formatFoodMetricValue,
-  getFoodAlertLabel,
   getFoodCategoryAsset,
+  getFoodEvidenceCoverage,
   getFoodEvidenceSummary,
+  getFoodLeadSummary,
   getFoodMetricConclusion,
-  getFoodObservationScope,
+  getFoodProductIdentity,
   getFoodTopMatch,
+  type FoodEvidenceCoverage,
   type FoodMetricBasis,
   type FoodMetricComparison,
 } from "./food-label-model";
-import type { FoodEvidencePanel } from "./food-evidence-sheet";
+
+const LABEL_COLUMN_WIDTH = 148;
+const PRODUCT_COLUMN_WIDTH = 236;
 
 export function FoodComparisonTable(input: {
   products: PublicProductDetail[];
@@ -38,120 +38,69 @@ export function FoodComparisonTable(input: {
   onBasisChange: (basis: FoodMetricBasis) => void;
   onRemoveProduct: (productRef: string) => void;
   onRequestAdd: () => void;
-  onOpenEvidence: (
-    product: PublicProductDetail,
-    panel: FoodEvidencePanel,
-  ) => void;
+  onOpenEvidence: (product: PublicProductDetail) => void;
 }) {
   const comparisons = compareFoodMetrics(input.products, input.basis);
   const topMatch = getFoodTopMatch(input.products, comparisons);
-  const hasTopMatch = topMatch.productRefs.size > 0;
+  const leadSummary = getFoodLeadSummary(input.products, topMatch);
+  const showAddColumn = input.products.length < FOOD_COMPARISON_LIMIT;
+  const columnCount = input.products.length + (showAddColumn ? 1 : 0);
 
   return (
     <section
       aria-label="Food comparison"
-      className="overflow-hidden rounded-xl border border-border bg-card"
+      className="inline-block max-w-full overflow-hidden rounded-xl border border-border bg-card align-top"
     >
-      <div className="flex min-h-14 flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-2 sm:px-5">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={input.onRequestAdd}
-          disabled={input.products.length >= 4}
-        >
-          <PlusIcon data-icon="inline-start" />
-          Add food
-        </Button>
-        <ToggleGroup
-          value={[input.basis]}
-          onValueChange={(values) => {
-            const next = values[0];
-            if (next === "per_100_g" || next === "per_serving") {
-              input.onBasisChange(next);
-            }
-          }}
-          variant="outline"
-          size="sm"
-          aria-label="Nutrition basis"
-        >
-          <ToggleGroupItem value="per_100_g" aria-label="Compare per 100 grams">
-            Per 100 g
-          </ToggleGroupItem>
-          <ToggleGroupItem value="per_serving" aria-label="Compare per serving">
-            Per serving
-          </ToggleGroupItem>
-        </ToggleGroup>
+      <div className="flex min-h-12 flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-2">
+        <p className="text-xs text-muted-foreground">
+          {`${input.products.length} of ${FOOD_COMPARISON_LIMIT} products`}
+        </p>
+        <BasisToggle
+          basis={input.basis}
+          onBasisChange={input.onBasisChange}
+          label="Nutrition basis"
+        />
       </div>
 
       <div className="overflow-x-auto">
         <table
-          className="w-full table-fixed border-collapse"
-          style={{ minWidth: `${176 + input.products.length * 272}px` }}
+          className="table-fixed border-collapse"
+          style={{ width: `${LABEL_COLUMN_WIDTH + columnCount * PRODUCT_COLUMN_WIDTH}px` }}
         >
           <colgroup>
-            <col style={{ width: "176px" }} />
+            <col style={{ width: `${LABEL_COLUMN_WIDTH}px` }} />
             {input.products.map((product) => (
-              <col key={product.productRef} style={{ width: "272px" }} />
+              <col key={product.productRef} style={{ width: `${PRODUCT_COLUMN_WIDTH}px` }} />
             ))}
+            {showAddColumn ? <col style={{ width: `${PRODUCT_COLUMN_WIDTH}px` }} /> : null}
           </colgroup>
           <thead>
             <tr>
               <th
                 scope="col"
-                className="sticky left-0 border-r border-border bg-card px-5 py-6 text-left align-bottom font-mono text-[9px] font-medium tracking-[0.11em] text-muted-foreground uppercase"
+                className="sticky left-0 z-10 border-r border-border bg-card px-4 py-4 text-left align-bottom text-xs font-normal text-muted-foreground"
               >
-                Compare
+                <span className="sr-only">Metric</span>
               </th>
-              {input.products.map((product) => {
-                const wins = topMatch.winsByProductRef.get(product.productRef) ?? 0;
-                const isTopMatch = topMatch.productRefs.has(product.productRef);
-                return (
-                  <th
-                    key={product.productRef}
-                    scope="col"
-                    className={cn(
-                      "relative border-r border-border px-5 py-5 text-left align-top last:border-r-0",
-                      isTopMatch && "bg-primary/5",
-                    )}
+              {input.products.map((product) => (
+                <ProductHeader
+                  key={product.productRef}
+                  product={product}
+                  onRemove={() => input.onRemoveProduct(product.productRef)}
+                />
+              ))}
+              {showAddColumn ? (
+                <th scope="col" className="p-2 align-top">
+                  <button
+                    type="button"
+                    onClick={input.onRequestAdd}
+                    className="flex min-h-[7.5rem] w-full flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border text-sm text-muted-foreground outline-none transition-colors hover:border-primary hover:text-primary focus-visible:ring-2 focus-visible:ring-ring"
                   >
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => input.onRemoveProduct(product.productRef)}
-                      className="absolute top-3 right-3"
-                    >
-                      <XIcon />
-                      <span className="sr-only">Remove {product.name}</span>
-                    </Button>
-                    <div className="grid grid-cols-[4rem_minmax(0,1fr)] items-center gap-4 pr-8">
-                      <Image
-                        src={getFoodCategoryAsset(product)}
-                        alt=""
-                        width={64}
-                        height={64}
-                        className="size-16 object-contain"
-                      />
-                      <div className="min-w-0">
-                        {product.brand ? (
-                          <p className="truncate font-mono text-[9px] font-medium tracking-[0.11em] text-muted-foreground uppercase">
-                            {product.brand}
-                          </p>
-                        ) : null}
-                        <p className="mt-1 line-clamp-2 font-serif text-lg font-semibold leading-tight tracking-[-0.015em] text-foreground">
-                          {product.name}
-                        </p>
-                      </div>
-                    </div>
-                    {isTopMatch && hasTopMatch ? (
-                      <Badge className="mt-4 border-primary/20 bg-primary/10 text-primary" variant="outline">
-                        {topMatch.productRefs.size > 1 ? "Tied" : "Top match"} · {wins} of {topMatch.comparableMetricCount}
-                      </Badge>
-                    ) : null}
-                  </th>
-                );
-              })}
+                    <PlusIcon className="size-4" aria-hidden="true" />
+                    {input.products.length === 1 ? "Add a product to compare" : "Add another product"}
+                  </button>
+                </th>
+              ) : null}
             </tr>
           </thead>
           <tbody>
@@ -161,28 +110,110 @@ export function FoodComparisonTable(input: {
                 comparison={comparison}
                 products={input.products}
                 basis={input.basis}
-                onBasisChange={input.onBasisChange}
+                showAddColumn={showAddColumn}
               />
             ))}
-            <tr className="border-t-2 border-border">
+            <tr className="border-t border-border">
               <th
                 scope="row"
-                className="sticky left-0 border-r border-border bg-card px-5 py-5 text-left text-sm font-normal text-muted-foreground"
+                className="sticky left-0 z-10 border-r border-border bg-card px-4 py-4 text-left align-top"
               >
-                Evidence
+                <span className="block text-sm font-normal text-foreground">Evidence</span>
+                <span className="block text-xs font-normal text-muted-foreground">Record coverage</span>
               </th>
               {input.products.map((product) => (
                 <EvidenceCell
                   key={product.productRef}
                   product={product}
-                  onOpenEvidence={input.onOpenEvidence}
+                  onOpenEvidence={() => input.onOpenEvidence(product)}
                 />
               ))}
+              {showAddColumn ? <td /> : null}
             </tr>
           </tbody>
         </table>
       </div>
+
+      {leadSummary ? (
+        <p className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
+          {`${leadSummary} Rows compare the visible values only.`}
+        </p>
+      ) : null}
     </section>
+  );
+}
+
+function ProductHeader(input: { product: PublicProductDetail; onRemove: () => void }) {
+  const identity = getFoodProductIdentity(input.product);
+  return (
+    <th
+      scope="col"
+      className="relative border-r border-border px-4 py-4 text-left align-top font-normal last:border-r-0"
+    >
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        onClick={input.onRemove}
+        className="absolute top-2 right-2 text-muted-foreground"
+      >
+        <XIcon />
+        <span className="sr-only">Remove {identity.brand ?? ""} {identity.title}</span>
+      </Button>
+      <div className="grid grid-cols-[3.5rem_minmax(0,1fr)] items-start gap-3 pr-7">
+        <Image
+          src={getFoodCategoryAsset(input.product)}
+          alt=""
+          width={56}
+          height={56}
+          className="size-14 object-contain"
+        />
+        <div className="min-w-0">
+          {identity.brand ? (
+            <p className="truncate text-sm font-semibold text-foreground">{identity.brand}</p>
+          ) : null}
+          <p className="line-clamp-2 text-sm leading-snug text-foreground">{identity.title}</p>
+          <p className="mt-1 truncate text-xs text-muted-foreground">
+            {identity.size ?? "Package size not reported"}
+          </p>
+        </div>
+      </div>
+    </th>
+  );
+}
+
+function BasisToggle(input: {
+  basis: FoodMetricBasis;
+  label: string;
+  onBasisChange: (basis: FoodMetricBasis) => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label={input.label}
+      className="flex w-fit items-center rounded-lg border border-border bg-card p-0.5"
+    >
+      {([
+        ["per_100_g", "Per 100 g", "Compare per 100 grams"],
+        ["per_serving", "Per serving", "Compare per serving"],
+      ] as const).map(([value, text, label]) => (
+        <button
+          key={value}
+          type="button"
+          aria-label={label}
+          aria-pressed={input.basis === value}
+          onClick={() => input.onBasisChange(value)}
+          className={cn(
+            "rounded-md px-2.5 py-1.5 text-xs font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+            input.basis === value
+              ? "bg-background text-foreground shadow-xs"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {text}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -190,15 +221,21 @@ function MetricRow(input: {
   basis: FoodMetricBasis;
   comparison: FoodMetricComparison;
   products: PublicProductDetail[];
-  onBasisChange: (basis: FoodMetricBasis) => void;
+  showAddColumn: boolean;
 }) {
+  const preference = input.comparison.metric.preference === "higher"
+    ? "Highest marked"
+    : "Lowest marked";
   return (
     <tr className="border-t border-border">
       <th
         scope="row"
-        className="sticky left-0 border-r border-border bg-card px-5 py-5 text-left text-sm font-normal text-muted-foreground"
+        className="sticky left-0 z-10 border-r border-border bg-card px-4 py-3 text-left align-top"
       >
-        {input.comparison.metric.label}
+        <span className="block text-sm font-normal text-foreground">
+          {input.comparison.metric.label}
+        </span>
+        <span className="block text-xs font-normal text-muted-foreground">{preference}</span>
       </th>
       {input.products.map((product) => {
         const value = input.comparison.values.get(product.productRef);
@@ -206,64 +243,59 @@ function MetricRow(input: {
         return (
           <td
             key={product.productRef}
-            className={cn(
-              "border-r border-border p-0 last:border-r-0",
-              isWinner && "bg-primary/5",
-            )}
+            className="border-r border-border p-0 align-top last:border-r-0"
           >
             {value ? (
               <MetricPopover
                 activeProduct={product}
-                basis={input.basis}
                 comparison={input.comparison}
                 products={input.products}
-                onBasisChange={input.onBasisChange}
               >
                 <button
                   type="button"
-                  className="flex min-h-16 w-full items-center gap-3 px-5 py-4 text-left outline-none transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                  title={`${input.comparison.metric.label} detail`}
+                  className="relative flex min-h-12 w-full items-center gap-2 px-4 py-3 text-left outline-none transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                 >
                   {isWinner ? (
-                    <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                      <CheckIcon className="size-3.5" aria-hidden="true" />
+                    <CheckIcon className="size-4 shrink-0 text-primary" aria-hidden="true" />
+                  ) : null}
+                  <span
+                    className={cn(
+                      "font-serif text-xl tracking-[-0.02em] text-foreground",
+                      isWinner && "font-semibold",
+                    )}
+                  >
+                    {formatFoodMetricValue(value)}
+                  </span>
+                  {isWinner ? (
+                    <span className="sr-only">
+                      {input.comparison.metric.preference === "higher" ? "highest" : "lowest"}
                     </span>
                   ) : null}
-                  <span>
-                    <span
-                      className={cn(
-                        "block font-serif text-2xl tracking-[-0.02em] text-foreground",
-                        isWinner && "font-semibold",
-                      )}
-                    >
-                      {formatFoodMetricValue(value)}
-                    </span>
-                    {isWinner ? (
-                      <span className="mt-0.5 block text-xs font-medium text-primary">
-                        {input.comparison.metric.preference === "higher" ? "Highest" : "Lowest"}
-                      </span>
-                    ) : null}
-                  </span>
                 </button>
               </MetricPopover>
             ) : (
-              <span className="flex min-h-16 items-center px-5 py-4 font-serif text-2xl text-muted-foreground">
-                —
+              <span className="flex min-h-12 items-center px-4 py-3 text-sm text-muted-foreground">
+                {product.nutrition.rows.length === 0
+                  ? "No nutrition in record"
+                  : input.basis === "per_serving" && !product.serving?.grams
+                    ? "Serving mass not reported"
+                    : "Not on label"}
               </span>
             )}
           </td>
         );
       })}
+      {input.showAddColumn ? <td /> : null}
     </tr>
   );
 }
 
 function MetricPopover(input: {
   activeProduct: PublicProductDetail;
-  basis: FoodMetricBasis;
   children: React.ReactElement;
   comparison: FoodMetricComparison;
   products: PublicProductDetail[];
-  onBasisChange: (basis: FoodMetricBasis) => void;
 }) {
   const sorted = input.products
     .flatMap((product) => {
@@ -275,7 +307,7 @@ function MetricPopover(input: {
         ? right.value.value - left.value.value
         : left.value.value - right.value.value,
     );
-  const comparisonLabel = getFoodMetricConclusion(
+  const conclusion = getFoodMetricConclusion(
     input.comparison,
     input.activeProduct.productRef,
     input.products.length,
@@ -286,112 +318,107 @@ function MetricPopover(input: {
     <Popover>
       <PopoverTrigger render={input.children} />
       <PopoverContent
-        align="center"
+        align="start"
         side="bottom"
-        sideOffset={10}
-        className="w-80 gap-5 rounded-xl border border-border bg-popover p-5 shadow-none ring-0"
+        sideOffset={6}
+        className="w-72 gap-3 rounded-lg border border-border bg-popover p-3 shadow-none ring-0"
       >
-        <div>
-          <PopoverTitle className="font-serif text-lg font-semibold tracking-[-0.015em] text-foreground">
+        <div className="flex items-baseline justify-between gap-3">
+          <PopoverTitle className="text-sm font-semibold text-foreground">
             {input.comparison.metric.label}
           </PopoverTitle>
-          <p className="mt-1 font-serif text-2xl font-semibold tracking-[-0.02em] text-foreground">
-            {comparisonLabel}
-          </p>
+          <span className="text-xs text-muted-foreground">{conclusion}</span>
         </div>
 
-        <div className="flex flex-col gap-3">
+        <ul className="flex flex-col gap-2">
           {sorted.map((entry) => {
             const active = entry.product.productRef === input.activeProduct.productRef;
+            const identity = getFoodProductIdentity(entry.product);
             return (
-              <div key={entry.product.productRef}>
-                <div className="flex items-center justify-between gap-4 text-sm">
+              <li key={entry.product.productRef}>
+                <div className="flex items-center justify-between gap-3 text-xs">
                   <span className={cn("truncate", active ? "font-medium text-foreground" : "text-muted-foreground")}>
-                    {entry.product.brand ?? entry.product.name}
+                    {identity.brand ? `${identity.brand} · ${identity.title}` : identity.title}
                   </span>
-                  <span className="shrink-0 font-serif font-semibold text-foreground">
+                  <span className="shrink-0 font-medium text-foreground">
                     {formatFoodMetricValue(entry.value)}
                   </span>
                 </div>
-                <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
+                <div className="mt-1 h-1 overflow-hidden rounded-full bg-muted">
                   <div
                     className={cn("h-full rounded-full", active ? "bg-primary" : "bg-border")}
-                    style={{ width: `${Math.max(4, (entry.value.value / max) * 100)}%` }}
+                    style={{ width: `${Math.max(3, (entry.value.value / max) * 100)}%` }}
                   />
                 </div>
-              </div>
+              </li>
             );
           })}
-        </div>
+        </ul>
 
-        <div className="flex items-center justify-between gap-4 border-t border-border pt-4">
-          <ToggleGroup
-            value={[input.basis]}
-            onValueChange={(values) => {
-              const next = values[0];
-              if (next === "per_100_g" || next === "per_serving") {
-                input.onBasisChange(next);
-              }
-            }}
-            variant="outline"
-            size="sm"
-            aria-label={`${input.comparison.metric.label} basis`}
+        {input.activeProduct.source.url ? (
+          <a
+            href={input.activeProduct.source.url}
+            target="_blank"
+            rel="noreferrer"
+            referrerPolicy="no-referrer"
+            className="self-end border-t border-border pt-3 text-xs text-muted-foreground underline decoration-border underline-offset-4 hover:text-foreground"
           >
-            <ToggleGroupItem value="per_100_g" aria-label="Per 100 grams">100 g</ToggleGroupItem>
-            <ToggleGroupItem value="per_serving" aria-label="Per serving">Serving</ToggleGroupItem>
-          </ToggleGroup>
-          {input.activeProduct.source.url ? (
-            <a
-              href={input.activeProduct.source.url}
-              target="_blank"
-              rel="noreferrer"
-              referrerPolicy="no-referrer"
-              className="text-sm text-muted-foreground underline decoration-border underline-offset-4 hover:text-foreground"
-            >
-              Source
-            </a>
-          ) : null}
-        </div>
+            Source
+          </a>
+        ) : null}
       </PopoverContent>
     </Popover>
   );
 }
 
+export function EvidenceMeter(input: {
+  coverage: FoodEvidenceCoverage;
+  className?: string;
+}) {
+  return (
+    <span className={cn("flex items-center gap-1", input.className)} aria-hidden="true">
+      {input.coverage.segments.map((segment) => (
+        <span
+          key={segment.id}
+          className={cn(
+            "h-1.5 w-4 rounded-full",
+            segment.covered ? "bg-foreground/55" : "bg-border",
+          )}
+        />
+      ))}
+    </span>
+  );
+}
+
 function EvidenceCell(input: {
   product: PublicProductDetail;
-  onOpenEvidence: (
-    product: PublicProductDetail,
-    panel: FoodEvidencePanel,
-  ) => void;
+  onOpenEvidence: () => void;
 }) {
+  const coverage = getFoodEvidenceCoverage(input.product);
   const summary = getFoodEvidenceSummary(input.product);
-  const hasAlerts = summary.alertCount > 0;
-  const alertLabel = getFoodAlertLabel(summary, false);
+  const alertLabel = summary.alertCount > 0
+    ? `${summary.alertsLowerBound ? "At least " : ""}${summary.alertCount} above a screening limit`
+    : null;
 
   return (
-    <td className="border-r border-border px-5 py-4 last:border-r-0">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
-        <button
-          type="button"
-          onClick={() => input.onOpenEvidence(input.product, "tests")}
-          className={cn(
-            "rounded-sm font-medium underline decoration-border underline-offset-4 outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            hasAlerts ? "text-destructive" : "text-primary",
-          )}
-        >
-          {alertLabel}
-        </button>
-        <button
-          type="button"
-          onClick={() => input.onOpenEvidence(input.product, "gaps")}
-          className="rounded-sm text-muted-foreground underline decoration-border underline-offset-4 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          Evidence: {summary.level}
-        </button>
-        <span className="text-xs text-muted-foreground">
-          {getFoodObservationScope(summary).replace(/^Showing /u, "")} · {summary.gapCount} gaps
+    <td className="border-r border-border px-4 py-3 align-top last:border-r-0">
+      <button
+        type="button"
+        onClick={input.onOpenEvidence}
+        className="group relative flex flex-col items-start gap-1 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <EvidenceMeter coverage={coverage} />
+        <span className="text-xs text-muted-foreground underline decoration-border underline-offset-4 group-hover:text-foreground">
+          {`${coverage.coveredCount} of ${coverage.segments.length} record parts`}
+          <span className="sr-only">
+            {" "}
+            · {coverage.segments.map((segment) => `${segment.label}: ${segment.covered ? "covered" : "missing"}`).join(", ")}
+          </span>
         </span>
-      </div>
+        {alertLabel ? (
+          <span className="text-xs font-medium text-destructive">{alertLabel}</span>
+        ) : null}
+      </button>
     </td>
   );
 }

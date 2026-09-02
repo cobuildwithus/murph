@@ -1,15 +1,9 @@
 "use client";
 
 import type { PublicProductDetail } from "@murphai/contracts";
-import {
-  AlertTriangleIcon,
-  CheckIcon,
-  CircleHelpIcon,
-  FlaskConicalIcon,
-} from "lucide-react";
 import Image from "next/image";
+import { useEffect, useRef } from "react";
 
-import { Badge } from "@/src/components/ui/badge";
 import { ScrollArea } from "@/src/components/ui/scroll-area";
 import {
   Sheet,
@@ -19,11 +13,15 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/src/components/ui/sheet";
+import { cn } from "@/src/lib/utils";
+
+import { EvidenceMeter } from "./food-comparison-table";
 import {
-  getFoodAlertLabel,
   getFoodCategoryAsset,
-  getFoodEvidenceSummary,
-  getFoodObservationScope,
+  getFoodEvidenceCoverage,
+  getFoodEvidenceStatuses,
+  getFoodProductIdentity,
+  type FoodEvidenceTone,
 } from "./food-label-model";
 import {
   formatEvidenceBasis,
@@ -35,105 +33,172 @@ import {
 
 export type FoodEvidencePanel = "tests" | "gaps";
 
+const STATUS_CODES_SHOWN_AS_RESULTS = new Set<PublicProductDetail["unknowns"][number]["code"]>([
+  "NO_LINKED_PRODUCT_TESTS",
+  "TEST_THRESHOLD_NOT_COMPARABLE",
+]);
+
 export function FoodEvidenceSheet(input: {
-  panel: FoodEvidencePanel | null;
+  focus: FoodEvidencePanel | null;
   product: PublicProductDetail | null;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { panel, product } = input;
+  const { focus, product } = input;
 
   return (
-    <Sheet open={panel !== null && product !== null} onOpenChange={input.onOpenChange}>
+    <Sheet open={product !== null} onOpenChange={input.onOpenChange}>
       <SheetContent
         side="right"
-        className="w-full gap-0 border-border bg-popover shadow-none sm:max-w-lg"
+        className="w-full gap-0 border-border bg-popover shadow-none data-[side=right]:w-full sm:max-w-md"
       >
-        {product && panel === "tests" ? <TestsPanel product={product} /> : null}
-        {product && panel === "gaps" ? <GapsPanel product={product} /> : null}
+        {product ? <EvidencePanel product={product} focus={focus} /> : null}
       </SheetContent>
     </Sheet>
   );
 }
 
-function ProductHeading(input: { product: PublicProductDetail }) {
-  return (
-    <div className="grid grid-cols-[3.5rem_minmax(0,1fr)] items-center gap-4">
-      <Image
-        src={getFoodCategoryAsset(input.product)}
-        alt=""
-        width={56}
-        height={56}
-        className="size-14 object-contain"
-      />
-      <div className="min-w-0">
-        {input.product.brand ? (
-          <p className="truncate font-mono text-[9px] font-medium tracking-[0.11em] text-muted-foreground uppercase">
-            {input.product.brand}
-          </p>
-        ) : null}
-        <p className="truncate font-serif text-xl font-semibold tracking-[-0.02em] text-foreground">
-          {input.product.name}
-        </p>
-        <p className="truncate text-sm text-muted-foreground">
-          {formatServing(input.product)}
-        </p>
-      </div>
-    </div>
-  );
-}
+function EvidencePanel(input: { product: PublicProductDetail; focus: FoodEvidencePanel | null }) {
+  const { product } = input;
+  const identity = getFoodProductIdentity(product);
+  const coverage = getFoodEvidenceCoverage(product);
+  const statuses = getFoodEvidenceStatuses(product);
+  const gaps = product.unknowns.filter((unknown) => !STATUS_CODES_SHOWN_AS_RESULTS.has(unknown.code));
+  const observations = product.productTests.observations;
+  const gapsRef = useRef<HTMLElement | null>(null);
 
-function TestsPanel(input: { product: PublicProductDetail }) {
-  const summary = getFoodEvidenceSummary(input.product);
-  const observations = input.product.productTests.observations;
+  useEffect(() => {
+    if (input.focus === "gaps" && typeof gapsRef.current?.scrollIntoView === "function") {
+      gapsRef.current.scrollIntoView({ block: "start" });
+    }
+  }, [input.focus, product.productRef]);
 
   return (
     <>
-      <SheetHeader className="gap-6 border-b border-border p-6 pr-14">
-        <ProductHeading product={input.product} />
-        <div>
-          <SheetTitle className="font-serif text-3xl font-semibold leading-tight tracking-[-0.025em]">
-            {getFoodAlertLabel(summary, true)}
-          </SheetTitle>
-          <SheetDescription className="mt-2">
-            {getFoodObservationScope(summary)}
-          </SheetDescription>
+      <SheetHeader className="gap-4 border-b border-border p-5 pr-12">
+        <div className="grid grid-cols-[2.5rem_minmax(0,1fr)] items-center gap-3">
+          <Image
+            src={getFoodCategoryAsset(product)}
+            alt=""
+            width={40}
+            height={40}
+            className="size-10 object-contain"
+          />
+          <div className="min-w-0">
+            <SheetTitle className="truncate text-sm font-semibold text-foreground">
+              {identity.brand ? `${identity.brand} · ` : ""}{identity.title}
+            </SheetTitle>
+            <SheetDescription className="truncate text-xs">
+              {[identity.size, product.upc ? `UPC ${product.upc}` : null].filter(Boolean).join(" · ")
+                || "Package size not reported"}
+            </SheetDescription>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <EvidenceMeter coverage={coverage} />
+          <p className="text-sm text-foreground">
+            {coverage.coveredCount} of {coverage.segments.length} record parts
+          </p>
         </div>
       </SheetHeader>
 
       <ScrollArea className="min-h-0 flex-1">
-        {summary.alertCount === 0 ? (
-          <div className="flex min-h-64 flex-col items-center justify-center gap-5 px-8 text-center">
-            <div className="flex size-20 items-center justify-center rounded-full bg-muted text-muted-foreground">
-              <FlaskConicalIcon className="size-9" aria-hidden="true" />
-            </div>
-            <p className="max-w-xs font-serif text-2xl font-semibold tracking-[-0.02em] text-foreground">
-              {summary.observationCount === 0
-                ? "No product-level observation is linked to this exact product."
-                : "No alert appears in the shown observations."}
-            </p>
-          </div>
-        ) : null}
-
-        {observations.length > 0 ? (
-          <details className="mx-6 border-t border-border py-5">
-            <summary className="cursor-pointer text-sm font-medium text-primary underline decoration-border underline-offset-4">
-              View shown observations
-            </summary>
-            <div className="mt-4 divide-y divide-border">
-              {observations.map((observation) => (
-                <ObservationRow key={observation.id} observation={observation} />
+        <div className="flex flex-col divide-y divide-border px-5">
+          <section className="py-4" aria-label="Record coverage">
+            <ul className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+              {coverage.segments.map((segment) => (
+                <li key={segment.id} className="flex items-center gap-2 text-xs">
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      "size-2 shrink-0 rounded-full",
+                      segment.covered ? "bg-foreground/55" : "bg-[#c4a882]",
+                    )}
+                  />
+                  <span className={segment.covered ? "text-foreground" : "text-muted-foreground"}>
+                    {segment.label}
+                  </span>
+                </li>
               ))}
-            </div>
-          </details>
-        ) : null}
+            </ul>
+          </section>
+
+          <section className="py-4" aria-label="Linked test results">
+            <h3 className="text-xs font-semibold text-foreground">Linked test results</h3>
+            <ul className="mt-2 flex flex-col gap-2">
+              {statuses.map((status) => (
+                <li key={status.id} className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-2">
+                  <ToneDot tone={status.tone} className="mt-1.5" />
+                  <div>
+                    <p
+                      className={cn(
+                        "text-sm",
+                        status.tone === "alert" ? "font-medium text-destructive" : "text-foreground",
+                      )}
+                    >
+                      {status.title}
+                    </p>
+                    <p className="text-xs text-muted-foreground">{status.detail}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+            {observations.length > 0 ? (
+              <details className="mt-3">
+                <summary className="cursor-pointer text-xs text-muted-foreground underline decoration-border underline-offset-4 hover:text-foreground">
+                  Show {observations.length} returned {observations.length === 1 ? "result" : "results"}
+                </summary>
+                <ul className="mt-2 divide-y divide-border">
+                  {observations.map((observation) => (
+                    <ObservationRow key={observation.id} observation={observation} />
+                  ))}
+                </ul>
+              </details>
+            ) : null}
+          </section>
+
+          <section className="py-4" aria-label="Evidence gaps" ref={gapsRef}>
+            <h3 className="text-xs font-semibold text-foreground">
+              {gaps.length === 0 ? "No other known gaps" : `${gaps.length} known ${gaps.length === 1 ? "gap" : "gaps"}`}
+            </h3>
+            {gaps.length > 0 ? (
+              <ul className="mt-2 flex flex-col gap-2">
+                {gaps.map((gap) => (
+                  <li key={gap.code} className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-2">
+                    <ToneDot tone="unknown" className="mt-1.5" />
+                    <div>
+                      <p className="text-sm text-foreground">{gap.title}</p>
+                      <p className="text-xs text-muted-foreground">{gap.description}</p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </section>
+        </div>
       </ScrollArea>
 
-      <SheetFooter className="border-t border-border px-6 py-5">
-        <p className="text-sm text-muted-foreground">
-          Screening references are not product safety determinations.
+      <SheetFooter className="border-t border-border px-5 py-3">
+        <p className="text-xs text-muted-foreground">
+          Screening limits are references, not safety verdicts. Unknown is not a failed test.
         </p>
       </SheetFooter>
     </>
+  );
+}
+
+function ToneDot(input: { tone: FoodEvidenceTone; className?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "size-2 shrink-0 rounded-full",
+        input.tone === "alert" && "bg-destructive",
+        input.tone === "supported" && "bg-primary",
+        input.tone === "unknown" && "bg-[#c4a882]",
+        input.tone === "neutral" && "bg-border",
+        input.className,
+      )}
+    />
   );
 }
 
@@ -141,32 +206,66 @@ function ObservationRow(input: {
   observation: PublicProductDetail["productTests"]["observations"][number];
 }) {
   const { observation } = input;
-  return (
-    <div className="py-5">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-sm font-medium text-foreground">{observation.analyte.name}</p>
-          <p className="mt-1 font-serif text-lg font-semibold text-foreground">
-            {formatProductTestResult(observation.result)}
-          </p>
-          <p className="mt-0.5 text-xs text-muted-foreground">{formatEvidenceBasis(observation.result.basis)}</p>
-          {observation.normalizedResult && hasDistinctNormalizedProductTestResult(observation) ? (
-            <p className="mt-2 text-xs leading-5 text-muted-foreground">
-              Normalized: {formatNormalizedProductTestResult(observation)} · {formatEvidenceBasis(observation.normalizedResult.basis)}
-            </p>
-          ) : null}
-        </div>
-        <ScreeningBadge screening={observation.screening} />
-      </div>
+  const screening = observation.screening;
+  const tone: FoodEvidenceTone = screening === null
+    ? "unknown"
+    : screening.comparison === "exceeds" ? "alert" : "supported";
+  const screeningLabel = screening === null
+    ? "No comparable screening threshold"
+    : screening.comparison === "exceeds"
+      ? "Above this screening threshold"
+      : "Did not exceed this screening threshold";
 
-      {observation.screening ? (
-        <ThresholdFacts
-          threshold={observation.screening.threshold}
-          screeningPolicy={observation.screening.screeningPolicy}
-        />
+  return (
+    <li className="py-3 text-xs">
+      <div className="flex items-baseline justify-between gap-3">
+        <p className="font-medium text-foreground">{observation.analyte.name}</p>
+        <p className="shrink-0 text-foreground">{formatProductTestResult(observation.result)}</p>
+      </div>
+      <p className="mt-1 flex items-center gap-1.5">
+        <ToneDot tone={tone} />
+        <span className={cn(tone === "alert" ? "font-medium text-destructive" : "text-muted-foreground")}>
+          {screeningLabel}
+        </span>
+      </p>
+      <p className="mt-1 text-muted-foreground">
+        {formatEvidenceBasis(observation.result.basis)}
+        {observation.normalizedResult && hasDistinctNormalizedProductTestResult(observation)
+          ? ` · Normalized: ${formatNormalizedProductTestResult(observation)} · ${formatEvidenceBasis(observation.normalizedResult.basis)}`
+          : null}
+      </p>
+
+      {screening ? (
+        <p className="mt-1.5 text-muted-foreground">
+          {screening.threshold.name} · {formatProductTestNumber(screening.threshold.value)} {screening.threshold.unit} · {formatEvidenceBasis(screening.threshold.basis)} · {screening.threshold.authority}
+          {screening.screeningPolicy ? (
+            <>
+              {" · "}
+              {formatProductTestNumber(screening.screeningPolicy.assumedServingsPerDay)} servings/day
+              {" · "}
+              {formatProductTestNumber(screening.screeningPolicy.assumedBodyWeightKg)} kg
+              {" · "}
+              {formatProductTestNumber(Math.round(screening.screeningPolicy.ratio * 100) / 100)}× threshold
+            </>
+          ) : null}
+          {screening.threshold.url ? (
+            <>
+              {" · "}
+              <a
+                href={screening.threshold.url}
+                target="_blank"
+                rel="noreferrer"
+                referrerPolicy="no-referrer"
+                className="underline decoration-border underline-offset-4 hover:text-foreground"
+              >
+                Threshold source
+              </a>
+            </>
+          ) : null}
+        </p>
       ) : null}
 
-      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+      <p className="mt-1.5 flex flex-wrap gap-x-2 text-muted-foreground">
         <span>{observation.source.name}</span>
         {observation.source.reportDate ? <span>{observation.source.reportDate}</span> : null}
         {observation.sample?.sampleCount ? (
@@ -178,181 +277,12 @@ function ObservationRow(input: {
             target="_blank"
             rel="noreferrer"
             referrerPolicy="no-referrer"
-            className="text-foreground underline decoration-border underline-offset-4 hover:text-primary"
+            className="underline decoration-border underline-offset-4 hover:text-foreground"
           >
             Report
           </a>
         ) : null}
-      </div>
-    </div>
-  );
-}
-
-function ScreeningBadge(input: {
-  screening: PublicProductDetail["productTests"]["observations"][number]["screening"];
-}) {
-  if (!input.screening) {
-    return (
-      <Badge variant="outline" className="h-fit border-border bg-muted text-muted-foreground">
-        No comparable screening threshold
-      </Badge>
-    );
-  }
-  if (input.screening.comparison === "exceeds") {
-    return (
-      <Badge variant="destructive" className="h-fit gap-1.5">
-        <AlertTriangleIcon aria-hidden="true" />
-        Above this screening threshold
-      </Badge>
-    );
-  }
-  return (
-    <Badge variant="outline" className="h-fit gap-1.5 border-primary/30 bg-primary/10 text-primary">
-      <CheckIcon aria-hidden="true" />
-      Did not exceed this screening threshold
-    </Badge>
-  );
-}
-
-function ThresholdFacts(input: {
-  threshold: PublicProductDetail["productTests"]["alerts"][number]["threshold"];
-  screeningPolicy?: PublicProductDetail["productTests"]["alerts"][number]["screeningPolicy"];
-}) {
-  return (
-    <div className="mt-3 text-sm text-muted-foreground">
-      <p className="font-medium text-foreground">{input.threshold.name}</p>
-      <p>
-        {formatProductTestNumber(input.threshold.value)} {input.threshold.unit} · {formatEvidenceBasis(input.threshold.basis)} · {input.threshold.authority}
       </p>
-      {input.screeningPolicy ? (
-        <p className="mt-1 text-xs">
-          Exposure {formatProductTestNumber(input.screeningPolicy.exposure.value)} {input.screeningPolicy.exposure.unit}
-          {` · ${formatEvidenceBasis(input.screeningPolicy.exposure.basis)}`}
-          {` · ${formatProductTestNumber(input.screeningPolicy.assumedServingsPerDay)} servings/day`}
-          {` · ${formatProductTestNumber(input.screeningPolicy.assumedBodyWeightKg)} kg`}
-          {` · ${formatProductTestNumber(input.screeningPolicy.ratio)}× threshold`}
-        </p>
-      ) : null}
-      {input.threshold.url ? (
-        <a
-          href={input.threshold.url}
-          target="_blank"
-          rel="noreferrer"
-          referrerPolicy="no-referrer"
-          className="mt-1 inline-block text-foreground underline decoration-border underline-offset-4 hover:text-primary"
-        >
-          Threshold source
-        </a>
-      ) : null}
-    </div>
+    </li>
   );
-}
-
-function GapsPanel(input: { product: PublicProductDetail }) {
-  const importantCodes = new Set<PublicProductDetail["unknowns"][number]["code"]>([
-    "NO_LINKED_PRODUCT_TESTS",
-    "TESTED_LOT_NOT_REPORTED",
-    "TEST_THRESHOLD_NOT_COMPARABLE",
-  ]);
-  const importantUnknowns = input.product.unknowns.filter((unknown) =>
-    importantCodes.has(unknown.code),
-  );
-  const otherUnknowns = input.product.unknowns.filter((unknown) =>
-    !importantCodes.has(unknown.code),
-  );
-
-  return (
-    <>
-      <SheetHeader className="gap-6 border-b border-border p-6 pr-14">
-        <ProductHeading product={input.product} />
-        <div>
-          <SheetTitle className="font-serif text-3xl font-semibold tracking-[-0.025em]">
-            {input.product.unknowns.length === 0
-              ? "No known evidence gaps"
-              : `${input.product.unknowns.length} evidence ${input.product.unknowns.length === 1 ? "gap" : "gaps"}`}
-          </SheetTitle>
-          <SheetDescription className="sr-only">
-            Evidence coverage and unknowns for this exact product.
-          </SheetDescription>
-        </div>
-      </SheetHeader>
-
-      <ScrollArea className="min-h-0 flex-1">
-        <div className="px-6 py-2">
-          {importantUnknowns.length > 0 ? (
-            <div className="border-b border-border py-5">
-              <p className="font-mono text-[10px] font-medium tracking-[0.11em] text-muted-foreground uppercase">
-                Matters most
-              </p>
-              <div className="mt-3 flex flex-col gap-2">
-                {importantUnknowns.map((dimension) => (
-                  <GapRow key={dimension.code} unknown={dimension} important />
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          <div className="divide-y divide-border">
-            {otherUnknowns.map((dimension) => (
-              <GapRow key={dimension.code} unknown={dimension} />
-            ))}
-          </div>
-
-          {importantUnknowns.length === 0 && otherUnknowns.length === 0 ? (
-            <div className="flex min-h-72 flex-col items-center justify-center gap-4 text-center">
-              <div className="flex size-16 items-center justify-center rounded-full bg-primary/10 text-primary">
-                <CheckIcon className="size-8" aria-hidden="true" />
-              </div>
-              <p className="font-serif text-2xl font-semibold text-foreground">
-                No known gaps in this record.
-              </p>
-            </div>
-          ) : null}
-        </div>
-      </ScrollArea>
-
-      <SheetFooter className="border-t border-border px-6 py-5">
-        <p className="text-sm text-muted-foreground">
-          Unknown is not a failed test.
-        </p>
-      </SheetFooter>
-    </>
-  );
-}
-
-function GapRow(input: {
-  important?: boolean;
-  unknown: PublicProductDetail["unknowns"][number];
-}) {
-  return (
-    <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-3 py-4">
-      <div
-        className="mt-0.5 flex size-9 items-center justify-center rounded-full bg-muted text-muted-foreground"
-      >
-        {input.important ? (
-          <AlertTriangleIcon className="size-4" aria-hidden="true" />
-        ) : (
-          <CircleHelpIcon className="size-4" aria-hidden="true" />
-        )}
-      </div>
-      <details className="group min-w-0">
-        <summary className="cursor-pointer list-none text-sm font-medium text-foreground outline-none group-open:text-primary">
-          {input.unknown.title}
-        </summary>
-        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-          {input.unknown.description}
-        </p>
-      </details>
-    </div>
-  );
-}
-
-function formatServing(product: PublicProductDetail): string {
-  const serving = product.serving;
-  const parts = [serving?.description, serving?.grams ? `${serving.grams} g` : null]
-    .filter(Boolean);
-  if (product.upc) {
-    parts.push(`UPC ${product.upc}`);
-  }
-  return parts.length > 0 ? parts.join(" · ") : "Serving not reported";
 }

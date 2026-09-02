@@ -32,13 +32,15 @@ records are excluded because this experience is package and product oriented.
 - `/food` lets a visitor search and compare two to four branded foods.
 - The main table compares calories, protein, total sugars, and total fat on a
   shared per-100-gram or per-serving basis.
-- A top match wins the most complete visible metrics. It is not a health score.
-- Each metric names its own winner. Missing values do not create a winner.
+- Each metric names its own winner with one quiet mark and a stated row rule.
+  Missing values do not create a winner. A plain sentence may count rows led;
+  nothing names a universal healthy or safe product.
 - Equal winning values remain ties and do not receive unequal ordinal ranks.
-- Evidence stays separate from nutrition. Real screening alerts use a warning
-  treatment; missing tests and other gaps stay neutral.
-- Metric detail uses a short popover. Tests and evidence gaps open in a side
-  sheet with the conclusion first and raw reports on demand.
+- Evidence stays separate from nutrition as a coverage meter. A confirmed
+  result above an available screening limit uses a warning treatment; missing
+  tests, no comparable limit, and other gaps stay amber or neutral.
+- Metric detail uses a short popover. Linked test results and evidence gaps
+  open in one combined side sheet with coverage first and raw reports on demand.
 - Bounded evidence states returned and total observation counts. Alert copy is
   scoped to shown observations, and the gap sheet renders the contract-owned
   unknown titles and descriptions directly.
@@ -56,7 +58,8 @@ On compatible browsers, `/food` registers four read-only page tools:
 - `compare_food_products` accepts two to four exact product references and
   updates the visible comparison.
 - `get_food_comparison` reads the compact comparison now shown on the page.
-- `show_food_evidence` opens the tests or gaps sheet for a shown product.
+- `show_food_evidence` opens the combined evidence sheet for a shown product;
+  its `view` input focuses tests or gaps.
 
 The tools use the same page state and public API as manual actions and return
 the same bounded observation scope as the visible comparison. Comparison

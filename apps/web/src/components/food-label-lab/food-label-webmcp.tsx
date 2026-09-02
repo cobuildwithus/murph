@@ -305,7 +305,7 @@ function createFoodWebMcpTools(
     {
       name: "show_food_evidence",
       description:
-        "Open the tested-sample summary or known evidence gaps for a product already in the visible comparison.",
+        "Open the combined evidence drawer for a product already in the visible comparison. view focuses linked test results (tests) or known evidence gaps (gaps).",
       inputSchema: {
         type: "object",
         properties: {

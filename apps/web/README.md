@@ -873,8 +873,8 @@ Compatible browsers expose four page-scoped, read-only WebMCP tools while
 product references and update the same visible page state as manual controls.
 Comparison results carry returned, total, and truncated observation scope so a
 bounded evidence response cannot look complete to an agent. They also include
-the same four nutrition values, complete-row winners, ties, and win counts as
-the visible table.
+the same four nutrition values, complete-row winners, ties, and the row-win
+counts behind the visible rows-led caption.
 One abort signal removes every registration when the page unmounts. This is a
 browser surface, not a remote MCP server, and it adds no account or vault access.
 
