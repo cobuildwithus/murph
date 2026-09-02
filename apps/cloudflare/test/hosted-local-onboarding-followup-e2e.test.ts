@@ -2,7 +2,10 @@ import { createHmac } from "node:crypto";
 import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
-import { readHostedLinqFirstContactMemberState } from "#hosted-web-testing";
+import {
+  listHostedRuntimeLogsForTest,
+  readHostedLinqFirstContactMemberState,
+} from "#hosted-web-testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -98,6 +101,7 @@ describe("hosted local onboarding follow-up e2e", () => {
       }),
       { matchInputContains: "I finished onboarding." },
     );
+    const archiveProofStartedAt = new Date();
     const completionWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       userId,
       materializedChatId,
@@ -121,18 +125,27 @@ describe("hosted local onboarding follow-up e2e", () => {
     });
     expect(requireLinqStub().readObservedMessageText(completionReply))
       .toBe(onboardingCompleteReplyText);
-    let completionStatus = await requireScenario().waitForHostedCompletion(userId);
+    const completionStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(completionStatus.lastErrorCode ?? null).toBeNull();
-    // The follow-up archive commits in a post-checkpoint managed-automation
-    // pass that may land one checkpoint (or one deferred wake) after the
-    // completion reply, so re-sample completions until the sticky
-    // murphManagedAutomationUpdated counter appears.
-    while (completionStatus.workspace?.redactedStatus?.murphManagedAutomationUpdated !== 1) {
-      completionStatus = await requireScenario().waitForHostedCompletion(userId);
-      expect(completionStatus.lastErrorCode ?? null).toBeNull();
-    }
-    expect(completionStatus.workspace?.redactedStatus).toMatchObject({
-      murphManagedAutomationUpdated: 1,
+    await vi.waitFor(async () => {
+      const logs = await listHostedRuntimeLogsForTest({
+        environment: requireScenario().runtimeEnv,
+        fromAt: archiveProofStartedAt,
+        limit: 1_500,
+        userId,
+      });
+      expect(logs).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          eventCode: "assistant.onboarding_followup_reconciled",
+          redactedJson: expect.objectContaining({
+            onboardingFollowupAction: "archived_completed",
+            onboardingStateStatus: "completed",
+          }),
+        }),
+      ]));
+    }, {
+      interval: 250,
+      timeout: 180_000,
     });
   }, 720_000);
 });

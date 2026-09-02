@@ -23,6 +23,7 @@ import {
   HOSTED_EXECUTION_CURRENT_SENDER_PRIVATE_PERMISSION_TEXT,
   isHostedExecutionAssistantAskCurrentSenderTarget,
   type HostedExecutionAssistantAskResult,
+  type HostedExecutionAssistantAskTarget,
 } from "@murphai/hosted-execution/contracts";
 
 import type {
@@ -403,6 +404,9 @@ async function runOneHostedDetachedAssistantAsk(input: {
             ? "direct_recipient"
             : "caller_handoff",
         permissionText: prepared.disclosure.permissionText,
+        ...resolveHostedAssistantAskWorkspaceInspection(
+          claimed.wake.ask.target,
+        ),
       });
     } else {
       if (prepared.disclosure !== undefined) {
@@ -490,6 +494,14 @@ async function runOneHostedDetachedAssistantAsk(input: {
       }
     }
   }
+}
+
+function resolveHostedAssistantAskWorkspaceInspection(
+  target: HostedExecutionAssistantAskTarget,
+): Partial<Pick<ConsentedReadOnlyAssistantAskInput, "workspaceInspection">> {
+  return target.kind === "operator_task"
+    ? { workspaceInspection: "read_tools" as const }
+    : {};
 }
 
 async function recordHostedDetachedAssistantAskUsageBestEffort(input: {

@@ -100,6 +100,7 @@ never returned to the standby for another member.
 
 Hosted assistant delivery recovery comes from the encrypted local runtime outbox state inside the workspace checkpoint plus web-owned hosted-runtime logs/status.
 The runner container sends runtime internal Worker requests to normal virtual hosts such as `results.worker` and `web-control.worker`. Cloudflare Container outbound interception routes those requests back into Worker-owned handlers, using the runtime write-fence headers as authority.
+Shared runtime ports cannot supply raw Web-control methods or paths. They must use a branded route descriptor from the same registry that derives the Worker proxy allowlist; bounded query-bearing and device-connect variants can only bind to an already-registered pathname. Cloudflare typecheck rejects an unregistered caller at compile time, and the Node route-contract suite enumerates the registry to prove each exact method/path is allowed while the opposite method and path variants remain blocked.
 The phone-call start port is one bounded `web-control.worker` callback into `apps/web`; its protocol floor is 45 seconds even when the generic web-control timeout is 30 seconds, so the web-owned 40-second aggregate deadline finishes before the caller gives up. Deploy and prove convergence of this 45-second Cloudflare caller before deploying a web build with the 40-second deadline. The longer caller is backward compatible with older web builds; an old 30-second caller is not compatible with the 40-second web deadline, so Cloudflare cannot be rolled back below 45 seconds while that web build is active. Retell credentials and provider calls remain web-owned and are never forwarded into the runner.
 `murph.plan_usage` uses one allowlisted signed `web-control.worker` callback.
 Cloudflare transports and validates the strict result but owns no billing or
@@ -477,6 +478,29 @@ Cloudflare keeps only the wake-payload decryption lane plus the worker-owned cal
 
 ## Private Operational Telemetry
 
+### Web-control preflight rejections
+
+Ordinary runtime callers select a branded route descriptor from the same
+registry that derives the proxy allowlist. If runtime validation nevertheless
+detects a descriptor/policy mismatch, it writes one warning through the
+existing durable runtime-log port before any request reaches the rejected
+target. Filter `hosted_runtime_log` for
+`event_code = runner.web_control_preflight_rejected` and
+`error_code = HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED`. The warning contains
+only the HTTP method, transport mode, policy-derived operation, and
+`reason = not_allowlisted`. It never copies the route, query, payload,
+description, response, member id, or credentials into the log request.
+
+When the rejected call belongs to retained system-mailbox work, the same typed
+error follows its existing retry path, where the runtime-log warning retains
+`error_code = HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED`. This classification
+does not change retry, wake, delivery, or canonical-state behavior. A runtime-log
+write failure cannot replace or suppress the original fail-closed error. Use
+the aggregate queries in
+[`docs/hosted-runtime-log-database.md`](../../docs/hosted-runtime-log-database.md)
+to detect affected runtimes and their later mailbox outcomes without returning
+subject keys or raw JSON.
+
 The `HOSTED_RUNTIME_RETRY_ANALYTICS` Analytics Engine binding records one
 identifier-free data point only after UserRunner has decided to return
 `retry_later`. `index1` is the sole index and `blob2` repeats the bounded retry
@@ -665,9 +689,10 @@ fence. Only explicit inactive or mismatch proof, or exact successful
 completion, may enter the corresponding identity-safe recovery or clear path.
 After an exact successful completion clears the fence, Cloudflare makes at most
 one signed, bodyless owner-release callback to web with a timeout capped at two
-seconds. A known future mailbox retry continuation skips the callback unless the
-result carries the exact positive `immediateRecheckRequested` edge. That
-signature-bound query means the invocation newly committed an unserviced
+seconds. Its signed query binds the opaque runtime attempt whose fence was
+cleared and may include the exact positive `immediateRecheckRequested` edge. A
+known future mailbox retry continuation skips the callback unless the result
+carries that edge. The edge means the invocation newly committed an unserviced
 default or retention schedule; it does not carry the schedule itself. Without
 the edge, Web signals Temporal only for current runnable mailbox lag and never
 turns a persisted due wake into a repeated level-triggered signal. Callback

@@ -638,9 +638,8 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       "foreground-priority",
     );
 
-    await armCheckpointPublicationBarrier(
+    await requireScenario().harness.armShutdownCheckpointPublicationBarrierForTest(
       environmentPriorityProbe.userId,
-      "canonical",
     );
     let barrierReleased = false;
     try {
@@ -751,7 +750,8 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       userId: retentionProbe.userId,
       wakeAt: new Date(Date.now() - 1_000),
     });
-    await armCheckpointPublicationBarrier(retentionProbe.userId, "shutdown");
+    await requireScenario().harness
+      .armShutdownCheckpointPublicationBarrierForTest(retentionProbe.userId);
     await signalTemporalRuntime(retentionProbe.userId, {
       kind: "runtime_recheck_requested",
     });
@@ -2504,23 +2504,6 @@ async function waitForAcceptedReplyBeforeDeadline(input: {
   ]));
 }
 
-async function armCheckpointPublicationBarrier(
-  userId: string,
-  kind: "canonical" | "shutdown",
-): Promise<void> {
-  await requireScenario().harness.requestJson(
-    `/__test/users/${encodeURIComponent(userId)}`
-      + "/shutdown-checkpoint-publication-barrier"
-      + `?action=${kind === "canonical" ? "arm-canonical" : "arm"}`,
-    {
-      headers: {
-        [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
-      },
-      method: "POST",
-    },
-  );
-}
-
 async function waitForBackgroundCheckpointBarrier(userId: string): Promise<void> {
   const deadlineAt = Date.now() + 90_000;
   let lastStatus = await requireScenario().harness.readUserStatus(userId);
@@ -2646,7 +2629,7 @@ async function waitForProcessingCheckpointBarrier(
   }
 
   throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Runtime work did not reach held canonical publication.",
+    "Runtime work did not reach held checkpoint publication.",
     `expected processing mode: ${expectedProcessingMode}`,
     `last active fence: ${JSON.stringify(lastFence)}`,
     `last status: ${JSON.stringify(lastStatus)}`,
@@ -2667,7 +2650,7 @@ async function requireProcessingOwnerPreserved(
       );
     if (barrier.state !== "entered") {
       throw new Error(
-        "Canonical checkpoint publication escaped before the foreground-safe handoff.",
+        "Checkpoint publication escaped before the foreground-safe handoff.",
       );
     }
     const activeFence = await readActiveRuntimeFenceForTest(userId);

@@ -65,6 +65,17 @@ const GROUP_ACTION_FIXTURES = {
     unit: "count",
     value: 1234,
   },
+  record_current_sender_journal_fact: {
+    action: "record_current_sender_journal_fact",
+    confidence: "high",
+    date: "2026-08-21",
+    factIndex: 1,
+    message_ref: MESSAGE_REF,
+    note: "Worked in the yard for two hours.",
+    noteType: "journal-factor",
+    privateQuestion: "Can I save clear facts from your groups in your private Journal?",
+    title: "Yard work",
+  },
   post_disclosure_request: {
     action: "post_disclosure_request",
     permissionText: "Share daily step counts with this group.",
@@ -83,6 +94,13 @@ const GROUP_ACTION_FIXTURES = {
     message_ref: MESSAGE_REF,
   },
   read_current: { action: "read_current" },
+  set_current_sender_journal_capture: {
+    action: "set_current_sender_journal_capture",
+    enabled: false,
+    message_ref: MESSAGE_REF,
+    scope: "group",
+  },
+  set_journal_capture: { action: "set_journal_capture", enabled: true },
   prepare_next_group: { action: "prepare_next_group" },
   read_next_group: { action: "read_next_group" },
   cancel_next_group: { action: "cancel_next_group" },
@@ -156,10 +174,10 @@ function schemaAdvertisesGroupConsultObjectShape(
 }
 
 describe("murph.group parser-first family compatibility", () => {
-  it("partitions all 31 advertised actions exactly once", () => {
+  it("partitions all 34 advertised actions exactly once", () => {
     const familyActions = Object.values(GROUP_FAMILY_ACTIONS).flat();
 
-    expect(familyActions).toHaveLength(31);
+    expect(familyActions).toHaveLength(34);
     expect(new Set(familyActions).size).toBe(familyActions.length);
     expect([...familyActions].sort())
       .toEqual(Object.keys(GROUP_ACTION_FIXTURES).sort());

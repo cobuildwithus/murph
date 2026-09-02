@@ -238,11 +238,14 @@ The final ReviewGPT gate never becomes a fallback product-decision owner.
 7. Commit and push the review candidate from the task worktree, open or update
    the PR, and keep any active plan open. For plan-bearing work this is
    an intermediate scoped commit, not the final task commit;
-   `scripts/finish-task` still owns plan closure later. Ensure the PR body
-   contains the outcome, Product UX result, direct evidence, non-obvious
-   surfaces, architecture and reuse, complexity impact, hot reply path impact,
-   provider-input impact, deployment and changelog decisions, the change-shape
-   breakdown, and applicable design proof required below.
+   `scripts/committer` requires every changed file to be listed explicitly and
+   rejects directory targets. Directory expansion belongs only to
+   `scripts/finish-task`, which still owns plan closure and the final task
+   commit later. Ensure the PR body contains the outcome, Product UX result,
+   direct evidence, non-obvious surfaces, architecture and reuse, complexity
+   impact, hot reply path impact, provider-input impact, deployment and
+   changelog decisions, the change-shape breakdown, and applicable design proof
+   required below.
 8. When the final ReviewGPT gate is selected, establish its immutable round-one
    baseline on the exact pushed candidate head. The candidate must already have
    focused local proof and a parent candidate review. Run final ReviewGPT
@@ -386,7 +389,11 @@ Every PR includes:
   Select `Deployment: applicable` and complete the deployment contract when the
   change crosses a deploy boundary; otherwise select
   `Deployment: not applicable` with a concrete reason. The pull-request
-  evidence guard validates this section.
+  evidence guard validates this section. For a shared protocol between
+  independently deployed components, identify the producer and consumer, use a
+  consumer-first safe order, and name direct proof for every supported
+  mixed-version pair. Current-head producer/consumer proof alone is
+  insufficient.
 - **Changelog.** Add exactly one `## Changelog` section with
   `Changelog: updated` and its item IDs, or `Changelog: not applicable` with a
   concrete reason. The changelog guard validates this section.

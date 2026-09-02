@@ -1,11 +1,14 @@
 import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import { parseHostedRuntimeLatencyTraceResponse } from "@murphai/hosted-execution/parsers";
-import { HOSTED_RUNTIME_LATENCY_TRACE_PATH } from "@murphai/hosted-execution/routes";
 import type { HostedRuntimeLatencyTraceResponse } from "@murphai/hosted-execution/runtime-control";
 
 import type { HostedWorkspaceCheckpointBridgeAuthority } from "./authority-headers.ts";
 import { writeRunnerRuntimeWriteFenceHeaders } from "../runner-outbound/write-fence.ts";
-import { fetchHostedWebControlPlaneJson, type HostedWebControlTransport } from "./web-control-transport.ts";
+import {
+  fetchHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
+  type HostedWebControlTransport,
+} from "./web-control-transport.ts";
 
 const HOSTED_RUNTIME_LATENCY_TRACE_SKIPPED_RESPONSE: HostedRuntimeLatencyTraceResponse = {
   matchedCount: 0,
@@ -39,7 +42,7 @@ export function createHostedWebRuntimeLatencyTracePort(input: {
         description: "Hosted runtime latency trace",
         fetchImpl: input.fetchImpl,
         headers,
-        path: HOSTED_RUNTIME_LATENCY_TRACE_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.runtimeLatencyTrace,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });

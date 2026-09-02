@@ -7623,16 +7623,26 @@ function pushWorkoutSummary(
   }
 
   const dayKey = workoutTimestamp.dayKey;
-  const rawSport = firstStringFromPaths(entry, ["sport.slug", "sportSlug", "sport_slug", "sport.type", "sportType", "sport_type", "sport.name", "sportName", "sport_name", "sport"]);
+  const rawSport = resolveJunctionWorkoutSport([
+    firstStringFromPaths(entry, ["sport.slug", "sportSlug", "sport_slug"]),
+    firstStringFromPaths(entry, ["sport.type", "sportType", "sport_type"]),
+    firstStringFromPaths(entry, ["sport.name", "sportName", "sport_name"]),
+    firstStringFromPaths(entry, ["sport"]),
+  ]);
   const sportName = trimOptionalToLength(
     firstStringFromPaths(entry, ["sport.name", "sportName", "sport_name", "sport.type", "sportType", "sport_type", "sport"]),
     160,
   );
   const sport = rawSport ? trimSlugToLength(slugify(rawSport, "workout"), 80) : undefined;
+  const rawTitle = firstStringFromPaths(entry, ["title", "name"]);
   const rawActivityType = firstStringFromPaths(entry, ["activityType", "activity_type", "sportType", "sport_type", "type"]) ?? rawSport;
-  const activityType = slugify(rawActivityType, "workout");
+  const activityType = resolveJunctionWorkoutActivityType([
+    rawActivityType,
+    rawSport,
+    rawTitle,
+  ]);
   const title = trimToLength(
-    firstStringFromPaths(entry, ["title", "name", "sport.name", "sportName", "sport_name", "sport.type", "sportType", "sport_type", "sport", "activityType", "activity_type"]) ?? "Junction workout",
+    rawTitle ?? firstStringFromPaths(entry, ["sport.name", "sportName", "sport_name", "sport.type", "sportType", "sport_type", "sport", "activityType", "activity_type"]) ?? "Junction workout",
     160,
   );
   const sourceWorkoutId = trimOptionalToLength(
@@ -7675,6 +7685,42 @@ function pushWorkoutSummary(
       }),
     }),
   }));
+}
+
+const GENERIC_JUNCTION_WORKOUT_ACTIVITY_TYPES = new Set([
+  "activity",
+  "activity-session",
+  "cardio",
+  "exercise",
+  "fitness",
+  "general",
+  "other",
+  "session",
+  "training",
+  "unknown",
+  "workout",
+  "workouts",
+]);
+
+function resolveJunctionWorkoutSport(
+  candidates: readonly (string | undefined)[],
+): string | undefined {
+  return candidates.find(
+    (candidate) =>
+      candidate !== undefined
+      && !GENERIC_JUNCTION_WORKOUT_ACTIVITY_TYPES.has(slugify(candidate, "workout")),
+  ) ?? candidates.find((candidate) => candidate !== undefined);
+}
+
+function resolveJunctionWorkoutActivityType(
+  candidates: readonly (string | undefined)[],
+): string {
+  const normalizedCandidates = candidates.flatMap((candidate) =>
+    candidate === undefined ? [] : [slugify(candidate, "workout")]
+  );
+  return normalizedCandidates.find(
+    (candidate) => !GENERIC_JUNCTION_WORKOUT_ACTIVITY_TYPES.has(candidate),
+  ) ?? normalizedCandidates[0] ?? "workout";
 }
 
 function resolveJunctionWorkoutDayKey(

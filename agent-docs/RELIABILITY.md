@@ -149,6 +149,17 @@ Last verified: 2026-09-01
   credential, or provider body values. Transport ambiguity, timeouts, rate
   limits, and server failures remain failed delivery attempts and must not
   start a second send.
+- Every ordinary runtime web-control caller selects a branded descriptor from
+  the policy-owned route registry. If runtime validation still finds a
+  descriptor/policy mismatch, it writes one bounded warning through the
+  existing durable runtime-log port before any request reaches the rejected
+  target. The entry contains only its dedicated error code, HTTP method,
+  policy-derived operation, rejection reason, and transport mode; it omits
+  route, query, payload, description, member, response, and credential
+  material. The log port uses the unadorned allowlisted transport so reporting
+  cannot recurse. A log-write failure is best-effort and never replaces or
+  suppresses the original typed policy error. This observability adds no queue,
+  persisted state, retry owner, or fallback egress path.
 - Newly authored ordinary assistant responses attach at most eight images,
   below Linq's 40-public-media provider ceiling. This keeps full-motion
   exercise sequences bounded without adding a second message or partial-send
@@ -351,6 +362,12 @@ Last verified: 2026-09-01
   remain the fail-closed backstop. The existing `runtime_recheck_requested`
   signal remains facts-only. This adds no mailbox item, direct wake, provider
   fallback, queue, or second preference owner.
+- Exact Cloudflare runtime completion sends `runtime_owner_released` only when
+  Web observes actionable work. Its opaque runtime-attempt pointer may clear the
+  accepted-processing horizon only for that same owner; stale callbacks cannot
+  release a newer owner. The signal creates no work and normal reconciliation
+  facts still choose the processing mode. Callback or signal failure retains
+  the existing durable owner horizon.
 - Hosted background admission uses one capability-scoped projection on the
   existing workspace checkpoint row. A capable runtime checkpoints an absolute
   `systemMailboxProgressGeneration` plus the independently calculated next
@@ -362,8 +379,14 @@ Last verified: 2026-09-01
   generation and handled-through frontier remain unchanged. Workspace-version,
   attempt, signal, and selected-wake churn are not progress. Due foreground,
   default-processing, provider-owned, and retention work bypasses the delay
-  without clearing it. This reuses the workspace CAS and Temporal timer owners;
-  it adds no queue, scheduler, per-member state table, or second wake authority.
+  without clearing it. When live runtime evaluation disproves an overdue
+  default-processing projection and selects a due model-free frontier, the
+  runtime checkpoints the corrected projections before releasing that pass.
+  This projection-only checkpoint re-reads every default-work source, preserves
+  handled-through and the progress generation, and therefore cannot hide
+  genuinely due default work or claim system progress. This reuses the workspace
+  CAS and Temporal timer owners; it adds no queue, scheduler, per-member state
+  table, or second wake authority.
 - A hosted-group projection grant that needs its first private projection and
   one generation-stable `runtime.maintenance-requested` control row commit in
   the same Web transaction. An append failure therefore rolls back the grant

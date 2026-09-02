@@ -52,7 +52,10 @@ import {
 
 const eventIdSchema = z
   .string()
-  .regex(/^evt_[0-9A-Za-z]+$/u, 'Expected a canonical event id in evt_* form.')
+  .regex(
+    /^evt_[0-9A-HJKMNP-TV-Z]{26}$/u,
+    'Expected a canonical event id in evt_<ULID> form.',
+  )
 
 const eventScaffoldResultSchema = z.object({
   vault: pathSchema,
@@ -125,6 +128,10 @@ const eventTagOptionSchema = z
   .array(slugSchema)
   .optional()
   .describe('Optional event tags. Repeat --tag for multiple values.')
+const eventRelatedIdOptionSchema = z
+  .array(eventIdSchema)
+  .optional()
+  .describe('Optional related event ids. Repeat --related-id for multiple events.')
 const eventUnitSchema = z
   .string()
   .regex(
@@ -220,6 +227,8 @@ type CommonTypedEventPayload = JsonObject & {
   source: EventSource
   title: string
   note?: string
+  noteType?: string
+  links?: Array<{ type: 'related_to'; targetId: string }>
   tags?: string[]
 }
 
@@ -259,6 +268,8 @@ async function buildCommonTypedEventPayload(input: {
   source?: EventSource
   title: string
   note?: string
+  noteType?: string
+  relatedId?: readonly string[]
   tag?: readonly string[]
 }): Promise<CommonTypedEventPayload> {
   const occurredAt =
@@ -268,6 +279,8 @@ async function buildCommonTypedEventPayload(input: {
     })) ?? new Date().toISOString()
   const source = input.source ?? 'manual'
   const note = normalizeOptionalText(input.note)
+  const noteType = normalizeOptionalText(input.noteType)
+  const relatedIds = normalizeRepeatableFlagOption(input.relatedId, 'related-id') ?? []
   const tags = normalizeEventTags(input.tag)
 
   return {
@@ -276,6 +289,10 @@ async function buildCommonTypedEventPayload(input: {
     source,
     title: input.title,
     ...(note ? { note } : {}),
+    ...(noteType ? { noteType } : {}),
+    ...(relatedIds.length > 0
+      ? { links: relatedIds.map((targetId) => ({ type: 'related_to' as const, targetId })) }
+      : {}),
     ...(tags.length > 0 ? { tags } : {}),
   }
 }
@@ -465,6 +482,10 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
         .min(1)
         .max(4000)
         .describe('Freeform note text to store on the event.'),
+      noteType: slugSchema
+        .optional()
+        .describe('Optional structured note type, such as journal-factor or journal-outcome.'),
+      relatedId: eventRelatedIdOptionSchema,
       occurredAt: occurredAtOptionSchema
         .optional()
         .describe('Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.'),
@@ -484,6 +505,8 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
         source: options.source,
         title,
         note: options.note,
+        noteType: options.noteType,
+        relatedId: options.relatedId,
         tag: options.tag,
       })
       const result = await upsertEventRecord({

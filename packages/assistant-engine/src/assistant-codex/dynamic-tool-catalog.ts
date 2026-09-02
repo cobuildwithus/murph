@@ -12,6 +12,10 @@ import {
 } from '@murphai/contracts'
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
+  HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+  HOSTED_EXECUTION_GROUP_JOURNAL_FACT_MAX_NOTE_LENGTH,
+  HOSTED_EXECUTION_GROUP_JOURNAL_FACT_MAX_TITLE_LENGTH,
+  HOSTED_EXECUTION_GROUP_JOURNAL_FACT_NOTE_TYPES,
 } from '@murphai/hosted-execution/contracts'
 import {
   HOSTED_RUNTIME_PENDING_GROUP_SETUP_ROOM_CONTEXT_MAX_CODE_POINTS,
@@ -883,7 +887,7 @@ const ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA = {
   type: 'string',
   pattern: ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN,
   description:
-    'Opaque Message ref shown beside an accepted inbound message in the current prompt. Required for current-sender actions, record_current_sender_daily_metric, and revoke_own_email_share. For offer_access, include it only when the group explicitly asks to repost the native access message; the trusted host binds the replacement to that exact request. It is otherwise optional only for create_signup_referral_link and read_usage_referral. Use the exact ref beside the relevant request or clarification answer; this is not a provider message id.',
+    'Opaque Message ref shown beside an accepted inbound message in the current prompt. Required for current-sender actions, record_current_sender_daily_metric, record_current_sender_journal_fact, set_current_sender_journal_capture, and revoke_own_email_share. For offer_access, include it only when the group explicitly asks to repost the native access message; the trusted host binds the replacement to that exact request. It is otherwise optional only for create_signup_referral_link and read_usage_referral. Use the exact ref beside the relevant request or clarification answer; this is not a provider message id.',
 } as const
 
 export const GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING =
@@ -904,6 +908,7 @@ export const MURPH_GROUP_TOOL_FAMILY_ACTIONS = {
   ],
   group_data: [
     'record_current_sender_daily_metric',
+    'record_current_sender_journal_fact',
     'post_disclosure_request',
     'revoke_disclosure_grant',
     'read_shared',
@@ -911,6 +916,8 @@ export const MURPH_GROUP_TOOL_FAMILY_ACTIONS = {
     'revoke_own_email_share',
   ],
   group_membership: [
+    'set_journal_capture',
+    'set_current_sender_journal_capture',
     'read_current',
     'prepare_next_group',
     'read_next_group',
@@ -1181,11 +1188,62 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
           'For action="offer_access" only. Set true only when the room explicitly asks for a standalone link; otherwise omit it and let the trusted host choose the best presentation for this channel.',
       },
       message_ref: ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA,
+      confidence: {
+        type: 'string',
+        enum: ['high', 'medium'],
+        description:
+          'For Journal facts: high is clear; medium needs one private question. Do not call for low confidence.',
+      },
       date: {
         type: 'string',
         pattern: '^\\d{4}-\\d{2}-\\d{2}$',
         description:
-          'Required only for record_current_sender_daily_metric. Exact member-reported civil date in YYYY-MM-DD form. Do not infer a date when the sender did not provide enough context.',
+          'Required for record_current_sender_daily_metric and record_current_sender_journal_fact. Exact member-reported civil date in YYYY-MM-DD form. Do not infer a date when the sender did not provide enough context.',
+      },
+      factIndex: {
+        type: 'integer',
+        minimum: 1,
+        maximum: 8,
+        description:
+          'Journal fact order in the selected message, starting at 1.',
+      },
+      title: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_EXECUTION_GROUP_JOURNAL_FACT_MAX_TITLE_LENGTH,
+        description:
+          'Short private Journal title in the sender language.',
+      },
+      note: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_EXECUTION_GROUP_JOURNAL_FACT_MAX_NOTE_LENGTH,
+        description:
+          'Current-sender fact only. Exclude group commentary, quotes, jokes, and third-party claims.',
+      },
+      noteType: {
+        type: 'string',
+        enum: HOSTED_EXECUTION_GROUP_JOURNAL_FACT_NOTE_TYPES,
+        description:
+          'Canonical Journal note type for this fact.',
+      },
+      privateQuestion: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
+        description:
+          'High: use the same consent question for every fact and name all clear facts. The host asks the first. Medium: ask only to clarify.',
+      },
+      enabled: {
+        type: 'boolean',
+        description:
+          'set_journal_capture: true accepts capture, false disables all. After true, save all named facts. set_current_sender_journal_capture uses scope.',
+      },
+      scope: {
+        type: 'string',
+        enum: ['global', 'group'],
+        description:
+          'Use group for this group, or global only when the sender says all groups.',
       },
       metric: {
         type: 'string',
@@ -1215,11 +1273,14 @@ const MURPH_GROUP_TOOL_FAMILY_PROPERTIES = {
     'context', 'grantId', 'membershipId', 'message_ref', 'question',
   ],
   group_data: [
-    'audience', 'date', 'displayName', 'grantId', 'message_ref', 'metric',
-    'permissionText', 'projectionScopes', 'standaloneLink', 'unit', 'value',
+    'audience', 'confidence', 'date', 'displayName', 'factIndex', 'grantId',
+    'message_ref', 'metric', 'note', 'noteType', 'permissionText',
+    'privateQuestion', 'projectionScopes', 'standaloneLink', 'title', 'unit',
+    'value',
   ],
   group_membership: [
-    'cursor', 'disclosureGrantCursor', 'membershipId', 'setup',
+    'cursor', 'disclosureGrantCursor', 'enabled', 'membershipId', 'message_ref',
+    'scope', 'setup',
   ],
   group_usage: ['message_ref', 'policyCode', 'policyCodes'],
   group_chat: [
@@ -1353,7 +1414,7 @@ export const MURPH_GROUP_DATA_TOOL = buildMurphGroupFamilyTool({
 export const MURPH_GROUP_MEMBERSHIP_TOOL = buildMurphGroupFamilyTool({
   name: 'group_membership',
   description:
-    'Read/change membership or next-group setup.',
+    'Read/change membership or next-group setup. On a direct answer to private group Journal consent, call set_journal_capture before saving every named fact.',
 })
 
 export const MURPH_GROUP_USAGE_TOOL = buildMurphGroupFamilyTool({

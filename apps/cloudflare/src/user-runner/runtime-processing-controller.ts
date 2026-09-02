@@ -1487,6 +1487,7 @@ export class RuntimeProcessingController {
         runtimeProcessingAction: input.action,
         runtimePreparationWaitAfterContainerReadyMs:
           preparation.runtimePreparationWaitAfterContainerReadyMs,
+        standbyAllocationOutcome: resolution.standbyAllocationOutcome,
         workspaceAttemptId: prepared.token.attemptId,
       },
       message: "Hosted runner runtime processing accepted.",

@@ -19,6 +19,17 @@ const vaultCliBundleRelativePath = path.join(
   "murph",
   ".bundle",
 );
+const runnerEntrypointBundleRelativePath = path.join(
+  "apps",
+  "cloudflare",
+  ".deploy",
+  "runner-bundle",
+  "dist-bundled",
+);
+const runnerBundleOutputSurfaces = [
+  { label: "vault CLI", relativePath: vaultCliBundleRelativePath },
+  { label: "runner entrypoint", relativePath: runnerEntrypointBundleRelativePath },
+];
 const minimumGrowthAllowanceBytes = 96 * 1024;
 
 function extractJob(source, jobName) {
@@ -286,8 +297,11 @@ export function compareRunnerBundleMeasurements(baseMeasurement, candidateMeasur
   };
 }
 
-export async function measureRunnerBundleOutput(repoRoot) {
-  const bundleRoot = path.join(repoRoot, vaultCliBundleRelativePath);
+export async function measureRunnerBundleOutput(
+  repoRoot,
+  bundleRelativePath = vaultCliBundleRelativePath,
+) {
+  const bundleRoot = path.join(repoRoot, bundleRelativePath);
   let entries;
   try {
     entries = await readdir(bundleRoot, { withFileTypes: true });
@@ -340,17 +354,23 @@ export function formatRunnerBundleGrowthDiagnostics(result, candidateMeasurement
 }
 
 export async function compareRunnerBundleCheckouts(baseRoot, candidateRoot) {
-  const [base, candidate] = await Promise.all([
-    measureRunnerBundleOutput(baseRoot),
-    measureRunnerBundleOutput(candidateRoot),
-  ]);
-  const result = compareRunnerBundleMeasurements(base, candidate);
-  const diagnostics = formatRunnerBundleGrowthDiagnostics(result, candidate);
+  for (const surface of runnerBundleOutputSurfaces) {
+    const [base, candidate] = await Promise.all([
+      measureRunnerBundleOutput(baseRoot, surface.relativePath),
+      measureRunnerBundleOutput(candidateRoot, surface.relativePath),
+    ]);
+    const result = compareRunnerBundleMeasurements(base, candidate);
+    const diagnostics = formatRunnerBundleGrowthDiagnostics(result, candidate);
 
-  if (!result.passed) {
-    throw new Error(`vault-cli total output growth exceeds the relative CI allowance.\n${diagnostics}`);
+    if (!result.passed) {
+      throw new Error(
+        `${surface.label} total output growth exceeds the relative CI allowance.\n${diagnostics}`,
+      );
+    }
+    process.stdout.write(
+      `Runner bundle ${surface.label} output comparison passed.\n${diagnostics}\n`,
+    );
   }
-  process.stdout.write(`Runner bundle total output comparison passed.\n${diagnostics}\n`);
 }
 
 export async function checkRunnerBundleBudgetWorkflow() {

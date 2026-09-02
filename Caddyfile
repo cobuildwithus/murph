@@ -18,12 +18,11 @@
 #   https://local.withmurph.ai:3443
 # And in @BotFather /setdomain:
 #   local.withmurph.ai
-
 {
 	auto_https disable_redirects
 	local_certs
 }
 
 local.withmurph.ai:3443 {
-	reverse_proxy 127.0.0.1:3000
+	reverse_proxy {$MURPH_DEV_WEB_HOST:127.0.0.1}:{$MURPH_DEV_WEB_PORT:3000}
 }

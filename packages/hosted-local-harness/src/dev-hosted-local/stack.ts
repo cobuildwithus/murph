@@ -496,6 +496,7 @@ export async function startHostedLocalDevStack(input: {
     throwIfAbortSignalAborted(input.abortSignal);
     const localOverrides = buildHostedLocalDevOverrides(config, cloudflareDevVars, {
       retellWebhookPublicBaseUrl: linqWebhookSetup?.publicBaseUrl ?? null,
+      webPublicBaseUrl: initialEnv.MURPH_DEV_WEB_PUBLIC_BASE_URL,
     });
     const runtimeEnv: NodeJS.ProcessEnv = {
       ...vercelEnv,
@@ -522,6 +523,10 @@ export async function startHostedLocalDevStack(input: {
         ...localOverrides,
         ...temporalEnvironmentOverlay,
       }),
+      // The browser uses the public HTTPS origin. The local Worker must call
+      // the managed Web child directly because workerd does not trust Caddy's
+      // local development certificate.
+      ...buildHostedWorkerWebBaseUrlEnv(config),
       ...(hostedLocalCodexModelCatalogJson !== null
         ? { [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: hostedLocalCodexModelCatalogJson }
         : {}),
@@ -951,7 +956,10 @@ export async function startHostedLocalDevStack(input: {
     }
     throwIfAbortSignalAborted(input.abortSignal);
 
-    const webBaseUrl = config.skipWeb ? null : `http://${config.webHost}:${config.webPort}`;
+    const { internalWebBaseUrl, webBaseUrl } = resolveHostedLocalWebBaseUrls(
+      config,
+      runtimeEnv,
+    );
     const temporalRuntimeEnv = buildHostedLocalTemporalProcessEnv({
       cloudflareDevVars,
       runtimeEnv,
@@ -961,7 +969,7 @@ export async function startHostedLocalDevStack(input: {
       cloudflareHostedControlBaseUrl: workerBaseUrl,
       config,
       env: temporalRuntimeEnv,
-      hostedWebBaseUrl: webBaseUrl,
+      hostedWebBaseUrl: internalWebBaseUrl,
       pipeOutput: input.pipeOutput,
       stderrTarget: input.stderrTarget,
       stdoutTarget: input.stdoutTarget,
@@ -1099,7 +1107,7 @@ export async function startHostedLocalDevStack(input: {
             protocol: config.workerProtocol,
           }),
         ];
-        if (webBaseUrl !== null) {
+        if (internalWebBaseUrl !== null) {
           healthChecks.push(
             waitForHealthyHttpEndpoint({
               host: config.webHost,
@@ -1325,6 +1333,28 @@ function startHostedLocalMinioMonitor(input: {
         await inFlightPoll;
       }
     },
+  };
+}
+
+function buildHostedWorkerWebBaseUrlEnv(
+  config: HostedLocalDevConfig,
+): NodeJS.ProcessEnv {
+  return config.skipWeb
+    ? {}
+    : { HOSTED_WEB_BASE_URL: `http://${config.webHost}:${config.webPort}` };
+}
+
+function resolveHostedLocalWebBaseUrls(
+  config: HostedLocalDevConfig,
+  runtimeEnv: NodeJS.ProcessEnv,
+): { internalWebBaseUrl: string | null; webBaseUrl: string | null } {
+  if (config.skipWeb) {
+    return { internalWebBaseUrl: null, webBaseUrl: null };
+  }
+  const internalWebBaseUrl = `http://${config.webHost}:${config.webPort}`;
+  return {
+    internalWebBaseUrl,
+    webBaseUrl: runtimeEnv.HOSTED_WEB_BASE_URL?.trim() || internalWebBaseUrl,
   };
 }
 

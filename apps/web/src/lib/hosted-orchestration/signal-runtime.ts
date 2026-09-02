@@ -114,6 +114,11 @@ export interface SignalHostedRuntimeControlInput {
   userId: string;
 }
 
+export interface SignalHostedRuntimeOwnerReleasedInput
+  extends SignalHostedRuntimeControlInput {
+  runtimeAttemptId: string;
+}
+
 export interface SignalHostedDeviceSyncMailboxInput {
   client?: HostedRuntimeTemporalSignalClient | null;
   environment?: NodeJS.ProcessEnv;
@@ -249,6 +254,30 @@ export async function signalHostedRuntimeRecheckRuntime(
     prisma,
     signal: parseHostedRuntimeSignal({
       kind: "runtime_recheck_requested",
+    }),
+    userId: input.userId,
+  });
+}
+
+export async function signalHostedRuntimeOwnerReleasedRuntime(
+  input: SignalHostedRuntimeOwnerReleasedInput,
+): Promise<HostedRuntimeSignalResult> {
+  const prisma = input.prisma ?? getPrisma();
+  await requireHostedRuntimeActiveAccess(input.userId, {
+    code: "HOSTED_RUNTIME_USER_INACTIVE",
+    message: "Hosted runtime user is not active.",
+    prisma,
+  });
+
+  return signalHostedUserRuntimeWorkflow({
+    abortSignal: input.abortSignal,
+    client: input.client,
+    environment: input.environment,
+    ensureWorkspace: false,
+    prisma,
+    signal: parseHostedRuntimeSignal({
+      kind: "runtime_owner_released",
+      runtimeAttemptId: input.runtimeAttemptId,
     }),
     userId: input.userId,
   });

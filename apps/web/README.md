@@ -1325,17 +1325,20 @@ Callback auth contract:
   authority and seals only from that scoped cache entry, with one full retry on
   typed root drift. Legacy transaction append surfaces remain for separately
   migrated callers and are not the transaction-safe generic entrypoint.
-- `POST /api/internal/hosted-runtime/owner-released` is the payload-free
-  completion handoff. Web accepts a zero-byte body and either no query or the
-  exact signature-bound `immediateRecheckRequested=1` positive edge, binds the
-  user through the signed request plus normal nonce protection, and emits the
-  existing `runtime_recheck_requested` Temporal signal. Without the edge, Web
-  signals only for current runnable mailbox lag; a persisted default or
-  retention wake is not itself signal authority. The edge means the completed
-  invocation newly committed an unserviced schedule and carries no wake data.
-  Known future mailbox retry continuations remain deferred. Cloudflare calls the
-  route at most once, with a timeout capped at two seconds, only after exact
-  write-fence completion; failure is non-fatal and has no callback retry.
+- `POST /api/internal/hosted-runtime/owner-released` is the pointer-only
+  completion handoff. Web accepts a zero-byte body and a signed query containing
+  the opaque released `runtimeAttemptId`, plus the optional exact
+  `immediateRecheckRequested=1` positive edge. It binds the user through the
+  signed request plus normal nonce protection and emits
+  `runtime_owner_released` only for actionable work. Temporal matches the
+  attempt before releasing an accepted-owner horizon. Legacy callbacks without
+  the pointer remain facts-only `runtime_recheck_requested` signals during
+  rollout. A persisted default or retention wake is not itself signal authority.
+  The positive edge means the completed invocation newly committed an
+  unserviced schedule and carries no wake data. Known future mailbox retry
+  continuations remain deferred. Cloudflare calls the route at most once, with
+  a timeout capped at two seconds, only after exact write-fence completion;
+  failure is non-fatal and has no callback retry.
 
 When you set `DEVICE_SYNC_PUBLIC_BASE_URL`, use the same stable production
 hostname as every first-party hosted app-session URL that can serve the OAuth
@@ -2205,7 +2208,7 @@ deleted sharing CRUD, local-vault import callbacks, or an outbox drain route. It
 still uses narrow signed hosted-web callbacks for execution-time device-sync
 runtime snapshot/apply, device connect-link starts, direct hosted usage
 recording, member-bound plan-usage reads, mailbox/workspace runtime status plus
-log callbacks, and the payload-free runtime owner-release recheck handoff.
+log callbacks, and the pointer-only runtime owner-release recheck handoff.
 
 ## Hosted onboarding routes
 

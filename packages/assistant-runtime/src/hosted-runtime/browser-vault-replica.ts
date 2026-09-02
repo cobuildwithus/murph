@@ -288,7 +288,7 @@ export async function refreshHostedBrowserVaultReplicaFromRuntime(input: {
       replicaRef: input.workspace.browserVaultReplicaRef ?? null,
     });
 
-    if (!freshness.shouldRefresh && input.force !== true) {
+    if (shouldSkipBrowserVaultReplicaRefresh(freshness, input.force)) {
       return {
         freshness,
         source,
@@ -350,6 +350,17 @@ export async function refreshHostedBrowserVaultReplicaFromRuntime(input: {
       sourceHash: sourceBefore.hash,
     });
 
+    const sourceBeforePublish = await cancellation.runOwned(
+      "second_source_hash",
+      (signal) => hashHostedBrowserVaultReplicaSources(input.vaultRoot, signal),
+    );
+    if (sourceBeforePublish.hash !== sourceBefore.hash) {
+      return {
+        source,
+        status: "deferred_source_changed",
+      };
+    }
+
     cancellation.throwIfCancelled();
     const publish = await cancellation.race(
       "ref_publication",
@@ -405,6 +416,13 @@ export async function refreshHostedBrowserVaultReplicaFromRuntime(input: {
   } finally {
     cancellation.cleanup();
   }
+}
+
+function shouldSkipBrowserVaultReplicaRefresh(
+  freshness: BrowserVaultReplicaFreshnessAssessment,
+  force: boolean | null | undefined,
+): boolean {
+  return !freshness.shouldRefresh && force !== true;
 }
 
 export function summarizeHostedBrowserVaultReplicaContent(

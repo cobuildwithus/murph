@@ -187,9 +187,10 @@ function findMutableActionRefs(workflow: string): Array<{ line: number; ref: str
 }
 
 describe("hosted deploy automation helpers", () => {
-  it("exports standby capacity as a deploy-only contract input", () => {
+  it("exports the exact deploy-only contract inputs", () => {
     expect(HOSTED_DEPLOY_AUTOMATION_OPTIONAL_VAR_NAMES).toEqual([
       "CF_STANDBY_CONTAINER_MAX_INSTANCES",
+      "HOSTED_EXECUTION_DEPLOY_TAG",
     ]);
   });
 
@@ -211,6 +212,7 @@ describe("hosted deploy automation helpers", () => {
       CF_RUNNER_READY_TIMEOUT_MS: "65000",
       CF_STANDBY_CONTAINER_MAX_INSTANCES: "100",
       CF_WORKER_NAME: "hosted-worker",
+      HOSTED_EXECUTION_DEPLOY_TAG: "run-123-2",
       ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
       HOSTED_WEB_BASE_URL: "https://web.example.test",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:v2",
@@ -486,6 +488,7 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS).toBe("60000");
     expect(config.vars.HOSTED_EXECUTION_STANDBY_MODE).toBe("off");
     expect(config.vars.CF_STANDBY_CONTAINER_MAX_INSTANCES).toBeUndefined();
+    expect(config.vars.HOSTED_EXECUTION_DEPLOY_TAG).toBeUndefined();
     expect(config.vars.HOSTED_PHYSICAL_NOTES_ENABLED).toBe("true");
     expect(config.vars.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION).toContain("cryptoKeyVersions/1");
     expect(config.vars.HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM).toContain("BEGIN PUBLIC KEY");
