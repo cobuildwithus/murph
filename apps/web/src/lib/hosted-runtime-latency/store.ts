@@ -453,9 +453,15 @@ export async function recordHostedIngressProviderStarted(input: {
     locked AS MATERIALIZED (
       SELECT scoped.assistant_input_id, trace.id
       FROM scoped
+      CROSS JOIN input
       JOIN hosted_ingress_latency_trace AS trace
         ON trace.id = scoped.trace_id
       WHERE scoped.eligible
+        AND (
+          trace.runtime_attempt_id IS NULL
+          OR input.runtime_attempt_id IS NULL
+          OR trace.runtime_attempt_id = input.runtime_attempt_id
+        )
       ORDER BY trace.id
       FOR UPDATE OF trace SKIP LOCKED
     ),
@@ -626,9 +632,21 @@ export async function recordHostedIngressAssistantMilestone(input: {
     locked AS MATERIALIZED (
       SELECT scoped.assistant_input_id, trace.id
       FROM scoped
+      CROSS JOIN input
       JOIN hosted_ingress_latency_trace AS trace
         ON trace.id = scoped.trace_id
       WHERE scoped.eligible
+        AND (
+          input.terminal_non_reply_projection
+          OR (
+            input.lifecycle_projection
+            AND ${buildHostedIngressLifecycleAssistantMilestoneEligibilitySql()}
+          )
+          OR (
+            NOT input.lifecycle_projection
+            AND trace.runtime_attempt_id = input.runtime_attempt_id
+          )
+        )
       ORDER BY trace.id
       FOR UPDATE OF trace SKIP LOCKED
     ),

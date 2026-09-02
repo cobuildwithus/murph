@@ -408,6 +408,258 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
+    it("rechecks transferred ownership after taking its eligibility snapshot", async () => {
+      const suffix = randomUUID().replaceAll("-", "");
+      const memberId = `hbm_latency_owner_recheck_${suffix}`;
+      const lifecycleAssistantInputId =
+        `assistant_input_latency_owner_lifecycle_${suffix}`;
+      const providerAssistantInputId =
+        `assistant_input_latency_owner_provider_${suffix}`;
+      const lifecycleMailboxItemId = `hmi_latency_owner_lifecycle_${suffix}`;
+      const providerMailboxItemId = `hmi_latency_owner_provider_${suffix}`;
+      const lifecycleTraceId = `hil_latency_owner_lifecycle_${suffix}`;
+      const providerTraceId = `hil_latency_owner_provider_${suffix}`;
+      const staleLifecycleAttemptId = `runtime_latency_stale_lifecycle_${suffix}`;
+      const currentLifecycleAttemptId = `runtime_latency_current_lifecycle_${suffix}`;
+      const staleProviderAttemptId = `runtime_latency_stale_provider_${suffix}`;
+      const currentProviderAttemptId = `runtime_latency_current_provider_${suffix}`;
+      const applicationName = `latency_owner_recheck_${suffix.slice(0, 8)}`;
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const barrier = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const staleWriter = createPrismaClient({
+        databaseUrl: withPostgresApplicationName(databaseUrl, applicationName),
+        poolMax: 1,
+      });
+      const inFlight: Promise<unknown>[] = [];
+      let heldBarrierKey: bigint | null = null;
+
+      const armSnapshotBarrier = async (barrierKey: bigint): Promise<void> => {
+        await barrier.$executeRaw`
+          SELECT pg_advisory_lock(${barrierKey})
+        `;
+        heldBarrierKey = barrierKey;
+        await staleWriter.$queryRaw`
+          SELECT
+            set_config(
+              'murph.latency_snapshot_barrier_key',
+              ${barrierKey.toString()},
+              false
+            ),
+            set_config(
+              'murph.latency_snapshot_barrier_state',
+              'armed',
+              false
+            )
+        `;
+      };
+      const releaseSnapshotBarrier = async (): Promise<void> => {
+        if (heldBarrierKey === null) {
+          return;
+        }
+        const barrierKey = heldBarrierKey;
+        heldBarrierKey = null;
+        await barrier.$queryRaw`
+          SELECT pg_advisory_unlock(${barrierKey})
+        `;
+      };
+
+      try {
+        const acceptedAt = new Date("2026-08-09T12:20:00.000Z");
+        await observer.hostedMember.create({ data: { id: memberId } });
+        await observer.hostedMailboxItem.createMany({
+          data: [
+            {
+              dedupeKey: `latency-owner-lifecycle:${suffix}`,
+              id: lifecycleMailboxItemId,
+              kind: "conversation.message",
+              lane: "conversation",
+              laneSeq: 1n,
+              occurredAt: acceptedAt,
+              payloadSchema: "murph.hosted-execution.conversation-message.v1",
+              userId: memberId,
+            },
+            {
+              dedupeKey: `latency-owner-provider:${suffix}`,
+              id: providerMailboxItemId,
+              kind: "conversation.message",
+              lane: "conversation",
+              laneSeq: 2n,
+              occurredAt: acceptedAt,
+              payloadSchema: "murph.hosted-execution.conversation-message.v1",
+              userId: memberId,
+            },
+          ],
+        });
+        await observer.hostedIngressLatencyTrace.createMany({
+          data: [
+            {
+              acceptedAt,
+              assistantInputId: lifecycleAssistantInputId,
+              id: lifecycleTraceId,
+              mailboxItemId: lifecycleMailboxItemId,
+              mailboxLane: "conversation",
+              mailboxLaneSeq: 1n,
+              phaseBreakdownJson: {
+                assistant: { runtimeLeaseGeneration: "7" },
+                schemaVersion: 1,
+              },
+              runtimeAttemptId: staleLifecycleAttemptId,
+              source: "linq",
+              userId: memberId,
+            },
+            {
+              acceptedAt,
+              assistantInputId: providerAssistantInputId,
+              id: providerTraceId,
+              mailboxItemId: providerMailboxItemId,
+              mailboxLane: "conversation",
+              mailboxLaneSeq: 2n,
+              runtimeAttemptId: null,
+              source: "linq",
+              userId: memberId,
+            },
+          ],
+        });
+        await installHostedLatencySnapshotBarrier(staleWriter);
+
+        const lifecycleBarrierKey = BigInt(`0x${suffix.slice(0, 12)}`);
+        await armSnapshotBarrier(lifecycleBarrierKey);
+        const staleLifecycleWrite = recordHostedIngressAssistantMilestone({
+          assistantInputIds: [lifecycleAssistantInputId],
+          at: new Date("2026-08-09T12:20:10.000Z"),
+          authenticatedUserId: memberId,
+          milestone: "assistant_input_accepted_for_execution",
+          prisma: staleWriter,
+          runtimeAttemptId: staleLifecycleAttemptId,
+          runtimeLeaseGeneration: "7",
+          source: "linq",
+        });
+        inFlight.push(staleLifecycleWrite);
+        await waitForPostgresLock({ applicationName, observer });
+
+        const currentLifecycleAt = new Date("2026-08-09T12:20:20.000Z");
+        await expect(recordHostedIngressAssistantMilestone({
+          assistantInputIds: [lifecycleAssistantInputId],
+          at: currentLifecycleAt,
+          authenticatedUserId: memberId,
+          milestone: "assistant_input_accepted_for_execution",
+          prisma: observer,
+          runtimeAttemptId: currentLifecycleAttemptId,
+          runtimeLeaseGeneration: "8",
+          source: "linq",
+        })).resolves.toEqual({
+          matchedCount: 1,
+          recorded: true,
+          unmatchedCount: 0,
+        });
+        await releaseSnapshotBarrier();
+        await expect(staleLifecycleWrite).resolves.toEqual({
+          contendedCount: 1,
+          matchedCount: 0,
+          recorded: false,
+          unmatchedCount: 1,
+        });
+        await expect(recordHostedIngressAssistantMilestone({
+          assistantInputIds: [lifecycleAssistantInputId],
+          at: new Date("2026-08-09T12:20:30.000Z"),
+          authenticatedUserId: memberId,
+          milestone: "assistant_input_accepted_for_execution",
+          prisma: staleWriter,
+          runtimeAttemptId: staleLifecycleAttemptId,
+          runtimeLeaseGeneration: "7",
+          source: "linq",
+        })).resolves.toEqual({
+          matchedCount: 0,
+          recorded: false,
+          unmatchedCount: 1,
+        });
+
+        const lifecycleTrace =
+          await observer.hostedIngressLatencyTrace.findUniqueOrThrow({
+            select: { phaseBreakdownJson: true, runtimeAttemptId: true },
+            where: { id: lifecycleTraceId },
+          });
+        expect(lifecycleTrace.runtimeAttemptId).toBe(currentLifecycleAttemptId);
+        expect(
+          requireJsonRecord(
+            requireJsonRecord(lifecycleTrace.phaseBreakdownJson).assistant,
+          ),
+        ).toMatchObject({
+          assistantInputAcceptedForExecutionAtEpochMs:
+            currentLifecycleAt.getTime(),
+          runtimeLeaseGeneration: "8",
+        });
+
+        const providerBarrierKey = lifecycleBarrierKey + 1n;
+        await armSnapshotBarrier(providerBarrierKey);
+        const staleProviderWrite = recordHostedIngressProviderStarted({
+          assistantInputIds: [providerAssistantInputId],
+          at: new Date("2026-08-09T12:21:10.000Z"),
+          authenticatedUserId: memberId,
+          prisma: staleWriter,
+          providerRequestOrdinal: 0,
+          runtimeAttemptId: staleProviderAttemptId,
+          source: "linq",
+        });
+        inFlight.push(staleProviderWrite);
+        await waitForPostgresLock({ applicationName, observer });
+
+        await expect(recordHostedIngressAssistantMilestone({
+          assistantInputIds: [providerAssistantInputId],
+          at: new Date("2026-08-09T12:21:20.000Z"),
+          authenticatedUserId: memberId,
+          milestone: "pending_reply_admitted",
+          prisma: observer,
+          runtimeAttemptId: currentProviderAttemptId,
+          runtimeLeaseGeneration: "1",
+          source: "linq",
+        })).resolves.toEqual({
+          matchedCount: 1,
+          recorded: true,
+          unmatchedCount: 0,
+        });
+        await releaseSnapshotBarrier();
+        await expect(staleProviderWrite).resolves.toEqual({
+          contendedCount: 1,
+          matchedCount: 0,
+          recorded: false,
+          unmatchedCount: 1,
+        });
+        await expect(recordHostedIngressProviderStarted({
+          assistantInputIds: [providerAssistantInputId],
+          at: new Date("2026-08-09T12:21:30.000Z"),
+          authenticatedUserId: memberId,
+          prisma: staleWriter,
+          providerRequestOrdinal: 0,
+          runtimeAttemptId: staleProviderAttemptId,
+          source: "linq",
+        })).resolves.toEqual({
+          matchedCount: 0,
+          recorded: false,
+          unmatchedCount: 1,
+        });
+
+        await expect(
+          observer.hostedIngressLatencyTrace.findUniqueOrThrow({
+            select: { providerStartAt: true, runtimeAttemptId: true },
+            where: { id: providerTraceId },
+          }),
+        ).resolves.toEqual({
+          providerStartAt: null,
+          runtimeAttemptId: currentProviderAttemptId,
+        });
+      } finally {
+        await releaseSnapshotBarrier();
+        await Promise.allSettled(inFlight);
+        await observer.hostedMember.deleteMany({ where: { id: memberId } });
+        await Promise.all([
+          barrier.$disconnect(),
+          observer.$disconnect(),
+          staleWriter.$disconnect(),
+        ]);
+      }
+    });
+
     it("does not let an older checkpoint lease overwrite a newer lease after waiting", async () => {
       const suffix = randomUUID().replaceAll("-", "");
       const memberId = `hbm_latency_lease_race_${suffix}`;
@@ -1316,6 +1568,53 @@ function withPostgresSessionTimeZone(value: string, timeZone: string): string {
   const url = new URL(value);
   url.searchParams.set("options", `-c timezone=${timeZone}`);
   return url.toString();
+}
+
+function withPostgresApplicationName(value: string, applicationName: string): string {
+  const url = new URL(value);
+  url.searchParams.set("application_name", applicationName);
+  return url.toString();
+}
+
+async function installHostedLatencySnapshotBarrier(
+  prisma: ReturnType<typeof createPrismaClient>,
+): Promise<void> {
+  await prisma.$executeRaw`
+    CREATE TEMP TABLE hosted_latency_snapshot_barrier_session (
+      installed boolean NOT NULL
+    )
+  `;
+  await prisma.$executeRaw`
+    CREATE FUNCTION pg_temp.hosted_latency_snapshot_barrier()
+    RETURNS boolean
+    LANGUAGE plpgsql
+    VOLATILE
+    AS $function$
+    BEGIN
+      IF current_setting(
+        'murph.latency_snapshot_barrier_state',
+        true
+      ) = 'armed' THEN
+        PERFORM set_config(
+          'murph.latency_snapshot_barrier_state',
+          'passed',
+          false
+        );
+        PERFORM pg_advisory_xact_lock(
+          current_setting('murph.latency_snapshot_barrier_key')::bigint
+        );
+      END IF;
+      RETURN true;
+    END;
+    $function$
+  `;
+  await prisma.$executeRaw`
+    CREATE TEMP VIEW hosted_ingress_latency_trace
+    WITH (security_barrier = true) AS
+    SELECT *
+    FROM public.hosted_ingress_latency_trace
+    WHERE pg_temp.hosted_latency_snapshot_barrier()
+  `;
 }
 
 function withPostgresLockOrderProbe(value: string, applicationName: string): string {
