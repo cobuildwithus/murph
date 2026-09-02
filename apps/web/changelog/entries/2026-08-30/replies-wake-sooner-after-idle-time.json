@@ -9,6 +9,6 @@
     "summary": "After an idle period, Murph now saves its ready-to-go assistant for your current conversation and keeps established conversations ready to continue.",
     "details": "Background work keeps its ordinary startup and cannot take that ready assistant. If the faster path is unavailable, Murph falls back to the durable startup; a full workspace restore still opens with a fresh assistant process.",
     "relevanceTags": ["assistant", "performance", "reliability"],
-    "sourcePullRequests": [2584, 2615, 2617, 2712]
+    "sourcePullRequests": [2584, 2615, 2617, 2712, 2738]
   }
 }
