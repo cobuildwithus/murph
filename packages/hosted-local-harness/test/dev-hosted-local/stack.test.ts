@@ -2070,6 +2070,35 @@ describe("hosted local dev stack", () => {
     await stopPromise;
   });
 
+  it("signals its exact child processes when the parent exits", async () => {
+    const cloudflareChild = createBufferedChild({ exitCode: null, name: "cloudflare", pid: 101 });
+    const webChild = createBufferedChild({ exitCode: null, name: "web", pid: 102 });
+    spawnChildProcess
+      .mockReturnValueOnce(cloudflareChild)
+      .mockReturnValueOnce(webChild);
+    const existingExitListeners = new Set(process.listeners("exit"));
+
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: process.env,
+    });
+    await stack.ready;
+    const parentExitListener = process.listeners("exit").find(
+      (listener) => !existingExitListeners.has(listener),
+    );
+    expect(parentExitListener).toBeDefined();
+    terminateChildProcess.mockClear();
+    spawnSync.mockClear();
+
+    parentExitListener?.(0);
+
+    expect(terminateChildProcess).toHaveBeenCalledWith(cloudflareChild.child, "SIGKILL");
+    expect(terminateChildProcess).toHaveBeenCalledWith(webChild.child, "SIGKILL");
+    expect(spawnSync.mock.calls.filter(([command]) => command === "pkill")).toEqual([]);
+    await stack.stop();
+  });
+
   it("runs stop cleanup once when stop is called repeatedly while termination is pending", async () => {
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 101 }))

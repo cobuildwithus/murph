@@ -283,6 +283,10 @@ The helper uses small, typed primitives:
 
 Do not add a generic port manager, background daemon, or second process
 supervisor. The hosted-local harness already owns process lifecycle.
+Hosted-local E2E scenario setup records that ownership before its first
+asynchronous resource starts. File teardown aborts and joins any setup that has
+not returned from `beforeAll`, while the stack's parent-exit handler signals
+only the exact child handles retained by that stack.
 
 ## Agent Workflow
 

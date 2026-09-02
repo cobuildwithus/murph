@@ -80,6 +80,7 @@ import {
   assertHostedRunNoProviderEgressAuthFailures,
   buildHostedLocalRuntimeLogDatabaseNameForTest,
   buildHostedLocalFullStackWebProcessEnvOverrides,
+  cleanupActiveHostedLocalFullStackScenarioSetups,
   shouldReuseExplicitHostedLocalScenarioDatabaseUrl,
 } from "./hosted-local-full-stack-scenario.js";
 
@@ -335,6 +336,35 @@ it("does not retry non-port startup failures", async () => {
 
   await expect(startScenario()).rejects.toThrow("Hosted local database migration failed.");
   expect(mocks.startHostedLocalDevHarness).toHaveBeenCalledOnce();
+});
+
+it("aborts and joins a full-stack setup that suite teardown reaches before startup returns", async () => {
+  let startupSignal: AbortSignal | undefined;
+  let setupRejected = false;
+  mocks.startHostedLocalDevHarness.mockImplementationOnce(async (input) => {
+    startupSignal = input.abortSignal;
+    return await new Promise((_, reject) => {
+      input.abortSignal?.addEventListener("abort", () => {
+        setupRejected = true;
+        const error = new Error("Hosted-local startup was interrupted.");
+        error.name = "AbortError";
+        reject(error);
+      }, { once: true });
+    });
+  });
+
+  const startup = startScenario();
+  await vi.waitFor(() => {
+    expect(mocks.startHostedLocalDevHarness).toHaveBeenCalledOnce();
+  });
+
+  await cleanupActiveHostedLocalFullStackScenarioSetups();
+
+  expect(startupSignal?.aborted).toBe(true);
+  expect(setupRejected).toBe(true);
+  await expect(startup).rejects.toMatchObject({ name: "AbortError" });
+  const oidcFixture = await mocks.startHostedLocalOidcFixture.mock.results.at(-1)?.value;
+  expect(oidcFixture?.stop).toHaveBeenCalledOnce();
 });
 
 it("forwards explicitly supplied provider credentials to the worker harness", async () => {

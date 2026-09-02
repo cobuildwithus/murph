@@ -217,6 +217,28 @@ type HostedLocalWorkspacePackage = {
   packageJsonPath: string;
 };
 
+function registerHostedLocalStackLifecycle(input: {
+  abortSignal?: AbortSignal;
+  kill: (signal?: NodeJS.Signals) => void;
+}): () => void {
+  const onParentExit = (): void => {
+    input.kill("SIGKILL");
+  };
+  const onStartupAbort = (): void => {
+    input.kill("SIGTERM");
+  };
+  process.once("exit", onParentExit);
+  input.abortSignal?.addEventListener("abort", onStartupAbort, { once: true });
+  if (input.abortSignal?.aborted) {
+    onStartupAbort();
+  }
+
+  return () => {
+    process.off("exit", onParentExit);
+    input.abortSignal?.removeEventListener("abort", onStartupAbort);
+  };
+}
+
 export async function startHostedLocalDevStack(input: {
   abortSignal?: AbortSignal;
   env: NodeJS.ProcessEnv;
@@ -319,6 +341,28 @@ export async function startHostedLocalDevStack(input: {
   let hostedWebTestPreloadOutputDir: string | null = null;
   let keepAliveTimer: ReturnType<typeof setInterval> | null = null;
   let minioMonitor: HostedLocalMinioMonitor | null = null;
+  const kill = (signal: NodeJS.Signals = "SIGTERM"): void => {
+    const childSignal = resolveHostedLocalChildShutdownSignal(signal);
+    killHostedLocalMinioMonitor();
+    for (const { child } of children) {
+      terminateChildProcess(child, childSignal);
+    }
+    if (minioServer !== null) {
+      for (const { child } of minioServer.processes()) {
+        terminateChildProcess(child, childSignal);
+      }
+    }
+    if (stripeListener !== null) {
+      terminateChildProcess(stripeListener.child, childSignal);
+    }
+    if (dockerEventsProcess !== null) {
+      terminateChildProcess(dockerEventsProcess.child, childSignal);
+    }
+  };
+  const releaseLifecycleListeners = registerHostedLocalStackLifecycle({
+    abortSignal: input.abortSignal,
+    kill,
+  });
 
   try {
     if (!config.skipVercelPull && !providedVercelOidcToken) {
@@ -974,24 +1018,6 @@ export async function startHostedLocalDevStack(input: {
     }
     throwIfAbortSignalAborted(input.abortSignal);
 
-    const kill = (signal: NodeJS.Signals = "SIGTERM"): void => {
-      const childSignal = resolveHostedLocalChildShutdownSignal(signal);
-      killHostedLocalMinioMonitor();
-      for (const { child } of children) {
-        terminateChildProcess(child, childSignal);
-      }
-      if (minioServer !== null) {
-        for (const { child } of minioServer.processes()) {
-          terminateChildProcess(child, childSignal);
-        }
-      }
-      if (stripeListener !== null) {
-        terminateChildProcess(stripeListener.child, childSignal);
-      }
-      if (dockerEventsProcess !== null) {
-        terminateChildProcess(dockerEventsProcess.child, childSignal);
-      }
-    };
     const cleanupTemporaryInputs = async (): Promise<void> => {
       if (restoreCloudflareDevVars) {
         await rm(cloudflareDevVarsPath, { force: true });
@@ -1019,6 +1045,7 @@ export async function startHostedLocalDevStack(input: {
         }
 
         stopped = true;
+        releaseLifecycleListeners();
         if (keepAliveTimer !== null) {
           clearInterval(keepAliveTimer);
           keepAliveTimer = null;
@@ -1190,6 +1217,7 @@ export async function startHostedLocalDevStack(input: {
       workerBaseUrl,
     };
   } catch (error) {
+    releaseLifecycleListeners();
     await stopHostedLocalMinioMonitor().catch(() => {});
     for (const { child } of children) {
       await terminateChildProcessAndWait(child, { signal: "SIGTERM" }).catch(() => {});
