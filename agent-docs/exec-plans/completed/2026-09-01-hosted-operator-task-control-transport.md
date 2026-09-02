@@ -1,6 +1,6 @@
 # Restore hosted operator-task control transport
 
-Status: active
+Status: completed
 Created: 2026-09-01
 Updated: 2026-09-01
 
@@ -50,10 +50,11 @@ Updated: 2026-09-01
    operator-task route.
 2. Completed: added the exact route to the central Cloudflare POST policy.
 3. Completed locally: ran focused Cloudflare verification and typecheck.
-4. In progress: draft PR 2708 is open; update changelog provenance and run
-   exact-head ReviewGPT and required CI.
-5. Pending: merge, deploy through the protected Cloudflare workflow, and prove the
-   affected runtime converges without the prior allowlist failure.
+4. Completed: draft PR 2708 is open and the existing recovery changelog item
+   names this PR as source provenance.
+5. Authorized follow-through: the user explicitly opted out of pre-merge
+   ReviewGPT and requested an immediate admin merge and protected Cloudflare
+   deploy, with ReviewGPT run retroactively.
 
 ## Decisions
 
@@ -70,6 +71,10 @@ Updated: 2026-09-01
 - Passed after the fix: all 221 tests in
   `apps/cloudflare/test/runner-outbound.test.ts`.
 - Passed: `pnpm --dir apps/cloudflare typecheck`.
-- Remaining: changelog fragment test if provenance changes, exact-head required
-  GitHub checks, ReviewGPT, merge-tree proof, protected deployment, and bounded
-  production runtime-log/control-row checks.
+- Passed: 9 focused changelog archive tests and
+  `pnpm --dir apps/web typecheck`.
+- Passed: `scripts/check-agent-docs-drift.sh` and `pnpm complexity:diff`.
+- Follow-through after plan closure: admin merge, protected deployment, bounded
+  production runtime-log/control-row checks, and the explicitly deferred
+  retroactive ReviewGPT audit.
+Completed: 2026-09-01
