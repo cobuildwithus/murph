@@ -21,8 +21,11 @@ import { cn } from "@/src/lib/utils";
 import {
   compareFoodMetrics,
   formatFoodMetricValue,
+  getFoodAlertLabel,
   getFoodCategoryAsset,
   getFoodEvidenceSummary,
+  getFoodMetricConclusion,
+  getFoodObservationScope,
   getFoodTopMatch,
   type FoodMetricBasis,
   type FoodMetricComparison,
@@ -272,9 +275,11 @@ function MetricPopover(input: {
         ? right.value.value - left.value.value
         : left.value.value - right.value.value,
     );
-  const rank = sorted.findIndex(
-    (entry) => entry.product.productRef === input.activeProduct.productRef,
-  ) + 1;
+  const comparisonLabel = getFoodMetricConclusion(
+    input.comparison,
+    input.activeProduct.productRef,
+    input.products.length,
+  );
   const max = Math.max(...sorted.map((entry) => entry.value.value), 1);
 
   return (
@@ -291,7 +296,7 @@ function MetricPopover(input: {
             {input.comparison.metric.label}
           </PopoverTitle>
           <p className="mt-1 font-serif text-2xl font-semibold tracking-[-0.02em] text-foreground">
-            {input.comparison.metric.preference === "higher" ? "Highest" : "Lowest"} · #{rank} of {sorted.length}
+            {comparisonLabel}
           </p>
         </div>
 
@@ -361,6 +366,7 @@ function EvidenceCell(input: {
 }) {
   const summary = getFoodEvidenceSummary(input.product);
   const hasAlerts = summary.alertCount > 0;
+  const alertLabel = getFoodAlertLabel(summary, false);
 
   return (
     <td className="border-r border-border px-5 py-4 last:border-r-0">
@@ -373,7 +379,7 @@ function EvidenceCell(input: {
             hasAlerts ? "text-destructive" : "text-primary",
           )}
         >
-          {summary.alertCount} {summary.alertCount === 1 ? "alert" : "alerts"}
+          {alertLabel}
         </button>
         <button
           type="button"
@@ -383,7 +389,7 @@ function EvidenceCell(input: {
           Evidence: {summary.level}
         </button>
         <span className="text-xs text-muted-foreground">
-          {summary.testCount} tests · {summary.gapCount} gaps
+          {getFoodObservationScope(summary).replace(/^Showing /u, "")} · {summary.gapCount} gaps
         </span>
       </div>
     </td>

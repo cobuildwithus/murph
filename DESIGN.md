@@ -497,10 +497,14 @@ count metric wins, but must not read as a health or safety score.
 
 Keep evidence in one separate row. Use sienna only for a real exact-sample
 alert. Show missing evidence with muted or amber-neutral treatments. One metric
-cell opens a compact ranked-bar popover. Tests and gaps open in a right-side
+cell opens a compact comparison-bar popover. Never assign a winner when a
+selected product lacks that metric, and never give tied values unequal ordinal
+ranks. Tests and gaps open in a right-side
 sheet with one large conclusion, simple status marks, and raw reports hidden by
-default. At phone widths, preserve the first label column and let product
-columns scroll horizontally.
+default. Observation summaries must show returned versus total scope when the
+public DTO is truncated. Gap rows use the DTO-owned titles and descriptions.
+At phone widths, preserve the first label column and let product columns scroll
+horizontally.
 
 ### Choice Cards
 Use the shared `ChoiceCard` with `RadioGroup` when a member must compare two to

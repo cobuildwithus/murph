@@ -53,9 +53,12 @@ export type EvidenceLevel = "limited" | "partial" | "reported";
 
 export interface FoodEvidenceSummary {
   alertCount: number;
+  alertsLowerBound: boolean;
   gapCount: number;
   level: EvidenceLevel;
-  testCount: number;
+  observationCount: number;
+  returnedObservationCount: number;
+  observationsTruncated: boolean;
 }
 
 export type EvidenceTone = "affirmative" | "warning" | "unknown" | "neutral";
@@ -66,13 +69,6 @@ export interface EvidenceMatrixRow {
   tone: EvidenceTone;
   coveredSampleCount: number | null;
   totalSampleCount: number | null;
-}
-
-export interface EvidenceDimension {
-  id: string;
-  label: string;
-  known: boolean;
-  priority: "high" | "standard";
 }
 
 const METRIC_BY_ID = new Map<FoodMetricId, FoodMetric>(
@@ -138,8 +134,9 @@ export function compareFoodMetrics(
       }
     }
 
+    const complete = products.length >= 2 && values.size === products.length;
     const numericValues = [...values.values()].map((value) => value.value);
-    const winningValue = numericValues.length >= 2
+    const winningValue = complete
       ? metric.preference === "higher"
         ? Math.max(...numericValues)
         : Math.min(...numericValues)
@@ -158,7 +155,7 @@ export function compareFoodMetrics(
       metric,
       values,
       winnerRefs,
-      complete: products.length >= 2 && values.size === products.length,
+      complete,
     };
   });
 }
@@ -198,15 +195,63 @@ export function getFoodTopMatch(
 export function getFoodEvidenceSummary(
   product: PublicProductDetail,
 ): FoodEvidenceSummary {
-  const testCount = product.productTests.total;
+  const observationCount = product.productTests.total;
   const gapCount = product.unknowns.length;
+  const alertCount = product.productTests.alerts.length;
 
   return {
-    alertCount: product.productTests.alerts.length,
+    alertCount,
+    alertsLowerBound: alertCount === 5,
     gapCount,
-    level: testCount === 0 ? "limited" : gapCount === 0 ? "reported" : "partial",
-    testCount,
+    level: observationCount === 0 ? "limited" : gapCount === 0 ? "reported" : "partial",
+    observationCount,
+    returnedObservationCount: product.productTests.returned,
+    observationsTruncated: product.productTests.truncated,
   };
+}
+
+export function getFoodMetricConclusion(
+  comparison: FoodMetricComparison,
+  activeProductRef: string,
+  productCount: number,
+): string {
+  if (!comparison.complete) {
+    return `Values for ${comparison.values.size} of ${productCount} products`;
+  }
+  if (comparison.winnerRefs.has(activeProductRef)) {
+    const direction = comparison.metric.preference === "higher" ? "highest" : "lowest";
+    return comparison.winnerRefs.size > 1
+      ? `Tied for ${direction}`
+      : direction === "highest" ? "Highest" : "Lowest";
+  }
+  return `Compared across ${productCount} products`;
+}
+
+export function getFoodAlertLabel(
+  summary: FoodEvidenceSummary,
+  detail: boolean,
+): string {
+  if (summary.observationCount === 0) {
+    return detail ? "No exact observations" : "No observations";
+  }
+  if (summary.alertCount === 0) {
+    if (summary.observationsTruncated) {
+      return detail ? "No alerts among shown observations" : "No alerts shown";
+    }
+    return detail ? "0 alerts in exact observations" : "0 alerts";
+  }
+  const count = summary.alertsLowerBound
+    ? `At least ${summary.alertCount}`
+    : String(summary.alertCount);
+  const noun = summary.alertCount === 1 ? "alert" : "alerts";
+  return detail ? `${count} ${noun} among shown observations` : `${count} ${noun}`;
+}
+
+export function getFoodObservationScope(summary: FoodEvidenceSummary): string {
+  if (summary.observationsTruncated) {
+    return `Showing ${summary.returnedObservationCount} of ${summary.observationCount} observations`;
+  }
+  return `${summary.observationCount} ${summary.observationCount === 1 ? "observation" : "observations"}`;
 }
 
 export function getEvidenceMatrix(
@@ -246,75 +291,16 @@ export function getEvidenceMatrix(
       return matrixRow(analyte, "Not detected", "affirmative", coveredSampleKeys, allSampleKeys);
     }
     if (observations.some((observation) => observation.screening === null)) {
-      return matrixRow(analyte, "No limit", "unknown", coveredSampleKeys, allSampleKeys);
+      return matrixRow(
+        analyte,
+        "No comparable threshold",
+        "unknown",
+        coveredSampleKeys,
+        allSampleKeys,
+      );
     }
     return matrixRow(analyte, "Measured", "neutral", coveredSampleKeys, allSampleKeys);
   });
-}
-
-export function getEvidenceDimensions(
-  product: PublicProductDetail,
-): EvidenceDimension[] {
-  const unknownCodes = new Set(product.unknowns.map((unknown) => unknown.code));
-
-  return [
-    {
-      id: "tests",
-      label: "Exact product tests",
-      known: !unknownCodes.has("NO_LINKED_PRODUCT_TESTS"),
-      priority: "high",
-    },
-    {
-      id: "lot",
-      label: "Current lot",
-      known: product.productTests.total > 0 && !unknownCodes.has("TESTED_LOT_NOT_REPORTED"),
-      priority: "high",
-    },
-    {
-      id: "thresholds",
-      label: "Screening limits",
-      known: product.productTests.total > 0 && !unknownCodes.has("TEST_THRESHOLD_NOT_COMPARABLE"),
-      priority: "high",
-    },
-    {
-      id: "nutrition",
-      label: "Nutrition",
-      known: !unknownCodes.has("NUTRITION_UNAVAILABLE"),
-      priority: "standard",
-    },
-    {
-      id: "ingredients",
-      label: "Ingredients",
-      known:
-        !unknownCodes.has("INGREDIENTS_UNAVAILABLE") &&
-        !unknownCodes.has("LABEL_CONTENT_OMITTED"),
-      priority: "standard",
-    },
-    {
-      id: "serving",
-      label: "Serving mass",
-      known: !unknownCodes.has("SERVING_MASS_UNAVAILABLE"),
-      priority: "standard",
-    },
-    {
-      id: "lab",
-      label: "Named lab",
-      known: product.productTests.total > 0 && !unknownCodes.has("TEST_LAB_NOT_REPORTED"),
-      priority: "standard",
-    },
-    {
-      id: "method",
-      label: "Test method",
-      known: product.productTests.total > 0 && !unknownCodes.has("TEST_METHOD_NOT_REPORTED"),
-      priority: "standard",
-    },
-    {
-      id: "formula",
-      label: "Formula revision",
-      known: !unknownCodes.has("FORMULA_REVISION_NOT_TRACKED"),
-      priority: "standard",
-    },
-  ];
 }
 
 export function formatFoodMetricValue(value: FoodMetricValue): string {

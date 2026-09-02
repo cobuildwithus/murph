@@ -289,4 +289,7 @@ Show one winner per complete nutrition metric and a top match based only on
 those visible metric wins. Never turn that result into a universal health or
 safety score. Keep exact test alerts, evidence coverage, and unknowns in a
 separate evidence row. Use a short popover for one metric and a side sheet for
-tests or gaps, with raw reports hidden until requested.
+tests or gaps, with raw reports hidden until requested. Never rank an incomplete
+metric or assign unequal ranks to tied values. When evidence is bounded, show
+returned and total observation scope. Render the public DTO's unknowns directly
+instead of rebuilding evidence completeness in the page.

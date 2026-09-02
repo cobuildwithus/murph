@@ -134,7 +134,7 @@ export function FoodLabelLab(input: {
         productRef: result.productRef,
         name: result.name,
         brand: result.brand,
-        linkedTests: result.productTests.total,
+        linkedObservations: result.productTests.total,
       }));
     } catch (error) {
       if (controller.signal.aborted || sequence !== searchSequenceRef.current) {
@@ -431,7 +431,7 @@ function SearchResults(input: {
                 {result.name}
               </span>
               <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                {result.brand ?? "Brand not reported"} · {result.productTests.total} tests
+                {result.brand ?? "Brand not reported"} · {result.productTests.total} observations
               </span>
             </span>
             <span className="text-sm font-medium text-primary">
@@ -513,7 +513,11 @@ function buildWebMcpComparison(
         productRef: product.productRef,
         name: product.name,
         brand: product.brand,
-        alerts: evidence.alertCount,
+        alertsShown: evidence.alertCount,
+        alertsLowerBound: evidence.alertsLowerBound,
+        observationTotal: evidence.observationCount,
+        observationReturned: evidence.returnedObservationCount,
+        observationsTruncated: evidence.observationsTruncated,
         evidence: evidence.level,
       };
     }),

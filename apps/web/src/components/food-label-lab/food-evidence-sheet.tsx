@@ -22,10 +22,11 @@ import {
 import { cn } from "@/src/lib/utils";
 
 import {
-  getEvidenceDimensions,
   getEvidenceMatrix,
+  getFoodAlertLabel,
   getFoodCategoryAsset,
   getFoodEvidenceSummary,
+  getFoodObservationScope,
   type EvidenceTone,
 } from "./food-label-model";
 
@@ -81,7 +82,6 @@ function ProductHeading(input: { product: PublicProductDetail }) {
 function TestsPanel(input: { product: PublicProductDetail }) {
   const summary = getFoodEvidenceSummary(input.product);
   const matrix = getEvidenceMatrix(input.product);
-  const hasAlerts = summary.alertCount > 0;
 
   return (
     <>
@@ -89,14 +89,10 @@ function TestsPanel(input: { product: PublicProductDetail }) {
         <ProductHeading product={input.product} />
         <div>
           <SheetTitle className="font-serif text-3xl font-semibold leading-tight tracking-[-0.025em]">
-            {summary.testCount === 0
-              ? "No exact tests"
-              : hasAlerts
-                ? `${summary.alertCount} ${summary.alertCount === 1 ? "alert" : "alerts"} in tested samples`
-                : "0 alerts in tested samples"}
+            {getFoodAlertLabel(summary, true)}
           </SheetTitle>
           <SheetDescription className="mt-2">
-            {summary.testCount} {summary.testCount === 1 ? "test" : "tests"}
+            {getFoodObservationScope(summary)}
             {matrix.length > 0 ? ` · ${matrix.length} measured ${matrix.length === 1 ? "analyte" : "analytes"}` : ""}
           </SheetDescription>
         </div>
@@ -140,7 +136,7 @@ function TestsPanel(input: { product: PublicProductDetail }) {
               <FlaskConicalIcon className="size-9" aria-hidden="true" />
             </div>
             <p className="max-w-xs font-serif text-2xl font-semibold tracking-[-0.02em] text-foreground">
-              No tested sample is linked to this exact product.
+              No product-level observation is linked to this exact product.
             </p>
           </div>
         )}
@@ -179,7 +175,7 @@ function TestsPanel(input: { product: PublicProductDetail }) {
 
       <SheetFooter className="border-t border-border px-6 py-5">
         <p className="text-sm text-muted-foreground">
-          Exact samples, not every package.
+          Shown observations cover exact samples, not every package.
         </p>
       </SheetFooter>
     </>
@@ -187,13 +183,16 @@ function TestsPanel(input: { product: PublicProductDetail }) {
 }
 
 function GapsPanel(input: { product: PublicProductDetail }) {
-  const dimensions = getEvidenceDimensions(input.product);
-  const knownCount = dimensions.filter((dimension) => dimension.known).length;
-  const importantUnknowns = dimensions.filter(
-    (dimension) => !dimension.known && dimension.priority === "high",
+  const importantCodes = new Set<PublicProductDetail["unknowns"][number]["code"]>([
+    "NO_LINKED_PRODUCT_TESTS",
+    "TESTED_LOT_NOT_REPORTED",
+    "TEST_THRESHOLD_NOT_COMPARABLE",
+  ]);
+  const importantUnknowns = input.product.unknowns.filter((unknown) =>
+    importantCodes.has(unknown.code),
   );
-  const otherUnknowns = dimensions.filter(
-    (dimension) => !dimension.known && dimension.priority === "standard",
+  const otherUnknowns = input.product.unknowns.filter((unknown) =>
+    !importantCodes.has(unknown.code),
   );
 
   return (
@@ -202,25 +201,13 @@ function GapsPanel(input: { product: PublicProductDetail }) {
         <ProductHeading product={input.product} />
         <div>
           <SheetTitle className="font-serif text-3xl font-semibold tracking-[-0.025em]">
-            Evidence: {knownCount === 0 ? "limited" : knownCount === dimensions.length ? "reported" : "partial"}
+            {input.product.unknowns.length === 0
+              ? "No known evidence gaps"
+              : `${input.product.unknowns.length} evidence ${input.product.unknowns.length === 1 ? "gap" : "gaps"}`}
           </SheetTitle>
           <SheetDescription className="sr-only">
             Evidence coverage and unknowns for this exact product.
           </SheetDescription>
-          <div
-            className="mt-4 grid grid-cols-9 gap-1.5"
-            aria-label={`${knownCount} of ${dimensions.length} evidence areas reported`}
-          >
-            {dimensions.map((dimension) => (
-              <span
-                key={dimension.id}
-                className={cn(
-                  "h-2 rounded-full",
-                  dimension.known ? "bg-primary" : "bg-muted",
-                )}
-              />
-            ))}
-          </div>
         </div>
       </SheetHeader>
 
@@ -233,7 +220,7 @@ function GapsPanel(input: { product: PublicProductDetail }) {
               </p>
               <div className="mt-3 flex flex-col gap-2">
                 {importantUnknowns.map((dimension) => (
-                  <GapRow key={dimension.id} label={dimension.label} important />
+                  <GapRow key={dimension.code} unknown={dimension} important />
                 ))}
               </div>
             </div>
@@ -241,7 +228,7 @@ function GapsPanel(input: { product: PublicProductDetail }) {
 
           <div className="divide-y divide-border">
             {otherUnknowns.map((dimension) => (
-              <GapRow key={dimension.id} label={dimension.label} />
+              <GapRow key={dimension.code} unknown={dimension} />
             ))}
           </div>
 
@@ -267,11 +254,14 @@ function GapsPanel(input: { product: PublicProductDetail }) {
   );
 }
 
-function GapRow(input: { important?: boolean; label: string }) {
+function GapRow(input: {
+  important?: boolean;
+  unknown: PublicProductDetail["unknowns"][number];
+}) {
   return (
-    <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 py-4">
+    <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-3 py-4">
       <div
-        className="flex size-9 items-center justify-center rounded-full bg-muted text-muted-foreground"
+        className="mt-0.5 flex size-9 items-center justify-center rounded-full bg-muted text-muted-foreground"
       >
         {input.important ? (
           <AlertTriangleIcon className="size-4" aria-hidden="true" />
@@ -279,10 +269,14 @@ function GapRow(input: { important?: boolean; label: string }) {
           <CircleHelpIcon className="size-4" aria-hidden="true" />
         )}
       </div>
-      <span className={cn("text-sm", input.important ? "font-medium text-foreground" : "text-foreground")}>
-        {input.label}
-      </span>
-      <span className="text-sm text-muted-foreground">Unknown</span>
+      <details className="group min-w-0">
+        <summary className="cursor-pointer list-none text-sm font-medium text-foreground outline-none group-open:text-primary">
+          {input.unknown.title}
+        </summary>
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+          {input.unknown.description}
+        </p>
+      </details>
     </div>
   );
 }

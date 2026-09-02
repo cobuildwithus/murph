@@ -1900,7 +1900,11 @@ and the production build verifies their exact active configuration.
 
 `/food` keeps temporary comparison state in the browser and derives four
 nutrition comparisons plus a separate exact-evidence summary from existing
-public DTOs. Compatible browsers receive four page-scoped WebMCP tools through
+public DTOs. A nutrition winner exists only when every compared product has the
+metric. Evidence keeps the DTO's returned, total, and truncated observation
+scope, and the gaps sheet renders the DTO-owned unknown entries without a
+parallel completeness model. Compatible browsers receive four page-scoped
+WebMCP tools through
 `document.modelContext.registerTool`. These tools call the same bounded page
 actions as manual controls and disappear when the page unmounts. They do not
 create a remote MCP service, a second data owner, or an authenticated path.

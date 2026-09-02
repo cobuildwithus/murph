@@ -4,11 +4,13 @@ import type { PublicProductDetail } from "@murphai/contracts";
 
 import {
   compareFoodMetrics,
-  getEvidenceDimensions,
   getEvidenceMatrix,
+  getFoodAlertLabel,
   getFoodCategoryAsset,
   getFoodEvidenceSummary,
+  getFoodMetricConclusion,
   getFoodMetricValue,
+  getFoodObservationScope,
   getFoodTopMatch,
 } from "@/src/components/food-label-lab/food-label-model";
 
@@ -65,8 +67,34 @@ describe("food label comparison model", () => {
     const comparisons = compareFoodMetrics([first, second], "per_100_g");
     const topMatch = getFoodTopMatch([first, second], comparisons);
 
-    expect(comparisons.find((row) => row.metric.id === "fat")?.complete).toBe(false);
+    const fat = comparisons.find((row) => row.metric.id === "fat");
+    expect(fat?.complete).toBe(false);
+    expect(fat?.winnerRefs).toEqual(new Set());
+    if (!fat) {
+      throw new Error("Fat comparison did not render.");
+    }
+    expect(getFoodMetricConclusion(fat, first.productRef, 2)).toBe(
+      "Values for 1 of 2 products",
+    );
     expect(topMatch.comparableMetricCount).toBe(3);
+  });
+
+  test("keeps equal complete values as tied winners", () => {
+    const first = makeFood("food_first", { sugars: 0 });
+    const second = makeFood("food_second", { sugars: 0 });
+
+    const sugars = compareFoodMetrics([first, second], "per_100_g").find(
+      (row) => row.metric.id === "sugars",
+    );
+
+    expect(sugars?.complete).toBe(true);
+    expect(sugars?.winnerRefs).toEqual(new Set([first.productRef, second.productRef]));
+    if (!sugars) {
+      throw new Error("Sugar comparison did not render.");
+    }
+    expect(getFoodMetricConclusion(sugars, second.productRef, 2)).toBe(
+      "Tied for lowest",
+    );
   });
 
   test("uses exact alerts and known gaps without producing a safety score", () => {
@@ -82,12 +110,52 @@ describe("food label comparison model", () => {
     limited.unknowns.push(unknown("NO_LINKED_PRODUCT_TESTS"));
 
     const summary = getFoodEvidenceSummary(limited);
-    const dimensions = getEvidenceDimensions(limited);
-
     expect(summary.level).toBe("limited");
     expect(summary.alertCount).toBe(0);
-    expect(dimensions.find((dimension) => dimension.id === "tests")?.known).toBe(false);
-    expect(dimensions.find((dimension) => dimension.id === "formula")?.known).toBe(false);
+    expect(summary.observationCount).toBe(0);
+    expect(summary.returnedObservationCount).toBe(0);
+    expect(limited.unknowns.map((entry) => entry.code)).toContain(
+      "NO_LINKED_PRODUCT_TESTS",
+    );
+  });
+
+  test("preserves bounded observation scope in evidence summaries", () => {
+    const product = makeFood("food_bounded");
+    product.productTests.total = 21;
+    product.productTests.returned = 20;
+    product.productTests.truncated = true;
+    product.productTests.observations = Array.from({ length: 20 }, (_, index) =>
+      observation(`lead-${index}`, "Lead", "does_not_exceed", `sample-${index}`),
+    );
+
+    const summary = getFoodEvidenceSummary(product);
+    expect(summary).toEqual(
+      expect.objectContaining({
+        alertCount: 0,
+        observationCount: 21,
+        returnedObservationCount: 20,
+        observationsTruncated: true,
+      }),
+    );
+    expect(getFoodAlertLabel(summary, true)).toBe(
+      "No alerts among shown observations",
+    );
+    expect(getFoodObservationScope(summary)).toBe("Showing 20 of 21 observations");
+  });
+
+  test("treats the five-alert response cap as a lower bound", () => {
+    const product = makeFood("food_alerts");
+    product.productTests.alerts = Array.from({ length: 5 }, (_, index) =>
+      alert(index),
+    );
+
+    const summary = getFoodEvidenceSummary(product);
+    expect(summary).toEqual(
+      expect.objectContaining({ alertCount: 5, alertsLowerBound: true }),
+    );
+    expect(getFoodAlertLabel(summary, true)).toBe(
+      "At least 5 alerts among shown observations",
+    );
   });
 
   test("maps measured results to honest semantic states", () => {
@@ -103,7 +171,11 @@ describe("food label comparison model", () => {
     expect(getEvidenceMatrix(product)).toEqual([
       expect.objectContaining({ analyte: "Lead", status: "Below limit", tone: "affirmative" }),
       expect.objectContaining({ analyte: "Glyphosate", status: "Not detected", tone: "affirmative" }),
-      expect.objectContaining({ analyte: "Cadmium", status: "No limit", tone: "unknown" }),
+      expect.objectContaining({
+        analyte: "Cadmium",
+        status: "No comparable threshold",
+        tone: "unknown",
+      }),
     ]);
   });
 
@@ -252,5 +324,23 @@ function observation(
           },
         }
       : null,
+  };
+}
+
+function alert(
+  index: number,
+): PublicProductDetail["productTests"]["alerts"][number] {
+  const item = observation(`lead-${index}`, "Lead", "exceeds", `sample-${index}`);
+  if (!item.screening) {
+    throw new Error("Synthetic alert requires a screening threshold.");
+  }
+  return {
+    analyte: item.analyte,
+    concernLevel: "high",
+    result: item.result,
+    threshold: item.screening.threshold,
+    source: item.source,
+    testedProduct: item.testedProduct,
+    sample: item.sample,
   };
 }

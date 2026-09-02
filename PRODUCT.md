@@ -108,6 +108,7 @@ precision as the private product. Search terms remain private and the public
 surface does not require an account.
 
 The `/food` view turns branded-food records into a fast comparison. It names
-the best product for each visible nutrition metric, then keeps exact test
+the best product for each complete visible nutrition metric, then keeps exact test
 alerts and evidence gaps separate. Its top match summarizes those metric wins;
-it is not a universal health or safety score.
+it is not a universal health or safety score. Bounded evidence states how many
+observations are shown, and gaps keep the public product record's own meaning.

@@ -128,6 +128,22 @@ page-scoped WebMCP registrations, and two existing-style UI primitives. This
 interaction set is proportionate to the approved outcome, so no split or scope
 deletion is required.
 
+## Review Remediation
+
+ReviewGPT round 2 found two original implementation errors. Both were accepted:
+
+- A partial metric could still show a winner, and tied values could receive
+  different ordinal ranks. Winner selection now requires a value from every
+  compared product. The popover no longer uses ordinal ranks.
+- The page treated bounded evidence arrays as complete and rebuilt evidence
+  gaps locally. The page now labels observations with their returned and total
+  scope, qualifies capped alert counts, and renders the public API's unknown
+  titles and descriptions directly.
+
+The correction removes the duplicate evidence-dimension owner. It adds no new
+service, state owner, persistence, dependency, or lifecycle. Focused model,
+client, WebMCP, public-product, Murph Safe, type, lint, and complexity checks pass.
+
 ## Tasks
 
 1. Inspect current public product contracts, route privacy, design catalog, and tests.

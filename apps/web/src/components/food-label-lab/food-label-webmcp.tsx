@@ -6,7 +6,7 @@ export interface FoodWebMcpSearchResult {
   productRef: string;
   name: string;
   brand: string | null;
-  linkedTests: number;
+  linkedObservations: number;
 }
 
 export interface FoodWebMcpComparisonResult {
@@ -14,7 +14,11 @@ export interface FoodWebMcpComparisonResult {
     productRef: string;
     name: string;
     brand: string | null;
-    alerts: number;
+    alertsShown: number;
+    alertsLowerBound: boolean;
+    observationTotal: number;
+    observationReturned: number;
+    observationsTruncated: boolean;
     evidence: string;
   }>;
   basis: "per_100_g" | "per_serving";
@@ -69,10 +73,24 @@ const PRODUCT_SUMMARY_SCHEMA = {
     productRef: { type: "string" },
     name: { type: "string" },
     brand: { type: ["string", "null"] },
-    alerts: { type: "integer", minimum: 0 },
+    alertsShown: { type: "integer", minimum: 0, maximum: 5 },
+    alertsLowerBound: { type: "boolean" },
+    observationTotal: { type: "integer", minimum: 0 },
+    observationReturned: { type: "integer", minimum: 0, maximum: 20 },
+    observationsTruncated: { type: "boolean" },
     evidence: { type: "string", enum: ["limited", "partial", "reported"] },
   },
-  required: ["productRef", "name", "brand", "alerts", "evidence"],
+  required: [
+    "productRef",
+    "name",
+    "brand",
+    "alertsShown",
+    "alertsLowerBound",
+    "observationTotal",
+    "observationReturned",
+    "observationsTruncated",
+    "evidence",
+  ],
   additionalProperties: false,
 } as const;
 
@@ -153,9 +171,9 @@ function createFoodWebMcpTools(
                 productRef: { type: "string" },
                 name: { type: "string" },
                 brand: { type: ["string", "null"] },
-                linkedTests: { type: "integer", minimum: 0 },
+                linkedObservations: { type: "integer", minimum: 0 },
               },
-              required: ["productRef", "name", "brand", "linkedTests"],
+              required: ["productRef", "name", "brand", "linkedObservations"],
               additionalProperties: false,
             },
           },

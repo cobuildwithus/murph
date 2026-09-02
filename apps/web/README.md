@@ -871,6 +871,8 @@ Compatible browsers expose four page-scoped, read-only WebMCP tools while
 `/food` is open: `search_food_products`, `compare_food_products`,
 `get_food_comparison`, and `show_food_evidence`. The tools use exact public
 product references and update the same visible page state as manual controls.
+Comparison results carry returned, total, and truncated observation scope so a
+bounded evidence response cannot look complete to an agent.
 One abort signal removes every registration when the page unmounts. This is a
 browser surface, not a remote MCP server, and it adds no account or vault access.
 

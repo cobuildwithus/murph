@@ -34,10 +34,14 @@ records are excluded because this experience is package and product oriented.
   shared per-100-gram or per-serving basis.
 - A top match wins the most complete visible metrics. It is not a health score.
 - Each metric names its own winner. Missing values do not create a winner.
+- Equal winning values remain ties and do not receive unequal ordinal ranks.
 - Evidence stays separate from nutrition. Real screening alerts use a warning
   treatment; missing tests and other gaps stay neutral.
 - Metric detail uses a short popover. Tests and evidence gaps open in a side
   sheet with the conclusion first and raw reports on demand.
+- Bounded evidence states returned and total observation counts. Alert copy is
+  scoped to shown observations, and the gap sheet renders the contract-owned
+  unknown titles and descriptions directly.
 - Category art is illustrative. It does not identify the package or certify the
   product category.
 
@@ -51,7 +55,8 @@ On compatible browsers, `/food` registers four read-only page tools:
 - `get_food_comparison` reads the compact comparison now shown on the page.
 - `show_food_evidence` opens the tests or gaps sheet for a shown product.
 
-The tools use the same page state and public API as manual actions. They exist
+The tools use the same page state and public API as manual actions and return
+the same bounded observation scope as the visible comparison. They exist
 only while `/food` is open and unregister through the browser-owned abort
 signal. Murph adds no remote MCP server, account access, vault access, writes,
 or food logging through this surface.

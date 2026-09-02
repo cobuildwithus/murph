@@ -83,7 +83,8 @@ describe("FoodLabelLab", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(rendered.container.textContent).toContain("Top match · 3 of 4");
     expect(rendered.container.textContent).toContain("Evidence: partial");
-    expect(rendered.container.textContent).toContain("0 alerts");
+    expect(rendered.container.textContent).toContain("No alerts shown");
+    expect(rendered.container.textContent).toContain("4 of 57 observations");
     expect(rendered.container.querySelector('section[aria-label="Food comparison"]'))
       .not.toBeNull();
   });
@@ -101,6 +102,7 @@ describe("FoodLabelLab", () => {
       "Too many searches. Wait a minute and try again.",
     );
   });
+
 });
 
 function searchHit(product: (typeof FOOD_LABEL_DESIGN_PRODUCTS)[number]) {
