@@ -31,9 +31,12 @@ import {
 import { projectHostedMemberAssistantPreferences } from "./member-preferences";
 import {
   extractHostedPrivyEmailAccount,
+  extractHostedPrivyPhoneAccount,
   extractHostedPrivyTelegramAccount,
+  extractHostedPrivyVerifiedEmailAccount,
   type PrivyLinkedAccountLike,
 } from "./privy-shared";
+import type { HostedPrivyAuthMethod } from "./types";
 
 export interface HostedAccountSettingsSnapshot {
   assistant?: {
@@ -63,6 +66,12 @@ export interface HostedAccountSettingsSnapshot {
     number: string | null;
     verifiedAt: string | null;
   };
+  /**
+   * Provider-linked methods that may be removed without leaving the member
+   * without a supported sign-in. Null when the Privy session could not be
+   * confirmed server-side.
+   */
+  removableSignInMethods?: HostedPrivyAuthMethod[] | null;
   /**
    * Browser-local invalidation only; it grants no referral authority. Absent
    * only in inert legacy fixtures—the server projection always supplies it.
@@ -284,22 +293,82 @@ export function withServerApprovedPrivyAccountHints(input: {
   serverApprovedPrivyLinkedAccounts?: PrivyLinkedAccountLike[] | null;
   snapshot: HostedAccountSettingsSnapshot;
 }): HostedAccountSettingsSnapshot {
+  const linkedAccounts = input.serverApprovedPrivyLinkedAccounts;
+  const linkedEmail = linkedAccounts
+    ? extractHostedPrivyEmailAccount(linkedAccounts)
+    : null;
+  const linkedPhone = linkedAccounts
+    ? extractHostedPrivyPhoneAccount(linkedAccounts)
+    : null;
+  const linkedTelegram = linkedAccounts
+    ? extractHostedPrivyTelegramAccount({ linkedAccounts })
+    : null;
+
   return {
     ...input.snapshot,
-    email: {
-      ...input.snapshot.email,
-      privyEmailLinked: input.serverApprovedPrivyLinkedAccounts
-        ? extractHostedPrivyEmailAccount(input.serverApprovedPrivyLinkedAccounts) !== null
-        : null,
-    },
-    telegram: {
-      ...input.snapshot.telegram,
-      username: resolveHostedAccountTelegramUsername({
-        serverApprovedPrivyLinkedAccounts: input.serverApprovedPrivyLinkedAccounts,
-        telegramUserId: input.snapshot.telegram.telegramUserId,
-      }),
-    },
+    email: linkedAccounts
+      ? linkedEmail
+        ? {
+            ...input.snapshot.email,
+            privyEmailLinked: true,
+          }
+        : {
+            address: null,
+            murphEmailAddress: null,
+            privyEmailLinked: false,
+            verifiedAt: null,
+          }
+      : {
+          ...input.snapshot.email,
+          privyEmailLinked: null,
+        },
+    phone: linkedAccounts && !linkedPhone
+      ? {
+          number: null,
+          verifiedAt: null,
+        }
+      : input.snapshot.phone,
+    removableSignInMethods: linkedAccounts
+      ? resolveHostedRemovablePrivySignInMethods(linkedAccounts)
+      : null,
+    telegram: linkedAccounts && !linkedTelegram
+      ? {
+          telegramUserId: null,
+          username: null,
+        }
+      : {
+          ...input.snapshot.telegram,
+          username: resolveHostedAccountTelegramUsername({
+            serverApprovedPrivyLinkedAccounts: linkedAccounts,
+            telegramUserId: input.snapshot.telegram.telegramUserId,
+          }),
+        },
   };
+}
+
+export function resolveHostedRemovablePrivySignInMethods(
+  linkedAccounts: PrivyLinkedAccountLike[],
+): HostedPrivyAuthMethod[] {
+  const linkedMethods: HostedPrivyAuthMethod[] = [
+    ...(extractHostedPrivyPhoneAccount(linkedAccounts) ? ["phone" as const] : []),
+    ...(extractHostedPrivyEmailAccount(linkedAccounts) ? ["email" as const] : []),
+    ...(extractHostedPrivyTelegramAccount({ linkedAccounts })
+      ? ["telegram" as const]
+      : []),
+  ];
+  const verifiedMethods = new Set<HostedPrivyAuthMethod>([
+    ...(extractHostedPrivyPhoneAccount(linkedAccounts) ? ["phone" as const] : []),
+    ...(extractHostedPrivyVerifiedEmailAccount(linkedAccounts)
+      ? ["email" as const]
+      : []),
+    ...(extractHostedPrivyTelegramAccount({ linkedAccounts })
+      ? ["telegram" as const]
+      : []),
+  ]);
+
+  return linkedMethods.filter((method) =>
+    [...verifiedMethods].some((candidate) => candidate !== method)
+  );
 }
 
 function resolveHostedAccountTelegramUsername(input: {

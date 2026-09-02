@@ -185,6 +185,15 @@ Last verified: 2026-09-01
   invite, routing, or email authority. Cross-member phone conflict suppression
   reads only the blind-index owner id, so it neither decrypts the other
   member's private identity nor needs that member's root in the transaction.
+- Settings linked-account removal treats the provider unlink as the first
+  irreversible step. The browser retries only the bounded live-provider lag
+  check; once Privy confirms absence, Murph's member-locked projection cleanup
+  is idempotent and an interrupted attempt can resume without unlinking again.
+  The same transaction appends the existing channel-update mailbox item when
+  state changed. Its post-commit runtime signal is best-effort because durable
+  runtime reconciliation remains the recovery owner. A refreshed Settings page
+  derives visible connection hints from live Privy state so a completed unlink
+  is not presented as connected while local cleanup is retried.
 - Connected-app email sends have no durable provider idempotency key or send ledger. Admit them only from current accepted user input in a private direct turn; scheduled, group, maintenance, system-notification, and output-only turns fail before provider egress. After an ambiguous dispatch, never replay the send. Reconcile only against a narrow recent Sent-mail window matching the primary recipient, subject, and substantive body, and leave the outcome unknown when that evidence is not decisive.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
 - Avoid hidden coupling between scripts, docs, and runtime code; document new dependencies in `ARCHITECTURE.md` and `agent-docs/references/testing-ci-map.md`.

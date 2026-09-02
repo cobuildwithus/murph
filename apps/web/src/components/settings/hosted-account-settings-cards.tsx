@@ -15,6 +15,11 @@ import { formatHostedTelegramDisplayValue } from "./hosted-telegram-settings-hel
 import { SettingsRow, SettingsRowList } from "./settings-row";
 
 type HostedSettingsIdentityLinkMode = "phone" | "email" | "telegram";
+type HostedSettingsIdentityDialogIntent = "manage" | "remove" | "replace";
+interface HostedSettingsIdentityDialogSelection {
+  intent: HostedSettingsIdentityDialogIntent;
+  mode: HostedSettingsIdentityLinkMode;
+}
 const ADD_EMAIL_QUERY_KEY = "addEmail";
 
 const HostedSettingsIdentityLinkDialog = dynamic(
@@ -40,15 +45,16 @@ export function HostedAccountSettingsCards({
   privySessionMatchesAppSession?: boolean;
   signupReferralUrl?: string | null;
 }) {
-  const [linkMode, setLinkMode] = useState<HostedSettingsIdentityLinkMode | null>(
-    openEmailLink ? "email" : null,
+  const [dialogSelection, setDialogSelection] =
+    useState<HostedSettingsIdentityDialogSelection | null>(
+      openEmailLink ? { intent: "manage", mode: "email" } : null,
   );
   const [previousOpenEmailLink, setPreviousOpenEmailLink] = useState(openEmailLink);
 
   if (previousOpenEmailLink !== openEmailLink) {
     setPreviousOpenEmailLink(openEmailLink);
     if (openEmailLink) {
-      setLinkMode("email");
+      setDialogSelection({ intent: "manage", mode: "email" });
     }
   }
 
@@ -66,6 +72,9 @@ export function HostedAccountSettingsCards({
   const emailVerified = Boolean(account.email.verifiedAt);
   const murphEmailAddress = account.email.murphEmailAddress;
   const murphSmsHref = phoneNumber && murphPhoneNumber ? `sms:${murphPhoneNumber}` : null;
+  const canRemovePhone = account.removableSignInMethods?.includes("phone") === true;
+  const canRemoveEmail = account.removableSignInMethods?.includes("email") === true;
+  const canRemoveTelegram = account.removableSignInMethods?.includes("telegram") === true;
 
   return (
     <>
@@ -81,9 +90,16 @@ export function HostedAccountSettingsCards({
             </SettingsContactLink>
           ) : null}
           action={
-            <Button type="button" size="default" variant={phoneNumber ? "ghost" : "default"} onClick={() => setLinkMode("phone")}>
-              {phoneNumber ? (phoneVerified ? "Change" : "Verify") : "Link phone"}
-            </Button>
+            <div className="flex flex-wrap justify-end gap-1">
+              <Button type="button" size="sm" variant={phoneNumber ? "ghost" : "default"} onClick={() => setDialogSelection({ intent: "manage", mode: "phone" })}>
+                {phoneNumber ? (phoneVerified ? "Change" : "Verify") : "Link phone"}
+              </Button>
+              {phoneNumber && canRemovePhone ? (
+                <Button aria-label="Remove phone" type="button" size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setDialogSelection({ intent: "remove", mode: "phone" })}>
+                  Remove
+                </Button>
+              ) : null}
+            </div>
           }
         />
         <SettingsRow
@@ -101,9 +117,24 @@ export function HostedAccountSettingsCards({
             </SettingsContactLink>
           ) : null}
           action={
-            <Button type="button" size="default" variant={telegramUserId ? "ghost" : "secondary"} onClick={() => setLinkMode("telegram")}>
-              {telegramUserId ? "Change" : "Connect"}
-            </Button>
+            <div className="flex flex-wrap justify-end gap-1">
+              <Button
+                type="button"
+                size="sm"
+                variant={telegramUserId ? "ghost" : "secondary"}
+                onClick={() => setDialogSelection({
+                  intent: telegramUserId ? "replace" : "manage",
+                  mode: "telegram",
+                })}
+              >
+                {telegramUserId ? "Change" : "Connect"}
+              </Button>
+              {telegramUserId && canRemoveTelegram ? (
+                <Button aria-label="Remove Telegram" type="button" size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setDialogSelection({ intent: "remove", mode: "telegram" })}>
+                  Remove
+                </Button>
+              ) : null}
+            </div>
           }
         />
         <SettingsRow
@@ -120,9 +151,16 @@ export function HostedAccountSettingsCards({
             </SettingsContactLink>
           ) : null}
           action={
-            <Button type="button" size="default" variant={emailAddress ? "ghost" : "default"} onClick={() => setLinkMode("email")}>
-              {emailAddress ? (emailVerified ? "Change" : "Verify") : "Link email"}
-            </Button>
+            <div className="flex flex-wrap justify-end gap-1">
+              <Button type="button" size="sm" variant={emailAddress ? "ghost" : "default"} onClick={() => setDialogSelection({ intent: "manage", mode: "email" })}>
+                {emailAddress ? (emailVerified ? "Change" : "Verify") : "Link email"}
+              </Button>
+              {emailAddress && canRemoveEmail ? (
+                <Button aria-label="Remove email" type="button" size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setDialogSelection({ intent: "remove", mode: "email" })}>
+                  Remove
+                </Button>
+              ) : null}
+            </div>
           }
         />
         <SettingsRow
@@ -139,14 +177,15 @@ export function HostedAccountSettingsCards({
           value="Your reusable link for inviting friends"
         />
       </SettingsRowList>
-      {linkMode ? (
+      {dialogSelection ? (
         <HostedSettingsIdentityLinkDialog
           account={account}
           expectedPrivyUserId={expectedPrivyUserId ?? null}
-          initialMode={linkMode}
+          initialMode={dialogSelection.mode}
+          intent={dialogSelection.intent}
           onOpenChange={(open) => {
             if (!open) {
-              setLinkMode(null);
+              setDialogSelection(null);
             }
           }}
           privySessionMatchesAppSession={privySessionMatchesAppSession === true}

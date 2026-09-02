@@ -9,9 +9,14 @@ import { renderClientComponent } from "./render-client-component";
 
 vi.mock("next/dynamic", () => ({
   default: () => function MockHostedSettingsIdentityLinkDialog(
-    props: { initialMode?: string; onOpenChange?: (open: boolean) => void },
+    props: {
+      initialMode?: string;
+      intent?: string;
+      onOpenChange?: (open: boolean) => void;
+    },
   ) {
     return React.createElement("div", {
+      "data-link-intent": props.intent ?? "manage",
       "data-link-mode": props.initialMode ?? "",
     },
     `identity link ${props.initialMode ?? ""}`,
@@ -131,6 +136,77 @@ describe("HostedAccountSettingsCards", () => {
 
     expect(markup).toContain("Connected");
     expect(markup).not.toContain("Telegram user 456");
+  });
+
+  test("offers removal only for provider-approved secondary sign-ins", () => {
+    const account: HostedAccountSettingsSnapshot = {
+      ...makeAccountSnapshot({ phoneNumber: "+14045550123" }),
+      email: {
+        address: "member@example.com",
+        verifiedAt: "2026-05-02T00:00:00.000Z",
+      },
+      removableSignInMethods: ["phone", "email", "telegram"],
+      telegram: {
+        telegramUserId: "456",
+        username: "sample_user",
+      },
+    };
+    const removableMarkup = renderToStaticMarkup(
+      React.createElement(HostedAccountSettingsCards, { account }),
+    );
+    const protectedMarkup = renderToStaticMarkup(
+      React.createElement(HostedAccountSettingsCards, {
+        account: {
+          ...account,
+          removableSignInMethods: [],
+        },
+      }),
+    );
+
+    expect(removableMarkup).toContain('aria-label="Remove phone"');
+    expect(removableMarkup).toContain('aria-label="Remove email"');
+    expect(removableMarkup).toContain('aria-label="Remove Telegram"');
+    expect(protectedMarkup).not.toContain('aria-label="Remove phone"');
+    expect(protectedMarkup).not.toContain('aria-label="Remove email"');
+    expect(protectedMarkup).not.toContain('aria-label="Remove Telegram"');
+  });
+
+  test("routes Telegram Change through replacement instead of linking a second account", async () => {
+    const rendered = await renderClientComponent(
+      React.createElement(HostedAccountSettingsCards, {
+        account: {
+          ...makeAccountSnapshot({ phoneNumber: null }),
+          removableSignInMethods: ["telegram"],
+          telegram: {
+            telegramUserId: "456",
+            username: "sample_user",
+          },
+        },
+      }),
+    );
+
+    try {
+      const telegramRow = Array.from(rendered.container.querySelectorAll("div")).find(
+        (candidate) =>
+          candidate.children[1]?.querySelector("span")?.textContent === "Telegram",
+      );
+      const changeButton = Array.from(telegramRow?.querySelectorAll("button") ?? []).find(
+        (candidate) => candidate.textContent === "Change",
+      );
+
+      await React.act(async () => {
+        changeButton?.click();
+      });
+
+      expect(
+        rendered.container.querySelector("[data-link-mode]")?.getAttribute("data-link-mode"),
+      ).toBe("telegram");
+      expect(
+        rendered.container.querySelector("[data-link-intent]")?.getAttribute("data-link-intent"),
+      ).toBe("replace");
+    } finally {
+      await rendered.cleanup();
+    }
   });
 
   test("opens the email link dialog when the add-email deep link is present on first mount", async () => {

@@ -591,6 +591,16 @@ describe("hosted account settings snapshot", () => {
     })).toMatchObject({
       email: {
         privyEmailLinked: false,
+        address: null,
+        murphEmailAddress: null,
+        verifiedAt: null,
+      },
+      phone: {
+        number: null,
+        verifiedAt: null,
+      },
+      telegram: {
+        telegramUserId: null,
       },
     });
 
@@ -600,6 +610,85 @@ describe("hosted account settings snapshot", () => {
     })).toMatchObject({
       email: {
         privyEmailLinked: null,
+      },
+    });
+  });
+
+  it("allows removing a linked identity only when another verified sign-in remains", () => {
+    const snapshot = makeAccountSettingsSnapshot({ telegramUserId: "456" });
+
+    expect(withServerApprovedPrivyAccountHints({
+      snapshot,
+      serverApprovedPrivyLinkedAccounts: [
+        {
+          id: 456,
+          type: "telegram",
+        },
+        {
+          address: "member@example.com",
+          latest_verified_at: 1_777_680_000,
+          type: "email",
+        },
+      ],
+    }).removableSignInMethods).toEqual(["email", "telegram"]);
+
+    expect(withServerApprovedPrivyAccountHints({
+      snapshot,
+      serverApprovedPrivyLinkedAccounts: [
+        {
+          id: 456,
+          type: "telegram",
+        },
+        {
+          address: "unverified@example.com",
+          type: "email",
+        },
+      ],
+    }).removableSignInMethods).toEqual(["email"]);
+
+    expect(withServerApprovedPrivyAccountHints({
+      snapshot,
+      serverApprovedPrivyLinkedAccounts: [
+        {
+          id: 456,
+          type: "telegram",
+        },
+      ],
+    }).removableSignInMethods).toEqual([]);
+  });
+
+  it("hides stale canonical contact projections after Privy removes them", () => {
+    expect(withServerApprovedPrivyAccountHints({
+      snapshot: {
+        email: {
+          address: "member@example.com",
+          murphEmailAddress: "reply@example.test",
+          verifiedAt: "2026-05-02T00:00:00.000Z",
+        },
+        phone: {
+          number: "+14045550123",
+          verifiedAt: "2026-05-02T00:00:00.000Z",
+        },
+        telegram: {
+          telegramUserId: "456",
+          username: "sample_user",
+        },
+      },
+      serverApprovedPrivyLinkedAccounts: [
+        {
+          address: "other@example.com",
+          latest_verified_at: 1_777_680_000,
+          type: "email",
+        },
+      ],
+    })).toMatchObject({
+      phone: {
+        number: null,
+        verifiedAt: null,
+      },
+      telegram: {
+        telegramUserId: null,
+        username: null,
       },
     });
   });
