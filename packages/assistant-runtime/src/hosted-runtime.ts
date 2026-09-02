@@ -168,6 +168,7 @@ import type {
   HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "./hosted-runtime/workspace-runner.ts";
 import {
+  createHostedWorkspaceCanonicalWriteCheckpointCoalescer,
   createHostedWorkspaceCheckpointRequestBuilder,
   createHostedWorkspaceSnapshotCheckpointRequestBuilder,
   finishHostedMailboxImportPostCheckpointEffects,
@@ -2767,6 +2768,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       return invocationResult;
     };
     const returnSystemMailboxProcessingModeAfterInitialImport = async () => {
+      const canonicalWriteCheckpointCoalescer =
+        createHostedWorkspaceCanonicalWriteCheckpointCoalescer({
+          onCanonicalSystemProgressCommitted() {
+            systemMailboxProgressedSinceCheckpoint = true;
+          },
+        });
       let currentRedactedStatus = buildHostedMailboxImportRedactedStatus(
         initialMailboxImport.importResult,
       );
@@ -3090,6 +3097,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         importOrStartupCheckpointPending = false;
         activeWorkspace = checkpoint.workspace;
         systemMailboxProgressedSinceCheckpoint = false;
+        canonicalWriteCheckpointCoalescer.recordCheckpoint();
         currentRedactedStatus = checkpoint.workspace.redactedStatus ?? {};
         if (checkpoint.conversationInputAhead === true) {
           checkpointReportedConversationInputAhead = true;
@@ -3101,15 +3109,16 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       const returnSystemMailboxModeResult = async (
         extraCandidates: readonly HostedRuntimeWakeCandidate[] = [],
       ): Promise<HostedWorkspaceInvocationResult> => {
-        if (
-          canonicalWriteReceiptLogBlocksBackgroundMaintenance()
-          || (foregroundWakeObserved && importOrStartupCheckpointPending)
-        ) {
-          await checkpointSystemMailboxMode(
-            canonicalWriteReceiptLogBlocksBackgroundMaintenance()
-              ? "system_mailbox.checkpoint.receipt_capacity"
-              : "system_mailbox.checkpoint.due_assistant_handoff",
-          );
+        const checkpointStage = resolveHostedSystemMailboxReturnCheckpointStage({
+          canonicalWritePending:
+            canonicalWriteCheckpointCoalescer.pendingCheckpoint() !== null,
+          foregroundHandoffPending:
+            foregroundWakeObserved && importOrStartupCheckpointPending,
+          receiptCapacityBlocked:
+            canonicalWriteReceiptLogBlocksBackgroundMaintenance(),
+        });
+        if (checkpointStage) {
+          await checkpointSystemMailboxMode(checkpointStage);
         }
         const projectedWake = await resolveCurrentSystemMailboxModeWake(extraCandidates);
         const defaultOwnerAuthorityObserved =
@@ -3179,6 +3188,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           acceptedCanonicalSystemProgressCheckpointOrdinal;
         return await withCanonicalWritePersistence(async () => {
           const persistedPreparation = await runHostedWorkspaceCanonicalWriteAtBoundary({
+            canonicalWriteCheckpointCoalescer,
+            onFailureRedactedStatusChanged(status) {
+              currentRedactedStatus = {
+                ...currentRedactedStatus,
+                ...status,
+              };
+            },
             previousRedactedStatus: currentRedactedStatus,
             runnerInput: {
               ...baseRunnerInput,
@@ -8999,6 +9015,22 @@ function selectEarliestHostedRuntimeWake(
     nextWakeAt: selected.at,
     nextWakeReason: selected.reason,
   };
+}
+
+function resolveHostedSystemMailboxReturnCheckpointStage(input: {
+  canonicalWritePending: boolean;
+  foregroundHandoffPending: boolean;
+  receiptCapacityBlocked: boolean;
+}): string | null {
+  if (input.canonicalWritePending) {
+    return "system_mailbox.checkpoint.canonical_write_batch";
+  }
+  if (input.receiptCapacityBlocked) {
+    return "system_mailbox.checkpoint.receipt_capacity";
+  }
+  return input.foregroundHandoffPending
+    ? "system_mailbox.checkpoint.due_assistant_handoff"
+    : null;
 }
 
 async function resolveHostedAssistantCronWakeAfterInitialImport(input: {
