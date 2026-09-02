@@ -2887,45 +2887,35 @@ async function listAutoReplyActiveTurnInputs(input: {
         sourceId: expectedChannel,
       })
     : { inputs: [], nextCursor: exact.nextCursor }
-  const lastStrictInput = strict.inputs.at(-1)
-  const additional = selectAutoReplyRouteInputs({
-    acceptedLiveInputIds: [
-      ...input.context.inputIds,
-      ...strict.inputs.map((candidate) => candidate.event.inputId),
-    ],
-    afterCursor: strict.nextCursor ?? input.afterCursor,
-    candidates: [...exact.inputs, ...route.inputs],
+  return selectAutoReplyActiveTurnInputs({
+    acceptedLiveInputIds: input.context.inputIds,
+    afterCursor: input.afterCursor,
+    candidates: [...strict.inputs, ...exact.inputs, ...route.inputs],
     conversation: input.conversation,
+    conversationInputIds: strict.inputs.map(
+      (candidate) => candidate.event.inputId,
+    ),
     deliveryTarget: bindingDeliveryTarget,
     expectedChannel,
     anchorSummary:
-      lastStrictInput
-        ? assistantAutomationInputSummaryFromCandidate(lastStrictInput)
-        : input.context.items.at(-1)?.summary ?? input.context.firstItem.summary,
-    knownProjectionCaptureIds: [
-      ...input.knownProjectionCaptureIds,
-      ...strict.inputs.flatMap((candidate) =>
-        candidate.projection.captureId ? [candidate.projection.captureId] : []
-      ),
-    ],
+      input.context.items.at(-1)?.summary ?? input.context.firstItem.summary,
+    knownProjectionCaptureIds: input.knownProjectionCaptureIds,
   })
-  return {
-    inputs: [...strict.inputs, ...additional.inputs],
-    nextCursor: additional.nextCursor,
-  }
 }
 
-function selectAutoReplyRouteInputs(input: {
+function selectAutoReplyActiveTurnInputs(input: {
   acceptedLiveInputIds: readonly string[]
   afterCursor: AssistantInputCandidate['event']['cursor']
   anchorSummary: AssistantAutomationInputSummary
   candidates: readonly AssistantInputCandidate[]
   conversation: AssistantInputConversationRef
+  conversationInputIds: readonly string[]
   deliveryTarget: string
   expectedChannel: string
   knownProjectionCaptureIds: readonly string[]
 }): AssistantInputCandidateBatch {
   const acceptedLiveInputIds = new Set(input.acceptedLiveInputIds)
+  const conversationInputIds = new Set(input.conversationInputIds)
   const knownProjectionCaptureIds = new Set(input.knownProjectionCaptureIds)
   const seenInputIds = new Set<string>()
   const selectedInputs: AssistantInputCandidate[] = []
@@ -2938,20 +2928,29 @@ function selectAutoReplyRouteInputs(input: {
       continue
     }
     seenInputIds.add(candidate.event.inputId)
-    if (!isSameAutoReplyDeliveryRoute({
-      accountId: input.conversation.accountId,
-      candidate,
-      expectedChannel: input.expectedChannel,
-      threadIsDirect: input.conversation.threadIsDirect,
-      threadId: input.deliveryTarget,
-    })) {
+    const isConversationInput = conversationInputIds.has(
+      candidate.event.inputId,
+    )
+    if (
+      !isConversationInput &&
+      !isSameAutoReplyDeliveryRoute({
+        accountId: input.conversation.accountId,
+        candidate,
+        expectedChannel: input.expectedChannel,
+        threadIsDirect: input.conversation.threadIsDirect,
+        threadId: input.deliveryTarget,
+      })
+    ) {
       continue
     }
     const candidateSummary =
       assistantAutomationInputSummaryFromCandidate(candidate)
+    // Exact-conversation discovery already proves eligibility, but it still
+    // shares this ordered stream so an earlier route barrier cannot be skipped.
     // A trusted edit follows the exact accepted input it corrects rather than
     // the provider reply anchor. The admission gate revalidates the same link.
     if (
+      !isConversationInput &&
       !shouldGroupAdjacentConversationInput(
         input.anchorSummary,
         candidateSummary,
