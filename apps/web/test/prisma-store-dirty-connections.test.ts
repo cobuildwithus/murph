@@ -2492,7 +2492,8 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     try {
       const dirtyAt = new Date("2026-07-09T12:00:00.000Z");
       const payloadCreates: Array<Array<Record<string, unknown>>> = [];
-      const dirtyRecord = {
+      const persistedPayloadIds = new Set<string>();
+      let dirtyRecord = {
         connectionId: "dsc_companion_123",
         createdAt: dirtyAt,
         dirtyResourcesJson: {},
@@ -2516,11 +2517,14 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
         $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
         deviceSyncDirtyConnection: {
           findUnique: vi.fn(async () => dirtyRecord),
-          updateManyAndReturn: vi.fn(async (input: { data: Record<string, unknown> }) => [{
-            ...dirtyRecord,
-            ...input.data,
-            updatedAt: dirtyAt,
-          }]),
+          updateManyAndReturn: vi.fn(async (input: { data: Record<string, unknown> }) => {
+            dirtyRecord = {
+              ...dirtyRecord,
+              ...input.data,
+              updatedAt: dirtyAt,
+            };
+            return [dirtyRecord];
+          }),
         },
         deviceSyncDirtyPayload: {
           createMany: vi.fn(async (input: {
@@ -2528,7 +2532,15 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
             skipDuplicates: boolean;
           }) => {
             payloadCreates.push(input.data);
-            return { count: input.data.length };
+            let count = 0;
+            for (const row of input.data) {
+              const id = String(row.id);
+              if (!persistedPayloadIds.has(id)) {
+                persistedPayloadIds.add(id);
+                count += 1;
+              }
+            }
+            return { count };
           }),
         },
       };
@@ -2537,7 +2549,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
         records: [{ recordId: "a".repeat(64) }],
         schemaVersion: 1,
       });
-      const resource = (occurredAt: string) => ({
+      const resource = (occurredAt: string, serializedBatch = webhookDataJson) => ({
         count: 1,
         jobKind: "resource",
         payload: {
@@ -2546,7 +2558,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
           resource: "companion_health_metadata",
           resourceCategory: "summary",
           sourceProviderSlug: "apple-health-kit",
-          webhookDataJson,
+          webhookDataJson: serializedBatch,
         },
         resource: "companion_health_metadata",
         resourceCategory: "summary",
@@ -2573,14 +2585,33 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
         resources: [resource("2026-07-09T12:05:00.000Z")],
         userId: dirtyRecord.userId,
       });
+      await store.upsertDirtyConnection({
+        connectionId: dirtyRecord.connectionId,
+        dirtyAt: "2026-07-09T12:10:00.000Z",
+        eventType: "companion.health_metadata.v1",
+        provider: "junction",
+        resourceCategory: "summary",
+        resources: [resource(
+          "2026-07-09T12:10:00.000Z",
+          JSON.stringify({
+            records: [{ recordId: "b".repeat(64) }],
+            schemaVersion: 1,
+          }),
+        )],
+        userId: dirtyRecord.userId,
+      });
 
-      expect(payloadCreates).toHaveLength(2);
+      expect(payloadCreates).toHaveLength(3);
       expect(expectFirstPayloadCreateRow(payloadCreates[0] ?? []).id)
         .toBe(expectFirstPayloadCreateRow(payloadCreates[1] ?? []).id);
+      expect(expectFirstPayloadCreateRow(payloadCreates[2] ?? []).id)
+        .not.toBe(expectFirstPayloadCreateRow(payloadCreates[0] ?? []).id);
+      expect(persistedPayloadIds.size).toBe(2);
+      expect(dirtyRecord.dirtyRevision).toBe(10n);
       expect(prisma.deviceSyncDirtyPayload.createMany).toHaveBeenCalledWith(expect.objectContaining({
         skipDuplicates: true,
       }));
-      expect(prisma.deviceSyncDirtyConnection.updateManyAndReturn).toHaveBeenCalledTimes(2);
+      expect(prisma.deviceSyncDirtyConnection.updateManyAndReturn).toHaveBeenCalledTimes(3);
     } finally {
       installHostedSecureBoxStringTestCodec();
     }

@@ -9,6 +9,9 @@ import {
 } from "@murphai/contracts";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
+  JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
+} from "@murphai/device-syncd/junction-resources";
+import {
   isDeviceSyncCredentialIndependentImportJob,
   isHostedDeviceSyncEventToProviderSendBucket,
   mergeHostedDeviceSyncEventToProviderSendBuckets,
@@ -1477,13 +1480,28 @@ function createDirtyPayloadId(input: {
     ].join("\0")).slice(0, 40)}`;
   }
 
+  const payloadIdentity = serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(
+    input.resource.payload,
+  );
+  if (
+    input.resource.resource === JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE
+    && payloadIdentity !== null
+  ) {
+    return `dsp_${sha256Hex([
+      input.connectionId,
+      JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
+      String(input.index),
+      payloadIdentity,
+    ].join("\0")).slice(0, 40)}`;
+  }
+
   const identity = [
     input.connectionId,
     input.dirtyRevision.toString(),
     normalizeNullableString(input.traceId) ?? "trace",
     String(input.index),
     buildDirtyResourceKey(input.resource),
-    serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(input.resource.payload),
+    payloadIdentity,
   ].join("\0");
 
   return `dsp_${sha256Hex(identity).slice(0, 40)}`;
