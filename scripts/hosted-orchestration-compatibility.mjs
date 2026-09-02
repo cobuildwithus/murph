@@ -10,6 +10,10 @@ export const TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW = "public-murph-integration
 export const TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME = "Public Murph Integration";
 export const TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH =
   ".github/workflows/public-murph-integration.yml";
+export const TEMPORAL_COMPATIBILITY_MODE = "temporal_compatibility";
+export const HOSTED_RELEASE_ADMISSION_MODE = "release_admission";
+export const HOSTED_RELEASE_SCOPE_NONE = "none";
+export const HOSTED_RELEASE_SCOPE_FOREGROUND = "foreground_priority";
 
 const GITHUB_API_VERSION = "2026-03-10";
 const HTTP_TIMEOUT_MS = 30_000;
@@ -163,7 +167,15 @@ export async function selectPullRequest({
   return { ...pullRequest, selected };
 }
 
-export function buildDispatchInputs({ producerDigest, producerFixtures, publicSha, requestId }) {
+export function buildDispatchInputs({
+  releaseScope = HOSTED_RELEASE_SCOPE_NONE,
+  mode = TEMPORAL_COMPATIBILITY_MODE,
+  producerDigest,
+  producerFixtures,
+  publicSha,
+  requestId,
+}) {
+  assertDispatchMode(mode, releaseScope);
   assertDigest(producerDigest, "producer fixture digest");
   const inspected = inspectProducerFixtures(producerFixtures);
   if (inspected.digest !== producerDigest) {
@@ -173,7 +185,8 @@ export function buildDispatchInputs({ producerDigest, producerFixtures, publicSh
   assertSafeId(requestId, "request id", 120);
   return {
     contract_version: TEMPORAL_COMPATIBILITY_CONTRACT_VERSION,
-    mode: "temporal_compatibility",
+    release_scope: releaseScope,
+    mode,
     murph_sha: publicSha,
     producer_digest: producerDigest,
     producer_fixtures: inspected.serialized,
@@ -331,6 +344,15 @@ export function compatibilityProofDigest({ producerDigest, publicSha, readersDig
     .digest("hex");
 }
 
+export function hostedReleaseProofDigest({ privateSha, publicSha, releaseScope }) {
+  assertHostedReleaseScope(releaseScope, { allowNone: false });
+  assertSha(privateSha, "private SHA");
+  assertSha(publicSha, "public SHA");
+  return createHash("sha256")
+    .update(`${TEMPORAL_COMPATIBILITY_CONTRACT_VERSION}\n${publicSha}\n${privateSha}\n${releaseScope}\n`)
+    .digest("hex");
+}
+
 export function buildReaderJobName(readerSha) {
   assertSha(readerSha, "supported reader SHA");
   return `Temporal compatibility reader [sha=${readerSha}]`;
@@ -341,19 +363,27 @@ export function buildAttestationJobName({ proofDigest }) {
   return `Temporal compatibility attestation [proof=${proofDigest}]`;
 }
 
+export function buildHostedReleaseAttestationJobName({ proofDigest }) {
+  assertDigest(proofDigest, "hosted release proof digest");
+  return `Hosted release attestation [proof=${proofDigest}]`;
+}
+
 export function inspectAttestationJobs(jobs, {
+  releaseScope = HOSTED_RELEASE_SCOPE_NONE,
   privateSha,
   producerDigest,
   publicSha,
   requestId,
   runId,
 }) {
+  assertHostedReleaseScope(releaseScope);
   if (!Array.isArray(jobs) || jobs.length === 0) {
     throw new Error("Private compatibility run returned no jobs.");
   }
   const ids = new Set();
   const readers = [];
   const attestations = [];
+  const hostedReleaseAttestations = [];
   for (const raw of jobs) {
     assertRecord(raw, "private compatibility job");
     if (!Number.isSafeInteger(raw.id) || raw.id <= 0 || ids.has(raw.id)) {
@@ -366,15 +396,23 @@ export function inspectAttestationJobs(jobs, {
     const name = requiredString(raw.name, "private compatibility job name");
     const readerMatch = /^Temporal compatibility reader \[sha=([0-9a-f]{40})\]$/u.exec(name);
     const attestationMatch = /^Temporal compatibility attestation \[proof=([0-9a-f]{64})\]$/u.exec(name);
-    if (readerMatch || attestationMatch) {
+    const hostedReleaseAttestationMatch =
+      /^Hosted release attestation \[proof=([0-9a-f]{64})\]$/u.exec(name);
+    if (readerMatch || attestationMatch || hostedReleaseAttestationMatch) {
       if (raw.status !== "completed" || raw.conclusion !== "success") {
         throw new Error("Private compatibility proof job did not complete successfully.");
       }
-    } else if (name.startsWith("Temporal compatibility")) {
+    } else if (
+      name.startsWith("Temporal compatibility")
+      || name.startsWith("Hosted release")
+    ) {
       throw new Error("Private compatibility run returned a malformed proof job.");
     }
     if (readerMatch) readers.push(readerMatch[1]);
     if (attestationMatch) attestations.push(attestationMatch[1]);
+    if (hostedReleaseAttestationMatch) {
+      hostedReleaseAttestations.push(hostedReleaseAttestationMatch[1]);
+    }
   }
   if (attestations.length !== 1) {
     throw new Error("Private compatibility run must return exactly one attestation job.");
@@ -395,7 +433,29 @@ export function inspectAttestationJobs(jobs, {
   if (attestations[0] !== proofDigest) {
     throw new Error("Private compatibility attestation does not bind the requested proof.");
   }
-  return { digest, proofDigest, readerCount: readers.length };
+  if (releaseScope === HOSTED_RELEASE_SCOPE_NONE) {
+    if (hostedReleaseAttestations.length !== 0) {
+      throw new Error("Unexpected hosted release attestation was returned.");
+    }
+  } else {
+    if (hostedReleaseAttestations.length !== 1) {
+      throw new Error("Private compatibility run must return exactly one hosted release attestation.");
+    }
+    const expectedReleaseProof = hostedReleaseProofDigest({
+      releaseScope,
+      privateSha,
+      publicSha,
+    });
+    if (hostedReleaseAttestations[0] !== expectedReleaseProof) {
+      throw new Error("Hosted release attestation does not bind the requested proof.");
+    }
+  }
+  return {
+    digest,
+    releaseScope,
+    proofDigest,
+    readerCount: readers.length,
+  };
 }
 
 export function inspectJobPage(raw) {
@@ -431,7 +491,9 @@ async function resolvePrivateMain({ encodedPrivateRepository, token }) {
 }
 
 export async function runTemporalCompatibility({
+  dispatchMode = TEMPORAL_COMPATIBILITY_MODE,
   expectedBaseRef,
+  releaseScope = HOSTED_RELEASE_SCOPE_NONE,
   privateToken,
   producerDigest,
   producerFixtures,
@@ -443,6 +505,7 @@ export async function runTemporalCompatibility({
   sleepFn = sleep,
   now = Date.now,
 }) {
+  assertDispatchMode(dispatchMode, releaseScope);
   assertRepository(publicRepository, "public repository");
   assertSafeId(expectedBaseRef, "expected public base ref", 255, /^[A-Za-z0-9._/-]+$/u);
   assertSha(publicSha, "public SHA");
@@ -497,7 +560,14 @@ export async function runTemporalCompatibility({
     `https://api.github.com/repos/${encodedPrivateRepository}/actions/workflows/${encodeURIComponent(TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW)}/dispatches`,
     {
       body: JSON.stringify({
-        inputs: buildDispatchInputs({ producerDigest, producerFixtures, publicSha, requestId }),
+        inputs: buildDispatchInputs({
+          releaseScope,
+          mode: dispatchMode,
+          producerDigest,
+          producerFixtures,
+          publicSha,
+          requestId,
+        }),
         ref: TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH,
         return_run_details: true,
       }),
@@ -532,6 +602,7 @@ export async function runTemporalCompatibility({
           throw new Error(`Private compatibility run completed with ${run.conclusion || "no conclusion"}.`);
         }
         const proof = inspectAttestationJobs(await listAllRunJobs({ runId, token: privateToken }), {
+          releaseScope,
           privateSha,
           producerDigest,
           publicSha,
@@ -730,7 +801,9 @@ async function runCompatibilityCommand(args) {
   delete process.env.TEMPORAL_COMPATIBILITY_PRIVATE_GITHUB_TOKEN;
   const producer = inspectProducerFixtures(await readFile(requiredArg(args, "fixtures"), "utf8"));
   await runTemporalCompatibility({
+    dispatchMode: TEMPORAL_COMPATIBILITY_MODE,
     expectedBaseRef: requiredEnv("EXPECTED_BASE_REF"),
+    releaseScope: HOSTED_RELEASE_SCOPE_NONE,
     privateToken,
     producerDigest: producer.digest,
     producerFixtures: producer.serialized,
@@ -749,7 +822,9 @@ async function runMainCompatibilityCommand(args) {
   delete process.env.TEMPORAL_COMPATIBILITY_PRIVATE_GITHUB_TOKEN;
   const producer = inspectProducerFixtures(await readFile(requiredArg(args, "fixtures"), "utf8"));
   await runTemporalCompatibility({
+    dispatchMode: HOSTED_RELEASE_ADMISSION_MODE,
     expectedBaseRef: requiredEnv("EXPECTED_BASE_REF"),
+    releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
     privateToken,
     producerDigest: producer.digest,
     producerFixtures: producer.serialized,
@@ -832,6 +907,32 @@ function assertSafeId(value, label, maxLength, pattern = /^[A-Za-z0-9._:-]+$/u) 
 function assertDigest(value, label) {
   if (typeof value !== "string" || !/^[0-9a-f]{64}$/u.test(value)) {
     throw new Error(`${label} is invalid.`);
+  }
+}
+
+function assertHostedReleaseScope(value, { allowNone = true } = {}) {
+  const allowed = allowNone
+    ? [
+        HOSTED_RELEASE_SCOPE_NONE,
+        HOSTED_RELEASE_SCOPE_FOREGROUND,
+      ]
+    : [HOSTED_RELEASE_SCOPE_FOREGROUND];
+  if (!allowed.includes(value)) {
+    throw new Error("Hosted release scope is invalid.");
+  }
+}
+
+function assertDispatchMode(mode, releaseScope) {
+  assertHostedReleaseScope(releaseScope);
+  const valid = (
+    mode === TEMPORAL_COMPATIBILITY_MODE
+    && releaseScope === HOSTED_RELEASE_SCOPE_NONE
+  ) || (
+    mode === HOSTED_RELEASE_ADMISSION_MODE
+    && releaseScope === HOSTED_RELEASE_SCOPE_FOREGROUND
+  );
+  if (!valid) {
+    throw new Error("Compatibility dispatch mode and hosted release scope do not match.");
   }
 }
 

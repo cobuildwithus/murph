@@ -53,7 +53,7 @@ jobs:
           permission-actions: write
           permission-contents: read
 
-      - name: Prove exact public main against every supported Temporal reader
+      - name: Prove exact public main against private Temporal and hosted runtime
         env:
           EXPECTED_BASE_REF: ${{ github.event.repository.default_branch }}
           TEMPORAL_COMPATIBILITY_PRIVATE_GITHUB_TOKEN: ${{ steps.private-app-token.outputs.token }}

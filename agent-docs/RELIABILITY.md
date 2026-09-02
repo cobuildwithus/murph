@@ -104,16 +104,23 @@ Last verified: 2026-09-02
   must configure its `Temporal Web production admission` job as a production
   Deployment Check so production domains remain on the prior deployment until
   the exact public commit passes against the then-current private `main` and
-  live reader set. The public controller re-reads both branches before success;
-  private protected attestation independently re-reads every supported reader.
+  live reader set. The same dispatch selects exactly the private integration
+  manifest's foreground-priority lane, forces and observes
+  `HOSTED_EXECUTION_STANDBY_MODE=allocate`, and returns one additional digest
+  bound to the exact public SHA, private SHA, and fixed lane. The private
+  workflow rejects any release request that is not current public `main` plus
+  current protected private `main`. The public controller re-reads both branches
+  before success; private protected attestations independently re-read every
+  supported reader and both branch heads.
   The Vercel Git integration is the sole production deployment owner, and every
   `main` commit must create a candidate: no ignore command, local production
   upload, historical promotion, Instant Rollback, or force-promotion is part of
   the supported path. Recovery is a revert or forward-fix commit on `main`,
   which receives fresh admission before domains move. Ordinary Vercel access
   must not grant Full Production Deployment authority.
-  This main-push boundary proves the reconciliation-facts wire contract, not
-  arbitrary Web, Cloudflare, or worker behavior. Separately, after both
+  This main-push boundary proves the reconciliation-facts wire contract and the
+  production-shaped foreground/standby path, not arbitrary Web, Cloudflare, or
+  worker behavior. Separately, after both
   revisions reach protected
   `main`, private unprivileged full-integration CI checks out the exact resolved
   public `main` revision, never an arbitrary public candidate, and emits an

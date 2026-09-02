@@ -7,6 +7,9 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  HOSTED_RELEASE_ADMISSION_MODE,
+  HOSTED_RELEASE_SCOPE_FOREGROUND,
+  HOSTED_RELEASE_SCOPE_NONE,
   TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH,
   TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY,
   TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
@@ -16,9 +19,11 @@ import {
   TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS,
   buildAttestationJobName,
   buildDispatchInputs,
+  buildHostedReleaseAttestationJobName,
   buildReaderJobName,
   cancelAcceptedRun,
   compatibilityProofDigest,
+  hostedReleaseProofDigest,
   inspectAttestationJobs,
   inspectChangedFilePage,
   inspectDispatchReceipt,
@@ -104,17 +109,20 @@ function privateRun(overrides = {}) {
   };
 }
 
-function proofJobs({ proofDigest = compatibilityProofDigest({
-  producerDigest: PRODUCER_DIGEST,
-  publicSha: PUBLIC_SHA,
-  readersDigest: supportedReaderDigest([
-    PRIVATE_SHA,
-    CURRENT_READER_SHA,
-    RAMPING_READER_SHA,
-  ]),
-  requestId: REQUEST_ID,
-}) } = {}) {
-  return [
+function proofJobs({
+  releaseScope = HOSTED_RELEASE_SCOPE_NONE,
+  proofDigest = compatibilityProofDigest({
+    producerDigest: PRODUCER_DIGEST,
+    publicSha: PUBLIC_SHA,
+    readersDigest: supportedReaderDigest([
+      PRIVATE_SHA,
+      CURRENT_READER_SHA,
+      RAMPING_READER_SHA,
+    ]),
+    requestId: REQUEST_ID,
+  }),
+} = {}) {
+  const jobs = [
     {
       conclusion: "success",
       head_sha: PRIVATE_SHA,
@@ -148,6 +156,23 @@ function proofJobs({ proofDigest = compatibilityProofDigest({
       status: "completed",
     },
   ];
+  if (releaseScope !== HOSTED_RELEASE_SCOPE_NONE) {
+    jobs.push({
+      conclusion: "success",
+      head_sha: PRIVATE_SHA,
+      id: 5,
+      name: buildHostedReleaseAttestationJobName({
+        proofDigest: hostedReleaseProofDigest({
+          releaseScope,
+          privateSha: PRIVATE_SHA,
+          publicSha: PUBLIC_SHA,
+        }),
+      }),
+      run_id: RUN_ID,
+      status: "completed",
+    });
+  }
+  return jobs;
 }
 
 function compatibilityArgs(overrides = {}) {
@@ -357,12 +382,36 @@ test("dispatch contract is closed, versioned, and exact-SHA only", () => {
     requestId: REQUEST_ID,
   }), {
     contract_version: "1",
+    release_scope: "none",
     mode: "temporal_compatibility",
     murph_sha: PUBLIC_SHA,
     producer_digest: PRODUCER_DIGEST,
     producer_fixtures: PRODUCER_FIXTURES,
     request_id: REQUEST_ID,
   });
+  assert.deepEqual(buildDispatchInputs({
+    releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
+    mode: HOSTED_RELEASE_ADMISSION_MODE,
+    producerDigest: PRODUCER_DIGEST,
+    producerFixtures: PRODUCER_FIXTURES,
+    publicSha: PUBLIC_SHA,
+    requestId: REQUEST_ID,
+  }), {
+    contract_version: "1",
+    release_scope: "foreground_priority",
+    mode: "release_admission",
+    murph_sha: PUBLIC_SHA,
+    producer_digest: PRODUCER_DIGEST,
+    producer_fixtures: PRODUCER_FIXTURES,
+    request_id: REQUEST_ID,
+  });
+  assert.throws(() => buildDispatchInputs({
+    releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
+    producerDigest: PRODUCER_DIGEST,
+    producerFixtures: PRODUCER_FIXTURES,
+    publicSha: PUBLIC_SHA,
+    requestId: REQUEST_ID,
+  }), /mode and hosted release scope do not match/u);
   assert.throws(
     () => buildDispatchInputs({
       producerDigest: PRODUCER_DIGEST,
@@ -471,8 +520,35 @@ test("attestation accepts the exact SHA-only private reader proof", () => {
       readersDigest,
       requestId: REQUEST_ID,
     }),
+    releaseScope: HOSTED_RELEASE_SCOPE_NONE,
     readerCount: 3,
   });
+});
+
+test("hosted release attestation binds scope plus exact public and private revisions", () => {
+  assert.equal(hostedReleaseProofDigest({
+    privateSha: PRIVATE_SHA,
+    publicSha: PUBLIC_SHA,
+    releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
+  }), "960beac94412483af1bca487dcb5a4d1355856bcc3706d478662ede153219463");
+  assert.equal(inspectAttestationJobs(
+    proofJobs({ releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND }),
+    {
+      ...proofInspectionArgs(),
+      releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
+    },
+  ).releaseScope, HOSTED_RELEASE_SCOPE_FOREGROUND);
+  assert.throws(() => inspectAttestationJobs(
+    proofJobs({ releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND }),
+    {
+      ...proofInspectionArgs({ privateSha: MOVED_PRIVATE_SHA }),
+      releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
+    },
+  ), /not bound to the accepted run|does not bind/u);
+  assert.throws(() => inspectAttestationJobs(proofJobs(), {
+    ...proofInspectionArgs(),
+    releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
+  }), /exactly one hosted release attestation/u);
 });
 
 test("attestation rejects omission of the dispatched private candidate", () => {
@@ -657,10 +733,10 @@ test("controller finalizes a last-admitted success before the private token safe
   );
 });
 
-test("deployment controller binds both rereads to exact public main", async () => {
+test("deployment controller dispatches the hosted release lane and binds both rereads to exact public main", async () => {
   let privateMainReads = 0;
   let publicMainReads = 0;
-  await withCompatibilityEnv(async () => withFetch(async (url) => {
+  await withCompatibilityEnv(async () => withFetch(async (url, init = {}) => {
     if (
       url.includes(`/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/`)
       && url.endsWith(`/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`)
@@ -680,14 +756,33 @@ test("deployment controller binds both rereads to exact public main", async () =
         state: "active",
       });
     }
-    if (url.endsWith("/dispatches")) return jsonResponse({ workflow_run_id: RUN_ID });
+    if (url.endsWith("/dispatches")) {
+      assert.deepEqual(JSON.parse(init.body), {
+        inputs: buildDispatchInputs({
+          releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
+          mode: HOSTED_RELEASE_ADMISSION_MODE,
+          producerDigest: PRODUCER_DIGEST,
+          producerFixtures: PRODUCER_FIXTURES,
+          publicSha: PUBLIC_SHA,
+          requestId: REQUEST_ID,
+        }),
+        ref: TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH,
+        return_run_details: true,
+      });
+      return jsonResponse({ workflow_run_id: RUN_ID });
+    }
     if (url.endsWith(`/actions/runs/${RUN_ID}`)) return jsonResponse(privateRun());
     if (url.includes(`/actions/runs/${RUN_ID}/jobs`)) {
-      return jsonResponse({ jobs: proofJobs(), total_count: 4 });
+      return jsonResponse({
+        jobs: proofJobs({ releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND }),
+        total_count: 5,
+      });
     }
     throw new Error(`unexpected URL ${url}`);
   }, async () => {
     const proof = await runTemporalCompatibility(compatibilityArgs({
+      dispatchMode: HOSTED_RELEASE_ADMISSION_MODE,
+      releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
       prNumber: null,
       sleepFn: async () => undefined,
     }));
@@ -1183,7 +1278,7 @@ test("Web production admission runs only for exact public main", async () => {
   const fixtureIndex = admissionJob.indexOf("name: Execute exact production wire projection");
   const tokenIndex = admissionJob.indexOf("name: Mint private compatibility token");
   const proofIndex = admissionJob.indexOf(
-    "name: Prove exact public main against every supported Temporal reader",
+    "name: Prove exact public main against private Temporal and hosted runtime",
   );
 
   assert.match(workflow, /on:\n  push:\n    branches:\n      - main/u);
