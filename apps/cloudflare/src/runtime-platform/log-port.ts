@@ -1,8 +1,11 @@
 import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import { parseHostedRuntimeLogResponse } from "@murphai/hosted-execution/parsers";
-import { HOSTED_RUNTIME_LOG_PATH } from "@murphai/hosted-execution/routes";
 
-import { fetchHostedWebControlPlaneJson, type HostedWebControlTransport } from "./web-control-transport.ts";
+import {
+  fetchHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
+  type HostedWebControlTransport,
+} from "./web-control-transport.ts";
 
 export function createHostedWebRuntimeLogPort(input: {
   boundUserId: string;
@@ -20,7 +23,7 @@ export function createHostedWebRuntimeLogPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted runtime log write",
         fetchImpl: input.fetchImpl,
-        path: HOSTED_RUNTIME_LOG_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.runtimeLogWrite,
         signal: context?.signal ?? null,
         timeoutMs: input.timeoutMs,
         transport: input.transport,

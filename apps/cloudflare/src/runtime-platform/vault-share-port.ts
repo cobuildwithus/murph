@@ -16,12 +16,13 @@ import {
 import {
   HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH,
   HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD,
-  HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
   isHostedRuntimeVaultShareDeliverContinuation,
 } from "@murphai/hosted-execution/routes";
 
 import {
+  bindHostedRunnerWebControlRoutePath,
   fetchHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   HostedWebControlPlaneResponseError,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
@@ -46,8 +47,10 @@ export function createHostedWebVaultSharePort(input: {
           boundUserId: input.boundUserId,
           description: "Hosted vault share active projection scopes",
           fetchImpl: input.fetchImpl,
-          method: "GET",
-          path: buildHostedVaultShareActiveKindsPath(request.projectionMode),
+          route: bindHostedRunnerWebControlRoutePath(
+            HOSTED_RUNNER_WEB_CONTROL_ROUTES.vaultShareActiveKinds,
+            buildHostedVaultShareActiveKindsPath(request.projectionMode),
+          ),
           signal,
           timeoutMs: input.timeoutMs,
           transport: input.transport,
@@ -87,7 +90,7 @@ export function createHostedWebVaultSharePort(input: {
             description: "Hosted vault share delivery",
             fetchImpl: input.fetchImpl,
             headers,
-            path: HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
+            route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.vaultShareDeliver,
             timeoutMs: Math.max(1, settlementDeadlineAtEpochMs - Date.now()),
             transport: input.transport,
           });

@@ -7,10 +7,9 @@ import type { AssistantUsageRecord } from "@murphai/hosted-execution/assistant-u
 import type {
   HostedRuntimeUsageNoticeDeliveryTarget,
 } from "@murphai/hosted-execution/runtime-control";
-import { HOSTED_RUNTIME_USAGE_RECORD_PATH } from "@murphai/hosted-execution/routes";
-
 import {
   fetchHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
 
@@ -52,7 +51,7 @@ export async function recordHostedRuntimeUsageRecord(input: {
     boundUserId: input.boundUserId,
     description: "Hosted usage recording",
     fetchImpl: input.fetchImpl,
-    path: HOSTED_RUNTIME_USAGE_RECORD_PATH,
+    route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.usageRecording,
     timeoutMs: input.timeoutMs,
     transport: input.transport,
   });
