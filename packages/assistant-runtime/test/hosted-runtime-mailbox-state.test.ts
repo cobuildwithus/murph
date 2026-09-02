@@ -544,6 +544,24 @@ describe("hosted runtime system mailbox state", () => {
       });
 
       await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [deviceWake, approvedContinuationA],
+      }));
+      await expect(resolveHostedSystemMailboxWakeCandidates({
+        now: () => "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      })).resolves.toEqual({
+        defaultOwned: {
+          at: "2026-04-27T00:00:00.000Z",
+          reason: "assistant",
+        },
+        next: {
+          at: "2026-04-27T00:00:00.000Z",
+          executionClass: "default_owned",
+          reason: "assistant",
+        },
+      });
+
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
         pending: [codexRetry, deviceWake],
       }));
       await expect(resolveHostedSystemMailboxNextWakeCandidate({
