@@ -105,6 +105,7 @@ import {
   restoreHostedWorkspaceRuntimeJobWorkspace,
 } from "../src/hosted-runtime/workspace-restore.ts";
 import {
+  createHostedWorkspaceCanonicalWriteCheckpointCoalescer,
   resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs,
   runHostedWorkspaceCanonicalWriteAtBoundary,
   type HostedWorkspaceRunnerAssistantInputBatch,
@@ -3605,6 +3606,188 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         force: true,
         recursive: true,
       });
+    }
+  });
+
+  test("checkpoints the eighth deferred background canonical write", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    await initializeVault({
+      createdAt: new Date(TEST_NOW),
+      timezone: "UTC",
+      title: "Hosted Workspace Deferred Canonical Write Test Vault",
+      vaultRoot,
+    });
+    const checkpointInputs: HostedWorkspaceRunnerRuntimeStatusCheckpointInput[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const coalescer = createHostedWorkspaceCanonicalWriteCheckpointCoalescer();
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+    let workspace = createWorkspaceState({ version: "0" });
+    let redactedStatus = workspace.redactedStatus ?? null;
+    const platform = createPlatform({
+      artifactBytesByHash,
+      async artifactPut(artifact) {
+        artifactBytesByHash.set(artifact.sha256, artifact.bytes);
+      },
+      mailboxPort: createMailboxPort({ items: [] }).mailboxPort,
+      workspacePort: createWorkspacePort({ checkpointRequests }),
+    });
+
+    try {
+      for (let writeIndex = 1; writeIndex <= 8; writeIndex += 1) {
+        const result = await runHostedWorkspaceCanonicalWriteAtBoundary({
+          canonicalWriteCheckpointCoalescer: coalescer,
+          previousRedactedStatus: redactedStatus,
+          runnerInput: {
+            async checkpointRuntimeRedactedStatus(checkpointInput) {
+              checkpointInputs.push(checkpointInput);
+              workspace = createWorkspaceState({
+                nextWakeAt: checkpointInput.nextWakeAt ?? null,
+                nextWakeReason: checkpointInput.nextWakeReason ?? null,
+                redactedStatus: checkpointInput.redactedStatus,
+                version: String(checkpointInputs.length),
+              });
+              return { checkpointed: true, workspace };
+            },
+            checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+              attemptId: `attempt_deferred_canonical_write_${writeIndex}`,
+              expectedWorkspaceVersion: workspace.version,
+              leaseGeneration: "1",
+              nextWakeAt: null,
+              nextWakeReason: null,
+              snapshotRef: null,
+            }),
+            expectedUserId: TEST_USER_ID,
+            async importItem() {
+              throw new Error("Mailbox import is not used at a canonical boundary.");
+            },
+            limitPerLane: 10,
+            now: () => TEST_NOW,
+            platform,
+            requestId: `request_deferred_canonical_write_${writeIndex}`,
+            vaultRoot,
+            workspace,
+          },
+          async write() {
+            await applyCanonicalWriteBatch({
+              audit: {
+                action: "device_import",
+                commandName: "test.deferredCanonicalWrite",
+                summary: `Synthetic deferred canonical write ${writeIndex}.`,
+              },
+              operationType: "device_batch_import",
+              summary: `Synthetic deferred canonical write ${writeIndex}`,
+              textWrites: [{
+                content: `deferred canonical write ${writeIndex}\n`,
+                overwrite: true,
+                relativePath: `bank/deferred-canonical-write-${writeIndex}.md`,
+              }],
+              vaultRoot,
+            });
+          },
+        });
+        redactedStatus = result.redactedStatus;
+        workspace = result.workspace ?? workspace;
+        assert.equal(checkpointInputs.length, writeIndex === 8 ? 1 : 0);
+      }
+
+      assert.equal(
+        checkpointInputs[0]?.canonicalSystemProgressCommitted,
+        true,
+      );
+      assert.equal(coalescer.pendingCheckpoint(), null);
+      assert.equal(workspace.version, "1");
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("flushes deferred canonical progress when its owner boundary fails", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    await initializeVault({
+      createdAt: new Date(TEST_NOW),
+      timezone: "UTC",
+      title: "Hosted Workspace Failed Deferred Canonical Write Test Vault",
+      vaultRoot,
+    });
+    const checkpointInputs: HostedWorkspaceRunnerRuntimeStatusCheckpointInput[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const coalescer = createHostedWorkspaceCanonicalWriteCheckpointCoalescer();
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+    const workspace = createWorkspaceState({ version: "0" });
+
+    try {
+      await assert.rejects(
+        runHostedWorkspaceCanonicalWriteAtBoundary({
+          canonicalWriteCheckpointCoalescer: coalescer,
+          previousRedactedStatus: workspace.redactedStatus ?? null,
+          runnerInput: {
+            async checkpointRuntimeRedactedStatus(checkpointInput) {
+              checkpointInputs.push(checkpointInput);
+              return {
+                checkpointed: true,
+                workspace: createWorkspaceState({
+                  redactedStatus: checkpointInput.redactedStatus,
+                  version: "1",
+                }),
+              };
+            },
+            checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+              attemptId: "attempt_failed_deferred_canonical_write",
+              expectedWorkspaceVersion: "0",
+              leaseGeneration: "1",
+              nextWakeAt: null,
+              nextWakeReason: null,
+              snapshotRef: null,
+            }),
+            expectedUserId: TEST_USER_ID,
+            async importItem() {
+              throw new Error("Mailbox import is not used at a canonical boundary.");
+            },
+            limitPerLane: 10,
+            now: () => TEST_NOW,
+            platform: createPlatform({
+              artifactBytesByHash,
+              async artifactPut(artifact) {
+                artifactBytesByHash.set(artifact.sha256, artifact.bytes);
+              },
+              mailboxPort: createMailboxPort({ items: [] }).mailboxPort,
+              workspacePort: createWorkspacePort({ checkpointRequests }),
+            }),
+            requestId: "request_failed_deferred_canonical_write",
+            vaultRoot,
+            workspace,
+          },
+          async write() {
+            await applyCanonicalWriteBatch({
+              audit: {
+                action: "device_import",
+                commandName: "test.failedDeferredCanonicalWrite",
+                summary: "Synthetic canonical write before owner failure.",
+              },
+              operationType: "device_batch_import",
+              summary: "Synthetic canonical write before owner failure",
+              textWrites: [{
+                content: "deferred progress survives owner failure\n",
+                overwrite: true,
+                relativePath: "bank/failed-deferred-canonical-write.md",
+              }],
+              vaultRoot,
+            });
+            throw new Error("synthetic owner boundary failure");
+          },
+        }),
+        /synthetic owner boundary failure/,
+      );
+
+      assert.equal(checkpointInputs.length, 1);
+      assert.equal(
+        typeof checkpointInputs[0]?.redactedStatus
+          ?.hostedCanonicalWriteReceiptLogSha256,
+        "string",
+      );
+      assert.equal(coalescer.pendingCheckpoint(), null);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
     }
   });
 
