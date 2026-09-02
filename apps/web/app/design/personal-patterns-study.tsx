@@ -32,7 +32,7 @@ const POPULATED_REPORT: PersonalPatternReport = {
       observedDays: 6,
     },
     {
-      id: "blue-light-blocking-glasses",
+      id: "high-filtering-amber-red-or-orange-evening-glasses-with-spectral-data-when-available",
       kind: "intervention",
       label: "Blue-light blocking glasses",
       observedDays: 7,
@@ -108,7 +108,7 @@ const POPULATED_REPORT: PersonalPatternReport = {
       6,
     ),
     cell(
-      "blue-light-blocking-glasses",
+      "high-filtering-amber-red-or-orange-evening-glasses-with-spectral-data-when-available",
       "hrv",
       "new_clue",
       "higher",

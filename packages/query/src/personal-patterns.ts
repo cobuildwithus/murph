@@ -1385,8 +1385,6 @@ function readFiniteNumber(value: unknown): number | null {
 
 function canonicalFactorToken(value: string | null): string | null {
   switch (value) {
-    case "high-filtering-amber-red-or-orange-evening-glasses-with-spectral-data-when-available":
-      return "blue-light-blocking-glasses";
     case "run":
       return "running";
     case "walk":
@@ -1412,7 +1410,11 @@ function canonicalFactorToken(value: string | null): string | null {
 }
 
 function humanizeToken(value: string): string {
-  if (value === "blue-light-blocking-glasses") {
+  if (
+    value === "blue-light-blocking-glasses" ||
+    value ===
+      "high-filtering-amber-red-or-orange-evening-glasses-with-spectral-data-when-available"
+  ) {
     return "Blue-light blocking glasses";
   }
   const readableValue =

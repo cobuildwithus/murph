@@ -1439,6 +1439,11 @@ test("Personal Patterns uses the concise label for evening light-filtering glass
       ],
       attributes: { noteType: "journal-factor" },
     })),
+    ...Array.from({ length: 5 }, (_, index) => ({
+      ...event(`generic_glasses_${index}`, addDays(start, index + 1), "note", {}),
+      tags: ["key-blue-light-blocking-glasses"],
+      attributes: { noteType: "journal-factor" },
+    })),
     ...Array.from({ length: 6 }, (_, index) =>
       observation(
         `sleep_${index}`,
@@ -1459,7 +1464,13 @@ test("Personal Patterns uses the concise label for evening light-filtering glass
 
   assert.deepEqual(
     report.factors.map((factor) => [factor.id, factor.label]),
-    [["blue-light-blocking-glasses", "Blue-light blocking glasses"]],
+    [
+      [
+        "high-filtering-amber-red-or-orange-evening-glasses-with-spectral-data-when-available",
+        "Blue-light blocking glasses",
+      ],
+      ["blue-light-blocking-glasses", "Blue-light blocking glasses"],
+    ],
   );
 });
 
