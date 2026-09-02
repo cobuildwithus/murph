@@ -1614,7 +1614,7 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
         },
       );
 
-      assert.equal(result.immediateRecheckRequested, undefined);
+      assert.equal(result.immediateRecheckRequested, true);
       assert.equal(dirtyAckCalls, 1);
       assert.equal(checkpointRequests.length, 2);
       assert.deepEqual(

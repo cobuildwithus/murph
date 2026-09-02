@@ -174,10 +174,10 @@ function schemaAdvertisesGroupConsultObjectShape(
 }
 
 describe("murph.group parser-first family compatibility", () => {
-  it("partitions all 33 advertised actions exactly once", () => {
+  it("partitions all 34 advertised actions exactly once", () => {
     const familyActions = Object.values(GROUP_FAMILY_ACTIONS).flat();
 
-    expect(familyActions).toHaveLength(33);
+    expect(familyActions).toHaveLength(34);
     expect(new Set(familyActions).size).toBe(familyActions.length);
     expect([...familyActions].sort())
       .toEqual(Object.keys(GROUP_ACTION_FIXTURES).sort());

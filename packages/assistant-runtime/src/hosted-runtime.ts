@@ -1344,6 +1344,28 @@ function recordHostedRuntimeLatencyMilestoneBestEffort(input: {
   }
 }
 
+function shouldPreemptHostedSystemMailboxExactDelivery(input: {
+  assistantCronDueNow: boolean;
+  assistantExecutionBlocked: boolean;
+  checkpointReportedConversationInputAhead: boolean;
+  deviceSyncDirtyRecordReady: boolean;
+  foregroundWakeBeforeExactDelivery: boolean;
+  hostAbortObserved: boolean;
+  ownsExactModelFreeDelivery: boolean;
+}): boolean {
+  return (
+    !input.assistantExecutionBlocked
+    && input.assistantCronDueNow
+    && !input.deviceSyncDirtyRecordReady
+  )
+    || input.hostAbortObserved
+    || (
+      input.checkpointReportedConversationInputAhead
+      && input.ownsExactModelFreeDelivery
+    )
+    || input.foregroundWakeBeforeExactDelivery;
+}
+
 export async function runHostedWorkspaceRuntimeJobInProcess(
   input: HostedAssistantWorkspaceRuntimeJobInput,
   options: HostedWorkspaceRuntimeJobOptions,
@@ -3331,14 +3353,20 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           const foregroundWakeBeforeExactDelivery = pendingWakeBeforeExactDelivery
             ? observeForegroundWake(pendingWakeBeforeExactDelivery)
             : foregroundWakeObserved;
+          const recordItem = exactDeliveryRecordItem
+            ?? readHostedSystemMailboxCheckpointPreparationRecordItem(preparation);
+          const ownsExactModelFreeDelivery = recordItem !== null
+            && isHostedSystemMailboxModelFreeExactNotificationItem(recordItem);
           const preemptBeforeExactDelivery =
-            (
-              !assistantExecutionBlocked
-              && projectedWake.assistantCronDueNow
-              && !deviceSyncDirtyRecordReady
-            )
-            || hostAbortObserved
-            || foregroundWakeBeforeExactDelivery;
+            shouldPreemptHostedSystemMailboxExactDelivery({
+              assistantCronDueNow: projectedWake.assistantCronDueNow,
+              assistantExecutionBlocked,
+              checkpointReportedConversationInputAhead,
+              deviceSyncDirtyRecordReady,
+              foregroundWakeBeforeExactDelivery,
+              hostAbortObserved,
+              ownsExactModelFreeDelivery,
+            });
           if (preemptBeforeExactDelivery) {
             if (
               exactDeliveryEffects.length > 0
@@ -3356,13 +3384,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             }
             return { preempted: true, prepared: preparation !== null };
           }
-          const recordItem = exactDeliveryRecordItem
-            ?? readHostedSystemMailboxCheckpointPreparationRecordItem(preparation);
           if (!recordItem) {
             return { preempted: false, prepared: preparation !== null };
           }
-          const ownsExactModelFreeDelivery =
-            isHostedSystemMailboxModelFreeExactNotificationItem(recordItem);
           const recordSystemMailboxItem = async (recordInput: {
             exactDeliveryCompleted: boolean;
             item: HostedSystemMailboxCheckpointPreparationRecordItem;
@@ -3430,7 +3454,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             await recordWakeInterruption.dispose();
             observeForegroundWake(recordWakeInterruption.takeNotification());
             return {
-              preempted: shouldYieldSystemMailboxWork(),
+              preempted:
+                checkpointReportedConversationInputAhead
+                || shouldYieldSystemMailboxWork(),
               prepared: true,
             };
           };
