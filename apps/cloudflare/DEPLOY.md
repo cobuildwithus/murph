@@ -777,15 +777,20 @@ are correctness-compatible, so either side may be rolled back independently
 during this compatibility window. The recommended order minimizes exposure to
 the old latency path.
 
-The exact owner-release attempt pointer uses consumer-first rollout: deploy the
-private Temporal worker that accepts `runtime_owner_released`, then Web, then
-Cloudflare/runner. During the compatibility window, Web maps old bodyless
-callbacks without an attempt pointer to the existing facts-only recheck. New
-Cloudflare code signs `runtimeAttemptId` and the optional
+The exact owner-release attempt pointer uses consumer-first rollout. Classify
+the private Temporal worker as patch-introducing, deploy it through its
+no-traffic direct-Current path, and prove the exact Build ID is Current with no
+prior or Ramping reader eligible for the Task Queue. Only then deploy Web,
+followed by Cloudflare/runner. During the compatibility window, Web maps old
+bodyless callbacks without an attempt pointer to the existing facts-only
+recheck. New Cloudflare code signs `runtimeAttemptId` and the optional
 `immediateRecheckRequested` edge in one canonical query; old Web rejects that
-query non-fatally, so Web must precede the producer. Roll back Cloudflare before
-Web, and keep the Temporal consumer compatible until Web no longer emits the
-new signal.
+query non-fatally, so Web must precede the producer.
+
+Roll back or disable Cloudflare and Web before worker recovery. Once Web can
+emit `runtime_owner_released`, never select the previous private Build ID until
+both producers are disabled and all signal-bearing Workflow histories have
+drained. Recover the consumer forward during that interval.
 
 After all three deploys, confirm there is no extra metadata-only handoff
 checkpoint for the same shutdown and actionable late input causes the exact

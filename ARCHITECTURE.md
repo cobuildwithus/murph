@@ -3650,10 +3650,14 @@ fresh reconciliation facts then choose the work mode. Legacy callbacks without
 the pointer remain facts-only `runtime_recheck_requested` signals during
 rollout. Neither signal converts a persisted due wake into a repeating
 level-triggered signal. Callback failure is non-fatal and is not retried by
-Cloudflare. Active, unsupported, error, and timeout liveness
-outcomes preserve the fence; only explicit inactive or mismatch proof, or exact
-successful completion, may enter the corresponding identity-safe recovery or
-clear path.
+Cloudflare. Because an exact release changes Workflow command order, the
+private consumer deploys first as a patch-introducing direct-Current cutover
+with no prior or Ramping reader eligible. From the first possible signal until
+both public producers are disabled and signal-bearing histories drain, that
+consumer is a one-way rollback floor. Active, unsupported, error, and timeout
+liveness outcomes preserve the fence; only explicit inactive or mismatch proof,
+or exact successful completion, may enter the corresponding identity-safe
+recovery or clear path.
 
 The hosted Temporal hard-cut target is documented in
 `agent-docs/references/hosted-temporal-orchestration.md`. That ADR is the

@@ -2069,6 +2069,13 @@ Duplicate provider retries, duplicate email delivery attempts, or duplicate
 workflow attempts are safe because mailbox append dedupes by event id and
 Temporal signals only coalesce pending work.
 
+The signal consumer is a patch-introducing Temporal release because an exact
+match can cancel an accepted timer and schedule the next reconciliation
+Activity. Promote that private Build ID directly to Current with no Ramping
+Version or prior reader eligible before Web can emit the signal. Once emission
+is possible, do not route an older private worker until Web and Cloudflare are
+disabled and every signal-bearing Workflow history has drained.
+
 Linq typing-start events are verified and parsed before any hint. Web returns
 the ordinary ignored acknowledgement before a post-response task uses only the
 private home-chat blind index to resolve an established direct member, then
