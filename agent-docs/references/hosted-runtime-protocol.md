@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-31
+Last verified: 2026-09-02
 
 ## Decision
 
@@ -2669,8 +2669,15 @@ worker-created children. It also carries the provider's advanced cadence, but
 withholds that cadence from Web until an empty-job completion-fence checkpoint
 has made the terminal transition durable. A cold replacement, whose snapshot
 intentionally excludes the device-sync SQLite store, reconstructs the same
-unfinished operation and cadence from that item. The canonical mailbox
-item/event already exists in the committed input workspace. The read-only
+unfinished operation and cadence from that item. The completion fence is due
+immediately once all local jobs are terminal; unlike a
+dirty-remainder or genuine retry/yield wake, it adds no 30-second backoff. Its
+empty job set and `retained_completion_fence` reason continue to suppress
+provider scheduling, and the retained item and schedule-event identities do not
+change. The due-now runtime wake therefore reuses the warm shell while the fence
+checkpoint remains the sole boundary before Web receives the carried cadence.
+The canonical mailbox item/event already exists in the committed input
+workspace. The read-only
 provider classes and their artifact writes run before checkpoint 1, which then
 durably captures the replayable post-pull/intermediate state. If checkpoint 2
 fails to persist record/completion, cold restore from checkpoint 1 lacks the
@@ -2703,8 +2710,9 @@ dispatch restores that exact ref without the SQLite execution record,
 reconstructs the pending obligation from durable mailbox authority, and replays
 those same four method/path classes exactly once,
 for eight requests total. That 00:05 recovery pass makes three successful
-checkpoints. Its retained completion-fence wake is due at 00:05:30 and carries
-the 06:05 provider cadence. The completion pass makes no third provider pull,
+checkpoints. Its retained completion-fence wake is immediately due at 00:05 and
+carries the 06:05 provider cadence. The completion pass makes no third provider
+pull,
 makes two successful checkpoints, and publishes 06:05 only after the durable
 recovery/completion checkpoint. The 00:10 pass returns idle with no wake and
 makes one bounded post-publication convergence checkpoint; the 00:15 pass is

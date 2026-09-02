@@ -637,9 +637,18 @@ session already restored from the published snapshot adds no extra checkpoint.
 Foreground conversation staging also aborts runner-owned background maintenance,
 including an in-flight provider-cleanup request, without aborting the foreground
 invocation itself.
-When Cloudflare reports
-the container `sleepAfter` lifecycle expiry, the container only yields to an
-active foreground operation or tears down the warm shell.
+After a successful hosted invocation, the container first waits for UserRunner
+to settle the exact runtime completion receipt, including write-fence release
+and the existing Temporal owner-release handling. A terminal result with no
+immediate recheck or wake inside the lifecycle reevaluation horizon then runs
+the same lifecycle decision used by `sleepAfter` expiry. That decision remains
+fenced by the lifecycle lock and interaction generation, and retains the shell
+for an active or replacement invocation, active child work, recent conversation
+warmth, an undefined legacy warmth field, or uncertain status, health, or
+cleanup. Any retained or failed immediate cleanup leaves the ordinary activity
+timer armed as the fallback. When Cloudflare later reports `sleepAfter`
+expiry, that shared decision either renews the shell or tears it down; a shell
+already stopped by invocation completion is not destroyed again.
 Each invocation runs in-process through `packages/assistant-runtime` with
 per-user warm workspace roots and invocation-local cache/temp roots. Runtime
 effects use internal virtual hosts and write-fence headers instead of
@@ -663,8 +672,9 @@ structured logs use only those fields plus bounded timing/status metadata; they
 do not log artifact hashes or bodies.
 
 The warm shell is destroyed when an invocation fails, warm health is stale,
-deploy smoke finishes, explicit cleanup is called, or Cloudflare reports idle
-activity expiry with no active foreground operation.
+deploy smoke finishes, explicit cleanup is called, a settled terminal
+invocation passes the shared lifecycle proof, or Cloudflare reports idle
+activity expiry and that same proof succeeds.
 
 Foreground progress recovery is write-fenced instead of container-destroy
 driven. A write fence is commit authority, not liveness proof; the exact wake,

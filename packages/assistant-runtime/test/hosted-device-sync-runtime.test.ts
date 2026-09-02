@@ -5863,13 +5863,21 @@ describe("hosted device-sync runtime", () => {
           pendingIndexes.delete(Number(id.slice("dsp_selected_".length)));
         }
 
+        const recoveryRequestedAtMs = Date.now();
         const recovery = resolveHostedDeviceSyncWakeRecovery({ service, state, wake });
+        const recoveryResolvedAtMs = Date.now();
         assert.equal(listPendingJobsForAccount.mock.calls.length, 2);
         assert.equal(recovery?.wake.hint?.jobs?.length ?? 0, 0);
         assert.equal(
           recovery?.wake.hint?.reason ?? null,
           pass < 4 ? "retained_dirty_remainder" : null,
         );
+        if (pass < 4) {
+          const retryAtMs = Date.parse(recovery?.retryAt ?? "");
+          assert.ok(Number.isFinite(retryAtMs));
+          assert.ok(retryAtMs >= recoveryRequestedAtMs + 30_000);
+          assert.ok(retryAtMs <= recoveryResolvedAtMs + 30_000);
+        }
       } finally {
         closeHostedRuntimeDeviceSyncService(service);
         await cleanup();
@@ -11785,6 +11793,7 @@ describe("hosted device-sync runtime", () => {
         wake,
       });
       assert.ok(completionFence);
+      assert.equal(completionFence.retryAt, occurredAt);
       assert.deepEqual(completionFence.wake.hint?.jobs, []);
       assert.equal(completionFence.wake.hint?.reason, "retained_completion_fence");
       const scheduledNextReconcileAt = firstStore.getAccountById(
@@ -11841,6 +11850,7 @@ describe("hosted device-sync runtime", () => {
         wake: recovery.wake,
       });
       assert.ok(restoredFence);
+      assert.equal(restoredFence.retryAt, occurredAt);
       assert.equal(restoredFence.wake.hint?.reason, "retained_completion_fence");
       assert.equal(
         restoredFence.wake.hint?.nextReconcileAt,

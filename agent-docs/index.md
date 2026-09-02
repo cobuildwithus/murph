@@ -12,6 +12,14 @@ direct-Current consumer rollout, and its signal-history rollback floor are
 specified by `agent-docs/references/hosted-runtime-protocol.md` and
 `apps/cloudflare/DEPLOY.md`.
 
+Hosted device-sync completion fences become due immediately after local work
+settles while keeping provider cadence checkpoint-gated. After the exact runtime
+completion receipt settles, the existing Cloudflare lifecycle proof may also
+tear down a terminal shell when no near-term wake, child work, or conversation
+warmth remains. These boundaries are specified by
+`agent-docs/RELIABILITY.md`, `agent-docs/references/hosted-runtime-protocol.md`,
+and `apps/cloudflare/README.md`.
+
 Hosted retention is divided across four authenticated, staggered Web-owned
 Vercel cron routes for callback/browser nonces, ordinary control-plane data,
 external providers, and runtime/log maintenance. The nonce owner alone has the
