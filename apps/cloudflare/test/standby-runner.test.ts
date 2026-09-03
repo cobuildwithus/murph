@@ -84,6 +84,20 @@ describe("hosted standby contract", () => {
 });
 
 describe("StandbyRunnerContainer", () => {
+  it("uses SIGTERM for the hosted-local shutdown checkpoint control", async () => {
+    const stop = vi.fn(async () => undefined);
+    const container: HostedLocalTestStandbyRunnerContainer = Object.create(
+      HostedLocalTestStandbyRunnerContainer.prototype,
+    );
+    Object.defineProperty(container, "stop", { value: stop });
+
+    await expect(container.beginShutdownCheckpointGracefulStopForTest({
+      userId: "member_shutdown_checkpoint_signal",
+    })).resolves.toEqual({ ok: true });
+    expect(stop).toHaveBeenCalledOnce();
+    expect(stop).toHaveBeenCalledWith("SIGTERM");
+  });
+
   it("keeps Wrangler's synthetic region override isolated to the local test class", async () => {
     const localHarness = createStandbyContainerHarness({
       containerClass: HostedLocalTestStandbyRunnerContainer,
