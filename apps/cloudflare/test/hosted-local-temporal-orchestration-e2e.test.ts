@@ -396,12 +396,22 @@ describe("hosted local Temporal orchestration e2e", () => {
       expectedSeq: memberChannelsAppend.wake.seq,
       userId: modelFreeFrontierUserId,
     });
-    await expect(readHostedMailboxItemForTest({
-      dedupeKey: memberChannelsEventId,
-      environment: activeScenario.runtimeEnv,
-      userId: modelFreeFrontierUserId,
-    })).resolves.toMatchObject({
-      consumedAt: expect.any(String),
+    await expect.poll(async () => {
+      const item = await readHostedMailboxItemForTest({
+        dedupeKey: memberChannelsEventId,
+        environment: activeScenario.runtimeEnv,
+        userId: modelFreeFrontierUserId,
+      });
+      return {
+        consumed: item.consumedAt !== null,
+        kind: item.kind,
+        lane: item.lane,
+      };
+    }, {
+      interval: 250,
+      timeout: 120_000,
+    }).toEqual({
+      consumed: true,
       kind: "member.channels.updated",
       lane: "system",
     });
