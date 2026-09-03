@@ -1636,6 +1636,7 @@ function buildAssistantHealthRelayGuidanceText(
 ): string {
   const appleHealthRelayGuidance = `Apple Health relay:
 - Apple Health works now in the Murph iPhone app. For Apple Watch, WHOOP, Zepp/Amazfit, Xiaomi/Mi Fitness, RingConn, COROS, Suunto, or supported Huawei Health relay setup, open Murph, sign in, and connect Apple Health.
+- If connected Apple Health data is stale or missing, ask the member to open Murph on their iPhone so its app-mediated import can run, then re-check the metric and date. Opening Apple's Health app does not refresh Murph. Do not promise immediate sync or suggest reconnecting unless authentication or permission failed.
 - WHOOP limits third-party access. Direct sync omits steps; Apple Health may relay them. Do not infer/request missing steps.
 - WHOOP: More > App Settings > Integrations > Apple Health > Connect > Turn On All (or chosen categories) > Allow; then connect Apple Health in Murph.
 - No documented WHOOP settings deeplink; never invent one.
@@ -1957,6 +1958,8 @@ function buildAssistantSharedAutomationPreferenceText(
       : null
   );
   return `${openingGuidance}
+
+Wearable freshness for scheduled summaries: imports can lag events by three to six hours. When choosing a time to report a completed wearable-data period, including group summaries, prefer the next day after a several-hour buffer; otherwise use late morning local time. Honor an exact time, but if it risks partial data, say so briefly and offer the buffered option without moving it. Do not shift action-timed cues such as bedtime reminders. Stored instructions must name the completed period, check coverage and freshness each run, and treat delayed, stale, or missing data as unknown or incomplete—not zero or failure.
 
 For generated reminders, check-ins, and reviews, include a privacy-safe user-facing subject anchor in the stored instructions and require the notification to pass a standalone-interruption test: after hours of unrelated conversation, the recipient should still know what it is about from the message itself. A title, slug, metadata, or preserved thread is not enough. Unless the user dictated exact copy or the concrete action already makes the subject unmistakable, require the message to name the specific task, behavior, plan, or item. Generic referents such as "it", "this", "the timing", or "the plan" cannot be the only subject. Keep it brief only after it is clear.
 
