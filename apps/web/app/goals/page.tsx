@@ -76,7 +76,11 @@ export default async function GoalsPage() {
   }));
 
   return (
-    <GoalSearchExperience categories={directory} goals={searchGoals}>
+    <GoalSearchExperience
+      categories={directory}
+      goals={searchGoals}
+      startOption={startOption}
+    >
       <div className="flex flex-col gap-14 sm:gap-16">
         {sections.map(({ category, featuredGoals, goals: categoryGoals }) => {
           return (

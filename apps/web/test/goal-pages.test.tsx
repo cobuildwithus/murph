@@ -531,10 +531,15 @@ describe("public goal pages", () => {
       "the standalone goal directory",
     );
     for (const tag of [familyDirectoryTag, rootDirectory]) {
-      expect(tag).toContain("grid-cols-2");
+      expect(tag).toContain("grid-cols-1");
+      expect(tag).toContain("sm:grid-cols-2");
       expect(tag).toContain("lg:grid-cols-3");
-      expect(tag).toContain("xl:grid-cols-4");
+      expect(tag).not.toContain("xl:grid-cols-4");
     }
+
+    expect(firstFamily).toContain("Heart rate and recovery");
+    expect(firstFamily).toContain('data-goal-depth="0"');
+    expect(firstFamily).toContain('data-goal-root="family"');
 
     expect(markup).toContain("More biomarkers goals");
     expect(rootDirectory.match(/data-goal-root="standalone"/gu)).toHaveLength(3);
@@ -544,7 +549,7 @@ describe("public goal pages", () => {
       .toBeLessThan(rootDirectory.indexOf(fixtureStandaloneFinal.title));
   });
 
-  it("lists a standalone-only category as one featured-first grid", async () => {
+  it("groups cardio goals under plain section headings", async () => {
     mocks.listHealthCommonsGoalsByCategory.mockImplementation((category: string) =>
       category === "cardio" ? fixtureStandaloneCardioGoals : []
     );
@@ -553,30 +558,23 @@ describe("public goal pages", () => {
       params: Promise.resolve({ goalId: "cardio" }),
     });
     const markup = renderToStaticMarkup(element);
-    const rootDirectory = requireMarkupMatch(
-      markup,
-      /<ul\b[^>]*data-goal-directory="root"[^>]*>[\s\S]*?<\/ul>/u,
-      "the standalone goal directory",
-    );
-    const visibleRouteIds = Array.from(
-      rootDirectory.matchAll(/href="\/goals\/([^"]+)"/gu),
-      (match) => match[1],
-    );
 
     expect(markup).toContain("Cardio Goals");
     expect(markup).not.toContain("data-goal-family");
     expect(markup).not.toContain("<details");
-    expect(markup).not.toContain("More cardio goals");
-    expect(markup.match(/aria-label="Cardio goals"/gu)).toHaveLength(1);
+    expect(markup).toContain("data-goal-sectioned-directory");
+    expect(markup.match(/data-goal-directory-section=/gu)).toHaveLength(4);
+    expect(markup).toMatch(/<h2[^>]*>Cardio fitness<\/h2>/u);
+    expect(markup).toMatch(/<h2[^>]*>Running<\/h2>/u);
+    expect(markup).toMatch(
+      /<h2[^>]*>Triathlon and long-distance endurance<\/h2>/u,
+    );
+    expect(markup).toMatch(/<h2[^>]*>More cardio goals<\/h2>/u);
     expect(fixtureStandaloneCardioGoals).toHaveLength(39);
-    expect(rootDirectory.match(/data-goal-root="standalone"/gu)).toHaveLength(39);
-    expect(visibleRouteIds.slice(0, 4)).toEqual([
-      "improve-vo2-max",
-      "run-ironman",
-      "run-first-5k",
-      "improve-cardio-endurance",
-    ]);
+    expect(markup.match(/data-goal-root="standalone"/gu)).toHaveLength(39);
     for (const goal of fixtureStandaloneCardioGoals) {
+      expect(markup.match(new RegExp(`href="/goals/${goal.routeId}"`, "gu")))
+        .toHaveLength(1);
       expect(markup).toContain(goal.title);
       expect(markup).not.toContain(goal.summary);
     }
@@ -596,6 +594,9 @@ describe("public goal pages", () => {
 
     expect(fixtureSmallMultiFamilyChildren).toHaveLength(5);
     expect(markup).toContain('data-goal-family="improve-blood-sugar-control"');
+    expect(markup).toMatch(/<h2[^>]*>Blood sugar<\/h2>/u);
+    expect(markup).toContain('href="/goals/improve-blood-sugar-control"');
+    expect(markup).toContain('data-goal-depth="0"');
     expect(markup.match(/data-goal-depth="1"/gu)).toHaveLength(5);
     expect(markup).not.toContain("<details");
     expect(markup).not.toContain('data-goal-directory="root"');

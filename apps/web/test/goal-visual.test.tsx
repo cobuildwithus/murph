@@ -10,8 +10,16 @@ vi.mock("@/src/lib/goals/public-murph-line", () => ({
 
 import GoalsPage from "../app/goals/page";
 import { GoalBrowseCard } from "../src/components/goals/goal-browse-card";
-import { getGoalCategoryVisual } from "../src/components/goals/goal-visual";
-import { GOAL_CATEGORIES } from "../src/lib/goals/goal-categories";
+import { GoalCategoryBrowse } from "../src/components/goals/goal-category-browse";
+import {
+  getGoalCategoryVisual,
+  GoalCategoryArtwork,
+  GoalHeroArtwork,
+} from "../src/components/goals/goal-visual";
+import {
+  getGoalCategory,
+  GOAL_CATEGORIES,
+} from "../src/lib/goals/goal-categories";
 import type { GoalOutcomeKind } from "../src/lib/goals/goal-models";
 import { listHealthCommonsGoalEntries } from "../src/lib/health-commons/goal-projections";
 
@@ -38,6 +46,33 @@ describe("Goal visual system", () => {
     expect(new Set(artwork).size).toBe(GOAL_CATEGORIES.length);
   });
 
+  it("renders category artwork with its original colors softly muted", () => {
+    const markup = renderToStaticMarkup(
+      <GoalCategoryArtwork category="cardio" />,
+    );
+
+    assert.match(markup, /<img\b/u);
+    assert.match(markup, /design-assets\/patterns\/running\.svg/u);
+    assert.match(markup, /opacity-60/u);
+    assert.match(markup, /saturate-50/u);
+    assert.doesNotMatch(markup, /data-goal-category-mask/u);
+  });
+
+  it("uses goal-specific hero art before falling back to category art", () => {
+    const specific = renderToStaticMarkup(
+      <GoalHeroArtwork category="cardio" routeId="run-ironman" />,
+    );
+    assert.match(specific, /data-goal-hero-visual="run-ironman"/u);
+    assert.match(specific, /design-assets\/goals\/run-ironman\.svg/u);
+    assert.doesNotMatch(specific, /data-goal-category-visual/u);
+
+    const fallback = renderToStaticMarkup(
+      <GoalHeroArtwork category="cardio" routeId="missing-artwork" />,
+    );
+    assert.match(fallback, /data-goal-category-visual="cardio"/u);
+    assert.doesNotMatch(fallback, /data-goal-hero-visual/u);
+  });
+
   it("covers every generated Goal with known category and outcome metadata", () => {
     const goals = listHealthCommonsGoalEntries();
 
@@ -45,6 +80,86 @@ describe("Goal visual system", () => {
     for (const goal of goals) {
       expect(() => getGoalCategoryVisual(goal.category)).not.toThrow();
       expect(OUTCOME_KINDS).toContain(goal.outcomeKind);
+    }
+  });
+
+  it("places every public cardio goal into one non-linked directory section", () => {
+    const category = getGoalCategory("cardio");
+    assert.ok(category);
+    const goals = listHealthCommonsGoalEntries().filter(
+      (goal) => goal.category === "cardio",
+    );
+    const markup = renderToStaticMarkup(
+      <GoalCategoryBrowse category={category} goals={goals} />,
+    );
+
+    expect(goals).toHaveLength(39);
+    expect(markup.match(/data-goal-directory-section=/gu)).toHaveLength(6);
+    expect(markup.match(/data-goal-root="standalone"/gu)).toHaveLength(39);
+    expect(markup).not.toContain("More cardio goals");
+    for (const heading of [
+      "Cardio fitness",
+      "Running",
+      "Cycling",
+      "Swimming and rowing",
+      "Triathlon and long-distance endurance",
+      "Everyday movement and team sports",
+    ]) {
+      expect(markup).toMatch(new RegExp(`<h2[^>]*>${heading}</h2>`, "u"));
+    }
+  });
+
+  it("turns Sleep Better into a card under a plain Sleep quality heading", () => {
+    const category = getGoalCategory("sleep");
+    assert.ok(category);
+    const goals = listHealthCommonsGoalEntries().filter(
+      (goal) => goal.category === "sleep",
+    );
+    const markup = renderToStaticMarkup(
+      <GoalCategoryBrowse category={category} goals={goals} />,
+    );
+    const qualitySection = markup.match(
+      /<section\b[^>]*data-goal-directory-section="quality"[^>]*>[\s\S]*?<\/section>/u,
+    )?.[0];
+    assert.ok(qualitySection);
+    const qualityHeading = qualitySection.match(/<h2[^>]*>[\s\S]*?<\/h2>/u)?.[0];
+    assert.ok(qualityHeading);
+
+    expect(goals).toHaveLength(35);
+    expect(markup.match(/data-goal-directory-section=/gu)).toHaveLength(5);
+    expect(markup.match(/data-goal-root="standalone"/gu)).toHaveLength(35);
+    expect(qualitySection).toMatch(/<h2[^>]*>Sleep quality<\/h2>/u);
+    expect(qualitySection).toContain('href="/goals/sleep-better"');
+    expect(qualitySection.match(/href="\/goals\/sleep-better"/gu))
+      .toHaveLength(1);
+    expect(qualityHeading).not.toContain("<a");
+    expect(qualitySection).toContain("lg:grid-cols-3");
+    expect(qualitySection).not.toContain("xl:grid-cols-4");
+  });
+
+  it("places every life-stage goal into one meaningful plain section", () => {
+    const category = getGoalCategory("life-stages");
+    assert.ok(category);
+    const goals = listHealthCommonsGoalEntries().filter(
+      (goal) => goal.category === "life-stages",
+    );
+    const markup = renderToStaticMarkup(
+      <GoalCategoryBrowse category={category} goals={goals} />,
+    );
+
+    expect(goals).toHaveLength(30);
+    expect(markup.match(/data-goal-directory-section=/gu)).toHaveLength(6);
+    expect(markup.match(/data-goal-root="standalone"/gu)).toHaveLength(30);
+    expect(markup).not.toContain("More life-stage goals");
+    for (const heading of [
+      "Healthy aging",
+      "Fertility and reproductive health",
+      "Pregnancy wellbeing",
+      "Postpartum recovery",
+      "Menopause health",
+      "Period and pelvic health",
+    ]) {
+      expect(markup).toMatch(new RegExp(`<h2[^>]*>${heading}</h2>`, "u"));
     }
   });
 

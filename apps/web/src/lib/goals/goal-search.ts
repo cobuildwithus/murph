@@ -60,6 +60,7 @@ function normalizeGoalSearchText(value: string): string {
       String.fromCharCode("0".charCodeAt(0) + digit.charCodeAt(0) - 0x2080)
     )
     .toLowerCase()
+    .replace(/\biron[\s-]*man\b/gu, "ironman")
     .trim();
 }
 

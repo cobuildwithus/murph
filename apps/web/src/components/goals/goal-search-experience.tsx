@@ -10,12 +10,20 @@ import {
 } from "react";
 
 import { GoalBrowseCard } from "@/src/components/goals/goal-browse-card";
+import { GoalContactActionContents } from "@/src/components/goals/goal-contact-action";
+import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
+import { buttonVariants } from "@/src/components/ui/button";
 import { Input } from "@/src/components/ui/input";
 import type { GoalCategorySlug } from "@/src/lib/goals/goal-categories";
 import {
   searchGoalItems,
   type GoalSearchItem,
 } from "@/src/lib/goals/goal-search";
+import {
+  type MurphContactOption,
+  withMurphContactOptionBody,
+} from "@/src/lib/murph-contact-routing";
+import { cn } from "@/src/lib/utils";
 
 const GOAL_SEARCH_BATCH_SIZE = 16;
 const GOAL_SEARCH_EXAMPLES = [
@@ -35,10 +43,12 @@ export function GoalSearchExperience({
   categories,
   children,
   goals,
+  startOption,
 }: {
   categories: readonly GoalCategoryDirectoryEntry[];
   children: ReactNode;
   goals: readonly GoalSearchItem[];
+  startOption: MurphContactOption;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
@@ -148,6 +158,7 @@ export function GoalSearchExperience({
           key={activeQuery}
           onClear={clearSearch}
           query={activeQuery}
+          startOption={startOption}
         />
       ) : children}
     </div>
@@ -158,10 +169,12 @@ function GoalSearchResults({
   goals,
   onClear,
   query,
+  startOption,
 }: {
   goals: readonly GoalSearchItem[];
   onClear: () => void;
   query: string;
+  startOption: MurphContactOption;
 }) {
   const [visibleGoalCount, setVisibleGoalCount] = useState(
     GOAL_SEARCH_BATCH_SIZE,
@@ -178,10 +191,14 @@ function GoalSearchResults({
             Search results
           </span>
           <h2 className="font-serif text-2xl font-semibold tracking-tight text-foreground">
-            {goals.length} {goals.length === 1 ? "goal" : "goals"} for “{query}”
+            {goals.length > 0
+              ? `${goals.length} ${goals.length === 1 ? "goal" : "goals"} for “${query}”`
+              : `Help with “${query}”`}
           </h2>
           <span aria-live="polite" className="sr-only" role="status">
-            {goals.length} {goals.length === 1 ? "goal" : "goals"} found.
+            {goals.length > 0
+              ? `${goals.length} ${goals.length === 1 ? "goal" : "goals"} found.`
+              : "No exact guide found. Start with Murph is available."}
           </span>
         </div>
         <button
@@ -209,13 +226,27 @@ function GoalSearchResults({
           ) : null}
         </>
       ) : (
-        <div className="rounded-2xl border border-dashed border-border p-8 text-center">
+        <div className="rounded-2xl border border-border/80 bg-card px-6 py-10 text-center sm:px-10">
           <h3 className="font-serif text-xl font-semibold text-foreground">
-            No goals matched
+            Start with Murph
           </h3>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Try a shorter search or a related outcome.
+          <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-muted-foreground">
+            There isn’t an exact guide for “{query}” yet. Send Murph your goal
+            and build a plan together.
           </p>
+          <MurphContactLink
+            actionLabel={`Start with Murph about ${query}`}
+            className={cn(
+              buttonVariants({ size: "xl" }),
+              "mt-6 w-full sm:w-auto",
+            )}
+            option={withMurphContactOptionBody(
+              startOption,
+              `Hey Murph, can you help me with this goal: ${query}?`,
+            )}
+          >
+            <GoalContactActionContents label="Start with Murph" />
+          </MurphContactLink>
         </div>
       )}
     </section>

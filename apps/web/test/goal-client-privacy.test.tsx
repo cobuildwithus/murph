@@ -47,6 +47,12 @@ const telegramOption: MurphContactOption = {
   target: "_blank",
 };
 
+const goalSearchStartOption: MurphContactOption = {
+  href: "sms:+15550100001?body=Tell%20Murph%20about%20your%20goal",
+  kind: "text",
+  label: "Messages",
+};
+
 let cleanupRender: (() => Promise<void>) | null = null;
 
 beforeEach(() => {
@@ -655,6 +661,7 @@ describe("public goal client privacy", () => {
             title: "Run My First 5K",
           },
         ]}
+        startOption={goalSearchStartOption}
       >
         <div data-goal-directory="landing">Browse goals</div>
       </GoalSearchExperience>,
@@ -704,6 +711,60 @@ describe("public goal client privacy", () => {
     expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
   });
 
+  it("offers a prefilled Murph message when there is no exact guide", async () => {
+    const { GoalSearchExperience } = await import(
+      "@/src/components/goals/goal-search-experience"
+    );
+    const rendered = await renderClientComponent(
+      <GoalSearchExperience
+        categories={[{ count: 1, label: "Sleep", slug: "sleep" }]}
+        goals={[]}
+        startOption={goalSearchStartOption}
+      >
+        <div>Browse goals</div>
+      </GoalSearchExperience>,
+      {
+        location: {
+          href: "https://example.test/goals",
+          pathname: "/goals",
+          search: "",
+        },
+        requireButton: false,
+      },
+    );
+    cleanupRender = rendered.cleanup;
+    const input = rendered.container.querySelector("input");
+    assert.ok(input instanceof rendered.window.HTMLInputElement);
+
+    await act(async () => {
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        rendered.window.HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      if (valueSetter) {
+        valueSetter.call(input, "custom recovery goal");
+      } else {
+        input.value = "custom recovery goal";
+      }
+      input.dispatchEvent(new rendered.window.Event("input", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(rendered.container.textContent).toContain(
+      "Help with “custom recovery goal”",
+    );
+    expect(rendered.container.textContent).not.toContain("No goals matched");
+    const startLink = rendered.container.querySelector(
+      'a[aria-label="Start with Murph about custom recovery goal in Messages"]',
+    );
+    assert.ok(startLink instanceof rendered.window.HTMLAnchorElement);
+    const href = startLink.getAttribute("href");
+    assert.ok(href);
+    expect(new URL(href).searchParams.get("body")).toBe(
+      "Hey Murph, can you help me with this goal: custom recovery goal?",
+    );
+  });
+
   it("materializes broad search results in explicit bounded batches", async () => {
     const { GoalSearchExperience } = await import(
       "@/src/components/goals/goal-search-experience"
@@ -719,6 +780,7 @@ describe("public goal client privacy", () => {
       <GoalSearchExperience
         categories={[{ count: goals.length, label: "Sleep", slug: "sleep" }]}
         goals={goals}
+        startOption={goalSearchStartOption}
       >
         <div>Browse goals</div>
       </GoalSearchExperience>,

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { GoalBrowseCard } from "@/src/components/goals/goal-browse-card";
 import { GoalContactAction } from "@/src/components/goals/goal-contact-action";
 import { GoalOutline } from "@/src/components/goals/goal-outline";
-import { GoalCategoryArtwork } from "@/src/components/goals/goal-visual";
+import { GoalHeroArtwork } from "@/src/components/goals/goal-visual";
 import { MarkdownView } from "@/src/components/ui/markdown-view";
 import type { GoalCategory } from "@/src/lib/goals/goal-categories";
 import { resolveGoalIllustrationSrc } from "@/src/lib/goals/goal-illustrations";
@@ -92,11 +92,12 @@ export function GoalGuide({
               />
             </div>
           </div>
-          <GoalCategoryArtwork
+          <GoalHeroArtwork
             category={category.slug}
             className="hidden size-36 sm:flex sm:justify-self-end"
             imageClassName="p-4"
             preload
+            routeId={goal.routeId}
           />
         </div>
       </header>

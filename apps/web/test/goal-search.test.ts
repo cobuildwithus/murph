@@ -59,4 +59,23 @@ describe("goal search", () => {
 
     expect(searchGoalItems([vo2], "vo2")).toEqual([vo2]);
   });
+
+  it("treats Ironman as the same phrase whether it is joined or spaced", () => {
+    const ironman = goal({
+      routeId: "run-an-ironman",
+      title: "Run an Ironman",
+    });
+    const halfIronman = goal({
+      routeId: "complete-half-ironman",
+      title: "Complete a Half Ironman",
+    });
+
+    expect(searchGoalItems([ironman, halfIronman], "iron man")).toEqual([
+      ironman,
+      halfIronman,
+    ]);
+    expect(searchGoalItems([ironman, halfIronman], "half iron man")).toEqual([
+      halfIronman,
+    ]);
+  });
 });
