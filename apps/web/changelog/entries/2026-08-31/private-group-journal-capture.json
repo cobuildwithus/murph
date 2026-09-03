@@ -9,6 +9,6 @@
     "summary": "Murph can privately ask before saving a clear fact that comes up in an authenticated group.",
     "details": "The first clear fact asks for one global choice in private. Later clear facts can save quietly, unclear facts get one private question, and each group can be excluded. Nothing about another member's Journal appears in the group.",
     "relevanceTags": ["journal", "groups", "privacy", "personal-patterns"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [2683]
   }
 }
