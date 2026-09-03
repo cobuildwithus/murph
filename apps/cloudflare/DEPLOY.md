@@ -1445,6 +1445,10 @@ Core execution tuning:
   work. Deploy Web first so its strict telemetry parser accepts these additive
   leaves, then deploy Cloudflare. Reversing that order affects diagnostics only:
   old Web drops the unknown phase breakdown while retaining core milestones.
+  The fields remain in Worker-owned orchestration and do not change the
+  Worker/container invocation job, so this diagnostic itself needs no special
+  container rollout mode; obey any independently active production rollout
+  requirement.
   Invalid values fail deploy/runtime parsing closed.
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production` for
   direct/local artifact rendering. The manual deploy workflow derives it from
