@@ -1,8 +1,8 @@
 # Wearable sync guidance
 
-Status: active
+Status: completed
 Created: 2026-09-02
-Updated: 2026-09-02
+Updated: 2026-09-03
 
 ## Goal
 
@@ -74,17 +74,19 @@ Updated: 2026-09-02
 
 1. Inspect the complete assembled prompt and current Apple Health,
    device-data, reminder, and group-newsletter instruction owners and tests.
+   Completed.
 2. Send the scoped task and relevant files to ReviewGPT, wait for its attached
    patch/diff, add the participant-scoped group recovery requirement, and
-   validate the proposal against current repo invariants.
+   validate the proposal against current repo invariants. Completed.
 3. Apply or adapt the smallest correct prompt patch and add deterministic
-   regression coverage.
+   regression coverage. Completed.
 4. Add and run focused real-Codex journeys for Apple Health recovery and
-   next-day wearable-summary scheduling; review the actual replies.
+   next-day wearable-summary scheduling; review the actual replies. Completed.
 5. Run focused tests, typecheck, prompt-input measurement, complexity, diff,
-   Product UX walkthrough, and parent final review.
+   Product UX walkthrough, and parent final review. Completed.
 6. Commit through the plan-aware workflow, push, open a draft PR, and wait for
-   required exact-head CI; run the user-requested ReviewGPT gate as routed.
+   required exact-head CI; run the user-requested ReviewGPT authoring pass as
+   routed. Completed.
 
 ## Decisions
 
@@ -96,6 +98,12 @@ Updated: 2026-09-02
 - Reuse the consented `device-sync-status.v0` group projection as the sole
   authority for naming Apple Health in a group. A missing metric alone never
   proves a provider, disconnection, permission problem, or recovery step.
+- Treat "only connection" as exactly one source whose current status is
+  connected. Other explicitly disconnected source rows do not block the
+  recovery suggestion.
+- Keep the current managed group-newsletter unavailable contract intact. The
+  shared timing guidance applies to supported automations and remains present
+  in group prompt assembly without inventing newsletter capability.
 
 ## Verification
 
@@ -105,3 +113,28 @@ Updated: 2026-09-02
 - Expected outcomes: assembled instructions contain the bounded freshness and
   recovery guidance once, tool effects match the requested automation, actual
   replies are truthful and concise, and all routed checks pass.
+
+## Results
+
+- ReviewGPT inspected the prompt owners and proposed direct recovery,
+  retrospective summary timing, and same-row group recovery rules. The parent
+  adopted the same-row and exactly-one-connected-source boundary, retained the
+  existing unavailable newsletter contract, and tightened the one-read rule
+  after the first live group journey repeated the same read.
+- Deterministic prompt coverage passed 103 tests across the system-prompt,
+  capability, and group shared-health owners. Assistant Engine and hosted Web
+  typechecks passed. The focused changelog suite passed 9 tests. The complexity
+  diff passed with no new debt.
+- The complete route-plan characterization passed 102 tests after its direct
+  and scheduled-email prompt digests were refreshed for the intentional prompt
+  change. Required exact-head PR CI then passed 33 checks with 2 skips and no
+  failures.
+- Real Codex reply review is Ready for direct Apple Health recovery, group
+  recovery, a completed weekly wearable summary scheduled Monday at 10:30 AM
+  local time, and preservation of an explicitly requested midnight reminder.
+- Product UX replay: a direct member gets the Murph-app recovery and a dated
+  re-check; a group uses one paired read and asks only the correctly named
+  participant; a model-chosen completed-period summary waits until the next
+  morning and stores freshness and unknown-not-zero rules; action-timed cues
+  and exact requested times remain unchanged.
+Completed: 2026-09-03
