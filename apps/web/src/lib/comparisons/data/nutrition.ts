@@ -4,26 +4,26 @@ export const NUTRITION_COMPARISONS = defineComparisons([
   {
     category: "nutrition",
     chooseCompetitor:
-      "Choose MyFitnessPal when fast food entry, barcode scanning, calorie targets, and a mature exercise ecosystem are the main job.",
+      "Pick MyFitnessPal when the main job is fast food entry, barcode scanning, calorie targets, and a deep set of exercise and device connections.",
     chooseMurph:
-      "Choose Murph when the question is no longer only what you ate, but what matters, what fits, and what to do next. Murph can remember relevant context and help carry the resulting plan forward.",
+      "Choose Murph if you want to log meals by photo or text and then talk through what the numbers mean. It keeps your food beside your sleep, training, and records, and it can import your MyFitnessPal meals.",
     competitor: {
       clinicalRole:
-        "A general wellness tracker. It does not diagnose conditions, prescribe treatment, or replace a clinician or dietitian.",
+        "A general wellness tracker. It does not diagnose conditions, prescribe treatment, or stand in for a clinician or dietitian.",
       followThrough:
-        "Goals, diary feedback, streaks, reminders, fasting tools, and meal planning on the Premium tiers.",
+        "Goals, feedback on your diary, streaks, and reminders. Fasting tools and meal planning come with the Premium tiers.",
       format:
-        "A structured food and exercise diary with dashboards, goals, and optional meal-planning tools.",
+        "A structured food and exercise diary with dashboards and goals. Meal-planning tools are optional.",
       hardware:
-        "No proprietary hardware is required. Supported wearables and smart scales can contribute activity, sleep, or weight data.",
+        "No special hardware is needed. Supported wearables and smart scales can add activity, sleep, or weight data.",
       inputs:
-        "Manual search, barcode, saved meals, recipes, photo, voice, weight, exercise, and supported health-platform data.",
+        "Manual search, barcode, saved meals, recipes, photo, voice, weight, exercise, and data from supported health platforms.",
       insightStyle:
-        "Daily calorie and nutrient totals, goal progress, food patterns, and subscription-level reports.",
+        "Daily calorie and nutrient totals, progress toward goals, food patterns, and reports that depend on your subscription level.",
       platforms:
-        "Web, iOS, and Android, with support for Apple Health, Health Connect, Fitbit, Garmin, Samsung Health, Withings, and other services.",
+        "Web, iOS, and Android. It connects to Apple Health, Health Connect, Fitbit, Garmin, Samsung Health, Withings, and other services.",
       pricing:
-        "US pricing checked August 30, 2026: free tier; Premium $19.99 monthly or $79.99 yearly; Premium+ $24.99 monthly or $99.99 yearly. Offers can vary.",
+        "US pricing checked August 30, 2026: a free tier, Premium at $19.99 a month or $79.99 a year, and Premium+ at $24.99 a month or $99.99 a year. Offers can vary.",
       primaryJob:
         "Log food and exercise against calorie, weight, and macro goals.",
     },
@@ -41,24 +41,24 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "MyFitnessPal has a free tier for basic food, weight, exercise, and progress tracking. Barcode scanning and several advanced logging and analysis tools require Premium in the United States.",
+          "Yes. The free tier covers basic food, weight, exercise, and progress tracking. In the United States, barcode scanning and several advanced logging and analysis tools need a Premium plan.",
         question: "Is MyFitnessPal free to use?",
       },
       {
         answer:
-          "MyFitnessPal connects with many health platforms and devices. Exact fields and availability depend on the operating system, country, device, and partner connection.",
+          "MyFitnessPal connects with many health platforms and devices. Which fields sync, and whether a connection is offered at all, depends on your operating system, country, device, and the partner app.",
         question: "What health data can MyFitnessPal collect?",
       },
       {
         answer:
-          "Not if you want a precise calorie or macro diary. MyFitnessPal owns that job. Murph becomes useful when the log raises a wider question about sleep, training, symptoms, goals, or a realistic next step. Neither product replaces medical nutrition care.",
-        question: "Would Murph replace my MyFitnessPal food diary?",
+          "For many people, yes. Murph logs meals from a photo or text with calorie and macro estimates, searches about two million food labels plus the USDA catalog, and imports your MyFitnessPal meals. MyFitnessPal is still faster if you rely on barcode scanning, and neither product replaces medical nutrition care.",
+        question: "Can Murph replace my MyFitnessPal food diary?",
       },
     ],
-    headline: "When a food diary needs a next step",
+    headline: "MyFitnessPal logs the meal. Murph ties it to your sleep, training, and labs.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "MyFitnessPal owns calorie and macro logging. Murph is a personal health assistant that connects the diary with wider context and carries the next step forward.",
+      "MyFitnessPal is a fast calorie and macro diary with barcode scanning. Murph is a personal health assistant that logs meals too, then links them to your sleep, training, and labs.",
     name: "MyFitnessPal",
     quickComparison: [
       {
@@ -139,36 +139,36 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "The free tier is useful, but barcode scanning and many deeper tools sit behind a subscription in the United States.",
-      "A large database increases convenience while making it important to verify user-submitted foods and automated estimates.",
-      "Its core workflow is a diary. That is efficient for totals and targets, but it is a different job from discussing a pattern across health domains and deciding how much attention it deserves. Murph covers the wider discussion but offers no searchable food database, barcode scanner, or calorie ledger.",
+      "The free tier is useful, but in the United States barcode scanning and many deeper tools sit behind a subscription.",
+      "A large database makes entry quick. It also means checking user-submitted foods and automatic estimates before you trust them.",
+      "MyFitnessPal is built as a diary, which is efficient for totals and targets. Murph logs meals too, but it has no barcode scanner and no streaks. Its strength is explaining a food pattern beside your sleep, training, and labs.",
     ],
   },
   {
     category: "nutrition",
     chooseCompetitor:
-      "Choose Cronometer when verified food records, detailed nutrient targets, biometrics, and exportable nutrition reports are the priority.",
+      "Cronometer is the better fit if you want verified food records, detailed nutrient targets, biometrics, and nutrition reports you can export.",
     chooseMurph:
-      "Choose Murph when a nutrient chart is the start of the question rather than the end. It can keep the relevant health history in the conversation, help weigh tradeoffs, and support a plan without requiring food tracking to become the whole project.",
+      "Choose Murph if a nutrient chart raises a question you want to talk through. It imports your Cronometer meals, keeps your health history in the conversation, and helps you weigh a change without making food tracking the whole project.",
     competitor: {
       clinicalRole:
-        "The consumer app is a wellness tracker, not diagnosis or treatment. Cronometer also sells separate professional products for practices.",
+        "The consumer app is a wellness tracker. It does not diagnose or treat. Cronometer also sells separate professional products for practices.",
       followThrough:
-        "Targets, diary groups, fasting, food suggestions, charts, reports, and Crono Coach AI on Gold.",
+        "Targets, diary groups, fasting, food suggestions, charts, and reports. Gold adds Crono Coach AI.",
       format:
         "A precise nutrition diary with nutrient dashboards, biometrics, notes, trends, and reports.",
       hardware:
-        "No proprietary device is required. It can receive supported data from wearables, scales, glucose devices, and health platforms.",
+        "No device of its own is required. It can take in supported data from wearables, scales, glucose devices, and health platforms.",
       inputs:
-        "Food search, barcode, recipes, exercise, biometrics, notes, photos on Gold, and supported device data.",
+        "Food search, barcode, recipes, exercise, biometrics, notes, and supported device data. Photo logging is on Gold.",
       insightStyle:
-        "Nutrient adequacy, energy balance, biomarker charts, correlations, and detailed reports from curated food data.",
+        "Nutrient adequacy, energy balance, biomarker charts, correlations, and detailed reports built on verified food data.",
       platforms:
-        "Web, iOS, and Android, with integrations including Apple Health, Health Connect, Garmin, Fitbit, WHOOP, Oura, Dexcom, Withings, and Keto-Mojo.",
+        "Web, iOS, and Android. Integrations include Apple Health, Health Connect, Garmin, Fitbit, WHOOP, Oura, Dexcom, Withings, and Keto-Mojo.",
       pricing:
-        "US pricing checked August 30, 2026: Basic is free; Gold is $10.99 monthly or $59.99 yearly. Taxes and regional offers may differ.",
+        "US pricing checked August 30, 2026: Basic is free. Gold is $10.99 a month or $59.99 a year. Taxes and regional offers may differ.",
       primaryJob:
-        "Measure energy, macro, micronutrient, exercise, and biometric intake or progress in detail.",
+        "Measure energy, macros, micronutrients, exercise, and biometrics in detail, and track progress against them.",
     },
     competitorEvidence: {
       clinicalRole: [4, 5],
@@ -184,24 +184,24 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "Cronometer tracks far more than calories and macros, including a broad set of vitamins, minerals, fatty acids, amino acids, and other compounds when the selected food record contains them. Its official pages use slightly different nutrient counts, so coverage should be judged food by food.",
+          "Very detailed. Beyond calories and macros it tracks a broad set of vitamins, minerals, fatty acids, amino acids, and other compounds, as long as the food record you pick contains them. Its official pages quote slightly different nutrient counts, so judge coverage food by food.",
         question: "How detailed is Cronometer's nutrient tracking?",
       },
       {
         answer:
-          "Cronometer supports many devices and platforms, but every connector has its own data directions and limits. For example, activity energy may be imported where raw step totals are not.",
+          "Yes, from many devices and platforms. Each connector has its own direction and limits. Activity energy may come across while raw step totals do not, for example.",
         question: "Does Cronometer import wearable data?",
       },
       {
         answer:
-          "Cronometer remains the better nutrient ledger, and Murph should not blur or recreate that precision. Murph adds value when you want to discuss a possible gap beside symptoms, labs, routines, preferences, and burden, then decide whether anything is worth changing. Neither consumer product is clinical nutrition care.",
-        question: "What would Murph add to Cronometer?",
+          "Cronometer stays the better nutrient ledger, and Murph imports its meals rather than competing on precision. Murph then sets a possible gap beside your symptoms, labs, routines, preferences, and the effort of tracking, and helps you decide whether to change anything. Neither product is clinical nutrition care.",
+        question: "What does Murph add to Cronometer?",
       },
     ],
-    headline: "Detailed nutrient tracking or a wider health decision",
+    headline: "Cronometer counts every nutrient. Murph helps you decide what to change.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Cronometer supplies the detailed nutrient ledger. Murph, a personal health assistant, helps decide what its numbers mean in context and what is worth changing.",
+      "Cronometer tracks vitamins, minerals, and biometrics in detail. Murph is a personal health assistant that imports that data and reads it beside your labs, sleep, and symptoms.",
     name: "Cronometer",
     quickComparison: [
       {
@@ -290,36 +290,36 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "The depth is valuable for nutrient-focused users but can be more detail than a simple weight-loss diary needs.",
-      "Nutrient completeness varies with the underlying food record, even when the app supports the field. Cronometer's ledger precision has no Murph equivalent: Murph does not calculate comprehensive nutrient totals or generate comparable nutrition reports.",
-      "Device connectors differ in the data they read and write, so a listed integration does not mean full parity or settle how the resulting pattern should be interpreted.",
+      "The depth suits nutrient-focused users. It is more detail than a simple weight-loss diary needs.",
+      "How complete a nutrient total is depends on the food record, even when the app supports the field. Murph estimates calories and macros from what you log or import, but it does not build Cronometer's micronutrient ledger.",
+      "Device connectors differ in what they read and write. A listed integration does not mean full parity, and it does not tell you what the pattern means.",
     ],
   },
   {
     category: "nutrition",
     chooseCompetitor:
-      "Choose MacroFactor when you want expenditure estimates and weekly calorie or macro adjustments based on consistent intake and weight data.",
+      "Pick MacroFactor when you want an expenditure estimate and weekly calorie or macro adjustments built from steady intake and weight data.",
     chooseMurph:
-      "Choose Murph when the real question includes sleep, symptoms, training, records, stress, preferences, or whether the tracking burden is still worthwhile. It can help shape and revisit the plan, but it is not an adaptive calorie algorithm.",
+      "Choose Murph if the real question involves sleep, symptoms, training, records, stress, or whether the logging is still worth it. Murph helps you shape and revisit the plan, but it is not an adaptive calorie algorithm.",
     competitor: {
       clinicalRole:
-        "A self-guided nutrition and fitness app, not a clinician, registered dietitian, diagnosis service, or prescription program.",
+        "A self-guided nutrition and fitness app. It is not a clinician, a registered dietitian, a diagnosis service, or a prescription program.",
       followThrough:
-        "Weekly program check-ins, adaptive targets, progress trends, and adherence-neutral coaching language.",
+        "Weekly program check-ins, adaptive targets, and progress trends. Its coaching language stays neutral about adherence.",
       format:
-        "A paid mobile food logger paired with an algorithmic calorie and macro program.",
+        "A paid mobile food logger paired with an algorithm that sets calorie and macro targets.",
       hardware:
-        "No proprietary hardware is required. Connected health platforms can pass weight and nutrition data, including data from compatible scales.",
+        "No special hardware is required. Connected health platforms can pass in weight and nutrition data, including readings from compatible scales.",
       inputs:
-        "Logged food, calories, macros, scale weight, goals, recipes, and selected Apple Health or Health Connect data.",
+        "Logged food, calories, macros, scale weight, goals, recipes, and selected data from Apple Health or Health Connect.",
       insightStyle:
-        "Estimated energy expenditure, smoothed weight trend, rate of change, and weekly target adjustments.",
+        "Estimated energy expenditure, a smoothed weight trend, rate of change, and weekly target adjustments.",
       platforms:
-        "iOS and Android, with Apple Health and Health Connect. It does not depend on activity-calorie estimates from wearables.",
+        "iOS and Android, with Apple Health and Health Connect. It does not rely on activity-calorie estimates from wearables.",
       pricing:
-        "US pricing checked August 30, 2026: $11.99 monthly, $47.99 for six months, or $71.99 yearly. A Nutrition and Workouts bundle is $89.99 yearly for eligible new users.",
+        "US pricing checked August 30, 2026: $11.99 a month, $47.99 for six months, or $71.99 a year. A Nutrition and Workouts bundle is $89.99 a year for eligible new users.",
       primaryJob:
-        "Adapt calorie and macro targets from logged intake and changes in body weight.",
+        "Adapt calorie and macro targets from what you log and how your body weight changes.",
     },
     competitorEvidence: {
       clinicalRole: [1],
@@ -335,24 +335,24 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "MacroFactor estimates energy expenditure from the relationship between logged intake and weight change. It then proposes weekly calorie and macro updates without treating missed targets as a moral failure.",
+          "It estimates your energy expenditure from how logged intake lines up with weight change. Each week it proposes updated calorie and macro targets. Missed targets are treated as data, not as a moral failure.",
         question: "How does MacroFactor adjust a nutrition plan?",
       },
       {
         answer:
-          "No. MacroFactor intentionally bases its core expenditure model on food and weight data rather than changing targets from a watch's daily calorie estimate.",
+          "No. Its core expenditure model is built on food and weight data on purpose. A watch's daily calorie estimate does not move your targets.",
         question: "Does MacroFactor use wearable calorie burn in its algorithm?",
       },
       {
         answer:
-          "MacroFactor turns consistent food and weight data into a focused body-composition program. Murph adds a persistent conversation around the parts that model does not own, such as competing health goals, symptoms, training context, practical burden, and follow-through. Murph does not replace the expenditure model or a human clinician.",
+          "MacroFactor turns steady food and weight data into a focused body-composition program. Murph adds an ongoing conversation about what the model leaves out: competing health goals, symptoms, training, and whether the routine is sustainable. It does not replace the expenditure model or a clinician.",
         question: "When would Murph add something to MacroFactor?",
       },
     ],
-    headline: "Adaptive macro targets or broader health context",
+    headline: "MacroFactor adjusts your macros each week. Murph covers the rest of your health.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "MacroFactor adapts calorie and macro targets from logged data. Murph is the broader personal health assistant for decisions across health; it does not reproduce that algorithm.",
+      "MacroFactor estimates expenditure and adjusts your calorie and macro targets weekly. Murph is a personal health assistant for the sleep, training, and symptoms around that plan.",
     name: "MacroFactor",
     quickComparison: [
       {
@@ -437,36 +437,36 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "The adaptive model becomes more useful when food and weight are logged consistently and accurately.",
-      "There is no lasting free tier after the trial.",
-      "The app deliberately does not turn daily wearable calorie estimates into changing food targets, which reduces one noisy input but also keeps the core program intentionally narrow. Murph can discuss that tradeoff, but it does not estimate expenditure or issue adaptive weekly calorie and macro targets.",
+      "The adaptive model gets better as food and weight are logged consistently and accurately.",
+      "There is no lasting free tier once the trial ends.",
+      "The app deliberately ignores daily wearable calorie estimates when setting food targets. That removes a noisy input but keeps the program narrow. Murph can talk through that tradeoff, but it does not estimate expenditure or set weekly calorie and macro targets.",
     ],
   },
   {
     category: "nutrition",
     chooseCompetitor:
-      "Choose Noom when a structured weight curriculum, food-color system, daily lessons, and optional Noom Med evaluation match your goal.",
+      "Pick Noom when you want a structured weight curriculum, its food color system, daily lessons, and the option of a Noom Med evaluation.",
     chooseMurph:
-      "Choose Murph when you would rather start with your actual question and let relevant nutrition, sleep, training, records, and constraints shape the answer. It can remember the thread and help you follow through without placing you in a fixed daily curriculum.",
+      "Choose Murph if you want to log meals and ask what the numbers mean, without a daily lesson to complete. It keeps your food beside your sleep, training, and records, and it remembers the plan you land on.",
     competitor: {
       clinicalRole:
-        "Noom Weight is a wellness program. Noom Med is a separate clinician-led service that may prescribe medication after evaluation where available.",
+        "Noom Weight is a wellness program. Noom Med is a separate service led by clinicians, who may prescribe medication after an evaluation where it is available.",
       followThrough:
-        "Daily lessons, weight and meal routines, habit prompts, Welli AI, optional coaching, and medication-program follow-up on eligible Med plans.",
+        "Daily lessons, weight and meal routines, habit prompts, and Welli AI. Coaching is optional. Eligible Med plans add medication follow-up.",
       format:
-        "A structured mobile behavior-change program, with separate telehealth plans for eligible medical weight care.",
+        "A structured behavior change program in a mobile app. Separate telehealth plans cover medical weight care for eligible members.",
       hardware:
-        "No proprietary hardware is required. Phones, scales, wearables, and supported health services can supply steps or weight.",
+        "No hardware of its own. Phones, scales, wearables, and supported health services can supply steps or weight.",
       inputs:
-        "Food by search, photo, or voice, calorie and color categories, weight, steps, habits, lessons, and optional clinical intake.",
+        "Food by search, photo, or voice, with calorie and color categories. Also weight, steps, habits, lessons, and an optional clinical intake.",
       insightStyle:
-        "Psychology-informed education, calorie guidance, habit feedback, progress views, and clinical monitoring on Med plans.",
+        "Psychology-based lessons, calorie guidance, habit feedback, and progress views. Med plans add clinical monitoring.",
       platforms:
-        "iOS and Android. Health and device connections vary by operating system, and account history does not freely migrate across mobile platforms.",
+        "iOS and Android. Health and device connections vary by operating system. Account history does not move freely between mobile platforms.",
       pricing:
-        "US Noom Weight pricing checked August 30, 2026 ranges from $70 for one month to $209 for twelve months before discounts. Noom Med lists initial charges from $39 to $149 and later advertised rates from $99 to $299 monthly, often billed quarterly; medication inclusion varies.",
+        "US Noom Weight pricing checked August 30, 2026 runs from $70 for one month to $209 for twelve months before discounts. Noom Med lists initial charges from $39 to $149 and later advertised rates from $99 to $299 a month, often billed quarterly. Whether medication is included varies.",
       primaryJob:
-        "Guide weight change through a structured behavior program, with optional separate access to medical obesity care.",
+        "Guide weight change through a structured behavior program, with separate optional access to medical obesity care.",
     },
     competitorEvidence: {
       clinicalRole: [1, 2],
@@ -482,24 +482,24 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "Noom Weight uses psychology-informed lessons, meal logging, calorie guidance, and habit tools. Coaching availability depends on the plan and should not be confused with licensed medical care.",
-        question: "What kind of coaching does Noom Weight provide?",
+          "Noom Weight uses psychology-based lessons, meal logging, calorie guidance, and habit tools. Whether a coach is available depends on the plan. Coaching is not licensed medical care.",
+        question: "What kind of coaching does Noom Weight include?",
       },
       {
         answer:
-          "Noom Weight does not include medication. Noom Med offers separate plans in which a licensed clinician can evaluate eligibility, but drug cost, insurance coverage, state availability, and plan inclusions vary.",
-        question: "Does a Noom subscription include weight-loss medication?",
+          "Noom Weight does not. Noom Med sells separate plans where a licensed clinician can check your eligibility. Drug cost, insurance coverage, state availability, and what each plan includes all vary.",
+        question: "Does Noom include weight loss medication?",
       },
       {
         answer:
-          "No. Noom's curriculum, food-color system, and Noom Med clinicians are distinct services. Murph fits when you want a flexible conversation that can remember relevant context and move across health topics. It cannot prescribe, and it should not override a clinician-led plan.",
-        question: "Would Murph replace Noom's program or Noom Med?",
+          "No. Noom's lessons, food color system, and Noom Med clinicians are distinct services that Murph does not offer. Murph fits when you want to log meals and talk through food, sleep, and other health questions in one place. It cannot prescribe, and it should not override a plan from a clinician.",
+        question: "Can Murph replace Noom or Noom Med?",
       },
     ],
-    headline: "A weight curriculum, clinical care, or a wider conversation",
+    headline: "Noom runs a weight program. Murph answers the health questions around it.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Noom provides a weight curriculum and optional medical care. As a personal health assistant, Murph supports wider non-clinical questions beyond the program.",
+      "Noom is a lesson-based weight program with an optional medical arm. Murph is a personal health assistant that logs meals and connects food to your sleep, training, and records.",
     name: "Noom",
     quickComparison: [
       {
@@ -580,37 +580,37 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "The lesson-led format supplies real structure but keeps the member inside a weight-focused curriculum rather than making any health question the organizing center. Murph leaves that curriculum behind, but it offers no equivalent lesson sequence, dedicated human coaching program, or prescribing clinic.",
-      "Weight and Med prices, renewal terms, state availability, and medication inclusion require careful checkout review.",
-      "Compounded medications are not FDA approved or reviewed for safety, effectiveness, or quality in the same way as approved drugs.",
+      "The lesson format gives real structure, but it keeps you inside a weight curriculum. Murph has no lesson sequence, no human coaching program, and no prescribing clinic. It starts from whatever question you bring.",
+      "Weight and Med prices, renewal terms, state availability, and whether medication is included all deserve a careful look at checkout.",
+      "Compounded medications are not FDA approved. They are not reviewed for safety, effectiveness, or quality the way approved drugs are.",
     ],
   },
   {
     aliases: ["WW"],
     category: "nutrition",
     chooseCompetitor:
-      "Choose Weight Watchers when Points, recipe planning, peer community, workshops, or its Clinic pathway are central to the experience you want.",
+      "Pick Weight Watchers when Points, recipe planning, a peer community, workshops, or its Clinic are the parts you want.",
     chooseMurph:
-      "Choose Murph when food or weight matters but needs to sit beside symptoms, sleep, training, records, preferences, or another health goal. Murph can remember those connections and support the chosen next step without assigning Points.",
+      "Choose Murph if food and weight matter to you but sit beside symptoms, sleep, training, or another health goal. Murph logs meals from a photo or text and keeps those threads together, with no Points to count.",
     competitor: {
       clinicalRole:
-        "Core memberships are wellness programs. Weight Watchers Clinic is a separate medical service with clinician evaluation and prescription authority where eligible.",
+        "Core memberships are wellness programs. Weight Watchers Clinic is a separate medical service where clinicians evaluate members and can prescribe when eligible.",
       followThrough:
-        "Points budgets, recipes, community, workshops, coaching, activity and sleep goals, and GLP-1 Success support on eligible plans.",
+        "Points budgets, recipes, community, workshops, coaching, and activity and sleep goals. Eligible plans add GLP-1 Success support.",
       format:
-        "A membership app built around Points, with optional live community formats and a separate telehealth clinic.",
+        "A membership app built around Points. Live community formats are optional, and the telehealth clinic is separate.",
       hardware:
-        "No proprietary hardware is required. Activity and health connections can contribute data where supported.",
+        "No hardware of its own. Activity and health connections can add data where supported.",
       inputs:
-        "Food and Points, macros, weight, activity, sleep, body scans, goals, community activity, and optional medical intake.",
+        "Food and Points, macros, weight, activity, sleep, body scans, goals, community activity, and an optional medical intake.",
       insightStyle:
-        "Points guidance, progress summaries, meal planning, community reinforcement, and clinical follow-up through Clinic plans.",
+        "Points guidance, progress summaries, meal planning, and community reinforcement. Clinic plans add clinical follow-up.",
       platforms:
-        "iOS, Android, and web. Exact activity-device compatibility should be confirmed for the member's current app and region.",
+        "iOS, Android, and web. Check which activity devices work with your current app and region.",
       pricing:
-        "US pricing checked August 30, 2026 is promotional and dynamic. The site advertises membership from $12 monthly. Med+ advertises $25 for month one, then $74 monthly on a twelve-month term or $84 monthly on six months; GLP-1 medication is extra.",
+        "US pricing checked August 30, 2026 is promotional and changes often. The site advertises membership from $12 a month. Med+ advertises $25 for the first month, then $74 a month on a twelve-month term or $84 a month on six months, with GLP-1 medication extra.",
       primaryJob:
-        "Support weight management through Points, recipes, community, coaching, and optional clinical care.",
+        "Support weight management with Points, recipes, community, coaching, and optional clinical care.",
     },
     competitorEvidence: {
       clinicalRole: [1, 3],
@@ -626,24 +626,24 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "The consumer program converts foods into a Points budget and pairs tracking with recipes, goals, and community features. The exact plan determines whether workshops or additional coaching are included.",
-        question: "What is the main Weight Watchers approach?",
+          "The consumer program turns foods into a Points budget. It pairs that tracking with recipes, goals, and community features. Your plan decides whether workshops or extra coaching are included.",
+        question: "How does the Weight Watchers program work?",
       },
       {
         answer:
-          "No. Med+ includes access to the Clinic program, but the advertised membership price does not include GLP-1 medication. Coverage, cash price, eligibility, and available drugs depend on the member's clinical and insurance situation.",
+          "No. Med+ includes access to the Clinic program, but the advertised price does not cover GLP-1 medication. Coverage, cash price, eligibility, and available drugs depend on your clinical and insurance situation.",
         question: "Does Weight Watchers Med+ include GLP-1 medication?",
       },
       {
         answer:
-          "No. Murph has no Points system, workshop network, peer community, or prescribing clinic. Its value is a private, ongoing conversation that can connect nutrition to other health threads and help carry a practical plan forward. Clinic decisions remain with Weight Watchers clinicians.",
-        question: "Would Murph replace Points, workshops, or Weight Watchers Clinic?",
+          "No. Murph has no Points system, workshops, peer community, or prescribing clinic. It gives you a private, ongoing conversation that logs meals and connects food to your other health threads, then helps you carry out a plan. Clinic decisions stay with Weight Watchers clinicians.",
+        question: "Can Murph replace Weight Watchers Points, workshops, or the Clinic?",
       },
     ],
-    headline: "Points, community, and the health context around weight",
+    headline: "Weight Watchers runs on Points. Murph connects food to the rest of your health.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Weight Watchers brings Points, community, workshops, and a clinic. Murph works as a personal health assistant; it has none of those program tools.",
+      "Weight Watchers offers Points, recipes, workshops, and a clinic. Murph is a personal health assistant that logs meals and reads them beside your sleep, records, and training.",
     name: "Weight Watchers",
     quickComparison: [
       {
@@ -728,34 +728,34 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Points simplify food decisions and make the program easier to use, but they intentionally abstract some nutritional detail and keep weight management at the center.",
-      "Promotional pricing, commitment length, renewal rates, workshop access, and Clinic costs can be difficult to compare from one headline price.",
-      "The consumer program and the licensed Clinic have different roles and should not be treated as one level of care. Murph has no Points system, recipe program, workshop or peer network, or obesity-medicine clinic.",
+      "Points make food decisions simpler and the program easier to stick with. They also hide some nutritional detail on purpose and keep weight at the center.",
+      "Promotional prices, commitment length, renewal rates, workshop access, and Clinic costs are hard to compare from one headline price.",
+      "The consumer program and the licensed Clinic play different roles and are not the same level of care. Murph has no Points system, recipe program, workshops, peer network, or obesity medicine clinic.",
     ],
   },
   {
     category: "nutrition",
     chooseCompetitor:
-      "Choose Lose It! when calorie budgeting, a large food database, barcode or camera entry, and weight-loss tracking are the core tasks.",
+      "Pick Lose It! when a calorie budget, a large food database, barcode or camera entry, and weight tracking are the core jobs.",
     chooseMurph:
-      "Choose Murph when you want to ask why a pattern matters, weigh it against symptoms, sleep, training, records, or preferences, and keep a realistic plan moving. It will not replace Lose It!'s food database or barcode workflow.",
+      "Choose Murph if you want to log a meal from a photo or text and then ask why a pattern matters. It weighs food against symptoms, sleep, training, and records, and keeps a realistic plan moving. It has no barcode scanner.",
     competitor: {
       clinicalRole:
-        "A general wellness and weight-tracking product. Medication logging does not make it a prescribing or clinical-monitoring service.",
+        "A general wellness and weight tracking product. Logging medication in it does not make it a prescribing or clinical monitoring service.",
       followThrough:
-        "Goals, reminders, challenges, community, fasting, meal planning, future logging, and trend reports depending on tier.",
+        "Goals, reminders, challenges, community, fasting, meal planning, future logging, and trend reports, depending on tier.",
       format:
-        "A calorie-budget app with a food diary, weight charts, goals, and optional premium analysis.",
+        "A calorie budget app with a food diary, weight charts, goals, and optional premium analysis.",
       hardware:
-        "No proprietary hardware is required. Supported wearables and scales can supply activity or weight data.",
+        "No hardware of its own. Supported wearables and scales can supply activity or weight data.",
       inputs:
         "Food search, barcode, photo, voice, recipes, weight, exercise, water, sleep, body metrics, and medication logs.",
       insightStyle:
-        "Calorie budget progress, macro and nutrient totals, weight trends, meal patterns, and goal reports.",
+        "Progress against your calorie budget, macro and nutrient totals, weight trends, meal patterns, and goal reports.",
       platforms:
-        "iOS, Android, and web, with connections including Apple Health, Health Connect, Fitbit, Garmin, and Withings. Legacy Google Fit connections may continue but cannot be newly connected or reconnected.",
+        "iOS, Android, and web. Connections include Apple Health, Health Connect, Fitbit, Garmin, and Withings. Existing Google Fit connections may keep working, but new ones cannot be made or reconnected.",
       pricing:
-        "US pricing checked August 30, 2026: Basic is free; Premium is $79.99 yearly; Lifetime is $299.99 from Basic or $229.99 for active Premium members. Personalized promotions vary.",
+        "US pricing checked August 30, 2026: Basic is free and Premium is $79.99 a year. Lifetime is $299.99 from Basic or $229.99 for active Premium members, and personalized promotions vary.",
       primaryJob:
         "Create and track a personalized calorie budget for weight change.",
     },
@@ -773,24 +773,24 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "The free tier includes a calorie budget and core food, weight, and exercise logging. Premium adds advanced entry methods, nutrients, planning, fasting, more health metrics, and broader integrations.",
-        question: "What is included in Lose It!'s free plan?",
+          "The free tier gives you a calorie budget plus core food, weight, and exercise logging. Premium adds more entry methods, nutrient detail, planning, fasting, extra health metrics, and more integrations.",
+        question: "What does the free Lose It! plan include?",
       },
       {
         answer:
-          "Lose It! Premium can record supported GLP-1 medications, doses, injection locations, schedules, and modeled medication levels alongside nutrition goals. That personal log is not a prescription, dose recommendation, or replacement for clinical monitoring.",
+          "Yes, on Premium. It records supported GLP-1 medications, doses, injection sites, schedules, and modeled medication levels next to your nutrition goals. That log is not a prescription, a dose recommendation, or a substitute for clinical monitoring.",
         question: "Can Lose It! track GLP-1 medication?",
       },
       {
         answer:
-          "Not for a structured calorie budget, barcode log, or weight diary; Lose It! is purpose-built for those jobs. Murph becomes the better fit when you need a conversation about what the numbers mean and a plan that can account for the rest of your health. Neither product provides prescribing or clinical monitoring.",
-        question: "Would Murph replace Lose It!'s calorie tracker?",
+          "For many people, yes. Murph logs meals from a photo or text with calorie and macro estimates, searches about two million food labels and the USDA catalog, and explains what a pattern means beside the rest of your health. Lose It! is still the better tool for barcode scanning and a structured daily calorie budget, and neither product prescribes or monitors treatment.",
+        question: "Can Murph replace Lose It!?",
       },
     ],
-    headline: "A calorie diary or a question-first health assistant",
+    headline: "Lose It! runs your calorie budget. Murph explains what the numbers mean.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Lose It! is a focused calorie and weight diary. Murph, the personal health assistant, starts with the wider question and remembers the resulting plan.",
+      "Lose It! is a calorie budget app with barcode and photo entry. Murph is a personal health assistant that logs meals too and puts them beside your sleep, training, and labs.",
     name: "Lose It!",
     quickComparison: [
       {
@@ -871,36 +871,36 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Premium is sold primarily as an annual commitment, while Lifetime pricing depends on current membership state.",
-      "Photo and voice results are estimates and need review before they become useful nutrition data. Murph has no comparable searchable food database, barcode capture, or built-in calorie budget.",
-      "Medication features organize self-reported use but do not provide clinical dosing or safety decisions, and the diary does not make medication the right lens for every health question.",
+      "Premium is sold mainly as an annual plan. Lifetime pricing depends on your current membership state.",
+      "Photo and voice results are estimates and need a check before they become useful nutrition data. Murph estimates calories and macros the same way, but it has no barcode scanner, and it sets a calorie target rather than running a daily budget.",
+      "The medication features organize what you report. They do not make dosing or safety decisions, and a diary does not make medication the right lens for every health question.",
     ],
   },
   {
     category: "nutrition",
     chooseCompetitor:
-      "Choose Foodnoms when an Apple-first, privacy-conscious calorie and macro tracker with Siri, Shortcuts, and Health support is the main need.",
+      "Foodnoms is the better fit if you live on Apple devices and want a private calorie and macro tracker with Siri, Shortcuts, and Apple Health support.",
     chooseMurph:
-      "Choose Murph when you want relevant meals, symptoms, training, sleep, records, and preferences to inform one conversation, then want help carrying the chosen next step forward. It is not an Apple-native food database.",
+      "Choose Murph if you want to log a meal from a photo or text and then ask how it fits with your sleep, training, symptoms, or records. It works in iMessage or Telegram on any phone, and it helps you carry out the change you settle on.",
     competitor: {
       clinicalRole:
-        "A consumer wellness tracker. It does not provide medical nutrition therapy, diagnosis, prescribing, or human clinical coaching.",
+        "A consumer wellness tracker. It does not offer medical nutrition therapy, diagnosis, prescribing, or human clinical coaching.",
       followThrough:
-        "Goals, reminders, fasting, favorites, trends, top-food analysis, and AI-assisted logging on Plus.",
+        "Goals, reminders, fasting, favorites, trends, and analysis of your top foods. Plus adds AI-assisted logging.",
       format:
-        "A privacy-focused native Apple food diary with a free core and optional Plus subscription.",
+        "A privacy-focused food diary built natively for Apple devices. The core is free, with an optional Plus subscription.",
       hardware:
-        "An Apple device is required. No separate Foodnoms hardware is needed, and compatible scales can pass weight through Apple Health.",
+        "You need an Apple device. There is no Foodnoms hardware, and compatible scales can pass weight through Apple Health.",
       inputs:
         "Manual food search, barcode, foods, meals, recipes, text, photo, voice, Siri, weight, active energy, and Apple Health data.",
       insightStyle:
-        "Calories, macros, extended nutrients, energy calibration, trends, charts, and foods contributing most to a target.",
+        "Calories, macros, extended nutrients, energy calibration, trends, charts, and the foods that contribute most to a target.",
       platforms:
-        "iPhone, iPad, Mac, and Apple Watch, with iCloud, Apple Health, Siri, and Shortcuts. Current releases require recent Apple operating systems.",
+        "iPhone, iPad, Mac, and Apple Watch, with iCloud, Apple Health, Siri, and Shortcuts. Current releases need recent Apple operating systems.",
       pricing:
-        "Pricing checked August 30, 2026 varies by storefront and account. The US App Store exposes individual tiers from $5.99 monthly or $39.99 yearly and family tiers from $9.99 monthly or $69.99 yearly, alongside other active storefront price points.",
+        "Pricing checked August 30, 2026 varies by storefront and account. The US App Store shows individual tiers from $5.99 a month or $39.99 a year and family tiers from $9.99 a month or $69.99 a year, alongside other active storefront price points.",
       primaryJob:
-        "Track calories, macros, nutrients, recipes, fasting, and weight in the Apple ecosystem.",
+        "Track calories, macros, nutrients, recipes, fasting, and weight on Apple devices.",
     },
     competitorEvidence: {
       clinicalRole: [1],
@@ -916,24 +916,24 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. Foodnoms is designed for Apple's ecosystem, including iPhone, iPad, Mac, Apple Watch, iCloud, Siri, Shortcuts, and Apple Health. It does not offer an Android or full web equivalent.",
+          "No. Foodnoms is built for Apple devices: iPhone, iPad, Mac, and Apple Watch, with iCloud, Siri, Shortcuts, and Apple Health. There is no Android app and no full web version.",
         question: "Is Foodnoms available on Android?",
       },
       {
         answer:
-          "Foodnoms keeps core calorie and macro logging free. Plus adds AI photo and text logging, more nutrients, fasting, recipe import, deeper charts, and related convenience features. Siri and Shortcuts voice tools are documented separately.",
+          "Core calorie and macro logging stays free. Plus adds AI photo and text logging, more nutrients, fasting, recipe import, deeper charts, and related conveniences. Siri and Shortcuts voice tools are documented separately.",
         question: "What does Foodnoms Plus add?",
       },
       {
         answer:
-          "Foodnoms is the better tool for a precise Apple-native food diary, including Siri, Shortcuts, and Health workflows. Murph adds a persistent health conversation around what the log means and what action fits. You do not need to abandon Foodnoms if the diary remains useful, and no direct connection is implied.",
-        question: "What would Murph add to Foodnoms?",
+          "For many people, yes. Murph logs meals from a photo or text with calorie and macro estimates, searches about two million food labels plus the USDA catalog, and works on Android too. Foodnoms is still the better pick if you want barcode scanning, Siri, Shortcuts, or a diary that lives in Apple Health, and there is no documented direct connection between the two.",
+        question: "Can Murph replace Foodnoms?",
       },
     ],
-    headline: "Apple-native nutrition logging or broader follow-through",
+    headline: "Foodnoms is an Apple-only food diary. Murph logs meals in iMessage or Telegram.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Foodnoms is an Apple-native nutrition diary. As a personal health assistant, Murph handles questions beyond the log; it is not a barcode or nutrient-tracking app.",
+      "Foodnoms is a privacy-focused food diary for Apple devices. Murph is a personal health assistant that logs meals by photo or text and links them to your sleep, training, and labs.",
     name: "Foodnoms",
     quickComparison: [
       {
@@ -957,7 +957,7 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       {
         capability: "Detailed nutrient totals",
         evidence: "insightStyle",
-        murph: "yes",
+        murph: "limited",
         competitor: "limited",
       },
       {
@@ -1014,34 +1014,34 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "The native experience is a benefit for Apple households and a hard platform limit for Android users. Murph does not provide Foodnoms' native diary, barcode workflow, or detailed nutrition totals on either platform.",
-      "AI meal estimates improve speed but still require the person to check portions and ingredients.",
-      "The official storefront exposes several active price points, so the in-app checkout is the reliable account-specific price; Plus still buys a better diary rather than a broader health relationship.",
+      "Being Apple-native is a plus for Apple households and a hard stop for Android users. Murph runs in iMessage or Telegram on either platform, but it has no barcode scanner or Siri and Shortcuts logging, and it estimates calories and macros rather than keeping a full nutrient ledger.",
+      "AI meal estimates speed up logging, but you still need to check portions and ingredients.",
+      "The storefront lists several active prices, so the in-app checkout is the reliable price for your account. Plus buys a better diary, not a wider health conversation.",
     ],
   },
   {
     category: "nutrition",
     chooseCompetitor:
-      "Choose MyNetDiary when you want a full food, exercise, weight, fasting, or glucose log with useful free features and optional AI analysis.",
+      "Pick MyNetDiary when you want one full log for food, exercise, weight, fasting, and glucose, with strong free features and optional AI analysis.",
     chooseMurph:
-      "Choose Murph when food, weight, or a medication log needs to be understood beside other questions, records, symptoms, goals, and constraints. Murph can remember that context and support a plan, but it is not a replacement nutrient database.",
+      "Choose Murph if you want your food, weight, and medication notes read beside your symptoms, records, and goals in one conversation. Murph logs meals from a photo or text and reads Dexcom glucose, but it does not build a 108-nutrient ledger.",
     competitor: {
       clinicalRole:
         "A wellness tracker and self-management aid. Its GLP-1 Companion logs medication and side effects but does not prescribe or manage treatment.",
       followThrough:
-        "Goals, reminders, AutoPilot adjustments, fasting, meal plans, community, AI Coach, and GLP-1 Companion depending on tier.",
+        "Goals, reminders, AutoPilot adjustments, fasting, meal plans, community, AI Coach, and GLP-1 Companion, depending on tier.",
       format:
-        "An ad-free freemium food and health diary with Premium and AI-led Premium Plus layers.",
+        "An ad-free food and health diary. The base is free, with Premium and an AI-led Premium Plus layer on top.",
       hardware:
-        "No proprietary device is required. Compatible watches, scales, and fitness platforms can contribute activity, weight, or health data.",
+        "No device of its own. Compatible watches, scales, and fitness platforms can add activity, weight, or health data.",
       inputs:
         "Food search, barcode, voice, meal scan, recipes, weight, exercise, water, glucose, medications, fasting, and supported device data.",
       insightStyle:
-        "Calories, macros, up to 108 nutrients, diet analysis, charts, forecasts, AI suggestions, and medication-support trends.",
+        "Calories, macros, up to 108 nutrients, diet analysis, charts, forecasts, AI suggestions, and medication support trends.",
       platforms:
-        "Web, iOS, Android, Apple Watch, and Wear OS, with Apple Health, Health Connect, Fitbit, Garmin, and Withings support.",
+        "Web, iOS, Android, Apple Watch, and Wear OS. It supports Apple Health, Health Connect, Fitbit, Garmin, and Withings.",
       pricing:
-        "US pricing checked August 30, 2026: Premium is $8.99 monthly or $59.99 yearly. Premium Plus pricing varies by storefront; an official listing shows a $14.99 purchase without a clearly labeled duration, so verify in checkout.",
+        "US pricing checked August 30, 2026: Premium is $8.99 a month or $59.99 a year. Premium Plus pricing varies by storefront. An official listing shows a $14.99 purchase without a clearly labeled duration, so check in checkout.",
       primaryJob:
         "Track food, weight, activity, and related health measures against personalized diet goals.",
     },
@@ -1059,24 +1059,24 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "The free app includes core calorie, macro, food, exercise, water, weight, barcode, voice, and community features without advertising. Premium adds meal scanning, diet plans, fasting, more measurements, reports, and wearable connections.",
-        question: "How much can I do with MyNetDiary for free?",
+          "Quite a lot. The free app covers core calorie, macro, food, exercise, water, weight, barcode, voice, and community features with no ads. Premium adds meal scanning, diet plans, fasting, more measurements, reports, and wearable connections.",
+        question: "How much of MyNetDiary is free?",
       },
       {
         answer:
-          "MyNetDiary's Premium Plus AI Coach already discusses diet history and suggests meals, while the tracker covers many nutrition jobs well. Murph differs in scope: the conversation can begin anywhere in your health, draw on relevant authorized context beyond nutrition, and turn a decision into action across topics. There is no direct MyNetDiary connection, and neither AI replaces clinical medication care.",
-        question: "Why add Murph to a full-featured tracker?",
+          "MyNetDiary's Premium Plus AI Coach already talks through your diet history and suggests meals, and the tracker handles most nutrition jobs well. Murph's conversation can start anywhere in your health, pull in your sleep, training, labs, and records, and turn a decision into reminders and errands across topics. There is no direct MyNetDiary connection, and neither AI replaces clinical medication care.",
+        question: "Why use Murph if MyNetDiary already has an AI Coach?",
       },
       {
         answer:
-          "It can log dose history, reminders, medication adherence, protein, fiber, hydration, symptoms, nutrition targets, and progress. It does not decide eligibility, write prescriptions, or replace the clinician managing the medication.",
+          "It logs dose history, reminders, medication adherence, protein, fiber, hydration, symptoms, nutrition targets, and progress. It does not decide eligibility, write prescriptions, or replace the clinician who manages the medication.",
         question: "What does MyNetDiary's GLP-1 Companion do?",
       },
     ],
-    headline: "A detailed nutrition dashboard or a wider health thread",
+    headline: "MyNetDiary tracks up to 108 nutrients. Murph ties food to your sleep and labs.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "MyNetDiary combines nutrition, weight and medication logs with an AI Coach. Murph acts as a personal health assistant across wider context and follow-through.",
+      "MyNetDiary logs food, weight, glucose, and medication with an AI Coach. Murph is a personal health assistant that logs meals too and explains them beside your sleep, training, and labs.",
     name: "MyNetDiary",
     quickComparison: [
       {
@@ -1094,7 +1094,7 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       {
         capability: "Detailed nutrient tracking",
         evidence: "insightStyle",
-        murph: "yes",
+        murph: "limited",
         competitor: "yes",
       },
       {
@@ -1161,34 +1161,34 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "The large feature set can take more setup than a minimal food diary. Murph asks for less structured logging, but it cannot replace MyNetDiary's food, weight, medication, and nutrient ledger.",
-      "Premium Plus pricing is not presented consistently enough for one durable public list price.",
-      "Medication logs, reminders, and adherence charts are useful organizational tools, but they are not treatment instructions or a substitute for interpreting the wider health picture.",
+      "The large feature set takes more setup than a minimal food diary. Murph asks for less structured logging and records medications too, but it does not replace MyNetDiary's food, weight, and 108-nutrient ledger.",
+      "Premium Plus pricing is not shown consistently enough to quote one durable public price.",
+      "Medication logs, reminders, and adherence charts help you stay organized. They are not treatment instructions, and they do not interpret the wider health picture for you.",
     ],
   },
   {
     category: "nutrition",
     chooseCompetitor:
-      "Choose Lifesum when visual meal feedback, recipes, preset eating plans, water, fasting, and wearable-fed activity are the desired daily workflow.",
+      "Lifesum is the better fit if you want visual meal feedback, recipes, preset eating plans, water and fasting tracking, and activity from your wearable in one daily routine.",
     chooseMurph:
-      "Choose Murph when a meal score or packaged plan cannot account for the full decision. It can keep symptoms, training, sleep, records, preferences, and ordinary life in the conversation, then help revisit what you chose.",
+      "Choose Murph if a meal score or a preset plan does not answer your real question. Murph logs meals by photo or text, keeps your symptoms, training, sleep, and records in the same conversation, and helps you revisit what you chose.",
     competitor: {
       clinicalRole:
-        "A recreational and educational wellness app. Its plans and ratings are not diagnosis, treatment, or individualized medical nutrition therapy.",
+        "A recreational and educational wellness app. Its plans and ratings are not diagnosis, treatment, or individual medical nutrition therapy.",
       followThrough:
-        "Goals, reminders, habits, Life Score, meal ratings, fasting, recipes, and guided meal plans on Premium.",
+        "Goals, reminders, habits, Life Score, meal ratings, fasting, and recipes. Premium adds guided meal plans.",
       format:
         "A visual mobile lifestyle tracker with food logging, scores, recipes, plans, and habit tools.",
       hardware:
-        "No proprietary device is required. Supported wearables and scales can add activity, sleep, or weight data.",
+        "No device of its own. Supported wearables and scales can add activity, sleep, or weight data.",
       inputs:
-        "Food by search, barcode, photo, voice, or text, plus water, weight, body measures, fasting, habits, exercise, and device data.",
+        "Food by search, barcode, photo, voice, or text. Also water, weight, body measures, fasting, habits, exercise, and device data.",
       insightStyle:
-        "Calories, macros, detailed nutrients, meal ratings, Life Score, goal trends, and plan-based guidance.",
+        "Calories, macros, detailed nutrients, meal ratings, Life Score, goal trends, and guidance based on your plan.",
       platforms:
-        "iOS, iPad, Apple Watch, Android, and Wear OS, with direct support for Apple Health, Health Connect, and Samsung Health. Other services may route data through those health platforms depending on the device.",
+        "iOS, iPad, Apple Watch, Android, and Wear OS, with direct support for Apple Health, Health Connect, and Samsung Health. Other services may pass data through those platforms depending on the device.",
       pricing:
-        "US pricing checked August 30, 2026 is account and promotion dependent. A current App Store offer shows $7.49 monthly, $14.99 for three months, or $49.99 yearly, while higher-price SKUs remain listed.",
+        "US pricing checked August 30, 2026 depends on your account and current promotions. A current App Store offer shows $7.49 a month, $14.99 for three months, or $49.99 a year, while higher-price SKUs remain listed.",
       primaryJob:
         "Guide everyday eating through meal logging, ratings, recipes, and packaged nutrition plans.",
     },
@@ -1206,24 +1206,24 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "Premium unlocks AI-assisted entry, custom goals, more nutrient detail, custom foods and exercise, and the full set of meal plans and recipes. Exact features can change by app version and market.",
+          "Premium adds AI-assisted entry, custom goals, more nutrient detail, custom foods and exercise, and the full set of meal plans and recipes. Exact features can change by app version and market.",
         question: "What does Lifesum Premium include?",
       },
       {
         answer:
-          "Lifesum offers plans such as Mediterranean, keto, weight-loss, and other themed approaches. These are consumer programs, not a clinician's assessment of whether a diet is safe for a particular condition.",
-        question: "Does Lifesum create a personalized diet plan?",
+          "Lifesum offers plans such as Mediterranean, keto, weight loss, and other themed approaches. These are consumer programs. They are not a clinician's judgment on whether a diet is safe for your condition.",
+        question: "Does Lifesum make a personalized diet plan?",
       },
       {
         answer:
-          "Murph may fit better when you do not want a preset eating plan to define the problem, or when food needs to be considered with the rest of your health. Lifesum remains stronger for visual logging, recipes, meal ratings, and packaged plans; Murph does not recreate that library.",
-        question: "When might Murph fit better than a Lifesum plan?",
+          "It depends on what you use. Murph logs meals from a photo or text with calorie and macro estimates, and it fits better when you do not want a preset plan to frame the problem or when food has to be weighed with the rest of your health. Lifesum stays stronger for meal ratings, recipes, and packaged plans, which Murph does not offer.",
+        question: "Can Murph replace Lifesum?",
       },
     ],
-    headline: "Meal plans and scores or context-led support",
+    headline: "Lifesum rates each meal. Murph reads food beside your sleep, training, and labs.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Lifesum offers meal plans, ratings, and a nutrition routine. As a personal health assistant, Murph weighs wider context rather than supplying preset diet tools.",
+      "Lifesum offers meal ratings, a Life Score, recipes, and preset diet plans. Murph is a personal health assistant that logs meals and weighs them against your sleep, training, and records.",
     name: "Lifesum",
     quickComparison: [
       {
@@ -1308,33 +1308,33 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Preset diet plans make choices easier but cannot account for every medical condition, preference, or life constraint. Murph can discuss those constraints, but it does not supply preset menus, meal ratings, or a full nutrition diary.",
-      "Meal scores make feedback quick and legible, but they compress the context that can explain why a meal does or does not fit one person.",
-      "Promotional and storefront pricing is variable enough that renewal terms need a checkout review.",
+      "Preset diet plans make choices easier, but they cannot account for every medical condition, preference, or life constraint. Murph can talk through those constraints and log your meals, but it has no preset menus and no meal ratings.",
+      "Meal scores give quick, readable feedback. They also flatten the detail that explains why a meal does or does not suit one person.",
+      "Prices vary enough by promotion and storefront that you should check renewal terms at checkout.",
     ],
   },
   {
     aliases: ["Yazio"],
     category: "nutrition",
     chooseCompetitor:
-      "Choose YAZIO when calorie and macro targets, a large food database, fasting timers, recipes, and multilingual mobile support are the priority.",
+      "Pick YAZIO when calorie and macro targets, a large food database, fasting timers, recipes, and an app in your own language matter most.",
     chooseMurph:
-      "Choose Murph when the usefulness or safety of a food or fasting goal depends on symptoms, training, sleep, records, preferences, or another priority. It can help reason through that context and support the plan without replacing YAZIO's tracker.",
+      "Choose Murph if whether a food or fasting goal is useful or safe depends on your symptoms, training, sleep, or records. Murph logs meals by photo or text, reasons through that picture with you, and helps you keep the plan going. It has no fasting timer.",
     competitor: {
       clinicalRole:
         "A general wellness and nutrition app. It does not provide licensed medical care, diagnosis, or prescription management.",
       followThrough:
-        "Goals, reminders, fasting plans, recipe guidance, streaks, progress analysis, and Buddies for optional social accountability.",
+        "Goals, reminders, fasting plans, recipe guidance, streaks, and progress analysis. Buddies adds optional social accountability.",
       format:
         "A mobile calorie and fasting app with food logging, recipes, goals, and a paid Pro plan.",
       hardware:
-        "No proprietary hardware is required. Phones and compatible health or fitness platforms can add steps and activity.",
+        "No hardware of its own. Phones and compatible health or fitness platforms can add steps and activity.",
       inputs:
         "Food search, barcode, photo AI, meals, water, weight, body metrics, mood, symptoms, fasting, and supported activity data.",
       insightStyle:
-        "Calorie and macro progress, weight trends, fasting history, food analysis, and personalized Pro targets.",
+        "Calorie and macro progress, weight trends, fasting history, food analysis, and personalized targets on Pro.",
       platforms:
-        "iOS, iPad, Apple Watch, and Android, with multiple languages and support for Apple Health, Health Connect, Fitbit, and Garmin.",
+        "iOS, iPad, Apple Watch, and Android, in multiple languages. It supports Apple Health, Health Connect, Fitbit, and Garmin.",
       pricing:
         "US pricing checked August 30, 2026 is promotional and account specific. The App Store lists twelve-month offers at $23.90 and $47.90, three months at $23.99, and six months at $34.99, plus other unlabeled Pro SKUs.",
       primaryJob:
@@ -1354,24 +1354,24 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "YAZIO supports manual and barcode entry and offers AI photo recognition in current versions. As with any camera estimate, ingredients and portions should be reviewed before relying on the totals.",
+          "Yes, in current versions. YAZIO supports manual and barcode entry and adds AI photo recognition. As with any camera estimate, check ingredients and portions before you trust the totals.",
         question: "Can YAZIO log a meal from a photo?",
       },
       {
         answer:
-          "YAZIO combines fasting timers and plans with the same food, water, weight, mood, and progress diary. Fasting guidance remains general wellness content rather than individualized medical clearance.",
+          "YAZIO pairs fasting timers and plans with the same food, water, weight, mood, and progress diary. The fasting guidance is general wellness content. It is not individual medical clearance.",
         question: "How does fasting work in YAZIO?",
       },
       {
         answer:
-          "No. YAZIO is purpose-built for its fasting timers, multilingual food database, recipes, and target tracking. Murph is useful when those tools raise a broader question or when you want a plan that can account for other health context and be revisited in conversation. No direct YAZIO connection is implied.",
-        question: "Would Murph replace YAZIO's food log or fasting timer?",
+          "Partly. Murph logs meals from a photo or text with calorie and macro estimates, but it has no fasting timer, recipe catalog, or multilingual food database. Murph earns its place when those tools raise a wider question, or when you want a plan that accounts for your other health data and can be revisited in conversation. No direct YAZIO connection is implied.",
+        question: "Can Murph replace YAZIO's food log or fasting timer?",
       },
     ],
-    headline: "Daily calorie and fasting tools or a broader plan",
+    headline: "YAZIO tracks food and fasting. Murph checks the plan against sleep and labs.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "YAZIO bundles calorie logging, fasting timers, recipes, and goals. Murph serves as a personal health assistant when the plan itself needs examination.",
+      "YAZIO combines calorie logging, fasting timers, and recipes. Murph is a personal health assistant that logs meals too and checks a fasting or food plan against your sleep and labs.",
     name: "YAZIO",
     quickComparison: [
       {
@@ -1456,34 +1456,34 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Food, fasting, body metrics, and social features make YAZIO a broad tracker, while the experience still assumes that structured daily logging is the useful center of the problem. Murph offers no built-in fasting timer, multilingual food database, or recipe catalog.",
-      "Camera-recognized meals are estimates and can miss portions, oils, preparation, or ingredients.",
-      "The product does not publish one stable Pro list price across regions and offers.",
+      "Food, fasting, body metrics, and social features make YAZIO a broad tracker, but it still assumes structured daily logging is the center of the problem. Murph has no built-in fasting timer, multilingual food database, or recipe catalog.",
+      "Camera-recognized meals are estimates. They can miss portions, oils, preparation, or ingredients.",
+      "YAZIO does not publish one stable Pro list price across regions and offers.",
     ],
   },
   {
     category: "nutrition",
     chooseCompetitor:
-      "Choose Lumen when breath readings, metabolic-flexibility scores, daily carb guidance, and a device-centered routine are specifically motivating.",
+      "Pick Lumen when breath readings, metabolic flexibility scores, daily carb guidance, and a device-led routine are what keep you going.",
     chooseMurph:
-      "Choose Murph when you want help with nutrition and energy but do not need another device, or when a Lumen reading is only one clue in a wider decision. Murph can help choose and revisit the next step without claiming to measure fuel use.",
+      "Choose Murph if you want help with food and energy without buying another device, or if a Lumen reading is one clue among several. Murph logs meals, reads your wearable data, and helps you pick and revisit a next step. It does not measure fuel use.",
     competitor: {
       clinicalRole:
-        "A wellness device and guidance program, not a diagnostic or prescribing service. Several medical conditions and pregnancy warrant professional review before use.",
+        "A wellness device and guidance program, not a diagnostic or prescribing service. Several medical conditions and pregnancy call for professional review before use.",
       followThrough:
-        "Daily breath checks, macro guidance, meal logging, fasting prompts, workout recommendations, scores, and weight-loss programs.",
+        "Daily breath checks, macro guidance, meal logging, fasting prompts, workout recommendations, scores, and weight loss programs.",
       format:
-        "A handheld breath device paired with a subscription mobile app and guided metabolic program.",
+        "A handheld breath device paired with a subscription mobile app and a guided metabolic program.",
       hardware:
-        "The proprietary Lumen breath device is central to the paid experience and measures breath carbon dioxide under instructed conditions.",
+        "The Lumen breath device is the center of the paid experience. It measures carbon dioxide in your breath under instructed conditions.",
       inputs:
         "Breath measurements, food logs, weight, sleep, activity, workouts, goals, and data from supported fitness services.",
       insightStyle:
-        "Inferred fuel use, metabolic-flexibility scores, daily carbohydrate and protein guidance, and program progress.",
+        "Inferred fuel use, metabolic flexibility scores, daily carbohydrate and protein guidance, and program progress.",
       platforms:
-        "iOS and Android, with more than 40 advertised connections including Apple Health, Google Fit, Garmin, Oura, WHOOP, Strava, MyFitnessPal, Peloton, and others.",
+        "iOS and Android, with more than 40 advertised connections. These include Apple Health, Google Fit, Garmin, Oura, WHOOP, Strava, MyFitnessPal, and Peloton.",
       pricing:
-        "The US shop displayed a limited-offer device price of $249, reduced from $299, with the first twelve months included and renewal at $149 yearly. Promotions may change; the company advertises a 30-day return window and possible HSA or FSA eligibility.",
+        "The US shop showed a limited-offer device price of $249, down from $299, with the first twelve months included and renewal at $149 a year. Promotions may change. The company advertises a 30-day return window and possible HSA or FSA eligibility.",
       primaryJob:
         "Use breath carbon dioxide to infer current fuel use and guide daily nutrition choices.",
     },
@@ -1501,24 +1501,24 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "Lumen measures carbon dioxide in a controlled breath and uses its model to infer whether the body is relying relatively more on carbohydrate or fat. That output is an inference from breath data, not a direct measurement of every metabolic process.",
+          "Lumen measures carbon dioxide in a controlled breath. Its model then infers whether your body is running relatively more on carbohydrate or fat. That output is an inference from breath data, not a direct measurement of every metabolic process.",
         question: "What does the Lumen device actually measure?",
       },
       {
         answer:
-          "For devices bought on or after July 30, 2023, Lumen says basic unlimited measurements remain available after cancellation. Granular history, personalized guidance, scores, and other premium features are lost.",
+          "Partly. For devices bought on or after July 30, 2023, Lumen says basic unlimited measurements stay available after you cancel. You lose detailed history, personalized guidance, scores, and other premium features.",
         question: "Can I use Lumen without renewing the membership?",
       },
       {
         answer:
-          "Lumen excludes users under 16 and advises professional consultation for pregnancy, diabetes, severe asthma or COPD, kidney disease, cancer, thyroid conditions, and other situations in which its general recommendations may not fit.",
+          "Lumen excludes anyone under 16. It advises talking to a professional if you are pregnant or have diabetes, severe asthma or COPD, kidney disease, cancer, a thyroid condition, or another situation where its general recommendations may not fit.",
         question: "Who should get medical advice before using Lumen?",
       },
     ],
-    headline: "Breath-based metabolic feedback in a wider health decision",
+    headline: "Lumen reads your breath. Murph sets that reading beside your sleep and labs.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Lumen measures breath and turns it into daily fuel guidance. A personal health assistant, Murph helps judge that signal in context but cannot take the reading.",
+      "Lumen measures carbon dioxide in your breath for daily carb guidance. Murph is a personal health assistant that weighs that reading with your sleep, food, and labs but cannot take it.",
     name: "Lumen",
     quickComparison: [
       {
@@ -1595,39 +1595,39 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "The useful experience depends on buying and regularly using proprietary hardware. Murph avoids that device burden but cannot produce a breath reading, fuel-use score, or Lumen's daily macro guidance.",
-      "Fuel-use and flexibility outputs are modeled interpretations of breath readings rather than direct measurements of fat loss.",
-      "General macro guidance may not fit pregnancy or several chronic medical conditions without professional input, and a compelling daily score can still deserve less attention than other evidence.",
+      "The useful experience depends on buying the device and using it regularly. Murph skips that, but it cannot produce a breath reading, a fuel use score, or Lumen's daily macro guidance.",
+      "Fuel use and flexibility scores are modeled readings of breath data. They are not direct measurements of fat loss.",
+      "The general macro guidance may not fit pregnancy or several chronic conditions without professional input. A compelling daily score can still deserve less weight than other evidence.",
     ],
     useTogether:
-      "Keep Lumen for the breath measurement and its device-specific program. Add Murph to discuss the readings you choose to share, compare them with other relevant context, and decide whether the routine is helping enough to keep. There is no claimed direct data connection.",
+      "Keep Lumen for the breath reading and its device program. Add Murph to talk through the readings you share, compare them with your sleep, food, and labs, and decide whether the routine is worth keeping. There is no claimed direct data connection.",
   },
   {
     aliases: ["January AI"],
     category: "nutrition",
     chooseCompetitor:
-      "Choose January when photo, barcode, voice, or search-based meal logging and model-generated glucose predictions are the experience you want.",
+      "Pick January when you want photo, barcode, voice, or search meal logging paired with a model that predicts your glucose response.",
     chooseMurph:
-      "Choose Murph when you want support to begin with any health question or task in familiar messaging, remember relevant context across domains, and carry the decision into a plan or action. It can discuss a January estimate you share, but it does not generate or validate the prediction.",
+      "Choose Murph if you want to start from any health question in iMessage or Telegram, keep your food, sleep, labs, and records in one thread, and turn a decision into a plan. Murph logs meals and reads Dexcom data, and it can discuss a January estimate you share, but it does not make or check the prediction.",
     competitor: {
       clinicalRole:
-        "A wellness and metabolic-awareness app. Device-free glucose output is predictive, not diagnostic, and the app does not replace medical care.",
+        "A wellness and metabolic awareness app. Device-free glucose output is a prediction, not a diagnosis, and the app does not replace medical care.",
       followThrough:
-        "Meal suggestions, food swaps, adaptive goals, fasting, Jan AI conversation, and feedback shaped by logged health context.",
+        "Meal suggestions, food swaps, adaptive goals, fasting, Jan AI conversation, and feedback shaped by the health data you log.",
       format:
         "An AI-first iPhone app for food capture, predicted glucose response, and metabolic guidance.",
       hardware:
-        "No sensor is required for predicted glucose. A compatible user-owned CGM can supply actual sensor readings through supported connection paths.",
+        "No sensor is needed for predicted glucose. A compatible CGM you already own can supply actual readings through supported connection paths.",
       inputs:
         "Meal photos, barcodes, voice, search, calories, macros, activity, sleep, labs, medications, health records, Apple Health, Oura, WHOOP, and supported CGM data.",
       insightStyle:
-        "Predicted post-meal glucose, food comparisons, macro summaries, swaps, goals, and AI answers grounded in available inputs.",
+        "Predicted post-meal glucose, food comparisons, macro summaries, swaps, goals, and AI answers based on the inputs available.",
       platforms:
         "The current consumer listing is iPhone-first, with some compatibility across Apple devices. A native Android consumer app was not verified on August 30, 2026.",
       pricing:
-        "US pricing checked August 30, 2026: limited free use; Premium is $9.99 monthly or $59.99 yearly with a seven-day trial. Older or discounted $4.99 and $39.99 SKUs also appear in the official storefront.",
+        "US pricing checked August 30, 2026: limited free use, then Premium at $9.99 a month or $59.99 a year with a seven-day trial. Older or discounted $4.99 and $39.99 SKUs also appear in the official storefront.",
       primaryJob:
-        "Make food logging fast and estimate how meals may affect personal glucose response.",
+        "Make food logging fast and estimate how meals may affect your glucose.",
     },
     competitorEvidence: {
       clinicalRole: [1],
@@ -1643,24 +1643,24 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. January's device-free feature predicts a likely response from its model and the information available about the person and meal. Only a glucose meter or CGM supplies an actual glucose measurement.",
+          "No. January's device-free feature predicts a likely response from its model and what it knows about you and the meal. Only a glucose meter or CGM gives an actual glucose measurement.",
         question: "Does January measure glucose without a CGM?",
       },
       {
         answer:
-          "January already provides Jan AI, adaptive goals, and answers grounded in its metabolic, lab, medication, and activity inputs. Its advantage remains the scanner and proprietary prediction workflow. Murph differs by supporting broader health questions and practical tasks in familiar messaging, with context and decisions carried across topics. There is no direct integration, and Murph does not turn a prediction into a measurement.",
-        question: "What would Murph add to January?",
+          "January already has Jan AI, adaptive goals, and answers built on its metabolic, lab, medication, and activity inputs, and its edge is the barcode scanner and its own prediction model. Murph adds a messaging thread that covers your wider health and practical tasks, carrying your food, sleep, labs, and records across topics. There is no direct integration, and Murph does not turn a prediction into a measurement.",
+        question: "What does Murph add if I already use January?",
       },
       {
         answer:
-          "January documents a direct Libre connection for US users. Other CGMs may send readings through Apple Health when their own app supports it, with availability and latency depending on that connection path.",
+          "Yes, in some cases. January documents a direct Libre connection for US users. Other CGMs may send readings through Apple Health when their own app supports it, and availability and delay depend on that path.",
         question: "Can January use readings from my CGM?",
       },
     ],
-    headline: "Food-and-glucose predictions or broader follow-through",
+    headline: "January predicts your glucose response. Murph handles the rest of your health.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "January scans meals and predicts glucose responses through its model. Murph is a personal health assistant for broader questions and tasks, not prediction.",
+      "January scans a meal and predicts your glucose response. Murph is a personal health assistant that logs meals, reads Dexcom data, and covers the questions beyond the prediction.",
     name: "January",
     quickComparison: [
       {
@@ -1745,36 +1745,36 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Predicted glucose can offer a hypothesis but should not be read as a sensor measurement or medical result. Murph can help judge the estimate, but it has neither January's food scanner nor its proprietary glucose-prediction model.",
-      "The verified consumer experience is currently Apple-centered, with no confirmed native Android app.",
-      "Food-recognition and model outputs inherit uncertainty from portions, ingredients, records, and the model itself, so a precise-looking prediction may still warrant a low-burden response or no action.",
+      "A predicted glucose value is a hypothesis, not a sensor reading or a medical result. Murph can help you judge the estimate and reads actual Dexcom data, but it has no barcode scanner and no glucose prediction model.",
+      "The verified consumer experience is Apple-centered right now, with no confirmed native Android app.",
+      "Food recognition and model outputs carry uncertainty from portions, ingredients, records, and the model itself. A precise-looking prediction may still deserve a small response, or none.",
     ],
     useTogether:
-      "Let January own meal capture, glucose predictions, and its app's metabolic coaching. Murph can handle broader health threads and follow-through around an estimate you choose to share. This is a complementary workflow, not a claimed direct integration.",
+      "Let January handle meal capture, glucose predictions, and its in-app metabolic coaching. Murph takes the wider health threads and the follow-up around an estimate you choose to share. This is a side-by-side workflow, not a claimed direct integration.",
   },
   {
     category: "nutrition",
     chooseCompetitor:
-      "Choose Signos when continuous glucose data, meal and habit scores, dietitian support, or its clinician-led Signos+ medication program are the specific goal.",
+      "Pick Signos when continuous glucose data, meal and habit scores, dietitian support, or its clinician-led Signos+ medication program are the goal.",
     chooseMurph:
-      "Choose Murph when you want help without committing to a CGM program, or when glucose is only one clue among symptoms, sleep, training, records, preferences, and cost. It can support the broader plan while clinical decisions stay with clinicians.",
+      "Choose Murph if you want help without joining a CGM program, or if glucose is one clue beside your symptoms, sleep, training, records, and budget. Murph logs meals, reads Dexcom data, and records medications, while clinical decisions stay with your clinicians.",
     competitor: {
       clinicalRole:
-        "The Signos CGM membership and Essentials use the FDA-cleared over-the-counter Signos Glucose Monitoring System for eligible adults. Signos+ separately facilitates evaluation and prescribing through independent licensed clinician networks.",
+        "The Signos CGM membership and Essentials use the FDA-cleared, over-the-counter Signos Glucose Monitoring System for eligible adults. Signos+ separately arranges evaluation and prescribing through independent networks of licensed clinicians.",
       followThrough:
-        "Prompts, scores, goals, meal and habit feedback, dietitian support, medication tracking, and clinician follow-up depending on plan.",
+        "Prompts, scores, goals, meal and habit feedback, dietitian support, medication tracking, and clinician follow-up, depending on plan.",
       format:
-        "A mobile CGM program with AI guidance, plus distinct GLP-1 support and prescription offerings.",
+        "A mobile CGM program with AI guidance, plus separate GLP-1 support and prescription offerings.",
       hardware:
-        "CGM sensors are central to the program. Essentials uses OTC Stelo sensors; other plan hardware and fulfillment depend on the offering.",
+        "CGM sensors are central to the program. Essentials uses over-the-counter Stelo sensors. Hardware and fulfillment for other plans depend on the offering.",
       inputs:
-        "Continuous glucose, meals, weight, activity, sleep, habits, medication doses, body scans, and supported health-platform or scale data.",
+        "Continuous glucose, meals, weight, activity, sleep, habits, medication doses, body scans, and data from supported health platforms or scales.",
       insightStyle:
         "Glucose trends, meal response, daily and weekly scores, habit prompts, and treatment progress on clinical plans.",
       platforms:
         "Compatible iOS and Android phones, with Apple Health, Google Health Connect, supported watches, and smart scales.",
       pricing:
-        "US pricing checked August 30, 2026: standard membership is advertised at $127 monthly with hardware; Essentials is $89 monthly for six months, medication extra; Signos+ starts at $199 monthly for three or six months and includes eligible compounded medication and CGMs.",
+        "US pricing checked August 30, 2026: the standard membership is advertised at $127 a month with hardware. Essentials is $89 a month for six months, medication extra. Signos+ starts at $199 a month for three or six months and includes eligible compounded medication and CGMs.",
       primaryJob:
         "Use continuous glucose feedback to guide eating and weight habits, with optional GLP-1 support or prescribing.",
     },
@@ -1792,24 +1792,24 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "Essentials includes the app and a series of OTC Stelo sensors for adults already using a GLP-1 medication, but it does not include the medication or require a new prescription for the sensor. It focuses on food, activity, dose, symptoms, and body changes.",
+          "Essentials is for adults already taking a GLP-1 medication. It includes the app and a series of over-the-counter Stelo sensors, but not the medication, and the sensor needs no new prescription. It focuses on food, activity, dose, symptoms, and body changes.",
         question: "What is Signos Essentials?",
       },
       {
         answer:
-          "Signos+ is a separate clinician-guided program that can include compounded semaglutide or tirzepatide after eligibility review, along with supplies, app access, and CGMs. Compounded drugs are not FDA-approved equivalents of branded products.",
+          "Signos+ can. It is a separate clinician-guided program that may include compounded semaglutide or tirzepatide after an eligibility review, along with supplies, app access, and CGMs. Compounded drugs are not FDA-approved equivalents of the branded products.",
         question: "Does Signos prescribe GLP-1 medication?",
       },
       {
         answer:
-          "The OTC Stelo sensor used in some plans is not intended for people using insulin, on dialysis, or with problematic hypoglycemia. A clinician should guide medical decisions and any medication change.",
+          "No. The over-the-counter Stelo sensor used in some plans is not meant for people who use insulin, are on dialysis, or have problematic hypoglycemia. A clinician should guide medical decisions and any medication change.",
         question: "Can anyone use the Signos CGM program?",
       },
     ],
-    headline: "Continuous glucose guidance or context beyond the sensor",
+    headline: "Signos pairs a CGM with coaching. Murph handles the health questions around it.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Signos pairs CGM feedback with structured and clinical programs. Murph, a personal health assistant, adds wider context; it neither measures glucose nor prescribes.",
+      "Signos pairs a CGM with scores, dietitians, and a medication program. Murph is a personal health assistant that reads glucose beside your sleep, food, and labs, and does not prescribe.",
     name: "Signos",
     quickComparison: [
       {
@@ -1894,38 +1894,38 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "CGM feedback can make meal responses visible, while adding cost, sensor wear, and a risk of giving short-term glucose variation more importance than it deserves. Murph avoids the sensor commitment but cannot generate continuous readings, meal scores, or prescriptions.",
-      "The standard, Essentials, and Signos+ plans differ materially in hardware, clinical role, commitment, and medication inclusion.",
-      "Compounded medication requires clear eligibility, safety, quality, and FDA-status disclosures.",
+      "CGM feedback makes meal responses visible. It also adds cost and sensor wear, and it can make short-term glucose swings look more important than they are. Murph skips the sensor commitment, but it cannot generate continuous readings, meal scores, or prescriptions.",
+      "The standard, Essentials, and Signos+ plans differ a lot in hardware, clinical role, commitment, and whether medication is included.",
+      "Compounded medication calls for clear disclosures about eligibility, safety, quality, and FDA status.",
     ],
     useTogether:
-      "Keep Signos for sensor data, its program, and any clinician-led medication care. Add Murph only for findings you choose to discuss beside other health information and for day-to-day execution of the resulting plan. No direct integration is implied, and medication or CGM decisions remain with the relevant clinician and Signos program.",
+      "Keep Signos for the sensor data, its program, and any clinician-led medication care. Bring Murph the findings you want to look at beside your other health data, and use it for the day-to-day work of the plan. No direct integration is implied, and medication or CGM decisions stay with the clinician and the Signos program.",
   },
   {
     category: "nutrition",
     chooseCompetitor:
-      "Choose Levels when organizing meals, glucose, wearables, labs, habits, and metabolic programs in one structured app is the main need.",
+      "Levels is the better fit if you want meals, glucose, wearables, labs, habits, and metabolic programs organized in one structured app.",
     chooseMurph:
-      "Choose Murph when the need is an ongoing messaging relationship for questions and tasks beyond a metabolic program, with remembered context and follow-through but no extra dashboard. It does not reproduce Levels' scores, programs, sensors, labs, or expert review.",
+      "Choose Murph if you want an ongoing messaging thread for questions and tasks outside a metabolic program, with your history remembered and no extra dashboard. Murph logs meals and reads Dexcom data, but it does not recreate Levels' scores, programs, sensors, labs, or expert review.",
     competitor: {
       clinicalRole:
         "A metabolic wellness platform with optional labs and limited clinician review. It is not diabetes treatment or continuous clinical care.",
       followThrough:
-        "Goals, habits, adaptive programs, AI insights, scores, experiments, and optional clinician or nutritionist touchpoints in higher packages.",
+        "Goals, habits, adaptive programs, AI insights, scores, and experiments. Higher packages add optional clinician or nutritionist touchpoints.",
       format:
-        "A mobile and web metabolic-health dashboard with optional sensor, lab, and professional-service add-ons.",
+        "A mobile and web metabolic health dashboard with optional sensor, lab, and professional service add-ons.",
       hardware:
-        "No sensor is required for the base membership. Members can bring a compatible sensor or buy optional Stelo shipments.",
+        "The base membership needs no sensor. Members can bring a compatible sensor or buy optional Stelo shipments.",
       inputs:
         "Food photos, text, barcodes, macros, CGM data, sleep, exercise, wearables, labs, documents, habits, and goals.",
       insightStyle:
-        "Meal and glucose response, metabolic scores, trends, AI summaries, lab context, and program feedback.",
+        "Meal and glucose response, metabolic scores, trends, AI summaries, labs read alongside the other data, and program feedback.",
       platforms:
-        "iOS, Android, and a web dashboard, with health and wearable data connections plus bring-your-own sensor support.",
+        "iOS, Android, and a web dashboard. It connects to health and wearable data and supports bringing your own sensor.",
       pricing:
-        "US pricing checked August 30, 2026: Build Your System is $80 yearly with optional Stelo at $89 per two-sensor shipment; Core is $499 yearly; Complete is $1,999 yearly. Sensor, lab, and review inclusions differ.",
+        "US pricing checked August 30, 2026: Build Your System is $80 a year, with optional Stelo at $89 per two-sensor shipment. Core is $499 a year and Complete is $1,999 a year. Sensor, lab, and review inclusions differ.",
       primaryJob:
-        "Combine food, glucose, activity, sleep, and labs into a metabolic-health feedback system.",
+        "Combine food, glucose, activity, sleep, and labs into one metabolic health feedback system.",
     },
     competitorEvidence: {
       clinicalRole: [1],
@@ -1941,24 +1941,24 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. The base membership supports food, habits, programs, records, and other available data without requiring a CGM. A member can add Stelo or bring a compatible sensor for continuous glucose information.",
+          "No. The base membership covers food, habits, programs, records, and other available data without a CGM. You can add Stelo or bring a compatible sensor for continuous glucose.",
         question: "Do I need a CGM to use Levels?",
       },
       {
         answer:
-          "Levels already provides AI insights, adaptive programs, habit loops, and optional clinician or nutritionist support around its metabolic data. Murph's different job is to take questions beyond the metabolic program into ongoing messaging, retain the relevant context, and remember the resulting decision for later follow-through. There is no claimed direct integration.",
-        question: "What would Murph add to Levels?",
+          "Levels already gives you AI insights, adaptive programs, habit loops, and optional clinician or nutritionist support around its metabolic data. Murph's job is different: it takes the questions beyond the metabolic program into an ongoing messaging thread, keeps the relevant history, and remembers what you decided so it can follow up. There is no claimed direct integration.",
+        question: "What does Murph add to Levels?",
       },
       {
         answer:
-          "No. Levels can organize glucose and related lifestyle data, and some packages include review by a clinician. It is not a substitute for diagnosis, diabetes treatment, urgent care, or ongoing management by the person's care team.",
-        question: "Is Levels a diabetes-care service?",
+          "No. Levels organizes glucose and lifestyle data, and some packages include a clinician review. It does not replace diagnosis, diabetes treatment, urgent care, or ongoing management by your care team.",
+        question: "Is Levels a diabetes care service?",
       },
     ],
-    headline: "Metabolic data programs or a broader health assistant",
+    headline: "Levels tracks glucose, meals, and labs. Murph covers the rest of your health.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Levels combines metabolic dashboards, programs, sensors, labs, and expert support. Murph, a personal health assistant, handles wider questions and follow-through.",
+      "Levels puts glucose, meals, wearables, and labs in one metabolic dashboard. Murph is a personal health assistant for the questions beyond the program, and it remembers what you decide.",
     name: "Levels",
     quickComparison: [
       {
@@ -2039,38 +2039,38 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Membership paths, sensor shipments, labs, and clinician reviews have different inclusions and costs. Murph does not bundle a sensor, lab panel, metabolic dashboard, or clinician review.",
-      "Glucose is one useful signal, but short-term responses do not by themselves establish whether a food is healthy for a person or whether changing it will improve life.",
+      "Membership paths, sensor shipments, labs, and clinician reviews come with different inclusions and costs. Murph bundles no sensor, lab panel, metabolic dashboard, or clinician review.",
+      "Glucose is one useful measure. A short-term response alone does not tell you whether a food is healthy for you or whether changing it will improve your life.",
       "A clinician review included in a package is not the same as ongoing medical care.",
     ],
     useTogether:
-      "Let Levels own its dashboard, programs, measurements, and any expert review. Murph can support broader health threads and the agreed action around a finding you choose to share. No direct product connection is implied.",
+      "Let Levels run its dashboard, programs, measurements, and any expert review. Murph handles the wider health threads and the agreed action around a finding you choose to share. No direct product connection is implied.",
   },
   {
     category: "nutrition",
     chooseCompetitor:
-      "Choose ZOE when food-quality scores, plant diversity, processing risk, personalized meal guidance, and optional microbiome testing fit the question you want to answer.",
+      "ZOE is the better fit if food quality scores, plant diversity, processing risk, personalized meal guidance, and optional microbiome testing answer the question you have.",
     chooseMurph:
-      "Choose Murph when you do not want one food model to define the problem, or when a ZOE recommendation must be weighed against symptoms, records, goals, preferences, cost, and ordinary life before you act.",
+      "Choose Murph if you do not want one food model to define the problem, or if a ZOE recommendation needs to be weighed against your symptoms, records, goals, budget, and daily life before you act. Murph logs meals too, but it has no food scores.",
     competitor: {
       clinicalRole:
-        "A consumer nutrition and wellness program. It does not diagnose, prevent, or treat disease, and underlying conditions warrant clinician guidance.",
+        "A consumer nutrition and wellness program. It does not diagnose, prevent, or treat disease, and anyone with an underlying condition should get clinician guidance.",
       followThrough:
-        "Meal scores, goals, plant and fiber targets, streaks, learning content, Ziggie or AskZiggie AI, and personalized suggestions on paid plans.",
+        "Meal scores, goals, plant and fiber targets, streaks, learning content, and Ziggie or AskZiggie AI. Paid plans add personalized suggestions.",
       format:
-        "A mobile personalized-nutrition app with a free US tier, paid guidance, and market-dependent microbiome testing.",
+        "A mobile personalized nutrition app with a free US tier, paid guidance, and microbiome testing that depends on your market.",
       hardware:
-        "No ongoing wearable or sensor is required in ZOE 2.0. Optional stool-test kits are sold in supported markets.",
+        "ZOE 2.0 needs no ongoing wearable or sensor. Optional stool test kits are sold in supported markets.",
       inputs:
-        "Meal photos, barcodes, products, calories, macros, fiber, plants, questionnaire responses, goals, and optional stool samples.",
+        "Meal photos, barcodes, products, calories, macros, fiber, plants, questionnaire answers, goals, and optional stool samples.",
       insightStyle:
-        "Meal and product scores, plant diversity, processing-risk context, predicted glucose and fat responses, and microbiome-based guidance where tested.",
+        "Meal and product scores, plant diversity, processing risk, predicted glucose and fat responses, and microbiome guidance where you have tested.",
       platforms:
-        "iOS and Android. Membership features, testing, and pricing vary between the United States and United Kingdom, and no current wearable integration was verified.",
+        "iOS and Android. Membership features, testing, and pricing differ between the United States and the United Kingdom, and no current wearable integration was verified.",
       pricing:
-        "Pricing checked August 30, 2026: US free app; ZOE Plus $15.99 monthly or $99.99 yearly. UK app-only membership starts at £9.99 monthly billed as £119.88 yearly, with an optional £149 stool test for members.",
+        "Pricing checked August 30, 2026: the US app is free, and ZOE Plus is $15.99 a month or $99.99 a year. UK app-only membership starts at £9.99 a month, billed as £119.88 a year, with an optional £149 stool test for members.",
       primaryJob:
-        "Score meals and guide food choices using quality, plant diversity, and personalized-response models.",
+        "Score meals and guide food choices using quality, plant diversity, and personalized response models.",
     },
     competitorEvidence: {
       clinicalRole: [2],
@@ -2086,24 +2086,24 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "ZOE 2.0 no longer uses the original standardized cookies, blood-fat test, or CGM test. It predicts glucose and fat responses from questionnaire data and its models, with optional newer stool testing in supported markets.",
+          "No. ZOE 2.0 dropped the original standardized cookies, blood fat test, and CGM test. It now predicts glucose and fat responses from questionnaire data and its models, with optional newer stool testing in supported markets.",
         question: "Does ZOE still require a glucose sensor?",
       },
       {
         answer:
-          "ZOE already provides food-quality scores, predicted responses, optional testing, and AI guidance. Murph differs by supporting health questions and follow-through beyond a nutrition model, in a conversation that can remember relevant context across topics. Murph does not reproduce ZOE's scores or imply a direct connection.",
-        question: "What would Murph add to ZOE?",
+          "Not the scores. ZOE gives you food quality scores, predicted responses, optional testing, and AI guidance, and Murph reproduces none of them. Murph logs meals and takes health questions beyond a nutrition model, in a conversation that remembers your history across topics, and there is no direct connection between the two.",
+        question: "Can Murph replace ZOE?",
       },
       {
         answer:
-          "No. ZOE offers nutrition education and personalization but says it is not intended to diagnose, prevent, or treat disease. A person with an underlying condition should use qualified medical advice for treatment decisions.",
+          "No. ZOE offers nutrition education and personalization, and it says it is not intended to diagnose, prevent, or treat disease. If you have an underlying condition, use qualified medical advice for treatment decisions.",
         question: "Is ZOE medical nutrition therapy?",
       },
     ],
-    headline: "Personalized nutrition scores or cross-domain follow-through",
+    headline: "ZOE scores each meal. Murph weighs the score against your sleep, labs, and life.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "ZOE provides nutrition scores, predictions, and optional testing. As a personal health assistant, Murph connects the result to wider health; it does not score meals.",
+      "ZOE scores meals and offers optional microbiome testing. Murph is a personal health assistant that weighs those results against your sleep, labs, and records, and it does not score meals.",
     name: "ZOE",
     quickComparison: [
       {
@@ -2188,36 +2188,36 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Predicted glucose and fat responses are model outputs rather than direct current measurements. Murph can question how much a result matters, but it does not provide ZOE's testing, response predictions, or meal-scoring model.",
-      "The experience, testing pathway, availability, and price differ materially by country. ZOE's current FAQ says its next-generation testing has not yet launched in the United States, while another FAQ section retains older New York-specific language.",
-      "Meal scores make a complex model easier to use, but they should not be treated as a diagnosis, a universal verdict, or a reason to ignore how a meal fits the person's life.",
+      "Predicted glucose and fat responses are model outputs, not direct measurements taken now. Murph can question how much a result matters, but it has no testing, response predictions, or meal scoring model of its own.",
+      "The experience, testing, availability, and price differ a lot by country. ZOE's current FAQ says its next-generation testing has not launched in the United States, while another FAQ section still carries older New York-specific language.",
+      "Meal scores make a complex model easy to use. They are not a diagnosis, a universal verdict, or a reason to ignore how a meal fits your life.",
     ],
   },
   {
     category: "nutrition",
     chooseCompetitor:
-      "Choose Nourish when assessment and medical nutrition therapy from a registered dietitian are the core need, especially when insurance may cover visits.",
+      "Nourish is the better fit if you need an assessment and medical nutrition therapy from a registered dietitian, especially when insurance may cover the visits.",
     chooseMurph:
-      "Choose Murph when you do not need medical nutrition therapy, or add it between visits to organize questions, understand information, remember relevant context, and follow through on a plan without changing the dietitian's clinical role.",
+      "Choose Murph if you do not need medical nutrition therapy, or add it between visits to sort out your questions, understand what you were told, log meals, and keep the plan moving. The dietitian's clinical role does not change.",
     competitor: {
       clinicalRole:
-        "Licensed registered dietitians provide medical nutrition therapy. Nourish's broader coordinated-care model may also include labs, virtual medical care, and GLP-1 prescribing or medication management through qualified medical clinicians for eligible patients.",
+        "Licensed registered dietitians provide medical nutrition therapy. Nourish's wider coordinated care model may also include labs, virtual medical care, and GLP-1 prescribing or medication management by qualified medical clinicians for eligible patients.",
       followThrough:
-        "Recurring dietitian visits, between-visit messaging, goals, meal logs, recipes, AI assistance, labs, and progress review.",
+        "Recurring dietitian visits, messaging between visits, goals, meal logs, recipes, AI assistance, labs, and progress review.",
       format:
-        "A US telehealth nutrition practice paired with patient apps and a web portal.",
+        "A US telehealth nutrition practice with patient apps and a web portal.",
       hardware:
-        "No proprietary hardware is required. Supported Apple Health data can be used through the iOS app.",
+        "No hardware of its own. The iOS app can use supported Apple Health data.",
       inputs:
-        "Clinical history, goals, symptoms, meal photos and macros, messages, labs, progress, and information shared during video visits.",
+        "Clinical history, goals, symptoms, meal photos and macros, messages, labs, progress, and what you share during video visits.",
       insightStyle:
-        "Individualized assessment and recommendations from an RD, supported by app tracking and AI convenience tools.",
+        "An individual assessment and recommendations from a registered dietitian, backed by app tracking and AI convenience tools.",
       platforms:
-        "Virtual care across all 50 US states through video, web, iOS, and Android. Provider availability and insurance participation vary.",
+        "Virtual care in all 50 US states through video, web, iOS, and Android. Provider availability and insurance participation vary.",
       pricing:
-        "US pricing checked August 30, 2026: Nourish says 94% of patients pay $0 out of pocket. Actual copay, deductible, coverage, and visit limits require a benefits check; a transparent universal self-pay price was not verified.",
+        "US pricing checked August 30, 2026: Nourish says 94% of patients pay $0 out of pocket. Your copay, deductible, coverage, and visit limits need a benefits check, and a clear universal self-pay price was not verified.",
       primaryJob:
-        "Deliver ongoing one-to-one nutrition care from a licensed registered dietitian.",
+        "Provide ongoing one-to-one nutrition care from a licensed registered dietitian.",
     },
     competitorEvidence: {
       clinicalRole: [1, 4],
@@ -2233,24 +2233,24 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "Yes. Nourish describes its care team as registered dietitians who provide individualized nutrition care through virtual visits. This is licensed nutrition care, not only automated app coaching.",
+          "Yes. Nourish describes its care team as registered dietitians who provide individual nutrition care through virtual visits. That is licensed nutrition care, not only automated app coaching.",
         question: "Are Nourish coaches registered dietitians?",
       },
       {
         answer:
-          "Nourish says most covered patients pay nothing, but the actual amount depends on the insurer, plan, deductible, referral rules, visit limits, and provider eligibility. A benefits estimate is not a payment guarantee.",
+          "Often, but not always. Nourish says most covered patients pay nothing, but the real amount depends on your insurer, plan, deductible, referral rules, visit limits, and provider eligibility. A benefits estimate is not a payment guarantee.",
         question: "Will insurance make Nourish free?",
       },
       {
         answer:
-          "A Nourish dietitian does not prescribe. Nourish says its coordinated-care services may include GLP-1 evaluation, prescribing, and medication management by qualified medical clinicians for eligible patients, based on need and coverage.",
+          "Not through the dietitian, who does not prescribe. Nourish says its coordinated care services may include GLP-1 evaluation, prescribing, and medication management by qualified medical clinicians for eligible patients, depending on need and coverage.",
         question: "Can Nourish manage my GLP-1 prescription?",
       },
     ],
-    headline: "Dietitian-led nutrition care with support between visits",
+    headline: "Nourish gives you a registered dietitian. Murph helps between the visits.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Nourish delivers licensed dietitian care. Murph remains a non-clinical personal health assistant for wider questions and between-visit follow-through.",
+      "Nourish offers dietitian visits that insurance often covers. Murph is a personal health assistant that helps you prepare questions and keep the plan going between visits.",
     name: "Nourish",
     quickComparison: [
       {
@@ -2335,38 +2335,38 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "The value depends heavily on dietitian fit, appointment availability, and continuity over multiple visits.",
-      "Insurance marketing cannot establish an individual's final copay, deductible, or allowed number of visits.",
-      "The app supports the care relationship, but its AI assistant is not the licensed clinician and should not blur who owns assessment or treatment decisions. Murph is also not a registered dietitian and cannot provide individualized medical nutrition therapy or an insurance-billed visit.",
+      "The value depends heavily on how well you match with your dietitian, on appointment availability, and on continuity across visits.",
+      "Insurance marketing cannot tell you your final copay, deductible, or how many visits are allowed.",
+      "The app supports the care relationship, but its AI assistant is not the licensed clinician and should not blur who owns assessment and treatment. Murph is not a registered dietitian either. It cannot provide individual medical nutrition therapy or an insurance-billed visit.",
     ],
     useTogether:
-      "Let the registered dietitian own assessment and medical nutrition therapy. Add Murph to prepare questions, connect the care plan with other health threads, and support agreed steps between visits. Murph should not override the care plan, and medication decisions remain with the prescribing clinician.",
+      "Let the registered dietitian own the assessment and medical nutrition therapy. Add Murph to prepare questions, connect the care plan to your other health threads, and support the agreed steps between visits. Murph should not override the care plan, and medication decisions stay with the prescribing clinician.",
   },
   {
     category: "nutrition",
     chooseCompetitor:
-      "Choose Fay when finding and working with a particular RD or RDN, with insurance billing and direct between-visit chat, is the primary goal.",
+      "Pick Fay when you want to find and work with a specific RD or RDN, with insurance billing and direct chat between visits.",
     chooseMurph:
-      "Choose Murph for non-clinical support, or add it when questions, other health context, and practical follow-through need attention between appointments without asking Murph to overrule the dietitian.",
+      "Choose Murph for support that is not clinical care, or add it when your questions, other health data, and practical next steps need attention between appointments. Murph does not overrule the dietitian.",
     competitor: {
       clinicalRole:
-        "Fay connects patients with board-certified RDs and RDNs who can provide medical nutrition therapy within their licensure and specialty.",
+        "Fay connects patients with board-certified RDs and RDNs who provide medical nutrition therapy within their licensure and specialty.",
       followThrough:
-        "Scheduled visits, direct dietitian chat, daily goals, meal photos, symptom or win tracking, tasks, progress, and rewards.",
+        "Scheduled visits, direct chat with your dietitian, daily goals, meal photos, symptom or win tracking, tasks, progress, and rewards.",
       format:
-        "A US dietitian marketplace, insurer-billing service, and patient app for virtual or in-person nutrition care.",
+        "A US dietitian marketplace, insurer billing service, and patient app for virtual or in-person nutrition care.",
       hardware:
-        "No proprietary hardware is required. A Withings partnership supports discovery and related connected-health workflows.",
+        "No hardware of its own. A Withings partnership supports discovery and related connected health workflows.",
       inputs:
-        "Health history, insurance, goals, meal photos, symptoms, progress, messages, and information shared with the selected dietitian.",
+        "Health history, insurance, goals, meal photos, symptoms, progress, messages, and what you share with your chosen dietitian.",
       insightStyle:
-        "Individualized clinical guidance from the chosen dietitian, supported by daily logs and messaging.",
+        "Individual clinical guidance from the dietitian you choose, supported by daily logs and messaging.",
       platforms:
-        "iOS, Android, and web booking for virtual or in-person care across all 50 US states. Individual provider licensing and location still matter.",
+        "iOS, Android, and web booking for virtual or in-person care in all 50 US states. Each provider's licensing and location still matter.",
       pricing:
-        "US pricing checked August 30, 2026: Fay advertises visits as low as $0, says most patients pay $0 to $12 and 95% pay under $15, while uncovered care is about $150 per session. Final cost depends on benefits.",
+        "US pricing checked August 30, 2026: Fay advertises visits as low as $0, says most patients pay $0 to $12, and says 95% pay under $15. Uncovered care is about $150 a session, and the final cost depends on your benefits.",
       primaryJob:
-        "Help a patient find, book, and continue care with a registered dietitian.",
+        "Help a patient find, book, and keep seeing a registered dietitian.",
     },
     competitorEvidence: {
       clinicalRole: [1, 3],
@@ -2382,24 +2382,24 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "Fay lets people filter dietitians by specialty, approach, availability, insurance, and virtual or in-person format. The ongoing relationship is with the selected RD or RDN, not an interchangeable automated coach.",
-        question: "How does Fay match someone with a dietitian?",
+          "You filter dietitians by specialty, approach, availability, insurance, and virtual or in-person format. The ongoing relationship is with the RD or RDN you pick, not an interchangeable automated coach.",
+        question: "How does Fay match you with a dietitian?",
       },
       {
         answer:
-          "Fay's price estimates are based on insurance and can be very low, but deductibles, eligibility, location, age, plan rules, and claim processing can change the final bill. Uncovered sessions are advertised at about $150.",
-        question: "What will a Fay nutrition visit cost?",
+          "Fay's estimates are based on your insurance and can be very low. Deductibles, eligibility, location, age, plan rules, and claim processing can change the final bill. Uncovered sessions are advertised at about $150.",
+        question: "How much does a Fay nutrition visit cost?",
       },
       {
         answer:
-          "A Fay dietitian can provide medical nutrition therapy and collaborate around medication-related eating needs. Dietitians generally do not replace the clinician responsible for prescribing, dosing, or monitoring a weight-loss drug.",
-        question: "Can a Fay dietitian prescribe weight-loss medication?",
+          "Generally no. A Fay dietitian can provide medical nutrition therapy and work with you on eating needs related to a medication. Dietitians do not usually replace the clinician who prescribes, doses, or monitors a weight loss drug.",
+        question: "Can a Fay dietitian prescribe weight loss medication?",
       },
     ],
-    headline: "Choosing a dietitian and supporting the plan between visits",
+    headline: "Fay finds you a dietitian and bills insurance. Murph helps between visits.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Fay helps you choose and work with a registered dietitian. Murph instead is a personal health assistant for non-clinical context and support between visits.",
+      "Fay matches you with a registered dietitian and handles the insurance billing. Murph is a personal health assistant for the questions and follow-up between appointments, not clinical care.",
     name: "Fay",
     quickComparison: [
       {
@@ -2484,38 +2484,38 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "The quality and fit of care depend on the individual dietitian, specialty, schedule, and relationship.",
-      "Insurance estimates can change after claims process and are not a guarantee of the final patient responsibility.",
-      "Nutrition care and medication prescribing remain separate professional scopes, and adding an AI assistant does not transfer either scope to the assistant. Murph cannot match you with an RD, book or bill a visit, or deliver medical nutrition therapy.",
+      "The quality and fit of care depend on the individual dietitian, their specialty, their schedule, and how well you work together.",
+      "Insurance estimates can change after claims are processed. They do not guarantee what you will owe.",
+      "Nutrition care and prescribing are separate professional scopes, and adding an AI assistant does not hand either scope to the assistant. Murph cannot match you with an RD, book or bill a visit, or provide medical nutrition therapy.",
     ],
     useTogether:
-      "Let the selected Fay dietitian own individualized nutrition care. Add Murph when a question crosses into other health domains or when a practical step needs support between appointments. Murph should not override the dietitian's plan.",
+      "Let your Fay dietitian own your individual nutrition care. Add Murph when a question crosses into other parts of your health, or when a practical step needs support between appointments. Murph should not override the dietitian's plan.",
   },
   {
     category: "nutrition",
     chooseCompetitor:
-      "Choose Nutrisense when glucose sensors, meal-response analysis, Nora AI, and access to an RD or CNS are the central experience you want.",
+      "Pick Nutrisense when glucose sensors, meal response analysis, Nora AI, and access to an RD or CNS are the experience you want.",
     chooseMurph:
-      "Choose Murph when you want to reason and follow through across health without making continuous glucose the center of the relationship, or when a Nutrisense result needs to be weighed beside other evidence and real-life burden.",
+      "Choose Murph if you want to reason about your health and act on it without making continuous glucose the center of everything. Murph logs meals and reads Dexcom data, and it can weigh a Nutrisense result beside your other evidence and the daily cost of wearing a sensor.",
     competitor: {
       clinicalRole:
-        "A metabolic wellness program with optional RD or CNS coaching. The app and OTC sensors do not replace diagnosis, treatment, or a prescribing clinician.",
+        "A metabolic wellness program with optional RD or CNS coaching. The app and over-the-counter sensors do not replace diagnosis, treatment, or a prescribing clinician.",
       followThrough:
-        "Nora AI, meal scores, habits, courses, webinars, goals, messaging, and video coaching eligibility depending on plan and insurance.",
+        "Nora AI, meal scores, habits, courses, webinars, goals, and messaging. Video coaching eligibility depends on plan and insurance.",
       format:
-        "A mobile CGM analysis and coaching program with bring-your-own-sensor and sensor-included options.",
+        "A mobile CGM analysis and coaching program. You can bring your own sensor or buy a plan that includes sensors.",
       hardware:
-        "Continuous glucose sensors are central. Supported options include Stelo, Dexcom, Libre, and Lingo with platform-specific limits.",
+        "Continuous glucose sensors are central. Supported options include Stelo, Dexcom, Libre, and Lingo, each with platform-specific limits.",
       inputs:
-        "CGM readings, meals, sleep, activity, mood, habits, goals, Apple Health, Fitbit, Garmin, Oura, Google Fit, and MyFitnessPal data.",
+        "CGM readings, meals, sleep, activity, mood, habits, goals, and data from Apple Health, Fitbit, Garmin, Oura, Google Fit, and MyFitnessPal.",
       insightStyle:
-        "Glucose trends, meal scores, response patterns, AI explanations, experiments, and feedback from a nutrition professional where included.",
+        "Glucose trends, meal scores, response patterns, AI explanations, and experiments. Plans that include coaching add feedback from a nutrition professional.",
       platforms:
-        "iOS and Android. Sensor and connector support varies; Lingo support is documented for iOS rather than Android.",
+        "iOS and Android. Sensor and connector support varies, and Lingo support is documented for iOS rather than Android.",
       pricing:
-        "US pricing checked August 30, 2026: bring-your-own-sensor access is $39 monthly or $199 yearly after a three-day trial. Sensor plans currently show conflicting promotions around $152 monthly for six months, $178 to $179 for three months, and $212 to $215 for one month.",
+        "US pricing checked August 30, 2026: bring-your-own-sensor access is $39 a month or $199 a year after a three-day trial. Sensor plans currently show conflicting promotions around $152 a month for six months, $178 to $179 for three months, and $212 to $215 for one month.",
       primaryJob:
-        "Use continuous glucose data, AI, and optional nutrition coaching to explore metabolic responses.",
+        "Use continuous glucose data, AI, and optional nutrition coaching to explore your metabolic responses.",
     },
     competitorEvidence: {
       clinicalRole: [2, 3],
@@ -2531,24 +2531,24 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "Yes. The bring-your-own-sensor plan provides app analysis and guidance for supported CGMs at a lower software price. Compatibility depends on the sensor, phone, country, and connection method.",
+          "Yes. The bring-your-own-sensor plan gives you the app's analysis and guidance for supported CGMs at a lower software price. Compatibility depends on the sensor, phone, country, and connection method.",
         question: "Can I use Nutrisense with my own CGM?",
       },
       {
         answer:
-          "Nutrisense offers access to RD or CNS coaching, and qualifying insurance can reduce the coaching cost. Sensor hardware and the app program may still be paid out of pocket, so coverage should be verified separately.",
+          "It offers access to RD or CNS coaching, and qualifying insurance can lower the coaching cost. Sensor hardware and the app program may still be paid out of pocket, so check coverage for each part separately.",
         question: "Does Nutrisense include a registered dietitian?",
       },
       {
         answer:
-          "The program is generally for adults 18 and older. Stelo and similar OTC routes are not intended for insulin users, dialysis, or problematic hypoglycemia, and medication changes require the person's clinician.",
+          "The program is generally for adults 18 and older. Stelo and similar over-the-counter routes are not meant for insulin users, people on dialysis, or anyone with problematic hypoglycemia. Medication changes belong with your clinician.",
         question: "Who should not use Nutrisense without medical guidance?",
       },
     ],
-    headline: "CGM experiments and coaching in a wider health context",
+    headline: "Nutrisense runs the CGM experiment. Murph weighs the result with sleep and labs.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Nutrisense centers CGM analysis, AI, and optional nutrition coaching. Murph is a broader personal health assistant, not a sensor-analysis dashboard or clinician.",
+      "Nutrisense pairs CGM analysis with Nora AI and dietitian coaching. Murph is a personal health assistant that weighs a glucose result beside your sleep, food, and labs.",
     name: "Nutrisense",
     quickComparison: [
       {
@@ -2633,36 +2633,36 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Sensor programs make glucose patterns visible while adding device cost, skin wear, and attention to short-term variation that may or may not change a useful decision. Murph supplies no CGM, sensor-analysis dashboard, or access to an RD or CNS.",
-      "The official plan page presents conflicting promotional amounts, so a dated checkout quote is necessary.",
-      "Nutrition coaching, app access, and sensor hardware can have different insurance and out-of-pocket treatment.",
+      "Sensor programs make glucose patterns visible. They also add device cost, skin wear, and attention to short-term swings that may not change any useful decision. Murph supplies no CGM, no sensor analysis dashboard, and no access to an RD or CNS.",
+      "The official plan page shows conflicting promotional prices, so get a dated quote at checkout.",
+      "Nutrition coaching, app access, and sensor hardware can each be treated differently by insurance and for out-of-pocket cost.",
     ],
     useTogether:
-      "Let Nutrisense own the sensor experiment and any professional coaching. Add Murph to discuss the results you choose to share alongside wider health context and support the resulting plan. No direct data connection is claimed.",
+      "Let Nutrisense own the sensor experiment and any professional coaching. Add Murph to talk through the results you share beside your sleep, food, and labs, and to support the plan that follows. No direct data connection is claimed.",
   },
   {
     category: "nutrition",
     chooseCompetitor:
-      "Choose Carb Manager when net carbs, keto macros, fasting, low-carb recipes, meal planning, and metabolic self-tracking define the daily job.",
+      "Pick Carb Manager when net carbs, keto macros, fasting, low-carb recipes, meal planning, and metabolic self-tracking are the daily job.",
     chooseMurph:
-      "Choose Murph when you want to evaluate low-carb eating beside symptoms, training, sleep, labs, preferences, and real-life burden before committing to its rules. It can support a bounded plan, but it will not replace net-carb logging.",
+      "Choose Murph if you want to weigh low-carb eating against your symptoms, training, sleep, labs, and daily life before you commit to its rules. Murph logs meals and can run a bounded trial with you, but it does not keep a net carb ledger.",
     competitor: {
       clinicalRole:
-        "A wellness and nutrition tracker. Glucose, ketone, insulin, and blood-pressure fields are self-management records, not medical treatment.",
+        "A wellness and nutrition tracker. Its glucose, ketone, insulin, and blood pressure fields are self-management records, not medical treatment.",
       followThrough:
-        "Goals, reminders, fasting, meal planning, shopping lists, recipes, community, macro cycling, and Smart Macros on Premium.",
+        "Goals, reminders, fasting, meal planning, shopping lists, recipes, community, and macro cycling. Premium adds Smart Macros.",
       format:
-        "A keto and low-carb food diary with free tracking and a Premium planning layer.",
+        "A keto and low-carb food diary. Tracking is free, and Premium adds a planning layer.",
       hardware:
-        "No proprietary hardware is required. Supported meters, wearables, and health platforms can contribute selected data.",
+        "No hardware of its own. Supported meters, wearables, and health platforms can add selected data.",
       inputs:
         "Food search, barcode, photo, voice, recipes, weight, exercise, fasting, glucose, ketones, insulin, sleep, and body measurements.",
       insightStyle:
         "Net and total carbs, calories, macros, nutrients, fasting history, metabolic logs, trends, and low-carb meal guidance.",
       platforms:
-        "iOS, iPad, Apple Watch, Android, and web, with Apple Health, Health Connect, Garmin, Fitbit, Keto-Mojo, and other connections.",
+        "iOS, iPad, Apple Watch, Android, and web. Connections include Apple Health, Health Connect, Garmin, Fitbit, Keto-Mojo, and others.",
       pricing:
-        "US pricing checked August 30, 2026: Premium is advertised at $39.99 yearly, equivalent to $3.33 monthly when billed annually. Monthly and quarterly options exist, but current public exact amounts were not verified.",
+        "US pricing checked August 30, 2026: Premium is advertised at $39.99 a year, which works out to $3.33 a month when billed annually. Monthly and quarterly options exist, but their current public amounts were not verified.",
       primaryJob:
         "Track net carbohydrates and plan keto or low-carb eating.",
     },
@@ -2680,24 +2680,24 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "Carb Manager is built around net carbs and low-carb targets, while still offering calories, macros, nutrients, recipes, exercise, weight, and other health logs. Premium adds the deeper planning and analysis tools.",
+          "No. It is built around net carbs and low-carb targets, but it also tracks calories, macros, nutrients, recipes, exercise, weight, and other health logs. Premium adds the deeper planning and analysis tools.",
         question: "Is Carb Manager only for strict keto?",
       },
       {
         answer:
-          "The app can record glucose, ketones, insulin, blood pressure, and related measurements and can connect with some meters. Those logs do not provide diagnosis, medication dosing, or individualized diabetes treatment.",
+          "Not as treatment. The app records glucose, ketones, insulin, blood pressure, and related measurements, and it connects with some meters. Those logs do not give a diagnosis, medication dosing, or individual diabetes treatment.",
         question: "Can Carb Manager manage diabetes?",
       },
       {
         answer:
-          "No. Carb Manager is purpose-built for net carbs, keto macros, fasting, recipes, and related metabolic logs. Murph fits before or around that workflow: it can help examine whether the approach suits your wider health, define what would make it worth continuing, and revisit the decision. No direct connection is implied.",
-        question: "Would Murph replace Carb Manager's low-carb tracker?",
+          "Not for net carb tracking, which Carb Manager is built for along with keto macros, fasting, recipes, and metabolic logs. Murph fits before or around that work: it logs meals, helps you judge whether low-carb eating suits your wider health, and revisits the decision with you. No direct connection is implied.",
+        question: "Can Murph replace Carb Manager?",
       },
     ],
-    headline: "Keto tracking or a bounded diet experiment",
+    headline: "Carb Manager counts net carbs. Murph checks whether low carb is helping you.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Carb Manager specializes in keto tracking, net carbs, fasting, and recipes. The personal health assistant Murph helps decide whether the plan fits wider health.",
+      "Carb Manager tracks net carbs, keto macros, fasting, and low-carb recipes. Murph is a personal health assistant that logs meals and checks the plan against your sleep, labs, and symptoms.",
     name: "Carb Manager",
     quickComparison: [
       {
@@ -2778,34 +2778,34 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "A low-carb-first design is efficient once the approach is chosen, but it is not a neutral place to decide whether low-carb eating is the right approach. Murph can examine the premise, but it does not supply a net-carb ledger, fasting timer, or low-carb recipe plan.",
-      "Those metabolic and blood-pressure fields can organize observations without establishing treatment decisions.",
+      "A low-carb-first design is efficient once you have chosen the approach. It is not a neutral place to decide whether low carb is right for you. Murph can test that premise, but it does not supply a net carb ledger, fasting timer, or low-carb recipe plan.",
+      "The metabolic and blood pressure fields organize what you observe. They do not settle treatment decisions.",
       "The clearly published value price requires annual billing.",
     ],
   },
   {
     category: "nutrition",
     chooseCompetitor:
-      "Choose Cal AI when the fastest possible photo, barcode, or text meal entry matters more than detailed manual logging or human coaching.",
+      "Pick Cal AI when the fastest possible photo, barcode, or text meal entry matters more than detailed manual logging or human coaching.",
     chooseMurph:
-      "Choose Murph when speed of logging is not the main problem and you need to weigh food beside symptoms, goals, records, preferences, and practical constraints, then carry a realistic next step forward.",
+      "Choose Murph if you want a photo or text meal log that also answers questions. Murph estimates calories and macros, then weighs food beside your symptoms, goals, records, and daily life, and carries a realistic next step forward.",
     competitor: {
       clinicalRole:
-        "A consumer app for wellness estimates, without professional nutrition services, medical advice, diagnosis, or treatment.",
+        "A consumer app for wellness estimates. It offers no professional nutrition services, medical advice, diagnosis, or treatment.",
       followThrough:
-        "Personal targets, progress views, recipes, custom foods, activity context, and repeated AI-assisted meal logging.",
+        "Personal targets, progress views, recipes, custom foods, activity data, and repeated AI-assisted meal logging.",
       format:
-        "A subscription mobile app centered on estimating calories and macros from meal photos.",
+        "A subscription mobile app built around estimating calories and macros from meal photos.",
       hardware:
-        "No proprietary hardware is required. A phone camera and supported health-platform data provide the main inputs.",
+        "No hardware of its own. A phone camera and supported health platform data are the main inputs.",
       inputs:
         "Meal photos, barcodes, text descriptions, recipes, custom foods, weight goals, steps, exercise, Apple Health, and Google health data.",
       insightStyle:
-        "Estimated calories and macros, daily target progress, meal history, and goal-oriented summaries.",
+        "Estimated calories and macros, progress toward daily targets, meal history, and goal summaries.",
       platforms:
-        "iOS, Apple Watch, and Android, with Apple Health and Google Fit references in official materials.",
+        "iOS, Apple Watch, and Android. Official materials reference Apple Health and Google Fit.",
       pricing:
-        "US pricing checked August 30, 2026 is not transparently labeled by term. Apple lists Unlimited purchases from $2.99 to $29.99 and says some purchases may support Family Sharing; verify the price, duration, and renewal in checkout after the three-day trial.",
+        "US pricing checked August 30, 2026 is not clearly labeled by term. Apple lists Unlimited purchases from $2.99 to $29.99 and says some purchases may support Family Sharing. Check the price, duration, and renewal in checkout after the three-day trial.",
       primaryJob:
         "Estimate meal calories and macros quickly from a photo or short description.",
     },
@@ -2823,24 +2823,24 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. Cal AI estimates likely foods, portions, calories, and macros from the image and other information. Its own FAQ describes about 80% scan accuracy, so the result should be checked and corrected.",
+          "No. Cal AI estimates likely foods, portions, calories, and macros from the image and other information. Its own FAQ puts scan accuracy at about 80%, so check and correct the result.",
         question: "Are Cal AI photo estimates exact?",
       },
       {
         answer:
-          "Cal AI is better for repeatedly turning photos into estimated calories and macros. Murph is useful when you need to question that estimate, connect eating with other health context, and decide what action is worthwhile. It does not recreate Cal AI's scanner, and no direct connection is implied.",
-        question: "What would Murph add to Cal AI?",
+          "For many people, yes. Murph also logs a meal from a photo or text with calorie and macro estimates, and it then connects eating with your sleep, training, labs, and records and helps you decide what is worth doing. Cal AI stays the leaner tool if all you want is repeated photo and barcode scans, and no direct connection between the two is implied.",
+        question: "Can Murph replace Cal AI?",
       },
       {
         answer:
-          "The official service uses calai.app. Its terms identify Cal AI, Inc. as the operator, while Apple lists Viral Development LLC as the App Store seller. Similarly named apps can have different features, prices, and privacy terms.",
+          "The official service uses calai.app. Its terms name Cal AI, Inc. as the operator, while Apple lists Viral Development LLC as the App Store seller. Apps with similar names can have different features, prices, and privacy terms.",
         question: "How do I identify the official Cal AI app?",
       },
     ],
-    headline: "Fast photo estimates or a broader health conversation",
+    headline: "Cal AI logs meals from a photo. Murph does too, and reads your sleep and labs.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Cal AI turns meal photos into fast calorie and macro estimates. Murph works as the personal health assistant for the wider decision; it is not a camera-based food logger.",
+      "Cal AI turns meal photos into fast calorie and macro estimates. Murph is a personal health assistant that logs meals from a photo too, then reads them beside your sleep, training, and labs.",
     name: "Cal AI",
     quickComparison: [
       {
@@ -2925,37 +2925,37 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Fast photo logging offers a real convenience advantage, but it trades precision for speed and requires review of ingredients and portions. Murph can discuss an estimate but offers no equivalent camera-to-calorie workflow, food database, or macro ledger.",
-      "The official storefront does not label its many purchase amounts clearly enough to publish one dependable monthly or annual price.",
-      "The app supplies automated wellness estimates rather than human dietitian coaching or medical care.",
+      "Fast photo logging is convenient, but it trades precision for speed and still needs a check of ingredients and portions. Murph's photo estimates need the same check, and Murph has no barcode scanner.",
+      "The official storefront does not label its many purchase amounts clearly enough to publish one reliable monthly or annual price.",
+      "The app gives automated wellness estimates. It offers no human dietitian coaching or medical care.",
     ],
   },
   {
     aliases: ["Ate Food Journal"],
     category: "nutrition",
     chooseCompetitor:
-      "Choose AteMate when quick photo journaling of meals and day-to-day wellbeing, plus an AI coach grounded in that record, are the behavior-change tools you want.",
+      "AteMate is the better fit if quick photo journaling of meals and daily wellbeing, plus an AI coach that works from that record, are the habit tools you want.",
     chooseMurph:
-      "Choose Murph when you want help to begin with a health question or task instead of maintaining a journal, when authorized records or connected data need to inform the answer, and when the result should become a remembered plan or action.",
+      "Choose Murph if you want to start with a health question or task rather than keep a journal. Murph logs meals by photo or text, pulls in your connected data and records, and turns the answer into a plan it remembers.",
     competitor: {
       clinicalRole:
         "A personal health journal for awareness. Its AI coach is not a clinician, dietitian, diagnosis service, or disease treatment.",
       followThrough:
         "AI prompts, pattern summaries, reminders, mindful questions, goals, and optional sharing with a human coach.",
       format:
-        "A visual health journal with meal photos, wellbeing entries, and an AI coach; calorie and macro tracking remain optional.",
+        "A visual health journal with meal photos, wellbeing entries, and an AI coach. Calorie and macro tracking are optional.",
       hardware:
-        "No proprietary hardware is required. Phones and watches support capture, while health-platform connections can add activity or related data.",
+        "No hardware of its own. Phones and watches handle capture, and health platform connections can add activity or related data.",
       inputs:
         "Meal photos, hunger, mood, reasons for eating, hydration, movement, sleep, weight, blood pressure, glucose, and optional calories or macros.",
       insightStyle:
-        "Cross-pillar patterns, weekly reviews, AI conversation grounded in journal history, and coach-readable entries.",
+        "Patterns across the five pillars, weekly reviews, AI conversation grounded in your journal history, and entries a coach can read.",
       platforms:
-        "iPhone, iPad, Apple Watch, and Android, with health-platform support including Health Connect and Apple ecosystem data.",
+        "iPhone, iPad, Apple Watch, and Android. Health platform support includes Health Connect and Apple ecosystem data.",
       pricing:
-        "US pricing checked August 30, 2026: the base journal lists $9.99 monthly, $19.99 quarterly, or $49.99 yearly. AteMate Coach is a separate $19.99 monthly tier; Coach Plus is another tier whose public US price was not verified.",
+        "US pricing checked August 30, 2026: the base journal lists $9.99 a month, $19.99 a quarter, or $49.99 a year. AteMate Coach is a separate $19.99 a month tier, and Coach Plus is another tier whose public US price was not verified.",
       primaryJob:
-        "Capture daily patterns across food and wellbeing through a photo-led journal and AI coach rather than compulsory calorie counting.",
+        "Capture daily patterns across food and wellbeing through a photo-led journal and AI coach, without required calorie counting.",
     },
     competitorEvidence: {
       clinicalRole: [1],
@@ -2971,24 +2971,24 @@ export const NUTRITION_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. AteMate is intentionally usable as a photo and context journal without calorie targets. People who want numbers can enable calories and macros, but they are not required for the main photo-journal workflow.",
+          "No. AteMate is designed to work as a photo and context journal without calorie targets. If you want numbers, you can turn on calories and macros, but the main photo journal does not need them.",
         question: "Do I have to count calories in AteMate?",
       },
       {
         answer:
-          "AteMate includes an automated AI coach that responds to the journal and surfaces patterns. A person can also share data with a separate human coach, but the app's AI itself is not a registered dietitian or clinician.",
+          "No. AteMate's AI coach is automated: it responds to your journal and points out patterns. You can also share data with a separate human coach, but the app's AI is not a registered dietitian or clinician.",
         question: "Is AteMate's AI coach a human dietitian?",
       },
       {
         answer:
-          "AteMate already has an AI coach that can use journal history across food, mood, hydration, movement, and sleep. Its advantage is the dedicated, low-friction journal. Murph differs by starting from any health question or task, using relevant authorized context beyond journal entries, and carrying decisions into broader follow-through. Neither product turns automated feedback into clinical care.",
+          "AteMate already has an AI coach that reads your journal history across food, mood, hydration, movement, and sleep, and its strength is the dedicated, low-effort journal. Murph starts from any health question or task, draws on your connected data and records beyond journal entries, and carries decisions into reminders and errands. Neither product turns automated feedback into clinical care.",
         question: "How is Murph different from AteMate?",
       },
     ],
-    headline: "A five-pillar journal or question-first health support",
+    headline: "AteMate is a photo journal with an AI coach. Murph starts from your question.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "AteMate is a five-pillar photo journal with AI pattern coaching. Murph is a question-first personal health assistant for decisions and action beyond the journal.",
+      "AteMate is a photo journal for food, mood, movement, and sleep with an AI coach. Murph is a personal health assistant that logs meals and reads them beside your wearable data and records.",
     name: "AteMate",
     quickComparison: [
       {
@@ -3073,9 +3073,9 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "A photo-led journal lowers the pressure to count, while its value still depends on maintaining enough entries for the AI coach to see a pattern. Murph asks for less ongoing capture, but it has no dedicated photo timeline or five-pillar journal review.",
-      "AI pattern feedback remains automated guidance rather than individualized clinical nutrition care.",
-      "Official storefronts retain legacy subscription SKUs, so current-account checkout terms should be confirmed.",
+      "A photo-led journal takes the pressure off counting, but its value still depends on enough entries for the AI coach to spot a pattern. Murph asks for less ongoing capture, but it has no dedicated photo timeline or five-pillar journal review.",
+      "AI pattern feedback is automated guidance. It is not individual clinical nutrition care.",
+      "Official storefronts still list legacy subscription SKUs, so confirm the checkout terms for your account.",
     ],
   },
 ]);

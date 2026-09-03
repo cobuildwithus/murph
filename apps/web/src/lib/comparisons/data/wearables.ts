@@ -5,28 +5,28 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     aliases: ["WHOOP 5.0", "WHOOP MG", "WHOOP Peak", "WHOOP Life"],
     category: "wearables",
     chooseCompetitor:
-      "Choose WHOOP when continuous recovery, sleep, strain, and training guidance from a dedicated sensor are the main job, and you are comfortable with an ongoing hardware membership.",
+      "Pick WHOOP when you want continuous recovery, sleep, and strain tracking from a dedicated sensor. It suits people who are fine paying a yearly membership that includes the hardware.",
     chooseMurph:
-      "Choose Murph when you already have enough numbers and need a private assistant to weigh a recovery flag against symptoms, travel, training, records, or schedule constraints, help choose a next step, and remember what happened.",
+      "Choose Murph if you have the numbers and want help acting on them. It reads your WHOOP data, weighs a low recovery against your symptoms and schedule, and remembers what you tried.",
     competitor: {
       clinicalRole:
-        "Consumer wellness and performance support. WHOOP says its Blood Pressure Insights are for wellness, and regulated heart features have eligibility and regional limits.",
+        "WHOOP is a consumer wellness and performance product. It says Blood Pressure Insights are for wellness only, and its regulated heart features have eligibility and regional limits.",
       followThrough:
-        "Daily Recovery, Strain, and Sleep targets, Journal-based behavior analysis, coaching, alerts, and longer-term performance trends.",
+        "WHOOP sets daily Recovery, Strain, and Sleep targets. It analyzes your Journal entries to show how habits affect you, and it adds coaching, alerts, and long-term performance trends.",
       format:
-        "A screen-free sensor worn continuously, paired with the WHOOP mobile app. Routes use a connected phone because the sensor has no onboard GPS.",
+        "You wear a screen-free sensor around the clock and read everything in the WHOOP phone app. The sensor has no GPS of its own, so route tracking uses your phone.",
       hardware:
-        "WHOOP 5.0 is included with One and Peak. WHOOP MG is included with Life. Current hardware advertises more than 14 days of battery life.",
+        "The One and Peak memberships include WHOOP 5.0, and Life includes WHOOP MG. Both current sensors advertise more than 14 days of battery life.",
       inputs:
-        "Continuous optical and motion sensing, sleep and workout data, Journal entries, profile information, and selected connected services.",
+        "WHOOP uses continuous optical and motion sensing, plus sleep and workout data, Journal entries, your profile, and selected connected services.",
       insightStyle:
-        "Daily performance scores and targets, with trend analysis and tier-dependent stress, Healthspan, ECG, rhythm, and blood pressure wellness features.",
+        "You get daily performance scores and targets with trend analysis. Stress, Healthspan, ECG, heart rhythm, and blood pressure wellness features depend on your tier.",
       platforms:
-        "WHOOP hardware plus the WHOOP app for iOS and Android. Current guidance recommends iOS 18 or later and Android 11 or later, with additional requirements for WHOOP MG.",
+        "WHOOP hardware works with the WHOOP app for iOS and Android. WHOOP recommends iOS 18 or later or Android 11 or later, and WHOOP MG has extra requirements.",
       pricing:
-        "Verified 2026-08-30: WHOOP One is $199 per year, Peak is $239 per year, and Life is $359 per year in the United States. Hardware is included with the corresponding annual membership; regional terms vary.",
+        "Verified 2026-08-30: in the United States, WHOOP One is $199 per year, Peak is $239 per year, and Life is $359 per year. Each annual membership includes the matching hardware. Terms vary by region.",
       primaryJob:
-        "Measure sleep, strain, and recovery continuously and turn those signals into daily performance guidance.",
+        "WHOOP measures sleep, strain, and recovery around the clock and turns the results into daily performance guidance.",
     },
     competitorEvidence: {
       clinicalRole: [2],
@@ -42,25 +42,25 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. If you need continuous measurements and WHOOP's proprietary scores, keep WHOOP. Murph supplies no sensor and cannot recreate Recovery or Strain; it helps with the decision that follows once those numbers meet the rest of your health context.",
-        question: "Is Murph a replacement for WHOOP?",
+          "No. WHOOP measures you around the clock and calculates Recovery and Strain, and Murph has no sensor to recreate either. Murph reads those scores and helps you decide what to do next alongside the rest of your health.",
+        question: "Can Murph replace WHOOP?",
       },
       {
         answer:
-          "Yes, but this comparison does not assume a direct WHOOP integration. Keep WHOOP as the measurement system, then bring the report or pattern you choose to share into Murph. A low-recovery week can then be considered beside illness, travel, workload, habits, and the result of the adjustment you try.",
+          "Yes. Connect WHOOP to Murph and it reads your recovery, sleep, and strain data as it comes in. A low-recovery week can then be weighed against illness, travel, workload, and habits, and Murph can track whether the change you try helps.",
         question: "Can I use Murph and WHOOP together?",
       },
       {
         answer:
-          "WHOOP is sold primarily as an annual membership that includes its sensor. Murph has free starter usage without a card, with paid plans adding more usage when needed. Check both products' current checkout terms because pricing can change.",
-        question: "How do the pricing models differ?",
+          "WHOOP is sold mainly as an annual membership that includes the sensor. Murph is free to start with no card, and paid plans add more usage. Check both checkout pages before deciding, since prices change.",
+        question: "How does WHOOP pricing compare with Murph?",
       },
     ],
     headline:
-      "Keep WHOOP for the signal. Use Murph for the decision it cannot make alone",
+      "WHOOP scores your recovery. Murph reads it and helps you plan the day.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "WHOOP measures strain, sleep, and recovery with a dedicated sensor. Murph is a personal health assistant that connects those signals to wider context and next steps.",
+      "WHOOP tracks strain, sleep, and recovery with a screen-free sensor. Murph is a personal health assistant that reads your WHOOP data next to your food, labs, and records.",
     quickComparison: [
       {
         capability: "Continuous recovery sensing",
@@ -153,40 +153,40 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "WHOOP requires a continuing membership for its full experience.",
-      "The sensor has no display, onboard apps, smartphone-notification feed, or onboard GPS, though it supports a haptic alarm and selected haptic training alerts.",
-      "Advanced health and longevity features depend on the selected tier, device, age, and region.",
-      "Murph does not generate recovery, strain, sleep, or continuous heart-rate measurements; it can only reason from information made available to it.",
+      "WHOOP needs an ongoing membership for the full experience.",
+      "The sensor has no screen, apps, phone notifications, or built-in GPS. It does offer a haptic alarm and some haptic training alerts.",
+      "Advanced health and longevity features depend on your tier, device, age, and region.",
+      "Murph has no sensor. It does not measure recovery, strain, sleep, or heart rate itself, so it works from the WHOOP data you connect.",
     ],
     useTogether:
-      "Let WHOOP measure the training day and recovery night. Bring a relevant report or observation to Murph when you need to decide whether to train, recover, investigate another factor, or change a routine; Murph can help define the next step and revisit the outcome.",
+      "Wear WHOOP and let it measure your training days and recovery nights. Murph reads that data and helps you decide whether to train, rest, or look for another cause. It can also set a plan and check back on how it went.",
   },
   {
     aliases: ["Oura", "Oura Ring 5", "Oura Membership", "Oura App"],
     category: "wearables",
     chooseCompetitor:
-      "Choose Oura when a small ring, passive overnight sensing, temperature trends, and established sleep and readiness scoring are your priorities.",
+      "Pick Oura if you want a small ring with no screen, passive overnight sensing, temperature trends, and well-established sleep and readiness scores.",
     chooseMurph:
-      "Choose Murph when a Readiness or sleep trend leaves you asking why, what else in your records or routine matters, which change is realistic, and how you will tell whether it worked.",
+      "Murph is the better fit when a low Readiness score leaves you asking why. It reads your Oura data, looks at what else changed in your routine or records, suggests one realistic fix, and checks whether it worked.",
     competitor: {
       clinicalRole:
-        "Consumer wellness product. Oura says the ring is not a medical device for diagnosing or treating conditions.",
+        "Oura Ring is a consumer wellness product. Oura says it is not a medical device and does not diagnose or treat conditions.",
       followThrough:
-        "Daily scores, stress and resilience guidance, activity prompts, trends, reports, and recommendations in the Oura app.",
+        "The Oura app gives you daily scores, stress and resilience guidance, activity prompts, trends, reports, and recommendations.",
       format:
-        "A titanium smart ring with no display, paired with the Oura app for syncing, scores, trends, reports, and guidance.",
+        "A titanium smart ring with no display. The Oura app handles syncing and shows your scores, trends, reports, and guidance.",
       hardware:
-        "Oura Ring 5 comes in whole sizes 6 through 13, advertises 6 to 9 days of battery life, and stores up to three days of data between syncs.",
+        "Oura Ring 5 comes in whole sizes 6 through 13. It advertises 6 to 9 days of battery life and stores up to three days of data between syncs.",
       inputs:
-        "Ring measurements for heart rate, HRV, temperature, blood oxygen, respiration, movement, sleep, and workouts, plus profile and selected partner data.",
+        "The ring measures heart rate, HRV, temperature, blood oxygen, breathing rate, movement, sleep, and workouts. Oura adds your profile and data from selected partner apps.",
       insightStyle:
-        "Three headline scores for Sleep, Readiness, and Activity, supported by stress, resilience, cardiovascular, body-clock, and women's-health trends.",
+        "Three headline scores: Sleep, Readiness, and Activity. Behind them sit trends for stress, resilience, cardiovascular health, body clock, and women's health.",
       platforms:
-        "Oura Ring hardware plus the Oura app on iOS 16 or later or Android 11 or later with supported Bluetooth and Google services.",
+        "You need the ring and the Oura app on iOS 16 or later or Android 11 or later, with supported Bluetooth and Google services.",
       pricing:
-        "Verified 2026-08-30: Oura Ring 5 starts at $399 in the United States, with selected finishes at $499. Membership is $5.99 per month or $69.99 per year after one complimentary month.",
+        "Verified 2026-08-30: Oura Ring 5 starts at $399 in the United States, and some finishes cost $499. Membership is $5.99 per month or $69.99 per year after one free month.",
       primaryJob:
-        "Track sleep and whole-body readiness passively in a ring and summarize the measurements into daily scores and long-term trends.",
+        "Oura tracks sleep and whole-body readiness passively from a ring, then sums the measurements up as daily scores and long-term trends.",
     },
     competitorEvidence: {
       clinicalRole: [7],
@@ -202,25 +202,25 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. Oura measures physiology through a ring and produces proprietary scores; Murph does neither. Murph is an additional reasoning and support layer for people who want to connect an Oura pattern with other health context and act on a considered conclusion.",
-        question: "Is Murph an alternative to the Oura Ring?",
+          "No. Oura measures your body through a ring and produces its own scores, and Murph does neither. Murph reads your Oura data and connects a pattern with the rest of your health so you can act on it.",
+        question: "Can Murph replace an Oura Ring?",
       },
       {
         answer:
-          "Oura's detailed metrics, API access, and most insights require an active membership. Without it, members retain the three daily scores and limited account functionality, while personal-data export remains available.",
+          "Most of it does. Detailed metrics, API access, and most insights need an active membership. Without one you keep the three daily scores and limited account features, and you can still export your personal data.",
         question: "Does Oura require a subscription?",
       },
       {
         answer:
-          "Yes, without assuming a direct Oura integration. Oura can keep collecting sleep and readiness data while Murph helps examine a report you share beside bedtime changes, symptoms, workouts, records, or travel, choose one response, and remember the result.",
-        question: "Can Oura and Murph be useful together?",
+          "Yes. Connect Oura and Murph reads your sleep and readiness data as it syncs. When a trend stands out, Murph looks at it beside bedtime changes, symptoms, workouts, records, or travel, helps you choose one response, and remembers the result.",
+        question: "Can I use Oura and Murph together?",
       },
     ],
     headline:
-      "Oura surfaces the pattern. Murph helps decide what to do with it",
+      "Oura scores your nights. Murph reads the scores and explains what changed.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Oura Ring turns overnight sensing into sleep, readiness, and activity scores. Murph is a personal health assistant for interpreting those trends alongside the rest of your health.",
+      "Oura Ring turns overnight sensing into Sleep, Readiness, and Activity scores. Murph is a personal health assistant that reads your Oura data beside your food, training, and records.",
     quickComparison: [
       {
         capability: "Passive overnight sensing",
@@ -317,40 +317,40 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Full functionality requires both an upfront ring purchase and an ongoing membership.",
-      "Correct fit matters, and Ring 5 is offered only in proprietary whole sizes.",
-      "There is no on-ring display, and Oura advises removing the ring for some heavy lifting and tool work.",
-      "Murph cannot replace Oura's overnight sensing or assess ring fit and signal quality; its role begins after relevant data is available.",
+      "Full use needs both the ring purchase up front and an ongoing membership.",
+      "Fit matters, and Ring 5 comes only in Oura's own whole sizes.",
+      "The ring has no display, and Oura advises taking it off for some heavy lifting and tool work.",
+      "Murph cannot replace Oura's overnight sensing, and it cannot judge ring fit or sensor accuracy. Its work starts once the data comes in.",
     ],
     useTogether:
-      "Let Oura collect the nights. When a trend is worth acting on, share the relevant report or observation with Murph, compare it with what was happening in your life, choose a change small enough to sustain, and check back on both the data and how you felt.",
+      "Let Oura collect your nights. Murph reads the data, compares a dip with what was going on in your life, and helps you pick a change you can keep. Later it checks both the numbers and how you felt.",
   },
   {
     aliases: ["Garmin", "Garmin Connect+", "Garmin CIRQA", "CIRQA Smart Band"],
     category: "wearables",
     chooseCompetitor:
-      "Choose Garmin Connect when GPS sports tracking, performance metrics, maps, courses, training status, or access to Garmin's wide hardware range is central to the decision.",
+      "Pick Garmin Connect if GPS sports tracking, performance metrics, maps, courses, or training status matter most to you, or if you want Garmin's wide range of watches and sensors.",
     chooseMurph:
-      "Choose Murph when Training Readiness is only one input and you want to weigh it with pain, illness, sleep context, labs, meals, travel, or a crowded week, then make the decision easier to carry out.",
+      "Choose Murph when Training Readiness is one input among many. Murph reads your Garmin data, weighs it against pain, illness, sleep, labs, meals, travel, or a crowded week, and helps you carry out the call.",
     competitor: {
       clinicalRole:
-        "Consumer health, fitness, and performance support. CIRQA and Garmin wellness metrics are not medical devices, and Pulse Ox availability varies by country.",
+        "Garmin Connect is a consumer health, fitness, and performance product. CIRQA and Garmin's wellness metrics are not medical devices, and Pulse Ox is not available in every country.",
       followThrough:
-        "Training plans, Garmin Coach, activity goals, challenges, recovery guidance, LiveTrack, and optional Connect+ coaching and AI insights.",
+        "Garmin offers training plans, Garmin Coach, activity goals, challenges, recovery guidance, and LiveTrack. Connect+ adds optional coaching and AI insights.",
       format:
-        "A mobile and web data hub connected to Garmin watches, cycling computers, sensors, and accessories. CIRQA is a screen-free band viewed through the app.",
+        "A phone and web hub that collects data from Garmin watches, cycling computers, sensors, and accessories. CIRQA is a screen-free band you read through the app.",
       hardware:
-        "Most automatic metrics require compatible Garmin hardware. CIRQA costs $199.99, advertises up to 10 days of battery life, and uses connected-phone GPS.",
+        "Most automatic metrics need compatible Garmin hardware. CIRQA costs $199.99, advertises up to 10 days of battery life, and uses your phone's GPS.",
       inputs:
-        "Garmin device measurements, recorded activities, sleep, heart rate, HRV, location and route data, nutrition entries, and goals.",
+        "Garmin Connect takes in device measurements, recorded activities, sleep, heart rate, HRV, location and route data, nutrition entries, and your goals.",
       insightStyle:
-        "Dense dashboards and sport-specific metrics, including Body Battery, sleep, stress, Training Readiness, Training Status, VO2 max, and recovery time where supported.",
+        "Dense dashboards and sport-specific metrics. Where your device supports them, these include Body Battery, sleep, stress, Training Readiness, Training Status, VO2 max, and recovery time.",
       platforms:
-        "Garmin Connect on web, iOS, and Android, paired with compatible Garmin devices. CIRQA depends on the app for display and editing.",
+        "Garmin Connect runs on the web, iOS, and Android and pairs with compatible Garmin devices. CIRQA relies on the app for display and editing.",
       pricing:
-        "Verified 2026-08-30: Garmin Connect's base tier is free. CIRQA is $199.99 with no required subscription. Garmin Connect+ is optional at $6.99 per month or $69.99 per year in the United States.",
+        "Verified 2026-08-30: the base Garmin Connect tier is free. CIRQA costs $199.99 with no required subscription. Garmin Connect+ is optional at $6.99 per month or $69.99 per year in the United States.",
       primaryJob:
-        "Collect Garmin device data and support detailed health, fitness, navigation, training, and social analysis.",
+        "Garmin Connect collects data from Garmin devices and supports detailed health, fitness, navigation, training, and social analysis.",
     },
     competitorEvidence: {
       clinicalRole: [1],
@@ -366,25 +366,25 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. Garmin Connect should remain the native home for Garmin measurements, routes, workouts, and training metrics. Murph has no comparable GPS or sports stack; it can help only when those facts need to be considered with health information and constraints Garmin does not own.",
-        question: "Does Murph replace Garmin Connect?",
+          "No. Garmin Connect stays the home for your Garmin measurements, routes, workouts, and training metrics, and Murph has no GPS or sports stack of its own. Murph reads your Garmin data and helps when those numbers need to sit beside health information Garmin does not hold.",
+        question: "Can Murph replace Garmin Connect?",
       },
       {
         answer:
-          "No. The core Garmin Connect experience and CIRQA's core insights do not require Connect+. The optional subscription adds AI insights, nutrition, richer coaching, dashboards, maps, and selected live features.",
-        question: "Is Garmin Connect+ required for CIRQA?",
+          "No. The core Garmin Connect experience and CIRQA's core insights work without Connect+. The optional subscription adds AI insights, nutrition, richer coaching, dashboards, maps, and selected live features.",
+        question: "Do I need Garmin Connect+ to use CIRQA?",
       },
       {
         answer:
-          "Yes, without assuming direct Garmin connectivity. Keep the workout, route, and device history in Garmin. Bring the relevant summary to Murph when you need to decide how a training recommendation fits an injury concern, travel week, lab result, or broader goal, then follow the chosen adjustment.",
-        question: "Can Garmin Connect and Murph work side by side?",
+          "Yes. Connect Garmin and Murph reads your workouts, sleep, and training metrics while Garmin keeps the full route and device history. When a training suggestion collides with an injury, a travel week, a lab result, or a bigger goal, Murph helps you decide and then follow the adjustment.",
+        question: "Can I use Garmin Connect and Murph together?",
       },
     ],
     headline:
-      "Garmin owns the workout detail. Murph connects it to the rest of your health",
+      "Garmin records the workout. Murph fits it into the rest of your health.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Garmin Connect turns Garmin device data into detailed training metrics, routes, and plans. Murph is a personal health assistant for decisions that extend beyond sport.",
+      "Garmin Connect turns watch data into training metrics, routes, and plans. Murph is a personal health assistant that reads your Garmin data beside your sleep, food, labs, and records.",
     quickComparison: [
       {
         capability: "GPS workout and route tracking",
@@ -469,13 +469,13 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Most useful Garmin metrics require a separate Garmin device, and availability differs by model.",
-      "Some CIRQA coaching, nutrition, breathing, and guided-workout features require Connect+.",
-      "Some third-party sync paths do not carry every Garmin metric or route detail.",
-      "Murph does not record GPS routes, calculate Garmin's native training metrics, or control a Garmin training plan.",
+      "Most Garmin metrics need a Garmin device, and which ones you get depends on the model.",
+      "Some CIRQA coaching, nutrition, breathing, and guided workout features need Connect+.",
+      "Some third-party syncs drop Garmin metrics or route details along the way.",
+      "Murph does not record GPS routes, calculate Garmin's own training metrics, or control a Garmin training plan.",
     ],
     useTogether:
-      "Keep every activity, course, and device metric in Garmin. Use Murph only at the decision point: share the summary that matters, add the non-Garmin context, choose a realistic response, and have Murph help carry that response into the week and revisit it.",
+      "Keep every activity, course, and device metric in Garmin. Murph reads that data and adds what Garmin does not hold, such as labs, symptoms, meals, and your calendar. When a plan needs adjusting, Murph helps you pick a realistic change and checks back during the week.",
   },
   {
     aliases: [
@@ -487,28 +487,28 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     ],
     category: "wearables",
     chooseCompetitor:
-      "Choose Google Health Premium when you already use a Fitbit device or Pixel Watch and want its Gemini coach, adaptive fitness plans, sleep guidance, and first-party health metrics.",
+      "Google Health Premium is the better fit if you already wear a Fitbit or Pixel Watch and want its Gemini coach, adaptive fitness plans, sleep guidance, and Google's own health metrics.",
     chooseMurph:
-      "Choose Murph when the work begins with a lab result, symptom, record, appointment task, habit, or uncertain decision rather than a Fitbit score, and when you want that context remembered in later conversations.",
+      "Choose Murph when your question starts with a lab result, a symptom, a record, an appointment, or a habit rather than a Fitbit score. Murph reads your Fitbit data too, and it remembers the whole thread in later conversations.",
     competitor: {
       clinicalRole:
-        "Consumer fitness, sleep, recovery, and wellness coaching. Google says AI responses should be verified and are not medical advice.",
+        "Google Health Premium offers consumer fitness, sleep, recovery, and wellness coaching. Google says its AI responses should be verified and are not medical advice.",
       followThrough:
-        "Adaptive weekly plans, daily recommendations, proactive morning and evening messages, post-workout guidance, videos, mindfulness, and sleep support.",
+        "The coach builds adaptive weekly plans and daily recommendations. It sends morning and evening messages on its own, gives post-workout guidance, and adds videos, mindfulness, and sleep support.",
       format:
-        "A mobile health app with a paid Gemini-powered coaching tier. The screen-free Fitbit Air is the current low-cost first-party tracker designed around the coach.",
+        "A phone health app with a paid coaching tier powered by Gemini. Fitbit Air is the current low-cost Google tracker, has no screen, and is designed around the coach.",
       hardware:
-        "Premium coaching currently requires a paired Fitbit device or Pixel Watch. Fitbit Air currently starts at $99.99, advertises up to seven days of battery life, and has no screen.",
+        "Premium coaching currently needs a paired Fitbit device or Pixel Watch. Fitbit Air currently starts at $99.99, advertises up to seven days of battery life, and has no screen.",
       inputs:
-        "Fitbit or Pixel Watch measurements, Google account and profile data, workouts, sleep, connected-app data, and eligible medical-record information used within stated permissions.",
+        "Google Health uses Fitbit or Pixel Watch measurements, your Google account and profile, workouts, sleep, data from connected apps, and eligible medical records within the permissions you grant.",
       insightStyle:
-        "Conversational and proactive coaching using paired Fitbit or Pixel Watch data plus profile and supported third-party data; selected calculations, including Sleep Score and Cardio Load, require first-party data.",
+        "Coaching is conversational and reaches out on its own, using paired Fitbit or Pixel Watch data plus your profile and supported third-party data. Some calculations, including Sleep Score and Cardio Load, need Google's own device data.",
       platforms:
-        "Google Health app on Android 11 or later and iOS 16.4 or later. Premium coaching requires an eligible country, age 18 or older, internet access, and supported first-party hardware.",
+        "The Google Health app runs on Android 11 or later and iOS 16.4 or later. Premium coaching needs an eligible country, age 18 or older, internet access, and supported Google hardware.",
       pricing:
-        "Verified 2026-08-30: Google Health Premium is $9.99 per month or $99 per year in the United States and is included with Google AI Pro and Ultra. The current US store lists Fitbit Air from $99.99; Google's May 2026 announcement listed the Special Edition at $129 and a three-month Premium offer. Checkout pricing controls.",
+        "Verified 2026-08-30: Google Health Premium is $9.99 per month or $99 per year in the United States, and it is included with Google AI Pro and Ultra. The current US store lists Fitbit Air from $99.99, while Google's May 2026 announcement listed the Special Edition at $129 with a three-month Premium offer. The checkout price is the one that counts.",
       primaryJob:
-        "Use Fitbit and Pixel Watch data to deliver personalized fitness, sleep, recovery, and wellness coaching inside Google's health app.",
+        "Google Health Premium turns Fitbit and Pixel Watch data into personalized fitness, sleep, recovery, and wellness coaching inside Google's health app.",
     },
     competitorEvidence: {
       clinicalRole: [1, 3],
@@ -524,25 +524,25 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "Google identifies Google Health Premium as formerly Fitbit Premium, and the Fitbit app began becoming the Google Health app on May 19, 2026. The legacy name remains useful for search, but current copy should explain the transition clearly.",
+          "It became Google Health Premium. Google describes Google Health Premium as formerly Fitbit Premium, and the Fitbit app began turning into the Google Health app on May 19, 2026. People still search for the old name, so you may see both.",
         question: "What happened to Fitbit Premium?",
       },
       {
         answer:
-          "Current Premium coaching requires a paired Fitbit device or Pixel Watch, even though the base Google Health app can import selected data from other services. Without one, Google Health Coach and Premium coaching are unavailable.",
+          "Not right now. Premium coaching needs a paired Fitbit device or Pixel Watch, even though the free Google Health app can import some data from other services. Without one of those devices, Google Health Coach and Premium coaching are not available.",
         question: "Can I use Google Health Premium without a Fitbit or Pixel Watch?",
       },
       {
         answer:
-          "They can serve different roles, but this page does not claim a direct integration. Let Google coach from supported Fitbit or Pixel Watch data. Use Murph when that coaching needs to be reconciled with a record, symptom, outside plan, practical task, or outcome that lives beyond Google's device-led loop.",
+          "Yes, and they do different jobs. Google coaches from your Fitbit or Pixel Watch data, and Murph reads your Fitbit data too. Use Murph when that coaching needs to be squared with a record, a symptom, a plan from your doctor, or an errand that Google's app does not handle.",
         question: "Can I use Google Health Premium and Murph together?",
       },
     ],
     headline:
-      "Google coaches from its wearable. Murph starts with your health question",
+      "Google coaches from your Fitbit. Murph starts with the question you bring.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Google Health Premium builds AI coaching around Fitbit and Pixel Watch data. Murph is a personal health assistant that reasons across wearable signals and broader health context.",
+      "Google Health Premium builds Gemini coaching around Fitbit and Pixel Watch data. Murph is a personal health assistant that reads Fitbit data beside your labs, records, and symptoms.",
     quickComparison: [
       {
         capability: "Coaching from device metrics",
@@ -639,40 +639,40 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Premium coaching requires eligible first-party Fitbit or Pixel Watch hardware.",
-      "Third-party data does not power every Google metric, including selected sleep and Cardio Load calculations.",
-      "Coach workouts do not yet sync back to watches or trackers, and availability varies by country, device, and language.",
-      "Murph has no wearable or on-device coaching interface and does not recreate Fitbit or Pixel Watch measurements.",
+      "Premium coaching needs an eligible Fitbit or Pixel Watch.",
+      "Data from other brands does not feed every Google metric, including some sleep and Cardio Load calculations.",
+      "Coach workouts do not yet sync back to your watch or tracker. Availability also varies by country, device, and language.",
+      "Murph has no wearable and no coaching screen on a device, and it does not recreate Fitbit or Pixel Watch measurements.",
     ],
     useTogether:
-      "Let Google Health Premium own the wearable-driven plan. Bring Murph in only when you need to compare that plan with other health information, adapt it to a real constraint, handle a related task, or remember whether the change actually helped.",
+      "Let Google Health Premium run the plan built on your watch data. Murph reads your Fitbit data alongside it and steps in when the plan meets a lab result, an injury, or a busy week. It also handles related errands and remembers whether a change helped.",
   },
   {
     aliases: ["Apple Health", "Apple Fitness", "Apple Fitness+", "Apple Watch"],
     category: "wearables",
     chooseCompetitor:
-      "Choose Apple Health and Fitness when you want the native Apple home for HealthKit data, activity rings, Apple Watch measurements, records, sharing, and optional trainer-led Fitness+ content.",
+      "Apple Health and Fitness are the better fit if you want Apple's own home for HealthKit data, activity rings, Apple Watch measurements, records, and sharing, with trainer-led Fitness+ workouts as an option.",
     chooseMurph:
-      "Choose Murph when an Apple trend or record raises a question that crosses symptoms, labs, routines, goals, or care logistics, and you want the reasoning, plan, and later check-in to stay in one conversation.",
+      "Add Murph when an Apple Health trend raises a question that touches symptoms, labs, routines, or appointments. It reads your Apple Health data and keeps the reasoning, the plan, and the later check-in in one conversation.",
     competitor: {
       clinicalRole:
-        "Consumer health record, wellness, activity, and fitness content. Sensor-based and regulated capabilities vary by Apple hardware, country, and eligibility, and wellness information is not a diagnosis.",
+        "Apple Health is a consumer health record with wellness, activity, and fitness content. Sensor and regulated features vary by Apple hardware, country, and eligibility, and Apple says wellness information is not a diagnosis.",
       followThrough:
-        "Activity goals, rings, awards, trends, social sharing, Training Load, medication tracking, and optional Fitness+ plans, workouts, and meditations.",
+        "Apple gives you activity goals, rings, awards, trends, sharing with friends, Training Load, and medication tracking. Fitness+ adds optional plans, workouts, and meditations.",
       format:
-        "Health and Fitness apps on Apple devices, with Apple Watch and compatible accessories adding richer sensor data. Fitness+ is a paid content service inside Fitness.",
+        "The Health and Fitness apps run on Apple devices. Apple Watch and compatible accessories add richer sensor data, and Fitness+ is a paid content service inside the Fitness app.",
       hardware:
-        "An iPhone can track basic movement and the Move ring. Apple Watch adds Exercise and Stand rings plus richer heart, sleep, workout, training, and safety measurements.",
+        "An iPhone on its own tracks basic movement and the Move ring. Apple Watch adds the Exercise and Stand rings plus richer heart, sleep, workout, training, and safety measurements.",
       inputs:
-        "iPhone, iPad, Apple Watch, compatible apps and accessories, user-entered information, and supported clinical records through permissioned HealthKit access.",
+        "Apple Health collects data from iPhone, iPad, Apple Watch, compatible apps and accessories, and what you enter yourself. It can also hold supported clinical records, all through HealthKit permissions you control.",
       insightStyle:
-        "A category-based health repository with trends and highlights, paired with activity rings, workout summaries, awards, Training Load, and optional instructor-led content.",
+        "Health organizes your data by category and shows trends and highlights. Fitness adds activity rings, workout summaries, awards, Training Load, and optional instructor-led content.",
       platforms:
-        "Apple-only. Health runs on iPhone and iPad; Fitness+ requires an iPhone subscription and can also be viewed on supported iPad and Apple TV devices.",
+        "Apple only. Health runs on iPhone and iPad. Fitness+ needs a subscription through an iPhone and can also be watched on supported iPad and Apple TV devices.",
       pricing:
-        "Verified 2026-08-30: Apple Health and Apple Fitness are free. Apple Fitness+ is $9.99 per month or $79.99 per year in the United States. Apple hardware is purchased separately.",
+        "Verified 2026-08-30: Apple Health and Apple Fitness are free. Apple Fitness+ costs $9.99 per month or $79.99 per year in the United States. Apple hardware is sold separately.",
       primaryJob:
-        "Aggregate Apple health data, present activity and workout progress, and optionally provide a library of guided workouts and meditations.",
+        "Apple Health gathers your health data in one place, Fitness shows activity and workout progress, and Fitness+ offers a library of guided workouts and meditations.",
     },
     competitorEvidence: {
       clinicalRole: [1],
@@ -688,25 +688,25 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. Apple Health can collect basic iPhone movement data without a watch, and Fitness+ does not require Apple Watch. Apple Watch is needed for the fullest activity-ring, heart, sleep, training, and safety experience.",
-        question: "Do Apple Health and Fitness require an Apple Watch?",
+          "No. Apple Health collects basic movement data from an iPhone alone, and Fitness+ works without a watch. You do need an Apple Watch for the full set of activity rings and for heart, sleep, training, and safety measurements.",
+        question: "Do I need an Apple Watch for Apple Health and Fitness?",
       },
       {
         answer:
-          "No. Health is the data repository, Fitness is the activity and workout app, and Fitness+ is an optional paid workout and meditation service inside Fitness.",
-        question: "Are Apple Health, Apple Fitness, and Fitness+ the same product?",
+          "No. Health stores your data, Fitness is the activity and workout app, and Fitness+ is an optional paid workout and meditation service inside Fitness.",
+        question: "Are Apple Health, Apple Fitness, and Fitness+ the same thing?",
       },
       {
         answer:
-          "Yes, without assuming direct Apple connectivity on this page. Keep Apple Health as the permissioned record for device and app data. Bring a relevant trend or report to Murph when you need to relate it to how you feel, prepare a question, adjust a routine, or make sure the next step happens.",
-        question: "Can an Apple Health user also use Murph?",
+          "Yes. Apple Health stays the record for your device and app data, and Murph reads it directly, including data from rings and bands that sync into it. Use Murph when a trend needs to be compared with how you feel, turned into a question for your doctor, or built into a routine you will keep.",
+        question: "Can I use Apple Health and Murph together?",
       },
     ],
     headline:
-      "Apple stores the health record. Murph helps turn it into a next step",
+      "Apple Health keeps the record. Murph reads it and helps you use it.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Apple Health stores device and app data while Fitness organizes activity. Murph is a personal health assistant that turns relevant signals into practical follow-through.",
+      "Apple Health stores your device and app data, and Fitness tracks activity. Murph is a personal health assistant that reads Apple Health and turns trends into plans and reminders.",
     quickComparison: [
       {
         capability: "Native health data repository",
@@ -791,13 +791,13 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "There is no Android version of the Apple Health and Fitness experience.",
-      "The depth of available data varies significantly by Apple hardware and connected accessories.",
-      "Fitness+ is a separate paid content layer, and regulated features vary by region.",
-      "Murph is not a system health repository and cannot replace Apple Health's permissions, record storage, or device-native measurements.",
+      "There is no Android version of Apple Health or Fitness.",
+      "How much data you get depends heavily on your Apple hardware and connected accessories.",
+      "Fitness+ costs extra, and regulated features vary by region.",
+      "Murph is not a system-level health store. It cannot replace Apple Health's permissions, record storage, or the measurements your devices make.",
     ],
     useTogether:
-      "Leave measurements, permissions, records, rings, and workouts in Apple's apps. Use Murph when one of those signals needs to be discussed beside the rest of your health, translated into a practical plan, or turned into a question or task you do not want to lose.",
+      "Leave measurements, permissions, records, rings, and workouts in Apple's apps. Murph reads your Apple Health data and talks it through with you beside your food, labs, and symptoms. It turns the result into a plan, a reminder, or a question you will not lose track of.",
   },
   {
     aliases: [
@@ -808,28 +808,28 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     ],
     category: "wearables",
     chooseCompetitor:
-      "Choose Samsung Health when you own or plan to buy Galaxy hardware and want native sleep, Energy Score, workouts, nutrition, body composition, and eligible heart-health features.",
+      "Samsung Health is the better fit if you own or plan to buy Galaxy hardware and want its sleep tracking, Energy Score, workouts, nutrition, body composition, and eligible heart-health features.",
     chooseMurph:
-      "Choose Murph when a sleep, energy, nutrition, or heart-health observation needs to be considered with information outside Samsung, turned into a realistic decision, and remembered at the next relevant moment.",
+      "Choose Murph when a sleep, energy, nutrition, or heart reading needs to be weighed against things Samsung does not hold, like labs, records, or a doctor's plan. Murph helps you settle on a realistic change and brings it up again when it matters.",
     competitor: {
       clinicalRole:
-        "Consumer general-wellness platform. ECG, blood pressure, irregular-rhythm, and sleep-apnea functions require supported hardware, software, age, and regional eligibility and may use Samsung Health Monitor.",
+        "Samsung Health is a consumer wellness platform. ECG, blood pressure, irregular rhythm, and sleep apnea features need supported hardware and software plus an eligible age and region, and they may run through Samsung Health Monitor.",
       followThrough:
-        "Activity goals, challenges, Sleep Coaching, Bedtime Guidance, exercise plans, mindfulness, nutrition tracking, reports, and optional iFIT workout content.",
+        "Samsung offers activity goals, challenges, Sleep Coaching, Bedtime Guidance, exercise plans, mindfulness, nutrition tracking, and reports. iFIT workout content is an optional extra.",
       format:
-        "A mobile health app connected most deeply to Galaxy phones, watches, and rings. Samsung Health Monitor is a separate companion app for selected regulated features.",
+        "A phone health app that works most deeply with Galaxy phones, watches, and rings. Samsung Health Monitor is a separate companion app for selected regulated features.",
       hardware:
-        "Basic phone tracking is available, while richer sleep, recovery, body composition, AGEs, antioxidant, heart, and activity measurements require compatible Galaxy hardware.",
+        "A phone alone gives basic tracking. Richer sleep, recovery, body composition, AGEs, antioxidant, heart, and activity measurements need compatible Galaxy hardware.",
       inputs:
-        "Phone and Galaxy wearable measurements, workouts, sleep, food and nutrient entries, medications, cycle information, records, accessories, and selected Health Connect data.",
+        "Samsung Health takes in phone and Galaxy wearable measurements, workouts, sleep, food and nutrient entries, medications, cycle information, records, accessories, and selected Health Connect data.",
       insightStyle:
-        "Broad dashboards and scores spanning activity, Cardio Load, sleep, Energy Score, nutrition, stress, body composition, heart health, and weekly reports.",
+        "Broad dashboards and scores that cover activity, Cardio Load, sleep, Energy Score, nutrition, stress, body composition, and heart health, plus weekly reports.",
       platforms:
-        "Samsung and non-Samsung Android phones, with documented but more limited iPhone functionality. Advanced features often require a compatible Galaxy phone, account, wearable, and region.",
+        "It runs on Samsung and other Android phones, and Samsung documents a more limited iPhone version. Advanced features often need a compatible Galaxy phone, a Samsung account, a Galaxy wearable, and an eligible region.",
       pricing:
-        "Verified 2026-08-30: Samsung Health is free, with Galaxy hardware sold separately. Optional embedded iFIT access is $9.99 per month or $99.99 per year, alongside a limited selection of free monthly videos.",
+        "Verified 2026-08-30: Samsung Health is free, and Galaxy hardware is sold separately. Optional iFIT access inside the app costs $9.99 per month or $99.99 per year, and a limited set of videos is free each month.",
       primaryJob:
-        "Bring Samsung activity, sleep, nutrition, recovery, and supported vital-sign information into one wellness and fitness experience.",
+        "Samsung Health brings your activity, sleep, nutrition, recovery, and supported vital signs into one wellness and fitness app.",
     },
     competitorEvidence: {
       clinicalRole: [1],
@@ -845,25 +845,25 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. Basic tracking can work from a phone, including on some non-Samsung devices. The fullest sleep, Energy Score, body composition, ECG, blood pressure, and related experience depends on compatible Galaxy hardware and regional availability.",
-        question: "Does Samsung Health require a Galaxy Watch or Ring?",
+          "No. Basic tracking works from a phone, including some non-Samsung phones. The full sleep, Energy Score, body composition, ECG, and blood pressure features depend on compatible Galaxy hardware and where you live.",
+        question: "Do I need a Galaxy Watch or Ring to use Samsung Health?",
       },
       {
         answer:
-          "Samsung Health is the main wellness and fitness app. Samsung Health Monitor is a separate companion app used for selected features such as ECG, calibrated blood pressure, and sleep-apnea screening on eligible devices and in eligible regions.",
-        question: "What is the difference between Samsung Health and Health Monitor?",
+          "Samsung Health is the main wellness and fitness app. Samsung Health Monitor is a separate companion app for features such as ECG, calibrated blood pressure, and sleep apnea screening. Those work only on eligible devices and in eligible regions.",
+        question: "What is the difference between Samsung Health and Samsung Health Monitor?",
       },
       {
         answer:
-          "Yes, without assuming a direct Samsung integration. Keep Galaxy measurements and device-specific features in Samsung Health. Use Murph to work through a report you choose to share when it intersects with symptoms, records, care questions, a routine change, or a plan that needs follow-through.",
-        question: "Can Samsung Health and Murph be used together?",
+          "Yes, though there is no direct connection between them. Keep your Galaxy measurements and device features in Samsung Health. Share a report or reading with Murph when it overlaps with symptoms, records, a question for your doctor, or a routine you want to change, and Murph helps you work through it.",
+        question: "Can I use Samsung Health and Murph together?",
       },
     ],
     headline:
-      "Samsung measures inside Galaxy. Murph reasons across the life around it",
+      "Samsung Health tracks your Galaxy devices. Murph helps with the rest.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Samsung Health centers Galaxy device measurements, reports, and native coaching. Murph is a personal health assistant that connects selected signals with wider health context.",
+      "Samsung Health gathers Galaxy device measurements, reports, and coaching in one app. Murph is a personal health assistant for the questions that reach beyond your Galaxy data.",
     quickComparison: [
       {
         capability: "Native sensor measurements",
@@ -948,13 +948,13 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Feature availability varies across phone, wearable, operating system, country, and age requirements.",
-      "Several heart and sleep features require separate Samsung Health Monitor software and eligible hardware.",
-      "Health Connect does not synchronize every Samsung activity field, and iPhone support is more limited.",
-      "Murph cannot perform Samsung's device-bound measurements or regulated Health Monitor functions.",
+      "Which features you get depends on your phone, wearable, operating system, country, and age.",
+      "Several heart and sleep features need the separate Samsung Health Monitor app and eligible hardware.",
+      "Health Connect does not sync every Samsung activity field, and iPhone support is more limited.",
+      "Murph cannot take Samsung's device measurements or run its regulated Health Monitor features, and it has no direct Samsung Health connection.",
     ],
     useTogether:
-      "Let Samsung Health own Galaxy sensing, reports, and native coaching. Bring Murph a specific pattern when you need to compare it with non-Samsung context, decide what is actionable, prepare a care question, or get support making a chosen change fit your day.",
+      "Let Samsung Health handle Galaxy sensing, reports, and coaching. There is no direct connection to Murph, so share a specific pattern with Murph when you want to compare it with your labs or records, prepare a question for a visit, or fit a change into your day.",
   },
   {
     aliases: [
@@ -965,28 +965,28 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     ],
     category: "wearables",
     chooseCompetitor:
-      "Choose Ultrahuman Ring PRO when a discreet ring, passive sleep and recovery sensing, long offline retention, and subscription-free core data matter most.",
+      "Pick Ultrahuman Ring PRO if you want a discreet ring that tracks sleep and recovery passively, stores months of data offline, and charges nothing extra for its core data.",
     chooseMurph:
-      "Choose Murph when a recovery, stress, glucose, or sleep observation needs to be reconciled with labs, symptoms, meals, training, and real constraints, then converted into one change whose outcome you can revisit.",
+      "Choose Murph when a recovery, stress, glucose, or sleep reading needs to be squared with labs, symptoms, meals, and training. Murph helps you pick one change and then checks whether it worked.",
     competitor: {
       clinicalRole:
-        "The Ring itself is a consumer-wellness product. The separate AFib Detection PowerPlug uses licensed FibriCheck technology, is cleared as a medical device in select jurisdictions, and is not currently available in the United States.",
+        "The ring itself is a consumer wellness product. The separate AFib Detection PowerPlug uses licensed FibriCheck technology and is cleared as a medical device in some jurisdictions, but it is not currently available in the United States.",
       followThrough:
-        "Dynamic Recovery, Stress Rhythm, movement guidance, PowerPlug insights, Jade conversations, and optional heart or women's-health programs.",
+        "Ultrahuman offers Dynamic Recovery, Stress Rhythm, movement guidance, PowerPlug insights, and conversations with Jade. Optional heart and women's health programs are also available.",
       format:
-        "A titanium smart ring with no display, paired with the Ultrahuman mobile app and optional Jade, PowerPlug, blood, glucose, and home-data services.",
+        "A titanium smart ring with no display, paired with the Ultrahuman phone app. Optional services add Jade, PowerPlugs, blood testing, glucose, and home data.",
       hardware:
-        "Ring PRO uses temperature, redesigned optical, and motion sensors. It advertises up to 15 days of ring battery, 250 days of onboard storage, and extended charging through its case.",
+        "Ring PRO uses temperature, redesigned optical, and motion sensors. It advertises up to 15 days of battery, 250 days of onboard storage, and extra charging from its case.",
       inputs:
-        "Ring sleep, heart, temperature, movement, stress, and recovery signals, plus optional Blood Vision, M1 glucose, Home, profile, and permitted partner data.",
+        "The ring measures sleep, heart, temperature, movement, stress, and recovery. Optional inputs include Blood Vision, M1 glucose, Home, your profile, and partner data you allow.",
       insightStyle:
-        "Named indexes for sleep, recovery, stress, movement, and age, with optional PowerPlugs and conversational synthesis through Jade.",
+        "Named indexes for sleep, recovery, stress, movement, and age. PowerPlugs add optional features, and Jade pulls it together in conversation.",
       platforms:
-        "Ultrahuman ring hardware plus the Ultrahuman app for iOS and Android. Optional ecosystem services add other devices and data sources.",
+        "The ring pairs with the Ultrahuman app for iOS and Android. Optional Ultrahuman services add other devices and data sources.",
       pricing:
-        "Verified 2026-08-30: Ring PRO is a $479 United States preorder with shipping stated for September 15, 2026 onward. Ring AIR remains listed at $349. Core ring data has no mandatory subscription; selected PowerPlugs cost extra.",
+        "Verified 2026-08-30: Ring PRO is a $479 preorder in the United States, with shipping stated for September 15, 2026 onward. Ring AIR is still listed at $349. Core ring data needs no subscription, and selected PowerPlugs cost extra.",
       primaryJob:
-        "Capture passive sleep, recovery, stress, movement, and longevity signals in a ring and interpret them through Ultrahuman's app and optional services.",
+        "Ultrahuman tracks sleep, recovery, stress, movement, and longevity measures passively from a ring and interprets them in its app and optional services.",
     },
     competitorEvidence: {
       clinicalRole: [2, 3],
@@ -1002,25 +1002,25 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No mandatory subscription is listed for core Ring PRO or Ring AIR data. Selected PowerPlugs have separate monthly or annual prices, and those optional services can also vary by region.",
-        question: "Does Ultrahuman require a subscription?",
+          "No. Ultrahuman lists no required subscription for core Ring PRO or Ring AIR data. Some PowerPlugs have their own monthly or annual prices, and those optional services can vary by region.",
+        question: "Does Ultrahuman Ring PRO need a subscription?",
       },
       {
         answer:
-          "As of August 30, 2026, the United States product page still described Ring PRO as a preorder, with shipping from September 15, 2026 onward. Availability and delivery timing should be rechecked before purchase.",
-        question: "Is Ultrahuman Ring PRO shipping now?",
+          "Not as of August 30, 2026. The United States product page still listed Ring PRO as a preorder with shipping from September 15, 2026 onward. Check availability and delivery dates again before you buy.",
+        question: "Is Ultrahuman Ring PRO shipping yet?",
       },
       {
         answer:
-          "Yes, without assuming direct connectivity. Ultrahuman can supply the ring measurements, indexes, and optional services. Murph can help you question a pattern rather than simply react to it, add relevant records or routine context, choose a response, and remember the outcome.",
-        question: "Can Ultrahuman and Murph serve complementary roles?",
+          "Yes. There is no direct Ultrahuman connection, but if the ring syncs to Apple Health on an iPhone, Murph reads that data. Ultrahuman supplies the measurements, indexes, and optional services, and Murph helps you question a pattern, add your records and routines, choose a response, and remember how it turned out.",
+        question: "Can I use Ultrahuman and Murph together?",
       },
     ],
     headline:
-      "Ultrahuman measures passively. Murph helps decide what deserves action",
+      "Ultrahuman tracks you quietly. Murph helps you decide which readings matter.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Ultrahuman Ring PRO is a preorder ring designed for passive sleep, recovery, and movement sensing. Murph is a personal health assistant for deciding what a pattern warrants next.",
+      "Ultrahuman Ring PRO tracks sleep, recovery, and movement from a ring with no core subscription. Murph is a personal health assistant that helps you decide what a pattern means.",
     quickComparison: [
       {
         capability: "Passive sleep and recovery sensing",
@@ -1109,40 +1109,40 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Ring PRO was still a preorder on the verification date, so real-world availability remains limited.",
-      "Personal calibration can take about 14 days, and sizes are offered without half sizes.",
-      "Some PowerPlugs cost extra or are region-limited; AFib Detection is not currently available in the United States, and detailed insights remain app-based.",
-      "Murph provides no ring or passive sensing of its own, so its analysis is only as current as the information available to it.",
+      "Ring PRO was still a preorder when we checked, so real-world availability is limited.",
+      "Personal calibration can take about 14 days, and there are no half sizes.",
+      "Some PowerPlugs cost extra or are limited to certain regions. AFib Detection is not currently available in the United States, and detailed insights live in the app.",
+      "Murph has no ring or passive sensing of its own, so its analysis is only as current as the data it receives.",
     ],
     useTogether:
-      "Use Ultrahuman for the ring data and any PowerPlugs you deliberately buy. Bring Murph a specific pattern when the next move is unclear; examine competing explanations, choose a bounded change, and review whether the signal and your experience moved together.",
+      "Use Ultrahuman for the ring data and any PowerPlugs you choose to buy. Murph reads that data through Apple Health on iPhone, or you can share a pattern directly. When the next move is unclear, Murph weighs the possible explanations with you, helps you pick one small change, and checks whether the numbers and how you felt moved together.",
   },
   {
     aliases: ["Polar", "Polar Flow", "POLAR Flow"],
     category: "wearables",
     chooseCompetitor:
-      "Choose POLAR Loop when you want passive heart rate, sleep, and recovery tracking plus training-load analysis in a simple screen-free band with free Polar Flow software.",
+      "POLAR Loop is the better fit if you want heart rate, sleep, and recovery tracking plus training load analysis from a simple screen-free band, with free Polar Flow software.",
     chooseMurph:
-      "Choose Murph when a Nightly Recharge or Training Load result needs to be weighed against symptoms, records, nutrition, goals, or schedule constraints before you decide how to train or recover.",
+      "Murph is the better fit when a Nightly Recharge or Training Load result is not the whole story. It reads your Polar data and weighs it against symptoms, records, meals, and your schedule before you decide how to train or rest.",
     competitor: {
       clinicalRole:
-        "Consumer wellness and sports-performance product. POLAR Loop is not a medical device.",
+        "POLAR Loop is a consumer wellness and sports performance product. It is not a medical device.",
       followThrough:
-        "Nightly Recharge, SleepWise, Training Load Pro, daily activity guidance, structured goals, plans, reports, and more than 170 sport profiles in Flow.",
+        "Polar Flow offers Nightly Recharge, SleepWise, Training Load Pro, daily activity guidance, structured goals, plans, and reports. It includes more than 170 sport profiles.",
       format:
-        "A screen-free wrist band paired with the free Polar Flow mobile and web platform. Manual outdoor recording can use phone GPS.",
+        "A screen-free wrist band paired with the free Polar Flow phone app and website. Outdoor workouts you start by hand can use your phone's GPS.",
       hardware:
-        "POLAR Loop weighs 29 grams, is rated WR30, advertises eight days of battery life, and can retain about four weeks of data on the device.",
+        "POLAR Loop weighs 29 grams and is rated WR30. It advertises eight days of battery life and holds about four weeks of data on the band.",
       inputs:
-        "Continuous heart rate and activity, nightly HRV, sleep stages, recognized or manually recorded workouts, and phone location for routes.",
+        "Loop records continuous heart rate and activity, nightly HRV, sleep stages, and workouts it detects or you record by hand. Your phone supplies location for routes.",
       insightStyle:
-        "Polar presents Loop and Flow as sports-science-oriented sleep, recovery, training-load, energy-source, fitness, and workout analysis.",
+        "Polar presents Loop and Flow as sports science tools. They analyze sleep, recovery, training load, energy sources, fitness, and workouts.",
       platforms:
-        "POLAR Loop with Polar Flow on iOS 17 or later, Android 8 or later, supported Huawei devices, and desktop web.",
+        "POLAR Loop works with Polar Flow on iOS 17 or later, Android 8 or later, supported Huawei devices, and the desktop web.",
       pricing:
-        "Verified 2026-08-30: POLAR Loop costs $199.99 in the United States. Polar Flow is free, and Polar says Loop has no monthly fee or locked core insights.",
+        "Verified 2026-08-30: POLAR Loop costs $199.99 in the United States. Polar Flow is free, and Polar says Loop has no monthly fee and no locked core insights.",
       primaryJob:
-        "Measure sleep, recovery, activity, and training in a screen-free band and analyze the results through Polar Flow.",
+        "POLAR Loop measures sleep, recovery, activity, and training from a screen-free band, and Polar Flow analyzes the results.",
     },
     competitorEvidence: {
       clinicalRole: [1],
@@ -1158,25 +1158,25 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. POLAR Loop is sold for $199.99 with no monthly fee or locked core insights, and Polar Flow is free. Pricing and promotions should still be checked at purchase.",
-        question: "Does POLAR Loop require a subscription?",
+          "No. POLAR Loop sells for $199.99 with no monthly fee and no locked core insights, and Polar Flow is free. Still check the price and any promotions when you buy.",
+        question: "Does POLAR Loop need a subscription?",
       },
       {
         answer:
-          "No. Loop relies on a connected phone for GPS routes during manual outdoor workouts. It also has no screen, buttons, notifications, or haptics.",
-        question: "Does POLAR Loop have built-in GPS or a display?",
+          "No. Loop uses your phone's GPS for routes during outdoor workouts you start by hand. It also has no screen, buttons, notifications, or vibration.",
+        question: "Does POLAR Loop have GPS or a screen?",
       },
       {
         answer:
-          "Yes, without assuming a direct Polar integration. Let Loop and Flow measure recovery and training load. Use Murph when the appropriate response depends on the rest of your health or life, and when you want help carrying that response through the next few days.",
-        question: "Can POLAR Loop and Murph work together?",
+          "Yes. Connect Polar and Murph reads your recovery and training load data while Loop and Flow keep doing the measuring. Use Murph when the right response depends on the rest of your health or life, and when you want help sticking to it over the next few days.",
+        question: "Can I use POLAR Loop and Murph together?",
       },
     ],
     headline:
-      "Polar explains training load. Murph helps fit the response to your whole week",
+      "Polar measures your training load. Murph fits it into the rest of your week.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "POLAR Loop records screen-free activity, sleep, and recovery inside Polar Flow. Murph is a personal health assistant for fitting those signals to broader health and real-life constraints.",
+      "POLAR Loop tracks activity, sleep, and recovery from a screen-free band. Murph is a personal health assistant that reads your Polar data beside your labs, meals, and calendar.",
     quickComparison: [
       {
         capability: "Continuous heart rate sensing",
@@ -1265,40 +1265,40 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "There is no onboard GPS, display, buttons, notification system, or haptic feedback.",
-      "Loop's Bluetooth connection is reserved for Flow, so it cannot broadcast heart rate to other devices.",
-      "Whole-account downloads omit some algorithm-derived sleep and activity outputs.",
-      "Murph cannot capture a workout, produce Polar's training-load algorithms, or coach in real time from the wrist.",
+      "There is no built-in GPS, screen, buttons, notifications, or vibration.",
+      "Loop's Bluetooth connection is reserved for Flow, so it cannot send heart rate to other devices.",
+      "A full account download leaves out some of Polar's calculated sleep and activity results.",
+      "Murph cannot record a workout, run Polar's training load calculations, or coach you from the wrist during a session.",
     ],
     useTogether:
-      "Keep Loop and Flow as the training record. Bring Murph the relevant summary only when you need to adapt a recovery or training recommendation to a constraint, compare it with non-Polar information, or stay accountable to the response you chose.",
+      "Keep Loop and Flow as your training record. Murph reads that data and steps in when a recovery or training suggestion needs adjusting for a trip, an illness, or a lab result. It also checks in so you stick with what you chose.",
   },
   {
     aliases: ["COROS App", "COROS Training Hub", "COROS EvoLab"],
     category: "wearables",
     chooseCompetitor:
-      "Choose COROS when accurate GPS training, racing, routes, sport-specific load, structured workouts, and coach-facing web analysis are the primary needs.",
+      "Pick COROS if you care most about accurate GPS training, racing, routes, sport-specific load, structured workouts, and web analysis your coach can see.",
     chooseMurph:
-      "Choose Murph when a recovery timer or load trend is not enough to settle the decision and you need to account for illness, pain, labs, meals, work, or prior outcomes before choosing a manageable next step.",
+      "Choose Murph when a recovery timer or load trend does not settle the question on its own. Murph weighs illness, pain, labs, meals, work, and what happened last time, then helps you pick a change you can manage.",
     competitor: {
       clinicalRole:
-        "Endurance-sport and fitness support centered on training analysis.",
+        "COROS is an endurance sport and fitness product built around training analysis.",
       followThrough:
-        "Structured plans and workouts, training calendar, recovery timer, fitness trends, free coaching resources, navigation, and coach collaboration through Training Hub.",
+        "COROS offers structured plans and workouts, a training calendar, a recovery timer, fitness trends, free coaching resources, and navigation. Training Hub lets you work with a coach.",
       format:
-        "GPS watches and sport sensors connected to the COROS mobile app and web-based COROS Training Hub.",
+        "GPS watches and sport sensors that connect to the COROS phone app and the web-based COROS Training Hub.",
       hardware:
-        "Compatible COROS hardware supplies automatic measurements. Verified pricing included PACE 3 at $199 sale pricing and PACE 4 at $249, with premium watches costing more.",
+        "Automatic measurements need compatible COROS hardware. Verified prices included PACE 3 at $199 on sale and PACE 4 at $249, with premium watches costing more.",
       inputs:
-        "GPS activities, heart rate, HRV, sleep, stress, training history, routes, plans, workouts, and supported third-party services.",
+        "COROS takes in GPS activities, heart rate, HRV, sleep, stress, training history, routes, plans, workouts, and supported third-party services.",
       insightStyle:
-        "Endurance and outdoor-sport analysis through EvoLab, including training load, status, recovery, VO2 estimates, race predictions, and long-term fitness trends.",
+        "EvoLab analyzes endurance and outdoor sport. It covers training load, training status, recovery, VO2 estimates, race predictions, and long-term fitness trends.",
       platforms:
-        "COROS app for iOS and Android plus COROS Training Hub on the web. A compatible COROS device is required for automatic first-party sensing.",
+        "The COROS app runs on iOS and Android, and COROS Training Hub runs on the web. Automatic sensing needs a compatible COROS device.",
       pricing:
-        "Verified 2026-08-30: COROS says fitness insights from its watches require no subscription or monthly fee; official training plans and Training Hub coaching analysis are free. Hardware ranged from a $79 arm heart-rate monitor to watches starting around $199 on sale.",
+        "Verified 2026-08-30: COROS says fitness insights from its watches need no subscription or monthly fee, and its official training plans and Training Hub coaching analysis are free. Hardware ranged from a $79 arm heart rate monitor to watches starting around $199 on sale.",
       primaryJob:
-        "Record endurance and outdoor activity and turn it into detailed training, recovery, navigation, and performance analysis.",
+        "COROS records endurance and outdoor activity and turns it into detailed training, recovery, navigation, and performance analysis.",
     },
     competitorEvidence: {
       clinicalRole: [1],
@@ -1314,25 +1314,25 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "COROS says fitness insights from its watches require no subscription or monthly fee. Its official training plans and Training Hub coaching analysis are also free. A compatible device is still needed for automatic tracking, and hardware prices vary substantially.",
-        question: "Does COROS require a software subscription?",
+          "No. COROS says fitness insights from its watches need no subscription or monthly fee, and its official training plans and Training Hub coaching analysis are free too. You still need a compatible device for automatic tracking, and hardware prices vary a lot.",
+        question: "Does COROS charge a subscription?",
       },
       {
         answer:
-          "COROS supports bulk FIT or TCX export for activities. Sleep, daily, and heart-rate exports currently require contacting support. Its official MCP offers permission-controlled, read-only access to supported training and health data for compatible AI clients.",
-        question: "Can I export or use COROS data with other tools?",
+          "Yes, with limits. COROS supports bulk FIT or TCX export for activities, while sleep, daily, and heart rate exports currently mean contacting support. Its official MCP gives compatible AI clients read-only access to supported training and health data, with permissions you control.",
+        question: "Can I export COROS data or use it with other tools?",
       },
       {
         answer:
-          "Yes, without assuming a direct COROS connection. Keep COROS as the detailed training system. Use Murph when you want to bring one training finding into a broader health decision, document why you changed the plan, and follow up on whether the change worked.",
-        question: "Can COROS and Murph complement one another?",
+          "Yes. COROS has no direct Murph connection, but Murph reads the data if your watch syncs to Apple Health on an iPhone. Keep COROS for training detail, and use Murph to weigh a finding against the rest of your health, note why you changed the plan, and check whether the change worked.",
+        question: "Can I use COROS and Murph together?",
       },
     ],
     headline:
-      "Keep COROS for training depth. Add Murph when the question crosses domains",
+      "COROS analyzes your training. Murph weighs it against everything else.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "COROS pairs sports hardware with EvoLab and Training Hub for endurance analysis. Murph is a personal health assistant for questions that extend beyond training data.",
+      "COROS pairs GPS watches with EvoLab and Training Hub for endurance analysis. Murph is a personal health assistant for questions that reach past training into sleep, food, and labs.",
     quickComparison: [
       {
         capability: "GPS route and workout tracking",
@@ -1429,13 +1429,13 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Automatic measurements require separate COROS hardware.",
-      "The ecosystem is deeper in sport and training than in labs, nutrition, or broader clinical context.",
-      "Some EvoLab insights require qualifying history, and non-activity bulk export is not self-service.",
-      "Murph does not map routes, collect GPS workouts, or generate COROS's native training and race metrics.",
+      "Automatic measurements need a COROS device.",
+      "COROS goes deep on sport and training but not on labs, nutrition, or medical records.",
+      "Some EvoLab insights need enough training history first, and bulk export of anything other than activities goes through support.",
+      "Murph does not map routes, record GPS workouts, or produce COROS's own training and race metrics.",
     ],
     useTogether:
-      "Use COROS for every workout, route, load metric, and race plan. Bring Murph the finding that changes a broader decision, add the missing health and life context, record the rationale, and get support with the actions that do not belong in Training Hub.",
+      "Use COROS for every workout, route, load metric, and race plan. Murph reads that data through Apple Health on iPhone, or you can share a finding directly, and adds what COROS does not hold, like labs, meals, and sleep. It also keeps a note of why you changed the plan and handles the errands that do not belong in Training Hub.",
   },
   {
     aliases: [
@@ -1447,28 +1447,28 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     ],
     category: "wearables",
     chooseCompetitor:
-      "Choose Helio Strap Pro when heart rate, recovery, movement quality, muscle load, HybridCharge, HYROX support, and flexible wrist, arm, or waist placement are the main priorities.",
+      "Helio Strap Pro is the better fit if you want heart rate, recovery, movement quality, muscle load, HybridCharge, and HYROX support, and you like being able to wear it on your wrist, arm, or waist.",
     chooseMurph:
-      "Choose Murph when HybridCharge, muscle load, sleep, or recovery raises a question about symptoms, labs, meals, schedule, or a goal, and you want to choose an adjustment and later judge its effect.",
+      "Choose Murph when a HybridCharge, muscle load, sleep, or recovery reading raises a question about symptoms, labs, meals, or your schedule. Murph helps you pick an adjustment and later judge whether it helped.",
     competitor: {
       clinicalRole:
-        "Consumer wellness and sports-performance support. Its health measurements and scores are not presented as a replacement for medical diagnosis.",
+        "Helio Strap Pro is a consumer wellness and sports performance product. Amazfit does not present its measurements and scores as a substitute for medical diagnosis.",
       followThrough:
-        "HybridCharge and LifeLoad guidance, Training Balance, Today's Focus, Zepp Coach plans, HYROX workouts, food logging, and optional Zepp Aura sleep content.",
+        "The Zepp app offers HybridCharge and LifeLoad guidance, Training Balance, Today's Focus, Zepp Coach plans, HYROX workouts, and food logging. Zepp Aura adds optional sleep content.",
       format:
-        "A screen-free sensor system worn at the wrist, upper arm, or waist and analyzed in the Zepp mobile app. The app also offers reduced device-free features.",
+        "A screen-free sensor system you wear on your wrist, upper arm, or waist, with analysis in the Zepp phone app. The app also offers a smaller set of features without a device.",
       hardware:
-        "Helio Strap Pro includes heart-rate and movement modules, advertises up to 11 days of primary battery life, stores up to 21 days of offline heart-rate data, and is rated 5 ATM.",
+        "Helio Strap Pro includes heart rate and movement modules. It advertises up to 11 days of primary battery life, stores up to 21 days of offline heart rate data, and is rated 5 ATM.",
       inputs:
-        "Continuous heart rate, blood oxygen, stress, temperature, motion, sleep, workouts, perceived effort, food logs, profile information, and selected partner platforms.",
+        "The strap records continuous heart rate, blood oxygen, stress, temperature, motion, sleep, and workouts. Zepp adds perceived effort, food logs, your profile, and selected partner platforms.",
       insightStyle:
-        "Hybrid training analysis that combines cardio exertion, movement quality, muscle load, recovery, sleep, and daily life load in the Zepp app.",
+        "Zepp analyzes hybrid training by combining cardio effort, movement quality, muscle load, recovery, sleep, and the load of daily life.",
       platforms:
-        "Helio Strap Pro plus Zepp App on Android 8 or later and iOS 17 or later. The app can provide selected free planning and nutrition tools without an Amazfit device.",
+        "Helio Strap Pro pairs with the Zepp App on Android 8 or later and iOS 17 or later. Some free planning and nutrition tools in the app work without an Amazfit device.",
       pricing:
-        "Verified 2026-08-30: Helio Strap Pro is $199.99 and the base Helio Strap is $99.99 in the United States, with no required core subscription. Zepp Aura has a paid tier, but a current public United States price was not verified.",
+        "Verified 2026-08-30: Helio Strap Pro costs $199.99 and the base Helio Strap costs $99.99 in the United States, with no required subscription for core features. Zepp Aura has a paid tier, but we could not verify a current public United States price.",
       primaryJob:
-        "Track hybrid training, recovery, sleep, heart rate, movement quality, and muscle load in a screen-free system at an accessible hardware price.",
+        "Helio Strap Pro tracks hybrid training, recovery, sleep, heart rate, movement quality, and muscle load from a screen-free system at a modest hardware price.",
     },
     competitorEvidence: {
       clinicalRole: [1],
@@ -1484,25 +1484,25 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No required subscription is listed for Helio Strap Pro or its core Zepp experience. Zepp Aura offers some sleep and meditation tools free and places unlimited AI guidance, richer reports, and expanded content in an optional paid tier.",
-        question: "Does Amazfit Helio Strap Pro require a subscription?",
+          "No. Amazfit lists no required subscription for Helio Strap Pro or the core Zepp app. Zepp Aura offers some sleep and meditation tools free and puts unlimited AI guidance, richer reports, and more content in an optional paid tier.",
+        question: "Does Amazfit Helio Strap Pro need a subscription?",
       },
       {
         answer:
-          "The official specification lists Bluetooth heart-rate broadcast and phone-app connectivity but does not list onboard GPS. Treat route tracking as phone or paired-device dependent unless Amazfit publishes different specifications.",
-        question: "Does Helio Strap Pro have onboard GPS?",
+          "It does not appear to. The official specification lists Bluetooth heart rate broadcast and phone app connectivity but no built-in GPS. Assume route tracking relies on your phone or a paired device unless Amazfit publishes otherwise.",
+        question: "Does Helio Strap Pro have built-in GPS?",
       },
       {
         answer:
-          "Yes, without assuming direct connectivity. Let Helio Strap Pro measure heart rate and movement quality. Use Murph when a finding needs to be reconciled with soreness, food, sleep, work, or another health concern, then turn the conclusion into a plan you can revisit.",
-        question: "Can Helio Strap Pro and Murph be used together?",
+          "Yes. There is no direct Amazfit connection, but if Zepp syncs to Apple Health on an iPhone, Murph reads that data. Let Helio Strap Pro measure heart rate and movement quality, and use Murph when a finding needs weighing against soreness, food, sleep, work, or another health concern, then turn the answer into a plan you can check on.",
+        question: "Can I use Helio Strap Pro and Murph together?",
       },
     ],
     headline:
-      "Helio measures the workout. Murph helps decide what to change next",
+      "Helio Strap Pro measures the workout. Murph helps you decide what to change.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Amazfit Helio Strap Pro captures workout, sleep, recovery, and movement data in Zepp. Murph is a personal health assistant for connecting a signal to context and action.",
+      "Amazfit Helio Strap Pro tracks workouts, sleep, recovery, and movement in the Zepp app. Murph is a personal health assistant that weighs those readings against food, labs, and your week.",
     quickComparison: [
       {
         capability: "Continuous heart rate sensing",
@@ -1587,40 +1587,40 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "There is no display, and interpretation depends on the Zepp app.",
-      "Advanced movement analysis depends on using the correct module and placement for the activity.",
-      "A public current United States price for optional Zepp Aura Premium could not be verified.",
-      "Murph cannot replace sensor placement, movement capture, or Zepp's sport-specific analysis.",
+      "There is no screen, so you read everything in the Zepp app.",
+      "Advanced movement analysis only works if you use the right module in the right place for the activity.",
+      "We could not verify a current public United States price for the optional Zepp Aura Premium tier.",
+      "Murph cannot replace the sensor, capture your movement, or run Zepp's sport-specific analysis.",
     ],
     useTogether:
-      "Keep sensor placement, workouts, movement analysis, and recovery scores in Zepp. Bring Murph one relevant finding when you need to add non-training context, decide what to change, and remember whether the adjustment improved performance, recovery, or daily fit.",
+      "Keep sensor placement, workouts, movement analysis, and recovery scores in Zepp. Murph reads the data through Apple Health on iPhone, or you can share one finding directly, and adds what Zepp does not track, like labs and your calendar. Then it helps you decide what to change and remembers whether the change improved your performance, recovery, or day.",
   },
   {
     aliases: ["RingConn Gen 3", "RingConn Gen 2", "RingConn Gen 2 Air"],
     category: "wearables",
     chooseCompetitor:
-      "Choose RingConn when passive sleep and recovery sensing, a ring form factor, long battery life, vibration health alerts, and no subscription are the main priorities.",
+      "Pick RingConn if you want a ring that tracks sleep and recovery passively, has long battery life, buzzes for health alerts, and charges no subscription.",
     chooseMurph:
-      "Choose Murph when a sleep, recovery, vascular, or stress pattern needs to be interpreted beside symptoms, records, routines, and goals rather than treated as a verdict on its own.",
+      "Go with Murph when a sleep, recovery, vascular, or stress pattern should be read beside your symptoms, records, and routines instead of taken as a verdict on its own.",
     competitor: {
       clinicalRole:
-        "Consumer wellness product. Sleep-apnea pattern indicators, vascular trends, and other health insights are not diagnostic measurements.",
+        "RingConn is a consumer wellness product. Its sleep apnea pattern indicators, vascular trends, and other health insights are not diagnostic measurements.",
       followThrough:
-        "Health, sedentary, and battery vibration alerts, reports, notes, health-data sharing, workout views, and app-based recommendations or advertised AI insights.",
+        "The ring vibrates for health, sedentary, and battery alerts. The app adds reports, notes, health data sharing, workout views, recommendations, and advertised AI insights.",
       format:
-        "A smart ring with no display, paired with the RingConn mobile app. Gen 3 adds vibration alerts and a universal charging case.",
+        "A smart ring with no display, paired with the RingConn phone app. Gen 3 adds vibration alerts and a universal charging case.",
       hardware:
-        "RingConn Gen 3 advertises up to 14 days of battery life and 10 days of offline storage. Gen 2 and Gen 2 Air remain lower-priced options.",
+        "RingConn Gen 3 advertises up to 14 days of battery life and 10 days of offline storage. Gen 2 and Gen 2 Air are still sold as lower-priced options.",
       inputs:
-        "Continuous heart rate, HRV, blood oxygen, respiration, temperature, stress, steps, sleep, workouts, women's-health information, and profile data.",
+        "The ring measures continuous heart rate, HRV, blood oxygen, breathing rate, temperature, stress, steps, sleep, and workouts. The app adds women's health information and your profile.",
       insightStyle:
-        "App-based sleep, recovery, activity, stress, vital-sign, vascular-load, and women's-health trends, with selected alerts delivered through ring vibration.",
+        "The app shows trends for sleep, recovery, activity, stress, vital signs, vascular load, and women's health. Selected alerts arrive as ring vibrations.",
       platforms:
-        "RingConn ring plus the RingConn app on iOS 17 or later or Android 10 or later over Bluetooth 5.0.",
+        "The ring pairs over Bluetooth 5.0 with the RingConn app on iOS 17 or later or Android 10 or later.",
       pricing:
-        "Verified 2026-08-30: RingConn Gen 3 starts at $349, with selected finishes at $369. Gen 2 starts at $299 and Gen 2 Air at $199. RingConn lists no subscription fee for these models.",
+        "Verified 2026-08-30: RingConn Gen 3 starts at $349, and some finishes cost $369. Gen 2 starts at $299 and Gen 2 Air at $199. RingConn lists no subscription fee for these models.",
       primaryJob:
-        "Track sleep, recovery, activity, vital signs, and selected vascular or women's-health trends passively in a subscription-free ring.",
+        "RingConn tracks sleep, recovery, activity, vital signs, and selected vascular and women's health trends passively from a ring with no subscription.",
     },
     competitorEvidence: {
       clinicalRole: [1, 2],
@@ -1636,25 +1636,25 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "RingConn lists no subscription fee for Gen 3, Gen 2, or Gen 2 Air. The hardware is purchased upfront, with features and specifications differing by generation.",
-        question: "Does RingConn require a subscription?",
+          "No. RingConn lists no subscription fee for Gen 3, Gen 2, or Gen 2 Air. You pay for the ring up front, and features and specifications differ by generation.",
+        question: "Does RingConn need a subscription?",
       },
       {
         answer:
-          "No. Gen 3 describes vascular-health trends rather than direct blood-pressure readings. Sleep-apnea pattern indicators and other wellness insights are also not diagnostic.",
+          "No. Gen 3 shows vascular health trends, not direct blood pressure readings. Its sleep apnea pattern indicators and other wellness insights are not diagnostic either.",
         question: "Does RingConn Gen 3 measure blood pressure or diagnose sleep apnea?",
       },
       {
         answer:
-          "Yes, without assuming a direct RingConn integration. RingConn can keep collecting and alerting. Murph can help you examine a report you share, distinguish a pattern from a diagnosis, add relevant history, and decide whether the right response is a routine change, a question for care, or simply more observation.",
-        question: "Can RingConn and Murph work together?",
+          "Yes. There is no direct RingConn connection, but if the ring syncs to Apple Health on an iPhone, Murph reads that data. RingConn keeps collecting and alerting, and Murph helps you tell a pattern from a diagnosis, add your history, and decide whether to change a routine, ask your doctor, or just keep watching.",
+        question: "Can I use RingConn and Murph together?",
       },
     ],
     headline:
-      "RingConn watches quietly. Murph helps turn a trend into a considered response",
+      "RingConn tracks your nights. Murph helps you work out what a trend means.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "RingConn provides subscription-free sleep, recovery, and vital-sign trends from a smart ring. Murph is a personal health assistant for interpreting a trend beyond the ring.",
+      "RingConn is a smart ring that tracks sleep, recovery, and vital signs with no subscription. Murph is a personal health assistant that reads a trend beside your symptoms and records.",
     quickComparison: [
       {
         capability: "Passive overnight sensing",
@@ -1739,40 +1739,40 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Gen 3 vascular insights are trends, not direct blood-pressure measurements.",
-      "Ring vibration covers selected health, sedentary, and battery alerts rather than messages or general alarms.",
-      "Gen 3 was out of stock at verification, and official pages gave inconsistent signals about full AI-companion availability.",
-      "Murph supplies no continuous overnight sensing or discreet hardware alerts; it needs a relevant trend or observation to work from.",
+      "Gen 3 vascular insights are trends, not direct blood pressure measurements.",
+      "The ring vibrates only for selected health, sedentary, and battery alerts, not for messages or general alarms.",
+      "Gen 3 was out of stock when we checked, and RingConn's pages disagreed with each other about whether the full AI companion is available.",
+      "Murph has no overnight sensing or ring alerts of its own. It needs a trend or observation to work from.",
     ],
     useTogether:
-      "Let RingConn collect sleep, recovery, and vital-sign trends with minimal attention. Bring Murph the report that genuinely changes a question, add symptoms or records the ring cannot see, choose a proportionate response, and follow up without turning every alert into a crisis.",
+      "Let RingConn collect sleep, recovery, and vital sign trends in the background. Murph reads that data through Apple Health on iPhone, or you can share a report, and adds the symptoms and records the ring cannot see. It helps you pick a response that fits the size of the problem, without turning every alert into a crisis.",
   },
   {
     aliases: ["Circular", "Circular Ring", "Kira AI"],
     category: "wearables",
     chooseCompetitor:
-      "Choose Circular Ring 2 when ring-based sleep, energy, stress, live measurements, a short ECG check, and a core no-forced-subscription model matter most.",
+      "Circular Ring 2 is the better fit if you want sleep, energy, and stress tracking from a ring, live measurements, a short ECG check, and core features with no forced subscription.",
     chooseMurph:
-      "Choose Murph when a Circular result needs to be checked against symptoms, records, routines, goals, and earlier outcomes, or when you want help separating a current capability from an upcoming product claim before acting.",
+      "Choose Murph when a Circular result needs checking against your symptoms, records, and routines. Murph also helps you separate what the ring does today from what Circular says is coming, before you act on either.",
     competitor: {
       clinicalRole:
-        "Consumer wellness product. Current and planned blood-pressure functionality is described as calibrated wellness trending rather than diagnosis, and glucose trends were not verified as available.",
+        "Circular Ring 2 is a consumer wellness product. Circular describes its current and planned blood pressure features as calibrated wellness trends, not diagnosis, and we could not verify that glucose trends are available.",
       followThrough:
-        "Energy and stress guidance, Kira recommendations, guided breathing, medication reminders, vital alerts, app-based analytics, and sport-session tracking.",
+        "Circular offers energy and stress guidance, Kira recommendations, guided breathing, medication reminders, vital sign alerts, analytics in the app, and sport session tracking.",
       format:
-        "A jewelry-style smart ring with no display, paired with the Circular app for measurements and analytics; the ring provides haptic wake-up and medication-reminder alerts.",
+        "A jewelry-style smart ring with no display, paired with the Circular app for measurements and analytics. The ring itself vibrates for wake-up and medication reminders.",
       hardware:
-        "Circular Ring 2 advertises about 8 days in Power Mode or 4 to 5 days in Performance Mode, with an approximately 30-minute recharge.",
+        "Circular Ring 2 advertises about 8 days of battery in Power Mode or 4 to 5 days in Performance Mode, and a recharge takes about 30 minutes.",
       inputs:
-        "Heart rate, HRV, temperature, blood oxygen, sleep, stress, movement, sport sessions, a 40-second ECG check, women's-health information, and profile data.",
+        "The ring measures heart rate, HRV, temperature, blood oxygen, sleep, stress, movement, sport sessions, and a 40-second ECG check. The app adds women's health information and your profile.",
       insightStyle:
-        "Detailed app-based sleep, Energy, stress, chronotype, vital, activity, and ECG views, with Kira recommendations after a calibration period.",
+        "The app gives detailed views of sleep, Energy, stress, chronotype, vital signs, activity, and ECG. Kira recommendations start after a calibration period.",
       platforms:
-        "Circular Ring 2 plus the Circular app for iOS and Android. Older published minimum operating-system versions may be stale and should not be treated as current requirements.",
+        "Circular Ring 2 pairs with the Circular app for iOS and Android. Circular's older published minimum operating system versions may be out of date, so do not treat them as current requirements.",
       pricing:
-        "Verified 2026-08-30: Circular Ring 2 is listed at $299, reduced from $349, with an active add-to-cart control. Core features are advertised without a forced subscription; future premium pricing is unpublished. Variant availability and checkout pricing can change.",
+        "Verified 2026-08-30: Circular Ring 2 is listed at $299, down from $349, and could be added to the cart. Core features are advertised with no forced subscription, and future premium pricing is not published. Variant availability and checkout pricing can change.",
       primaryJob:
-        "Provide ring-based ECG, sleep, recovery, stress, activity, and wellness analytics with Kira app guidance.",
+        "Circular Ring 2 provides ECG, sleep, recovery, stress, activity, and wellness analytics from a ring, with Kira guidance in the app.",
     },
     competitorEvidence: {
       clinicalRole: [1, 2],
@@ -1788,25 +1788,25 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "Circular Ring 2 was listed at $299, reduced from $349, with an active add-to-cart control when verified on August 30, 2026. Verify variant availability and final pricing at checkout because both can change.",
+          "Circular Ring 2 was listed at $299, down from $349, and could be added to the cart when we checked on August 30, 2026. Confirm variant availability and the final price at checkout, since both can change.",
         question: "How much does Circular Ring 2 cost?",
       },
       {
         answer:
-          "Not safely. Circular's current official pages conflict: product copy presents blood-pressure trends while also calling blood-pressure and glucose capabilities upcoming; the August 26 release notes describe both as upcoming or unfinished. General availability and any paid scope remain unverified.",
-        question: "Are Circular blood-pressure and glucose trends available now?",
+          "Not as far as we can confirm. Circular's official pages conflict, with product copy showing blood pressure trends while also calling blood pressure and glucose features upcoming, and the August 26 release notes describe both as upcoming or unfinished. General availability and whether either will cost extra are unverified.",
+        question: "Does Circular Ring 2 track blood pressure and glucose yet?",
       },
       {
         answer:
-          "Yes, without assuming direct connectivity. Use Circular for measurements and Kira features that are actually available. Use Murph to discuss a report you share beside records, symptoms, routines, or goals, choose a next step that does not depend on an unverified feature, and review what happened.",
-        question: "Can Circular and Murph complement each other?",
+          "Yes. There is no direct Circular connection, but if the ring syncs to Apple Health on an iPhone, Murph reads that data. Use Circular for the measurements and Kira features that exist today, and use Murph to weigh a result beside your records, symptoms, and routines, choose a step that does not rely on an unverified feature, and review what happened.",
+        question: "Can I use Circular Ring 2 and Murph together?",
       },
     ],
     headline:
-      "Use the ring data that exists. Keep the wider decision grounded",
+      "Circular Ring 2 takes the readings. Murph helps you weigh them carefully.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Circular Ring 2 combines sleep tracking, ECG checks, and haptic alerts in a smart ring. Murph is a personal health assistant for cautious interpretation and follow-through.",
+      "Circular Ring 2 combines sleep tracking, ECG checks, and vibration alerts in a smart ring. Murph is a personal health assistant that helps you read the results and act on them.",
     quickComparison: [
       {
         capability: "Passive sleep and recovery sensing",
@@ -1891,40 +1891,40 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "The advertised $299 sale price and availability can change by variant and at checkout.",
-      "Official Circular pages conflict on whether blood-pressure and glucose trends are available; rollout timing and any paid scope remain unverified.",
-      "The ring has no display and limits on-ring interaction to selected haptic alerts; personalized Kira guidance follows a calibration period.",
-      "Murph cannot perform ECG checks, deliver ring vibrations, or independently verify a wearable claim that remains unresolved.",
+      "The $299 sale price and availability can differ by variant and change at checkout.",
+      "Circular's official pages disagree on whether blood pressure and glucose trends are available. Rollout timing and any extra cost are unverified.",
+      "The ring has no screen and only vibrates for selected alerts. Personalized Kira guidance starts after a calibration period.",
+      "Murph cannot take an ECG, vibrate on your finger, or confirm a wearable claim that Circular itself has not settled.",
     ],
     useTogether:
-      "Use Circular for the ECG check, sleep analytics, alerts, and Kira guidance available on your device. Bring Murph a specific result when it needs non-Circular context, a cautious interpretation, or a follow-up plan; leave unverified blood-pressure or glucose promises out of the decision.",
+      "Use Circular for the ECG check, sleep analytics, alerts, and Kira guidance available on your ring. Murph reads the data through Apple Health on iPhone, or you can share a result, and puts it beside your records and symptoms before you build a plan. Leave the unverified blood pressure and glucose promises out of that plan.",
   },
   {
     aliases: ["Withings App", "Withings+", "Health Mate"],
     category: "wearables",
     chooseCompetitor:
-      "Choose Withings when connected weight, body composition, blood pressure, sleep, temperature, ECG, or hybrid-watch measurements and clinician-shareable reports are the priority.",
+      "Withings is the better fit if you want connected scales, blood pressure monitors, sleep sensors, thermometers, ECG, or a hybrid watch, plus reports you can hand to your doctor.",
     chooseMurph:
-      "Choose Murph when a weight, blood-pressure, sleep, temperature, or activity trend needs to be considered with symptoms, records, meals, goals, and life constraints, then turned into a question, plan, or task you can follow through on.",
+      "Add Murph when a weight, blood pressure, sleep, temperature, or activity trend needs to be read beside your symptoms, records, and meals. It reads your Withings data and turns the trend into a question, a plan, or a task it will remind you about.",
     competitor: {
       clinicalRole:
-        "Consumer wellness ecosystem with selected medical-device and clinical-service features. Availability and regulatory status vary by device, service, and region.",
+        "Withings is a consumer wellness product line with some medical device and clinical service features. Availability and regulatory status vary by device, service, and region.",
       followThrough:
-        "Goals, trends, reports, reminders, app insights, and optional Withings+ AI assistance, Health Improvement Score, Daily Readiness Indicator, cardiologist review, and selected clinical programs.",
+        "The app offers goals, trends, reports, reminders, and insights. Withings+ adds optional AI assistance, a Health Improvement Score, a Daily Readiness Indicator, cardiologist review, and selected clinical programs.",
       format:
-        "One iOS and Android app connecting hybrid watches, smart scales, blood-pressure monitors, sleep sensors, thermometers, and other home health devices.",
+        "One iOS and Android app that connects hybrid watches, smart scales, blood pressure monitors, sleep sensors, thermometers, and other home health devices.",
       hardware:
-        "Basic manual app use is possible without Withings hardware. Automated and advanced measurements require the corresponding separately purchased device.",
+        "You can use the app for basic manual tracking without Withings hardware. Automatic and advanced measurements need the matching device, sold separately.",
       inputs:
-        "Activity, workouts, heart rate, sleep, weight, body composition, blood pressure, temperature, supported ECG and blood oxygen data, manual entries, and partner services.",
+        "Withings takes in activity, workouts, heart rate, sleep, weight, body composition, blood pressure, temperature, and supported ECG and blood oxygen data, plus manual entries and partner services.",
       insightStyle:
-        "Longitudinal charts and reports across several home and wearable measurement categories, with optional premium interpretation and clinical services.",
+        "Long-term charts and reports across several home and wearable measurement types, with optional premium interpretation and clinical services.",
       platforms:
-        "Withings App on iOS and Android, paired with compatible Withings devices and selected partner apps. An open API supports approved software integrations.",
+        "The Withings App runs on iOS and Android and pairs with compatible Withings devices and selected partner apps. An open API supports approved software integrations.",
       pricing:
-        "Verified 2026-08-30: base app access and stored measurements are free, with hardware sold separately. Live pages showed Withings+ at $9.95 per month or $99.50 per year; an older official FAQ still listed $99.95 per year.",
+        "Verified 2026-08-30: the base app and stored measurements are free, and hardware is sold separately. Live pages showed Withings+ at $9.95 per month or $99.50 per year, while an older official FAQ still listed $99.95 per year.",
       primaryJob:
-        "Bring wearable and home measurements such as activity, sleep, weight, body composition, blood pressure, and temperature into one longitudinal record.",
+        "Withings brings wearable and home measurements such as activity, sleep, weight, body composition, blood pressure, and temperature into one long-term record.",
     },
     competitorEvidence: {
       clinicalRole: [1, 2],
@@ -1940,25 +1940,25 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "Basic manual tracking and stored measurements are available in the free Withings App. Automatic and advanced measurements require the relevant watch, scale, blood-pressure monitor, sleep device, thermometer, or other hardware.",
+          "Yes, for basic manual tracking and stored measurements, which the free Withings App supports. Automatic and advanced measurements need the relevant watch, scale, blood pressure monitor, sleep device, thermometer, or other hardware.",
         question: "Can I use the Withings App without Withings hardware?",
       },
       {
         answer:
-          "Withings+ is optional. It adds premium interpretation, AI assistance, Health Improvement Score, Daily Readiness Indicator, cardiologist ECG review, and selected nutrition or sleep services. Core measurements remain available without it.",
-        question: "Is Withings+ required?",
+          "No, Withings+ is optional. It adds premium interpretation, AI assistance, the Health Improvement Score, the Daily Readiness Indicator, cardiologist ECG review, and selected nutrition or sleep services. Core measurements stay available without it.",
+        question: "Do I need Withings+?",
       },
       {
         answer:
-          "Yes, without assuming a direct Withings integration. Keep every device measurement and report in Withings. Use Murph when you want to compare trends across categories, prepare a concise care question, decide on a routine change, or make sure a follow-up task does not disappear.",
-        question: "Can Withings and Murph work together?",
+          "Yes. Connect Withings and Murph reads your weight, blood pressure, sleep, and other measurements while Withings keeps every device reading and report. Use Murph to compare trends across devices, prepare a short question for your doctor, decide on a routine change, or make sure a task does not slip.",
+        question: "Can I use Withings and Murph together?",
       },
     ],
     headline:
-      "Withings measures the home. Murph connects the results into one conversation",
+      "Withings measures you at home. Murph reads the results and talks them through.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Withings brings watch, scale, blood-pressure, sleep, and other home measurements into one ecosystem. Murph is a personal health assistant for reasoning across the results.",
+      "Withings brings watch, scale, blood pressure, and sleep measurements into one app. Murph is a personal health assistant that reads your Withings data beside your meals, labs, and records.",
     quickComparison: [
       {
         capability: "Home health measurements",
@@ -2051,12 +2051,12 @@ export const WEARABLE_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "A broad view can require several separately purchased Withings devices.",
-      "Premium interpretation and selected clinical services require Withings+.",
-      "Features and partner synchronization vary by device, platform, and region, and official annual pricing was slightly inconsistent.",
-      "Murph cannot make the watch and home-device measurements described above; those instruments remain necessary.",
+      "A full picture can mean buying several Withings devices.",
+      "Premium interpretation and selected clinical services need Withings+.",
+      "Features and partner syncing vary by device, platform, and region, and Withings' own pages listed slightly different annual prices.",
+      "Murph cannot take the watch and home device measurements described above. You still need the instruments.",
     ],
     useTogether:
-      "Keep Withings as the source of truth for every watch and home-device measurement. Bring Murph the cross-device trend or question that matters, add the context those instruments cannot capture, decide whether the next step is observation, a routine change, or a care conversation, and follow it through.",
+      "Keep Withings as the record for every watch and home device measurement. Murph reads that data and adds what the instruments cannot see, like meals, symptoms, and records. It helps you decide whether to keep watching, change a routine, or talk to your doctor, and then checks in on it.",
   },
 ]);

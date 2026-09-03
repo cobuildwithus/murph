@@ -93,10 +93,7 @@ export function ComparisonIndex({ comparisons }: { comparisons: readonly Compari
         <div className="mx-auto max-w-[1080px]">
           <div className="grid items-center gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(360px,0.8fr)] lg:gap-16">
             <div>
-              <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#c4a882]">
-                {comparisons.length} source-backed guides
-              </p>
-              <h1 className="mt-5 max-w-[12ch] text-balance font-serif text-[clamp(3rem,7vw,5.5rem)] font-semibold leading-[0.9] tracking-[-0.045em]">
+              <h1 className="max-w-[12ch] text-balance font-serif text-[clamp(3rem,7vw,5.5rem)] font-semibold leading-[0.9] tracking-[-0.045em]">
                 Your health is bigger than one app.
               </h1>
               <p className="mt-7 max-w-[49ch] text-pretty text-[0.98rem] leading-7 text-[#f5f0e8]/72 sm:text-[1.05rem]">
@@ -133,7 +130,7 @@ export function ComparisonIndex({ comparisons }: { comparisons: readonly Compari
             </h2>
             <div className="grid max-w-[66ch] gap-4 text-[0.92rem] leading-7 text-[#4d4533]">
               <p>
-                Product facts come from each company's own product, support, pricing, legal, or app store pages. When we infer something, we say so. We do not claim hands-on testing we did not do.
+                Product facts come from each company&apos;s own product, support, pricing, legal, or app store pages. When we infer something, we say so. We do not claim hands-on testing we did not do.
               </p>
               <p>
                 Products change, so every guide shows its review date and sources. Claims about Murph follow our{" "}

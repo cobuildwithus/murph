@@ -9,28 +9,28 @@ export const HEALTH_ASSISTANT_COMPARISONS = defineComparisons([
     ],
     category: "health-assistants",
     chooseCompetitor:
-      "Choose BodyBuddy for an opinionated accountability program with daily check-ins, photo and voice logging, points, badges, and leaderboards.",
+      "Pick BodyBuddy if you already have a plan or program and want a coach that texts you every day to keep you on it. You also get photo and voice logging, points, badges, and leaderboards.",
     chooseMurph:
-      "Choose Murph when your health will not stay inside one fixed plan. Murph connects wearable and lab data, records, symptoms, decisions, reminders, and outcomes in one private thread as the question changes.",
+      "Choose Murph if you want the daily check-ins but your health does not fit one fixed plan. Murph reads your wearable data, labs, and records, summarizes an appointment from a voice memo, and makes the follow-up calls and bookings.",
     competitor: {
       clinicalRole:
-        "A consumer wellness and accountability coach. BodyBuddy says it does not provide medical advice, diagnose conditions, or independently validate instructions from a health professional.",
+        "BodyBuddy is a consumer wellness and accountability coach. It says it does not give medical advice, does not diagnose conditions, and does not independently verify instructions from a health professional.",
       followThrough:
-        "Daily text check-ins, persistent plans, action tracking, reminders, progress views, points, badges, leaderboards, and optional plan sharing.",
+        "BodyBuddy checks in by text every day and keeps your plan and action items running between check-ins. It also has reminders, progress views, points, badges, and leaderboards. Sharing a plan is optional.",
       format:
-        "An AI accountability coach built around proactive text messages, with app and web access for plans, logs, documents, and progress.",
+        "BodyBuddy is an AI accountability coach that works mainly through texts it sends you first. An app and a website hold your plans, logs, documents, and progress.",
       hardware:
-        "No proprietary hardware is required. Texting works without installing an app; the iPhone app adds Apple Health and Dynamic Island features.",
+        "You do not need any special hardware. Texting works without installing an app. The iPhone app adds Apple Health and Dynamic Island features.",
       inputs:
-        "Text, photos, voice, meals, movement, sleep, hydration, appointment audio, uploaded care or training documents, and authorized Apple Health data.",
+        "BodyBuddy takes text, photos, and voice. You can log meals, movement, sleep, and hydration, record appointment audio, upload care or training documents, and share Apple Health data you authorize.",
       insightStyle:
-        "Turns stated goals and imported instructions into action items, then responds to daily logs with encouragement, summaries, and accountability prompts.",
+        "BodyBuddy turns your stated goals and any imported instructions into action items. When you log something each day, it replies with encouragement, summaries, and accountability prompts.",
       platforms:
-        "iPhone and iMessage with iOS 15.1 or later, plus web access described in BodyBuddy's terms. The service is for adults age 18 and older.",
+        "BodyBuddy runs on iPhone and iMessage with iOS 15.1 or later, plus web access as described in its terms. It is for adults 18 and older.",
       pricing:
-        "BodyBuddy advertises $29 per month with a seven-day trial. Its App Store listing shows multiple in-app purchase amounts, and its terms say the selected price and billing period are shown at checkout.",
+        "BodyBuddy advertises $29 per month with a seven-day trial. Its App Store listing shows several in-app purchase amounts, and its terms say you see the selected price and billing period at checkout.",
       primaryJob:
-        "Turn a health goal, professional plan, or program into daily execution through proactive messages, easy logging, and visible accountability.",
+        "Turn a health goal, a professional's plan, or a program into daily action. It does that with texts it sends first, easy logging, and accountability you can see.",
     },
     competitorEvidence: {
       clinicalRole: [3],
@@ -46,24 +46,24 @@ export const HEALTH_ASSISTANT_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "This comparison covers BodyBuddy's health-coaching app from BodyBuddy HQ, currently listed in the US App Store as BodyBuddy: Better Health. Please Clap, LLC is the App Store seller. It does not cover the similarly named EMS controller, pregnancy course, or Apple Health utility.",
-        question: "Which BodyBuddy does this comparison cover?",
+          "This guide covers the health coaching app from BodyBuddy HQ, listed in the US App Store as BodyBuddy: Better Health. The App Store seller is Please Clap, LLC. It does not cover the EMS controller, pregnancy course, or Apple Health utility that share the name.",
+        question: "Which BodyBuddy app is this guide about?",
       },
       {
         answer:
-          "Yes. BodyBuddy can record an appointment, create a transcript or summary, and turn the instructions into action items. It says generated material can contain errors, the original professional instructions remain authoritative, and the user is responsible for obtaining any required recording consent.",
-        question: "Can BodyBuddy summarize a medical appointment?",
+          "Yes. BodyBuddy can record an appointment, write a transcript or summary, and turn the instructions into action items. It says the output can contain errors, the professional's original instructions still come first, and you are responsible for any recording consent that is required.",
+        question: "Can BodyBuddy record and summarize a doctor's appointment?",
       },
       {
         answer:
-          "BodyBuddy documents Apple Health access for steps, workouts, weight, sleep, active energy, and dietary calories. It says Fitbit, Garmin, Oura, and WHOOP data can reach BodyBuddy through Apple Health; that relay is different from a documented native connection to each service.",
-        question: "What health data can BodyBuddy use?",
+          "Only through Apple Health. BodyBuddy documents Apple Health access for steps, workouts, weight, sleep, active energy, and dietary calories, and says Fitbit, Garmin, Oura, and WHOOP data can reach it that way. That relay is not the same as a documented direct connection to each service.",
+        question: "Does BodyBuddy connect to Fitbit, Garmin, Oura, or WHOOP?",
       },
     ],
-    headline: "A daily accountability coach or one assistant for your whole health picture?",
+    headline: "BodyBuddy coaches a set plan by text. Murph does that, plus labs and records.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Murph is a personal health assistant for changing questions and follow-through; BodyBuddy specializes in proactive texts and daily accountability for a defined plan.",
+      "BodyBuddy texts you every day to keep a set plan on track. Murph is a personal health assistant that texts too, and also reads your labs, records, and wearable data.",
     name: "BodyBuddy",
     quickComparison: [
       {
@@ -148,39 +148,39 @@ export const HEALTH_ASSISTANT_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "BodyBuddy's opinionated daily text loop is a real advantage for executing a defined plan. Murph does not reproduce its points, badges, streaks, leaderboards, or game-like daily accountability loop.",
-      "Appointment transcripts, imported-plan summaries, and other AI output can be inaccurate and need comparison with the original source.",
-      "Several advertised device connections depend on data first reaching Apple Health rather than a direct BodyBuddy integration.",
+      "BodyBuddy's daily text loop is a real strength when you have a set plan to carry out. Murph does not have its points, badges, streaks, leaderboards, or game-style daily accountability.",
+      "Appointment transcripts, imported plan summaries, and other AI output can be wrong. Check them against the original.",
+      "Several of the device connections BodyBuddy advertises work only after the data reaches Apple Health first. They are not direct BodyBuddy integrations.",
     ],
     useTogether:
-      "Keep BodyBuddy on the defined plan and daily check-ins. Use Murph when an unexpected symptom, lab result, or tradeoff changes the question, then bring the agreed decision back to BodyBuddy's plan manually. The products do not document a direct connection.",
+      "Keep BodyBuddy for the set plan and the daily check-ins. Bring a surprise symptom, lab result, or tradeoff to Murph when it changes what you should do, then update BodyBuddy's plan yourself with what you decide. The two products do not document a direct connection.",
   },
   {
     aliases: ["Ada - your health portal", "Ada Health"],
     category: "health-assistants",
     chooseCompetitor:
-      "Choose Ada when you want its structured symptom questions, possible-cause report, and guidance about possible next steps, including whether medical support may be needed. Its Class IIa status under EU MDR is a meaningful distinction that Murph does not claim.",
+      "Ada is the better fit when you have a symptom right now and want structured questions, a report of possible causes, and guidance on whether you may need medical support. Ada is a Class IIa medical device under EU MDR, and Murph is not.",
     chooseMurph:
-      "Choose Murph when the symptom is only one part of the thread and you want records, wearable or lab context, routines, questions, decisions, reminders, and later outcomes to stay connected in one private conversation.",
+      "Choose Murph for everything around a symptom: your records, lab results, wearable data, reminders, and booking the appointment. Murph does not diagnose or treat, and it does not rank possible causes the way Ada does.",
     competitor: {
       clinicalRole:
-        "Ada identifies its consumer assessment as a Class IIa medical device under EU MDR. It provides possible explanations and care guidance but does not diagnose a condition or replace professional or emergency care.",
+        "Ada says its consumer assessment is a Class IIa medical device under EU MDR. It gives possible explanations and care guidance. It does not diagnose a condition and does not replace professional or emergency care.",
       followThrough:
-        "Keeps an assessment history and allows users to review, export, or share reports. It does not center the experience on daily coaching or habit accountability.",
+        "Ada keeps a history of your assessments, and you can review, export, or share the reports. It is not built around daily coaching or habit accountability.",
       format:
-        "A structured conversational symptom assessment that asks follow-up questions and produces a personalized report.",
+        "A structured symptom assessment that works like a conversation. Ada asks follow-up questions and then produces a personalized report.",
       hardware:
-        "No proprietary device or wearable is required for Ada's symptom assessment.",
+        "Ada's symptom assessment needs no special device or wearable.",
       inputs:
-        "Current symptoms, age, demographic information, health profile, risk factors, and answers to follow-up questions.",
+        "Ada works from your current symptoms, age, demographic details, health profile, and risk factors, plus your answers to its follow-up questions.",
       insightStyle:
-        "Compares the reported presentation with a clinical knowledge base to rank possible explanations and provide possible next steps, including whether medical support may be needed.",
+        "Ada compares what you report against a clinical knowledge base and ranks the possible explanations. It then suggests possible next steps, including whether you may need medical support.",
       platforms:
-        "iPhone, Android phones and tablets, Chromebooks, and a web symptom assessment. Ada advertises support for seven languages.",
+        "Ada runs on iPhone, Android phones and tablets, and Chromebooks, and there is a web version of the symptom assessment. Ada advertises support for seven languages.",
       pricing:
-        "Ada says its consumer symptom assessment is free. Its current official app listings also present the consumer app as free.",
+        "Ada says its consumer symptom assessment is free. Its current official app listings also show the consumer app as free.",
       primaryJob:
-        "Help a person think through a current symptom and decide what kind of care or next step may be appropriate.",
+        "Help you think through a symptom you have right now and decide what kind of care or next step may make sense.",
     },
     competitorEvidence: {
       clinicalRole: [5, 6],
@@ -196,24 +196,24 @@ export const HEALTH_ASSISTANT_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. Ada identifies its consumer assessment as a Class IIa medical device under EU MDR, but says its possible causes and suggested next steps are not a diagnosis, clinical decision support, or a replacement for professional care.",
+          "No. Ada says its consumer assessment is a Class IIa medical device under EU MDR, but its possible causes and suggested next steps are not a diagnosis. They are also not clinical decision support or a replacement for professional care.",
         question: "Can Ada diagnose a medical condition?",
       },
       {
         answer:
-          "Ada asks about symptoms, basic profile information, and relevant risk factors. Its current consumer materials do not document Apple Health, Health Connect, wearable, or medical-record input for the symptom assessment.",
-        question: "Does Ada use wearable or medical-record data?",
+          "Not according to Ada's current consumer materials. Ada asks about your symptoms, basic profile details, and relevant risk factors. It does not document Apple Health, Health Connect, wearable, or medical-record input for the symptom assessment.",
+        question: "Does Ada use Apple Health, wearable, or medical record data?",
       },
       {
         answer:
-          "Ada's distinctive job is a bounded symptom assessment that ends in a possible-cause report and next-step guidance. Murph keeps the wider health thread alive across questions, data, plans, reminders, and what happens later, without ranking conditions or replacing Ada's assessment flow.",
-        question: "How is Ada's role different from Murph's?",
+          "No, because they do different jobs. Ada runs a bounded symptom assessment that ends in a report of possible causes and next-step guidance, and Murph does not rank conditions or replace that flow. Murph does not diagnose, but it keeps your questions, data, plans, reminders, and later results connected over time.",
+        question: "Can Murph replace Ada?",
       },
     ],
-    headline: "Symptom assessment now or health support over time?",
+    headline: "Ada assesses a symptom. Murph keeps the rest of your health in one chat.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Murph is a personal health assistant for ongoing context and follow-through; Ada is a regulated symptom-assessment tool that ranks possible causes.",
+      "Ada is a regulated symptom checker that ranks possible causes. Murph is a personal health assistant that does not diagnose but keeps your records, data, and reminders in one chat.",
     name: "Ada",
     quickComparison: [
       {
@@ -306,39 +306,39 @@ export const HEALTH_ASSISTANT_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Class IIa status under EU MDR does not make Ada's possible-cause report a diagnosis or account for everything a clinician can observe or test.",
-      "Ada's structured, finite assessment is its advantage for a current symptom. Murph does not reproduce that regulated assessment or rank possible causes.",
-      "Natural-language symptom entry and some product details vary by country, language, and app version.",
+      "Ada's Class IIa status under EU MDR does not make its possible-cause report a diagnosis. It also cannot cover everything a clinician can observe or test.",
+      "Ada's structured, finite assessment is the better tool for a symptom you have right now. Murph does not reproduce that regulated assessment and does not rank possible causes.",
+      "Typing symptoms in your own words, and some other product details, vary by country, language, and app version.",
     ],
     useTogether:
-      "Use Ada for the bounded symptom assessment and keep its report for a clinician. Use Murph to organize the questions that remain and the non-clinical follow-through around appointments, reminders, or records. No direct Ada-Murph sync is documented.",
+      "Use Ada for the symptom assessment itself and keep its report to show a clinician. Use Murph to organize the questions that remain and the practical follow-up: appointments, reminders, and records. Neither product documents a direct sync with the other.",
   },
   {
     aliases: ["Hume", "Hume Pod", "Hume Band"],
     category: "health-assistants",
     chooseCompetitor:
-      "Choose Hume Health when owning the Pod or Band 2.0, collecting their measurements, and reviewing Hume's recovery, body-composition, and longevity scores are the experience you want.",
+      "Pick Hume Health if you want to own the Pod or Band 2.0, collect their measurements, and follow Hume's recovery, body composition, and longevity scores in one app.",
     chooseMurph:
-      "Choose Murph when the useful question crosses beyond what a scale or band measures, such as how a trend fits with symptoms, records, labs, routines, constraints, or a prior attempt, and you want help deciding and revisiting the next move.",
+      "Murph is the better fit when the question goes past what a scale or band can measure, like how a weight trend fits with your labs, symptoms, and routines. Murph has no sensors, so it works from the data you connect or upload.",
     competitor: {
       clinicalRole:
-        "A consumer wellness system. Hume says its Pod and Band are not medical devices and are not intended to diagnose, monitor, or manage medical conditions.",
+        "Hume Health is a consumer wellness system. Hume says the Pod and Band are not medical devices and are not meant to diagnose, monitor, or manage medical conditions.",
       followThrough:
-        "Daily briefings, trend views, weekly reports, personalized guidance, and subscription-level coaching features.",
+        "Hume gives you a daily briefing, trend views, weekly reports, and personalized guidance. Extra coaching features come with its subscription.",
       format:
-        "A mobile dashboard and AI insight layer paired with a multi-frequency body-composition scale and a screenless continuous wearable.",
+        "A phone dashboard with an AI insight layer, paired with a multi-frequency body composition scale and a screenless wearable that measures continuously.",
       hardware:
-        "Hume Pod and Hume Band 2.0 are the core advertised data sources. The app can also read selected phone health-platform data, but the distinctive body-composition and continuous wearable measurements come from Hume hardware.",
+        "The Hume Pod and Hume Band 2.0 are the main advertised data sources. The app can also read some phone health-platform data, but the body composition and continuous wearable measurements that set Hume apart come from Hume hardware.",
       inputs:
-        "Estimated body composition from Hume Pod, sleep and recovery signals from Hume Band, and selected Apple Health or Google Fit data.",
+        "Hume takes estimated body composition from the Pod, sleep and recovery data from the Band, and selected Apple Health or Google Fit data.",
       insightStyle:
-        "Presents metric trends, recovery and activity scores, daily recommendations, and proprietary outputs such as Pace of Aging and metabolic scores.",
+        "Hume shows metric trends, recovery and activity scores, and daily recommendations. It also produces its own scores, such as Pace of Aging and metabolic scores.",
       platforms:
-        "iPhone and iPad with iOS 15 or later, Android phones and tablets, and Chromebook, used with supported Hume hardware.",
+        "Hume runs on iPhone and iPad with iOS 15 or later, Android phones and tablets, and Chromebook, used together with supported Hume hardware.",
       pricing:
-        "Hume's pages list a $229 one-time reference price for Pod and $249 for Band 2.0, with changing promotional discounts. Core scores and data are marketed as subscription-free, while the App Store lists optional Hume Plus Annual at $99.99.",
+        "Hume's pages list a one-time reference price of $229 for the Pod and $249 for the Band 2.0, with promotional discounts that change. Core scores and data are marketed as free of any subscription, while the App Store lists an optional Hume Plus Annual purchase at $99.99.",
       primaryJob:
-        "Combine Hume body-composition and wearable measurements into a single wellness dashboard with trend-based guidance.",
+        "Bring Hume's body composition and wearable measurements together in one wellness dashboard, with guidance based on your trends.",
     },
     competitorEvidence: {
       clinicalRole: [1, 2],
@@ -354,24 +354,24 @@ export const HEALTH_ASSISTANT_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "Yes. Hume's current Google Play listing says Body Pod or Band is required. Pod supplies body-composition estimates and Band supplies continuous sleep, recovery, and activity signals; selected Apple Health or Google Fit data do not reproduce those proprietary measurements.",
-        question: "Do I need Hume hardware to use Hume Health?",
+          "Yes. Hume's current Google Play listing says a Body Pod or Band is required. The Pod supplies body composition estimates and the Band supplies continuous sleep, recovery, and activity data, and selected Apple Health or Google Fit data do not reproduce those Hume measurements.",
+        question: "Do I need the Hume Pod or Band to use the Hume Health app?",
       },
       {
         answer:
-          "No. Hume describes Pod body composition as an estimate rather than a DEXA-equivalent clinical measurement. It also describes Band blood-pressure insights as directional PPG trends, not cuff readings or a replacement for a validated cuff.",
-        question: "Are Hume's measurements clinical readings?",
+          "No. Hume describes Pod body composition as an estimate, not a DEXA-equivalent clinical measurement. It describes the Band's blood pressure insights as directional PPG trends, not cuff readings and not a replacement for a validated cuff.",
+        question: "Are Hume Health's measurements clinical readings?",
       },
       {
         answer:
-          "No for core scores and data, according to Hume's current product pages. Hume Plus is optional and adds deeper coaching and reports, while the App Store lists a $99.99 annual purchase. Hardware and promotional offers still change, so check checkout terms.",
+          "Not for core scores and data, according to Hume's current product pages. Hume Plus is optional and adds deeper coaching and reports, and the App Store lists it as a $99.99 annual purchase. Hardware prices and promotions change, so check the terms at checkout.",
         question: "Does Hume Health require a subscription?",
       },
     ],
-    headline: "Dedicated measurements or help across the wider context?",
+    headline: "Hume measures you with its Pod and Band. Murph helps you decide what to do next.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Murph is a personal health assistant that connects health context to decisions; Hume Health pairs dedicated sensors with body-composition and recovery estimates.",
+      "Hume Health pairs its Pod and Band with body composition and recovery estimates. Murph is a personal health assistant with no sensors that keeps labs, records, and wearables in one chat.",
     name: "Hume Health",
     quickComparison: [
       {
@@ -456,39 +456,39 @@ export const HEALTH_ASSISTANT_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "The distinctive Hume experience requires an upfront Pod or Band purchase and continued device use, but Hume markets core scores and data without a required ongoing subscription. Murph cannot generate Pod body-composition or Band sleep and recovery measurements.",
-      "Pod bioelectrical-impedance estimates can vary with hydration, timing, and calibration; Band outputs are directional wellness estimates rather than clinical readings.",
-      "Hume's proprietary aging, recovery, and metabolic scores should not be interpreted as diagnoses or guaranteed outcome changes.",
+      "Hume's experience needs an upfront Pod or Band purchase and ongoing use of the device, though Hume markets its core scores and data without a required subscription. Murph cannot produce Pod body composition or Band sleep and recovery measurements.",
+      "The Pod estimates body composition with bioelectrical impedance, so hydration, timing, and calibration can shift the numbers. Band outputs are directional wellness estimates, not clinical readings.",
+      "Hume's own aging, recovery, and metabolic scores are not diagnoses, and they do not guarantee a change in outcomes.",
     ],
     useTogether:
-      "Keep Hume for Pod and Band measurements. Bring a trend to Murph when you want to consider it beside authorized or manually shared records, labs, symptoms, routines, or constraints, then keep the resulting decision and later check-in in the conversation. No direct Hume-Murph connection is documented.",
+      "Keep Hume for the Pod and Band measurements. When a trend raises a question, bring it to Murph and look at it next to the records, labs, symptoms, and routines you have shared, then keep the decision and a later check-in in the chat. No direct Hume-Murph connection is documented.",
   },
   {
     aliases: ["HUMANITY - AI Health Coach", "Humanity Health"],
     category: "health-assistants",
     chooseCompetitor:
-      "Choose Humanity when you want phone and wearable signals distilled into Rate of Aging, Biological Age, and H Score, with streaks, daily actions, and optional blood-based analysis to keep the longevity goal visible.",
+      "Humanity is the better fit if you want your phone and wearable data boiled down to Rate of Aging, Biological Age, and H Score. Streaks and daily actions keep the longevity goal in front of you, and blood-based analysis is optional.",
     chooseMurph:
-      "Choose Murph when a score is only one clue and you want to weigh it with records, symptoms, routines, labs, goals, tradeoffs, and lived constraints, then carry the decision into a plan, reminder, check-in, or personal experiment.",
+      "Choose Murph if an aging score is one clue among many and you want to weigh it against your records, labs, symptoms, and daily routine. Murph then turns the decision into a plan, a reminder, a check-in, or a small personal experiment.",
     competitor: {
       clinicalRole:
-        "A consumer wellness and longevity app. Humanity says its scores and guidance are informational and are not medical advice, diagnosis, treatment, or a reason to change medication or care without a professional.",
+        "Humanity is a consumer wellness and longevity app. It says its scores and guidance are for information only. They are not medical advice, diagnosis, or treatment, and not a reason to change medication or care without a professional.",
       followThrough:
-        "Recommended actions across movement, nutrition, mind, and recovery, plus streaks, weekly reports, and optional social Circles.",
+        "Humanity recommends actions across movement, nutrition, mind, and recovery. It also has streaks, weekly reports, and optional social Circles.",
       format:
-        "A mobile longevity dashboard and AI coach organized around proprietary aging scores, daily actions, and optional blood-test analysis.",
+        "A phone longevity dashboard and AI coach built around Humanity's own aging scores, daily actions, and optional blood-test analysis.",
       hardware:
-        "No proprietary hardware is required. A supported phone, Apple Watch, or other data source connected through Apple Health or Health Connect can contribute signals.",
+        "No special hardware is required. A supported phone, an Apple Watch, or another source connected through Apple Health or Health Connect can supply the data.",
       inputs:
-        "Phone and wearable movement, steps, heart-rate patterns, resting heart rate, sleep, manually completed actions, and optional recent blood-test results.",
+        "Humanity reads movement, steps, heart-rate patterns, resting heart rate, and sleep from your phone and wearable. It also counts the actions you mark complete and, if you add them, recent blood-test results.",
       insightStyle:
-        "Summarizes inputs as Rate of Aging, Biological Age, H Score, and Blood Age, then recommends wellness actions intended to move those estimates.",
+        "Humanity sums up your inputs as Rate of Aging, Biological Age, H Score, and Blood Age. It then recommends wellness actions meant to move those estimates.",
       platforms:
-        "iPhone with iOS 16 or later, Apple Watch with watchOS 9.3 or later, and Android with supported Health Connect data.",
+        "Humanity runs on iPhone with iOS 16 or later, Apple Watch with watchOS 9.3 or later, and Android with supported Health Connect data.",
       pricing:
-        "A free account can generate a Rate of Aging score. The US App Store lists Premium purchases including $49.99 and a separate Pro purchase; Humanity's terms allow several billing periods, so confirm the duration and price at checkout.",
+        "A free account can generate a Rate of Aging score. The US App Store lists Premium purchases, including one at $49.99, and a separate Pro purchase. Humanity's terms allow several billing periods, so confirm the duration and price at checkout.",
       primaryJob:
-        "Motivate longevity-oriented behavior through model-generated aging estimates and a gamified set of daily wellness actions.",
+        "Get you to act on longevity by showing model-based aging estimates and a game-like set of daily wellness actions.",
     },
     competitorEvidence: {
       clinicalRole: [4],
@@ -504,24 +504,24 @@ export const HEALTH_ASSISTANT_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. Humanity's Biological Age and Rate of Aging are model-generated wellness estimates. They can make direction and daily actions easier to see, but Humanity does not establish them as a clinical diagnosis or a precise forecast for one person.",
-        question: "Is Humanity's Biological Age a clinical measurement?",
+          "No. Humanity's Biological Age and Rate of Aging are wellness estimates produced by a model. They can make your direction and daily actions easier to see, but Humanity does not present them as a clinical diagnosis or a precise forecast for one person.",
+        question: "Is Humanity's Biological Age a real medical measurement?",
       },
       {
         answer:
-          "Humanity can generate its core Rate of Aging from compatible phone and wearable signals. Its Pro features can add recent blood-test data to produce blood-based insights, so laboratory input is optional rather than required for the basic experience.",
-        question: "Does Humanity require a blood test?",
+          "No. Humanity can produce its core Rate of Aging from compatible phone and wearable data. Its Pro features can add recent blood-test data for blood-based insights, so lab input is optional and not required for the basic experience.",
+        question: "Do I need a blood test to use Humanity?",
       },
       {
         answer:
-          "Humanity turns compatible data into an aging-focused score and action loop. Murph keeps different health threads in one continuing conversation, so a wearable trend, record, symptom, decision, and later result can inform one another without making longevity the required frame.",
-        question: "What is the central difference between Humanity and Murph?",
+          "Humanity turns compatible data into an aging score and a loop of daily actions. Murph keeps your different health threads in one ongoing conversation, so a wearable trend, a record, a symptom, a decision, and a later result can inform each other. Longevity does not have to be the frame.",
+        question: "How is Humanity different from Murph?",
       },
     ],
-    headline: "A longevity scorecard or help across the wider health story?",
+    headline: "Humanity gives an aging score and daily actions. Murph adds records and errands.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Murph is a personal health assistant for questions, decisions, and follow-through; Humanity centers longevity scores, wearable inputs, and daily actions.",
+      "Humanity turns wearable data into an aging score with daily actions and streaks. Murph, a personal health assistant, keeps records, labs, and reminders in one chat, no score required.",
     name: "Humanity",
     quickComparison: [
       {
@@ -606,39 +606,39 @@ export const HEALTH_ASSISTANT_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Humanity's aging scores make a longevity goal concrete and easy to revisit, but a proprietary wellness estimate can feel more precise than its non-clinical role supports. Murph does not calculate Humanity's Rate of Aging, Biological Age, H Score, or Blood Age.",
-      "Blood-based features and deeper analysis sit outside the free core experience and may require a higher-priced plan.",
-      "Recommendations are general wellness guidance and should not drive medication, diagnosis, or treatment decisions.",
+      "Humanity's aging scores make a longevity goal concrete and easy to revisit, but an in-house wellness estimate can look more precise than its non-clinical role supports. Murph does not calculate Humanity's Rate of Aging, Biological Age, H Score, or Blood Age.",
+      "Blood-based features and deeper analysis sit outside the free core, and may need a higher-priced plan.",
+      "Humanity's recommendations are general wellness guidance. They should not drive medication, diagnosis, or treatment decisions.",
     ],
     useTogether:
-      "Keep Humanity if its aging scores and daily actions motivate you. Bring a score or weekly pattern to Murph when it raises a wider question involving records, symptoms, labs, routines, or tradeoffs, then keep the decision and follow-up there. No direct Humanity-Murph connection is documented.",
+      "Keep Humanity if its aging scores and daily actions keep you motivated. When a score or weekly pattern raises a bigger question about your records, symptoms, labs, routines, or a tradeoff, bring it to Murph and keep the decision and follow-up there. No direct Humanity-Murph connection is documented.",
   },
   {
     aliases: ["Health Tracker: Healthily", "Your.MD"],
     category: "health-assistants",
     chooseCompetitor:
-      "Choose Healthily when a predictable tracker is the point: record selected factors, set goals and reminders, follow a 28-day plan, and review weekly reports and self-care content in an iPhone app.",
+      "Choose Healthily when a predictable tracker is what you want: log selected factors, set goals and reminders, follow a 28-day plan, and read weekly reports and self-care content, all in one iPhone app.",
     chooseMurph:
-      "Choose Murph when logging is not the end goal and you want a private conversation to put a pattern beside records, wearable or lab context, routines, and constraints, then help with the question, decision, plan, reminder, or later check-in.",
+      "Pick Murph when logging is not the point and you want to put a pattern next to your records, lab results, and wearable data, then talk it through. Murph works in iMessage or Telegram, sets reminders, and checks back in later.",
     competitor: {
       clinicalRole:
-        "A consumer self-care and wellness app. Healthily says its content and tools do not provide medical advice, diagnosis, or treatment and do not replace a health professional.",
+        "Healthily is a consumer self-care and wellness app. It says its content and tools do not give medical advice, diagnosis, or treatment and do not replace a health professional.",
       followThrough:
-        "Goals, reminders, manual trackers, notes, weekly reports, and 28-day plans covering activity, mind, nutrition, and sleep.",
+        "Healthily offers goals, reminders, manual trackers, notes, and weekly reports. Its 28-day plans cover activity, mind, nutrition, and sleep.",
       format:
-        "A structured mobile health journal with trackers, plans, reports, reminders, a back-pain hub, and a health-information library.",
+        "A structured health journal for your phone, with trackers, plans, reports, reminders, a back-pain hub, and a library of health information.",
       hardware:
-        "No proprietary hardware is required. The current iPhone listing documents Apple Health and Fitbit connections, although supported fields and connection paths can vary.",
+        "No special hardware is required. The current iPhone listing documents Apple Health and Fitbit connections, though the supported fields and how you connect can vary.",
       inputs:
-        "Manual activity, sleep, mental wellbeing, symptoms, medication, habits, goals, notes, and selected connected health or Fitbit data.",
+        "You log activity, sleep, mental wellbeing, symptoms, medication, habits, goals, and notes by hand. Healthily can also take selected connected health or Fitbit data.",
       insightStyle:
-        "Shows logs, progress, reminders, and weekly self-care reports. The store listings still advertise a DOT AI checker, but its live consumer availability is not established.",
+        "Healthily shows your logs, progress, reminders, and weekly self-care reports. The store listings still advertise a DOT AI checker, but whether it is live for consumers is not established.",
       platforms:
-        "iPhone with iOS 14 or later. Healthily retired and discontinued its Android app on March 31, 2026.",
+        "Healthily runs on iPhone with iOS 14 or later. It retired and discontinued its Android app on March 31, 2026.",
       pricing:
-        "Healthily advertises a seven-day trial. Its App Store list includes $4.99 weekly, $6.49 and $24.99 subscription entries, and a $29.99 lifetime entry, but some durations are unclear and checkout terms control.",
+        "Healthily advertises a seven-day trial. Its App Store list includes a $4.99 weekly entry, $6.49 and $24.99 subscription entries, and a $29.99 lifetime entry. Some durations are unclear, and the checkout terms control.",
       primaryJob:
-        "Help a user record wellness factors, follow short self-care plans, and review progress in a structured mobile journal.",
+        "Help you record wellness factors, follow short self-care plans, and review your progress in a structured journal on your phone.",
     },
     competitorEvidence: {
       clinicalRole: [4],
@@ -654,24 +654,24 @@ export const HEALTH_ASSISTANT_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "Not from the current official evidence. The iPhone listing still advertises Healthily's DOT chatbot and symptom checker, but Healthily's consumer symptom-checker page says the feature has been temporarily removed.",
-        question: "Is Healthily's AI symptom checker currently available?",
+          "Not as far as the current official evidence shows. The iPhone listing still advertises Healthily's DOT chatbot and symptom checker, but Healthily's consumer symptom-checker page says the feature has been temporarily removed.",
+        question: "Does Healthily still have an AI symptom checker?",
       },
       {
         answer:
-          "Healthily supports manual trackers for activity, sleep, mental wellbeing, symptoms, medication, and custom habits. Its iPhone listing also advertises Apple Health and Fitbit connections, although supported fields and connection paths can vary.",
+          "Healthily has manual trackers for activity, sleep, mental wellbeing, symptoms, medication, and custom habits. Its iPhone listing also advertises Apple Health and Fitbit connections, though the supported fields and how you connect can vary.",
         question: "What can I track in Healthily?",
       },
       {
         answer:
-          "Healthily's terms exclude emergency use and say the service is not intended for children under 16, pregnancy, immunosuppression, or management of long-term conditions such as diabetes. A qualified professional remains the right source for medical decisions.",
-        question: "Who should not rely on Healthily for self-care guidance?",
+          "Healthily's terms rule out emergency use. They also say the service is not intended for children under 16, pregnancy, immunosuppression, or managing long-term conditions such as diabetes. A qualified professional is still the right source for medical decisions.",
+        question: "Who should not use Healthily?",
       },
     ],
-    headline: "A structured self-care journal or an ongoing conversation?",
+    headline: "Healthily is an iPhone self-care journal. Murph is a health assistant you text.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Murph is a personal health assistant for contextual decisions and follow-through; Healthily is an iPhone self-care journal with trackers, reports, and plans.",
+      "Healthily is an iPhone self-care journal with trackers, weekly reports, and 28-day plans. Murph is a personal health assistant you text that also reads your records, labs, and wearables.",
     name: "Healthily",
     quickComparison: [
       {
@@ -760,12 +760,12 @@ export const HEALTH_ASSISTANT_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Healthily offers a predictable journal, reports, guided plans, and a content library, but its advertised AI checker cannot be treated as a verified live feature. Murph does not provide Healthily's dedicated tracker screens, weekly reports, or 28-day plans.",
-      "Manual tracking can reveal patterns only when entries are consistent enough to support a meaningful report.",
-      "Healthily retired and discontinued its Android app on March 31, 2026, so the current consumer tracker is an iPhone-only choice.",
-      "Healthily's terms exclude children under 16, pregnancy, immunosuppression, and management of long-term conditions such as diabetes from its intended self-care use.",
+      "Healthily gives you a predictable journal, reports, guided plans, and a content library, but its advertised AI checker cannot be counted on as a live feature. Murph does not have Healthily's dedicated tracker screens, weekly reports, or 28-day plans.",
+      "Manual tracking only shows a pattern if you log often enough for the weekly report to have something to work with.",
+      "Healthily retired and discontinued its Android app on March 31, 2026, so the current consumer tracker is iPhone only.",
+      "Healthily's terms say its self-care use is not intended for children under 16, pregnancy, immunosuppression, or managing long-term conditions such as diabetes.",
     ],
     useTogether:
-      "Keep symptoms, mood, medication, and habits logged in Healthily. When a weekly report shows a pattern, bring the relevant summary to Murph with any authorized records, labs, or wearable context, then decide on a next step and schedule a later check-in. No automatic Healthily-Murph connection is documented.",
+      "Keep logging symptoms, mood, medication, and habits in Healthily. When a weekly report shows a pattern, send the summary to Murph along with any records, labs, or wearable data you have connected, then decide on a next step and set a later check-in. No automatic Healthily-Murph connection is documented.",
   },
 ]);

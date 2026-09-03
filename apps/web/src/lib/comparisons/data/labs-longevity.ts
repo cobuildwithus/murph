@@ -5,28 +5,28 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     aliases: ["Function"],
     category: "labs-longevity",
     chooseCompetitor:
-      "Choose Function when the immediate need is a prepaid annual lab program with clinician reviewed explanations and access to add-on imaging.",
+      "Function Health is the better fit if you want a prepaid yearly lab program. You get 100+ tests up front, 60+ more a few months later, clinician reviewed notes, and optional MRI or CT at extra cost.",
     chooseMurph:
-      "Choose Murph when the main need is a continuing conversation that connects health context across time and helps turn an existing plan into practical next steps.",
+      "Choose Murph if you want help understanding lab results you already have. Murph charts each marker against its reference band, explains it in plain words, and reminds you about the plan you agreed on.",
     competitor: {
       clinicalRole:
-        "Function is a health technology company. Independent laboratories and clinicians provide testing and review; Function says it does not diagnose or treat disease.",
+        "Function is a health technology company. Independent labs and clinicians do the testing and review. Function says it does not diagnose or treat disease.",
       followThrough:
-        "A personalized protocol, result explanations, clinician flags, a midyear test, and optional tests or scans at added cost.",
+        "You get a personalized protocol, written explanations of each result, clinician flags, and a midyear test. Extra tests or scans cost more.",
       format:
-        "An annual testing membership with an initial lab visit, a follow-up visit 3 to 6 months later, and a longitudinal results account.",
+        "An annual testing membership. There is a first lab visit, a follow-up visit 3 to 6 months later, and a results account that tracks changes over time.",
       hardware:
-        "No owned device is required. Samples are collected through partner labs or mobile phlebotomy, with MRI and CT available separately.",
+        "You do not need to own a device. Samples are collected at partner labs or by mobile phlebotomy, and MRI and CT are available separately.",
       inputs:
-        "Blood, urine, health history, prior result uploads, and optional MRI, CT, or add-on test data.",
+        "Blood, urine, health history, and uploads of prior results. MRI, CT, and add-on test data are optional.",
       insightStyle:
-        "Clinician reviewed biomarker explanations, issue flags, longitudinal trends, and a personalized protocol.",
+        "Clinician reviewed explanations of each biomarker, flags on issues, trends over time, and a personalized protocol.",
       platforms:
-        "Web member portal with private AI chat and optional connections to supported AI assistants.",
+        "A web member portal with private AI chat. You can also connect it to supported AI assistants.",
       pricing:
-        "$365 charged annually on the current public site. The footer calls this a first-year price; add-ons, scans, and some state-specific lab costs are extra.",
+        "$365 charged annually on the current public site. The footer calls this a first-year price. Add-ons, scans, and some state-specific lab costs are extra.",
       primaryJob:
-        "Provide a broad twice-yearly laboratory view and make the results easier to inspect over time.",
+        "Give you a broad lab picture twice a year and make the results easy to review over time.",
     },
     competitorEvidence: {
       clinicalRole: [1],
@@ -42,24 +42,24 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. Murph does not draw blood, run laboratory assays, or provide MRI or CT scans. Function can supply those measurements, while Murph can help organize the resulting context and support follow-through.",
+          "No. Murph does not draw blood, run lab assays, or provide MRI or CT scans. Function Health supplies those measurements. Murph can chart the results, explain them, and help you follow the plan.",
         question: "Can Murph replace Function Health testing?",
       },
       {
         answer:
-          "Function currently describes 160+ annual lab tests split across an initial 100+ test visit and a 60+ test follow-up. Add-on tests and imaging are not part of the base testing count.",
+          "Function Health currently lists 160+ lab tests per year. That splits into a 100+ test first visit and a 60+ test follow-up. Add-on tests and imaging are not part of that count.",
         question: "What does Function Health include during a year?",
       },
       {
         answer:
-          "No. Function says it is not a medical provider, and Murph is also not medical care. Urgent symptoms, diagnoses, and treatment decisions belong with a licensed clinician.",
+          "No. Function Health says it is not a medical provider, and Murph is not medical care either. Urgent symptoms, diagnoses, and treatment decisions belong with a licensed clinician.",
         question: "Is either Function Health or Murph primary medical care?",
       },
     ],
-    headline: "Function Health measures broadly. Murph helps carry the context forward.",
+    headline: "Function Health runs labs twice a year. Murph works with the results in between.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Function Health provides broad annual labs and optional scans. Murph is a personal health assistant for connecting those results to context, questions, and follow-through.",
+      "Function Health is an annual lab membership with 160+ tests and optional scans. Murph is a personal health assistant that charts your results and helps you follow the plan.",
     name: "Function Health",
     quickComparison: [
       {
@@ -144,39 +144,39 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "The public site calls $365 a first-year price, so renewal cost should be confirmed before purchase.",
-      "The 160+ annual figure spans two testing points and should not be read as 160 unique assays in one draw.",
-      "Function generates results but does not replace a treating clinician, while Murph does not generate laboratory or scan data at all.",
+      "Function's site calls $365 a first-year price. Check what renewal costs before you buy.",
+      "The 160+ tests are spread across two visits. It is not 160 separate assays in one draw.",
+      "Function runs the tests but does not replace your treating clinician. Murph runs no tests or scans at all.",
     ],
     useTogether:
-      "Use Function for measurements and clinician reviewed result notes, then bring the relevant report, questions, and agreed next steps into Murph for reminders, planning, and ongoing context.",
+      "Use Function Health for the blood draws, clinician flags, and protocol. Then upload the report to Murph. Murph charts the markers, answers your questions in plain terms, and sends reminders for the follow-up draw and the steps you agreed to.",
   },
   {
     aliases: ["Superpower Health"],
     category: "labs-longevity",
     chooseCompetitor:
-      "Choose Superpower when a yearly 100+ biomarker blood draw and its connected marketplace are the core purchase.",
+      "Pick Superpower when the yearly 100+ biomarker draw is the main thing you want. It comes with an AI protocol and a marketplace for extra tests, supplements, and eligible prescriptions.",
     chooseMurph:
-      "Choose Murph when ongoing conversation, remembered context, adaptable plans, and support between health events matter more than buying a lab bundle.",
+      "Choose Murph if you want one ongoing conversation about your health rather than a yearly lab bundle. Murph remembers what you told it, adapts the plan, and checks in between tests.",
     competitor: {
       clinicalRole:
-        "Superpower is a technology platform, not a healthcare provider. Independent clinicians and labs provide medical and testing services, while nonclinical care team members offer wellness support.",
+        "Superpower is a technology platform, not a healthcare provider. Independent clinicians and labs provide the medical and testing services. Nonclinical care team members offer wellness support.",
       followThrough:
-        "A personalized protocol, AI chat, year-round care team messaging, wearable trends, and access to separately purchased tests, supplements, and eligible prescriptions.",
+        "A personalized protocol, AI chat, and care team messaging all year. Wearable trends are shown, and you can buy extra tests, supplements, and eligible prescriptions separately.",
       format:
-        "An annual membership beginning with one partner lab draw or an optional at-home collection.",
+        "An annual membership. It starts with one draw at a partner lab, or an optional at-home collection.",
       hardware:
-        "No ongoing device is required. It can incorporate supported wearable data and uses partner collection services.",
+        "No device is required. Superpower can pull in supported wearable data and uses partner collection services.",
       inputs:
-        "A 100+ biomarker blood test, health history, uploaded outside labs, and supported wearable data including Apple Health, WHOOP, and Oura.",
+        "A 100+ biomarker blood test, your health history, and uploaded outside labs. Supported wearables include Apple Health, WHOOP, and Oura.",
       insightStyle:
-        "A biological age estimate, health scores, trends, and an AI generated lifestyle, diet, and supplement protocol.",
+        "A biological age estimate, health scores, and trends. An AI writes a lifestyle, diet, and supplement protocol.",
       platforms:
-        "Web member portal with mobile app distribution referenced in its terms and supported wearable connections.",
+        "A web member portal. Its terms mention mobile app distribution, and it connects to supported wearables.",
       pricing:
         "Starts at $199 per year. At-home collection, repeat testing, marketplace products, prescriptions, and specialty tests can cost more.",
       primaryJob:
-        "Turn one broad annual lab baseline into a protocol and a catalog of possible next services.",
+        "Turn one broad yearly lab baseline into a protocol and a catalog of services you might buy next.",
     },
     competitorEvidence: {
       clinicalRole: [3],
@@ -192,24 +192,24 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. Murph does not order or perform Superpower's blood test. Someone can use the products together by bringing relevant results and clinician instructions into Murph for ongoing support.",
+          "No. Murph does not order or run blood tests. You can use both: get the draw from Superpower, then bring the results and any clinician instructions into Murph for charts, plain explanations, and ongoing support.",
         question: "Does Murph replace the Superpower blood test?",
       },
       {
         answer:
-          "The base membership starts with one annual 100+ biomarker draw. Additional tests, at-home collection, products, and prescriptions can carry separate charges.",
+          "No. The base membership includes one 100+ biomarker draw a year. At-home collection, extra tests, marketplace products, and prescriptions can cost extra.",
         question: "Are all Superpower tests and treatments included for $199?",
       },
       {
         answer:
-          "Superpower says its AI and nonclinical care team do not diagnose or treat. Murph is also educational support rather than medical care, so a licensed clinician remains responsible for diagnosis and treatment.",
+          "No. Superpower says its AI and nonclinical care team do not diagnose or treat. Murph is educational support, not medical care. A licensed clinician stays responsible for diagnosis and treatment.",
         question: "Is Superpower's AI the same as medical care?",
       },
     ],
-    headline: "Superpower sells an annual health baseline. Murph stays with the plan between tests.",
+    headline: "Murph keeps a Superpower protocol going between yearly draws.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Superpower bundles an annual biomarker test, protocol, and marketplace. Murph is a personal health assistant for carrying the plan into daily life, not a testing service.",
+      "Superpower bundles a yearly 100+ biomarker blood test, an AI protocol, and a marketplace. Murph is a personal health assistant that charts those results and keeps the plan going.",
     name: "Superpower",
     quickComparison: [
       {
@@ -290,40 +290,40 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "The base program centers on one annual draw rather than repeated included testing through the year.",
-      "Marketplace access is not the same as having every add-on, medication, or specialty test included.",
-      "Its protocol and biological age outputs are interpretations and estimates, not independent diagnoses.",
-      "Murph supplies none of Superpower's testing, proprietary scores, prescriptions, or marketplace products.",
+      "The base plan is built around one draw a year. Repeat testing through the year is not included.",
+      "Marketplace access does not mean every add-on, medication, or specialty test is included.",
+      "The protocol and biological age are estimates and interpretations, not diagnoses.",
+      "Murph does none of Superpower's testing and offers no proprietary scores, prescriptions, or marketplace products.",
     ],
     useTogether:
-      "Use Superpower to obtain the annual panel and its reviewed protocol, then use Murph to keep relevant tasks, questions, habits, and follow-up timing in one continuing conversation.",
+      "Use Superpower for the annual panel and its protocol. Then bring the results into Murph. Murph charts the markers, explains them plainly, and keeps your tasks, questions, and retest timing in one thread.",
   },
   {
     aliases: ["Inside Tracker"],
     category: "labs-longevity",
     chooseCompetitor:
-      "Choose InsideTracker when performance analytics, supported wearable integrations, and a structured biomarker action plan are the main job.",
+      "InsideTracker is the better fit if you want performance analytics from your blood work. It gives you optimized ranges, healthspan scores, an action plan, and imports from Apple Health, Oura, Fitbit, and Garmin.",
     chooseMurph:
-      "Choose Murph when you want a private assistant to connect health questions and plans beyond a performance dashboard and help with follow-through over time.",
+      "Choose Murph if you want more than a performance dashboard. Murph reads your labs alongside sleep, meals, training, and records, explains them plainly, and keeps you on the plan you pick.",
     competitor: {
       clinicalRole:
-        "A wellness analytics service that says its results and recommendations are not medical advice, diagnosis, or treatment.",
+        "A wellness analytics service. InsideTracker says its results and recommendations are not medical advice, diagnosis, or treatment.",
       followThrough:
-        "Personalized recommendations, an action plan, trend tracking, and suggested retesting; its Nutrition DeepDive uses algorithmic recommendations, and InsideTracker says the tool complements rather than replaces a doctor's visit.",
+        "Personalized recommendations, an action plan, trend tracking, and suggested retesting. Its Nutrition DeepDive uses algorithmic recommendations. InsideTracker says the tool complements a doctor's visit rather than replacing it.",
       format:
-        "A yearly analytics membership that can be paired with an InsideTracker blood test or supported outside results.",
+        "A yearly analytics membership. You can pair it with an InsideTracker blood test or with supported outside results.",
       hardware:
-        "No proprietary device. It imports data from supported watches, rings, and fitness services.",
+        "There is no proprietary device. It imports data from supported watches, rings, and fitness services.",
       inputs:
-        "Up to 54 blood biomarkers in Ultimate, supported outside lab uploads, fitness and sleep trackers, and optional eligible DNA uploads.",
+        "Up to 54 blood biomarkers in Ultimate, plus supported outside lab uploads, fitness and sleep trackers, and optional eligible DNA uploads.",
       insightStyle:
-        "Healthspan category scores, optimized ranges, recommendations, and optional InnerAge and DNA insights.",
+        "Healthspan category scores, optimized ranges, and recommendations. InnerAge and DNA insights are optional.",
       platforms:
-        "Web, iOS, and Android with Apple Health, Oura, Fitbit, and Garmin support.",
+        "Web, iOS, and Android. It supports Apple Health, Oura, Fitbit, and Garmin.",
       pricing:
-        "For new US and Canadian customers, Membership plus Ultimate is $489. The standalone $149 membership is listed for international customers; current members can buy Ultimate for $340. InnerAge and DNA can cost extra.",
+        "New US and Canadian customers pay $489 for Membership plus Ultimate, and current members can buy Ultimate for $340. The standalone $149 membership is listed for international customers. InnerAge and DNA can cost extra.",
       primaryJob:
-        "Translate performance-related labs and tracker data into structured recommendations and trends.",
+        "Turn performance-related labs and tracker data into structured recommendations and trends.",
     },
     competitorEvidence: {
       clinicalRole: [5],
@@ -339,24 +339,24 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. Murph does not provide InsideTracker's blood test or proprietary scores. Murph can help a person discuss the results, connect them with other context, and carry out an agreed plan.",
+          "No. Murph does not offer InsideTracker's blood test or its proprietary scores. Murph can chart the results, explain them, connect them to your other data, and help you carry out the plan.",
         question: "Can Murph replace InsideTracker Ultimate?",
       },
       {
         answer:
-          "No. The $149 membership provides the analytics platform and supported uploads, while InsideTracker-ordered blood testing is purchased separately or through a bundle.",
+          "No. The $149 membership covers the analytics platform and supported uploads. Blood testing ordered through InsideTracker is bought separately or as part of a bundle.",
         question: "Does an InsideTracker membership include a blood test?",
       },
       {
         answer:
-          "InsideTracker presents biomarker and model-based insights for wellness and performance. Its terms say these do not diagnose or treat disease, and InnerAge is an estimate rather than a directly measured age.",
+          "No. InsideTracker gives biomarker and model-based insights for wellness and performance. Its terms say these do not diagnose or treat disease. InnerAge is an estimate, not a directly measured age.",
         question: "Are InsideTracker recommendations medical advice?",
       },
     ],
-    headline: "InsideTracker structures performance data. Murph connects it to the rest of life.",
+    headline: "Keep InsideTracker for its scores. Add Murph for the plan and the reminders.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "InsideTracker turns supported blood, DNA, and wearable data into proprietary analytics. Murph is a personal health assistant for wider context and ongoing follow-through.",
+      "InsideTracker turns blood, DNA, and wearable data into scores and ranges. Murph is a personal health assistant that explains your labs in plain terms and helps you act on them.",
     name: "InsideTracker",
     quickComparison: [
       {
@@ -449,40 +449,40 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "The lowest-priced membership does not include an InsideTracker blood draw.",
-      "InnerAge and DNA analysis depend on the purchased package and should not be assumed to be included.",
-      "Outside lab uploads only produce analytics for supported markers, not every value in the original report.",
+      "The cheapest membership does not include an InsideTracker blood draw.",
+      "InnerAge and DNA analysis depend on which package you buy. Do not assume they are included.",
+      "Outside lab uploads only produce analytics for supported markers. Other values in your report are not scored.",
       "Murph does not calculate InsideTracker's optimized ranges, proprietary scores, or recommendations.",
     ],
     useTogether:
-      "Use InsideTracker for its supported lab and performance analytics, then bring the useful findings into Murph to plan habits, remember context, and review what changed.",
+      "Use InsideTracker for its scores, optimized ranges, and retest suggestions. Then bring the report into Murph. Murph charts the markers with reference bands, answers questions in plain terms, and turns the recommendations into habits and reminders.",
   },
   {
     aliases: ["SiPhox", "SiPhox Core"],
     category: "labs-longevity",
     chooseCompetitor:
-      "Choose SiPhox when at-home collection, configurable lab panels, and recurring test cycles are the central requirement.",
+      "SiPhox is the better fit if you want to test from home on a schedule. You pick the panel, collect with the EasyDraw device, mail it in, and see how each marker moves cycle to cycle.",
     chooseMurph:
-      "Choose Murph when the central requirement is a continuing assistant for questions, decisions, habits, reminders, and context across multiple health sources.",
+      "Choose Murph if you want a running conversation about your health rather than another test cycle. Murph charts results from any lab, explains them plainly, and keeps reminders and habits in one place.",
     competitor: {
       clinicalRole:
-        "Primarily a wellness testing platform. Certain clinical programs use independent telehealth clinicians, while SiPhox itself says it is not a medical provider.",
+        "Mainly a wellness testing platform. Some clinical programs use independent telehealth clinicians, but SiPhox itself says it is not a medical provider.",
       followThrough:
-        "A personalized action plan, longitudinal dashboard, retest cadence, wearable context, and optional coaching or clinical programs.",
+        "A personalized action plan, a dashboard that tracks results over time, a retest schedule, and wearable data alongside your labs. Coaching and clinical programs are optional extras.",
       format:
-        "A recurring at-home test cycle offered monthly, quarterly, or every six months, with one-time specialty panels also available.",
+        "A recurring at-home test cycle, offered monthly, quarterly, or every six months. One-time specialty panels are also available.",
       hardware:
-        "An EasyDraw upper-arm collection device is used for mailed samples. No ongoing wearable is required.",
+        "You collect blood with an EasyDraw upper-arm device and mail the sample in. No wearable is required.",
       inputs:
-        "At-home blood samples, health information, supported outside labs, supplements, and compatible wearable or CGM data.",
+        "At-home blood samples, health information, supported outside labs, supplements you take, and compatible wearable or CGM data.",
       insightStyle:
-        "Panel-based biomarker trends and a personalized action plan, with depth determined by the base panel and selected upgrades.",
+        "Biomarker trends by panel and a personalized action plan. How deep it goes depends on the base panel and the upgrades you select.",
       platforms:
-        "Digital dashboard with integrations that include Oura, Apple Watch, Fitbit, Eight Sleep, Dexcom, FreeStyle CGMs, and Google Fit.",
+        "A digital dashboard. Integrations include Oura, Apple Watch, Fitbit, Eight Sleep, Dexcom, FreeStyle CGMs, and Google Fit.",
       pricing:
-        "The introductory base-panel cycle is $124 at checkout ($99 plus $25 shipping), then $149 per renewal ($124 plus $25 shipping). Ultimate 360 is $249 for new customers and $274 on renewal; panel add-ons and coaching cost more.",
+        "The introductory base-panel cycle is $124 at checkout ($99 plus $25 shipping), then $149 per renewal ($124 plus $25 shipping). Ultimate 360 is $249 for new customers and $274 on renewal. Panel add-ons and coaching cost more.",
       primaryJob:
-        "Make repeat laboratory testing possible from home and show changes across test cycles.",
+        "Make repeat lab testing possible from home and show how results change from one cycle to the next.",
     },
     competitorEvidence: {
       clinicalRole: [4],
@@ -498,24 +498,24 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. Murph is not a laboratory and cannot replace the EasyDraw collection, assay processing, or SiPhox report. It can support planning and follow-through after the results arrive.",
+          "No. Murph is not a lab. It cannot replace the EasyDraw collection, the assay processing, or the SiPhox report. Once results arrive, Murph can chart them, explain them, and help you plan what to do about them.",
         question: "Can Murph do the SiPhox at-home blood test?",
       },
       {
         answer:
-          "No. The base panel starts with a smaller included set, while additional markers and programs require upgrades. SiPhox pages also vary in how they count calculated and measured outputs.",
+          "No. The base panel starts with a smaller set of markers. More markers and programs require upgrades. SiPhox pages also differ in how they count calculated versus measured outputs.",
         question: "Are all SiPhox biomarkers included in the base price?",
       },
       {
         answer:
-          "Most SiPhox services are wellness testing. Some named programs offer care through independent clinicians, with availability determined by state and program eligibility.",
+          "Most SiPhox services are wellness testing, not medical care. Some named programs offer care through independent clinicians. Availability depends on your state and program eligibility.",
         question: "Does SiPhox Health provide medical care?",
       },
     ],
-    headline: "SiPhox brings repeat lab collection home. Murph supports what happens next.",
+    headline: "SiPhox mails you a blood kit on a schedule. Murph keeps the plan on track.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "SiPhox Health provides repeat at-home blood collection and biomarker trends. Murph is a personal health assistant for questions and plans between test cycles, not a lab.",
+      "SiPhox Health mails at-home blood kits on a monthly, quarterly, or six-month cycle. Murph is a personal health assistant that explains the results and keeps the plan going.",
     name: "SiPhox Health",
     quickComparison: [
       {
@@ -612,38 +612,38 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Base and upgraded panels include different markers, so the highest advertised count is not the base program.",
-      "New York and Hawaii are excluded from current services, and telehealth has additional state limits.",
-      "Shipping, upgrades, specialty panels, coaching, and clinical programs can raise the total beyond the headline cycle price.",
-      "Sample collection, laboratory analysis, and SiPhox's biomarker results remain outside Murph's role.",
+      "Base and upgraded panels cover different markers. The highest advertised count is not what the base program includes.",
+      "New York and Hawaii are excluded from current services. Telehealth has further state limits.",
+      "Shipping, upgrades, specialty panels, coaching, and clinical programs can push the total well past the headline cycle price.",
+      "Murph does not collect samples, run the lab analysis, or produce SiPhox's biomarker results.",
     ],
     useTogether:
-      "Use SiPhox for repeat measurements, then bring the reviewed result and selected actions into Murph for practical routines, reminders, and questions to take to a clinician.",
+      "Use SiPhox for the repeat draws and its dashboard. Then bring each result into Murph. Murph charts the markers with reference bands, explains what changed, sets reminders for the actions you chose, and helps you write down questions for a clinician.",
   },
   {
     aliases: ["Lifeforce Health"],
     category: "labs-longevity",
     chooseCompetitor:
-      "Choose Lifeforce when recurring labs, scheduled clinical consultation, coaching, and treatment eligibility are the main purchase.",
+      "Pick Lifeforce when you want repeat labs plus scheduled clinician visits, coaching, and the option of prescriptions where eligible. That bundle is the product.",
     chooseMurph:
-      "Choose Murph when you already have care or data and want an ongoing private assistant for context, preparation, decisions, and follow-through.",
+      "Choose Murph if you already have a doctor or your own data and want a private assistant on top. Murph helps you get ready for visits, remembers the instructions, and checks in on the plan.",
     competitor: {
       clinicalRole:
-        "Licensed care is delivered through independent professional practices. The program can evaluate prescriptions, but it is not emergency or full primary care.",
+        "Licensed care comes from independent professional practices. The program can evaluate you for prescriptions, but it is not emergency care or full primary care.",
       followThrough:
-        "Clinician consultations, a personalized program, coaching in the monthly tier, repeat labs, and access to eligible prescriptions and supplements.",
+        "Clinician consultations, a personalized program, and repeat labs. The monthly tier adds coaching, and eligible prescriptions and supplements are available.",
       format:
-        "A clinical longevity membership offered as a monthly high-touch program or a lower-touch annual Core plan.",
+        "A clinical longevity membership. It comes as a high-touch monthly program or a lower-touch annual Core plan.",
       hardware:
-        "No proprietary device is required. Blood can be collected at home or through a partner laboratory.",
+        "No proprietary device is required. Blood can be collected at home or at a partner lab.",
       inputs:
-        "Health history, goals, 50+ laboratory markers, repeat testing, and information reviewed during clinician and coach visits.",
+        "Health history, goals, 50+ lab markers, repeat testing, and what comes up during clinician and coach visits.",
       insightStyle:
-        "A LifeScore-style dashboard, biological age estimate, clinician interpretation, and a personalized clinical and lifestyle program.",
+        "A LifeScore-style dashboard, a biological age estimate, clinician interpretation, and a personalized clinical and lifestyle program.",
       platforms:
-        "Digital member dashboard with telehealth consultations and coaching communication.",
+        "A digital member dashboard, with telehealth consultations and coaching messages.",
       pricing:
-        "Monthly Membership starts with a $199 payment and then $149 per month. Core Annual is $599. Medications, supplements, and specialty services are extra.",
+        "Monthly Membership starts with a $199 payment, then $149 per month. Core Annual is $599. Medications, supplements, and specialty services are extra.",
       primaryJob:
         "Combine repeat biomarker testing with clinician access, coaching, and possible longevity treatment.",
     },
@@ -661,24 +661,24 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. Murph cannot order Lifeforce tests, prescribe medication, or replace its licensed clinicians. Murph can help someone prepare for visits and follow a clinician-approved plan.",
+          "No. Murph cannot order Lifeforce tests, prescribe medication, or stand in for its licensed clinicians. Murph can help you prepare for visits and follow a plan your clinician approved.",
         question: "Can Murph replace a Lifeforce clinician?",
       },
       {
         answer:
-          "No. The monthly and Core Annual tiers include different testing cadence, consultation access, and coaching. Prescriptions, medications, supplements, and specialty services can cost extra.",
+          "No. The monthly and Core Annual tiers differ in testing cadence, consultation access, and coaching. Prescriptions, medications, supplements, and specialty services can cost extra.",
         question: "Is everything in Lifeforce included in one membership price?",
       },
       {
         answer:
-          "Eligible licensed clinicians can diagnose and treat within their scope and state rules. Lifeforce's technology entity is separate from those practices, and the service is not emergency care.",
+          "Yes, within limits. Eligible licensed clinicians can diagnose and treat within their scope and state rules. Lifeforce's technology entity is separate from those practices, and the service is not emergency care.",
         question: "Does Lifeforce provide medical treatment?",
       },
     ],
-    headline: "Lifeforce combines labs with clinical care. Murph supports the work between visits.",
+    headline: "Lifeforce pairs labs with a clinician. Murph remembers what they told you.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Lifeforce combines recurring labs, coaching, and licensed clinical care. Murph is a personal health assistant for continuity around visits, not a clinician or prescriber.",
+      "Lifeforce pairs repeat labs with clinician visits and coaching. Murph is a personal health assistant that helps you prepare for visits and follow the plan afterward.",
     name: "Lifeforce",
     quickComparison: [
       {
@@ -763,40 +763,40 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "The monthly program costs substantially more than a lab-only membership.",
-      "Medical, prescription, and treatment availability depends on state rules and clinical eligibility.",
-      "Medication, supplements, and specialty services are not included in the advertised membership prices.",
-      "Licensed consultations, treatment eligibility, and prescribing remain Lifeforce functions that Murph cannot provide.",
+      "The monthly program costs much more than a lab-only membership.",
+      "Medical care, prescriptions, and treatment options depend on state rules and clinical eligibility.",
+      "Medications, supplements, and specialty services are not in the advertised membership prices.",
+      "Licensed consultations, treatment eligibility, and prescribing stay with Lifeforce. Murph cannot provide any of them.",
     ],
     useTogether:
-      "Use Lifeforce for its measurements and licensed care, while using Murph to prepare questions, remember clinician instructions, schedule practical tasks, and notice barriers to the plan.",
+      "Use Lifeforce for the labs and the licensed care. Use Murph to write down questions before each visit, remember what the clinician said, schedule the practical tasks, and notice when the plan is slipping.",
   },
   {
     aliases: ["Mito", "Mito Core"],
     category: "labs-longevity",
     chooseCompetitor:
-      "Choose Mito when you want to select individual tests or panels, compare transparent prices, and receive a clinician reviewed action plan.",
+      "Mito is the better fit if you want to pick individual tests or panels, see the price before you order, and get a clinician reviewed action plan with each result.",
     chooseMurph:
-      "Choose Murph when you want ongoing context and practical support that is not tied to ordering another test or buying a specific panel.",
+      "Choose Murph if you want ongoing help that is not tied to buying another test. Murph charts whatever labs you already have, explains them plainly, and follows up on the plan day to day.",
     competitor: {
       clinicalRole:
-        "Mito is a technology platform rather than a medical provider. Independent partner clinics order tests and review results, while Mito describes its guidance as wellness information.",
+        "Mito is a technology platform, not a medical provider. Independent partner clinics order the tests and review the results. Mito describes its guidance as wellness information.",
       followThrough:
-        "Trend tracking, retest reminders, an action plan, AI concierge chat, in-chat clinician escalation, and optional paid consultations.",
+        "Trend tracking, retest reminders, an action plan, and AI concierge chat. You can escalate to a clinician in chat, and paid consultations are optional.",
       format:
-        "A month-to-month membership layered onto an at-cost test marketplace, with nonmember ordering also available.",
+        "A month-to-month membership on top of an at-cost test marketplace. Nonmembers can order too.",
       hardware:
-        "No ongoing proprietary device. Collection can occur at partner laboratories or through selected at-home kits.",
+        "No proprietary device. Samples are collected at partner labs or with selected at-home kits.",
       inputs:
-        "Selected blood, urine, stool, genetic, or specialty tests, a health questionnaire, and uploaded prior laboratory records.",
+        "The blood, urine, stool, genetic, or specialty tests you select, a health questionnaire, and uploaded prior lab records.",
       insightStyle:
         "Clinician reviewed explanations, a personalized wellness plan, biological age tracking, trends, and an AI health concierge.",
       platforms:
-        "Digital web dashboard and concierge experience. A current native mobile app commitment is not clearly stated on the public pages.",
+        "A web dashboard and concierge chat. The public pages do not clearly commit to a native mobile app.",
       pricing:
-        "$9 per month for membership, with tests purchased separately. Mito Core starts at $197.62 for members through one provider, but state and laboratory pricing can be much higher.",
+        "$9 per month for membership, with tests bought separately. Mito Core starts at $197.62 for members through one provider, but state and lab pricing can be much higher.",
       primaryJob:
-        "Offer flexible direct testing at listed prices and keep the resulting records and guidance together.",
+        "Offer flexible direct testing at listed prices and keep the records and guidance together in one place.",
     },
     competitorEvidence: {
       clinicalRole: [4],
@@ -812,24 +812,24 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. Murph cannot order, collect, or process Mito tests. It can help someone work with an existing result and the plan their clinician or Mito review produced.",
+          "No. Murph cannot order, collect, or process Mito tests. Murph can chart a result you already have, explain it, and help you work the plan your clinician or Mito review produced.",
         question: "Can Murph replace Mito Health laboratory testing?",
       },
       {
         answer:
-          "No. The $9 monthly fee unlocks member pricing, tracking, guidance, and concierge features. Tests, draw fees, specialty kits, scans, and one-to-one consultations are purchased separately.",
+          "No. The $9 monthly fee gets you member pricing, tracking, guidance, and the concierge features. Tests, draw fees, specialty kits, scans, and one-to-one consultations are bought separately.",
         question: "Are Mito Health tests included in the $9 membership?",
       },
       {
         answer:
-          "Mito pages currently use several different counts for curated panels, sometimes mixing measured markers, sex-specific values, urine outputs, and calculated results. The exact product page and checkout are the safer references.",
+          "Mito's pages currently give several different counts for its panels. Some mix measured markers, sex-specific values, urine outputs, and calculated results. The exact product page and checkout are the safer references.",
         question: "Why do Mito Health biomarker counts vary by page?",
       },
     ],
-    headline: "Mito makes testing modular. Murph makes the follow-through continuous.",
+    headline: "Mito lets you pick and price each test. Murph turns the plan into daily habits.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Mito Health sells separately priced tests with clinician-reviewed action plans. Murph is a personal health assistant for connecting those results to records and daily follow-through.",
+      "Mito Health sells lab tests one at a time, with clinician reviewed action plans. Murph is a personal health assistant that charts the results and keeps you on the plan.",
     name: "Mito Health",
     quickComparison: [
       {
@@ -914,40 +914,40 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "The membership does not include a test, so the useful total price depends on what is ordered and where it is collected.",
-      "The current site shows inconsistent panel counts and materially different provider prices by state.",
-      "Mito's clinician review and wellness recommendations do not create a treating relationship with Mito itself.",
+      "The membership does not include a test. Your real total depends on what you order and where you get it collected.",
+      "The current site shows inconsistent panel counts, and provider prices differ a lot by state.",
+      "Mito's clinician review and wellness recommendations do not make Mito your treating clinician.",
       "Murph cannot order Mito's tests or stand in for the independent clinical review.",
     ],
     useTogether:
-      "Use Mito to order the appropriate test and obtain its reviewed action plan, then use Murph to carry selected next steps, reminders, and questions into everyday life.",
+      "Use Mito to order the test and get its reviewed action plan. Then bring the result into Murph. Murph charts each marker against its reference band, explains it in plain terms, and turns the plan into reminders and check-ins.",
   },
   {
     aliases: ["Parsley", "Parsley Clinical Lab Review"],
     category: "labs-longevity",
     chooseCompetitor:
-      "Choose Parsley when live clinician interpretation, symptom context, and a medical care pathway are the essential needs.",
+      "Parsley is the better fit if you want a licensed clinician to read your labs alongside your symptoms and say what medical follow-up makes sense. The visit is 30 minutes and comes with an action plan.",
     chooseMurph:
-      "Choose Murph when you want a private ongoing assistant to help prepare for care, organize records, and carry clinician-approved actions into daily life.",
+      "Choose Murph if you want a private assistant that sticks around after the visit. Murph keeps your records in one place, helps you prepare questions, and turns the clinician's plan into reminders and habits.",
     competitor: {
       clinicalRole:
-        "Clinical care is delivered by board-certified clinicians through independent physician-owned medical groups supported by Parsley's management platform.",
+        "Board-certified clinicians deliver the care through independent physician-owned medical groups. Parsley's management platform supports those groups.",
       followThrough:
-        "A personalized action plan, 14 days of care team messaging, and an option to continue into the separate Complete Care program.",
+        "A personalized action plan and 14 days of care team messaging. You can continue into the separate Complete Care program.",
       format:
-        "A 30-minute virtual Clinical Lab Review using Parsley's 80+ biomarker panel or qualifying outside labs from the prior six months, sold as an annual membership that auto-renews unless canceled.",
+        "A 30-minute virtual Clinical Lab Review. It uses Parsley's 80+ biomarker panel or qualifying outside labs from the prior six months. It is sold as an annual membership that auto-renews unless canceled.",
       hardware:
-        "No proprietary device. The panel uses Quest collection or optional at-home phlebotomy where available.",
+        "No proprietary device. The panel uses Quest collection, or optional at-home phlebotomy where available.",
       inputs:
-        "Blood results, symptoms, medical history, lifestyle information, and outside records reviewed during a clinical visit.",
+        "Blood results, symptoms, medical history, lifestyle information, and outside records, all reviewed during a clinical visit.",
       insightStyle:
-        "Clinician interpretation plus a Functional Health Score, Functional Age estimate, Aging Velocity estimate, and personalized recommendations.",
+        "A clinician's interpretation plus a Functional Health Score, a Functional Age estimate, an Aging Velocity estimate, and personalized recommendations.",
       platforms:
-        "HIPAA-compliant patient portal, virtual visits, and secure care team messaging.",
+        "A HIPAA-compliant patient portal, virtual visits, and secure care team messaging.",
       pricing:
-        "$550 per year for the Advanced Lab Panel plus visit, or $250 per year to bring recent outside labs. The Clinical Lab Review membership auto-renews unless canceled; Complete Care is separate, with insurance and self-pay rules.",
+        "$550 per year for the Advanced Lab Panel plus visit, or $250 per year if you bring recent outside labs. The Clinical Lab Review membership auto-renews unless canceled. Complete Care is separate and has its own insurance and self-pay rules.",
       primaryJob:
-        "Explain broad blood results in clinical context and define appropriate medical and lifestyle next steps.",
+        "Explain broad blood results with your symptoms and history in mind, and set out the right medical and lifestyle steps to take.",
     },
     competitorEvidence: {
       clinicalRole: [1, 4],
@@ -963,24 +963,24 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. Parsley's visit is with a licensed clinician, while Murph does not diagnose or treat. Murph can help prepare questions and follow a plan but should not substitute for the visit.",
+          "No. Parsley's visit is with a licensed clinician. Murph does not diagnose or treat. Murph can help you prepare questions and follow the plan, but it should not stand in for the visit.",
         question: "Can Murph replace a Parsley Clinical Lab Review?",
       },
       {
         answer:
-          "Clinical Lab Review is self-pay at $550 per year with Parsley's panel or $250 per year with recent eligible outside labs. The membership auto-renews unless canceled. Complete Care is a different program with membership fees, medical billing, copays, and deductibles.",
+          "No. Clinical Lab Review is self-pay: $550 per year with Parsley's panel, or $250 per year with recent eligible outside labs. The membership auto-renews unless canceled. Complete Care is a separate program with membership fees, medical billing, copays, and deductibles.",
         question: "Is Parsley Clinical Lab Review covered by the Complete Care price?",
       },
       {
         answer:
-          "No. They are clinician-informed model outputs derived from lab data and trends. They are useful summaries, not directly measured ages or diagnoses.",
+          "No. They are model outputs, informed by clinicians and derived from your lab data and trends. They are useful summaries, not directly measured ages or diagnoses.",
         question: "Are Parsley's Functional Age and Aging Velocity direct measurements?",
       },
     ],
-    headline: "Parsley provides clinical interpretation. Murph helps make the plan workable.",
+    headline: "A Parsley clinician reads your labs. Murph helps you stick to the plan.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Parsley Clinical Lab Review pairs broad labs with a licensed clinician. Murph is a personal health assistant for visit preparation and follow-through, not medical care.",
+      "Parsley's Clinical Lab Review pairs an 80+ biomarker panel with a clinician visit. Murph is a personal health assistant that helps you prepare for the visit and follow the plan.",
     name: "Parsley Health",
     quickComparison: [
       {
@@ -1069,40 +1069,40 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Clinical Lab Review is self-pay, auto-renews annually unless canceled, and includes 14 days of follow-up messaging rather than open-ended care.",
+      "Clinical Lab Review is self-pay and auto-renews each year unless you cancel. It includes 14 days of follow-up messaging, not open-ended care.",
       "New York and New Jersey use split payment and do not offer the at-home draw for this panel.",
-      "Functional Age and Aging Velocity are model-based summaries rather than direct physiological measurements.",
-      "Murph can support follow-through but cannot extend the licensed visit or replace Parsley's interpretation.",
+      "Functional Age and Aging Velocity are model-based summaries, not direct physical measurements.",
+      "Murph can help you follow the plan, but it cannot extend the licensed visit or replace Parsley's interpretation.",
     ],
     useTogether:
-      "Use Parsley for testing and licensed clinical interpretation, then use Murph to remember the agreed plan, surface barriers, and prepare informed follow-up questions.",
+      "Use Parsley for the labs and the clinician's read on them. Then bring the plan into Murph. Murph remembers what you agreed to, notices when it is slipping, and helps you write good questions for the next visit.",
   },
   {
     aliases: ["Wild Health Precision Medicine"],
     category: "labs-longevity",
     chooseCompetitor:
-      "Choose Wild Health when licensed clinical care, genetics, quarterly labs, and regular coaching are the core requirements.",
+      "Wild Health is the better fit if you want licensed physicians, genetic testing, quarterly bloodwork, and regular coaching in one program. Standard starts at $362 per month.",
     chooseMurph:
-      "Choose Murph when you need a lower-friction, ongoing assistant around existing health context without enrolling in a high-touch clinical membership.",
+      "Choose Murph if you want a light-touch assistant around the care and data you already have, not a full clinical membership. Murph reads your labs and wearables, explains them plainly, and checks in on the plan.",
     competitor: {
       clinicalRole:
-        "A telehealth functional medicine service with licensed physicians and coaches. Genomic testing is explicitly not the same as genetic counseling.",
+        "A telehealth functional medicine service with licensed physicians and coaches. Its terms say genomic testing is not the same as genetic counseling.",
       followThrough:
-        "Quarterly physician visits and bloodwork in Standard, ongoing coaching and messaging, and expanded testing and access in premium tiers.",
+        "Standard includes quarterly physician visits and bloodwork, plus ongoing coaching and messaging. Premium tiers add more testing and access.",
       format:
-        "A clinical membership with Standard, Peak, and Elite service levels and a minimum commitment on the standard program.",
+        "A clinical membership with Standard, Peak, and Elite service levels. The standard program has a minimum commitment.",
       hardware:
-        "No proprietary device is required in Standard. Higher tiers can include a device and advanced diagnostics.",
+        "Standard requires no proprietary device. Higher tiers can include a device and advanced diagnostics.",
       inputs:
-        "Genetic data, health history, 65+ standard panel markers, repeat bloodwork, goals, two included biological age tests with Standard membership, and tier-specific specialty testing.",
+        "Genetic data, health history, 65+ markers on the standard panel, repeat bloodwork, and your goals. Standard includes two biological age tests, and higher tiers add specialty testing.",
       insightStyle:
-        "A detailed genetics and lab report interpreted by a physician, with personalized nutrition, lifestyle, supplement, and treatment planning.",
+        "A detailed genetics and lab report that a physician interprets, with personalized nutrition, lifestyle, supplement, and treatment planning.",
       platforms:
-        "Wild Health Clarity web and mobile experience with messaging and virtual visits.",
+        "The Wild Health Clarity web and mobile experience, with messaging and virtual visits.",
       pricing:
-        "Standard starts at $362 per month. Peak is $25,000 per year, while Elite requires an inquiry. Testing and access vary by tier.",
+        "Standard starts at $362 per month. Peak is $25,000 per year, and Elite requires an inquiry. Testing and access vary by tier.",
       primaryJob:
-        "Provide high-touch precision medicine and coaching informed by genetics and recurring clinical data.",
+        "Provide high-touch precision medicine and coaching, informed by genetics and recurring clinical data.",
     },
     competitorEvidence: {
       clinicalRole: [1, 4],
@@ -1118,24 +1118,24 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. Murph cannot practice medicine, order Wild Health's clinical tests, or prescribe. It can complement care by helping someone prepare questions and follow a physician-approved plan.",
+          "No. Murph cannot practice medicine, order Wild Health's clinical tests, or prescribe. Murph can work alongside that care by helping you prepare questions and follow a plan your physician approved.",
         question: "Can Murph replace Wild Health precision medicine?",
       },
       {
         answer:
-          "No. Standard, Peak, and Elite include different levels of laboratory testing, physician access, coaching, devices, and specialty diagnostics. The highest-tier features should not be attributed to Standard.",
+          "No. Standard, Peak, and Elite differ in lab testing, physician access, coaching, devices, and specialty diagnostics. Do not assume the top-tier features come with Standard.",
         question: "Does every Wild Health tier include the same tests?",
       },
       {
         answer:
-          "No. Wild Health's terms distinguish genomic testing from genetic counseling. A qualified genetics professional is the appropriate source for counseling about inherited findings.",
+          "No. Wild Health's terms draw a line between genomic testing and genetic counseling. For counseling about inherited findings, see a qualified genetics professional.",
         question: "Is Wild Health genetic testing the same as genetic counseling?",
       },
     ],
-    headline: "Wild Health delivers precision medicine. Murph supports the day-to-day reality of the plan.",
+    headline: "Wild Health is a precision medicine clinic. Murph is the assistant you text.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Wild Health combines genetics, recurring labs, physicians, and coaching. Murph is a personal health assistant for carrying clinician-approved plans between care interactions.",
+      "Wild Health pairs genetics and quarterly labs with physicians and coaches. Murph is a personal health assistant that helps you keep up with the plan between visits.",
     name: "Wild Health",
     quickComparison: [
       {
@@ -1228,38 +1228,38 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Official commitment terms conflict: the current FAQ says four months for monthly plans, while the terms still say six months for Precision Care. Confirm the controlling term before checkout.",
-      "The scope of testing, access, and devices changes substantially across tiers.",
-      "Genetic associations and biological age estimates add context but are not direct diagnoses or guarantees about outcomes.",
+      "Wild Health's own pages disagree on the commitment. The FAQ says four months for monthly plans, while the terms still say six months for Precision Care. Confirm which applies before checkout.",
+      "What you get in testing, access, and devices changes a lot from tier to tier.",
+      "Genetic associations and biological age estimates can inform the plan. They are not diagnoses or guarantees about outcomes.",
       "Genetic testing, physician care, and prescribing are outside Murph's nonclinical role.",
     ],
     useTogether:
-      "Use Wild Health for licensed care and testing, while Murph helps capture questions, remember instructions, support routines, and notice what needs discussion at the next visit.",
+      "Use Wild Health for the physician care, genetics, and testing. Use Murph to jot down questions as they come up, remember the instructions, keep routines going, and flag what to raise at the next visit.",
   },
   {
     aliases: ["Hone", "Hone Telehealth"],
     category: "labs-longevity",
     chooseCompetitor:
-      "Choose Hone when symptoms, hormone evaluation, recurring labs, and possible clinician-prescribed treatment are the main needs.",
+      "Pick Hone when you have symptoms you want evaluated, need hormone labs on a schedule, and want a clinician who can prescribe if you qualify.",
     chooseMurph:
-      "Choose Murph when you want an ongoing private assistant for records, questions, habits, and follow-through around care you already have.",
+      "Choose Murph if you want a private assistant for the care you already have. Murph keeps your records and lab charts in one place, helps you prepare questions, and reminds you about the plan.",
     competitor: {
       clinicalRole:
-        "A licensed telehealth clinic. Treatment and prescriptions depend on clinical evaluation, state licensure, eligibility, and the member's physical location during visits.",
+        "A licensed telehealth clinic. Treatment and prescriptions depend on clinical evaluation, state licensure, eligibility, and where you are physically located during visits.",
       followThrough:
-        "Lab reviews, clinician visits in eligible tiers, treatment monitoring, repeat testing, and prescription management when appropriate.",
+        "Lab reviews, clinician visits in eligible tiers, treatment monitoring, and repeat testing. Prescriptions are managed when appropriate.",
       format:
-        "A monthly telehealth membership with Basic, Plus, and Premium tiers that differ by sex, state, panel depth, and clinician access.",
+        "A monthly telehealth membership with Basic, Plus, and Premium tiers. The tiers differ by sex, state, panel depth, and clinician access.",
       hardware:
-        "Lab collection may use an at-home kit or a Quest lab order. No ongoing wearable is required.",
+        "Labs are collected with an at-home kit or through a Quest lab order. No wearable is required.",
       inputs:
         "Blood tests, symptoms, medical history, health goals, and follow-up information used in telehealth care.",
       insightStyle:
-        "Clinician interpretation and treatment-oriented recommendations rather than a general quantified-self dashboard.",
+        "Clinician interpretation and treatment-oriented recommendations, not a general quantified-self dashboard.",
       platforms:
-        "A mobile-friendly web account, not a downloadable app, for lab action items and results, virtual-consult scheduling, provider notes, medications, and billing.",
+        "A mobile-friendly web account, not a downloadable app. It holds lab action items and results, virtual-consult scheduling, provider notes, medications, and billing.",
       pricing:
-        "Basic costs $50 to start, comprising the first $25 membership month and a one-time $25 onboarding fee, then $25 per month. Plus and Premium cost more, and medications are extra.",
+        "Basic costs $50 to start: the first $25 membership month plus a one-time $25 onboarding fee. After that it is $25 per month. Plus and Premium cost more, and medications are extra.",
       primaryJob:
         "Evaluate hormone and metabolic concerns and manage eligible telehealth treatment over time.",
     },
@@ -1277,24 +1277,24 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. Murph cannot diagnose hormone conditions, order Hone treatment, or prescribe medication. It can help someone prepare for visits and follow the licensed provider's instructions.",
+          "No. Murph cannot diagnose hormone conditions, order Hone treatment, or prescribe medication. Murph can help you prepare for visits and follow your licensed provider's instructions.",
         question: "Can Murph replace Hone Health treatment?",
       },
       {
         answer:
-          "No. Basic, Plus, and Premium have different lab panels, test cadence, clinician access, sex eligibility, and state coverage. Medications are billed separately in every tier.",
+          "No. Basic, Plus, and Premium differ in lab panels, test cadence, clinician access, sex eligibility, and state coverage. Medications are billed separately in every tier.",
         question: "Do all Hone memberships include the same labs and care?",
       },
       {
         answer:
-          "No. A licensed provider must review the person's history and results, determine whether treatment is appropriate, and follow state rules. Membership does not guarantee a prescription.",
+          "No. A licensed provider has to review your history and results, decide whether treatment is appropriate, and follow state rules. Membership does not guarantee a prescription.",
         question: "Does joining Hone guarantee hormone medication?",
       },
     ],
-    headline: "Hone evaluates and treats eligible patients. Murph helps people stay organized around care.",
+    headline: "Hone handles hormone care. Murph keeps track of everything around it.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Hone Health offers hormone and metabolic labs with telehealth care. Murph is a personal health assistant for organizing care, not determining treatment eligibility or prescribing.",
+      "Hone Health runs hormone and metabolic labs and treats eligible patients by telehealth. Murph is a personal health assistant that keeps your records, questions, and reminders in order.",
     name: "Hone Health",
     quickComparison: [
       {
@@ -1383,40 +1383,40 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Availability varies by state, tier, and sex, and the member must be in an eligible state during a visit.",
-      "Medications are not included in the membership fee and treatment is not guaranteed.",
-      "The narrow Plus panel and broader Basic or Premium panels serve different purposes and should not be treated as equivalent.",
-      "Murph can organize care but cannot determine treatment eligibility or prescribe.",
+      "Availability varies by state, tier, and sex. You must be in an eligible state during a visit.",
+      "Medications are not part of the membership fee, and treatment is not guaranteed.",
+      "The narrow Plus panel and the broader Basic or Premium panels do different jobs. Do not treat them as equivalent.",
+      "Murph can keep your care organized, but it cannot decide treatment eligibility or prescribe.",
     ],
     useTogether:
-      "Use Hone for licensed testing and treatment decisions, then use Murph to organize questions, remember instructions, support routines, and prepare for follow-up.",
+      "Use Hone for the testing and the treatment decisions, which stay with its licensed providers. Use Murph to keep your questions in one place, remember the instructions, keep routines going, and get ready for the follow-up visit.",
   },
   {
     aliases: ["Quest", "Quest Diagnostics", "Quest Elite Health Profile"],
     category: "labs-longevity",
     chooseCompetitor:
-      "Choose Quest Health when the immediate need is a one-off, self-purchased laboratory panel collected through a large national network.",
+      "Quest Health is the better fit if you want one self-purchased panel, collected at a nearby Quest center, with results posted online. No prior doctor visit is needed.",
     chooseMurph:
-      "Choose Murph when measurements already exist and the bigger need is to connect them with ongoing context, questions, plans, and reminders.",
+      "Choose Murph if you already have the lab report and want to understand it. Murph charts each marker against its reference band, explains it in plain terms, and keeps your questions and reminders in one place.",
     competitor: {
       clinicalRole:
-        "A clinical laboratory service with independent provider ordering and result oversight. The ordering service is not a substitute for a full primary care relationship.",
+        "A clinical laboratory service. Independent providers order the tests and oversee results. The ordering service is not a substitute for a full primary care relationship.",
       followThrough:
-        "Online results, a Health Quotient summary, urgent-result outreach when required, and an option to discuss results with an independent provider.",
+        "Online results, a Health Quotient summary, and outreach when a result is urgent. You can also choose to discuss results with an independent provider.",
       format:
-        "À-la-carte test purchase followed by in-person collection at a Quest Patient Service Center for most profiles.",
+        "You buy tests one at a time, then get collected in person at a Quest Patient Service Center for most profiles.",
       hardware:
-        "No consumer hardware. Blood, urine, and biometric collection occur through Quest facilities or a supported home kit where offered.",
+        "No consumer hardware. Blood, urine, and biometric collection happen at Quest facilities, or with a supported home kit where offered.",
       inputs:
         "The Elite Health Profile uses blood, urine, biometric measurements, and a health risk survey to report 85+ health indicators.",
       insightStyle:
         "Conventional reference-range results, a summary score, and optional discussion with an independent provider.",
       platforms:
-        "Quest Health purchase flow and MyQuest results account.",
+        "The Quest Health purchase flow and a MyQuest results account.",
       pricing:
-        "The Elite Health Profile list price is $399 plus an independent physician service fee that generally starts at $6. Promotions can temporarily lower the test price.",
+        "The Elite Health Profile list price is $399, plus an independent physician service fee that generally starts at $6. Promotions can temporarily lower the test price.",
       primaryJob:
-        "Provide direct access to established laboratory testing without requiring a prior doctor visit.",
+        "Give direct access to established lab testing without a prior doctor visit.",
     },
     competitorEvidence: {
       clinicalRole: [3],
@@ -1432,24 +1432,24 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. Murph does not collect samples or produce Quest laboratory results. Murph can help a person review the report, prepare questions, and manage clinician-recommended follow-up.",
+          "No. Murph does not collect samples or produce Quest lab results. Murph can chart the report, explain it in plain terms, help you prepare questions, and track any follow-up your clinician recommends.",
         question: "Can Murph replace a Quest Health lab panel?",
       },
       {
         answer:
-          "No. The purchase includes ordering oversight and access to discuss results, but it does not establish comprehensive ongoing primary care. A personal clinician remains important for diagnosis and treatment.",
+          "No. The purchase includes ordering oversight and the option to discuss results, but it does not set up ongoing primary care. Your own clinician still matters for diagnosis and treatment.",
         question: "Does Quest Health include a full doctor visit?",
       },
       {
         answer:
-          "Quest currently says consumer tests are unavailable in Arizona, Hawaii, and Puerto Rico. Individual tests also have age, sex, and state eligibility rules.",
+          "No. Quest currently says consumer tests are unavailable in Arizona, Hawaii, and Puerto Rico. Individual tests also have age, sex, and state eligibility rules.",
         question: "Is Quest Health available everywhere in the United States?",
       },
     ],
-    headline: "Quest Health provides the lab result. Murph helps turn it into an organized next step.",
+    headline: "Quest runs the panel and posts the numbers. Murph puts them in plain English.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Quest Health provides direct-purchase laboratory testing through its national network. Murph is a personal health assistant for questions and next steps after results, not a lab.",
+      "Quest Health sells lab panels like the $399 Elite Health Profile with no doctor visit needed. Murph is a personal health assistant that charts the results and explains them plainly.",
     name: "Quest Health",
     quickComparison: [
       {
@@ -1534,40 +1534,40 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "The service is a one-time testing purchase rather than an ongoing coaching or cross-source health platform.",
-      "The physician service covers ordering and result oversight, not comprehensive longitudinal medical care.",
+      "This is a one-time test purchase. It is not an ongoing coaching service or a platform that pulls in your other health data.",
+      "The physician service covers ordering and result oversight. It is not ongoing medical care.",
       "Arizona, Hawaii, and Puerto Rico are excluded from current Quest Health consumer testing.",
-      "Murph cannot order, collect, or process Quest's laboratory tests.",
+      "Murph cannot order, collect, or process Quest's lab tests.",
     ],
     useTogether:
-      "Use Quest Health for the measurements, then bring the report and clinician-approved next steps to Murph for organization, reminders, and preparation for future care.",
+      "Use Quest Health for the draw and the results. Then bring the report to Murph. Murph charts the values with reference bands, explains them, and sets reminders for whatever your clinician recommends.",
   },
   {
     aliases: ["Labcorp", "Labcorp On Demand"],
     category: "labs-longevity",
     chooseCompetitor:
-      "Choose Labcorp OnDemand when the goal is to buy a specific conventional test, visit a nearby collection center, and receive the result quickly.",
+      "Labcorp OnDemand is the better fit when you want one specific conventional test, a nearby collection center, and a quick result. The Comprehensive Health Test is $169.",
     chooseMurph:
-      "Choose Murph when you already have records and want an ongoing assistant to help make them understandable and useful in daily decisions.",
+      "Choose Murph if you already have records and want them to make sense day to day. Murph charts your lab values against reference bands, explains them plainly, and remembers what you decided to do about them.",
     competitor: {
       clinicalRole:
-        "A clinical laboratory service. Independent providers approve OnDemand orders, and certain urgent results trigger outreach, but the purchase is not comprehensive medical care.",
+        "A clinical laboratory service. Independent providers approve OnDemand orders, and certain urgent results trigger outreach. The purchase is not comprehensive medical care.",
       followThrough:
-        "Online results and urgent-result contact when needed. Advisor sessions require the separate Personal Wellness Program.",
+        "Online results, and contact when a result is urgent. Advisor sessions require the separate Personal Wellness Program.",
       format:
-        "One-time online test purchase followed by an in-person Labcorp collection for the Comprehensive Health Test.",
+        "A one-time online test purchase, followed by in-person collection at a Labcorp location for the Comprehensive Health Test.",
       hardware:
         "No consumer hardware. The Comprehensive Health Test uses a blood and urine sample collected at a Labcorp location.",
       inputs:
-        "Conventional blood and urine measurements including CBC, metabolic, lipid, HbA1c, and urinalysis-related values.",
+        "Conventional blood and urine measurements, including CBC, metabolic, lipid, HbA1c, and urinalysis-related values.",
       insightStyle:
-        "Laboratory results with trend tracking and AI-assisted explanations in MyLabcorp; Labcorp directs personalized interpretation to the ordering provider.",
+        "Lab results with trend tracking and AI-assisted explanations in MyLabcorp. Labcorp leaves personalized interpretation to the ordering provider.",
       platforms:
-        "Results are available through the Labcorp Patient web portal and MyLabcorp mobile app; MyLabcorp also manages appointments and billing.",
+        "Results are available in the Labcorp Patient web portal and the MyLabcorp mobile app. MyLabcorp also manages appointments and billing.",
       pricing:
-        "The Comprehensive Health Test is $169. Men's and Women's Health Tests are $219, with expanded panels priced separately.",
+        "The Comprehensive Health Test is $169. Men's and Women's Health Tests are $219, and expanded panels are priced separately.",
       primaryJob:
-        "Offer direct access to conventional laboratory tests through Labcorp's national collection network.",
+        "Give direct access to conventional lab tests through Labcorp's national collection network.",
     },
     competitorEvidence: {
       clinicalRole: [1],
@@ -1583,24 +1583,24 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. Murph cannot approve, collect, or process a Labcorp test. It can help a person organize the result, prepare clinician questions, and remember next steps.",
+          "No. Murph cannot approve, collect, or process a Labcorp test. Murph can chart the result, explain it plainly, help you prepare questions for a clinician, and remember what you decided to do.",
         question: "Can Murph replace Labcorp OnDemand testing?",
       },
       {
         answer:
-          "No. The Comprehensive Health Test includes provider order approval and online results. MyLabcorp offers AI-assisted explanations and trend tracking, but not ongoing personalized coaching; advisor sessions are a separate product, and medical care remains with the person's clinician.",
+          "No. The Comprehensive Health Test includes provider order approval and online results. MyLabcorp adds AI-assisted explanations and trend tracking, but not ongoing personalized coaching. Advisor sessions are a separate product, and medical care stays with your clinician.",
         question: "Does the Labcorp OnDemand test include coaching?",
       },
       {
         answer:
-          "The Comprehensive Health Test currently costs $169 and uses blood and urine collected in person. Sex-specific and expanded panels have different markers and higher prices.",
+          "The Comprehensive Health Test currently costs $169. It uses blood and urine collected in person. Sex-specific and expanded panels have different markers and higher prices.",
         question: "What does the Labcorp Comprehensive Health Test cost?",
       },
     ],
-    headline: "Labcorp OnDemand answers a testing question. Murph helps manage what follows.",
+    headline: "Labcorp OnDemand runs the test. Murph reads the report with you.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Labcorp OnDemand offers one-time conventional tests through Labcorp collection sites. Murph is a personal health assistant for connecting reports to context and follow-through.",
+      "Labcorp OnDemand sells one-time lab tests, like the $169 Comprehensive Health Test. Murph is a personal health assistant that charts the results and helps you follow up.",
     name: "Labcorp OnDemand",
     quickComparison: [
       {
@@ -1685,40 +1685,40 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "The test itself does not include ongoing coaching, wearable analysis, or cross-source longitudinal guidance.",
-      "Independent provider approval is narrower than a full medical visit with a clinician who knows the person's history.",
-      "The broadest expanded panels cost substantially more than the $169 Comprehensive Health Test.",
+      "The test itself comes with no ongoing coaching, wearable analysis, or guidance that combines your other data over time.",
+      "Independent provider approval is narrower than a full visit with a clinician who knows your history.",
+      "The broadest expanded panels cost much more than the $169 Comprehensive Health Test.",
       "Murph cannot order the Labcorp panel or produce its blood and urine measurements.",
     ],
     useTogether:
-      "Use Labcorp OnDemand for a needed measurement, then use Murph to keep the report, questions, appointments, and clinician-approved actions organized.",
+      "Use Labcorp OnDemand when you need a specific measurement. Then bring the report to Murph. Murph charts the values, explains them in plain terms, and keeps your questions, appointments, and clinician-approved actions in one place.",
   },
   {
     aliases: ["Bioniq Pro"],
     category: "labs-longevity",
     chooseCompetitor:
-      "Choose Bioniq when the desired product is a custom supplement formula, nutritionist review, and app experience based on qualifying labs.",
+      "Pick Bioniq when you want a custom supplement formula built from your blood work, a nutritionist review, and an app to go with it.",
     chooseMurph:
-      "Choose Murph when you want broader ongoing help across health questions and plans without making supplement fulfillment the center of the relationship.",
+      "Choose Murph if you want help across your whole health picture, not a service built around shipping supplements. Murph reads your labs, sleep, and meals, explains them plainly, and checks in on whatever routine you choose.",
     competitor: {
       clinicalRole:
         "A personalized nutrition and supplement service, not a general medical clinic. Its nutritionist consultation does not replace diagnosis or treatment by a licensed clinician.",
       followThrough:
-        "A three-month supplement supply, one nutritionist consultation, app recommendations, and optional retesting to update the next formula.",
+        "A three-month supplement supply, one nutritionist consultation, and recommendations in the app. Retesting is optional and updates the next formula.",
       format:
-        "A rolling three-month supplement subscription with monthly billing and quarterly shipments, or a nonrenewing starter package.",
+        "A rolling three-month supplement subscription, billed monthly and shipped quarterly. A nonrenewing starter package is also offered.",
       hardware:
-        "The PRO workflow uses a laboratory report rather than sensor hardware; Bioniq can arrange a blood test in supported locations.",
+        "The PRO workflow uses a lab report, not sensor hardware. Bioniq can arrange a blood test in supported locations.",
       inputs:
-        "A recent blood-test report or a Bioniq-arranged blood test where available, plus the app health questionnaire and required laboratory markers.",
+        "A recent blood-test report, or a Bioniq-arranged blood test where available. You also complete the app health questionnaire, and specific lab markers are required.",
       insightStyle:
-        "Lab analysis focused on nutrient status and a personalized supplement recipe with nutrition guidance.",
+        "Lab analysis focused on nutrient status, plus a personalized supplement recipe with nutrition guidance.",
       platforms:
-        "Bioniq mobile app for the health questionnaire, laboratory-report upload, analyzed results, formula details, and nutritional recommendations. PRO cancellation or freeze requests are handled by email rather than in the app.",
+        "The Bioniq mobile app handles the health questionnaire, lab-report upload, analyzed results, formula details, and nutritional recommendations. PRO cancellation or freeze requests go by email, not through the app.",
       pricing:
-        "Pricing was not publicly verifiable on August 30, 2026. Bioniq documents a rolling three-month subscription billed monthly and shipped quarterly, plus a nonrenewing three-month starter package in supported countries; confirm current availability and price directly.",
+        "Pricing was not publicly verifiable on August 30, 2026. Bioniq documents a rolling three-month subscription billed monthly and shipped quarterly, plus a nonrenewing three-month starter package in supported countries. Confirm current availability and price directly.",
       primaryJob:
-        "Create and deliver a personalized daily supplement formula informed by blood data.",
+        "Create and deliver a personalized daily supplement formula based on your blood data.",
     },
     competitorEvidence: {
       clinicalRole: [1, 7],
@@ -1734,24 +1734,24 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. Murph does not formulate, manufacture, or ship personalized supplements. It can help someone keep track of what a clinician or nutrition professional has recommended and notice questions to raise.",
+          "No. Murph does not formulate, make, or ship personalized supplements. Murph can keep track of what a clinician or nutrition professional recommended and help you notice questions worth raising.",
         question: "Can Murph replace Bioniq PRO supplements?",
       },
       {
         answer:
-          "The supplement plan and initial blood-test or upload-processing option are separate parts of onboarding. Repeat testing is optional and is not included with every quarterly shipment; confirm current testing and plan charges directly.",
+          "Not automatically. The supplement plan and the initial blood test or upload processing are separate parts of onboarding. Repeat testing is optional and does not come with every quarterly shipment, so confirm current testing and plan charges with Bioniq directly.",
         question: "Is blood testing included in the Bioniq monthly price?",
       },
       {
         answer:
-          "No. Bioniq PRO is a nutrition and supplement service. Its app analysis and nutritionist consultation should not be treated as diagnosis, prescription care, or a replacement for a medical clinician.",
+          "No. Bioniq PRO is a nutrition and supplement service. Its app analysis and nutritionist consultation are not a diagnosis, prescription care, or a replacement for a medical clinician.",
         question: "Is Bioniq PRO medical treatment?",
       },
     ],
-    headline: "Bioniq personalizes supplements. Murph supports the wider health context.",
+    headline: "Bioniq mixes a supplement from your blood test. Murph tracks how you feel on it.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Bioniq PRO turns a qualifying blood report into a custom supplement formula. Murph is a personal health assistant for broader context, not a supplement maker or clinician.",
+      "Bioniq PRO turns a qualifying blood report into a custom daily supplement. Murph is a personal health assistant that tracks the routine alongside your other health data.",
     name: "Bioniq",
     quickComparison: [
       {
@@ -1848,40 +1848,40 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "The service is centered on supplements rather than broad clinical evaluation or independent longitudinal coaching.",
-      "The subscription has a three-month minimum and ships the full quarter at once while billing monthly.",
-      "Testing availability and marker lists vary by country, and the US partner draw is not available in New York or New Jersey.",
+      "The service is built around supplements, not broad clinical evaluation or independent coaching over time.",
+      "The subscription has a three-month minimum. It ships the full quarter at once while billing monthly.",
+      "Testing availability and marker lists vary by country. The US partner draw is not available in New York or New Jersey.",
       "Murph does not formulate, manufacture, or deliver Bioniq's personalized supplements.",
     ],
     useTogether:
-      "Use Bioniq for its formula and nutritionist review, then use Murph to track the routine, record questions or reactions, and coordinate any clinician-approved changes.",
+      "Use Bioniq for the formula and the nutritionist review. Use Murph to track the daily routine, note any questions or reactions, and coordinate changes your clinician approves.",
   },
   {
     aliases: ["Neko", "Neko Scan"],
     category: "labs-longevity",
     chooseCompetitor:
-      "Choose Neko when you want an in-person scan of skin, heart, circulation, body composition, and selected blood markers in one visit.",
+      "Neko is the better fit if you want an in-person scan of skin, heart, circulation, body composition, and selected blood markers, all in one visit, with a clinician there to talk it through.",
     chooseMurph:
-      "Choose Murph when the need is ongoing private support across health records and plans rather than a location-bound annual scan.",
+      "Choose Murph if you want ongoing private help with your records and plans, not a yearly visit to a clinic. Murph works wherever you are, in iMessage or Telegram, and keeps everything in one thread.",
     competitor: {
       clinicalRole:
-        "An in-person preventive assessment with clinician review. Neko says its clinic is not a full-service medical practice and members should maintain their ordinary clinicians.",
+        "An in-person preventive assessment with clinician review. Neko says its clinic is not a full-service medical practice, and members should keep their ordinary clinicians.",
       followThrough:
-        "A same-visit consultation, action plan, and included specialist review or referral support when a finding warrants it.",
+        "A consultation during the same visit and an action plan. If a finding warrants it, specialist review or referral support is included.",
       format:
-        "A roughly one-hour appointment at a Neko Health center, commonly positioned as an annual scan.",
+        "An appointment of roughly one hour at a Neko Health center. It is commonly positioned as an annual scan.",
       hardware:
-        "Neko's center-based sensor system captures skin imagery, cardiovascular signals, circulation, body composition, grip strength, and other measurements without ionizing radiation.",
+        "Neko's center-based sensor system captures skin imagery, cardiovascular signals, circulation, body composition, grip strength, and other measurements. It uses no ionizing radiation.",
       inputs:
         "Thousands of sensor images, ECG and cardiovascular measures, circulation, body composition, grip strength, and selected blood markers such as lipids and HbA1c.",
       insightStyle:
-        "A clinician-guided preventive snapshot with an action plan and follow-up pathways for notable findings.",
+        "A clinician-guided preventive snapshot, with an action plan and follow-up pathways for notable findings.",
       platforms:
-        "Neko app plus a required physical clinic visit, with advertised Apple Health and wearable syncing.",
+        "The Neko app plus a required visit to a physical clinic. Apple Health and wearable syncing are advertised.",
       pricing:
         "£299 in the United Kingdom and SEK 2,750 in Sweden. The announced US price is $499, with the first New York clinic opening September 24, 2026.",
       primaryJob:
-        "Collect many noninvasive physical measurements in one visit and review them with a clinician immediately.",
+        "Collect many noninvasive physical measurements in one visit and review them with a clinician right away.",
     },
     competitorEvidence: {
       clinicalRole: [1],
@@ -1897,24 +1897,24 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. Murph has no scanning hardware, does not collect Neko's physical measurements, and cannot perform the clinician consultation. It can support preparation and follow-through around the visit.",
+          "No. Murph has no scanning hardware, does not collect Neko's physical measurements, and cannot do the clinician consultation. Murph can help you prepare for the visit and follow up on the plan afterward.",
         question: "Can Murph replace a Neko Health Scan?",
       },
       {
         answer:
-          "No. Neko uses a purpose-built sensor system plus selected blood tests. It is not a whole-body MRI and does not replace every guideline-recommended cancer screening or diagnostic test.",
+          "No. Neko uses a purpose-built sensor system plus selected blood tests. It is not a whole-body MRI, and it does not replace every guideline-recommended cancer screening or diagnostic test.",
         question: "Is the Neko Health Scan a whole-body MRI?",
       },
       {
         answer:
-          "Not yet on the verification date. Neko's first US clinic in New York is scheduled to open September 24, 2026, so the US offering remains pre-opening as of August 30.",
+          "Not yet, as of the verification date. Neko's first US clinic, in New York, is scheduled to open September 24, 2026. As of August 30 the US offering was still pre-opening.",
         question: "Is Neko Health currently open in the United States?",
       },
     ],
-    headline: "Neko captures a physical snapshot. Murph helps keep the story coherent afterward.",
+    headline: "Neko scans you in an hour. Murph carries the plan through the rest of the year.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Neko Health provides an in-person sensor scan, selected labs, and clinician review. Murph is a personal health assistant for preparation and follow-through, not a clinic.",
+      "Neko Health is a one-hour in-person sensor scan with selected labs and a clinician review. Murph is a personal health assistant that keeps the action plan going after you leave.",
     name: "Neko Health",
     quickComparison: [
       {
@@ -2003,40 +2003,40 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "The service requires travel to a limited set of physical centers and is not yet live in the United States on the verification date.",
-      "It is an annual-style snapshot rather than continuous measurement or open-ended care.",
-      "Incidental or abnormal findings can require further testing with an outside specialist or primary clinician.",
+      "You have to travel to one of a small number of physical centers. On the verification date it was not yet live in the United States.",
+      "It is a once-a-year snapshot, not continuous measurement or open-ended care.",
+      "Incidental or abnormal findings can mean more testing with an outside specialist or your primary clinician.",
       "Murph cannot reproduce Neko's in-person sensors or clinician consultation.",
     ],
     useTogether:
-      "Use Neko for the physical assessment and clinician review, then use Murph to remember the action plan, prepare referrals or appointments, and track practical next steps.",
+      "Use Neko for the scan and the same-day clinician review. Then bring the action plan into Murph. Murph remembers it, helps you book any referrals or appointments, and keeps track of the practical tasks.",
   },
   {
     aliases: ["Fountain", "Fountain Life CORE", "Fountain Life APEX"],
     category: "labs-longevity",
     chooseCompetitor:
-      "Choose Fountain Life when extensive annual imaging and diagnostics with a care team justify the high price and travel requirement.",
+      "Fountain Life is the better fit if you want an extensive yearly workup, including imaging, labs, and genetics, with a physician and care team, and the price and travel are acceptable to you.",
     chooseMurph:
-      "Choose Murph when you need a broadly useful private assistant for health context and action without buying a premium diagnostic center membership.",
+      "Choose Murph if you want a useful everyday assistant for your health without buying a premium diagnostic membership. Murph reads the data you already have, explains it plainly, and keeps the plan moving.",
     competitor: {
       clinicalRole:
-        "A preventive diagnostics and longevity care membership with physicians and care teams at physical US centers.",
+        "A preventive diagnostics and longevity care membership. Physicians and care teams work at physical US centers.",
       followThrough:
-        "Physician review, a personalized plan, ongoing monitoring, care team access, and optional additional diagnostics or therapies.",
+        "Physician review, a personalized plan, ongoing monitoring, and care team access. Additional diagnostics or therapies are optional.",
       format:
-        "An annual center-based membership offered in CORE, APEX, and family configurations.",
+        "An annual center-based membership, offered in CORE, APEX, and family configurations.",
       hardware:
-        "Center-based MRI, CT, DEXA, ECG, cardiovascular imaging, and other diagnostic equipment, depending on tier and location.",
+        "Center-based MRI, CT, DEXA, ECG, cardiovascular imaging, and other diagnostic equipment. What is used depends on tier and location.",
       inputs:
         "Tier-specific imaging, 100+ labs, cardiovascular tests, body composition, genetics, and other advanced diagnostics.",
       insightStyle:
-        "A physician and care team synthesize multimodal data into a preventive plan, supported by the Zori AI experience.",
+        "A physician and care team pull the imaging, lab, and genetic data together into a preventive plan. The Zori AI experience supports this.",
       platforms:
-        "Fountain Life member app and Zori AI, paired with required visits to a Fountain Life center.",
+        "The Fountain Life member app and Zori AI, paired with required visits to a Fountain Life center.",
       pricing:
-        "CORE is currently $10,500 and APEX is $21,500. APEX Family and some services require an inquiry or separate purchase.",
+        "CORE is currently $10,500 and APEX is $21,500. APEX Family and some services require an inquiry or a separate purchase.",
       primaryJob:
-        "Deliver an extensive annual preventive workup across imaging, laboratory, and genetic modalities.",
+        "Deliver an extensive annual preventive workup across imaging, labs, and genetics.",
     },
     competitorEvidence: {
       clinicalRole: [1],
@@ -2052,24 +2052,24 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. Murph does not provide medical imaging, laboratory testing, physician care, or advanced therapies. It can complement the program by supporting preparation and follow-through.",
+          "No. Murph does not provide medical imaging, lab testing, physician care, or advanced therapies. Murph can work alongside the program by helping you prepare for visits and follow the plan.",
         question: "Can Murph replace Fountain Life diagnostics?",
       },
       {
         answer:
-          "No. CORE and APEX include different subsets of imaging, labs, genetics, and care services. A diagnostic listed on the general membership page should not be assumed to be included in every tier.",
+          "No. CORE and APEX include different subsets of imaging, labs, genetics, and care services. A diagnostic listed on the general membership page is not necessarily included in every tier.",
         question: "Does every Fountain Life membership include every diagnostic?",
       },
       {
         answer:
-          "Fountain provides clinical review, but some separately offered restorative biologic services are described by Fountain as not FDA approved. Those services should be evaluated separately from standard labs and imaging.",
+          "No. Fountain provides clinical review, but it describes some separately offered restorative biologic services as not FDA approved. Weigh those services separately from standard labs and imaging.",
         question: "Are all Fountain Life services standard approved screening?",
       },
     ],
-    headline: "Fountain Life builds a premium diagnostic workup. Murph helps with the life around it.",
+    headline: "Fountain Life does the annual workup. Murph is the daily check-in.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Fountain Life delivers center-based imaging, labs, genetics, and physician review. Murph is a personal health assistant for coordinating the resulting care plan, not a diagnostic provider.",
+      "Fountain Life is a center-based membership with imaging, 100+ labs, genetics, and physician review. Murph is a personal health assistant that keeps the care plan on track.",
     name: "Fountain Life",
     quickComparison: [
       {
@@ -2154,38 +2154,38 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Membership prices are far above lab-only and software-only alternatives.",
-      "The experience depends on travel to a limited set of physical US centers.",
-      "Included diagnostics vary by tier, and separately offered therapies can have different evidence and regulatory status.",
-      "Imaging, laboratory work, physician care, and procedures remain outside Murph's role.",
+      "Membership prices are far above lab-only and software-only options.",
+      "You have to travel to one of a small number of physical US centers.",
+      "Included diagnostics vary by tier. Separately offered therapies can have different evidence and regulatory status.",
+      "Imaging, lab work, physician care, and procedures are outside what Murph does.",
     ],
     useTogether:
-      "Use Fountain Life for its clinical workup, then use Murph to prepare questions, retain the care plan, coordinate follow-up, and support clinician-approved routines.",
+      "Use Fountain Life for the clinical workup and the physician's plan. Use Murph to prepare questions before visits, hold onto the care plan, coordinate follow-up appointments, and keep the routines your clinician approved going.",
   },
   {
     aliases: ["Prenuvo Whole Body MRI", "Prenuvo Scan"],
     category: "labs-longevity",
     chooseCompetitor:
-      "Choose Prenuvo when a focused or whole-body MRI is the core need and the cost, travel, and possible follow-up are acceptable.",
+      "Prenuvo is the better fit when a focused or whole-body MRI is what you want, and the cost, the travel, and the chance of follow-up tests are acceptable.",
     chooseMurph:
-      "Choose Murph when you want continuous private support across health context rather than a periodic imaging event.",
+      "Choose Murph if you want steady, private support with your health day to day rather than a scan every year or two. Murph keeps your records, questions, and reminders in one conversation.",
     competitor: {
       clinicalRole:
         "A preventive medical imaging service with radiology review and provider result consultations. It describes whole-body MRI as an adjunct to established screening, not a replacement.",
       followThrough:
-        "Radiology reporting, provider result review, longitudinal imaging comparison, and repeat labs in selected annual memberships.",
+        "Radiology reporting, provider result review, and comparison of images over time. Selected annual memberships add repeat labs.",
       format:
-        "A standalone scan or annual Core, Comprehensive, or Executive membership at a physical imaging location.",
+        "A standalone scan, or an annual Core, Comprehensive, or Executive membership. All happen at a physical imaging location.",
       hardware:
-        "MRI scanners, plus body composition and advanced brain or heart imaging in eligible higher tiers and locations.",
+        "MRI scanners. Eligible higher tiers and locations add body composition and advanced brain or heart imaging.",
       inputs:
-        "Focused or whole-body MRI, tier-specific blood panels, and optional advanced brain, heart, and body composition imaging.",
+        "A focused or whole-body MRI, tier-specific blood panels, and optional advanced brain, heart, and body composition imaging.",
       insightStyle:
-        "Board-certified radiology findings, longitudinal image comparison, blood trends in memberships, and provider review.",
+        "Board-certified radiology findings, image comparison over time, blood trends in memberships, and provider review.",
       platforms:
-        "Digital results and member platform paired with in-person imaging centers in the United States and Canada.",
+        "Digital results and a member platform, paired with in-person imaging centers in the United States and Canada.",
       pricing:
-        "Core is $1,199 per year, Comprehensive $2,499, and Executive starts at $3,999. A standalone whole-body MRI is $2,499 and a focused scan is $1,199.",
+        "Core is $1,199 per year, Comprehensive is $2,499, and Executive starts at $3,999. A standalone whole-body MRI is $2,499 and a focused scan is $1,199.",
       primaryJob:
         "Use preventive MRI to look for structural findings and track them over time, with labs added in membership tiers.",
     },
@@ -2203,12 +2203,12 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. Murph has no imaging hardware and cannot interpret scans as a radiologist. It can help someone prepare for the appointment and manage questions or follow-up after the clinical review.",
+          "No. Murph has no imaging hardware and cannot read scans like a radiologist. Murph can help you prepare for the appointment and manage questions or follow-up after the clinical review.",
         question: "Can Murph replace a Prenuvo MRI?",
       },
       {
         answer:
-          "No. Prenuvo states that whole-body MRI is an adjunct and does not replace established screening such as mammography, colonoscopy, cervical screening, or clinically indicated imaging.",
+          "No. Prenuvo says whole-body MRI is an adjunct. It does not replace established screening such as mammography, colonoscopy, cervical screening, or imaging your clinician orders for a specific reason.",
         question: "Does a Prenuvo scan replace standard cancer screening?",
       },
       {
@@ -2217,10 +2217,10 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
         question: "Are blood tests included with every Prenuvo scan?",
       },
     ],
-    headline: "Prenuvo images the body. Murph helps organize the decisions that follow.",
+    headline: "Prenuvo scans your body by MRI. Murph keeps track of the follow-up.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Prenuvo provides preventive MRI with radiology review and optional membership labs. Murph is a personal health assistant for preparation and follow-up, not an imaging service.",
+      "Prenuvo offers preventive MRI read by radiologists, as a one-off scan or an annual membership with labs. Murph is a personal health assistant that helps you manage the follow-up.",
     name: "Prenuvo",
     quickComparison: [
       {
@@ -2301,36 +2301,36 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Every option requires travel to a supported imaging location and costs substantially more than a software service.",
-      "Whole-body MRI can surface incidental findings that require additional clinical workup.",
-      "Blood panels and repeated provider reviews are membership features, not part of every standalone scan.",
-      "Murph cannot acquire or interpret MRI images.",
+      "Every option means travel to a supported imaging location and costs much more than a software service.",
+      "Whole-body MRI can turn up incidental findings that need more clinical workup.",
+      "Blood panels and repeated provider reviews come with memberships, not with every standalone scan.",
+      "Murph cannot take or interpret MRI images.",
     ],
     useTogether:
-      "Use Prenuvo for imaging and clinical review, then use Murph to retain the plan, prepare specialist questions, coordinate appointments, and support agreed health actions.",
+      "Use Prenuvo for the imaging and the clinical review. Then bring the report and plan into Murph. Murph holds onto the plan, helps you write questions for specialists, coordinates appointments, and reminds you about the health steps you agreed to.",
   },
   {
     aliases: ["TruAge", "TruDiagnostic TruAge", "TruHealth"],
     category: "labs-longevity",
     chooseCompetitor:
-      "Choose TruDiagnostic when the main question is how a blood-based methylation clock describes biological aging and change across repeat tests.",
+      "TruDiagnostic is the better fit when your main question is what a blood-based methylation clock says about your biological aging, and how that changes across repeat tests.",
     chooseMurph:
-      "Choose Murph when you need broader longitudinal support across records, goals, questions, and habits rather than a specialized epigenetic report.",
+      "Choose Murph if you want help across your records, goals, and habits over time, not a single specialized report. Murph can hold the TruAge result next to your labs and wearable data and explain what each one says.",
     competitor: {
       clinicalRole:
         "A research, informational, and educational epigenetic testing service. TruDiagnostic says its reports do not independently diagnose, prevent, or treat disease.",
       followThrough:
-        "A secure report, personalized recommendations, and optional repeat testing every few months, without included ongoing clinical care.",
+        "A secure report and personalized recommendations. Repeat testing every few months is optional, and ongoing clinical care is not included.",
       format:
-        "A one-time or subscription at-home finger-prick blood test mailed to a laboratory for DNA methylation analysis.",
+        "An at-home finger-prick blood test, bought once or as a subscription. You mail the sample to a lab for DNA methylation analysis.",
       hardware:
         "A disposable finger-prick collection kit. No ongoing device is required.",
       inputs:
-        "A dried blood spot used to analyze more than one million DNA methylation sites, plus registration and self-reported information.",
+        "A dried blood spot, analyzed at more than one million DNA methylation sites, plus registration and self-reported information.",
       insightStyle:
-        "Overall biological age, pace of aging, 11 organ-system age estimates, and epigenetically inferred health-related outputs.",
+        "Overall biological age, pace of aging, 11 organ-system age estimates, and health-related outputs inferred from methylation.",
       platforms:
-        "Secure web results portal for TruAge and TruHealth reports.",
+        "A secure web results portal for TruAge and TruHealth reports.",
       pricing:
         "TruAge is $499 one time, TruHealth is $499, and the combined kit is $849. A four-test subscription is marketed near $249 per test.",
       primaryJob:
@@ -2350,24 +2350,24 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. Murph cannot process DNA methylation or calculate TruDiagnostic's proprietary clocks. It can help someone understand the report's scope and prepare questions for a qualified clinician.",
+          "No. Murph cannot process DNA methylation or calculate TruDiagnostic's proprietary clocks. Murph can help you understand what the report does and does not cover, and prepare questions for a qualified clinician.",
         question: "Can Murph calculate a TruAge result?",
       },
       {
         answer:
-          "No. Values such as organ age, telomere length, and some inflammation or health outputs are inferred from methylation models. They are not the same as directly measuring serum LDL, glucose, or an organ's chronological age.",
+          "No. Values such as organ age, telomere length, and some inflammation or health outputs are inferred from methylation models. That is not the same as directly measuring serum LDL, glucose, or an organ's chronological age.",
         question: "Are all TruDiagnostic outputs direct measurements?",
       },
       {
         answer:
-          "No. TruDiagnostic's terms describe the service as research, informational, and educational. Results should be interpreted with medical history and conventional clinical information by a qualified professional.",
+          "No. TruDiagnostic's terms describe the service as research, informational, and educational. A qualified professional should interpret the results together with your medical history and conventional clinical information.",
         question: "Does TruAge diagnose disease?",
       },
     ],
-    headline: "TruDiagnostic estimates biological aging. Murph helps keep the result in context.",
+    headline: "TruDiagnostic estimates biological age. Murph compares it with your other data.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "TruDiagnostic estimates biological age from blood DNA methylation. Murph is a personal health assistant for context, not performing the assay or calculating its clocks.",
+      "TruDiagnostic estimates biological age from a $499 finger-prick DNA methylation test. Murph is a personal health assistant that reads the report alongside your labs, sleep, and habits.",
     name: "TruDiagnostic",
     quickComparison: [
       {
@@ -2452,38 +2452,38 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "The $499 test is specialized around methylation and does not replace conventional labs or medical evaluation.",
-      "Many report values are model-based estimates, so they cannot be compared directly with measured blood chemistry.",
+      "The $499 test is specialized around methylation. It does not replace conventional labs or a medical evaluation.",
+      "Many report values are model-based estimates, so you cannot compare them directly with measured blood chemistry.",
       "Ongoing clinical interpretation or coaching is not included in the consumer test price.",
       "Murph cannot process DNA methylation or reproduce TruDiagnostic's proprietary clocks.",
     ],
     useTogether:
-      "Use TruDiagnostic for the methylation assay, then use Murph to document questions, connect the report with other records, and support actions agreed with a qualified clinician.",
+      "Use TruDiagnostic for the methylation assay and its report. Then bring the report into Murph. Murph keeps it with your other records, helps you write down questions, and supports the actions you agree on with a qualified clinician.",
   },
   {
     aliases: ["Tally", "TallyAge"],
     category: "labs-longevity",
     chooseCompetitor:
-      "Choose Tally Health when a noninvasive aging score, twice-yearly retesting, and a bundled daily supplement are the desired product.",
+      "Tally Health is the better fit if you want a noninvasive aging score, a retest every six months, and a daily supplement bundled together.",
     chooseMurph:
-      "Choose Murph when you want an ongoing assistant across many health questions and sources without centering the relationship on one age score or supplement subscription.",
+      "Choose Murph if you want one assistant for many health questions and data sources, not a relationship built around one age score or a supplement subscription. Murph reads your labs, sleep, and food logs and explains them plainly.",
     competitor: {
       clinicalRole:
         "A wellness testing and supplement service. Tally says its reports, advice, and products are not medical advice or disease treatment.",
       followThrough:
-        "A personalized lifestyle action plan, digital check-ins, a repeat TallyAge test every six months, and monthly supplement delivery for members.",
+        "A personalized lifestyle action plan and digital check-ins. Members get a repeat TallyAge test every six months and monthly supplement delivery.",
       format:
-        "A monthly membership or a one-time at-home cheek-swab test.",
+        "A monthly membership, or a one-time at-home cheek-swab test.",
       hardware:
         "A disposable cheek-swab collection kit. No ongoing device is required.",
       inputs:
-        "Cheek-cell DNA methylation and a lifestyle survey covering diet, exercise, sleep, mental health, and habits.",
+        "Cheek-cell DNA methylation, plus a lifestyle survey covering diet, exercise, sleep, mental health, and habits.",
       insightStyle:
-        "A single TallyAge estimate and personalized lifestyle recommendations rather than conventional laboratory values.",
+        "A single TallyAge estimate and personalized lifestyle recommendations, not conventional lab values.",
       platforms:
-        "Tally Health digital platform for the age result, action plan, and membership management.",
+        "The Tally Health digital platform, for the age result, action plan, and membership management.",
       pricing:
-        "$129 per month for membership, including a TallyAge test every six months and a daily Vitality supplement. A one-time TallyAge test is $249.",
+        "$129 per month for membership, which includes a TallyAge test every six months and a daily Vitality supplement. A one-time TallyAge test is $249.",
       primaryJob:
         "Estimate epigenetic age from cheek cells and pair the result with lifestyle guidance and supplements.",
     },
@@ -2501,24 +2501,24 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "No. Murph cannot analyze cheek-cell methylation or produce Tally's proprietary age result. It can help someone think through the result and maintain context around chosen habits.",
+          "No. Murph cannot analyze cheek-cell methylation or produce Tally's proprietary age result. Murph can help you think through the result and keep track of the habits you choose.",
         question: "Can Murph calculate a TallyAge score?",
       },
       {
         answer:
-          "No. TallyAge is a model-based estimate from cheek-cell DNA methylation and survey context. It is not a directly measured whole-body age, diagnosis, or equivalent to a blood-based clock.",
+          "No. TallyAge is a model-based estimate from cheek-cell DNA methylation and your survey answers. It is not a directly measured whole-body age or a diagnosis, and it is not equivalent to a blood-based clock.",
         question: "Is TallyAge a direct measurement of biological age?",
       },
       {
         answer:
-          "No. A single TallyAge test costs $249. The $129 monthly membership adds testing every six months, an action plan, check-ins, and daily supplement delivery.",
+          "No. A single TallyAge test costs $249. The $129 monthly membership adds a test every six months, an action plan, check-ins, and daily supplement delivery.",
         question: "Do I need a Tally Health membership to take the test?",
       },
     ],
-    headline: "Tally Health centers on an age estimate. Murph centers on the ongoing relationship.",
+    headline: "Tally scores your age twice a year. Murph works with you week to week.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Tally Health pairs a cheek-swab epigenetic age estimate with guidance and supplements. Murph is a personal health assistant for context, not performing the assay or supplying products.",
+      "Tally Health pairs a cheek-swab age estimate with a lifestyle plan and a daily supplement. Murph is a personal health assistant that works with all your health data, not one score.",
     name: "Tally Health",
     quickComparison: [
       {
@@ -2603,12 +2603,12 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "The membership is expensive if the primary interest is only the twice-yearly cheek-swab test.",
-      "TallyAge is a model-specific estimate and cannot be directly compared with blood chemistry or another tissue's clock.",
-      "The service bundles supplements but does not provide licensed ongoing medical care or conventional laboratory testing.",
+      "The membership is expensive if all you want is the twice-yearly cheek-swab test.",
+      "TallyAge is an estimate from one specific model. You cannot compare it directly with blood chemistry or a clock from another tissue.",
+      "The service bundles supplements. It does not provide licensed ongoing medical care or conventional lab testing.",
       "Murph cannot run the cheek-swab assay, calculate TallyAge, or supply the bundled supplements.",
     ],
     useTogether:
-      "Use Tally for its cheek-swab result and program, then use Murph to keep the chosen lifestyle changes realistic, record questions, and connect the experience with other health context.",
+      "Use Tally for the cheek-swab result and its program. Use Murph to keep the lifestyle changes realistic, write down questions as they come up, and see how the result sits next to your other health data.",
   },
 ] as const);

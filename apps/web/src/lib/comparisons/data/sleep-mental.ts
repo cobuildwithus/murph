@@ -5,28 +5,28 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     aliases: ["Eight Sleep Pod"],
     category: "sleep-mental",
     chooseCompetitor:
-      "Choose Eight Sleep if active cooling or heating on each side of the bed is the priority and you are comfortable buying dedicated hardware with a required membership.",
+      "Choose Eight Sleep if you want the bed itself to heat and cool each side on its own, and you are fine buying the Pod plus the required Autopilot membership.",
     chooseMurph:
-      "Choose Murph when a nightly temperature or recovery result still leaves you asking why sleep changed, what else in your health matters, and which realistic step deserves a reminder or check-in.",
+      "Choose Murph if the nightly score tells you what happened but not why. Murph reads your Eight Sleep data beside your food, training, symptoms, and labs, then sets a plan with reminders and check-ins.",
     competitor: {
       clinicalRole:
-        "A consumer sleep and recovery product. Its sleep phases, recovery reports, and other wellness measurements are estimates, not a diagnosis or a substitute for medical evaluation.",
+        "Eight Sleep is a consumer sleep and recovery product. Its sleep phases, recovery reports, and other wellness readings are estimates. They are not a diagnosis and do not replace a medical evaluation.",
       followThrough:
-        "Automatic temperature adjustments, bedtime and wake routines, vibration and thermal alarms, sleep reports, and Autopilot recommendations.",
+        "The Pod adjusts its temperature on its own, runs bedtime and wake routines, and offers vibration and thermal alarms. The app adds sleep reports and Autopilot recommendations.",
       format:
-        "A sensor-equipped mattress cover and hub paired with a mobile app and an annual Autopilot membership.",
+        "A mattress cover with built-in sensors and a hub, paired with a mobile app and an annual Autopilot membership.",
       hardware:
-        "The Pod 5 cover fits over an existing mattress and uses a hub to circulate water. Each side can be controlled independently from 55 to 110 degrees Fahrenheit.",
+        "The Pod 5 cover fits over your existing mattress. A hub circulates water through it, and each side of the bed can be set separately from 55 to 110 degrees Fahrenheit.",
       inputs:
-        "Bed sensors estimate heart rate, heart-rate variability, respiratory rate, sleep timing and phases, movement, snoring, and recovery-related patterns.",
+        "Sensors in the cover estimate heart rate, heart rate variability, breathing rate, sleep timing and phases, movement, snoring, and recovery patterns.",
       insightStyle:
-        "Nightly scores, trends, recovery reports, and automated temperature changes based on measured and modeled sleep patterns.",
+        "Nightly scores, trends, and recovery reports, plus automatic temperature changes based on measured and modeled sleep patterns.",
       platforms:
-        "Pod hardware with the Eight Sleep companion app. Current mobile operating-system requirements should be checked before purchase.",
+        "Pod hardware with the Eight Sleep app. Check the current phone operating system requirements before you buy.",
       pricing:
-        "Checked August 30, 2026: Pod 5 was listed at $2,999 before promotions. A required annual Autopilot plan was $199 for Standard, $299 for Enhanced, or $399 for Elite.",
+        "Checked August 30, 2026: the Pod 5 was listed at $2,999 before promotions. A required annual Autopilot plan cost $199 for Standard, $299 for Enhanced, or $399 for Elite.",
       primaryJob:
-        "Actively regulate bed temperature while passively estimating sleep and recovery signals.",
+        "Control bed temperature through the night while estimating sleep and recovery from the mattress.",
     },
     competitorEvidence: {
       clinicalRole: [1],
@@ -42,24 +42,25 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "Eight Sleep changes the sleep environment and measures from the bed. Murph does not control temperature or create passive sleep measurements. It works through an ongoing private text conversation, remembering useful health history and helping decide what to try next. They solve different parts of the problem.",
+          "Eight Sleep changes the temperature of your bed and measures your sleep from the mattress. Murph does not control temperature or take its own measurements. It is a private text conversation that remembers your health history, reads your connected sleep data, and helps you decide what to try next.",
         question: "What is the main difference between Murph and Eight Sleep?",
       },
       {
         answer:
-          "Yes. Eight Sleep says an annual Autopilot plan is required with a Pod purchase. Plan prices and included warranty terms differ by tier, so the continuing cost belongs in the purchase decision.",
+          "Yes. Eight Sleep says you must buy an annual Autopilot plan with the Pod. Prices and warranty terms differ by tier, so count the yearly cost when you compare.",
         question: "Does Eight Sleep require a subscription?",
       },
       {
         answer:
-          "No consumer sleep device can diagnose a sleep disorder from a score alone. Eight Sleep's phases, snoring, recovery, and physiological summaries are estimates that can help with awareness but do not replace a clinician or a sleep study.",
+          "No. No consumer sleep device can diagnose a sleep disorder from a score. Eight Sleep's sleep phases, snoring, recovery, and heart data are estimates. They can help you notice patterns, but they do not replace a clinician or a sleep study.",
         question: "Can Eight Sleep diagnose a sleep disorder?",
       },
     ],
-    headline: "Health conversation or smart bed?",
+    headline:
+      "Eight Sleep controls the bed. Murph reads its data and keeps a plan going.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Eight Sleep controls bed temperature and estimates overnight metrics. Murph is a personal health assistant, putting sleep beside symptoms, routines, and decisions.",
+      "Eight Sleep heats and cools each side of the bed and scores your sleep. Murph is a personal health assistant that reads that data next to food, training, and labs, then keeps a plan going.",
     quickComparison: [
       {
         capability: "Active bed temperature control",
@@ -144,39 +145,39 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Active temperature control and passive bed sensing are capabilities Murph cannot reproduce.",
-      "The device has a high upfront cost and requires a continuing Autopilot plan.",
-      "Eight Sleep produces automatic nightly outputs; Murph adds value only when a person wants to bring observations into conversation and work through what follows.",
+      "Murph cannot control bed temperature or sense sleep from the mattress. Only Eight Sleep does that.",
+      "The Pod costs a lot up front and needs an ongoing Autopilot plan.",
+      "Eight Sleep reports every night without any effort from you. Murph only helps when you bring a question or a plan to the conversation.",
     ],
     useTogether:
-      "Eight Sleep can manage the bed environment and produce overnight estimates. A person can discuss those observations with Murph alongside routines, symptoms, training, travel, and how they actually feel, then choose a next step. This comparison does not claim that Eight Sleep data flows into Murph.",
+      "Eight Sleep runs the bed and produces the nightly estimates. Connect it to Murph, and Murph reads those nights alongside your routines, symptoms, training, and travel. Murph then helps you pick one change and checks back on whether it worked.",
   },
   {
     aliases: ["Sleep Cycle Alarm Clock"],
     category: "sleep-mental",
     chooseCompetitor:
-      "Choose Sleep Cycle if your main goal is automatic bedside sleep tracking, a wake window, snore and sound detection, and trend views in a dedicated sleep app.",
+      "Choose Sleep Cycle if you mainly want automatic bedside tracking, a smart wake window, snore and cough recordings, and trend charts in one sleep app.",
     chooseMurph:
-      "Choose Murph if you already have enough nightly data and want to text through questions, compare it with relevant symptoms, habits, workouts, or records, and set a plan, reminder, or later check-in instead of mainly reviewing another dashboard.",
+      "Choose Murph if you already have plenty of nightly data and want help acting on it. Murph reads the nights through Apple Health, compares them with your symptoms, habits, workouts, and records, and sets a plan with reminders.",
     competitor: {
       clinicalRole:
-        "A consumer sleep and smart-alarm app. Sleep stages, scores, sound classifications, and coaching are wellness estimates rather than medical diagnosis.",
+        "Sleep Cycle is a consumer sleep and smart alarm app. Its sleep stages, scores, sound labels, and coaching are wellness estimates, not a medical diagnosis.",
       followThrough:
-        "A smart wake window, sleep goals, notes, trend reports, reminders, relaxation content, and guidance from its Luma assistant.",
+        "Sleep Cycle offers a smart wake window, sleep goals, notes, trend reports, and reminders. It also has relaxation content and guidance from its Luma assistant.",
       format:
-        "A phone-first tracker that can listen from a bedside table or use motion sensing, with optional Apple Watch support.",
+        "A phone-first tracker. It listens from the bedside table or uses motion sensing, with optional Apple Watch support.",
       hardware:
-        "No proprietary device is required. A compatible phone is sufficient, and Apple Watch can provide another tracking route on iOS.",
+        "No special device is needed. A compatible phone is enough, and on iOS an Apple Watch is another way to track.",
       inputs:
-        "Phone microphone or accelerometer signals, optional Apple Watch movement, user notes, wake times, and selected Apple Health data.",
+        "It uses the phone microphone or accelerometer, optional Apple Watch movement, your notes and wake times, and selected Apple Health data.",
       insightStyle:
-        "Estimated sleep stages and score, nightly graphs, snore and cough recordings, long-term trends, and conversational sleep guidance.",
+        "You get estimated sleep stages and a score for each night, graphs, snore and cough recordings, long-term trends, and chat-style sleep guidance.",
       platforms:
-        "iOS, Android, and Apple Watch, with Apple Health support on compatible Apple devices.",
+        "iOS, Android, and Apple Watch. Apple Health support works on compatible Apple devices.",
       pricing:
-        "A free version is available after the trial. The US App Store listed a $57.99 Premium purchase at verification, but its displayed listing did not clearly label the billing interval.",
+        "A free version is available after the trial. At verification the US App Store listed a $57.99 Premium purchase, but the listing did not clearly say how often that bills.",
       primaryJob:
-        "Estimate sleep from a nearby phone and wake the user during a lighter portion of a selected alarm window.",
+        "Estimate sleep from a phone next to the bed, and wake you during a lighter phase within the alarm window you set.",
     },
     competitorEvidence: {
       clinicalRole: [3],
@@ -192,24 +193,25 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "Sleep Cycle automatically estimates nights and wakes you; Murph does neither. With Murph, the main surface is a private conversation that can bring symptoms, routines, records, and prior decisions to bear on a pattern without treating the score as a verdict.",
+          "Sleep Cycle estimates your sleep every night and wakes you. Murph does neither. Murph is a private conversation that reads your connected sleep data and puts a pattern next to symptoms, routines, records, and past decisions, without treating one score as the final word.",
         question: "How is Sleep Cycle different from Murph?",
       },
       {
         answer:
-          "No. Sleep Cycle can use a compatible phone's microphone or accelerometer from the bedside. Apple Watch support is optional for users who prefer that tracking route.",
+          "No. Sleep Cycle can track from a compatible phone on the bedside table using the microphone or accelerometer. Apple Watch tracking is optional for people who prefer it.",
         question: "Do I need a wearable to use Sleep Cycle?",
       },
       {
         answer:
-          "They should be treated as estimates. Bedside audio and motion can be affected by a partner, pets, room noise, phone placement, and device settings, and the app is not a replacement for clinical sleep testing.",
+          "No, treat them as estimates. A partner, pets, room noise, phone placement, and device settings can all affect bedside audio and motion tracking. The app does not replace a clinical sleep test.",
         question: "Are Sleep Cycle stages and sound labels medical results?",
       },
     ],
-    headline: "Health assistant or smart alarm?",
+    headline:
+      "Sleep Cycle tracks the night and wakes you. Murph works out what to change.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Sleep Cycle tracks from the bedside and wakes you. Murph is a personal health assistant: it interprets the graph with wider context and supports follow-through.",
+      "Sleep Cycle tracks sleep from a bedside phone and wakes you in a light phase. Murph is a personal health assistant that reads those nights via Apple Health and helps you change them.",
     quickComparison: [
       {
         capability: "Automatic bedside sleep tracking",
@@ -294,39 +296,39 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Phone-based tracking avoids another wearable but is sensitive to the bedroom environment and phone placement.",
-      "A free mode exists, while deeper history, trends, recordings, and other tools require Premium.",
-      "Murph offers no smart alarm or automatic bedside record; it requires an active conversation to add interpretation or follow-through.",
+      "Phone tracking spares you a wearable, but room noise, a partner, and where the phone sits all affect the results.",
+      "There is a free mode, but longer history, trends, recordings, and other tools need Premium.",
+      "Murph has no smart alarm and does not track the night on its own. You have to bring the pattern to the conversation for it to help.",
     ],
     useTogether:
-      "Let Sleep Cycle own the overnight estimate, sound record, and alarm. Bring a noteworthy night or longer trend to Murph with the room, routine, symptoms, stress, and lived experience that could change its meaning, then use Murph for the decision or check-in. That handoff is manual, not a product sync.",
+      "Let Sleep Cycle track the night, record sounds, and run the alarm. On Apple devices it can write sleep to Apple Health, which Murph reads, so the nights reach Murph without a direct connection. Murph then adds your routine, symptoms, and stress to the picture and holds the plan or check-in.",
   },
   {
     aliases: ["RISE Sleep", "Rise Science"],
     category: "sleep-mental",
     chooseCompetitor:
-      "Choose RISE if a clear estimate of sleep debt, a daily energy schedule, a melatonin window, and sleep-timing reminders are the main experience you want.",
+      "Choose RISE if you want a clear sleep debt number, a daily energy schedule, a melatonin window, and reminders for when to wind down and sleep.",
     chooseMurph:
-      "Choose Murph when RISE's debt or energy model does not explain how you feel and symptoms, workouts, meals, records, or prior attempts need to shape a plan that can change with new evidence.",
+      "Choose Murph when RISE's debt and energy model does not match how you feel. Murph reads the same wearable sleep data, adds symptoms, workouts, meals, and records, and adjusts the plan as new evidence comes in.",
     competitor: {
       clinicalRole:
-        "A consumer sleep and energy-planning app. Its sleep need, debt, circadian timing, and energy predictions are modeled estimates and are not diagnosis or treatment.",
+        "RISE is a consumer sleep and energy planning app. Its sleep need, sleep debt, circadian timing, and energy predictions are modeled estimates, not a diagnosis or treatment.",
       followThrough:
-        "Smart alarms, calendar-like energy windows, bedtime and wind-down reminders, habit prompts, widgets, sounds, and optional AI Expert guidance.",
+        "RISE offers smart alarms, energy windows laid out like a calendar, bedtime and wind-down reminders, habit prompts, widgets, and sounds. AI Expert guidance is an optional extra.",
       format:
-        "A subscription mobile app centered on two modeled concepts: accumulated sleep debt and circadian energy timing.",
+        "A subscription mobile app built around two modeled ideas: accumulated sleep debt and circadian energy timing.",
       hardware:
-        "No proprietary hardware is required. RISE can use phone data and import from supported health platforms and wearables.",
+        "No special hardware is needed. RISE can use phone data and import from supported health platforms and wearables.",
       inputs:
-        "Estimated or imported sleep timing from Apple Health, Apple Watch, Fitbit, Oura, WHOOP, and supported phone health platforms.",
+        "Sleep timing estimated from the phone or imported from Apple Health, Apple Watch, Fitbit, Oura, WHOOP, and supported phone health platforms.",
       insightStyle:
-        "A weighted sleep-debt estimate, personal sleep-need estimate, predicted energy peaks and dips, and a modeled melatonin window.",
+        "A weighted sleep debt estimate, a personal sleep need estimate, predicted energy peaks and dips, and a modeled melatonin window.",
       platforms:
-        "iPhone, iPad, Apple Watch, and Android, with available integrations differing by operating system and provider.",
+        "iPhone, iPad, Apple Watch, and Android. Available integrations differ by operating system and provider.",
       pricing:
-        "Checked August 30, 2026: RISE listed a seven-day trial followed by $69.99 per year. AI Expert was a separate optional purchase whose displayed term and price should be confirmed at checkout.",
+        "Checked August 30, 2026: RISE listed a seven-day trial followed by $69.99 per year. AI Expert was a separate optional purchase, so confirm its term and price at checkout.",
       primaryJob:
-        "Translate estimated sleep debt and circadian timing into a practical daily energy schedule.",
+        "Turn estimated sleep debt and circadian timing into a practical daily energy schedule.",
     },
     competitorEvidence: {
       clinicalRole: [1, 4],
@@ -342,24 +344,25 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "RISE turns sleep history into a defined debt and daily energy schedule. Murph does not produce that specialized dashboard. It is a private assistant that can remember relevant health context, question whether one model explains the day, and help choose and revisit a practical response.",
+          "RISE turns your sleep history into a sleep debt number and a daily energy schedule. Murph does not build that kind of dashboard. It is a private assistant that remembers your health history, questions whether one model explains your day, and helps you pick a practical response and revisit it.",
         question: "What is the difference between Murph and RISE?",
       },
       {
         answer:
-          "RISE lists imports from sources including Apple Health, Apple Watch, Fitbit, Oura, and WHOOP. The exact connection path and fields depend on the phone platform, provider, and current app version.",
+          "Yes. RISE lists imports from Apple Health, Apple Watch, Fitbit, Oura, and WHOOP, among others. The exact connection and the fields it pulls depend on your phone platform, the provider, and the current app version.",
         question: "Can RISE use sleep data from a wearable?",
       },
       {
         answer:
-          "No. RISE calculates sleep need, debt, circadian phase, and energy windows from its models and available sleep history. Those outputs can organize routines but should not be read as clinical measurements or diagnoses.",
+          "No. RISE calculates sleep need, sleep debt, circadian phase, and energy windows from its models and your sleep history. Those numbers can help you plan a routine, but they are not clinical measurements or a diagnosis.",
         question: "Are RISE energy peaks clinical measurements?",
       },
     ],
-    headline: "Health conversation or sleep debt planner?",
+    headline:
+      "RISE plans your day around sleep debt. Murph adds the rest of your health.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "RISE models sleep debt and daily energy. Murph is a personal health assistant; those estimates can be weighed against symptoms, routines, records, and lived experience.",
+      "RISE estimates sleep debt and maps your energy through the day. Murph is a personal health assistant that weighs those estimates against symptoms, food, training, and records.",
     quickComparison: [
       {
         capability: "Sleep debt modeling",
@@ -448,39 +451,39 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "The focused model can make sleep timing actionable, but users seeking granular stage analysis may prefer a different tracker.",
-      "There is a trial rather than a permanent free plan, and optional AI guidance can add another purchase.",
-      "RISE supplies a ready-made schedule; Murph asks the user to engage in conversation and does not replace that specialized energy timeline.",
+      "RISE's focused model makes sleep timing easy to act on, but if you want detailed stage analysis a different tracker may suit you better.",
+      "RISE offers a trial rather than a permanent free plan, and the optional AI guidance is another purchase.",
+      "RISE hands you a ready-made schedule. Murph needs you to take part in a conversation, and it does not replace that energy timeline.",
     ],
     useTogether:
-      "Use RISE for the debt estimate and daily energy schedule. Bring the relevant pattern to Murph when work, workouts, symptoms, meals, travel, or how the day actually felt complicate that model, and let Murph hold the resulting next step. Murph does not automatically receive the RISE timeline.",
+      "Use RISE for the sleep debt estimate and the daily energy schedule. When work, workouts, symptoms, meals, or travel make that model a poor fit, bring the pattern to Murph and let it hold the resulting plan. Murph does not receive the RISE timeline automatically.",
   },
   {
     aliases: ["AutoSleep Track Sleep on Watch"],
     category: "sleep-mental",
     chooseCompetitor:
-      "Choose AutoSleep if you already use Apple Watch and want automatic sleep timing, estimated stages, readiness, physiology, trends, and smart alarms in an Apple-focused app.",
+      "Choose AutoSleep if you already wear an Apple Watch and want automatic sleep timing, estimated stages, readiness, heart and breathing data, trends, and smart alarms in one Apple app.",
     chooseMurph:
-      "Choose Murph if you would rather bring a Watch pattern into a private conversation with symptoms, routines, workouts, or records, then carry the resulting decision into a plan or check-in.",
+      "Choose Murph if you want a plan, not another chart. Murph reads AutoSleep nights from Apple Health, sets them beside your symptoms, workouts, and records, and turns the answer into reminders and check-ins.",
     competitor: {
       clinicalRole:
-        "A consumer sleep analytics app. Its stage, readiness, oxygen, respiration, and apnea-related views are estimates and do not diagnose a medical condition.",
+        "AutoSleep is a consumer sleep analytics app. Its stage, readiness, oxygen, breathing, and apnea-related views are estimates and do not diagnose a medical condition.",
       followThrough:
-        "Sleep goals, rings, a sleep bank, bedtime and consistency views, smart alarms, notes, trends, exports, Siri, and Shortcuts support.",
+        "AutoSleep offers sleep goals, rings, a sleep bank, bedtime and consistency views, smart alarms, notes, trends, and exports. It also supports Siri and Shortcuts.",
       format:
-        "An Apple-only sleep dashboard designed primarily around automatic Apple Watch measurements.",
+        "An Apple-only sleep dashboard built mainly around automatic Apple Watch measurements.",
       hardware:
-        "Apple Watch supplies the richest signal set. The app can estimate time in bed from an iPhone when the watch is not worn, with fewer measurements.",
+        "Apple Watch gives the fullest set of readings. Without the watch, the app can estimate time in bed from an iPhone, with fewer measurements.",
       inputs:
-        "Apple Watch movement, heart rate, heart-rate variability, blood oxygen where supported, respiration, wrist temperature, environmental noise, and Apple Health data.",
+        "Apple Watch movement, heart rate, heart rate variability, blood oxygen where supported, breathing rate, wrist temperature, and room noise, plus Apple Health data.",
       insightStyle:
-        "Detailed rings, ratings, estimated stages, readiness, sleep bank, nightly physiology, trends, and user-adjustable calibration.",
+        "Detailed rings, ratings, estimated stages, readiness, a sleep bank, nightly heart and breathing data, and trends. You can adjust the calibration yourself.",
       platforms:
-        "iPhone and Apple Watch, with Apple Health, Siri, Shortcuts, and selected HomeKit features. Android is not supported.",
+        "iPhone and Apple Watch, with Apple Health, Siri, Shortcuts, and some HomeKit features. There is no Android version.",
       pricing:
-        "Checked August 30, 2026: $8.99 as a one-time US App Store purchase, with no subscription or in-app purchase listed.",
+        "Checked August 30, 2026: $8.99 as a one-time purchase on the US App Store, with no subscription or in-app purchase listed.",
       primaryJob:
-        "Turn Apple Watch signals into a detailed, automatic sleep and readiness history.",
+        "Turn Apple Watch readings into a detailed sleep and readiness history without any manual logging.",
     },
     competitorEvidence: {
       clinicalRole: [1, 3],
@@ -496,24 +499,25 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "AutoSleep automatically turns Apple Watch signals into a deep sleep dashboard. Murph is not a tracker or Watch visualization layer. It is a private health conversation that can use relevant history to put a pattern in context and help decide whether to act, watch it, or leave it alone.",
+          "AutoSleep turns Apple Watch readings into a detailed sleep dashboard on its own. Murph is not a tracker or a Watch chart. It is a private health conversation that reads your sleep data, remembers your history, and helps you decide whether to act, keep watching, or leave a pattern alone.",
         question: "How does AutoSleep compare with Murph?",
       },
       {
         answer:
-          "AutoSleep can estimate time in bed when an Apple Watch is not worn, but its richest sleep, heart, oxygen, respiration, temperature, and readiness views depend on compatible Watch measurements.",
+          "Partly. AutoSleep can estimate time in bed from your iPhone when you are not wearing the Watch. Its richest sleep, heart, oxygen, breathing, temperature, and readiness views need a compatible Watch.",
         question: "Can AutoSleep work without wearing Apple Watch?",
       },
       {
         answer:
-          "No. AutoSleep can surface estimated stages and patterns related to breathing or oxygen, but consumer watch data cannot confirm or exclude sleep apnea or another disorder. Symptoms or concerning patterns warrant clinical evaluation.",
+          "No. AutoSleep can show estimated stages and patterns linked to breathing or oxygen, but consumer watch data cannot confirm or rule out sleep apnea or any other disorder. If you have symptoms or a worrying pattern, see a clinician.",
         question: "Can AutoSleep diagnose sleep apnea?",
       },
     ],
-    headline: "Health assistant or Apple Watch dashboard?",
+    headline:
+      "AutoSleep charts your Apple Watch nights. Murph helps you act on them.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "AutoSleep turns Apple Watch data into dense sleep analytics. Murph is a personal health assistant, helping decide what those patterns mean across the rest of your health.",
+      "AutoSleep turns Apple Watch data into detailed sleep charts. Murph is a personal health assistant that reads those nights through Apple Health and works out what they mean.",
     quickComparison: [
       {
         capability: "Automatic watch sleep tracking",
@@ -598,39 +602,39 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "The one-time price is unusual among full sleep trackers, and official materials say sleep data stays on the device.",
-      "The full experience is limited to Apple's ecosystem and is most useful when a compatible Watch is worn overnight.",
-      "AutoSleep supplies automatic detail that Murph does not; Murph is useful only if the user wants conversation and action beyond the dashboard.",
+      "AutoSleep charges a one-time price, which is rare for a full sleep tracker, and its official materials say your sleep data stays on the device.",
+      "The full experience only works on Apple devices, and it is most useful when you wear a compatible Watch overnight.",
+      "AutoSleep fills in the detail automatically. Murph does not, and it only helps if you want a conversation and a plan beyond the dashboard.",
     ],
     useTogether:
-      "Keep the detailed nightly record in AutoSleep. Share a relevant chart, trend, or summary with Murph when it raises a question, then use the conversation to weigh other context and revisit the chosen response. This workflow requires the user to make that handoff.",
+      "Keep the detailed nightly record in AutoSleep. It saves sleep to Apple Health, which Murph reads, so a run of bad nights shows up in the conversation without you copying anything. Murph then adds the rest of your health, helps you choose a response, and revisits it later.",
   },
   {
     aliases: ["Pillow Sleep Tracker"],
     category: "sleep-mental",
     chooseCompetitor:
-      "Choose Pillow if you want automatic Apple Watch sleep sessions, phone-based audio detection, a wake window, and detailed sleep history inside an Apple-only app.",
+      "Choose Pillow if you want automatic Apple Watch sleep sessions, audio detection from your phone, a wake window, and a detailed sleep history in an Apple-only app.",
     chooseMurph:
-      "Choose Murph if you already have enough nightly graphs and want to text an assistant that remembers relevant symptoms, routines, goals, and prior attempts, then helps decide what to try, monitor, or discuss with a clinician.",
+      "Choose Murph if you have enough nightly graphs already. Murph reads them from Apple Health, remembers your symptoms, routines, goals, and past attempts, and helps you decide what to try, what to watch, and what to raise with a clinician.",
     competitor: {
       clinicalRole:
-        "A consumer sleep app. Estimated stages, scores, audio labels, and breathing-related patterns are for wellness awareness and do not diagnose sleep apnea or another disorder.",
+        "Pillow is a consumer sleep app. Its estimated stages, scores, audio labels, and breathing-related patterns are for general awareness and do not diagnose sleep apnea or any other disorder.",
       followThrough:
-        "A smart alarm, nap modes, bedtime support, mood and note tracking, sleep programs, relaxation content, trends, and data export.",
+        "Pillow includes a smart alarm, nap modes, bedtime support, mood and note tracking, sleep programs, relaxation content, trends, and data export.",
       format:
-        "An Apple-focused sleep tracker that can work automatically with Apple Watch or record a session from an iPhone or iPad.",
+        "An Apple-focused sleep tracker. It can track automatically with an Apple Watch or record a session from an iPhone or iPad.",
       hardware:
-        "No proprietary hardware is required. Apple Watch enables automatic wrist tracking, while the phone or tablet microphone supports overnight audio features.",
+        "No special hardware is needed. An Apple Watch enables automatic wrist tracking, and the phone or tablet microphone handles the overnight audio features.",
       inputs:
-        "Apple Watch motion and heart rate, iPhone or iPad microphone audio, sleep sessions, mood, notes, wake times, and selected Apple Health data.",
+        "Apple Watch motion and heart rate, audio from an iPhone or iPad microphone, sleep sessions, mood, notes, wake times, and selected Apple Health data.",
       insightStyle:
-        "Estimated stages, sleep score, heart-rate views, audio-event recordings, trends, and comparisons with Apple Health categories.",
+        "Estimated stages, a sleep score, heart rate views, recordings of audio events, trends, and comparisons with Apple Health categories.",
       platforms:
-        "iPhone, iPad, and Apple Watch, with Apple Health and selected Apple Music support. Android and a full web app are not offered.",
+        "iPhone, iPad, and Apple Watch, with Apple Health and some Apple Music support. There is no Android app and no full web app.",
       pricing:
-        "A free basic experience is available. Checked August 30, 2026, the US App Store listed Premium options at $19.99 monthly, $59.99 quarterly, and $39.99 annually.",
+        "A free basic version is available. Checked August 30, 2026, the US App Store listed Premium at $19.99 monthly, $59.99 quarterly, or $39.99 annually.",
       primaryJob:
-        "Estimate sleep within Apple's ecosystem and pair the nightly record with audio events and a smart alarm.",
+        "Estimate sleep within Apple's ecosystem and pair each night's record with audio events and a smart alarm.",
     },
     competitorEvidence: {
       clinicalRole: [2],
@@ -646,24 +650,25 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "Pillow tracks and records the night inside Apple's ecosystem; Murph does not. Murph works in messaging, where those observations can be considered beside symptoms, routines, workouts, or records, the next-step tradeoffs can be explained, and the user's decision can carry into a later check-in.",
+          "Pillow tracks and records the night inside Apple's ecosystem. Murph does not track anything itself. It works in messaging, where it can set those nights beside symptoms, routines, workouts, or records, explain the tradeoffs of each option, and follow up on your decision with a later check-in.",
         question: "What separates Pillow from Murph?",
       },
       {
         answer:
-          "No. Users can start a sleep session with an iPhone or iPad, including audio analysis where permitted. Apple Watch enables the app's automatic wrist-based tracking and richer heart-related data.",
+          "No. You can start a sleep session from an iPhone or iPad, including audio analysis where permitted. Apple Watch adds automatic wrist tracking and richer heart data.",
         question: "Does Pillow require Apple Watch?",
       },
       {
         answer:
-          "No. Pillow can label possible sounds and breathing events and estimate sleep stages, but these are consumer wellness outputs. A clinician and appropriate testing are needed to diagnose sleep apnea or another sleep condition.",
+          "No. Pillow can label possible sounds and breathing events and estimate sleep stages, but these are consumer wellness estimates. Diagnosing sleep apnea or any other sleep condition takes a clinician and proper testing.",
         question: "Can Pillow's audio analysis diagnose sleep apnea?",
       },
     ],
-    headline: "Health conversation or Apple sleep tracker?",
+    headline:
+      "Pillow records the night on Apple devices. Murph helps you change it.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Pillow records Apple sleep sessions, audio, and alarms. Murph is a personal health assistant. It puts a nightly pattern beside wider context and helps choose a realistic next step.",
+      "Pillow tracks sleep with an Apple Watch or an iPhone microphone. Murph is a personal health assistant that reads those nights via Apple Health and helps you plan a fix.",
     quickComparison: [
       {
         capability: "Automatic watch sleep tracking",
@@ -744,39 +749,39 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "It can combine wrist signals and bedroom audio, but partners, pets, room noise, and microphone placement can affect sound attribution.",
-      "The product is confined to Apple devices, and many advanced analytics and convenience features require Premium.",
-      "Pillow provides passive collection, audio, and an alarm that Murph cannot replace; Murph requires an active conversation to add value beyond the log.",
+      "Pillow can combine wrist data and bedroom audio, but a partner, pets, room noise, and where the microphone sits can all affect how sounds get labeled.",
+      "Pillow only runs on Apple devices, and many of the advanced analytics and convenience features need Premium.",
+      "Pillow collects data passively, records audio, and runs an alarm. Murph cannot replace any of that, and it only adds value if you talk with it about the log.",
     ],
     useTogether:
-      "Let Pillow collect the sleep session, audio, and wake-window record. Bring only the useful pattern or concern to Murph with the surrounding routine, symptoms, and lived experience, then decide whether to act or keep watching. Pillow does not automatically send that record to Murph.",
+      "Let Pillow collect the sleep session, the audio, and the wake window. Pillow can save sleep to Apple Health, and Murph reads Apple Health, so the record can reach Murph that way. Murph adds your routine, symptoms, and how you feel, then helps you decide whether to act or keep watching.",
   },
   {
     aliases: ["SleepWatch by Bodymatter"],
     category: "sleep-mental",
     chooseCompetitor:
-      "Choose SleepWatch if you want an automatic Apple Watch sleep log with estimated sleep quality, heart and oxygen trends, audio events, reports, and dedicated coaching guidance.",
+      "Choose SleepWatch if you want an automatic Apple Watch sleep log with estimated sleep quality, heart and oxygen trends, audio events, reports, and dedicated sleep coaching.",
     chooseMurph:
-      "Choose Murph if you want to bring sleep into a private text conversation with relevant symptoms, routines, workouts, records, and previous attempts, then get help choosing and revisiting a practical next move.",
+      "Choose Murph if you want sleep in the same conversation as your symptoms, workouts, records, and past attempts. Murph reads SleepWatch nights from Apple Health, helps you pick a practical next move, then checks back on it.",
     competitor: {
       clinicalRole:
-        "A consumer sleep and wellness app. Its sleep, sound, blood-oxygen, and coaching outputs are estimates and general information, not medical advice or diagnosis.",
+        "SleepWatch is a consumer sleep and wellness app. Its sleep, sound, blood oxygen, and coaching outputs are estimates and general information, not medical advice or a diagnosis.",
       followThrough:
-        "Sleep goals, reminders, a smart alarm, white noise, reports, personalized guidance, and Premium digital coaching.",
+        "SleepWatch offers sleep goals, reminders, a smart alarm, white noise, reports, and personalized guidance. Premium adds digital coaching.",
       format:
-        "An iPhone and Apple Watch tracker with nightly metrics, longer-term trends, sound recordings, and a Premium coaching layer.",
+        "An iPhone and Apple Watch tracker with nightly metrics, long-term trends, sound recordings, and a Premium coaching layer.",
       hardware:
-        "No proprietary hardware is required. Apple Watch provides wrist sensor data, and the iPhone microphone can capture selected overnight sounds.",
+        "No special hardware is needed. The Apple Watch supplies the wrist sensor data, and the iPhone microphone can record selected overnight sounds.",
       inputs:
-        "Apple Watch movement, heart rate, heart-rate dip, blood oxygen where available, iPhone audio, sleep timing, and Apple Health data.",
+        "Apple Watch movement, heart rate, heart rate dip, blood oxygen where available, iPhone audio, sleep timing, and Apple Health data.",
       insightStyle:
-        "Estimated total and restful sleep, sleep rhythm, disruptions, sleeping heart rate, heart-rate dip, oxygen trends, sound events, and coaching summaries.",
+        "Estimated total and restful sleep, sleep rhythm, disruptions, sleeping heart rate, heart rate dip, oxygen trends, sound events, and coaching summaries.",
       platforms:
-        "iPhone and Apple Watch with Apple Health. SleepWatch does not offer an equivalent Android app or full consumer web dashboard.",
+        "iPhone and Apple Watch with Apple Health. SleepWatch has no equivalent Android app and no full web dashboard.",
       pricing:
         "A free version is available. Checked August 30, 2026, Premium was listed at $4.99 per month or $39.99 per year after a seven-day trial.",
       primaryJob:
-        "Convert Apple Watch and iPhone signals into automatic sleep estimates and personalized sleep guidance.",
+        "Turn Apple Watch and iPhone readings into automatic sleep estimates and personalized sleep guidance.",
     },
     competitorEvidence: {
       clinicalRole: [1, 4],
@@ -792,24 +797,25 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "SleepWatch automatically builds and coaches from an Apple-centered sleep record. Murph does not create that record or a sleep score. It is a broader health assistant in messaging that can remember relevant context, work through uncertainty, and support a plan or later check-in beyond sleep alone.",
+          "SleepWatch builds an Apple-based sleep record on its own and coaches from it. Murph does not create that record or a sleep score. It is a broader health assistant in messaging that reads your connected sleep data, remembers your history, and supports a plan or check-in that reaches beyond sleep.",
         question: "How is SleepWatch different from Murph?",
       },
       {
         answer:
-          "The free app includes core sleep tracking and selected metrics. Premium adds deeper reports, more trends and sound features, personalized insights, and the digital coaching experience.",
+          "Partly. The free app covers core sleep tracking and selected metrics. Premium adds deeper reports, more trends and sound features, personalized insights, and the digital coaching.",
         question: "Is SleepWatch free?",
       },
       {
         answer:
-          "No. SleepWatch's own terms frame its outputs as estimates and general wellness information. Blood oxygen, sound labels, heart patterns, and sleep quality in the app cannot confirm or rule out a medical condition.",
+          "No. SleepWatch's own terms call its outputs estimates and general wellness information. The app's blood oxygen, sound labels, heart patterns, and sleep quality cannot confirm or rule out a medical condition.",
         question: "Are SleepWatch insights medical advice?",
       },
     ],
-    headline: "Health assistant or sleep coach?",
+    headline:
+      "SleepWatch tracks and coaches sleep. Murph ties it to the rest of your health.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "SleepWatch builds an Apple sleep record with coaching. Murph is a personal health assistant. SleepWatch reports can be considered beside symptoms, records, and routines.",
+      "SleepWatch builds an Apple Watch sleep record and adds coaching. Murph is a personal health assistant that reads that record via Apple Health and weighs it with symptoms and routines.",
     quickComparison: [
       {
         capability: "Automatic watch sleep tracking",
@@ -894,39 +900,39 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "The automatic Apple Watch workflow is convenient, but there is no equivalent Android experience.",
-      "Several useful reports, trends, recordings, and coaching tools sit behind Premium.",
-      "SleepWatch offers a dedicated coaching path and automatic record; Murph offers neither unless the user actively brings the question into conversation.",
+      "The automatic Apple Watch workflow is convenient, but there is no Android version.",
+      "Several of the useful reports, trends, recordings, and coaching tools sit behind Premium.",
+      "SleepWatch gives you a coaching path and an automatic record. Murph gives you neither unless you bring the question to the conversation.",
     ],
     useTogether:
-      "Use SleepWatch for the nightly record and sleep-specific guidance. Bring a report or unresolved question to Murph when other symptoms, routines, records, or health decisions matter, and keep the resulting action in that wider conversation. The guide does not claim a SleepWatch import.",
+      "Use SleepWatch for the nightly record and the sleep-specific coaching. SleepWatch can save sleep to Apple Health, which Murph reads, so those nights show up in Murph without an import. Bring an unresolved question to Murph when other symptoms, routines, records, or health decisions matter, and keep the resulting plan there.",
   },
   {
     aliases: ["SleepScore App"],
     category: "sleep-mental",
     chooseCompetitor:
-      "Choose SleepScore if non-contact tracking, nightly scores, guided sleep goals, and a shareable doctor report are the central sleep tools you want.",
+      "Choose SleepScore if you want tracking without a wearable, nightly scores, guided sleep goals, and a PDF report you can hand to your doctor.",
     chooseMurph:
-      "Choose Murph if the question extends beyond a sleep score and you want to discuss symptoms, routines, workouts, records, constraints, and how you actually feel, then carry one decision into a reminder or later review.",
+      "Choose Murph if your question is bigger than a sleep score. Murph talks through your symptoms, routines, workouts, records, and how you actually feel, then turns one decision into a reminder or a later review.",
     competitor: {
       clinicalRole:
-        "A consumer sleep-improvement app. Sonar-derived stages, scores, and screening questionnaires are estimates and do not diagnose a sleep disorder.",
+        "SleepScore is a consumer sleep improvement app. Its sonar-based stages, scores, and screening questionnaires are estimates and do not diagnose a sleep disorder.",
       followThrough:
-        "A Sleep Guide, goals and challenges, sleep education, a smart alarm, trends, lifestyle comparisons, and a PDF report that can be shared with a clinician.",
+        "SleepScore includes a Sleep Guide, goals and challenges, sleep education, a smart alarm, trends, lifestyle comparisons, and a PDF report you can share with a clinician.",
       format:
-        "A non-contact sleep tracker that uses a compatible phone near the bed, with a free core app and Premium guidance and history.",
+        "A no-contact sleep tracker that uses a compatible phone near the bed. The core app is free, and Premium adds guidance and history.",
       hardware:
-        "No wearable is required. Advanced tracking depends on compatible phone speakers and microphones. SleepScore Max is a separate bedside hardware product.",
+        "No wearable is needed. Advanced tracking depends on the phone having compatible speakers and microphones. SleepScore Max is a separate bedside hardware product.",
       inputs:
-        "Low-power sound reflections from breathing and body movement, user-entered lifestyle factors, sleep goals, and questionnaire responses.",
+        "Low-power sound reflections from breathing and body movement, plus the lifestyle factors, sleep goals, and questionnaire answers you enter.",
       insightStyle:
         "Estimated sleep duration and stages, separate mind and body scores, a total SleepScore, trends, guidance, and risk questionnaires.",
       platforms:
-        "A mobile app for supported smartphones. Advanced sonar compatibility is device-dependent and should be confirmed before relying on tracking.",
+        "A mobile app for supported smartphones. Advanced sonar tracking depends on the device, so confirm your phone is compatible before relying on it.",
       pricing:
-        "The core app is free. Checked August 30, 2026, Premium was listed at $29.99 for three months; an annual option was offered but its current public price was not clearly posted.",
+        "The core app is free. Checked August 30, 2026, Premium was listed at $29.99 for three months. An annual option was offered, but its current public price was not clearly posted.",
       primaryJob:
-        "Estimate sleep without a wearable and turn the results into a guided sleep-improvement routine.",
+        "Estimate sleep without a wearable and turn the results into a guided routine for sleeping better.",
     },
     competitorEvidence: {
       clinicalRole: [1, 2],
@@ -942,24 +948,25 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "SleepScore uses a compatible phone as a non-contact bedroom sensor; Murph does not measure the night. Murph is a private health assistant in messaging that can examine what a sleep result means beside relevant history and help decide what is worth doing next.",
+          "SleepScore turns a compatible phone into a no-contact bedroom sensor. Murph does not measure the night at all. It is a private health assistant in messaging that looks at what a sleep result means next to your history and helps you decide what is worth doing next.",
         question: "What is the main difference between SleepScore and Murph?",
       },
       {
         answer:
-          "SleepScore uses inaudible or near-inaudible sound signals from a compatible phone's speaker and analyzes reflections associated with breathing and body movement. Advanced tracking varies by phone model and cannot reliably separate two people in the same bed.",
+          "SleepScore sends inaudible or near-inaudible sound from the phone's speaker and reads the reflections from your breathing and body movement. Advanced tracking varies by phone model, and it cannot reliably tell two people in the same bed apart.",
         question: "How does SleepScore track sleep without a wearable?",
       },
       {
         answer:
-          "No. SleepScore's stages, scores, and risk questionnaires can support awareness and a doctor conversation, but they are not a diagnosis. Persistent insomnia, breathing concerns, or excessive sleepiness deserve professional evaluation.",
+          "No. SleepScore's stages, scores, and risk questionnaires can raise awareness and help a doctor conversation, but they are not a diagnosis. Ongoing insomnia, breathing problems, or heavy daytime sleepiness need a professional evaluation.",
         question: "Can SleepScore diagnose a sleep condition?",
       },
     ],
-    headline: "Health conversation or sonar sleep app?",
+    headline:
+      "SleepScore tracks sleep with no wearable. Murph works out what the score means.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "SleepScore estimates nights without a wearable on compatible phones. Murph is a personal health assistant; instead of sensing sleep, it interprets observations with broader context.",
+      "SleepScore uses your phone as a bedside sonar sensor and scores each night. Murph is a personal health assistant that puts that score beside your symptoms, routines, and records.",
     quickComparison: [
       {
         capability: "Contactless sleep tracking",
@@ -1044,39 +1051,39 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Non-contact tracking avoids wearing and charging a device, but compatible-phone requirements can limit who gets the full experience.",
-      "A partner, pet, room setup, or unsupported handset can complicate attribution and measurement quality.",
-      "Murph cannot fill a compatibility gap or generate passive sleep measurements; it adds value only when conversation and wider context are the missing pieces.",
+      "Tracking without a wearable means nothing to wear or charge, but the app only works fully on compatible phones.",
+      "A partner, a pet, the room layout, or an unsupported phone can muddy whose movement is measured and how well.",
+      "Murph cannot fix a phone compatibility gap or measure sleep on its own. It helps only when conversation and the rest of your health are the missing pieces.",
     ],
     useTogether:
-      "Use SleepScore for compatible-phone sensing, scores, and its guided sleep routine. Bring a relevant result or doctor report to Murph when it needs to be considered with symptoms, records, routines, or a wider plan. Murph does not automatically import SleepScore results.",
+      "Use SleepScore for the phone-based sensing, the scores, and its guided sleep routine. Bring a result or the doctor report to Murph when you need to weigh it against symptoms, records, routines, or a wider plan. Murph does not import SleepScore results automatically.",
   },
   {
     aliases: ["Sleep Reset CBT for Insomnia"],
     category: "sleep-mental",
     chooseCompetitor:
-      "Choose Sleep Reset if chronic insomnia is the specific problem and you want a defined behavioral program with a sleep diary, personalized schedule, CBT-I exercises, and coach messaging.",
+      "Choose Sleep Reset if chronic insomnia is the specific problem and you want a defined program: a sleep diary, a personalized schedule, CBT-I exercises, and messaging with a coach.",
     chooseMurph:
-      "Choose Murph if the need is a flexible private health conversation that remembers relevant context, helps with ordinary plans and check-ins, and can discuss sleep alongside other concerns, with no expectation of a CBT-I curriculum, sleep coach, or treatment relationship.",
+      "Choose Murph if you want a flexible private health conversation that remembers your history, keeps ordinary plans and check-ins going, and can talk about sleep alongside other concerns. Do not expect a CBT-I curriculum, a sleep coach, or a treatment relationship from Murph.",
     competitor: {
       clinicalRole:
-        "A digital sleep program based on cognitive behavioral therapy for insomnia and supported by sleep coaches. It is not emergency care and does not replace individualized medical assessment when one is needed.",
+        "Sleep Reset is a digital sleep program based on cognitive behavioral therapy for insomnia, with support from sleep coaches. It is not emergency care, and it does not replace an individual medical assessment when one is needed.",
       followThrough:
-        "Daily sleep diaries, a personalized sleep schedule, stimulus-control and sleep-consolidation tasks, cognitive exercises, relaxation practice, and asynchronous coach messages.",
+        "Daily sleep diaries, a personalized sleep schedule, stimulus control and sleep consolidation tasks, cognitive exercises, relaxation practice, and coach messages you exchange on your own time.",
       format:
-        "A paid, structured mobile program completed over multiple weeks, with self-guided lessons and support from a human sleep coach.",
+        "A paid, structured mobile program that runs over several weeks. It combines self-guided lessons with support from a human sleep coach.",
       hardware:
-        "No proprietary wearable or bedside sensor is central to the program. Recommendations are driven mainly by intake responses and daily sleep diaries.",
+        "No wearable or bedside sensor is central to the program. Recommendations come mainly from your intake answers and daily sleep diaries.",
       inputs:
-        "An insomnia and sleep intake, self-reported sleep timing and quality, diary entries, adherence, concerns, and messages exchanged with a coach.",
+        "An insomnia and sleep intake, self-reported sleep timing and quality, diary entries, how closely you follow the plan, your concerns, and messages exchanged with a coach.",
       insightStyle:
-        "Personalized behavioral recommendations and schedule changes grounded in CBT-I methods rather than consumer sleep-stage scoring.",
+        "Personalized behavioral recommendations and schedule changes based on CBT-I methods, rather than consumer sleep stage scores.",
       platforms:
-        "A mobile and web-supported digital program. Current device compatibility and enrollment availability should be checked directly.",
+        "A digital program for mobile with web support. Check current device compatibility and enrollment availability directly with Sleep Reset.",
       pricing:
-        "Checked August 30, 2026: a one-week trial was $19, followed by $297 for each 28-day program period unless canceled.",
+        "Checked August 30, 2026: a one-week trial cost $19, followed by $297 for each 28-day program period unless canceled.",
       primaryJob:
-        "Help adults change behaviors and thoughts that perpetuate insomnia through a structured CBT-I-based program.",
+        "Help adults change the behaviors and thoughts that keep insomnia going, through a structured program based on CBT-I.",
     },
     competitorEvidence: {
       clinicalRole: [2],
@@ -1092,24 +1099,25 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "Sleep Reset is a defined CBT-I-based insomnia program with diaries, schedule changes, exercises, and human coach support. Murph is a broader health assistant in familiar messaging. It can help someone think through context and keep practical actions moving, but it is not a replacement for Sleep Reset or a clinician.",
+          "Sleep Reset is a defined insomnia program based on CBT-I, with diaries, schedule changes, exercises, and support from human coaches. Murph is a broader health assistant that lives in your messaging app. It can help you think through your situation and keep practical actions moving, but it does not replace Sleep Reset or a clinician.",
         question: "How is Sleep Reset different from Murph?",
       },
       {
         answer:
-          "The program says it draws on cognitive behavioral therapy for insomnia, including a sleep diary, schedule adjustments, stimulus control, cognitive work, and relaxation. Delivery through an app and coach messages is different from individualized in-person therapy.",
+          "Sleep Reset says it draws on cognitive behavioral therapy for insomnia, including a sleep diary, schedule adjustments, stimulus control, cognitive work, and relaxation. Delivery through an app and coach messages is not the same as individualized in-person therapy.",
         question: "Is Sleep Reset a CBT-I program?",
       },
       {
         answer:
-          "Sleep Reset publishes a $19 one-week trial followed by $297 per 28-day program period. Because the full program can span more than one period, users should confirm the expected duration, renewal, cancellation, and any separate clinical-service costs before enrolling.",
+          "Sleep Reset lists a $19 one-week trial, then $297 per 28-day program period. The full program can run for more than one period, so confirm the expected length, renewal, cancellation terms, and any separate clinical service costs before you enroll.",
         question: "How much does Sleep Reset cost?",
       },
     ],
-    headline: "Health assistant or CBT-I program?",
+    headline:
+      "Sleep Reset is a coached CBT-I program. Murph covers the rest of your health.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Sleep Reset delivers structured CBT-I work with a human coach. Murph is a personal health assistant, broader in scope but not a substitute for dedicated insomnia care.",
+      "Sleep Reset is a CBT-I insomnia program with human sleep coaches. Murph is a personal health assistant that covers wider health questions but is not a substitute for insomnia care.",
     quickComparison: [
       {
         capability: "Structured CBTI program",
@@ -1194,39 +1202,39 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Its narrow insomnia focus and structured behavioral work can be more appropriate than a general wellness app for the right user.",
-      "The recurring 28-day price is substantially higher than most consumer sleep trackers and meditation subscriptions.",
-      "Murph is more flexible and lower-structure, but that flexibility is a disadvantage when the user needs a defined CBT-I curriculum or human sleep coach.",
+      "For the right person, Sleep Reset's narrow insomnia focus and structured behavioral work can be a better fit than a general wellness app.",
+      "The recurring 28-day price is far higher than most consumer sleep trackers and meditation subscriptions.",
+      "Murph is more flexible and less structured. That flexibility works against you if you need a defined CBT-I curriculum or a human sleep coach.",
     ],
     useTogether:
-      "Keep the insomnia schedule, exercises, and clinical questions with Sleep Reset and the appropriate clinician. Murph can separately support broader health questions, ordinary logistics, and agreed reminders without rewriting the program. The products do not share program history automatically.",
+      "Keep the insomnia schedule, the exercises, and any clinical questions with Sleep Reset and your clinician. Murph can separately handle wider health questions, everyday logistics, and reminders you both agree on, without rewriting the program. The two products do not share program history.",
   },
   {
     aliases: ["Calm App"],
     category: "sleep-mental",
     chooseCompetitor:
-      "Choose Calm if your main need is a deep on-demand catalog of meditations, bedtime stories, music, ambient sounds, breathing sessions, and movement content.",
+      "Choose Calm if what you mainly want is a deep on-demand catalog: meditations, bedtime stories, music, ambient sounds, breathing sessions, and movement content.",
     chooseMurph:
-      "Choose Murph when another audio session is not the answer and your symptoms, routines, records, goals, or uncertainty need to inform a decision, reminder, or later check-in.",
+      "Choose Murph when another audio session is not the answer. Murph looks at your symptoms, routines, records, and goals, helps you make a decision, and follows it with a reminder or a later check-in.",
     competitor: {
       clinicalRole:
-        "A consumer mindfulness, relaxation, and sleep-content service. The standard Calm app is not psychotherapy, diagnosis, or emergency mental-health care.",
+        "Calm is a consumer mindfulness, relaxation, and sleep content service. The standard Calm app is not psychotherapy, a diagnosis, or emergency mental health care.",
       followThrough:
-        "Daily content, reminders, meditation history and streaks, multi-day programs, bedtime routines, and regularly added sessions.",
+        "Daily content, reminders, meditation history and streaks, multi-day programs, bedtime routines, and new sessions added regularly.",
       format:
         "An on-demand subscription library organized around meditation, sleep, music, breathing, movement, and personal growth.",
       hardware:
-        "No proprietary hardware or biometric sensor is required. Playback uses a phone, tablet, computer, or other supported media device.",
+        "No special hardware or biometric sensor is needed. You play the content on a phone, tablet, computer, or another supported media device.",
       inputs:
-        "User-selected goals, preferred topics, completed sessions, listening history, and in-app engagement rather than a continuous biometric stream.",
+        "The goals and topics you pick, the sessions you complete, your listening history, and how you use the app. There is no continuous biometric feed.",
       insightStyle:
-        "Curated and recommended content, guided practice, streaks, and progress history rather than health-data correlations or physiological scoring.",
+        "Hand-picked and recommended content, guided practice, streaks, and progress history. Calm does not correlate health data or score your physiology.",
       platforms:
-        "iOS, Android, and web, with availability on selected watches, televisions, speakers, and partner platforms.",
+        "iOS, Android, and web, plus selected watches, televisions, speakers, and partner platforms.",
       pricing:
-        "Calm offers limited free content. Checked August 30, 2026, a public web offer showed a seven-day trial then $69.99 per year, while an official help page documented a 14-day trial then $79.99 per year. Checkout terms prevail.",
+        "Calm offers limited free content. Checked August 30, 2026, a public web offer showed a seven-day trial then $69.99 per year, while an official help page listed a 14-day trial then $79.99 per year. The checkout terms are what count.",
       primaryJob:
-        "Provide a broad library of guided practices and audio that support relaxation, meditation, and bedtime routines.",
+        "Provide a broad library of guided practices and audio for relaxation, meditation, and bedtime routines.",
     },
     competitorEvidence: {
       clinicalRole: [1, 2],
@@ -1242,24 +1250,25 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "Calm gives the user ready-to-play audio and guided practice on demand. Murph offers no equivalent library. It starts with the person's own health question in messaging, uses useful prior context, and can carry the chosen next step into a reminder or later conversation.",
+          "Calm gives you ready-to-play audio and guided practice whenever you want it. Murph has no library like that. It starts from your own health question in messaging, uses what it already knows about you, and carries the next step into a reminder or a later conversation.",
         question: "What is the main difference between Calm and Murph?",
       },
       {
         answer:
-          "Calm provides some free sessions, with most of its catalog and programs included in Premium. Trial length, annual price, promotions, app-store terms, and regional offers can differ, so users should review the final checkout screen.",
+          "Yes, in part. Calm offers some free sessions, and most of its catalog and programs sit in Premium. Trial length, annual price, promotions, app store terms, and regional offers can differ, so check the final checkout screen.",
         question: "Can I use Calm for free?",
       },
       {
         answer:
-          "The standard Calm app offers wellness and relaxation content, not diagnosis or psychotherapy. Calm also markets separate employer and health-plan products, but access to those services should not be assumed from an ordinary Premium subscription.",
+          "No. The standard Calm app offers wellness and relaxation content, not diagnosis or psychotherapy. Calm also sells separate employer and health plan products, but an ordinary Premium subscription does not include those services.",
         question: "Is Calm a mental-health treatment service?",
       },
     ],
-    headline: "Health conversation or mindfulness library?",
+    headline:
+      "Calm is the audio library. Murph is the conversation about what to do next.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Calm offers ready-to-play meditation and sleep audio. Murph is a personal health assistant. Your situation comes first, useful context is remembered, and decisions carry forward.",
+      "Calm offers a library of meditations, Sleep Stories, music, and breathing sessions. Murph is a personal health assistant that starts from your own situation and keeps a plan going.",
     quickComparison: [
       {
         capability: "Guided meditation library",
@@ -1344,39 +1353,39 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "The large catalog offers variety, but finding the right session can involve more browsing than following a single structured program.",
-      "Murph has no comparable catalog of ready-to-play meditation and sleep content; its value depends on wanting an active, personal conversation.",
-      "Trial and renewal terms vary across official pages, storefronts, regions, and promotions, so checkout details deserve attention.",
+      "The big catalog gives you variety, but finding the right session can take more browsing than following one structured program.",
+      "Murph has no catalog of ready-to-play meditation or sleep audio. It is only worth using if you want an active, personal conversation.",
+      "Trial and renewal terms differ across Calm's official pages, app stores, regions, and promotions, so read the checkout screen carefully.",
     ],
     useTogether:
-      "Use Calm when a meditation, Sleep Story, or soundscape is the chosen action. Use Murph to work out why that action fits, keep it lightweight, and later ask whether it actually helped in the wider situation. Murph does not receive Calm's library or listening history.",
+      "Use Calm when a meditation, a Sleep Story, or a soundscape is what you have decided to do. Use Murph to work out why that fits, keep it small, and later ask whether it actually helped. Murph does not receive Calm's library or your listening history.",
   },
   {
     aliases: ["Headspace App"],
     category: "sleep-mental",
     chooseCompetitor:
-      "Choose Headspace if guided meditation, Sleepcasts, courses, breathing, focus audio, movement, and a defined mindfulness curriculum are your priorities.",
+      "Choose Headspace if you want guided meditation, Sleepcasts, courses, breathing, focus audio, movement, and a defined mindfulness curriculum.",
     chooseMurph:
-      "Choose Murph if the question is not solved by another guided session and you want to text through relevant symptoms, routines, records, or goals, understand the tradeoffs, and keep the resulting plan or check-in alive over time.",
+      "Choose Murph if another guided session will not settle the question. Murph texts through your symptoms, routines, records, and goals, lays out the tradeoffs, and keeps the plan or check-in alive over time.",
     competitor: {
       clinicalRole:
-        "The consumer membership is a mental-wellness service, not diagnosis or psychotherapy. Coaching and therapy are separate offerings with eligibility, location, and payment conditions.",
+        "The consumer membership is a mental wellness service, not a diagnosis or psychotherapy. Coaching and therapy are separate offerings with their own eligibility, location, and payment conditions.",
       followThrough:
         "Courses, daily meditations, reminders, progress tracking, streaks, sleep routines, exercises, and personalized content recommendations.",
       format:
-        "A subscription library and learning experience for meditation, sleep, stress, focus, and movement, with separate care products for eligible users.",
+        "A subscription library and learning experience for meditation, sleep, stress, focus, and movement. Separate care products exist for eligible users.",
       hardware:
-        "No proprietary device is required. Apple Watch can support quick sessions, and Apple Health can record eligible mindful minutes.",
+        "No special device is needed. Apple Watch supports quick sessions, and Apple Health can record eligible mindful minutes.",
       inputs:
-        "Selected goals and topics, completed sessions, self-directed check-ins, conversation with the Ebb AI companion, and optional care intake in separate services.",
+        "The goals and topics you pick, completed sessions, self-directed check-ins, conversations with the Ebb AI companion, and an optional care intake in the separate services.",
       insightStyle:
-        "Expert-created courses, guided exercises, recommendations, progress history, and conversational reflection through Ebb rather than biometric health scoring.",
+        "Expert-created courses, guided exercises, recommendations, progress history, and reflective conversation with Ebb. There is no biometric health scoring.",
       platforms:
-        "iOS, Android, Apple Watch, and web. Coaching, therapy, employer access, and AI features can have separate availability rules.",
+        "iOS, Android, Apple Watch, and web. Coaching, therapy, employer access, and AI features can each have separate availability rules.",
       pricing:
-        "Checked August 30, 2026: $12.99 per month after a seven-day trial or $69.99 per year after a 14-day trial. Therapy and coaching are separate from the standard consumer membership.",
+        "Checked August 30, 2026: $12.99 per month after a seven-day trial, or $69.99 per year after a 14-day trial. Therapy and coaching are separate from the standard consumer membership.",
       primaryJob:
-        "Teach and support regular meditation, sleep, and mental-wellness practices through expert-created content.",
+        "Teach and support a regular meditation, sleep, and mental wellness practice through expert-created content.",
     },
     competitorEvidence: {
       clinicalRole: [1, 4],
@@ -1392,24 +1401,25 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "Headspace teaches practices through courses, Sleepcasts, breathing, movement, and focus tools. Murph does not replace that curriculum. Its day-to-day surface is a private conversation where health history can inform an individual decision and what happens after the answer.",
+          "Headspace teaches practices through courses, Sleepcasts, breathing, movement, and focus tools. Murph does not replace that curriculum. Day to day, Murph is a private conversation where your health history shapes what you decide and what happens after.",
         question: "How does Headspace differ from Murph?",
       },
       {
         answer:
-          "No. A standard Headspace subscription covers the consumer meditation and wellness library. Human coaching and therapy are distinct services with separate access, clinical, geographic, insurance, or payment terms.",
+          "No. A standard Headspace subscription covers the consumer meditation and wellness library. Human coaching and therapy are separate services with their own access, clinical, location, insurance, or payment terms.",
         question: "Does Headspace membership include therapy?",
       },
       {
         answer:
-          "Ebb is Headspace's conversational AI companion for reflection and everyday support. Headspace does not present it as emergency care, and it is not a replacement for a licensed clinician or crisis resource.",
+          "Ebb is Headspace's conversational AI companion for reflection and everyday support. Headspace does not present it as emergency care, and it does not replace a licensed clinician or a crisis resource.",
         question: "What is Headspace's Ebb AI companion?",
       },
     ],
-    headline: "Health assistant or meditation platform?",
+    headline:
+      "Headspace teaches you to meditate. Murph fits that practice into your health.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Headspace teaches meditation and sleep practices through structured content. Murph is a personal health assistant; mental wellness stays connected to the wider health thread.",
+      "Headspace teaches meditation and sleep through courses and Sleepcasts. Murph is a personal health assistant that ties mental wellness to the rest of your health.",
     quickComparison: [
       {
         capability: "Guided meditation curriculum",
@@ -1494,39 +1504,39 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Its structured curriculum is useful for learning a practice, while people seeking open-ended health reasoning may find a content library too narrow.",
-      "Therapy and coaching should be evaluated as separate products rather than assumed benefits of the consumer subscription.",
-      "Murph offers no equivalent depth of guided meditation or sleep audio and is not a substitute for Headspace's separate human-care pathways.",
+      "Headspace's structured curriculum is good for learning a practice, but a content library is a narrow tool for open-ended health questions.",
+      "Treat Headspace therapy and coaching as separate products. They are not included in the consumer subscription.",
+      "Murph has nothing close to Headspace's depth of guided meditation and sleep audio, and it is no substitute for Headspace's separate human care services.",
     ],
     useTogether:
-      "Let Headspace own the course, Sleepcast, or guided practice. Use Murph when the practice sits inside a wider question about symptoms, routines, health data, or follow-through, and keep clinical care with the appropriate service or clinician. Headspace history is not automatically available to Murph.",
+      "Let Headspace run the course, the Sleepcast, or the guided practice. Bring in Murph when that practice sits inside a wider question about symptoms, routines, or health data, and keep clinical care with the right service or clinician. Headspace history does not flow into Murph, apart from any mindful minutes it records in Apple Health.",
   },
   {
     aliases: ["Balance Meditation and Sleep"],
     category: "sleep-mental",
     chooseCompetitor:
-      "Choose Balance if you want guided meditation plans that adapt session by session, plus sleep meditations, stories, breathing, and relaxation audio.",
+      "Choose Balance if you want guided meditation plans that adapt from session to session, plus sleep meditations, stories, breathing, and relaxation audio.",
     chooseMurph:
-      "Choose Murph when meditation is only one option inside a wider health question and useful history, tradeoffs, and the later result need to stay connected.",
+      "Choose Murph when meditation is only one option inside a bigger health question. Murph keeps your history, the tradeoffs, and the later result in one place.",
     competitor: {
       clinicalRole:
-        "A consumer meditation and mental-wellness app. Its personalization supports practice selection and does not amount to diagnosis, psychotherapy, or medical treatment.",
+        "Balance is a consumer meditation and mental wellness app. Its personalization helps choose a practice. It is not a diagnosis, psychotherapy, or medical treatment.",
       followThrough:
         "Ten-day Plans, daily sessions, reminders, streaks, skills, badges, quick Singles, sleep content, and progress through meditation techniques.",
       format:
-        "A guided meditation subscription that assembles sessions from a library based on user goals, experience, preferences, and recent feedback.",
+        "A guided meditation subscription that builds sessions from a library based on your goals, experience, preferences, and recent feedback.",
       hardware:
-        "No proprietary hardware or biometric sensor is required. Apple Watch offers selected sessions and practice access.",
+        "No special hardware or biometric sensor is needed. Apple Watch offers selected sessions and practice access.",
       inputs:
-        "Self-reported goals, meditation experience, current feelings, preferred duration, completed sessions, and feedback after practice.",
+        "Your self-reported goals, meditation experience, current feelings, preferred duration, completed sessions, and feedback after each practice.",
       insightStyle:
-        "Personalized session selection and progressive skill-building rather than physiological measurement, health-record analysis, or clinical assessment.",
+        "Personalized session selection and step-by-step skill building. There is no physiological measurement, health record analysis, or clinical assessment.",
       platforms:
-        "iOS, Android, and Apple Watch. Feature availability can differ between phone and watch experiences.",
+        "iOS, Android, and Apple Watch. Features can differ between the phone and watch apps.",
       pricing:
-        "Checked August 30, 2026: $11.99 per month, $69.99 per year, or $399.99 for lifetime access, with storefront and promotional variations possible.",
+        "Checked August 30, 2026: $11.99 per month, $69.99 per year, or $399.99 for lifetime access. Storefront and promotional prices can vary.",
       primaryJob:
-        "Personalize a regular guided meditation practice from self-reported needs and preferences.",
+        "Personalize a regular guided meditation practice from the needs and preferences you report.",
     },
     competitorEvidence: {
       clinicalRole: [1],
@@ -1542,24 +1552,25 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "Balance adapts guided sessions from what the user reports before and after practice. Murph does not choose meditation content. It keeps a broader private health conversation, so symptoms, records, routines, and earlier decisions can inform questions and follow-through beyond meditation.",
+          "Balance adapts guided sessions to what you report before and after each practice. Murph does not choose meditation content. It runs a broader private health conversation, so your symptoms, records, routines, and earlier decisions can shape questions and plans beyond meditation.",
         question: "What is the difference between Balance and Murph?",
       },
       {
         answer:
-          "Balance asks about goals, meditation experience, feelings, desired duration, and session feedback. It then changes the techniques and guidance selected from its library. This is content personalization, not biometric analysis.",
+          "Balance asks about your goals, meditation experience, current feelings, preferred length, and how each session went. It then changes which techniques and guidance it picks from its library. That is content personalization, not biometric analysis.",
         question: "How does Balance personalize meditation?",
       },
       {
         answer:
-          "Balance offers sleep-focused meditations, stories, sounds, and wind-down practices. It is not a passive sleep tracker and does not estimate stages or diagnose insomnia or another sleep disorder.",
+          "No. Balance offers sleep meditations, stories, sounds, and wind-down practices, but it is not a passive sleep tracker. It does not estimate sleep stages or diagnose insomnia or any other sleep disorder.",
         question: "Does Balance track sleep?",
       },
     ],
-    headline: "Health conversation or meditation coach?",
+    headline:
+      "Balance picks your next meditation. Murph handles the questions around it.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Balance adapts guided meditation from your feedback. Murph is a personal health assistant for open-ended questions, remembered context, and action beyond the session.",
+      "Balance adapts guided meditation to your feedback. Murph is a personal health assistant for the questions around the session. It remembers your history and keeps a plan going.",
     quickComparison: [
       {
         capability: "Personalized meditation plans",
@@ -1644,39 +1655,39 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "Adaptive session selection can reduce browsing, but it remains bounded by a meditation and relaxation library.",
-      "There is no continuous sensor stream or objective sleep measurement behind the personalization.",
-      "Murph has no comparable guided-session catalog; it is useful only when conversation, wider context, or support after the session is the unmet need.",
+      "Adaptive session selection cuts down on browsing, but it can only choose from a meditation and relaxation library.",
+      "No continuous sensor data or objective sleep measurement sits behind the personalization.",
+      "Murph has no guided-session catalog to compare with Balance. It is only useful when conversation, the rest of your health, or support after the session is what you are missing.",
     ],
     useTogether:
-      "Use Balance to select and deliver the meditation session. Use Murph when the choice needs wider health context or when the useful work is deciding what happened afterward and what, if anything, to repeat. A person must bring the relevant session context across.",
+      "Use Balance to pick and play the meditation. Use Murph when that choice depends on the rest of your health, or when the real work is deciding what happened afterward and what to repeat. You have to tell Murph about the session yourself.",
   },
   {
     aliases: ["Wysa Mental Wellbeing AI"],
     category: "sleep-mental",
     chooseCompetitor:
-      "Choose Wysa if a dedicated emotional-support chatbot, CBT- and DBT-inspired exercises, mood check-ins, coping tools, and optional wellbeing coaching match your immediate need.",
+      "Choose Wysa if what you need right now is a dedicated emotional support chatbot, exercises inspired by CBT and DBT, mood check-ins, coping tools, and optional wellbeing coaching.",
     chooseMurph:
-      "Choose Murph when an emotional concern cannot be separated from sleep, physical symptoms, routines, or authorized health data and the next decision needs a plan, reminder, or follow-up across those domains.",
+      "Choose Murph when an emotional concern is tangled up with sleep, physical symptoms, routines, or the health data you have connected. Murph can turn what you decide into a plan, a reminder, or a follow-up across all of those.",
     competitor: {
       clinicalRole:
-        "An AI wellbeing companion and self-help toolkit with optional human coaching. Wysa says it does not provide diagnosis or treatment advice and is not a crisis or emergency service.",
+        "Wysa is an AI wellbeing companion and self-help toolkit with optional human coaching. Wysa says it does not provide diagnosis or treatment advice and is not a crisis or emergency service.",
       followThrough:
         "Conversational check-ins, mood tracking, self-guided exercises, reminders, progress through tool packs, and messaging with a coach on eligible plans.",
       format:
-        "An AI chat interface paired with structured self-help exercises and optional scheduled live text coaching, plus asynchronous journaling feedback between sessions. Select users in the United States and India may have audio or video sessions.",
+        "An AI chat paired with structured self-help exercises. Optional live text coaching runs on a schedule, with journaling feedback between sessions. Select users in the United States and India may get audio or video sessions.",
       hardware:
-        "No proprietary hardware or continuous biometric sensor is required. The experience is driven mainly by chat and self-report.",
+        "No special hardware or continuous biometric sensor is needed. The experience runs mainly on chat and what you report yourself.",
       inputs:
-        "Typed conversation, mood and symptom check-ins, questionnaire responses, selected goals, exercise activity, and coach messages when purchased.",
+        "Typed conversation, mood and symptom check-ins, questionnaire answers, the goals you choose, exercise activity, and coach messages if you buy coaching.",
       insightStyle:
         "Empathetic AI conversation and exercises inspired by CBT, DBT, mindfulness, breathing, sleep, and behavioral coping approaches.",
       platforms:
-        "iPhone, Android, and web. Employer, health-plan, and care pathways can differ from the direct consumer experience.",
+        "iPhone, Android, and web. Employer, health plan, and care pathways can differ from the direct consumer experience.",
       pricing:
-        "Published direct-plan copy checked August 30, 2026 listed self-help Tools at $99.99 per year and Coach plus Tools at $99.99 per month. App-store purchases and supported-program pricing can differ.",
+        "Wysa's published direct-plan copy, checked August 30, 2026, listed self-help Tools at $99.99 per year and Coach plus Tools at $99.99 per month. App store purchases and supported-program pricing can differ.",
       primaryJob:
-        "Offer always-available emotional-support chat and structured self-help exercises between or outside formal care.",
+        "Offer emotional support chat that is always available, plus structured self-help exercises, between or outside formal care.",
     },
     competitorEvidence: {
       clinicalRole: [3],
@@ -1692,24 +1703,25 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "Wysa is a dedicated emotional-support chatbot with a structured exercise library and optional human coaching. Murph does not offer that same focused toolkit or coach tier. It is a broader private health assistant that can connect mental-wellness concerns with other relevant health context and support the next decision over time.",
+          "Wysa is a dedicated emotional support chatbot with a structured exercise library and optional human coaching. Murph has no equivalent toolkit or coach tier. It is a broader private health assistant that connects mental wellness concerns with the rest of your health and helps you decide what to do next.",
         question: "How does Wysa compare with Murph?",
       },
       {
         answer:
-          "No. Wysa's FAQ says the AI does not diagnose conditions or provide treatment advice. Human wellbeing coaching is also distinct from psychotherapy unless a specific clinical program explicitly says otherwise.",
+          "No. Wysa's FAQ says the AI does not diagnose conditions or give treatment advice. Its human wellbeing coaching is also not psychotherapy unless a specific clinical program says so explicitly.",
         question: "Is Wysa a therapist?",
       },
       {
         answer:
-          "No. Wysa says it is not designed for crisis or emergency use. Anyone in immediate danger or considering self-harm should contact local emergency services or an appropriate crisis resource rather than depend on an app chat.",
+          "No. Wysa says it is not designed for crisis or emergency use. If you are in immediate danger or thinking about self-harm, contact local emergency services or a crisis resource rather than relying on an app chat.",
         question: "Can Wysa help in an emergency?",
       },
     ],
-    headline: "Broad health assistant or wellbeing chatbot?",
+    headline:
+      "Wysa is built for emotional support. Murph ties it to the rest of your health.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Wysa focuses on emotional-support chat and self-help exercises. Murph is a personal health assistant, connecting mental and physical context without claiming therapy.",
+      "Wysa offers emotional support chat and self-help exercises. Murph is a personal health assistant that links how you feel to sleep, symptoms, and records. Neither is therapy.",
     quickComparison: [
       {
         capability: "Focused emotional support chat",
@@ -1794,39 +1806,39 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "The chat format lowers the barrier to a self-help exercise, but AI responses and generic tools cannot replace individualized assessment or therapy.",
-      "Optional human coaching can add accountability, with a substantially higher recurring price than the self-guided tools tier.",
-      "Murph covers more health domains but lacks Wysa's dedicated exercise library and optional coach tier; broader scope is not a clinical upgrade.",
+      "The chat format makes it easy to start a self-help exercise, but AI replies and general tools cannot replace an individual assessment or therapy.",
+      "Optional human coaching adds accountability, and it costs far more per month than the self-guided Tools tier.",
+      "Murph covers more of your health, but it has no equivalent to Wysa's exercise library or coach tier. Wider scope is not a clinical upgrade.",
     ],
     useTogether:
-      "Use Wysa for a specific self-help exercise or its separately purchased coach relationship, and use Murph for health questions that cross into sleep, symptoms, records, routines, or other decisions. Expect separate conversation histories, and do not rely on either product for emergency care or therapy.",
+      "Use Wysa for a specific self-help exercise or the coaching you buy separately from it. Use Murph for health questions that cross into sleep, symptoms, records, routines, or other decisions. The two keep separate conversation histories, and neither one is emergency care or therapy.",
   },
   {
     aliases: ["Daylio Journal Mood Tracker"],
     category: "sleep-mental",
     chooseCompetitor:
-      "Choose Daylio if your priority is quick daily mood and activity logging, flexible categories, habit goals, long-term charts, and exportable journal reports.",
+      "Choose Daylio if you want quick daily mood and activity logging, flexible categories, habit goals, long-term charts, and journal reports you can export.",
     chooseMurph:
-      "Choose Murph when a Daylio pattern raises more questions than it answers and symptoms, routines, records, or prior attempts should be considered before choosing and revisiting a next step.",
+      "Choose Murph when a Daylio pattern raises more questions than it answers. Murph weighs it against your symptoms, routines, records, and past attempts, then helps you choose what to try and checks back on it.",
     competitor: {
       clinicalRole:
-        "A consumer mood, activity, and habit journal. Its charts describe self-reported associations and do not establish diagnosis, treatment need, or causation.",
+        "Daylio is a consumer mood, activity, and habit journal. Its charts show self-reported associations. They do not establish a diagnosis, a need for treatment, or cause and effect.",
       followThrough:
         "Goals, habits, reminders, streaks, daily entries, custom activities, notes, photos, and PDF or CSV reports.",
       format:
-        "A low-friction mobile journal built around choosing a mood and activities, with optional notes and detailed trend views.",
+        "A quick mobile journal built around picking a mood and your activities, with optional notes and detailed trend views.",
       hardware:
-        "No proprietary hardware is required. Supported Apple Health categories can add selected activity and mindfulness information on iOS.",
+        "No special hardware is needed. On iOS, supported Apple Health categories can add selected activity and mindfulness data.",
       inputs:
-        "Self-selected mood, activities, notes, photos, custom goals, habits, scales, and optional supported Apple Health data.",
+        "The mood, activities, notes, photos, custom goals, habits, and scales you enter, plus optional supported Apple Health data.",
       insightStyle:
-        "Mood calendars, frequency charts, activity relationships, habit progress, streaks, and longer-term summaries generated from logged entries.",
+        "Mood calendars, frequency charts, activity relationships, habit progress, streaks, and longer-term summaries built from your logged entries.",
       platforms:
-        "iPhone, iPad, and Android. Backups can use iCloud or Google Drive depending on the operating system, rather than a full web journal.",
+        "iPhone, iPad, and Android. Backups use iCloud or Google Drive depending on the operating system. There is no full web journal.",
       pricing:
-        "A free base app is available. Checked August 30, 2026, the US App Store listed leading Daylio Premium purchases at $4.99 and $35.99, but the public listing did not clearly label each billing interval.",
+        "A free base app is available. Checked August 30, 2026, the US App Store listed the leading Daylio Premium purchases at $4.99 and $35.99, but the public listing did not clearly label each billing interval.",
       primaryJob:
-        "Make mood, activity, and habit self-tracking quick enough to sustain as a daily journal.",
+        "Make mood, activity, and habit tracking quick enough to keep up as a daily journal.",
     },
     competitorEvidence: {
       clinicalRole: [1],
@@ -1842,24 +1854,25 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "Daylio creates a structured history from quick self-report; Murph does not. Murph's record is a continuing private health conversation rather than a mood log. It can question what the chart cannot establish, relate it to other health evidence, and remember the decision that follows.",
+          "Daylio builds a structured history from quick self-reports. Murph does not keep a mood log. Its record is an ongoing private health conversation that can question what a chart cannot prove, relate it to your other health evidence, and remember what you decided.",
         question: "How is Daylio different from Murph?",
       },
       {
         answer:
-          "No. Daylio can show that two logged factors often appear together, but self-report, missing entries, outside variables, and timing all matter. An association in a journal is a prompt for investigation, not proof of a medical cause.",
+          "No. Daylio can show that two logged factors often appear together, but self-report, missing entries, outside factors, and timing all matter. A link in a journal is a reason to look closer, not proof of a medical cause.",
         question: "Do Daylio charts prove what causes a mood change?",
       },
       {
         answer:
-          "Daylio says entries are stored locally by default and offers backups through iCloud or Google Drive. Apple Health can supply selected data on iOS. Users should review device backups and privacy settings for their chosen setup.",
+          "Daylio says entries are stored on your device by default, with backups available through iCloud or Google Drive. On iOS, Apple Health can supply selected data. Review your device backup and privacy settings for the setup you choose.",
         question: "Where does Daylio get and store its data?",
       },
     ],
-    headline: "Health conversation or mood journal?",
+    headline:
+      "Daylio logs your moods in seconds. Murph works out what the chart means.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Daylio builds mood and habit charts from quick logs. Murph is a personal health assistant that questions those patterns, adds health context, and helps choose what follows.",
+      "Daylio turns quick mood and activity logs into charts. Murph is a personal health assistant that questions those patterns, adds your wider health, and helps you choose what to try.",
     quickComparison: [
       {
         capability: "Fast mood and activity logging",
@@ -1944,39 +1957,38 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "The simplified check-in can improve consistency, but the output is only as complete and accurate as the user's entries.",
-      "Charts can suggest relationships without controlling for confounding factors or establishing cause.",
-      "Murph adds interpretation and follow-through but not Daylio's fast structured logging, dense diary history, or exportable journal reports.",
+      "The quick check-in makes it easier to log every day, but the charts are only as complete and accurate as your entries.",
+      "Charts can suggest that two things are linked without ruling out other factors or proving cause.",
+      "Murph adds interpretation and a plan, but it does not offer Daylio's fast structured logging, dense diary history, or exportable journal reports.",
     ],
     useTogether:
-      "Keep the daily mood and activity record in Daylio. Bring a selected chart, export, or suspected pattern to Murph when it needs careful interpretation beside other health context, then record the decision and revisit it later. Daylio does not automatically share the journal with Murph.",
+      "Keep the daily mood and activity record in Daylio. When a chart, export, or suspected pattern needs careful reading beside your other health data, bring it to Murph, record the decision, and revisit it later. Daylio does not share the journal with Murph on its own.",
   },
   {
     aliases: ["Finch Self Care Pet"],
     category: "sleep-mental",
     chooseCompetitor:
-      "Choose Finch if gamified goals, pet growth, rewards, reflection prompts, breathing, movement, soundscapes, and encouragement from friends make self-care easier to start.",
+      "Choose Finch if a pet to grow, rewards, reflection prompts, breathing, movement, soundscapes, and encouragement from friends make self-care easier to start.",
     chooseMurph:
-      "Choose Murph if you prefer to text directly about symptoms, routines, data, goals, or a hard decision, and want relevant context plus plans, reminders, or check-ins without a pet, rewards, or a streak-like progress layer.",
+      "Choose Murph if you would rather text directly about symptoms, routines, data, goals, or a hard decision. Murph remembers your history and sets plans, reminders, and check-ins, with no pet, rewards, or streaks.",
     competitor: {
       clinicalRole:
-        "A consumer self-care and habit app. Finch says its services do not provide medical care, mental health services, diagnosis, treatment, or emergency support.",
+        "Finch is a consumer self-care and habit app. Finch says its services do not provide medical care, mental health services, diagnosis, treatment, or emergency support.",
       followThrough:
-        "Daily goals, journeys, reminders, rewards, streak-like pet progress, reflections, friend encouragement, events, and personalized suggestions.",
+        "Daily goals, journeys, reminders, rewards, streak-like pet progress, reflections, encouragement from friends, events, and personalized suggestions.",
       format:
-        "A gamified mobile self-care experience in which completing goals and exercises gives energy and growth to a virtual pet.",
+        "A game-like mobile self-care app. Completing goals and exercises gives energy and growth to a virtual pet.",
       hardware:
-        "No proprietary device or biometric sensor is required. The experience is based on user-entered goals, check-ins, reflections, and activity in the app.",
+        "No special device or biometric sensor is needed. Everything runs on the goals, check-ins, reflections, and activity you enter in the app.",
       inputs:
-        "Self-created or suggested goals, mood check-ins, written reflections, quiz responses, breathing and movement sessions, gratitude, and social encouragement.",
+        "Goals you create or accept, mood check-ins, written reflections, quiz answers, breathing and movement sessions, gratitude entries, and encouragement from friends.",
       insightStyle:
-        "Gentle summaries and self-reflection insights framed through pet progress, journeys, events, rewards, and positive reinforcement.",
-      platforms:
-        "Available on iPhone and iPad, plus Android phones and tablets.",
+        "Gentle summaries and self-reflection insights, presented through pet progress, journeys, events, rewards, and positive reinforcement.",
+      platforms: "iPhone and iPad, plus Android phones and tablets.",
       pricing:
-        "Core features are free. Checked August 30, 2026, Finch Plus was listed at $9.99 per month or $69.99 per year, with regional, sponsored, and promotional prices possible.",
+        "Core features are free. Checked August 30, 2026, Finch Plus was listed at $9.99 per month or $69.99 per year. Regional, sponsored, and promotional prices are possible.",
       primaryJob:
-        "Make small self-care actions more approachable by tying them to a virtual pet and a gentle reward loop.",
+        "Make small self-care actions easier to start by tying them to a virtual pet and a gentle reward loop.",
     },
     competitorEvidence: {
       clinicalRole: [4, 6],
@@ -1992,24 +2004,25 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "Finch motivates self-care by tying goals and exercises to a virtual pet. Murph does not gamify the work. It uses ordinary private messaging to answer an individual health question, draw on useful history, and help carry a chosen next step into real life.",
+          "Finch motivates self-care by tying goals and exercises to a virtual pet. Murph does not turn the work into a game. It uses ordinary private messaging to answer your health question, draw on your history, and help you carry the next step into real life.",
         question: "What is the main difference between Finch and Murph?",
       },
       {
         answer:
-          "No. Finch offers core goal setting, reflections, check-ins, exercises, and pet interaction for free. Plus expands customization, content, insights, and convenience features, but the basic self-care loop remains available without it.",
+          "No. Finch offers core goal setting, reflections, check-ins, exercises, and pet interaction for free. Plus adds more customization, content, insights, and convenience features, but the basic self-care loop works without it.",
         question: "Do I need Finch Plus to use the app?",
       },
       {
         answer:
-          "No. Finch can support routines and provide reflective wellness exercises, but it does not diagnose conditions, deliver psychotherapy, or replace crisis or emergency services.",
+          "No. Finch can support routines and offer reflective wellness exercises, but it does not diagnose conditions, provide psychotherapy, or replace crisis or emergency services.",
         question: "Is Finch a therapy app?",
       },
     ],
-    headline: "Health conversation or self-care pet?",
+    headline:
+      "Finch turns self-care into a pet game. Murph keeps it to a plain conversation.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Finch motivates self-care through a virtual pet and rewards. Murph is a personal health assistant. Direct questions, remembered context, and practical follow-through define its role.",
+      "Finch turns self-care into caring for a virtual pet. Murph is a personal health assistant that answers direct questions and keeps a plan going, without a pet or streaks.",
     quickComparison: [
       {
         capability: "Gamified self care goals",
@@ -2102,39 +2115,39 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "The pet and reward loop can be motivating for some people and distracting or too playful for others.",
-      "Mood check-ins and insights depend on self-report rather than objective sensing or clinical assessment.",
-      "Murph can reason across more health context but cannot reproduce Finch's pet loop, rewards, or playful motivation.",
+      "The pet and reward loop motivates some people and feels distracting or too playful to others.",
+      "Mood check-ins and insights rest on what you report yourself, not on sensors or a clinical assessment.",
+      "Murph can reason across more of your health, but it cannot reproduce Finch's pet, rewards, or playful motivation.",
     ],
     useTogether:
-      "Let Finch make a small self-care action inviting enough to start. Use Murph when the action needs to fit a wider health question, record, symptom, or plan, and when a later conversation would be more useful than another reward. The apps do not automatically share goals or progress.",
+      "Let Finch make a small self-care action easy to start. Use Murph when that action has to fit a wider health question, record, symptom, or plan, or when a later conversation would help more than another reward. The apps do not share goals or progress with each other.",
   },
   {
     aliases: ["Muse S", "Muse Athena"],
     category: "sleep-mental",
     chooseCompetitor:
-      "Choose Muse S Athena if you specifically want real-time EEG feedback, guided neurofeedback, brain and focus exercises, and headband-based overnight sleep features.",
+      "Choose Muse S Athena if you specifically want real-time EEG feedback, guided neurofeedback, brain and focus exercises, and overnight sleep features from a headband.",
     chooseMurph:
-      "Choose Murph when the problem is not obtaining EEG feedback but judging how a session fits symptoms, routines, records, or other wearable clues and whether it is worth continuing.",
+      "Choose Murph when getting EEG feedback is not the problem. Murph helps you judge how a session fits your symptoms, routines, records, and other wearable data, and whether it is worth continuing.",
     competitor: {
       clinicalRole:
-        "A consumer neurotechnology and wellness device. Muse markets advanced sensing capabilities, but its stage, brain, recovery, focus, and wellness outputs should not be treated as a medical diagnosis.",
+        "Muse is a consumer neurotechnology and wellness device. Muse markets advanced sensing, but its sleep stage, brain, recovery, focus, and wellness outputs are not a medical diagnosis.",
       followThrough:
         "Guided meditation, real-time neurofeedback, cognitive training, sleep sessions, Sleep Assist, Deep Sleep Boost, a smart alarm, progress reports, and Premium programs.",
       format:
-        "A rechargeable EEG and optical-sensing headband paired with a mobile app and an optional or bundled Premium subscription.",
+        "A rechargeable EEG and optical-sensing headband paired with a mobile app. Premium is optional or comes bundled.",
       hardware:
-        "Muse S Athena includes seven EEG sensors, fNIRS optical sensing, PPG heart sensing, and motion sensors in a fabric headband designed for daytime sessions and overnight wear.",
+        "Muse S Athena has seven EEG sensors, fNIRS optical sensing, PPG heart sensing, and motion sensors in a fabric headband made for daytime sessions and overnight wear.",
       inputs:
-        "EEG brain activity, fNIRS-derived blood-flow changes, heart rate, motion and posture, session behavior, estimated breathing feedback, and self-selected programs.",
+        "EEG brain activity, blood flow changes from fNIRS, heart rate, motion and posture, how you behave in a session, estimated breathing feedback, and the programs you choose.",
       insightStyle:
-        "Real-time audio neurofeedback, meditation summaries, estimated sleep stages, cognitive and focus exercises, brain-recovery views, and an Enso AI guidance layer.",
+        "Real-time audio neurofeedback, meditation summaries, estimated sleep stages, cognitive and focus exercises, brain recovery views, and an Enso AI guidance layer.",
       platforms:
-        "Muse S Athena hardware with the Muse mobile app on supported iOS and Android devices. Muse lists iOS 15 and Android 8 as minimums for current app support.",
+        "Muse S Athena hardware with the Muse mobile app on supported iOS and Android devices. Muse lists iOS 15 and Android 8 as the minimums for current app support.",
       pricing:
-        "Checked August 30, 2026: Muse S Athena was $474.99 device-only or $539 with one year of Premium. Premium was also listed at $12.99 monthly or $55 annually; bundle renewal terms can differ.",
+        "Checked August 30, 2026: Muse S Athena cost $474.99 for the device alone or $539 with one year of Premium. Premium was also listed at $12.99 monthly or $55 annually. Bundle renewal terms can differ.",
       primaryJob:
-        "Use head-worn brain and physiological sensors to guide meditation, cognitive training, and sleep-focused experiences.",
+        "Use brain and body sensors worn on the head to guide meditation, cognitive training, and sleep-focused sessions.",
     },
     competitorEvidence: {
       clinicalRole: [4],
@@ -2150,24 +2163,25 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "Muse S Athena measures headband signals and turns them into neurofeedback, training, and sleep experiences. Murph does not measure EEG or deliver neurofeedback. It works without proprietary hardware, using private conversation to interpret wider health context and support decisions beyond a sensor session.",
+          "Muse S Athena measures signals from a headband and turns them into neurofeedback, training, and sleep experiences. Murph does not measure EEG or deliver neurofeedback. It needs no special hardware and uses a private conversation to read your wider health and help you decide what to do after a session.",
         question: "How does Muse S Athena differ from Murph?",
       },
       {
         answer:
-          "Muse lists seven EEG sensors, fNIRS optical sensing, PPG heart sensing, and motion sensing in the Athena headband. Signal quality depends on fit, skin and hair contact, movement, charge, and supported app setup.",
+          "Muse lists seven EEG sensors, fNIRS optical sensing, PPG heart sensing, and motion sensing in the Athena headband. Signal quality depends on fit, contact with skin and hair, movement, charge, and a supported app setup.",
         question: "What does Muse S Athena measure?",
       },
       {
         answer:
-          "No. Muse can estimate sleep stages and present brain, focus, and recovery-related feedback, but consumer headband results do not diagnose insomnia, a neurological condition, or another disorder.",
+          "No. Muse can estimate sleep stages and show brain, focus, and recovery feedback, but consumer headband results do not diagnose insomnia, a neurological condition, or any other disorder.",
         question: "Are Muse S Athena results a medical diagnosis?",
       },
     ],
-    headline: "Health assistant or EEG headband?",
+    headline:
+      "Muse gives you EEG feedback. Murph helps you decide whether to keep using it.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Muse S Athena provides EEG sensing and neurofeedback. Murph is a personal health assistant for judging how those sessions fit wider health context, cost, and daily life.",
+      "Muse is an EEG headband for neurofeedback and sleep sessions. Murph is a personal health assistant that weighs those sessions against your wider health, cost, and daily life.",
     quickComparison: [
       {
         capability: "EEG brain sensing",
@@ -2252,39 +2266,39 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "It offers signals and feedback that phone-only meditation apps cannot, with significantly higher hardware cost and setup effort.",
-      "Good contact and overnight comfort matter, and some advanced experiences require Premium and the Athena model.",
-      "Murph cannot substitute for EEG sensing or neurofeedback; it adds value only if the user wants help evaluating the experience in a wider health context.",
+      "Muse gives you brain readings and feedback that phone-only meditation apps cannot, but the hardware costs far more and takes more setup.",
+      "Good sensor contact and overnight comfort matter, and some advanced experiences need Premium and the Athena model.",
+      "Murph cannot stand in for EEG sensing or neurofeedback. It only adds value if you want help judging the experience against the rest of your health.",
     ],
     useTogether:
-      "Muse can provide a dedicated neurofeedback or sleep session. A person can discuss the resulting observations with Murph beside routines, symptoms, goals, cost, comfort, and how the session felt, then decide whether it is worth continuing. Muse signals do not automatically flow into Murph.",
+      "Muse runs the neurofeedback or sleep session. Afterwards you can talk it over with Murph beside your routines, symptoms, goals, the cost, the comfort, and how the session felt, then decide whether to keep going. Muse data does not flow into Murph automatically.",
   },
   {
     aliases: ["Apollo Wearable"],
     category: "sleep-mental",
     chooseCompetitor:
-      "Choose Apollo Neuro if you want a wearable that delivers selectable vibration patterns throughout the day and night and you accept the hardware cost and any optional ongoing SmartVibes cost.",
+      "Choose Apollo Neuro if you want a wearable that plays vibration patterns you pick through the day and night, and you accept the hardware cost plus the optional ongoing SmartVibes cost.",
     chooseMurph:
-      "Choose Murph when the missing intervention is not vibration but a realistic decision that accounts for symptoms, routines, other data, previous attempts, cost, and a later review.",
+      "Choose Murph when vibration is not the missing piece. Murph helps you make a realistic decision that accounts for symptoms, routines, other data, past attempts, and cost, then reviews it with you later.",
     competitor: {
       clinicalRole:
-        "A consumer wellness wearable. Apollo states that it is not FDA approved to treat disease, and individual responses to its vibration programs can vary.",
+        "Apollo Neuro is a consumer wellness wearable. Apollo states that it is not FDA approved to treat disease, and people respond differently to its vibration programs.",
       followThrough:
-        "Basic use includes manually selected timed Vibes with adjustable intensity and duration. SmartVibes membership adds AI personalization, sleep automation, Stay Asleep sessions, supported Oura features, sleep views, and additional Premium Vibes.",
+        "Basic use means picking timed Vibes by hand and adjusting their intensity and duration. A SmartVibes membership adds AI personalization, sleep automation, Stay Asleep sessions, supported Oura features, sleep views, and extra Premium Vibes.",
       format:
-        "A small Bluetooth-connected wearable worn on the wrist or ankle and controlled from a mobile app. The current direct purchase includes one year of SmartVibes, but renewal is not required to keep using basic manually selected Vibes.",
+        "A small Bluetooth wearable worn on the wrist or ankle and controlled from a mobile app. The current direct purchase includes one year of SmartVibes, and you do not need to renew to keep using basic hand-picked Vibes.",
       hardware:
-        "The rechargeable Apollo device delivers patterned mechanical vibrations. It is primarily an actuator rather than a broad biometric sensor suite.",
+        "The rechargeable Apollo device delivers patterned mechanical vibrations. It is mainly an actuator, not a broad set of biometric sensors.",
       inputs:
-        "User-selected goals, schedules, intensity, duration, app interactions, daytime and nighttime preferences, and supported Oura information for eligible SmartVibes experiences.",
+        "The goals, schedules, intensity, duration, and daytime and nighttime preferences you set, how you use the app, and supported Oura data for eligible SmartVibes features.",
       insightStyle:
-        "Personalized vibration recommendations and schedules rather than a comprehensive dashboard of measured sleep stages, stress, or medical outcomes.",
+        "Personalized vibration recommendations and schedules. There is no full dashboard of measured sleep stages, stress, or medical outcomes.",
       platforms:
         "Apollo wearable hardware with Bluetooth and companion apps for supported iOS and Android phones. Oura support applies to specific SmartVibes features.",
       pricing:
-        "Checked August 30, 2026: MSRP was $448 and the public offer was $368, including the first year of SmartVibes valued at $99. After that year, renewal is needed to retain SmartVibes automation and Premium features, not to manually play basic Vibes.",
+        "Checked August 30, 2026: MSRP was $448 and the public offer was $368, including the first year of SmartVibes, valued at $99. After that year you need to renew to keep SmartVibes automation and Premium features, but not to play basic Vibes by hand.",
       primaryJob:
-        "Deliver scheduled tactile stimulation intended to support different functional states without requiring the user to watch a screen.",
+        "Deliver scheduled vibration meant to support different functional states without making you look at a screen.",
     },
     competitorEvidence: {
       clinicalRole: [1, 5],
@@ -2300,24 +2314,25 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     faqs: [
       {
         answer:
-          "Apollo Neuro delivers patterned vibration through a wearable; Murph cannot. Murph works through private conversation instead, bringing prior health context to the decision, weighing the intervention's cost and burden, and following up on whether it was actually useful.",
+          "Apollo Neuro delivers patterned vibration through a wearable. Murph cannot do that. Murph works through a private conversation instead, bringing your health history into the conversation, weighing the cost and effort of the device, and following up on whether it actually helped.",
         question: "What is the difference between Apollo Neuro and Murph?",
       },
       {
         answer:
-          "Not in the way a full sleep or recovery wearable does. Apollo's main function is delivering Vibes. SmartVibes can personalize schedules and use eligible Oura information, but the Apollo device itself is not positioned as a broad biometric dashboard.",
+          "Not the way a full sleep or recovery wearable does. Apollo's main job is playing Vibes. SmartVibes can personalize schedules and use eligible Oura data, but Apollo does not position the device itself as a broad biometric dashboard.",
         question: "Does Apollo Neuro track sleep and stress?",
       },
       {
         answer:
-          "No. Apollo says the device is not FDA approved to treat disease. Its Vibes are a consumer wellness intervention, not a guaranteed treatment or a substitute for medical or mental-health care.",
+          "No. Apollo says the device is not FDA approved to treat disease. Its Vibes are a consumer wellness intervention, not a guaranteed treatment and not a substitute for medical or mental health care.",
         question: "Is Apollo Neuro an FDA-approved treatment?",
       },
     ],
-    headline: "Health assistant or vibration wearable?",
+    headline:
+      "Apollo Neuro vibrates on a schedule. Murph helps you tell whether it is working.",
     lastVerified: "2026-08-31",
     metaDescription:
-      "Apollo Neuro delivers scheduled vibration through a wearable. Murph is a personal health assistant that helps decide whether an intervention fits and whether it actually helped.",
+      "Apollo Neuro is a wearable that plays vibration patterns through the day and night. Murph is a personal health assistant that helps you decide whether it fits and whether it helped.",
     quickComparison: [
       {
         capability: "Timed vibration programs",
@@ -2406,11 +2421,11 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
       },
     ],
     tradeoffs: [
-      "It provides a physical, screen-light intervention that software conversation cannot reproduce.",
-      "The upfront hardware price is substantial compared with a simple wellness app, and continued SmartVibes access adds an optional recurring cost after the included first year.",
-      "Murph supplies no vibration and no automatic proof that Apollo worked; its contribution is helping the user judge fit, burden, and observed results over time.",
+      "Apollo gives you a physical intervention with little screen time, which a text conversation cannot reproduce.",
+      "The hardware costs a lot compared with a simple wellness app, and keeping SmartVibes after the included first year adds an optional recurring cost.",
+      "Murph has no vibration and no automatic proof that Apollo worked. What it adds is help judging fit, effort, and results over time.",
     ],
     useTogether:
-      "Apollo can supply a scheduled tactile routine. Murph can help define the hoped-for benefit, consider it beside wider routines and health goals, and later ask whether the device earned its cost and friction. The products do not automatically share schedules or results.",
+      "Apollo supplies the scheduled vibration routine. Murph helps you name the benefit you hope for, weighs it beside your other routines and health goals, and later asks whether the device earned its cost and hassle. The two products do not share schedules or results.",
   },
 ]);

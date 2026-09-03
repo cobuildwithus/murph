@@ -227,3 +227,6 @@ Completed: 2026-09-01
   plain language, and every guide's prose was rewritten for clarity (see the
   copy brief rules: short sentences, concrete nouns, no rhetorical headlines,
   no machine-sounding vocabulary), keeping every sourced fact.
+- The relationship eyebrow above the detail hero title and the guide-count
+  eyebrow above the index title were removed; the review-date line below each
+  hero already carries that information.

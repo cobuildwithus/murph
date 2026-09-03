@@ -9,12 +9,6 @@ import {
   type ComparisonEntry,
 } from "@/src/lib/comparisons/types";
 
-const RELATIONSHIP_LABELS: Record<ComparisonEntry["relationship"], string> = {
-  alternative: "Meaningful overlap",
-  complement: "Usually complementary",
-  "different-role": "Different primary job",
-};
-
 const SECTION_HEADING =
   "font-serif text-[clamp(1.65rem,3vw,2.35rem)] font-semibold leading-[1.05] tracking-[-0.025em]";
 
@@ -92,11 +86,8 @@ export function ComparisonArticle({
 
           <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center lg:gap-16">
             <div>
-              <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#c4a882]">
-                {RELATIONSHIP_LABELS[comparison.relationship]}
-              </p>
               <h1
-                className="mt-4 max-w-[16ch] [overflow-wrap:anywhere] text-balance font-serif text-[clamp(2.5rem,5.5vw,4.25rem)] font-semibold leading-[0.96] tracking-[-0.04em]"
+                className="max-w-[16ch] [overflow-wrap:anywhere] text-balance font-serif text-[clamp(2.5rem,5.5vw,4.25rem)] font-semibold leading-[0.96] tracking-[-0.04em]"
                 id={titleId}
               >
                 Murph vs {comparison.name}
