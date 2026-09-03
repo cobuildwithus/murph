@@ -694,6 +694,9 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(insightRecord?.instructions).toContain(
       'Do not turn a generic rule into a personal finding',
     )
+    expect(insightRecord?.instructions).toContain(
+      "If web search is unavailable, the owning skill and the member's own records decide",
+    )
     expect(insightRecord?.instructions).toContain('Food planning')
     expect(insightRecord?.instructions).toContain('Goal progress')
     expect(insightRecord?.instructions).toContain('A goal plus missing or messy logs is not enough')
