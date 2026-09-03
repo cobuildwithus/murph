@@ -4189,6 +4189,91 @@ describeRealCodex('real Codex assistant-style boundary e2e', () => {
 
 describeRealCodex('real Codex group-chat behavior e2e', () => {
   it(
+    'uses Linq speaker labels to attribute a group promise',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-speaker-labels-e2e-'),
+      )
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({ skillsRoot, slug: 'group-chat' })
+        const promptResult = buildAssistantAutoReplyPrompt([
+          buildSyntheticLinqGroupPromptInput({
+            inputId: `ain_${'8'.repeat(32)}`,
+            occurredAt: '2026-09-02T18:00:00.000Z',
+            senderHandle: 'synthetic-riley-handle',
+            speakerLabel: {
+              displayName: 'Riley',
+              source: 'profile-name',
+            },
+            text: 'I can bring sunscreen for the walk.',
+          }),
+          buildSyntheticLinqGroupPromptInput({
+            inputId: `ain_${'9'.repeat(32)}`,
+            occurredAt: '2026-09-02T18:00:01.000Z',
+            senderHandle: 'synthetic-morgan-handle',
+            speakerLabel: {
+              displayName: 'Morgan',
+              source: 'unverified-owner-contact',
+            },
+            text: 'Murph, who said they would bring sunscreen?',
+          }),
+        ])
+        expect(promptResult.kind).toBe('ready')
+        if (promptResult.kind !== 'ready') {
+          throw new Error('Expected a ready Linq group speaker-label prompt.')
+        }
+        expect(promptResult.prompt).toContain('Profile name: "Riley"')
+        expect(promptResult.prompt).toContain('Address-book name: "Morgan"')
+
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildGroupPointOfViewDeveloperInstructions({ hostedRuntime: true }),
+          dynamicTools: [],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          groupConversation: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: promptResult.prompt,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const reply = result.finalMessage.trim()
+
+        process.stdout.write(
+          `[group-speaker-labels-e2e] ${JSON.stringify({ reply })}\n`,
+        )
+        expect(actions.filter((action) => action.kind === 'dynamic')).toEqual([])
+        expect(actions.filter((action) => action.kind === 'command')).toEqual([])
+        expect(reply).toMatch(/Riley[^.!?\n]{0,80}sunscreen|sunscreen[^.!?\n]{0,80}Riley/iu)
+        expect(reply).not.toMatch(
+          /synthetic-(?:riley|morgan)-handle|cache|lookup|profile-name|address-book source/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'analyzes one participant\'s group video when another participant requests it',
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -29882,6 +29967,59 @@ function buildSyntheticCurrentSenderGroupPrompt(input: {
     throw new Error('Expected a ready synthetic current-sender group prompt.')
   }
   return prompt.prompt
+}
+
+function buildSyntheticLinqGroupPromptInput(input: {
+  inputId: string
+  occurredAt: string
+  senderHandle: string
+  speakerLabel: NonNullable<AssistantAutoReplyPromptInput['linqSpeakerLabel']>
+  text: string
+}): AssistantAutoReplyPromptInput {
+  const threadId = 'synthetic-speaker-label-group'
+  return {
+    actorIsSelf: false,
+    attachmentDescriptors: [],
+    attachmentEvidence: {
+      attachments: [],
+      optionalInboxCaptureId: null,
+      reasonCode: null,
+      source: null,
+      status: 'not_attempted',
+      updatedAt: null,
+    },
+    conversation: {
+      accountId: null,
+      actorId: input.senderHandle,
+      actorIsSelf: false,
+      source: 'linq',
+      threadId,
+      threadIsDirect: false,
+    },
+    inputId: input.inputId,
+    linqSpeakerLabel: input.speakerLabel,
+    occurredAt: input.occurredAt,
+    projection: null,
+    receivedAt: input.occurredAt,
+    replyContext: null,
+    replyTarget: {
+      channel: 'linq',
+      messageId: `${threadId}-${input.inputId.slice(-4)}`,
+      threadId,
+    },
+    source: 'linq',
+    sourceMetadata: {
+      externalThreadRouteAuthorityPresent: true,
+      kind: 'linq',
+      partCount: 1,
+      reactionEligible: false,
+      replyToMessageId: null,
+      senderHandle: input.senderHandle,
+      service: 'iMessage',
+    },
+    telegramMetadata: null,
+    text: input.text,
+  }
 }
 
 function buildGroupPointOfViewDeveloperInstructions(input?: {
