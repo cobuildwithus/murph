@@ -7,6 +7,7 @@ import {
   GOAL_CATEGORIES,
   type GoalCategory,
 } from "@/src/lib/goals/goal-categories";
+import { resolveGoalIllustrationSrc } from "@/src/lib/goals/goal-illustrations";
 import type { GoalIndexEntryModel } from "@/src/lib/goals/goal-models";
 
 interface GoalBrowseNode {
@@ -119,6 +120,7 @@ export function GoalCategoryBrowse({
                 <GoalBrowseCard
                   className={cardClassName}
                   href={`/goals/${goal.routeId}`}
+                  illustrationSrc={resolveGoalIllustrationSrc(goal.routeId)}
                   title={goal.title}
                 />
               </li>
@@ -177,6 +179,7 @@ function GoalFamilySection({
             <GoalBrowseCard
               className={cardClassName}
               href={`/goals/${entry.goal.routeId}`}
+              illustrationSrc={resolveGoalIllustrationSrc(entry.goal.routeId)}
               title={entry.goal.title}
             />
           </li>

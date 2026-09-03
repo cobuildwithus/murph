@@ -13,6 +13,7 @@ import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
 import { buttonVariants } from "@/src/components/ui/button";
 import { GOAL_CATEGORIES } from "@/src/lib/goals/goal-categories";
 import { resolveGoalContactOption } from "@/src/lib/goals/goal-contact";
+import { resolveGoalIllustrationSrc } from "@/src/lib/goals/goal-illustrations";
 import type { GoalIndexEntryModel } from "@/src/lib/goals/goal-models";
 import { createGoalSearchItem } from "@/src/lib/goals/goal-search";
 import { resolvePublicMurphLinePhoneNumber } from "@/src/lib/goals/public-murph-line";
@@ -47,7 +48,10 @@ export default async function GoalsPage() {
     textAvailable: true,
   });
   const goals = listHealthCommonsGoalEntries();
-  const searchGoals = goals.map((goal) => createGoalSearchItem(goal));
+  const searchGoals = goals.map((goal) => ({
+    ...createGoalSearchItem(goal),
+    illustrationSrc: resolveGoalIllustrationSrc(goal.routeId),
+  }));
   const sections = GOAL_CATEGORIES.flatMap((category) => {
     const categoryGoals = goals.filter(
       (goal) => goal.category === category.slug,
@@ -121,6 +125,7 @@ export default async function GoalsPage() {
                     <GoalBrowseCard
                       className="h-full"
                       href={`/goals/${goal.routeId}`}
+                      illustrationSrc={resolveGoalIllustrationSrc(goal.routeId)}
                       title={goal.title}
                     />
                   </li>

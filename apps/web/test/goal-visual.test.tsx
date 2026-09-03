@@ -69,14 +69,27 @@ describe("Goal visual system", () => {
     assert.match(markup, /min-h-20/u);
   });
 
-  it("keeps each goal tile title-only and free of decorative icons", () => {
+  it("keeps each goal tile to a title and its own illustration, free of decorative icons", () => {
     const markup = renderToStaticMarkup(
       <GoalBrowseCard href="/goals/improve-deep-sleep" title="Improve My Deep Sleep" />,
     );
 
     assert.match(markup, />Improve My Deep Sleep</u);
     assert.doesNotMatch(markup, /<svg\b/u);
+    assert.doesNotMatch(markup, /<img\b/u);
     assert.doesNotMatch(markup, /<p\b/u);
     assert.doesNotMatch(markup, /font-mono/u);
+
+    const illustrated = renderToStaticMarkup(
+      <GoalBrowseCard
+        href="/goals/reduce-bloating"
+        illustrationSrc="/design-assets/goals/reduce-bloating.svg"
+        title="Reduce Bloating"
+      />,
+    );
+
+    assert.match(illustrated, /<img[^>]*data-goal-illustration/u);
+    assert.match(illustrated, /design-assets\/goals\/reduce-bloating\.svg/u);
+    assert.doesNotMatch(illustrated, /<svg\b/u);
   });
 });

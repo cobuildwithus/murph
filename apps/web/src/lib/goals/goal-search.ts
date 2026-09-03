@@ -2,6 +2,7 @@ import type { GoalIndexEntryModel } from "@/src/lib/goals/goal-models";
 
 export interface GoalSearchItem {
   goalPhrase: string;
+  illustrationSrc?: string | null;
   key: string;
   routeId: string;
   searchText: string;

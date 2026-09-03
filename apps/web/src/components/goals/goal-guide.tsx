@@ -7,6 +7,7 @@ import { GoalOutline } from "@/src/components/goals/goal-outline";
 import { GoalCategoryArtwork } from "@/src/components/goals/goal-visual";
 import { MarkdownView } from "@/src/components/ui/markdown-view";
 import type { GoalCategory } from "@/src/lib/goals/goal-categories";
+import { resolveGoalIllustrationSrc } from "@/src/lib/goals/goal-illustrations";
 import { describeGoalSourcePublisher } from "@/src/lib/goals/goal-source-labels";
 import {
   isGoalGuideRelatedSection,
@@ -301,6 +302,7 @@ function GoalRelatedGoals({
             <GoalBrowseCard
               className="h-full"
               href={`/goals/${relatedGoal.routeId}`}
+              illustrationSrc={resolveGoalIllustrationSrc(relatedGoal.routeId)}
               title={relatedGoal.title}
             />
           </li>

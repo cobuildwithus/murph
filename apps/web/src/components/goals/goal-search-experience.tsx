@@ -237,6 +237,7 @@ function GoalSearchGrid({
           <GoalBrowseCard
             className="h-full"
             href={`/goals/${goal.routeId}`}
+            illustrationSrc={goal.illustrationSrc}
             prefetch={false}
             title={goal.title}
           />
