@@ -113,7 +113,10 @@ export async function createBrowserVaultReplica(
     input.vault,
     wearableSummaryBundle,
     allMetricPoints,
-    { asOf: generatedAt },
+    {
+      asOf: generatedAt,
+      vocabulary: input.personalPatternVocabulary,
+    },
   );
   await yieldToBrowserVaultReplicaCancellation(input.signal);
   const replicaWithoutVersion: BrowserVaultReplica = {
@@ -132,6 +135,7 @@ export async function createBrowserVaultReplica(
     ),
     journal: buildJournalView(input.vault, allMetricPoints, {
       asOf: addDaysToIsoDate(generatedAt.slice(0, 10), 1),
+      vocabulary: input.personalPatternVocabulary,
     }),
     labResultRows,
     metricGoalProgressRows: buildMetricGoalProgressRows(defaultProjectedVault.entities, allMetricPoints, generatedAt),

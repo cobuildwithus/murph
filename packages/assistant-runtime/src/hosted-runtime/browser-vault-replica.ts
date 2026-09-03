@@ -175,10 +175,10 @@ export async function createHostedBrowserVaultReplicaForSourceState(input: {
   } = await import("@murphai/query/browser-replica-server");
   input.onRefreshStep?.("replica_construction_source_read");
   input.signal?.throwIfAborted();
-  const { metricPoints, vault } = await readBrowserVaultReplicaSource(
-    input.vaultRoot,
-    { signal: input.signal },
-  );
+  const { metricPoints, personalPatternVocabulary, vault } =
+    await readBrowserVaultReplicaSource(input.vaultRoot, {
+      signal: input.signal,
+    });
   input.onRefreshStep?.("replica_construction_experiment_outcome_read");
   input.signal?.throwIfAborted();
   const outcomeProjection = await readHostedBrowserVaultExperimentOutcomes(
@@ -193,6 +193,7 @@ export async function createHostedBrowserVaultReplicaForSourceState(input: {
     experimentOutcomes: outcomeProjection.outcomes,
     generatedAt: input.generatedAt,
     metricPoints,
+    personalPatternVocabulary,
     signal: input.signal,
     sourceBundleHash: input.sourceStateHash,
     vault,
@@ -542,18 +543,24 @@ export async function hashHostedBrowserVaultReplicaSources(
 ): Promise<CanonicalQuerySourceHash> {
   const {
     hashCanonicalQuerySources,
+    readBrowserVaultPersonalPatternVocabulary,
     readBrowserVaultReplicaVault,
   } = await import("@murphai/query/browser-replica-server");
   signal?.throwIfAborted();
-  const [canonicalSourceResult, vaultResult] = await Promise.allSettled([
-    hashCanonicalQuerySources(vaultRoot, { signal }),
-    readBrowserVaultReplicaVault(vaultRoot, { signal }),
-  ]);
+  const [canonicalSourceResult, vaultResult, vocabularyResult] =
+    await Promise.allSettled([
+      hashCanonicalQuerySources(vaultRoot, { signal }),
+      readBrowserVaultReplicaVault(vaultRoot, { signal }),
+      readBrowserVaultPersonalPatternVocabulary(vaultRoot),
+    ]);
   if (canonicalSourceResult.status === "rejected") {
     throw canonicalSourceResult.reason;
   }
   if (vaultResult.status === "rejected") {
     throw vaultResult.reason;
+  }
+  if (vocabularyResult.status === "rejected") {
+    throw vocabularyResult.reason;
   }
   signal?.throwIfAborted();
   const outcomeProjection = await readHostedBrowserVaultExperimentOutcomes(
@@ -565,6 +572,11 @@ export async function hashHostedBrowserVaultReplicaSources(
   const digest = createHash("sha256");
   digest.update("murph.hosted-browser-vault-source.v1\0");
   digest.update(canonicalSourceResult.value.hash);
+  digest.update("\0");
+  const vocabularyJson = vocabularyResult.value
+    ? JSON.stringify(vocabularyResult.value)
+    : "";
+  digest.update(vocabularyJson);
   digest.update("\0");
 
   for (const source of outcomeProjection.sources) {
@@ -578,10 +590,13 @@ export async function hashHostedBrowserVaultReplicaSources(
 
   return {
     fileCount:
-      canonicalSourceResult.value.fileCount + outcomeProjection.sources.length,
+      canonicalSourceResult.value.fileCount +
+      outcomeProjection.sources.length +
+      (vocabularyJson ? 1 : 0),
     hash: digest.digest("hex"),
     totalBytes:
       canonicalSourceResult.value.totalBytes +
+      Buffer.byteLength(vocabularyJson) +
       outcomeProjection.sources.reduce((total, source) => total + source.byteLength, 0),
   };
 }

@@ -1403,6 +1403,21 @@ describe('applyMurphManagedAutomations', () => {
     expect(patternsUpdateRecord?.instructions).toContain(
       'do not rely on a shell environment variable',
     )
+    expect(patternsUpdateRecord?.instructions).toContain(
+      'knowledge show journal-pattern-vocabulary',
+    )
+    expect(patternsUpdateRecord?.instructions).toContain(
+      'Merge clear synonyms into one concept',
+    )
+    expect(patternsUpdateRecord?.instructions).toContain(
+      'Derived detail ids containing `--` do not need concepts',
+    )
+    expect(patternsUpdateRecord?.instructions).toContain(
+      'Never use an unexplained abbreviation as the member-facing label',
+    )
+    expect(patternsUpdateRecord?.instructions).toContain(
+      'A rename must not create a notification',
+    )
     const digestRecord = managedAutomationMocks.records.get(
       MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
     )
