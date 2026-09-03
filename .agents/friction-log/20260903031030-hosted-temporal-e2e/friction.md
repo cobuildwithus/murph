@@ -1,35 +1,34 @@
 ---
-title: 'Hosted Temporal E2E handled-through checkpoint races mailbox consumption'
+title: 'Hosted Temporal E2E confuses row timestamps with lane consumption'
 severity: 'minor'
 ---
 
 ## Expected Behavior
 
-The hosted Temporal orchestration E2E should wait for the system mailbox item
-to reach the consumed state before asserting consumption.
+The hosted Temporal orchestration E2E should assert system mailbox consumption
+through the lane's canonical consumed sequence.
 
 ## Current Behavior
 
-The test waits only for the workspace handled-through checkpoint and then
-immediately reads the mailbox row. That checkpoint can be published during
-prepare, before the later record checkpoint persists consumption, so a valid
-run can observe a null consumed timestamp.
+The test treats the mailbox row's `consumed_at` timestamp as canonical for the
+system lane. Workspace checkpointing intentionally advances the system lane's
+`consumed_seq` without stamping individual system rows, so the assertion can
+never pass even after successful handling.
 
 ## Possible Solution
 
-Poll the mailbox item's consumed state directly while retaining the kind and
-lane assertions.
+Read and assert the system lane's `consumed_seq`, and retain the row assertion
+only for item identity and the intentional null timestamp.
 
 ## Minimal Reproducible Example
 
 1. Enqueue a synthetic `member.channels.updated` system mailbox item.
 2. Wait for the workspace handled-through checkpoint.
-3. Immediately read the mailbox item.
-4. Observe that the handled-through checkpoint may be visible before the
-   consumed timestamp.
+3. Read the system lane's consumed sequence and the mailbox item.
+4. Observe that the lane frontier reaches the item while its row timestamp
+   remains null by design.
 
 ## Context
 
-The same assertion failed in two release integration attempts, forcing
-expensive reruns even though the runtime completed the later record checkpoint
-normally.
+The invalid row-level assertion caused repeated release integration failures
+even though the canonical system-lane frontier had advanced normally.
