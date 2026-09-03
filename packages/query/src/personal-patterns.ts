@@ -371,7 +371,7 @@ function collectFactors(
           : factor.kinds.has("activity")
           ? ("activity" as const)
           : ("intervention" as const),
-      label: presentation?.label ?? humanizeToken(factor.token),
+      label: presentation?.label ?? humanizeFactorToken(factor.token),
       observedDays,
     };
   });
@@ -720,7 +720,7 @@ function collectJournalOutcomeSeries(
     .filter(([, values]) => values.size >= 2)
     .map(([id, values]) => ({
       id,
-      label: humanizeToken(id.slice("subjective-".length)),
+      label: humanizeFactorToken(id.slice("subjective-".length)),
       lagDays: 0,
       meaningfulAbsoluteDelta: 0.75,
       meaningfulRelativeDelta: 0.2,
@@ -1488,7 +1488,7 @@ export function canonicalFactorToken(value: string | null): string | null {
   }
 }
 
-function humanizeToken(value: string): string {
+export function humanizeFactorToken(value: string): string {
   const readableValue =
     value === "yardwork"
       ? "yard-work"

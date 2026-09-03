@@ -9,6 +9,7 @@ import type { CanonicalEntity } from "./canonical-entities.ts";
 import type { VaultReadModel } from "./read-model.ts";
 import {
   canonicalFactorToken,
+  humanizeFactorToken,
   resolvePersonalPatternVocabularyConcept,
   type PersonalPatternVocabulary,
 } from "./personal-patterns.ts";
@@ -255,7 +256,7 @@ function journalEventPresentation(
   return {
     activityKey: concept?.id ?? rawKey,
     exerciseNames: activityExerciseNames(event.attributes),
-    label: concept?.label ?? humanize(rawKey),
+    label: concept?.label ?? humanizeFactorToken(rawKey),
     observationMetric,
   };
 }
