@@ -7191,24 +7191,25 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
       vi.setSystemTime(new Date(TEST_NOW));
-      mocks.executeConsentedReadOnlyAssistantAsk.mockImplementationOnce(
-        async (askInput) => {
-          events.push("ask.first.execution.started");
-          firstAskExecutionStarted.resolve();
-          return await new Promise((_resolve, reject) => {
-            const abort = () => {
-              events.push("ask.first.execution.aborted");
-              firstAskExecutionAborted.resolve();
-              reject(askInput.abortSignal?.reason);
-            };
-            if (askInput.abortSignal?.aborted) {
-              abort();
-              return;
-            }
-            askInput.abortSignal?.addEventListener("abort", abort, { once: true });
-          });
-        },
-      );
+      const executeFirstAsk = ownerKind === "operator diagnostic"
+        ? mocks.executeOperatorDiagnostic
+        : mocks.executeConsentedReadOnlyAssistantAsk;
+      executeFirstAsk.mockImplementationOnce(async (askInput) => {
+        events.push("ask.first.execution.started");
+        firstAskExecutionStarted.resolve();
+        return await new Promise((_resolve, reject) => {
+          const abort = () => {
+            events.push("ask.first.execution.aborted");
+            firstAskExecutionAborted.resolve();
+            reject(askInput.abortSignal?.reason);
+          };
+          if (askInput.abortSignal?.aborted) {
+            abort();
+            return;
+          }
+          askInput.abortSignal?.addEventListener("abort", abort, { once: true });
+        });
+      });
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       await enqueueHostedSystemMailboxItem({
         item: createResolvedAssistantAskSystemMailboxItem(firstAsk),

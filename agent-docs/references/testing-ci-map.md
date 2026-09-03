@@ -1007,18 +1007,19 @@ keep the one-second presentation-only deadline and late-result rejection.
   leaking or silently consuming work. Replay/restart and concurrent
   admission/completion proofs assert one canonical request per source and
   exactly one authorized terminal experience, including private exact-text
-  delivery and no cross-audience completion. A focused synthetic operator
-  engine-level diagnostic live journey reads canonical automation metadata from its exact
-  target workspace while remaining in an isolated process directory; a trusted
-  target-local MCP config cannot start its marker process, and canonical vault
-  files remain byte-for-byte unchanged. Runtime routing proves only an
-  `operator_task` selects workspace inspection, and the signed group-runtime
-  control route completes privately without a delivery handoff. The opt-in PostgreSQL cases run the
-  same transaction and lock owners against a real database. The production-like
-  Linux proof must still show committed group reads succeed while writes,
-  `.runtime/**`, `.codex/**`, environment files, other roots, inherited shell
-  secrets, and tool network are denied, and it must show child failure or
-  cancellation cannot interrupt the resident foreground App Server. Routine CI
+  delivery and no cross-audience completion. Focused tests prove an
+  `operator_task` runs one direct `executeOperatorDiagnostic` turn with the
+  operator profile and exact workspace/session roots, while group/member asks
+  retain their existing profile and reviewer behavior. The real-Codex journey
+  correlates synthetic `.runtime` and session evidence and proves the child
+  neither loads target-local project configuration nor changes either root. The
+  signed group-runtime control route still completes privately without a
+  delivery handoff. The opt-in PostgreSQL cases run the same transaction and
+  lock owners against a real database. The production-like Linux proof must
+  still show committed group reads succeed while writes, `.runtime/**`,
+  `.codex/**`, environment files, other roots, inherited shell secrets, and tool
+  network are denied, and it must show child failure or cancellation cannot
+  interrupt the resident foreground App Server. Routine CI
   uses scripted provider responses; it does not send a real private-to-group
   ask, an accepted-input grant-bound group-to-member ask, one-time
   current-sender self-disclosure, private current-sender continuation, or a
