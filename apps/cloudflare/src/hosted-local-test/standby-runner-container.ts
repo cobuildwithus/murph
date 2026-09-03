@@ -11,6 +11,13 @@ import {
 const HOSTED_LOCAL_STANDBY_REGION = "REGN";
 
 export class HostedLocalTestStandbyRunnerContainer extends StandbyRunnerContainer {
+  async beginShutdownCheckpointGracefulStopForTest(
+    _input: { userId: string },
+  ): Promise<{ ok: true }> {
+    await this.stop("SIGTERM");
+    return { ok: true };
+  }
+
   protected override resolveExpectedStandbyHealthRegion(
     _region: typeof HOSTED_STANDBY_REGION,
   ): string {

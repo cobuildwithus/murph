@@ -290,8 +290,6 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     const recoveryEvidenceStartedAt = new Date();
     const providerStartObservations: Array<{
       activeFence: Awaited<ReturnType<typeof readActiveRuntimeFenceForTest>>;
-      barrierState:
-        HostedLocalForegroundPriorityOrderingObservationState["barrierState"];
       deviceMailboxItem: Awaited<ReturnType<typeof readHostedMailboxItemForTest>>;
       systemLane: {
         importedSeq: string;
@@ -307,16 +305,8 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         inboundText,
         label: "system mailbox exact replacement",
         onAssistantProviderStart: async () => {
-          await requireScenario().harness
-            .recordForegroundPriorityAssistantProviderStartForTest(
-              systemMailboxProbe.userId,
-            );
-          const [ordering, activeFence, status, deviceMailboxItem] =
+          const [activeFence, status, deviceMailboxItem] =
             await Promise.all([
-              readForegroundPriorityOrderingObservation(
-                requireScenario(),
-                systemMailboxProbe.userId,
-              ),
               readActiveRuntimeFenceForTest(systemMailboxProbe.userId),
               requireScenario().harness.readUserStatus(
                 systemMailboxProbe.userId,
@@ -332,7 +322,6 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
           );
           providerStartObservations.push({
             activeFence,
-            barrierState: ordering.barrierState,
             deviceMailboxItem,
             systemLane: systemLane
               ? {
@@ -353,6 +342,10 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         systemAttemptId: systemFence.attemptId,
         userId: systemMailboxProbe.userId,
       });
+      // Releasing the exact-user owner lets it finish and shut down before the
+      // foreground provider starts on the claimed standby. The provider-start
+      // callback therefore uses durable handoff evidence below instead of
+      // reaching back into volatile instrumentation on the retired owner.
       await expect(releaseForegroundPriorityOrderingBarrier({
         scenario: requireScenario(),
         userId: systemMailboxProbe.userId,
@@ -369,7 +362,6 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
           ["Assistant provider started without an active runtime write fence."],
         ));
       }
-      expect(providerStart.barrierState).toBe("released");
       expect(providerStart.activeFence.processingMode).toBe("default");
       expect(providerStart.activeFence.attemptId).not.toBe(
         systemFence.attemptId,
