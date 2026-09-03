@@ -450,7 +450,7 @@ export const WEARABLE_COMPARISONS = defineComparisons([
         competitor: "no",
       },
     ],
-    name: "Garmin Connect",
+    name: "Garmin",
     relationship: "complement",
     slug: "garmin-connect",
     sources: [
