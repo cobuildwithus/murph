@@ -84,6 +84,101 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
+    it("accepts the first unhandled wake when later work is also imported", async () => {
+      const client = requirePrisma(prisma);
+      const fixture = await seedRetiredScheduledWake({
+        client,
+        consumedSeq: 1n,
+        importedSeq: "3",
+        laneSeq: 2n,
+        memberIds,
+        nextSeq: 4n,
+      });
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+      try {
+        await expect(client.$transaction((tx) =>
+          appendHostedScheduledDeviceSyncWakeEnvelopeTx({
+            envelope: fixture.wake,
+            tx,
+          })
+        )).resolves.toMatchObject({
+          dedupeConflict: false,
+          duplicate: true,
+          inserted: false,
+          runtimeOwnedRetiredDuplicate: true,
+        });
+        expect(warn).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it("rejects a retired wake skipped behind an earlier pending item", async () => {
+      const client = requirePrisma(prisma);
+      const fixture = await seedRetiredScheduledWake({
+        client,
+        consumedSeq: 0n,
+        importedSeq: "3",
+        laneSeq: 2n,
+        memberIds,
+        nextSeq: 4n,
+      });
+      await client.hostedMailboxItem.createMany({
+        data: [
+          {
+            contentRetiredAt: new Date("2026-08-20T12:00:00.000Z"),
+            createdAt: new Date("2026-08-01T12:00:00.000Z"),
+            dedupeKey: `${fixture.mailboxItemId}:pending`,
+            id: `${fixture.mailboxItemId}_pending`,
+            kind: "runtime.maintenance-requested",
+            lane: "system",
+            laneSeq: 1n,
+            occurredAt: new Date("2026-08-01T12:00:00.000Z"),
+            payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+            userId: fixture.memberId,
+          },
+          {
+            createdAt: new Date("2026-09-02T12:00:00.000Z"),
+            dedupeKey: `${fixture.mailboxItemId}:successor`,
+            id: `${fixture.mailboxItemId}_successor`,
+            kind: "runtime.maintenance-requested",
+            lane: "system",
+            laneSeq: 3n,
+            occurredAt: new Date("2026-09-02T12:00:00.000Z"),
+            payloadBytes: 27,
+            payloadHash: "a".repeat(64),
+            payloadInlineCiphertext: "encrypted-successor-fixture",
+            payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+            userId: fixture.memberId,
+          },
+        ],
+      });
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+      try {
+        await expect(client.$transaction((tx) =>
+          appendHostedScheduledDeviceSyncWakeEnvelopeTx({
+            envelope: fixture.wake,
+            tx,
+          })
+        )).resolves.toMatchObject({
+          dedupeConflict: true,
+          duplicate: true,
+          inserted: false,
+          runtimeOwnedRetiredDuplicate: false,
+        });
+        expect(warn).toHaveBeenCalledWith(
+          "Hosted mailbox dedupe conflict.",
+          expect.objectContaining({
+            eventCode: "mailbox.dedupe_conflict",
+          }),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
     it.each([
       {
         importedSeq: "0",
@@ -174,7 +269,9 @@ async function seedRetiredScheduledWake(input: {
   consumedSeq?: bigint;
   eventSchema?: string;
   importedSeq: number | string;
+  laneSeq?: bigint;
   memberIds: string[];
+  nextSeq?: bigint;
   occurredAtOffsetMs?: number;
   sidecar?: boolean;
 }) {
@@ -184,6 +281,7 @@ async function seedRetiredScheduledWake(input: {
   const mailboxItemId = `mailbox_scheduled_retention_${suffix}`;
   const expectedConnectedAt = "2026-08-01T12:00:00.000Z";
   const nextReconcileAt = "2026-08-02T12:00:00.000Z";
+  const laneSeq = input.laneSeq ?? 1n;
   const eventId = [
     "device-sync",
     "scheduled-reconcile",
@@ -209,18 +307,19 @@ async function seedRetiredScheduledWake(input: {
     data: {
       consumedSeq: input.consumedSeq ?? 0n,
       lane: "system",
-      nextSeq: 2n,
+      nextSeq: input.nextSeq ?? laneSeq + 1n,
       userId: memberId,
     },
   });
   await input.client.hostedMailboxItem.create({
     data: {
       contentRetiredAt: new Date("2026-08-20T12:00:00.000Z"),
+      createdAt: new Date(nextReconcileAt),
       dedupeKey: eventId,
       id: mailboxItemId,
       kind: "device-sync.wake",
       lane: "system",
-      laneSeq: 1n,
+      laneSeq,
       occurredAt: new Date(
         Date.parse(nextReconcileAt) + (input.occurredAtOffsetMs ?? 0),
       ),
@@ -240,6 +339,8 @@ async function seedRetiredScheduledWake(input: {
   }
 
   return {
+    mailboxItemId,
+    memberId,
     wake: buildHostedDeviceSyncWake({
       connectionId,
       eventId,
