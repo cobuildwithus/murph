@@ -7,8 +7,8 @@
     "priority": 3,
     "title": "Journal and Patterns use cleaner names",
     "summary": "Repeated wearable names now group into short, consistent labels across Journal and Personal Patterns.",
-    "details": "Journal hides missing activity values and repeated details, while Patterns adds outcome sorting and clearer explanations when comparable days are unavailable.",
+    "details": "Journal hides missing activity values and repeated details. Patterns keeps labels compact and its sortable headers clean. Weekly insights can also use verified timing and combination evidence from Journal records.",
     "relevanceTags": ["journal", "patterns", "wearables", "usability"],
-    "sourcePullRequests": [2745]
+    "sourcePullRequests": [2745, 2776]
   }
 }

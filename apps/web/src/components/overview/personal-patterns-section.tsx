@@ -5,7 +5,6 @@ import {
   ArrowDown,
   ArrowRight,
   ArrowUp,
-  ArrowUpDown,
   CircleHelp,
   Ellipsis,
   Minus,
@@ -660,13 +659,6 @@ function PatternOutcomeHeader({
   const pointerAnchor = usePointerPopoverAnchor();
   const popover = useExclusivePatternPopover();
 
-  const SortIcon =
-    sortDirection === "ascending"
-      ? ArrowUp
-      : sortDirection === "descending"
-        ? ArrowDown
-        : ArrowUpDown;
-
   return (
     <div className="flex items-center justify-center gap-1">
       <button
@@ -681,10 +673,6 @@ function PatternOutcomeHeader({
         type="button"
       >
         <span>{outcome.label}</span>
-        <SortIcon
-          aria-hidden="true"
-          className={compact ? "size-2.5" : "size-3"}
-        />
       </button>
       <Popover open={popover.open} onOpenChange={popover.onOpenChange}>
         <PopoverTrigger
