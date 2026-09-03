@@ -1,6 +1,7 @@
 import {
   assistantBasePersonaOptions,
   assistantVoiceOptions,
+  MURPH_PRODUCT_ORIGIN,
 } from "@murphai/contracts";
 
 import {
@@ -185,7 +186,7 @@ function projectPendingState(input: {
         description: option.description,
         id: option.id,
         label: option.label,
-        previewURL: new URL(option.previewPath, input.origin).toString(),
+        previewURL: new URL(option.previewPath, MURPH_PRODUCT_ORIGIN).toString(),
       })),
     },
     contactCard: supportsContactCard

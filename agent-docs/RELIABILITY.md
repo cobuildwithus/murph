@@ -226,6 +226,16 @@ Last verified: 2026-09-01
   invite, routing, or email authority. Cross-member phone conflict suppression
   reads only the blind-index owner id, so it neither decrypts the other
   member's private identity nor needs that member's root in the transaction.
+- Settings linked-account removal treats the provider unlink as the first
+  irreversible step. The browser retries only the bounded live-provider lag
+  check; once Privy confirms absence, Murph's member-locked projection cleanup
+  is idempotent and an interrupted attempt can resume without unlinking again.
+  The same transaction appends the existing channel-update mailbox item when
+  state changed. Its post-commit runtime signal is best-effort because durable
+  runtime reconciliation remains the recovery owner. A refreshed Settings page
+  derives provider absence against the still-canonical identity from existing
+  state and exposes the same idempotent cleanup action without repeating the unlink. No
+  retry job, timer, or additional persisted state owns this recovery.
 - Connected-app email sends have no durable provider idempotency key or send ledger. Admit them only from current accepted user input in a private direct turn; scheduled, group, maintenance, system-notification, and output-only turns fail before provider egress. After an ambiguous dispatch, never replay the send. Reconcile only against a narrow recent Sent-mail window matching the primary recipient, subject, and substantive body, and leave the outcome unknown when that evidence is not decisive.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
 - Avoid hidden coupling between scripts, docs, and runtime code; document new dependencies in `ARCHITECTURE.md` and `agent-docs/references/testing-ci-map.md`.
@@ -368,6 +378,18 @@ Last verified: 2026-09-01
   release a newer owner. The signal creates no work and normal reconciliation
   facts still choose the processing mode. Callback or signal failure retains
   the existing durable owner horizon.
+- A completed hosted runtime does not depend on the originating
+  `RunnerContainer` activation surviving long enough to deliver its result.
+  After a successful invocation, the container entrypoint clears its local wake
+  and abort pointers, decrements active work, and cleans request transport before
+  sending the exact result, attempt, and generation over the existing bound
+  internal route to `UserRunner`. That release-first order prevents the durable
+  fence from admitting a successor while the process still reports busy.
+  `UserRunner`'s existing compare-and-swap remains the only write-fence clear
+  authority. The ordinary outer result remains the normal path; duplicate or
+  stale receipts are harmless. The one-second best-effort receipt reports only
+  `recorded` or `not_recorded`, never changes the completed result, and adds no
+  completion poller or recovery queue.
 - Hosted background admission uses one capability-scoped projection on the
   existing workspace checkpoint row. A capable runtime checkpoints an absolute
   `systemMailboxProgressGeneration` plus the independently calculated next
@@ -434,10 +456,18 @@ Last verified: 2026-09-01
 - Cloudflare standby allocation is an optional one-slot optimization, not a
   scheduler. `off` is the source-controlled default, `shadow` maintains and
   re-proves one current-release ENAM slot without allocating it, and `allocate`
-  uses one 250 ms claim/bind deadline. A miss before slot ownership uses the
-  ordinary exact-user fallback; an ambiguous bind after the per-member stop
-  target is durably reserved retries that exact target instead of risking two
-  live containers.
+  offers one 250 ms claim/bind deadline only to a fence-free, authenticated
+  Web-direct `default` request. Temporal and background requests keep the
+  ordinary exact-user target. After foreground preemption has cleared an
+  exact-user background fence, the trusted foreground replacement may claim
+  the ready standby instead of reusing the child while it shuts down. A miss
+  before slot ownership uses the same exact-user fallback; an ambiguous bind
+  after the per-member stop target is durably reserved retries that exact
+  target instead of risking two live containers. Pending and retained targets
+  are reconciled before fresh-claim eligibility. In `allocate` mode the standby
+  coordinator is the only shell-prewarm owner; the exact-user prewarm hint is
+  skipped so it cannot reserve a competing target before a fresh claim. The
+  ordinary exact-user start remains the fallback after a claim miss.
   A coordinator transaction admits at most one winner, then replacement
   provisioning runs under `waitUntil`; alarms re-prove readiness, retry failed
   retirement, expire unbound claim tombstones, and drain stale releases. The
@@ -1282,7 +1312,24 @@ Last verified: 2026-09-01
   runner rebuilds from those owners; it never projects local retry timing into
   `nextReconcileAt`. Per-connection mailbox ordering and scheduler scoping
   prevent a future retry for one connection from blocking or advancing due work
-  for another. Per-attempt `device-sync.job_failed` telemetry has one owner:
+  for another. A later due webhook for that same connection may admit the older
+  exact retained mailbox item so newly dirty data can enter the local worker
+  without waiting behind a historical retry. That webhook remains available for
+  an exact continuation only when post-checkpoint acknowledgement reports a
+  newer dirty revision and the retained job hints prove the next pass has
+  admission capacity. Every accepted dirty append advances that revision,
+  including payload-only work accepted after the pass fetched its input, while
+  ingress still coalesces mailbox delivery for an already-dirty connection.
+  Revision inequality is therefore the existing authoritative observed-work
+  frontier rather than a second scheduling state. Otherwise, the existing
+  mailbox retention update atomically defers the webhook to the retained retry,
+  including payload-only backoff and a full retained queue that cannot yet admit
+  distinct dirty work.
+  The retained wake's job hints suppress provider scheduling,
+  and each local job keeps its own `availableAt`, so these bounded passes neither
+  run the later mailbox item out of order nor bypass provider backoff.
+  Scheduled-reconcile successors do not grant admission. Per-attempt
+  `device-sync.job_failed` telemetry has one owner:
   assistant-runtime maintenance emits it from the failed local job diagnostic
   before Web state application. Web persists canonical failure state and never
   translates state application or a persistence failure into another provider or
@@ -1703,6 +1750,14 @@ Last verified: 2026-09-01
   `whoop`, but admission uses the Junction `whoop_v2` lifecycle source. Resume,
   omitted intent, stale
   events, and background work never clear the source fence.
+- Personal Patterns operator email is terminal-state only. A failed cron
+  attempt remains silent while the finalized job has a scheduled retry. Web
+  treats an absent retry disposition from an older runner as non-terminal, so
+  the consumer can deploy first. Terminal failures and expired occurrences for
+  one scheduled time share one generic body and one member-independent Resend
+  idempotency key. Concurrent failures therefore produce at most one operator
+  email for that occurrence without adding a database row, queue, or second
+  retry owner.
 - The hosted reply-latency operator alert remains one singleton incident owner.
   Fresh conversation mailbox rows that the existing Web AI usage gate
   intentionally denies receive one assign-once timestamp at the mutating

@@ -1442,7 +1442,7 @@ function JournalEntryActions({
         <NotebookPen className="size-3" aria-hidden="true" />
       </span>
       <span className="text-xs leading-[19px] text-muted-foreground">
-        To add, correct, or remove an entry, tell Murph in your private chat.
+        Update your journal in private chat with Murph.
       </span>
     </span>
   );

@@ -76,6 +76,10 @@ const hostedLocalE2eRunnerSmokeOnceEnv =
   "MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE";
 const hostedLocalE2eRunnerSmokeProvedBuildIdEnv =
   "MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROVED_BUILD_ID";
+const defaultRunnerBundleManifestText = vi.hoisted(() => JSON.stringify({
+  bundleFingerprint: "fixture-runner-bundle-fingerprint",
+  sourceFingerprint: "fixture-runner-source-fingerprint",
+}));
 
 const runCommand = vi.fn<(
   command: string,
@@ -300,7 +304,10 @@ vi.mock("node:fs/promises", () => ({
   cp: vi.fn(async () => {}),
   mkdir: vi.fn(async () => {}),
   mkdtemp: vi.fn(async () => "/tmp/murph-dev-env-test"),
-  readFile: vi.fn(async () => {
+  readFile: vi.fn(async (filePath) => {
+    if (String(filePath).endsWith(".murph-runner-bundle-manifest.json")) {
+      return defaultRunnerBundleManifestText;
+    }
     const error = new Error("File not found") as Error & { code: string };
     error.code = "ENOENT";
     throw error;
@@ -564,6 +571,18 @@ function createDeferred<T>(): {
   };
 }
 
+function readRunnerBundleManifestFixture(filePath: unknown): string | null {
+  return String(filePath).endsWith(".murph-runner-bundle-manifest.json")
+    ? defaultRunnerBundleManifestText
+    : null;
+}
+
+function createMissingFileError(): Error & { code: string } {
+  const error = new Error("File not found") as Error & { code: string };
+  error.code = "ENOENT";
+  return error;
+}
+
 describe("hosted local dev stack", () => {
   beforeEach(() => {
     vi.stubEnv("HOSTED_EXECUTION_RUNNER_HOST_ALIAS", "host.docker.internal");
@@ -572,10 +591,12 @@ describe("hosted local dev stack", () => {
   afterEach(() => {
     vi.clearAllMocks();
     vi.mocked(cp).mockImplementation(async () => {});
-    vi.mocked(readFile).mockImplementation(async () => {
-      const error = new Error("File not found") as Error & { code: string };
-      error.code = "ENOENT";
-      throw error;
+    vi.mocked(readFile).mockImplementation(async (filePath) => {
+      const manifest = readRunnerBundleManifestFixture(filePath);
+      if (manifest !== null) {
+        return manifest;
+      }
+      throw createMissingFileError();
     });
     runCommand.mockImplementation(async () => {});
     spawnSync.mockImplementation(defaultSpawnSyncImplementation);
@@ -1321,6 +1342,10 @@ describe("hosted local dev stack", () => {
     const dockerContext = "desktop-linux";
     const dockerContextId = createHash("sha256").update(dockerContext).digest("hex");
     vi.mocked(readFile).mockImplementation(async (filePath) => {
+      const manifest = readRunnerBundleManifestFixture(filePath);
+      if (manifest !== null) {
+        return manifest;
+      }
       if (/apps[/\\]web[/\\]\.next-smoke-e2e-fixture[/\\]BUILD_ID$/u.test(String(filePath))) {
         return "smoke-build-id\n";
       }
@@ -1333,9 +1358,7 @@ describe("hosted local dev stack", () => {
         });
       }
 
-      const error = new Error("File not found") as Error & { code: string };
-      error.code = "ENOENT";
-      throw error;
+      throw createMissingFileError();
     });
 
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
@@ -1573,13 +1596,15 @@ describe("hosted local dev stack", () => {
       OPENAI_API_KEY: "local-openai-key",
     });
     vi.mocked(readFile).mockImplementation(async (filePath) => {
+      const manifest = readRunnerBundleManifestFixture(filePath);
+      if (manifest !== null) {
+        return manifest;
+      }
       if (/apps[/\\]web[/\\]\.next-smoke-e2e-fixture[/\\]BUILD_ID$/u.test(String(filePath))) {
         return "smoke-build-id\n";
       }
 
-      const error = new Error("File not found") as Error & { code: string };
-      error.code = "ENOENT";
-      throw error;
+      throw createMissingFileError();
     });
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 107 }))
@@ -1708,6 +1733,10 @@ describe("hosted local dev stack", () => {
     const dockerContext = "desktop-linux";
     const dockerContextId = createHash("sha256").update(dockerContext).digest("hex");
     vi.mocked(readFile).mockImplementation(async (filePath) => {
+      const manifest = readRunnerBundleManifestFixture(filePath);
+      if (manifest !== null) {
+        return manifest;
+      }
       if (String(filePath).endsWith(`${path.sep}.docker${path.sep}config.json`)) {
         return JSON.stringify({
           auths: { "registry.example.invalid": {} },
@@ -1716,9 +1745,7 @@ describe("hosted local dev stack", () => {
         });
       }
 
-      const error = new Error("File not found") as Error & { code: string };
-      error.code = "ENOENT";
-      throw error;
+      throw createMissingFileError();
     });
     vi.mocked(cp).mockImplementation(async (sourcePath) => {
       if (String(sourcePath).endsWith(path.join("contexts", "tls", dockerContextId))) {
@@ -2521,13 +2548,15 @@ describe("hosted local dev stack", () => {
     vi.stubEnv(hostedLocalE2eRunnerSmokeOnceEnv, "1");
     vi.stubEnv(hostedLocalE2eRunnerSmokeProvedBuildIdEnv, "");
     vi.mocked(readFile).mockImplementation(async (filePath) => {
+      const manifest = readRunnerBundleManifestFixture(filePath);
+      if (manifest !== null) {
+        return manifest;
+      }
       if (String(filePath).endsWith("runner-smoke-proved.json")) {
         return `${JSON.stringify({ buildId: expectedBuildId })}\n`;
       }
 
-      const error = new Error("File not found") as Error & { code: string };
-      error.code = "ENOENT";
-      throw error;
+      throw createMissingFileError();
     });
     const stderrTarget = new CapturingWritable();
     const configModule = await import("../../src/dev-hosted-local/config.ts");

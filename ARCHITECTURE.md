@@ -375,11 +375,13 @@ reuse `assistant.notification.requested` and the ordinary transcript/outbox
 delivery path. The exported Web admission function is the single entry point
 for Ops, workflows, and future cron callers; callers supply a stable
 idempotency key rather than creating another scheduler or delivery owner.
-The diagnostic answer candidate starts in an isolated working directory and
-receives the exact targeted workspace path as immutable host prompt data. It may
-use Codex's native read tools under the existing `murph-group-read` profile.
-The separate disclosure reviewer remains tool-free and isolated from that
-workspace; diagnostics have no network, dynamic effect tool, or delivery port.
+The diagnostic starts one direct `executeOperatorDiagnostic` turn. Trusted
+runtime code binds the exact target workspace plus, when present, only the
+hosted Codex `sessions/` directory. The read-only child can inspect `.runtime`
+but cannot write, use the network, load workspace configuration, or invoke
+effect or delivery tools. Its answer returns directly to the existing
+encrypted, expiring Ops-only result owner; it does not enter the member
+disclosure-review composition.
 
 Assistant Ask is one typed request/reply primitive over the existing encrypted
 hosted mailbox. `assistant.ask.requested` carries one bounded question to an
@@ -602,22 +604,16 @@ account-deletion owners.
 
 The target runtime keeps its resident foreground Murph as the sole
 model-authored canonical-content writer and outbound sender. Beside it, at most
-one `executeReadOnlyAssistantAsk` call may start a separate one-shot Codex App
-Server process. The trusted target adapter supplies the authorized root
-and bounded committed conversation evidence; the model cannot choose either.
-The native `murph-group-read` permission profile then exposes the live target
-read: exact workspace roots are read-only, `.runtime/**`, `.codex/**`, and
-retired vault-share projection roots, and environment files are denied; tool
-network is off, shell commands inherit no secrets, and no child receives mutation
-or delivery authority. Joined-group asks receive only the consent-aware narrow
-legacy `murph.group/read_shared` dynamic tool; consented and operator candidates
-and disclosure reviewers receive no dynamic tools.
-The thread request supplies the exact profile, roots, disabled instruction sources,
-and approval policy. Every candidate and reviewer uses an empty working
-directory; an authenticated operator diagnostic selected for read-tool inspection
-receives the exact target path as quoted host prompt data. The App Server response is
-not an authorization boundary; production-like Linux smoke proves the
-profile's actual filesystem, environment, and network enforcement.
+one detached read-only child may start a separate one-shot Codex App Server
+process. Group/member asks keep `executeReadOnlyAssistantAsk` and
+`murph-group-read`, which hides private runtime state. Authenticated operator
+tasks instead call `executeOperatorDiagnostic` with
+`murph-operator-diagnostic-read`, the bound workspace including `.runtime`, and
+only the hosted Codex `sessions/` directory as an optional second root. The
+model chooses neither roots nor profile. All detached children start in an empty
+temporary working directory with approval policy `never`, no inherited shell
+environment, and no network, project configuration, mutation, effect, or
+delivery authority. Only member disclosure flows use the separate reviewer.
 The child never shares the resident process, provider thread, interruption
 domain, or route grant. Before checkpoint, invocation return, fence loss,
 workspace replacement, or shutdown, the runtime aborts and awaits the exact
@@ -1587,9 +1583,31 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   readiness and atomic availability only; the per-member `UserRunner` persists
   the exact opaque stop target, binds it once, then owns the ordinary write
   fence, workspace restore, invocation, retention, and retirement. Standby
-  readiness warms the image, heavy runtime, and a disposable content-free Codex
-  initialization, while the member-specific resident Codex process remains
-  post-restore. Claimed containers are never returned for another member.
+  allocation is available only to a fence-free, OIDC-authenticated Web-direct
+  `default` request with a validated direct-attempt identity. Background modes
+  and Temporal requests retain the exact-user target. A foreground request that
+  has finished preempting an exact-user background child may claim the ready
+  standby instead of reusing the child while it shuts down. A previously
+  reserved standby is reconciled before this eligibility check so retries and
+  replacements already bound to a standby cannot split ownership. In
+  `allocate` mode the standby coordinator is the sole shell-prewarm owner; the
+  exact-user prewarm hint is skipped so it cannot reserve a competing target
+  before the claim, while the normal exact-user start remains the claim-miss
+  fallback.
+  Standby readiness warms the image, heavy runtime, and a disposable
+  content-free Codex initialization, while the member-specific resident Codex
+  process remains post-restore. Claimed containers are never returned for
+  another member.
+- `UserRunner` remains the sole durable runtime write-fence owner when a
+  `RunnerContainer` Durable Object activation is replaced. After a successful
+  invocation, the container entrypoint first clears its wake and abort pointers,
+  decrements active work, and cleans up request transport. It then sends the
+  exact result, attempt, and generation over the existing bound internal
+  runner-control route before running shutdown drain. `UserRunner` applies its
+  existing exact completion compare-and-swap; the ordinary outer result remains
+  the normal completion path, and a duplicate or stale receipt is a no-op. The
+  one-second best-effort receipt adds no recovery queue, poller, persisted
+  promise, or second completion authority.
 - The same Cloudflare app owns one production database-health singleton that is
   deliberately independent of hosted Web and Postgres. A five-minute Cron
   Trigger asks a SQLite-backed `DatabaseHealthDurableObject` to discover and
@@ -3635,17 +3653,19 @@ new assistant input locally, that real dirty state is checkpointed with a due
 `assistant` wake so the restored runtime cannot strand it. This is an ordinary
 dirty-state checkpoint, not a synthetic wake-handoff snapshot.
 
-After a parsed successful runtime result has settled and RunnerContainer has
-removed the exact active-operation pointer, RunnerContainer sends UserRunner one
-best-effort internal completion receipt bound to user, attempt, and generation.
-RunnerContainer waits at most one second for that receipt before returning the
-completed result so a slow or unavailable UserRunner cannot block the outer
-completion fallback.
-UserRunner applies the same exact write-fence compare-and-swap used by the outer
-invocation path; whichever path wins is the only owner that can release the
-runtime owner, while the outer path remains the mixed-version and callback-loss
-fallback. A checkpoint, elapsed time, or container lifecycle event is not a
-completion receipt. After an exact successful runtime completion clears its
+After a parsed successful runtime result settles, the container entrypoint
+clears the invocation's wake and abort pointers, decrements its active-job
+count, and cleans request transport before sending UserRunner one best-effort
+internal completion receipt bound to user, attempt, and generation. This keeps
+the process reusable before the durable fence can admit a successor. Both the
+fetch abort and an independent hard deadline cap the receipt at one second; an
+unavailable route, non-success response, transport failure, invalid response,
+or non-settling fetch preserves the completed result.
+UserRunner applies the same exact write-fence compare-and-swap used by the
+ordinary outer invocation path; whichever path wins is the only owner that can
+release the runtime owner. The disposable RunnerContainer activation sends no
+second receipt. A checkpoint, elapsed time, or container lifecycle event is not
+a completion receipt. After an exact successful runtime completion clears its
 write fence, Cloudflare makes at most one signed, bodyless, best-effort callback
 to web with a timeout of at most two seconds; a known future mailbox retry
 continuation skips it. The signed query binds the opaque released runtime

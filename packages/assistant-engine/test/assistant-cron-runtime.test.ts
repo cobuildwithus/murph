@@ -5880,6 +5880,7 @@ describe('assistant cron runtime orchestration', () => {
       )
       const canonicalJob = await createCanonicalJob(vaultRoot, 'yield-in-flight')
       let shouldYield = false
+      const events: AssistantRunEvent[] = []
       cronMocks.sendAssistantMessageLocal.mockImplementationOnce(
         async (input: { abortSignal?: AbortSignal }) => {
           expect(input.abortSignal?.aborted).toBe(false)
@@ -5892,6 +5893,7 @@ describe('assistant cron runtime orchestration', () => {
 
       const summary = await processDueAssistantCronJobsLocal({
         limit: 1,
+        onEvent: (event) => events.push(event),
         shouldYield: () => shouldYield,
         vault: vaultRoot,
       })
@@ -5920,6 +5922,15 @@ describe('assistant cron runtime orchestration', () => {
       expect(current.state.lastFailedAt).toBeNull()
       expect(current.state.consecutiveFailures).toBe(0)
       expect(current.state.nextRunAt).toBe('2026-04-08T10:20:10.050Z')
+      expect(events).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          failureContext: expect.objectContaining({
+            retryScheduled: true,
+            runOutcome: 'failed',
+          }),
+          type: 'cron.job.completed',
+        }),
+      ]))
     } finally {
       vi.useRealTimers()
     }
@@ -7832,6 +7843,7 @@ describe('assistant cron runtime orchestration', () => {
           failureContext: expect.objectContaining({
             errorCode: 'ASSISTANT_CODEX_USAGE_LIMIT',
             errorPresent: true,
+            retryScheduled: true,
             runOutcome: 'failed',
             scheduleKind: 'at',
             sourceKind: 'automation',
@@ -7866,9 +7878,16 @@ describe('assistant cron runtime orchestration', () => {
       },
     )
     cronMocks.sendAssistantMessageLocal.mockRejectedValueOnce(error)
+    const events: Array<{
+      failureContext?: Record<string, boolean | number | string | null>
+      type: string
+    }> = []
 
     const summary = await processDueAssistantCronJobsLocal({
       limit: 1,
+      onEvent: (event) => {
+        events.push(event)
+      },
       vault: vaultRoot,
     })
 
@@ -7888,6 +7907,15 @@ describe('assistant cron runtime orchestration', () => {
       'Hosted Linq egress authority assertion request failed.',
     )
     expect(runtimeRecord?.state.consecutiveFailures).toBe(0)
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        failureContext: expect.objectContaining({
+          retryScheduled: false,
+          runOutcome: 'failed',
+        }),
+        type: 'cron.job.completed',
+      }),
+    ]))
     await expect(
       listAssistantCronRuns({
         job: canonicalJob.jobId,

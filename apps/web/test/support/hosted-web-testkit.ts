@@ -282,6 +282,11 @@ interface HostedTestPrismaFactoryClient {
     }>;
     updateMany(args: unknown): Promise<{ count: number }>;
   };
+  hostedMailboxLaneCounter: {
+    findUnique(args: unknown): Promise<{
+      consumedSeq: bigint;
+    } | null>;
+  };
   hostedMember: {
     create(args: unknown): Promise<{ id: string }>;
     update(args: unknown): Promise<{ id: string }>;
@@ -1006,6 +1011,27 @@ export async function readHostedMailboxItemForTest(input: {
       lane: item.lane,
       laneSeq: item.laneSeq.toString(),
     };
+  });
+}
+
+export async function readHostedMailboxConsumedSeqForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  lane: "conversation" | "system";
+  userId: string;
+}): Promise<{ consumedSeq: string }> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const counter = await deps.prisma.hostedMailboxLaneCounter.findUnique({
+      select: {
+        consumedSeq: true,
+      },
+      where: {
+        userId_lane: {
+          lane: input.lane,
+          userId: input.userId,
+        },
+      },
+    });
+    return { consumedSeq: counter?.consumedSeq.toString() ?? "0" };
   });
 }
 

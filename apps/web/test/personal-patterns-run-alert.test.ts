@@ -14,7 +14,50 @@ const alertEnv = {
 };
 
 describe("Personal Patterns run alerts", () => {
-  it("emails operators for a failed managed run", async () => {
+  it("ignores a failed managed run while automatic recovery is pending", async () => {
+    const sendEmail = vi.fn(async () => ({ providerMessageId: "email_1" }));
+
+    await expect(sendHostedPersonalPatternsRunAlerts({
+      entries: [{
+        at: "2026-08-31T13:02:00.000Z",
+        errorCode: "ASSISTANT_CODEX_CONNECTION_LOST",
+        redactedJson: {
+          failureAutomationSlug: "personal-patterns-update",
+          failureErrorCode: "ASSISTANT_CODEX_CONNECTION_LOST",
+          failureRetryScheduled: true,
+          failureOccurrenceAt: "2026-08-31T13:00:00.000Z",
+          failureRunOutcome: "failed",
+          type: "cron.job.completed",
+        },
+      }],
+      env: alertEnv,
+      sendEmail,
+    })).resolves.toBe("unrelated");
+
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("ignores failed events from an older runtime without retry disposition", async () => {
+    const sendEmail = vi.fn(async () => ({ providerMessageId: "email_1" }));
+
+    await expect(sendHostedPersonalPatternsRunAlerts({
+      entries: [{
+        at: "2026-08-31T13:02:00.000Z",
+        redactedJson: {
+          failureAutomationSlug: "personal-patterns-update",
+          failureOccurrenceAt: "2026-08-31T13:00:00.000Z",
+          failureRunOutcome: "failed",
+          type: "cron.job.completed",
+        },
+      }],
+      env: alertEnv,
+      sendEmail,
+    })).resolves.toBe("unrelated");
+
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("emails operators for a terminal managed run failure", async () => {
     const sent: SendAlertEmailInput[] = [];
 
     await expect(sendHostedPersonalPatternsRunAlerts({
@@ -24,13 +67,13 @@ describe("Personal Patterns run alerts", () => {
         redactedJson: {
           failureAutomationSlug: "personal-patterns-update",
           failureErrorCode: "ASSISTANT_CODEX_USAGE_LIMIT",
+          failureRetryScheduled: false,
           failureOccurrenceAt: "2026-08-31T13:00:00.000Z",
           failureRunOutcome: "failed",
           type: "cron.job.completed",
         },
       }],
       env: alertEnv,
-      memberId: "member_test_1",
       sendEmail: async (input) => {
         sent.push(input);
         return { providerMessageId: "email_1" };
@@ -38,14 +81,18 @@ describe("Personal Patterns run alerts", () => {
     })).resolves.toBe("sent");
 
     expect(sent).toHaveLength(1);
-    expect(sent[0]?.subject).toBe("Murph Personal Patterns run failed");
-    expect(sent[0]?.text).toContain("member: member_test_1");
-    expect(sent[0]?.text).toContain("error code: ASSISTANT_CODEX_USAGE_LIMIT");
+    expect(sent[0]?.subject).toBe("Murph Personal Patterns runs need attention");
+    expect(sent[0]?.text).toContain("did not complete after automatic recovery");
+    expect(sent[0]?.text).toContain(
+      "scheduled occurrence: 2026-08-31T13:00:00.000Z",
+    );
+    expect(sent[0]?.text).not.toContain("member");
+    expect(sent[0]?.text).not.toContain("ASSISTANT_CODEX_USAGE_LIMIT");
     expect(sent[0]?.text).not.toContain("health");
   });
 
-  it("emails operators once per expired occurrence through a stable key", async () => {
-    const keys: string[] = [];
+  it("coalesces different members for one expired occurrence", async () => {
+    const sends: SendAlertEmailInput[] = [];
     const entry = {
       at: "2026-08-31T17:00:00.000Z",
       redactedJson: {
@@ -62,15 +109,15 @@ describe("Personal Patterns run alerts", () => {
       await sendHostedPersonalPatternsRunAlerts({
         entries: [{ ...entry, at: observedAt }],
         env: alertEnv,
-        memberId: "member_test_1",
         sendEmail: async (input) => {
-          keys.push(input.idempotencyKey);
+          sends.push(input);
           return { providerMessageId: "email_1" };
         },
       });
     }
 
-    expect(new Set(keys).size).toBe(1);
+    expect(new Set(sends.map((send) => send.idempotencyKey)).size).toBe(1);
+    expect(new Set(sends.map((send) => send.text)).size).toBe(1);
   });
 
   it("ignores other automations and successful Patterns runs", async () => {
@@ -98,7 +145,6 @@ describe("Personal Patterns run alerts", () => {
         },
       ],
       env: alertEnv,
-      memberId: "member_test_1",
       sendEmail,
     })).resolves.toBe("unrelated");
     expect(sendEmail).not.toHaveBeenCalled();
@@ -112,13 +158,13 @@ describe("Personal Patterns run alerts", () => {
         at: "2026-08-31T13:02:00.000Z",
         redactedJson: {
           failureAutomationSlug: "personal-patterns-update",
+          failureRetryScheduled: false,
           failureOccurrenceAt: "2026-08-31T13:00:00.000Z",
           failureRunOutcome: "failed",
           type: "cron.job.completed",
         },
       }],
       env: {},
-      memberId: "member_test_1",
       sendEmail,
     })).resolves.toBe("not_configured");
     expect(sendEmail).not.toHaveBeenCalled();
@@ -133,6 +179,7 @@ describe("Personal Patterns run alerts", () => {
           at: "2026-08-31T13:02:00.000Z",
           redactedJson: {
             failureAutomationSlug: "personal-patterns-update",
+            failureRetryScheduled: false,
             failureOccurrenceAt: "2026-08-30T13:00:00.000Z",
             failureRunOutcome: "failed",
             type: "cron.job.completed",
@@ -148,7 +195,6 @@ describe("Personal Patterns run alerts", () => {
         },
       ],
       env: alertEnv,
-      memberId: "member_test_1",
       sendEmail: async () => {
         attempts += 1;
         if (attempts === 1) {

@@ -5,10 +5,10 @@
     "id": "journal-details-are-easier-to-scan",
     "kind": "improvement",
     "priority": 3,
-    "title": "Journal is easier to scan",
-    "summary": "Journal now keeps seven-day context close to the timeline, marks entries with more detail, and removes repeated context.",
-    "details": "On phones, the seven-day summary appears before the timeline, calendars and metric trends open from the bottom, and pattern insights follow the period they describe. Workout, travel, laboratory, and experiment details stay one tap away.",
+    "title": "Journal and Patterns are easier to scan",
+    "summary": "Journal keeps seven-day context close to the timeline and hides empty or repeated activity details. Patterns uses shorter labels for recognized factors.",
+    "details": "On phones, the seven-day summary appears before the timeline, calendars and metric trends open from the bottom, and pattern insights follow the period they describe. Useful workout, travel, laboratory, and experiment details stay one tap away.",
     "relevanceTags": ["journal", "workouts", "experiments", "usability"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [2705, 2731]
   }
 }

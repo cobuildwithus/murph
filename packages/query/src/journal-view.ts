@@ -711,7 +711,7 @@ function mealSummary(attributes: Record<string, unknown>): string | null {
 
 function journalEventDetailItems(event: CanonicalEntity): string[] {
   if (event.kind === "activity_session") {
-    return activityDetailItems(event.attributes);
+    return activityDetailItems(event.attributes, eventLabel(event));
   }
 
   if (event.kind === "experiment_context") {
@@ -808,7 +808,10 @@ function experimentJournalSummary(
   return progress;
 }
 
-function activityDetailItems(attributes: Record<string, unknown>): string[] {
+function activityDetailItems(
+  attributes: Record<string, unknown>,
+  title: string,
+): string[] {
   const workout = readRecord(attributes.workout);
   const metrics = readRecord(workout?.metrics);
   const distanceKm = firstJournalNumber(
@@ -847,9 +850,9 @@ function activityDetailItems(attributes: Record<string, unknown>): string[] {
   const energy = activeCalories === null ? totalCalories : activeCalories;
 
   return uniqueStrings([
-    readString(workout?.routineName),
-    readString(workout?.sportName),
-    formatJournalDetail("Distance", distanceKm, "km"),
+    usefulActivityDetail(workout?.routineName, title),
+    usefulActivityDetail(workout?.sportName, title),
+    formatPositiveJournalDetail("Distance", distanceKm, "km"),
     formatJournalDetail("Average heart rate", averageHeartRate, "bpm"),
     formatJournalDetail("Maximum heart rate", maxHeartRate, "bpm"),
     formatJournalDetail("Strain", strain),
@@ -862,6 +865,14 @@ function activityDetailItems(attributes: Record<string, unknown>): string[] {
     formatJournalDetail("Average power", averagePower, "W"),
     exercises.length > 0 ? `Exercises: ${exercises.join(", ")}` : null,
   ]);
+}
+
+function usefulActivityDetail(value: unknown, title: string): string | null {
+  const detail = readString(value);
+  if (!detail || detail.toLocaleLowerCase() === "unknown") return null;
+  return detail.localeCompare(title, undefined, { sensitivity: "accent" }) === 0
+    ? null
+    : detail;
 }
 
 function firstJournalNumber(...values: readonly unknown[]): number | null {
@@ -891,6 +902,16 @@ function formatJournalDetail(
 ): string | null {
   if (value === null) return null;
   return `${label}: ${formatDetailNumber(value)}${unit ? ` ${unit}` : ""}`;
+}
+
+function formatPositiveJournalDetail(
+  label: string,
+  value: number | null,
+  unit?: string,
+): string | null {
+  return value !== null && value > 0
+    ? formatJournalDetail(label, value, unit)
+    : null;
 }
 
 function formatDetailNumber(value: number): string {

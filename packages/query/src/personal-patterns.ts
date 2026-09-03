@@ -1410,6 +1410,15 @@ function canonicalFactorToken(value: string | null): string | null {
 }
 
 function humanizeToken(value: string): string {
+  if (value === "blue-light-blocking-glasses") {
+    return "Blue-light blocking glasses";
+  }
+  if (
+    value ===
+    "high-filtering-amber-red-or-orange-evening-glasses-with-spectral-data-when-available"
+  ) {
+    return "Red/amber evening glasses";
+  }
   const readableValue =
     value === "yardwork"
       ? "yard-work"

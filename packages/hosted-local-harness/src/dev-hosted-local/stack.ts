@@ -202,6 +202,8 @@ const HOSTED_LOCAL_RUNNER_BUNDLE_ROOT = path.join(
   ".deploy",
   "runner-bundle",
 );
+const HOSTED_LOCAL_RUNNER_BUNDLE_MANIFEST_FILE =
+  ".murph-runner-bundle-manifest.json";
 const HOSTED_LOCAL_CLOUDFLARE_SOURCE_SNAPSHOT_DIR = "cloudflare-source";
 const HOSTED_LOCAL_WORKSPACE_PACKAGE_SCOPE = "@murphai/";
 
@@ -714,6 +716,13 @@ export async function startHostedLocalDevStack(input: {
           workerProcessEnv.MURPH_DEV_SKIP_RUNNER_BUNDLE = "1";
         }
       }
+      const runnerBundleFingerprintEnv =
+        await readHostedLocalRunnerBundleFingerprintEnv();
+      applyHostedLocalRunnerBundleFingerprintEnv({
+        fingerprintEnv: runnerBundleFingerprintEnv,
+        workerProcessEnv,
+        workerRuntimeEnv,
+      });
       const cloudflareSourceSnapshot = await prepareHostedLocalCloudflareSourceSnapshot({
         abortSignal: input.abortSignal,
         tempDir,
@@ -1269,6 +1278,57 @@ export async function startHostedLocalDevStack(input: {
       minioMonitor.kill();
       minioMonitor = null;
     }
+  }
+}
+
+async function readHostedLocalRunnerBundleFingerprintEnv(): Promise<{
+  HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: string;
+  HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: string;
+}> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(
+      path.join(
+        HOSTED_LOCAL_RUNNER_BUNDLE_ROOT,
+        HOSTED_LOCAL_RUNNER_BUNDLE_MANIFEST_FILE,
+      ),
+      "utf8",
+    ));
+  } catch (error) {
+    throw new Error("Hosted local runner bundle manifest is unreadable.", {
+      cause: error,
+    });
+  }
+
+  const bundleFingerprint = isRecord(parsed)
+    && typeof parsed.bundleFingerprint === "string"
+    ? parsed.bundleFingerprint.trim()
+    : "";
+  const sourceFingerprint = isRecord(parsed)
+    && typeof parsed.sourceFingerprint === "string"
+    ? parsed.sourceFingerprint.trim()
+    : "";
+  if (!bundleFingerprint || !sourceFingerprint) {
+    throw new Error("Hosted local runner bundle manifest is missing fingerprints.");
+  }
+
+  return {
+    HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: bundleFingerprint,
+    HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: sourceFingerprint,
+  };
+}
+
+function applyHostedLocalRunnerBundleFingerprintEnv(input: {
+  fingerprintEnv: {
+    HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: string;
+    HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: string;
+  };
+  workerProcessEnv: NodeJS.ProcessEnv | null;
+  workerRuntimeEnv: NodeJS.ProcessEnv;
+}): void {
+  Object.assign(input.workerRuntimeEnv, input.fingerprintEnv);
+  if (input.workerProcessEnv !== null) {
+    Object.assign(input.workerProcessEnv, input.fingerprintEnv);
   }
 }
 

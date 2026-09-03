@@ -18,6 +18,9 @@ import {
   readHostedExecutionEnvironment,
 } from "../env.ts";
 import {
+  createHostedRunnerContainerNamespaceRouter,
+} from "../standby-runner-contract.ts";
+import {
   asWorkerStringEnvironment,
 } from "../worker-contracts.ts";
 import type {
@@ -28,12 +31,19 @@ export class HostedLocalTestUserRunnerDurableObject extends UserRunnerDurableObj
   private readonly testRunner: HostedUserRunnerWithTestControls;
 
   constructor(state: DurableObjectStateLike, env: WorkerEnvironmentSource) {
+    const runnerContainerNamespace = createHostedRunnerContainerNamespaceRouter({
+      exactUser: env.RUNNER_CONTAINER,
+      standby: env.STANDBY_RUNNER_CONTAINER ?? null,
+    });
     const testRunner = new HostedUserRunnerWithTestControls(
       state,
       readHostedExecutionEnvironment(asWorkerStringEnvironment(env)),
       env.BUNDLES,
       env,
-      env.RUNNER_CONTAINER,
+      runnerContainerNamespace,
+      env.HOSTED_RUNTIME_RETRY_ANALYTICS ?? null,
+      env.STANDBY_COORDINATOR ?? null,
+      env.STANDBY_RUNNER_CONTAINER ?? null,
     );
     super(state, env, testRunner);
     this.testRunner = testRunner;

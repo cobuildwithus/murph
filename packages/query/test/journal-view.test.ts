@@ -374,6 +374,38 @@ test("Journal keeps useful workout detail in the activity popover", () => {
   ]);
 });
 
+test("Journal omits missing and repeated activity details", () => {
+  const view = buildJournalView(
+    createVaultReadModel({
+      entities: [
+        event(
+          "yard_work",
+          "activity_session",
+          "2026-08-25T12:37:00.000Z",
+          {
+            activityType: "yardwork",
+            source: "oura",
+            workout: {
+              metrics: { activeCalories: 925 },
+              routineName: "Unknown",
+              sportName: "Yard work",
+            },
+            distanceKm: 0,
+          },
+          "Yard work",
+        ),
+      ],
+      vaultRoot: "test://journal-activity-detail-cleanup",
+    }),
+    [],
+    { asOf: "2026-08-25T22:00:00.000Z" },
+  );
+
+  assert.deepEqual(view.days[0]?.events[0]?.details, [
+    "Active energy: 925 kcal",
+  ]);
+});
+
 test("Journal keeps source note summaries and experiment results without tag rules", () => {
   const lateCaffeine = {
     ...event(
