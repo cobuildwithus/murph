@@ -1,0 +1,274 @@
+import { randomUUID } from "node:crypto";
+
+import type { PrismaClient } from "@prisma/client";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+import { buildHostedDeviceSyncWake } from "@/src/lib/device-sync/wake";
+import {
+  appendHostedMailboxEnvelopeTx,
+  appendHostedScheduledDeviceSyncWakeEnvelopeTx,
+  HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+} from "@/src/lib/hosted-mailbox/store";
+import { createPrismaClient } from "@/src/lib/prisma";
+
+const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
+const runPostgresProof =
+  process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
+
+if (
+  runPostgresProof
+  && (!databaseUrl || !isClearlyLocalPostgresUrl(databaseUrl))
+) {
+  throw new Error(
+    "The scheduled device-sync retention proof requires a local DATABASE_URL.",
+  );
+}
+
+describe.skipIf(!runPostgresProof)(
+  "scheduled device-sync wake retention",
+  () => {
+    let prisma: PrismaClient | null = null;
+    const memberIds: string[] = [];
+
+    beforeAll(() => {
+      prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+    });
+
+    afterAll(async () => {
+      if (prisma && memberIds.length > 0) {
+        await prisma.hostedMember.deleteMany({
+          where: { id: { in: memberIds } },
+        });
+      }
+      await prisma?.$disconnect();
+    });
+
+    it("accepts only the producer-specific duplicate after runtime import", async () => {
+      const client = requirePrisma(prisma);
+      const fixture = await seedRetiredScheduledWake({
+        client,
+        importedSeq: "1",
+        memberIds,
+      });
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+      try {
+        const strict = await client.$transaction((tx) =>
+          appendHostedMailboxEnvelopeTx({
+            envelope: fixture.wake,
+            tx,
+          })
+        );
+        expect(strict).toMatchObject({
+          dedupeConflict: true,
+          duplicate: true,
+          inserted: false,
+        });
+
+        warn.mockClear();
+        const scheduled = await client.$transaction((tx) =>
+          appendHostedScheduledDeviceSyncWakeEnvelopeTx({
+            envelope: fixture.wake,
+            tx,
+          })
+        );
+        expect(scheduled).toMatchObject({
+          dedupeConflict: false,
+          duplicate: true,
+          inserted: false,
+          runtimeOwnedRetiredDuplicate: true,
+        });
+        expect(warn).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it.each([
+      {
+        importedSeq: "0",
+        label: "a wake beyond the imported watermark",
+      },
+      {
+        importedSeq: 1,
+        label: "a non-string imported watermark",
+      },
+      {
+        importedSeq: "malformed",
+        label: "a malformed imported watermark",
+      },
+      {
+        importedSeq: "999999999999999999999999999999999999",
+        label: "an overflowing imported watermark",
+      },
+      {
+        importedSeq: "2",
+        label: "an imported watermark beyond the allocated high-water mark",
+      },
+      {
+        consumedSeq: 1n,
+        importedSeq: "1",
+        label: "a wake already covered by the handled frontier",
+      },
+      {
+        importedSeq: "1",
+        label: "a retired row with a remaining sidecar",
+        sidecar: true,
+      },
+      {
+        importedSeq: "1",
+        label: "a retired row with different occurrence metadata",
+        occurredAtOffsetMs: 1,
+      },
+      {
+        eventSchema: "v2",
+        importedSeq: "1",
+        label: "a retired legacy schedule identity",
+      },
+    ])("rejects $label", async ({
+      consumedSeq,
+      eventSchema,
+      importedSeq,
+      occurredAtOffsetMs,
+      sidecar,
+    }) => {
+      const client = requirePrisma(prisma);
+      const fixture = await seedRetiredScheduledWake({
+        client,
+        consumedSeq,
+        eventSchema,
+        importedSeq,
+        memberIds,
+        occurredAtOffsetMs,
+        sidecar,
+      });
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+      try {
+        await expect(client.$transaction((tx) =>
+          appendHostedScheduledDeviceSyncWakeEnvelopeTx({
+            envelope: fixture.wake,
+            tx,
+          })
+        )).resolves.toMatchObject({
+          dedupeConflict: true,
+          duplicate: true,
+          inserted: false,
+          runtimeOwnedRetiredDuplicate: false,
+        });
+        expect(warn).toHaveBeenCalledWith(
+          "Hosted mailbox dedupe conflict.",
+          expect.objectContaining({
+            eventCode: "mailbox.dedupe_conflict",
+          }),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+  },
+);
+
+async function seedRetiredScheduledWake(input: {
+  client: PrismaClient;
+  consumedSeq?: bigint;
+  eventSchema?: string;
+  importedSeq: number | string;
+  memberIds: string[];
+  occurredAtOffsetMs?: number;
+  sidecar?: boolean;
+}) {
+  const suffix = randomUUID().replaceAll("-", "");
+  const memberId = `member_scheduled_retention_${suffix}`;
+  const connectionId = `dsc_scheduled_retention_${suffix}`;
+  const mailboxItemId = `mailbox_scheduled_retention_${suffix}`;
+  const expectedConnectedAt = "2026-08-01T12:00:00.000Z";
+  const nextReconcileAt = "2026-08-02T12:00:00.000Z";
+  const eventId = [
+    "device-sync",
+    "scheduled-reconcile",
+    input.eventSchema ?? "v3",
+    connectionId,
+    expectedConnectedAt,
+    nextReconcileAt,
+  ].join(":");
+  input.memberIds.push(memberId);
+
+  await input.client.hostedMember.create({
+    data: { billingStatus: "active", id: memberId },
+  });
+  await input.client.hostedWorkspace.create({
+    data: {
+      redactedStatusJson: {
+        hostedMailboxSystemImportedSeq: input.importedSeq,
+      },
+      userId: memberId,
+    },
+  });
+  await input.client.hostedMailboxLaneCounter.create({
+    data: {
+      consumedSeq: input.consumedSeq ?? 0n,
+      lane: "system",
+      nextSeq: 2n,
+      userId: memberId,
+    },
+  });
+  await input.client.hostedMailboxItem.create({
+    data: {
+      contentRetiredAt: new Date("2026-08-20T12:00:00.000Z"),
+      dedupeKey: eventId,
+      id: mailboxItemId,
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: 1n,
+      occurredAt: new Date(
+        Date.parse(nextReconcileAt) + (input.occurredAtOffsetMs ?? 0),
+      ),
+      payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+      userId: memberId,
+    },
+  });
+  if (input.sidecar) {
+    await input.client.hostedMailboxPayload.create({
+      data: {
+        mailboxItemId,
+        payloadCiphertext: "encrypted-retention-fixture",
+        payloadSchema: "murph.hosted-mailbox-payload.v1",
+        userId: memberId,
+      },
+    });
+  }
+
+  return {
+    wake: buildHostedDeviceSyncWake({
+      connectionId,
+      eventId,
+      expectedConnectedAt,
+      hint: {
+        nextReconcileAt,
+        occurredAt: nextReconcileAt,
+      },
+      occurredAt: nextReconcileAt,
+      provider: "oura",
+      source: "scheduled-reconcile",
+      userId: memberId,
+    }),
+  };
+}
+
+function requirePrisma(value: PrismaClient | null): PrismaClient {
+  if (!value) {
+    throw new Error("Expected a PostgreSQL test client.");
+  }
+  return value;
+}
+
+function isClearlyLocalPostgresUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol.startsWith("postgres")
+      && ["127.0.0.1", "localhost", "::1"].includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
