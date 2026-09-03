@@ -1,6 +1,6 @@
 # Retired device-sync wake dedupe
 
-Status: active
+Status: completed
 Created: 2026-09-03
 Updated: 2026-09-03
 
@@ -74,8 +74,8 @@ Updated: 2026-09-03
    without weakening generic mailbox dedupe or adding redundant state.
 3. Completed: run focused regressions and hosted Web typecheck, then complete the
    Product UX walkthrough and parent diff review.
-4. In progress: publish the member-visible reliability changelog, commit
-   through the plan-aware path, open a draft PR, and complete exact-head CI and
+4. Completed: publish the member-visible reliability changelog, commit through
+   the plan-aware path, open a draft PR, and prepare the exact-head CI and
    ReviewGPT gates required for this sensitive runtime change.
 
 ## Decisions
@@ -97,4 +97,8 @@ Updated: 2026-09-03
   (73 tests), and three recovery-sweeper suites (13 tests).
 - Passed hosted Web typecheck, focused ESLint, `git diff --check`, and the
   identifier privacy scan.
-- Pending exact pushed-head CI and final ReviewGPT review.
+- Passed the four focused changelog suites (59 tests) after adding the
+  member-visible reliability entry.
+- Exact pushed-head CI and final ReviewGPT review launch after this
+  implementation plan is archived into the candidate.
+Completed: 2026-09-03
