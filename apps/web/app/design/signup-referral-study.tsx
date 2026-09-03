@@ -24,7 +24,11 @@ const DESIGN_ACCOUNT: HostedAccountSettingsSnapshot = {
     number: "+15555550100",
     verifiedAt: "2026-08-01T00:00:00.000Z",
   },
-  removableSignInMethods: ["phone", "email", "telegram"],
+  privySignInStates: {
+    email: { removable: true, status: "matched" },
+    phone: { removable: true, status: "matched" },
+    telegram: { removable: true, status: "matched" },
+  },
   referralIdentityKey: "design-referral-member",
   telegram: {
     telegramUserId: "design-telegram-user",

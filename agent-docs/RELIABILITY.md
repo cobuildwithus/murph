@@ -192,8 +192,8 @@ Last verified: 2026-09-01
   The same transaction appends the existing channel-update mailbox item when
   state changed. Its post-commit runtime signal is best-effort because durable
   runtime reconciliation remains the recovery owner. A refreshed Settings page
-  derives an exact provider/canonical disagreement from existing state and
-  exposes the same idempotent cleanup action without repeating the unlink. No
+  derives provider absence against the still-canonical identity from existing
+  state and exposes the same idempotent cleanup action without repeating the unlink. No
   retry job, timer, or additional persisted state owns this recovery.
 - Connected-app email sends have no durable provider idempotency key or send ledger. Admit them only from current accepted user input in a private direct turn; scheduled, group, maintenance, system-notification, and output-only turns fail before provider egress. After an ambiguous dispatch, never replay the send. Reconcile only against a narrow recent Sent-mail window matching the primary recipient, subject, and substantive body, and leave the outcome unknown when that evidence is not decisive.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.

@@ -15,9 +15,9 @@ import { readHostedPrivyUserById } from "@/src/lib/hosted-onboarding/privy";
 import {
   extractHostedPrivyEmailAccount,
   extractHostedPrivyPhoneAccount,
-  extractHostedPrivyTelegramAccount,
   extractHostedPrivyVerifiedEmailAccount,
   resolveHostedPrivyLinkedAccounts,
+  resolveHostedPrivyTelegramAccountSelection,
   type HostedPrivyLinkedAccountContainer,
   type PrivyLinkedAccountLike,
 } from "@/src/lib/hosted-onboarding/privy-shared";
@@ -115,11 +115,14 @@ function assertProviderAccountRemoved(input: {
   providerLinkedAccounts: PrivyLinkedAccountLike[];
   providerUser: HostedPrivyLinkedAccountContainer;
 }): void {
+  const telegramSelection = input.method === "telegram"
+    ? resolveHostedPrivyTelegramAccountSelection(input.providerUser)
+    : null;
   const accountStillLinked = input.method === "phone"
     ? extractHostedPrivyPhoneAccount(input.providerLinkedAccounts) !== null
     : input.method === "email"
       ? extractHostedPrivyEmailAccount(input.providerLinkedAccounts) !== null
-      : extractHostedPrivyTelegramAccount(input.providerUser) !== null;
+      : Boolean(telegramSelection?.ambiguous || telegramSelection?.account);
 
   if (accountStillLinked) {
     throw hostedOnboardingError({
@@ -135,10 +138,12 @@ function hasSupportedProviderSignIn(
   providerUser: HostedPrivyLinkedAccountContainer,
   linkedAccounts: PrivyLinkedAccountLike[],
 ): boolean {
+  const telegramSelection = resolveHostedPrivyTelegramAccountSelection(providerUser);
+
   return Boolean(
     extractHostedPrivyPhoneAccount(linkedAccounts)
     || extractHostedPrivyVerifiedEmailAccount(linkedAccounts)
-    || extractHostedPrivyTelegramAccount(providerUser),
+    || (!telegramSelection.ambiguous && telegramSelection.account),
   );
 }
 

@@ -195,6 +195,59 @@ describe("settings linked-account removal route", () => {
     expect(mocks.prismaClient.$transaction).not.toHaveBeenCalled();
   });
 
+  it("fails closed while direct and linked Telegram accounts disagree", async () => {
+    mocks.readHostedPrivyUserById.mockResolvedValueOnce({
+      id: "did:privy:user_123",
+      linked_accounts: [
+        {
+          id: 789,
+          type: "telegram",
+        },
+        {
+          address: "remaining@example.com",
+          latest_verified_at: 1_777_680_000,
+          type: "email",
+        },
+      ],
+      telegram: {
+        id: 456,
+      },
+    });
+
+    const response = await route.DELETE(makeRequest({
+      expectedIdentity: "456",
+      method: "telegram",
+    }));
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "PRIVY_ACCOUNT_UNLINK_NOT_READY",
+      },
+    });
+    expect(mocks.prismaClient.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("counts a top-level Telegram account as the remaining sign-in", async () => {
+    mocks.readHostedPrivyUserById.mockResolvedValueOnce({
+      id: "did:privy:user_123",
+      linked_accounts: [],
+      telegram: {
+        id: 456,
+      },
+    });
+
+    const response = await route.DELETE(makeRequest({
+      expectedIdentity: "member@example.com",
+      method: "email",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.removeHostedMemberLinkedAccountProjectionTx).toHaveBeenCalledWith(
+      expect.objectContaining({ method: "email" }),
+    );
+  });
+
   it("refuses canonical removal when no supported sign-in remains", async () => {
     mocks.readHostedPrivyUserById.mockResolvedValueOnce({
       id: "did:privy:user_123",

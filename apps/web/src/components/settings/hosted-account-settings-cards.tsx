@@ -2,10 +2,14 @@
 
 import { Link2, Mail, Phone, Send } from "lucide-react";
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/src/components/ui/button";
-import type { HostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
+import type {
+  HostedAccountSettingsSnapshot,
+  HostedPrivySignInState,
+} from "@/src/lib/hosted-onboarding/account-settings-snapshot";
 import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
 
 import { SettingsContactLink } from "./connected-account-card";
@@ -45,6 +49,7 @@ export function HostedAccountSettingsCards({
   privySessionMatchesAppSession?: boolean;
   signupReferralUrl?: string | null;
 }) {
+  const router = useRouter();
   const [dialogSelection, setDialogSelection] =
     useState<HostedSettingsIdentityDialogSelection | null>(
       openEmailLink ? { intent: "manage", mode: "email" } : null,
@@ -70,14 +75,17 @@ export function HostedAccountSettingsCards({
         <HostedSettingsPhoneRow
           account={account}
           murphPhoneNumber={murphPhoneNumber}
+          onRefresh={() => router.refresh()}
           onSelect={setDialogSelection}
         />
         <HostedSettingsTelegramRow
           account={account}
+          onRefresh={() => router.refresh()}
           onSelect={setDialogSelection}
         />
         <HostedSettingsEmailRow
           account={account}
+          onRefresh={() => router.refresh()}
           onSelect={setDialogSelection}
         />
         <SettingsRow
@@ -115,14 +123,19 @@ export function HostedAccountSettingsCards({
 function HostedSettingsPhoneRow({
   account,
   murphPhoneNumber,
+  onRefresh,
   onSelect,
 }: {
   account: HostedAccountSettingsSnapshot;
   murphPhoneNumber?: string | null;
+  onRefresh: () => void;
   onSelect: (selection: HostedSettingsIdentityDialogSelection) => void;
 }) {
   const phoneNumber = account.phone.number;
-  const removalPending = account.pendingSignInRemovals?.includes("phone") === true;
+  const privyState = account.privySignInStates?.phone ?? null;
+  const removalPending = Boolean(
+    phoneNumber && account.phone.verifiedAt && privyState?.status === "absent",
+  );
   const murphSmsHref = phoneNumber && murphPhoneNumber
     ? `sms:${murphPhoneNumber}`
     : null;
@@ -142,8 +155,9 @@ function HostedSettingsPhoneRow({
         <HostedSettingsIdentityActions
           connected={Boolean(phoneNumber)}
           method="phone"
+          onRefresh={onRefresh}
           onSelect={onSelect}
-          removable={account.removableSignInMethods?.includes("phone") === true}
+          privyState={privyState}
           removalPending={removalPending}
           verified={Boolean(account.phone.verifiedAt)}
         />
@@ -154,14 +168,18 @@ function HostedSettingsPhoneRow({
 
 function HostedSettingsTelegramRow({
   account,
+  onRefresh,
   onSelect,
 }: {
   account: HostedAccountSettingsSnapshot;
+  onRefresh: () => void;
   onSelect: (selection: HostedSettingsIdentityDialogSelection) => void;
 }) {
   const telegramUserId = account.telegram.telegramUserId;
-  const removalPending =
-    account.pendingSignInRemovals?.includes("telegram") === true;
+  const privyState = account.privySignInStates?.telegram ?? null;
+  const removalPending = Boolean(
+    telegramUserId && privyState?.status === "absent",
+  );
 
   return (
     <SettingsRow
@@ -182,8 +200,9 @@ function HostedSettingsTelegramRow({
         <HostedSettingsIdentityActions
           connected={Boolean(telegramUserId)}
           method="telegram"
+          onRefresh={onRefresh}
           onSelect={onSelect}
-          removable={account.removableSignInMethods?.includes("telegram") === true}
+          privyState={privyState}
           removalPending={removalPending}
           verified={Boolean(telegramUserId)}
         />
@@ -194,14 +213,19 @@ function HostedSettingsTelegramRow({
 
 function HostedSettingsEmailRow({
   account,
+  onRefresh,
   onSelect,
 }: {
   account: HostedAccountSettingsSnapshot;
+  onRefresh: () => void;
   onSelect: (selection: HostedSettingsIdentityDialogSelection) => void;
 }) {
   const emailAddress = account.email.address;
   const murphEmailAddress = account.email.murphEmailAddress;
-  const removalPending = account.pendingSignInRemovals?.includes("email") === true;
+  const privyState = account.privySignInStates?.email ?? null;
+  const removalPending = Boolean(
+    emailAddress && account.email.verifiedAt && privyState?.status === "absent",
+  );
 
   return (
     <SettingsRow
@@ -218,8 +242,9 @@ function HostedSettingsEmailRow({
         <HostedSettingsIdentityActions
           connected={Boolean(emailAddress)}
           method="email"
+          onRefresh={onRefresh}
           onSelect={onSelect}
-          removable={account.removableSignInMethods?.includes("email") === true}
+          privyState={privyState}
           removalPending={removalPending}
           verified={Boolean(account.email.verifiedAt)}
         />
@@ -231,21 +256,31 @@ function HostedSettingsEmailRow({
 function HostedSettingsIdentityActions({
   connected,
   method,
+  onRefresh,
   onSelect,
-  removable,
+  privyState,
   removalPending,
   verified,
 }: {
   connected: boolean;
   method: HostedSettingsIdentityLinkMode;
+  onRefresh: () => void;
   onSelect: (selection: HostedSettingsIdentityDialogSelection) => void;
-  removable: boolean;
+  privyState: HostedPrivySignInState | null;
   removalPending: boolean;
   verified: boolean;
 }) {
+  const refreshRequired = privyState?.status === "ambiguous"
+    || (
+      connected
+      && verified
+      && !removalPending
+      && privyState?.status !== "matched"
+    );
   const label = resolveIdentityActionLabel({
     connected,
     method,
+    refreshRequired,
     removalPending,
     verified,
   });
@@ -263,11 +298,17 @@ function HostedSettingsIdentityActions({
         type="button"
         size="sm"
         variant={method === "telegram" && !connected ? "secondary" : connected ? "ghost" : "default"}
-        onClick={() => onSelect({ intent, mode: method })}
+        onClick={() => {
+          if (refreshRequired) {
+            onRefresh();
+            return;
+          }
+          onSelect({ intent, mode: method });
+        }}
       >
         {label}
       </Button>
-      {connected && removable && !removalPending ? (
+      {connected && privyState?.removable && !removalPending ? (
         <Button
           aria-label={`Remove ${accessibleMethod}`}
           type="button"
@@ -286,9 +327,13 @@ function HostedSettingsIdentityActions({
 function resolveIdentityActionLabel(input: {
   connected: boolean;
   method: HostedSettingsIdentityLinkMode;
+  refreshRequired: boolean;
   removalPending: boolean;
   verified: boolean;
 }): string {
+  if (input.refreshRequired) {
+    return "Refresh";
+  }
   if (input.removalPending) {
     return "Finish disconnecting";
   }

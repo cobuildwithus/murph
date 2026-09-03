@@ -32,11 +32,24 @@ import { projectHostedMemberAssistantPreferences } from "./member-preferences";
 import {
   extractHostedPrivyEmailAccount,
   extractHostedPrivyPhoneAccount,
-  extractHostedPrivyTelegramAccount,
   extractHostedPrivyVerifiedEmailAccount,
-  type PrivyLinkedAccountLike,
+  resolveHostedPrivyLinkedAccounts,
+  resolveHostedPrivyTelegramAccountSelection,
+  type HostedPrivyLinkedAccountContainer,
 } from "./privy-shared";
+import { normalizePhoneNumber } from "./phone";
 import type { HostedPrivyAuthMethod } from "./types";
+
+export type HostedPrivySignInStatus =
+  | "absent"
+  | "ambiguous"
+  | "matched"
+  | "mismatched";
+
+export interface HostedPrivySignInState {
+  removable: boolean;
+  status: HostedPrivySignInStatus;
+}
 
 export interface HostedAccountSettingsSnapshot {
   assistant?: {
@@ -53,31 +66,14 @@ export interface HostedAccountSettingsSnapshot {
   email: {
     address: string | null;
     murphEmailAddress?: string | null;
-    /**
-     * Whether the server-approved Privy session has an email linked. Privy's
-     * headless update-email flow only works when this is true; otherwise the
-     * email must be linked through Privy's own modal. Null when the Privy
-     * session could not be confirmed server-side.
-     */
-    privyEmailLinked?: boolean | null;
     verifiedAt: string | null;
   };
   phone: {
     number: string | null;
     verifiedAt: string | null;
   };
-  /**
-   * Canonical Murph projections whose provider identity is already absent.
-   * Settings derives a durable cleanup action from this disagreement instead
-   * of relying on browser state that disappears after a refresh.
-   */
-  pendingSignInRemovals?: HostedPrivyAuthMethod[] | null;
-  /**
-   * Provider-linked methods that may be removed without leaving the member
-   * without a supported sign-in. Null when the Privy session could not be
-   * confirmed server-side.
-   */
-  removableSignInMethods?: HostedPrivyAuthMethod[] | null;
+  /** One server-derived source of truth for provider/canonical agreement. */
+  privySignInStates?: Record<HostedPrivyAuthMethod, HostedPrivySignInState> | null;
   /**
    * Browser-local invalidation only; it grants no referral authority. Absent
    * only in inert legacy fixtures—the server projection always supplies it.
@@ -296,109 +292,115 @@ export async function readHostedAccountSettingsPageSnapshot(input: {
 }
 
 export function withServerApprovedPrivyAccountHints(input: {
-  serverApprovedPrivyLinkedAccounts?: PrivyLinkedAccountLike[] | null;
+  serverApprovedPrivyUser?: HostedPrivyLinkedAccountContainer | null;
   snapshot: HostedAccountSettingsSnapshot;
 }): HostedAccountSettingsSnapshot {
-  const linkedAccounts = input.serverApprovedPrivyLinkedAccounts;
-  const linkedEmail = linkedAccounts
-    ? extractHostedPrivyEmailAccount(linkedAccounts)
-    : null;
-  const linkedPhone = linkedAccounts
-    ? extractHostedPrivyPhoneAccount(linkedAccounts)
-    : null;
-  const linkedTelegram = linkedAccounts
-    ? extractHostedPrivyTelegramAccount({ linkedAccounts })
+  const providerUser = input.serverApprovedPrivyUser;
+  const privySignInStates = providerUser
+    ? resolveHostedPrivySignInStates(input.snapshot, providerUser)
     : null;
 
   return {
     ...input.snapshot,
-    email: {
-      ...input.snapshot.email,
-      privyEmailLinked: linkedAccounts ? linkedEmail !== null : null,
-    },
-    pendingSignInRemovals: linkedAccounts
-      ? resolveHostedPendingSignInRemovals({
-          linkedEmail: linkedEmail !== null,
-          linkedPhone: linkedPhone !== null,
-          linkedTelegram: linkedTelegram !== null,
-          snapshot: input.snapshot,
-        })
-      : null,
-    phone: input.snapshot.phone,
-    removableSignInMethods: linkedAccounts
-      ? resolveHostedRemovablePrivySignInMethods(linkedAccounts)
-      : null,
+    privySignInStates,
     telegram: {
       ...input.snapshot.telegram,
       username: resolveHostedAccountTelegramUsername({
-        serverApprovedPrivyLinkedAccounts: linkedAccounts,
+        serverApprovedPrivyUser: providerUser,
         telegramUserId: input.snapshot.telegram.telegramUserId,
       }),
     },
   };
 }
 
-function resolveHostedPendingSignInRemovals(input: {
-  linkedEmail: boolean;
-  linkedPhone: boolean;
-  linkedTelegram: boolean;
-  snapshot: HostedAccountSettingsSnapshot;
-}): HostedPrivyAuthMethod[] {
-  return [
-    ...(!input.linkedPhone && input.snapshot.phone.number ? ["phone" as const] : []),
-    ...(
-      !input.linkedEmail
-      && input.snapshot.email.address
-      && input.snapshot.email.verifiedAt
-        ? ["email" as const]
-        : []
-    ),
-    ...(
-      !input.linkedTelegram && input.snapshot.telegram.telegramUserId
-        ? ["telegram" as const]
-        : []
-    ),
-  ];
-}
-
-export function resolveHostedRemovablePrivySignInMethods(
-  linkedAccounts: PrivyLinkedAccountLike[],
-): HostedPrivyAuthMethod[] {
-  const linkedMethods: HostedPrivyAuthMethod[] = [
-    ...(extractHostedPrivyPhoneAccount(linkedAccounts) ? ["phone" as const] : []),
-    ...(extractHostedPrivyEmailAccount(linkedAccounts) ? ["email" as const] : []),
-    ...(extractHostedPrivyTelegramAccount({ linkedAccounts })
-      ? ["telegram" as const]
-      : []),
-  ];
+function resolveHostedPrivySignInStates(
+  snapshot: HostedAccountSettingsSnapshot,
+  providerUser: HostedPrivyLinkedAccountContainer,
+): Record<HostedPrivyAuthMethod, HostedPrivySignInState> {
+  const linkedAccounts = resolveHostedPrivyLinkedAccounts(providerUser);
+  const linkedPhone = extractHostedPrivyPhoneAccount(linkedAccounts);
+  const linkedEmail = extractHostedPrivyEmailAccount(linkedAccounts);
+  const telegramSelection = resolveHostedPrivyTelegramAccountSelection(providerUser);
   const verifiedMethods = new Set<HostedPrivyAuthMethod>([
-    ...(extractHostedPrivyPhoneAccount(linkedAccounts) ? ["phone" as const] : []),
+    ...(linkedPhone ? ["phone" as const] : []),
     ...(extractHostedPrivyVerifiedEmailAccount(linkedAccounts)
       ? ["email" as const]
       : []),
-    ...(extractHostedPrivyTelegramAccount({ linkedAccounts })
+    ...(telegramSelection.account
       ? ["telegram" as const]
       : []),
   ]);
+  const hasAlternative = (method: HostedPrivyAuthMethod) =>
+    [...verifiedMethods].some((candidate) => candidate !== method);
 
-  return linkedMethods.filter((method) =>
-    [...verifiedMethods].some((candidate) => candidate !== method)
+  const phoneStatus = resolvePrivySignInStatus(
+    normalizePhoneNumber(snapshot.phone.number),
+    linkedPhone?.number ?? null,
   );
+  const emailStatus = resolvePrivySignInStatus(
+    normalizeComparableEmail(snapshot.email.address),
+    normalizeComparableEmail(linkedEmail?.address),
+  );
+  const telegramStatus = telegramSelection.ambiguous
+    ? "ambiguous"
+    : resolvePrivySignInStatus(
+        snapshot.telegram.telegramUserId,
+        telegramSelection.account?.telegramUserId ?? null,
+      );
+
+  return {
+    email: {
+      removable:
+        emailStatus === "matched"
+        && Boolean(snapshot.email.verifiedAt)
+        && hasAlternative("email"),
+      status: emailStatus,
+    },
+    phone: {
+      removable:
+        phoneStatus === "matched"
+        && Boolean(snapshot.phone.verifiedAt)
+        && hasAlternative("phone"),
+      status: phoneStatus,
+    },
+    telegram: {
+      removable: telegramStatus === "matched" && hasAlternative("telegram"),
+      status: telegramStatus,
+    },
+  };
+}
+
+function resolvePrivySignInStatus(
+  canonicalIdentity: string | null | undefined,
+  providerIdentity: string | null | undefined,
+): HostedPrivySignInStatus {
+  if (!providerIdentity) {
+    return "absent";
+  }
+
+  return canonicalIdentity === providerIdentity ? "matched" : "mismatched";
+}
+
+function normalizeComparableEmail(value: string | null | undefined): string | null {
+  const normalized = value?.trim().toLowerCase();
+  return normalized || null;
 }
 
 function resolveHostedAccountTelegramUsername(input: {
-  serverApprovedPrivyLinkedAccounts?: PrivyLinkedAccountLike[] | null;
+  serverApprovedPrivyUser?: HostedPrivyLinkedAccountContainer | null;
   telegramUserId: string | null;
 }): string | null {
   if (!input.telegramUserId) {
     return null;
   }
 
-  const linkedTelegram = extractHostedPrivyTelegramAccount({
-    linkedAccounts: input.serverApprovedPrivyLinkedAccounts ?? [],
-  });
+  const telegramSelection = resolveHostedPrivyTelegramAccountSelection(
+    input.serverApprovedPrivyUser,
+  );
+  const linkedTelegram = telegramSelection.account;
 
-  return linkedTelegram?.telegramUserId === input.telegramUserId
+  return !telegramSelection.ambiguous
+    && linkedTelegram?.telegramUserId === input.telegramUserId
     ? linkedTelegram.username
     : null;
 }

@@ -36,9 +36,11 @@ identity so a removed channel does not stay active or visible.
 - Member whose selected identity is the only supported sign-in: removal and
   Telegram replacement stay unavailable, with direct copy to add email, phone,
   or Telegram first. The provider's last-account rejection remains a backstop.
-- Member with a stale browser or raced change: the server refuses to clear a
-  canonical value that no longer matches the expected identity. Retrying from a
-  refreshed Settings page is the recovery path.
+- Member with a stale browser, raced change, or conflicting provider identity:
+  Settings offers only Refresh until the server-approved provider identity and
+  canonical identity agree. The dialog rechecks that same canonical value
+  immediately before unlink, and the cleanup route refuses any provider type
+  that is still present or ambiguous.
 - Provider unlink succeeds but Murph sync is temporarily unavailable: the
   dialog says the provider identity was removed and offers a retry that only
   performs idempotent Murph cleanup; it never tries to unlink twice.
@@ -53,9 +55,9 @@ identity so a removed channel does not stay active or visible.
 
 ## Implementation plan
 
-1. Project the server-approved Privy auth methods into the Settings snapshot so
-   the client can distinguish an actual linked login from billing/contact
-   fallback data and can explain whether removal is available.
+1. Project one state per auth method from the full server-approved Privy user
+   into the Settings snapshot, including top-level Telegram, so presentation,
+   recovery, and unlink eligibility share one source of truth.
 2. Add one authenticated Settings unlink route. Resolve live Privy state before
    `BEGIN`; require the target method to be absent and another supported method
    to remain; then lock the member, verify the expected blind index, revoke the
@@ -74,17 +76,17 @@ identity so a removed channel does not stay active or visible.
 
 ## Verification record
 
-- Focused hosted-Web suite: 54 tests passed across account projection,
+- Focused hosted-Web suite: 138 tests passed across account projection,
   Settings rows/dialogs, removal retries, canonical projection cleanup, and the
   authenticated DELETE route.
-- Changelog page suite: 9 tests passed.
+- Changelog page suite: 48 tests passed.
 - `pnpm --dir apps/web typecheck:prepared`: passed.
 - `pnpm --dir apps/web lint`: passed with 44 pre-existing warnings and no
   errors.
 - `pnpm test:frontend-design-proof`: 12 tests passed with a process-scoped
   neutral Git identity; the fixture/privacy-hook conflict found on the first
   run is recorded in Frog.
-- Dedicated Playwright proof: passed. The production removal confirmation,
+- Dedicated Playwright proof: passed after the final identity-state correction. The production removal confirmation,
   disabled last-sign-in state, composed Settings rows, current changelog
   edition, and changelog catalog study were inspected at 1440x1000 and
   390x844 using synthetic data only.

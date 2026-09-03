@@ -7,6 +7,12 @@ import type { HostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/
 
 import { renderClientComponent } from "./render-client-component";
 
+const refresh = vi.hoisted(() => vi.fn());
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh }),
+}));
+
 vi.mock("next/dynamic", () => ({
   default: () => function MockHostedSettingsIdentityLinkDialog(
     props: {
@@ -79,6 +85,10 @@ describe("HostedAccountSettingsCards", () => {
             murphEmailAddress: "murph+u2-private-alias@mail.example.test",
             verifiedAt: "2026-05-02T00:00:00.000Z",
           },
+          privySignInStates: {
+            ...protectedPrivySignInStates(),
+            email: { removable: false, status: "matched" },
+          },
         },
       }),
     );
@@ -96,6 +106,10 @@ describe("HostedAccountSettingsCards", () => {
       React.createElement(HostedAccountSettingsCards, {
         account: {
           ...makeAccountSnapshot({ phoneNumber: null }),
+          privySignInStates: {
+            ...protectedPrivySignInStates(),
+            telegram: { removable: false, status: "matched" },
+          },
           telegram: {
             telegramUserId: "456",
             username: "sample_user",
@@ -126,6 +140,10 @@ describe("HostedAccountSettingsCards", () => {
       React.createElement(HostedAccountSettingsCards, {
         account: {
           ...makeAccountSnapshot({ phoneNumber: null }),
+          privySignInStates: {
+            ...protectedPrivySignInStates(),
+            telegram: { removable: false, status: "matched" },
+          },
           telegram: {
             telegramUserId: "456",
             username: null,
@@ -145,7 +163,7 @@ describe("HostedAccountSettingsCards", () => {
         address: "member@example.com",
         verifiedAt: "2026-05-02T00:00:00.000Z",
       },
-      removableSignInMethods: ["phone", "email", "telegram"],
+      privySignInStates: removablePrivySignInStates(),
       telegram: {
         telegramUserId: "456",
         username: "sample_user",
@@ -158,7 +176,7 @@ describe("HostedAccountSettingsCards", () => {
       React.createElement(HostedAccountSettingsCards, {
         account: {
           ...account,
-          removableSignInMethods: [],
+          privySignInStates: protectedPrivySignInStates(),
         },
       }),
     );
@@ -176,7 +194,10 @@ describe("HostedAccountSettingsCards", () => {
       React.createElement(HostedAccountSettingsCards, {
         account: {
           ...makeAccountSnapshot({ phoneNumber: null }),
-          removableSignInMethods: ["telegram"],
+          privySignInStates: {
+            ...protectedPrivySignInStates(),
+            telegram: { removable: true, status: "matched" },
+          },
           telegram: {
             telegramUserId: "456",
             username: "sample_user",
@@ -214,8 +235,11 @@ describe("HostedAccountSettingsCards", () => {
       React.createElement(HostedAccountSettingsCards, {
         account: {
           ...makeAccountSnapshot({ phoneNumber: "+14045550123" }),
-          pendingSignInRemovals: ["telegram"],
-          removableSignInMethods: ["phone"],
+          privySignInStates: {
+            ...protectedPrivySignInStates(),
+            phone: { removable: true, status: "matched" },
+            telegram: { removable: false, status: "absent" },
+          },
           telegram: {
             telegramUserId: "456",
             username: null,
@@ -242,6 +266,41 @@ describe("HostedAccountSettingsCards", () => {
       expect(
         rendered.container.querySelector("[data-link-intent]")?.getAttribute("data-link-intent"),
       ).toBe("finish");
+    } finally {
+      await rendered.cleanup();
+    }
+  });
+
+  test("refreshes instead of offering destructive actions when identities disagree", async () => {
+    const rendered = await renderClientComponent(
+      React.createElement(HostedAccountSettingsCards, {
+        account: {
+          ...makeAccountSnapshot({ phoneNumber: null }),
+          privySignInStates: {
+            ...protectedPrivySignInStates(),
+            telegram: { removable: false, status: "mismatched" },
+          },
+          telegram: {
+            telegramUserId: "456",
+            username: null,
+          },
+        },
+      }),
+    );
+
+    try {
+      const refreshButton = Array.from(rendered.container.querySelectorAll("button")).find(
+        (candidate) => candidate.textContent === "Refresh",
+      );
+      expect(refreshButton).toBeTruthy();
+      expect(rendered.container.textContent).not.toContain("Remove");
+
+      await React.act(async () => {
+        refreshButton?.click();
+      });
+
+      expect(refresh).toHaveBeenCalledTimes(1);
+      expect(rendered.container.querySelector("[data-link-mode]")).toBeNull();
     } finally {
       await rendered.cleanup();
     }
@@ -327,9 +386,36 @@ function makeAccountSnapshot(input: {
       number: input.phoneNumber,
       verifiedAt: input.phoneNumber ? "2026-05-02T00:00:00.000Z" : null,
     },
+    privySignInStates: {
+      ...protectedPrivySignInStates(),
+      phone: {
+        removable: false,
+        status: input.phoneNumber ? "matched" : "absent",
+      },
+    },
     referralIdentityKey: "member_settings_test",
     telegram: {
       telegramUserId: null,
     },
+  };
+}
+
+function protectedPrivySignInStates(): NonNullable<
+  HostedAccountSettingsSnapshot["privySignInStates"]
+> {
+  return {
+    email: { removable: false, status: "absent" },
+    phone: { removable: false, status: "absent" },
+    telegram: { removable: false, status: "absent" },
+  };
+}
+
+function removablePrivySignInStates(): NonNullable<
+  HostedAccountSettingsSnapshot["privySignInStates"]
+> {
+  return {
+    email: { removable: true, status: "matched" },
+    phone: { removable: true, status: "matched" },
+    telegram: { removable: true, status: "matched" },
   };
 }

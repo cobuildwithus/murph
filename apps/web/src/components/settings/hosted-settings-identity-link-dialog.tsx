@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  type User as PrivyUser,
   usePrivy,
   useUnlinkEmail,
   useUnlinkPhone,
@@ -24,9 +23,11 @@ import type { HostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/
 import {
   extractHostedPrivyEmailAccount,
   extractHostedPrivyPhoneAccount,
-  extractHostedPrivyTelegramAccount,
   resolveHostedPrivyLinkedAccounts,
+  resolveHostedPrivyTelegramAccountSelection,
+  type HostedPrivyLinkedAccountContainer,
 } from "@/src/lib/hosted-onboarding/privy-shared";
+import { normalizePhoneNumber } from "@/src/lib/hosted-onboarding/phone";
 import type { HostedPrivyAuthMethod } from "@/src/lib/hosted-onboarding/types";
 
 import { ConnectedAccountCard, SettingsStatusLine } from "./connected-account-card";
@@ -288,7 +289,10 @@ function HostedSettingsIdentityAuthorizedContent({
   // inline update form cannot work — Privy only supports linking an email
   // through its own modal. Skip our dialog entirely and hand off to Privy's,
   // so the member sees a single dialog instead of two stacked ones.
-  if (initialMode === "email" && account.email.privyEmailLinked === false) {
+  if (
+    initialMode === "email"
+    && account.privySignInStates?.email.status === "absent"
+  ) {
     return (
       <HostedEmailPrivyLinkHandOff
         onAborted={() => onOpenChange(false)}
@@ -533,16 +537,16 @@ function HostedSettingsIdentityRemoval({
   const { unlink: unlinkTelegram } = useUnlinkTelegram();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const initialProviderAccountRemoved = intent === "finish";
+  const privyState = account.privySignInStates?.[method] ?? null;
+  const initialProviderAccountRemoved =
+    intent === "finish" && privyState?.status === "absent";
   const [providerAccountRemoved, setProviderAccountRemoved] = useState(
     initialProviderAccountRemoved,
   );
   const removable = initialProviderAccountRemoved
-    || account.removableSignInMethods?.includes(method) === true;
+    || (privyState?.status === "matched" && privyState.removable);
   const [expectedIdentity] = useState(() =>
-    initialProviderAccountRemoved
-      ? resolveSettingsIdentitySnapshotValue(method, account)
-      : resolveSettingsIdentityProviderValue(method, user),
+    resolveSettingsIdentitySnapshotValue(method, account),
   );
   const displayValue = resolveSettingsIdentityDisplayValue(method, account);
   const label = getSettingsIdentityLabel(method);
@@ -568,6 +572,10 @@ function HostedSettingsIdentityRemoval({
 
     try {
       if (!providerRemoved) {
+        if (!settingsIdentityMatchesProvider(method, expectedIdentity, user)) {
+          setErrorMessage("This sign-in changed. Refresh Settings and try again.");
+          return;
+        }
         if (method === "phone") {
           await unlinkPhone({ phoneNumber: expectedIdentity });
         } else if (method === "email") {
@@ -675,22 +683,31 @@ export function HostedSettingsIdentityRemovalView({
   );
 }
 
-function resolveSettingsIdentityProviderValue(
+function settingsIdentityMatchesProvider(
   method: HostedPrivyAuthMethod,
-  user: PrivyUser | null,
-): string | null {
+  expectedIdentity: string,
+  user: HostedPrivyLinkedAccountContainer | null,
+): boolean {
+  const linkedAccounts = resolveHostedPrivyLinkedAccounts(user);
+
   if (method === "phone") {
-    return extractHostedPrivyPhoneAccount(
-      resolveHostedPrivyLinkedAccounts(user),
-    )?.number ?? null;
+    return extractHostedPrivyPhoneAccount(linkedAccounts)?.number
+      === normalizePhoneNumber(expectedIdentity);
   }
   if (method === "email") {
-    return extractHostedPrivyEmailAccount(
-      resolveHostedPrivyLinkedAccounts(user),
-    )?.address ?? null;
+    return normalizeComparableEmail(
+      extractHostedPrivyEmailAccount(linkedAccounts)?.address,
+    ) === normalizeComparableEmail(expectedIdentity);
   }
 
-  return extractHostedPrivyTelegramAccount(user)?.telegramUserId ?? null;
+  const telegramSelection = resolveHostedPrivyTelegramAccountSelection(user);
+  return !telegramSelection.ambiguous
+    && telegramSelection.account?.telegramUserId === expectedIdentity;
+}
+
+function normalizeComparableEmail(value: string | null | undefined): string | null {
+  const normalized = value?.trim().toLowerCase();
+  return normalized || null;
 }
 
 function resolveSettingsIdentitySnapshotValue(

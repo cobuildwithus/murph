@@ -353,7 +353,6 @@ describe("HostedSettingsIdentityLinkDialog", () => {
           ...makeAccountSnapshot(),
           email: {
             address: "member@example.com",
-            privyEmailLinked: false,
             verifiedAt: null,
           },
           telegram: {
@@ -499,8 +498,11 @@ describe("HostedSettingsIdentityLinkDialog", () => {
           ...makeAccountSnapshot(),
           email: {
             address: "member@example.com",
-            privyEmailLinked: false,
             verifiedAt: null,
+          },
+          privySignInStates: {
+            ...removablePrivySignInStates(),
+            email: { removable: false, status: "absent" },
           },
         },
         expectedPrivyUserId: "privy-user-a",
@@ -541,7 +543,6 @@ describe("HostedSettingsIdentityLinkDialog", () => {
           ...makeAccountSnapshot(),
           email: {
             address: "member@example.com",
-            privyEmailLinked: true,
             verifiedAt: "2026-05-02T00:00:00.000Z",
           },
         },
@@ -637,15 +638,14 @@ describe("HostedSettingsIdentityLinkDialog", () => {
         id: "privy-user-a",
         linkedAccounts: [
           {
-            telegramUserId: "12345",
-            type: "telegram",
-          },
-          {
             address: "member@example.com",
             latestVerifiedAt: 1_777_680_000,
             type: "email",
           },
         ],
+        telegram: {
+          id: "12345",
+        },
       },
     });
     const { HostedSettingsIdentityLinkDialog } = await import(
@@ -653,7 +653,6 @@ describe("HostedSettingsIdentityLinkDialog", () => {
     );
     const account: HostedAccountSettingsSnapshot = {
       ...makeAccountSnapshot(),
-      removableSignInMethods: ["telegram", "email"],
     };
     const { cleanup, container } = await renderClientComponent(
       createElement(HostedSettingsIdentityLinkDialog, {
@@ -697,6 +696,101 @@ describe("HostedSettingsIdentityLinkDialog", () => {
     }
   });
 
+  it.each([
+    {
+      clientUser: {
+        id: "privy-user-a",
+        linkedAccounts: [
+          {
+            phoneNumber: "+14045550999",
+            latestVerifiedAt: 1_777_680_000,
+            type: "phone",
+          },
+          {
+            address: "member@example.com",
+            latestVerifiedAt: 1_777_680_000,
+            type: "email",
+          },
+        ],
+      },
+      label: "phone",
+      method: "phone" as const,
+    },
+    {
+      clientUser: {
+        id: "privy-user-a",
+        linkedAccounts: [
+          {
+            address: "other@example.com",
+            latestVerifiedAt: 1_777_680_000,
+            type: "email",
+          },
+          {
+            phoneNumber: "+14045550123",
+            latestVerifiedAt: 1_777_680_000,
+            type: "phone",
+          },
+        ],
+      },
+      label: "email",
+      method: "email" as const,
+    },
+    {
+      clientUser: {
+        id: "privy-user-a",
+        linkedAccounts: [
+          {
+            address: "member@example.com",
+            latestVerifiedAt: 1_777_680_000,
+            type: "email",
+          },
+          {
+            telegramUserId: "99999",
+            type: "telegram",
+          },
+        ],
+      },
+      label: "Telegram",
+      method: "telegram" as const,
+    },
+  ])("does not unlink a changed $label identity", async ({ clientUser, method }) => {
+    mocks.useUser.mockReturnValue({ user: clientUser });
+    const { HostedSettingsIdentityLinkDialog } = await import(
+      "@/src/components/settings/hosted-settings-identity-link-dialog"
+    );
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedSettingsIdentityLinkDialog, {
+        account: makeAccountSnapshot(),
+        expectedPrivyUserId: "privy-user-a",
+        initialMode: method,
+        intent: "remove",
+        onOpenChange: mocks.onOpenChange,
+        privySessionMatchesAppSession: true,
+      }),
+    );
+
+    try {
+      const removeButton = Array.from(container.querySelectorAll("button")).find(
+        (candidate) => candidate.textContent?.startsWith("Remove "),
+      );
+
+      await act(async () => {
+        removeButton?.dispatchEvent(new Event("click", { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      expect(container.textContent).toContain(
+        "This sign-in changed. Refresh Settings and try again.",
+      );
+      expect(mocks.unlinkPhone).not.toHaveBeenCalled();
+      expect(mocks.unlinkEmail).not.toHaveBeenCalled();
+      expect(mocks.unlinkTelegram).not.toHaveBeenCalled();
+      expect(mocks.finishHostedLinkedAccountRemovalWithRetry).not.toHaveBeenCalled();
+    } finally {
+      await cleanup();
+    }
+  });
+
   it("disconnects the old Telegram before opening the existing link flow", async () => {
     mocks.useUser.mockReturnValue({
       user: {
@@ -721,7 +815,6 @@ describe("HostedSettingsIdentityLinkDialog", () => {
       createElement(HostedSettingsIdentityLinkDialog, {
         account: {
           ...makeAccountSnapshot(),
-          removableSignInMethods: ["phone", "telegram"],
         },
         expectedPrivyUserId: "privy-user-a",
         initialMode: "telegram",
@@ -786,7 +879,6 @@ describe("HostedSettingsIdentityLinkDialog", () => {
       createElement(HostedSettingsIdentityLinkDialog, {
         account: {
           ...makeAccountSnapshot(),
-          removableSignInMethods: ["email", "phone"],
         },
         expectedPrivyUserId: "privy-user-a",
         initialMode: "email",
@@ -842,8 +934,10 @@ describe("HostedSettingsIdentityLinkDialog", () => {
       createElement(HostedSettingsIdentityLinkDialog, {
         account: {
           ...makeAccountSnapshot(),
-          pendingSignInRemovals: ["telegram"],
-          removableSignInMethods: ["phone"],
+          privySignInStates: {
+            ...removablePrivySignInStates(),
+            telegram: { removable: false, status: "absent" },
+          },
         },
         expectedPrivyUserId: "privy-user-a",
         initialMode: "telegram",
@@ -895,7 +989,10 @@ describe("HostedSettingsIdentityLinkDialog", () => {
       createElement(HostedSettingsIdentityLinkDialog, {
         account: {
           ...makeAccountSnapshot(),
-          removableSignInMethods: [],
+          privySignInStates: {
+            ...removablePrivySignInStates(),
+            telegram: { removable: false, status: "matched" },
+          },
         },
         expectedPrivyUserId: "privy-user-a",
         initialMode: "telegram",
@@ -918,7 +1015,7 @@ describe("HostedSettingsIdentityLinkDialog", () => {
   });
 });
 
-function makeAccountSnapshot() {
+function makeAccountSnapshot(): HostedAccountSettingsSnapshot {
   return {
     email: {
       address: "member@example.com",
@@ -928,8 +1025,19 @@ function makeAccountSnapshot() {
       number: "+14045550123",
       verifiedAt: "2026-05-02T00:00:00.000Z",
     },
+    privySignInStates: removablePrivySignInStates(),
     telegram: {
       telegramUserId: "12345",
     },
+  };
+}
+
+function removablePrivySignInStates(): NonNullable<
+  HostedAccountSettingsSnapshot["privySignInStates"]
+> {
+  return {
+    email: { removable: true, status: "matched" },
+    phone: { removable: true, status: "matched" },
+    telegram: { removable: true, status: "matched" },
   };
 }
