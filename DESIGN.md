@@ -767,8 +767,8 @@ factor coverage as a compact five-segment bar. Its tooltip uses `Data coverage` 
 title and gives the exact recorded-case count below it. Label total sleep time
 as `Sleep duration`. Group sleep score and sleep efficiency under `Sleep quality`. Keep
 their calculations separate and identify the metric in each result popover.
-Outcome headings reveal a short explanation of why each result matters on hover,
-focus, or press. Keep `No clear pattern` descriptions to one short sentence.
+Keep outcome headings clear without separate help controls. Keep `No clear pattern`
+descriptions to one short sentence.
 
 Keep the copy observational and conversational. Prefer `You slept less after cycling` over a statistical sentence. Never use `caused` or `proved`. Show the activity result and other comparable days as two labeled bars in the cell detail. Keep matched-day counts in accessible copy instead of repeating them visually. On narrow screens, keep the row labels readable and scroll the matrix horizontally.
 

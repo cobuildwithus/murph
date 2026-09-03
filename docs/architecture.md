@@ -182,6 +182,15 @@ to Codex.
   Objects keep only runner-local lease, alarm, and bundle/addressing
   coordination state; web-owned mailbox/workspace checkpoints are the durable
   progress truth.
+- The public repository owns only the trusted Temporal compatibility
+  controller and unprivileged exact-candidate reconciliation fixtures. After
+  same-repository human and exact-public-head admission, the controller uses its
+  repository-scoped GitHub App token to resolve private `main`, dispatch the
+  fixed private compatibility workflow at `main`, bind the returned first
+  attempt to the pre-resolved private SHA and workflow identity, and re-read
+  private `main` before publishing success. Private protected CI alone derives
+  Current and Ramping reader SHAs; public code imports no private implementation
+  or reader policy.
 - Hosted execution is a thin containerized runner over the same local runtime
   input spine. It restores the encrypted workspace, imports hosted mailbox rows,
   stages `AssistantInputEvent` records, runs the local scanner/active-turn

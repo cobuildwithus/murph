@@ -1685,6 +1685,9 @@ describe("hosted runtime control contracts", () => {
         replacementFenceClearElapsedMs: 5,
         replacedStaleFence: true,
         freshStartRequestedAtEpochMs: 1_777_000_000_070,
+        standbyAllocationElapsedMs: 250,
+        standbyAllocationOutcome: "fallback",
+        standbyAllocationReason: "claim_no_ready_slot",
         freshStartFenceBoundAtEpochMs: 1_777_000_000_080,
         freshStartContainerReadinessRequestedAtEpochMs: 1_777_000_000_081,
         freshStartContainerLifecycleLockAcquiredAtEpochMs: 1_777_000_000_082,
@@ -1981,6 +1984,19 @@ describe("hosted runtime control contracts", () => {
       { directEnsureResultKind: "retry_later", directEnsureRetryReason: "container_rpc_timeout" }, // retry reasons remain in structured logs only
       { directEnsureResultKind: "retry_later", directEnsureAction: "woken" }, // accepted metadata must match the result
       { directEnsureResultKind: "runtime_processing_accepted", directEnsureAction: "woken" }, // accepted results require a runtime id
+      { standbyAllocationOutcome: "fallback" }, // allocation timing, outcome, and reason are one diagnostic fact
+      { standbyAllocationReason: "claim_no_ready_slot" }, // allocation timing, outcome, and reason are one diagnostic fact
+      { standbyAllocationElapsedMs: 87 }, // allocation timing, outcome, and reason are one diagnostic fact
+      {
+        standbyAllocationElapsedMs: 87,
+        standbyAllocationOutcome: "fallback",
+        standbyAllocationReason: "raw_coordinator_error",
+      }, // allocation reasons are a bounded enum
+      {
+        standbyAllocationElapsedMs: 87,
+        standbyAllocationOutcome: "claimed",
+        standbyAllocationReason: "claim_no_ready_slot",
+      }, // allocation reasons must match their outcome
       {
         directEnsureResultKind: "runtime_processing_accepted",
         directEnsureAction: "woken",
@@ -2327,6 +2343,9 @@ describe("hosted runtime control contracts", () => {
       extraLeaf: 1,
       freshStartRequestedAtEpochMs: -1,
       replacedStaleFence: "true",
+      standbyAllocationElapsedMs: 87,
+      standbyAllocationOutcome: "fallback",
+      standbyAllocationReason: "claim_no_ready_slot",
       runtimeControlAuthFinishedAtEpochMs: 1_777_000_000_110,
       runtimeControlAuthStartedAtEpochMs: 1_777_000_000_090,
       runtimeInvocationPreparationElapsedMs: 120,
@@ -2351,6 +2370,9 @@ describe("hosted runtime control contracts", () => {
       directEnsureRuntimeAttemptId: "runtime-attempt-direct",
       runtimeControlAuthFinishedAtEpochMs: 1_777_000_000_110,
       runtimeControlAuthStartedAtEpochMs: 1_777_000_000_090,
+      standbyAllocationElapsedMs: 87,
+      standbyAllocationOutcome: "fallback",
+      standbyAllocationReason: "claim_no_ready_slot",
       runtimeInvocationPreparationElapsedMs: 120,
       runtimeStoreEnsureElapsedMs: 80,
       tokenAcquiredAtEpochMs: 1_777_000_000_010,

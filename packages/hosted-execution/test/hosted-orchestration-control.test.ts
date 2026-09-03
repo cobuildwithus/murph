@@ -338,6 +338,10 @@ describe("hosted orchestration control contracts", () => {
       kind: "environment-interview.completed",
     })).toBe("model_free");
     expect(classifyHostedSystemMailboxExecutionClass({
+      dedupeKey: "member.channels.updated:settings-change",
+      kind: "member.channels.updated",
+    })).toBe("model_free");
+    expect(classifyHostedSystemMailboxExecutionClass({
       dedupeKey: "assistant.ask.completed:request",
       kind: "assistant.ask.completed",
     })).toBe("default_owned");

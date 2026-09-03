@@ -375,11 +375,13 @@ reuse `assistant.notification.requested` and the ordinary transcript/outbox
 delivery path. The exported Web admission function is the single entry point
 for Ops, workflows, and future cron callers; callers supply a stable
 idempotency key rather than creating another scheduler or delivery owner.
-The diagnostic answer candidate starts in an isolated working directory and
-receives the exact targeted workspace path as immutable host prompt data. It may
-use Codex's native read tools under the existing `murph-group-read` profile.
-The separate disclosure reviewer remains tool-free and isolated from that
-workspace; diagnostics have no network, dynamic effect tool, or delivery port.
+The diagnostic starts one direct `executeOperatorDiagnostic` turn. Trusted
+runtime code binds the exact target workspace plus, when present, only the
+hosted Codex `sessions/` directory. The read-only child can inspect `.runtime`
+but cannot write, use the network, load workspace configuration, or invoke
+effect or delivery tools. Its answer returns directly to the existing
+encrypted, expiring Ops-only result owner; it does not enter the member
+disclosure-review composition.
 
 Assistant Ask is one typed request/reply primitive over the existing encrypted
 hosted mailbox. `assistant.ask.requested` carries one bounded question to an
@@ -602,22 +604,16 @@ account-deletion owners.
 
 The target runtime keeps its resident foreground Murph as the sole
 model-authored canonical-content writer and outbound sender. Beside it, at most
-one `executeReadOnlyAssistantAsk` call may start a separate one-shot Codex App
-Server process. The trusted target adapter supplies the authorized root
-and bounded committed conversation evidence; the model cannot choose either.
-The native `murph-group-read` permission profile then exposes the live target
-read: exact workspace roots are read-only, `.runtime/**`, `.codex/**`, and
-retired vault-share projection roots, and environment files are denied; tool
-network is off, shell commands inherit no secrets, and no child receives mutation
-or delivery authority. Joined-group asks receive only the consent-aware narrow
-legacy `murph.group/read_shared` dynamic tool; consented and operator candidates
-and disclosure reviewers receive no dynamic tools.
-The thread request supplies the exact profile, roots, disabled instruction sources,
-and approval policy. Every candidate and reviewer uses an empty working
-directory; an authenticated operator diagnostic selected for read-tool inspection
-receives the exact target path as quoted host prompt data. The App Server response is
-not an authorization boundary; production-like Linux smoke proves the
-profile's actual filesystem, environment, and network enforcement.
+one detached read-only child may start a separate one-shot Codex App Server
+process. Group/member asks keep `executeReadOnlyAssistantAsk` and
+`murph-group-read`, which hides private runtime state. Authenticated operator
+tasks instead call `executeOperatorDiagnostic` with
+`murph-operator-diagnostic-read`, the bound workspace including `.runtime`, and
+only the hosted Codex `sessions/` directory as an optional second root. The
+model chooses neither roots nor profile. All detached children start in an empty
+temporary working directory with approval policy `never`, no inherited shell
+environment, and no network, project configuration, mutation, effect, or
+delivery authority. Only member disclosure flows use the separate reviewer.
 The child never shares the resident process, provider thread, interruption
 domain, or route grant. Before checkpoint, invocation return, fence loss,
 workspace replacement, or shutdown, the runtime aborts and awaits the exact
@@ -1170,7 +1166,7 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
 - `packages/contracts`: canonical Zod contracts, shared event-envelope/lifecycle parse and revision-collapse helpers, TypeScript types, generated JSON Schema artifacts, the canonical static lookup-ID family catalog/classifiers consumed by query and vault-usecases, and the shared vault-family registry/layout/query-source metadata consumed by core, query, and inboxd
 - `packages/clinical-records`: workspace-private pure Clinical Records Intake contract owner for raw FHIR retrieval manifests, explicit completed-resource-family declarations, canonical FHIR base/patient/page hashing helpers, facet-free resource-level FHIR external references, and one-decision-per-resource `upsert | retract | review` import plans; it does not own OAuth, provider credentials, raw-file writes, assistant behavior, or canonical vault mutation
 - `packages/hosted-execution`: shared hosted control-plane contracts, HMAC signing/verification helpers, vendor-neutral env readers, route builders, computer-use request schemas, phone-call start contracts, and side-effect codecs; it no longer owns Cloudflare worker-host topology or proxy-client inference, and app-local adapters now own deployment-specific transport, hostname, and token policy
-- `cobuildwithus/murph-cloud` (private external owner): owns the hosted Temporal worker, Workflows, Activities, Schedule/client helpers, production bundle, replay gates, supported-reader compatibility manifest, and Render deployment. Public Murph contains only shared pointer-level contracts, Web signaling/status adapters, the hosted-local external-worker seam, and the trusted exact-SHA controller that translates private reader attestation into one public required status; it must not contain a Temporal worker implementation, production bundle, or private reader policy. Hosted-local Temporal requires `MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR` to select the private package, or it must be disabled explicitly. Temporal workflow state must not store raw webhook payloads, mailbox bodies, prompts, transcripts, provider responses, provider tokens, dirty resource bodies, or workspace snapshot contents.
+- `cobuildwithus/murph-cloud` (private external owner): owns the hosted Temporal worker, Workflows, Activities, Schedule/client helpers, production bundle, replay gates, live Current/Ramping reader discovery and attestation, and Render deployment. Public Murph contains only shared cross-repository wire contracts, Web signaling/status adapters, the hosted-local external-worker seam, and the trusted exact-private-main controller that translates private reader attestation over bounded public-produced fixtures into one public required status; it must not contain a Temporal worker implementation, production bundle, or private reader policy. Private CI never checks out or imports public pull-request candidate code for Temporal compatibility: the protected pull-request gate is fixture-only. Hosted-local Temporal requires `MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR` to select the private package, or it must be disabled explicitly. Temporal workflow state must not store raw webhook payloads, mailbox bodies, prompts, transcripts, provider responses, provider tokens, dirty resource bodies, or workspace snapshot contents.
 - `packages/runtime-state`: workspace-private shared hosted email/env/loopback/id helpers plus pure hosted bundle identity types/equality on the root package, a worker-safe `@murphai/runtime-state/assistant-generated-deliveries` exact-ref contract, an explicit `@murphai/runtime-state/node` subpath for hosted bundle codec/materialization, an explicit `@murphai/runtime-state/node/assistant-state-fs` subpath for assistant runtime-state write/audit/repair permission policy, explicit `.runtime` taxonomy/path resolution (`operations` vs `projections` vs `cache/tmp`), assistant runtime path/security helpers, process scoping, versioned JSON helpers, and SQLite-backed Node-only migration seams
 - `packages/core`: workspace-private canonical mutation owner for live local-vault evolution, with current-format canonical reads/writes failing closed on non-current `formatVersion` values; it also owns the shared raw-attachment staging/manifests and canonical event attachment metadata used by document, meal, workout, and measurement writes, the dedicated `addActivitySession` and `addBodyMeasurement` seams for workout-session and body-measurement persistence, provider-agnostic wearable storage repair primitives for proven legacy/debug telemetry bloat, the verified raw-to-gzip transition and streaming gzip read/amendment path for closed monthly integration-ingest shards, the bounded dual-format read plus streaming archive and atomic amendment path for lossless closed monthly event-ledger gzip shards, and the shared event-spine envelope assembly used by generic events and health-event writes over the single `ledger/events` seam. Hosted idle maintenance activates event archive creation only after the reader-compatible release has drained; the current UTC month stays plain. Public bulk event import accepts legacy payload batches plus explicit upsert/retract decision batches and reconciles strict ISO `externalRef.version` values monotonically at that owner: it orders same-identity decisions by source revision within a batch, ignores retrieval-local provenance for source-semantically equal replay, rejects equal-version conflicts, supersedes newer same-kind values, tombstones and replaces newer kind changes, and tombstones newer retractions. Core also owns bounded raw-reference lookup, using a fixed number of event-shard passes per lookup set so compatibility resolution does not become one ledger walk per imported row. An unseen retraction is persisted as an invisible deleted source marker in the same event ledger, preventing stale resurrection without a parallel watermark store. Blood tests stay canonical `kind: "test"` records behind a projected user-facing view.
 - `packages/importers`: workspace-private ingestion adapters that parse external files or provider API snapshots, normalize them behind registry-based adapters, and delegate all writes to core. It owns the bounded, non-writing workout CSV planner, including explicit Strong/Hevy dialect selection, exact-signature/provider-marker inference, fail-closed shared-header and provider-conflict handling, vault-timezone normalization, explicit unit gates, aggregate repair/omission reporting, provider-neutral privacy-safe source-session keys for snapshot overlap, and provider-scoped public source identities. The clinical FHIR adapter validates each raw page exactly once for file integrity, declared resource family, manifest patient plus FHIR-base binding, same-base root-reachable pagination, and FHIR modifier semantics before emitting one upsert, retract, or review decision per resource
