@@ -2329,6 +2329,37 @@ export type HostedRuntimeAssistantMilestone =
 export type HostedRuntimeLatencyTraceMilestone =
   (typeof HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES)[number];
 
+export const HOSTED_STANDBY_ALLOCATION_OUTCOMES = [
+  "claimed",
+  "disabled",
+  "fallback",
+  "retained",
+] as const;
+
+export type HostedStandbyAllocationOutcome =
+  (typeof HOSTED_STANDBY_ALLOCATION_OUTCOMES)[number];
+
+export const HOSTED_STANDBY_ALLOCATION_REASONS = [
+  "bind_completed",
+  "bind_recovered",
+  "bind_rejected",
+  "bindings_unavailable",
+  "claim_deadline_expired",
+  "claim_disabled",
+  "claim_failed",
+  "claim_no_ready_slot",
+  "claim_stale_release",
+  "claim_timed_out",
+  "exact_user_pending",
+  "mode_not_allocate",
+  "not_trusted_web_direct",
+  "processing_mode_not_default",
+  "retained",
+] as const;
+
+export type HostedStandbyAllocationReason =
+  (typeof HOSTED_STANDBY_ALLOCATION_REASONS)[number];
+
 export interface HostedRuntimeLatencyPhaseBreakdown {
   schemaVersion: number;
   // Control-plane orchestration diagnostics before the runner-container DO
@@ -2392,6 +2423,9 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     replacementFenceClearElapsedMs?: number;
     replacedStaleFence?: boolean;
     freshStartRequestedAtEpochMs?: number;
+    standbyAllocationElapsedMs?: number;
+    standbyAllocationOutcome?: HostedStandbyAllocationOutcome;
+    standbyAllocationReason?: HostedStandbyAllocationReason;
     freshStartFenceBoundAtEpochMs?: number;
     freshStartContainerReadinessRequestedAtEpochMs?: number;
     freshStartContainerLifecycleLockAcquiredAtEpochMs?: number;
@@ -2802,6 +2836,9 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "replacementFenceClearElapsedMs",
     "replacedStaleFence",
     "freshStartRequestedAtEpochMs",
+    "standbyAllocationElapsedMs",
+    "standbyAllocationOutcome",
+    "standbyAllocationReason",
     "freshStartFenceBoundAtEpochMs",
     "freshStartContainerReadinessRequestedAtEpochMs",
     "freshStartContainerLifecycleLockAcquiredAtEpochMs",
@@ -2966,6 +3003,10 @@ const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_STRING_LEAF_VALUES:
       "woken",
       "already_running",
     ],
+    "orchestration.standbyAllocationOutcome":
+      HOSTED_STANDBY_ALLOCATION_OUTCOMES,
+    "orchestration.standbyAllocationReason":
+      HOSTED_STANDBY_ALLOCATION_REASONS,
   };
 
 export type HostedRuntimeLatencyPhaseBreakdownLeafRule =

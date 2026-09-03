@@ -106,3 +106,10 @@ experience shows the exact supplement or branded-food record, linked product
 tests, label contents, nutrition, provenance, and known gaps with the same warm
 precision as the private product. Search terms remain private and the public
 surface does not require an account.
+
+The `/food` view turns branded-food records into a fast, scan-first comparison.
+It marks one quiet winner per complete visible nutrition row and states the row
+rule, then keeps exact test results and evidence gaps in one separate evidence
+drawer behind a coverage meter. It never names a universal healthy or safe
+winner. Bounded evidence states how many results are shown, and gaps keep the
+public product record's own meaning.

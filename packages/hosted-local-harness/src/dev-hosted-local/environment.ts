@@ -298,12 +298,11 @@ export function mergeCloudflareLocalEnv(input: {
   const authoritySignPublicKeyPem =
     authoritySigningKey.publicKeyPem
     ?? readRequiredRemoteHostedCryptoKey("HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM");
-  const authoritySignKeyVersion =
-    readHostedLocalKey("HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION")
-    ?? readHostedLocalKey("HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION")
-    ?? (useRemoteHostedCryptoKeys
-      ? readRequiredRemoteHostedCryptoKey("HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION")
-      : buildHostedLocalAuthoritySignKeyVersion(authoritySignPublicKeyPem));
+  const authoritySignKeyVersion = useRemoteHostedCryptoKeys
+    ? readHostedLocalKey("HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION")
+      ?? readHostedLocalKey("HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION")
+      ?? readRequiredRemoteHostedCryptoKey("HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION")
+    : buildHostedLocalAuthoritySignKeyVersion(authoritySignPublicKeyPem);
   const authorityVerifyKeyringJson = buildHostedAuthorityVerifyKeyringJson({
     currentKeyVersionName: authoritySignKeyVersion,
     currentPublicKeyPem: authoritySignPublicKeyPem,

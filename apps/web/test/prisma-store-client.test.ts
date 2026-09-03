@@ -179,7 +179,7 @@ describe("prisma module", () => {
     expect(mocks.Pool).toHaveBeenCalledWith({
       connectionString: "postgresql://example.invalid/db?sslmode=require",
       connectionTimeoutMillis: 5_000,
-      idleTimeoutMillis: 30_000,
+      idleTimeoutMillis: 5_000,
       max: 15,
     });
     expect(mocks.attachDatabasePool).toHaveBeenCalledOnce();
@@ -233,13 +233,13 @@ describe("prisma module", () => {
     expect(mocks.Pool).toHaveBeenNthCalledWith(1, {
       connectionString: "postgresql://example.invalid/first?sslmode=require",
       connectionTimeoutMillis: 5_000,
-      idleTimeoutMillis: 30_000,
+      idleTimeoutMillis: 5_000,
       max: 1,
     });
     expect(mocks.Pool).toHaveBeenNthCalledWith(2, {
       connectionString: "postgresql://example.invalid/second?sslmode=require",
       connectionTimeoutMillis: 5_000,
-      idleTimeoutMillis: 30_000,
+      idleTimeoutMillis: 5_000,
       max: 1,
     });
     expect(mocks.attachDatabasePool).toHaveBeenNthCalledWith(1, poolA);
@@ -294,7 +294,7 @@ describe("prisma module", () => {
     expect(mocks.Pool).toHaveBeenCalledWith({
       connectionString: "postgresql://example.invalid/db?sslmode=require",
       connectionTimeoutMillis: 5_000,
-      idleTimeoutMillis: 30_000,
+      idleTimeoutMillis: 5_000,
       max: 15,
     });
   });
@@ -335,7 +335,7 @@ describe("prisma module", () => {
     expect(mocks.Pool).toHaveBeenCalledWith({
       connectionString: "postgresql://example.invalid/db?sslmode=require",
       connectionTimeoutMillis: 5_000,
-      idleTimeoutMillis: 30_000,
+      idleTimeoutMillis: 5_000,
       max: 9,
     });
   });

@@ -25,6 +25,8 @@ import {
 
 const DEFAULT_WINDOW_DAYS = 120;
 const MAX_REPORT_FACTORS = 100;
+export const PERSONAL_PATTERN_VOCABULARY_SLUG =
+  "journal-pattern-vocabulary";
 const MIN_OUTCOME_DAYS = 2;
 const COMPARISON_SEARCH_DAYS = 35;
 // Product-owned and intentionally fail-closed. A new provider tag requires
@@ -77,11 +79,43 @@ export type PersonalPatternClassification =
 
 export interface PersonalPatternFactor {
   id: string;
+  icon?: PersonalPatternIcon;
   kind: "activity" | "intervention" | "mixed";
   label: string;
   observedDays: number;
   confirmedAbsentDays?: number;
   episodeCount?: number;
+}
+
+export type PersonalPatternIcon =
+  | "activity"
+  | "alcohol"
+  | "bed"
+  | "caffeine"
+  | "cycling"
+  | "dance"
+  | "meal"
+  | "medication"
+  | "mind-body"
+  | "recovery"
+  | "red-light"
+  | "running"
+  | "strength"
+  | "swimming"
+  | "travel"
+  | "walking"
+  | "wellness";
+
+export interface PersonalPatternVocabularyConcept {
+  aliases: string[];
+  icon: PersonalPatternIcon;
+  id: string;
+  label: string;
+}
+
+export interface PersonalPatternVocabulary {
+  concepts: PersonalPatternVocabularyConcept[];
+  version: 1;
 }
 
 export interface PersonalPatternOutcome {
@@ -164,7 +198,11 @@ interface PatternWindow {
 
 export function buildPersonalPatternReport(
   vault: VaultReadModel,
-  options: { asOf?: Date | string; windowDays?: number } = {},
+  options: {
+    asOf?: Date | string;
+    vocabulary?: PersonalPatternVocabulary | null;
+    windowDays?: number;
+  } = {},
 ): PersonalPatternReport {
   return buildPersonalPatternReportFromWearableBundle(
     vault,
@@ -176,7 +214,11 @@ export function buildPersonalPatternReport(
 export function buildPersonalPatternReportFromWearableBundle(
   vault: VaultReadModel,
   wearableBundle: Pick<WearableSummaryBundle, "recoveryDays" | "sleepNights">,
-  options: { asOf?: Date | string; windowDays?: number } = {},
+  options: {
+    asOf?: Date | string;
+    vocabulary?: PersonalPatternVocabulary | null;
+    windowDays?: number;
+  } = {},
 ): PersonalPatternReport {
   const window = resolveWindow(options);
   return buildPersonalPatternReportFromOutcomeSeries(
@@ -193,7 +235,11 @@ export function buildPersonalPatternReportFromWearableBundleAndMetricPoints(
   vault: VaultReadModel,
   wearableBundle: Pick<WearableSummaryBundle, "recoveryDays" | "sleepNights">,
   metricPoints: readonly MetricPoint[],
-  options: { asOf?: Date | string; windowDays?: number } = {},
+  options: {
+    asOf?: Date | string;
+    vocabulary?: PersonalPatternVocabulary | null;
+    windowDays?: number;
+  } = {},
 ): PersonalPatternReport {
   const window = resolveWindow(options);
   const wearableOutcomes = collectOutcomeSeries(
@@ -223,15 +269,20 @@ export function buildPersonalPatternReportFromWearableBundleAndMetricPoints(
 function buildPersonalPatternReportFromOutcomeSeries(
   vault: VaultReadModel,
   outcomes: readonly OutcomeSeries[],
-  options: { asOf?: Date | string; windowDays?: number },
+  options: {
+    asOf?: Date | string;
+    vocabulary?: PersonalPatternVocabulary | null;
+    windowDays?: number;
+  },
 ): PersonalPatternReport {
   const asOfDate = resolveAsOfDate(options.asOf);
   const windowDays = normalizeWindowDays(options.windowDays);
   const fromDate = addDays(asOfDate, -(windowDays - 1));
+  const vocabulary = buildPersonalPatternVocabularyIndex(options.vocabulary);
   const factorAccumulators = pruneRedundantFactorDetails(
-    collectFactorAccumulators(vault.events, fromDate, asOfDate),
+    collectFactorAccumulators(vault.events, fromDate, asOfDate, vocabulary),
   );
-  const candidateFactors = collectFactors(factorAccumulators);
+  const candidateFactors = collectFactors(factorAccumulators, vocabulary);
   const candidateCells = candidateFactors.flatMap((factor) =>
     outcomes.map((outcome) =>
       buildPatternCell(factor, factorAccumulators.get(factor.id), outcome),
@@ -301,23 +352,26 @@ export function emptyPersonalPatternReport(
 
 function collectFactors(
   accumulators: ReadonlyMap<string, FactorAccumulator>,
+  vocabulary: PersonalPatternVocabularyIndex,
 ): PersonalPatternFactor[] {
   return [...accumulators.values()].map((factor) => {
     const observedDays = factor.dates.size;
     const episodeCount = factor.episodeIds.size;
+    const presentation = vocabulary.byId.get(factor.token);
     return {
       ...(factor.absentDates.size > 0
         ? { confirmedAbsentDays: factor.absentDates.size }
         : {}),
       ...(episodeCount !== observedDays ? { episodeCount } : {}),
       id: factor.token,
+      ...(presentation ? { icon: presentation.icon } : {}),
       kind:
         factor.kinds.size === 2
           ? ("mixed" as const)
           : factor.kinds.has("activity")
           ? ("activity" as const)
           : ("intervention" as const),
-      label: humanizeToken(factor.token),
+      label: presentation?.label ?? humanizeFactorToken(factor.token),
       observedDays,
     };
   });
@@ -327,11 +381,13 @@ function collectFactorAccumulators(
   events: readonly CanonicalEntity[],
   fromDate: string,
   toDate: string,
+  vocabulary: PersonalPatternVocabularyIndex,
 ): Map<string, FactorAccumulator> {
   const factors = new Map<string, FactorAccumulator>();
 
   for (const event of events) {
-    for (const candidate of readFactorCandidates(event)) {
+    for (const rawCandidate of readFactorCandidates(event)) {
+      const candidate = applyFactorVocabulary(rawCandidate, vocabulary);
       if (candidate.date < fromDate || candidate.date > toDate) continue;
 
       const existing = factors.get(candidate.token);
@@ -375,6 +431,29 @@ function collectFactorAccumulators(
   }
 
   return factors;
+}
+
+function applyFactorVocabulary(
+  candidate: FactorCandidate,
+  vocabulary: PersonalPatternVocabularyIndex,
+): FactorCandidate {
+  const separatorIndex = candidate.token.indexOf("--");
+  const baseToken =
+    separatorIndex === -1
+      ? candidate.token
+      : candidate.token.slice(0, separatorIndex);
+  const detailSuffix =
+    separatorIndex === -1 ? "" : candidate.token.slice(separatorIndex);
+  const canonicalBase = vocabulary.aliasToId.get(baseToken) ?? baseToken;
+  if (canonicalBase === baseToken) return candidate;
+  return {
+    ...candidate,
+    episodeId:
+      candidate.episodeId === `${baseToken}:${candidate.date}`
+        ? `${canonicalBase}:${candidate.date}`
+        : candidate.episodeId,
+    token: `${canonicalBase}${detailSuffix}`,
+  };
 }
 
 function pruneRedundantFactorDetails(
@@ -641,7 +720,7 @@ function collectJournalOutcomeSeries(
     .filter(([, values]) => values.size >= 2)
     .map(([id, values]) => ({
       id,
-      label: humanizeToken(id.slice("subjective-".length)),
+      label: humanizeFactorToken(id.slice("subjective-".length)),
       lagDays: 0,
       meaningfulAbsoluteDelta: 0.75,
       meaningfulRelativeDelta: 0.2,
@@ -1383,7 +1462,7 @@ function readFiniteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function canonicalFactorToken(value: string | null): string | null {
+export function canonicalFactorToken(value: string | null): string | null {
   switch (value) {
     case "run":
       return "running";
@@ -1409,16 +1488,7 @@ function canonicalFactorToken(value: string | null): string | null {
   }
 }
 
-function humanizeToken(value: string): string {
-  if (value === "blue-light-blocking-glasses") {
-    return "Blue-light blocking glasses";
-  }
-  if (
-    value ===
-    "high-filtering-amber-red-or-orange-evening-glasses-with-spectral-data-when-available"
-  ) {
-    return "Red/amber evening glasses";
-  }
+export function humanizeFactorToken(value: string): string {
   const readableValue =
     value === "yardwork"
       ? "yard-work"
@@ -1429,4 +1499,123 @@ function humanizeToken(value: string): string {
       : value;
   const words = readableValue.replace(/--/gu, " · ").replace(/[-_]+/gu, " ");
   return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+}
+
+interface PersonalPatternVocabularyIndex {
+  aliasToId: ReadonlyMap<string, string>;
+  byId: ReadonlyMap<string, PersonalPatternVocabularyConcept>;
+}
+
+const EMPTY_PERSONAL_PATTERN_VOCABULARY_INDEX: PersonalPatternVocabularyIndex = {
+  aliasToId: new Map(),
+  byId: new Map(),
+};
+
+export function parsePersonalPatternVocabulary(
+  body: string | null | undefined,
+): PersonalPatternVocabulary | null {
+  if (!body || body.length > 16_000) return null;
+  let value: unknown;
+  try {
+    value = JSON.parse(body);
+  } catch {
+    return null;
+  }
+  const record = readRecord(value);
+  if (record?.version !== 1 || !Array.isArray(record.concepts)) return null;
+  if (record.concepts.length > 50) return null;
+
+  const concepts: PersonalPatternVocabularyConcept[] = [];
+  const claimedTokens = new Set<string>();
+  for (const value of record.concepts) {
+    const concept = readRecord(value);
+    const id = readVocabularyToken(concept?.id, 80);
+    const label = readVocabularyLabel(concept?.label);
+    const icon = parsePersonalPatternIcon(concept?.icon);
+    const aliases = readVocabularyAliases(concept?.aliases);
+    if (!id || !label || !icon || !aliases) return null;
+    const tokens = [id, ...aliases];
+    if (tokens.some((token) => claimedTokens.has(token))) return null;
+    tokens.forEach((token) => claimedTokens.add(token));
+    concepts.push({ aliases, icon, id, label });
+  }
+
+  return { concepts, version: 1 };
+}
+
+export function resolvePersonalPatternVocabularyConcept(
+  vocabulary: PersonalPatternVocabulary | null | undefined,
+  token: string,
+): PersonalPatternVocabularyConcept | null {
+  if (!vocabulary) return null;
+  return vocabulary.concepts.find(
+    (concept) => concept.id === token || concept.aliases.includes(token),
+  ) ?? null;
+}
+
+function buildPersonalPatternVocabularyIndex(
+  vocabulary: PersonalPatternVocabulary | null | undefined,
+): PersonalPatternVocabularyIndex {
+  if (!vocabulary) return EMPTY_PERSONAL_PATTERN_VOCABULARY_INDEX;
+  const byId = new Map(
+    vocabulary.concepts.map((concept) => [concept.id, concept]),
+  );
+  const aliasToId = new Map<string, string>();
+  for (const concept of vocabulary.concepts) {
+    aliasToId.set(concept.id, concept.id);
+    for (const alias of concept.aliases) aliasToId.set(alias, concept.id);
+  }
+  return { aliasToId, byId };
+}
+
+function readVocabularyAliases(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length > 20) return null;
+  const aliases = value.map((alias) => readVocabularyToken(alias, 240));
+  return aliases.every((alias): alias is string => alias !== null)
+    ? [...new Set(aliases)]
+    : null;
+}
+
+function readVocabularyToken(value: unknown, maxLength: number): string | null {
+  const token = readString(value);
+  return token &&
+    token.length <= maxLength &&
+    /^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(token)
+    ? token
+    : null;
+}
+
+function readVocabularyLabel(value: unknown): string | null {
+  const label = readString(value);
+  return label && label.length <= 80 && !/[\u0000-\u001f\u007f]/u.test(label)
+    ? label
+    : null;
+}
+
+export function parsePersonalPatternIcon(
+  value: unknown,
+): PersonalPatternIcon | null {
+  const icon = readString(value);
+  switch (icon) {
+    case "activity":
+    case "alcohol":
+    case "bed":
+    case "caffeine":
+    case "cycling":
+    case "dance":
+    case "meal":
+    case "medication":
+    case "mind-body":
+    case "recovery":
+    case "red-light":
+    case "running":
+    case "strength":
+    case "swimming":
+    case "travel":
+    case "walking":
+    case "wellness":
+      return icon;
+    default:
+      return null;
+  }
 }

@@ -37,6 +37,7 @@ import {
 import {
   HostedIdentitySessionLoading,
   HostedIdentitySessionMismatch,
+  HostedSettingsIdentityRemovalView,
 } from "@/src/components/settings/hosted-settings-identity-link-dialog";
 import {
   ASSISTANT_MODEL_CHOICE_CARD_CLASSES,
@@ -149,6 +150,7 @@ import { HostedFamilyManager } from "@/src/components/settings/hosted-family-set
 import { HostedPlanChangeConfirmationContent } from "@/src/components/settings/hosted-plan-change-button";
 import { UpgradeToEdgeButton } from "@/src/components/settings/hosted-plan-upgrade-button";
 import { HostedPlanUpdateReturn } from "@/src/components/settings/hosted-plan-update-return";
+import { FoodBrandVisualStudy } from "./food-label-lab-study";
 import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-personality-settings-dialog";
 import {
   DESIGN_AI_USAGE_ACTIVITY,
@@ -666,6 +668,17 @@ export function ComponentsContent() {
         <div>
           <h1 className="font-serif text-4xl font-semibold tracking-tight text-foreground">Components</h1>
           <p className="mt-2 text-sm text-muted-foreground">Shadcn base UI + custom Murph components. Colors and typography live in the Brand tab.</p>
+        </div>
+
+        <Separator />
+
+        <div data-design-component="food-brand-visual" id="food-brand-visual" inert>
+          <Section title="Food brand visual">
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              Brand-aware food identity with a local category-art fallback.
+            </p>
+            <FoodBrandVisualStudy />
+          </Section>
         </div>
 
         <Separator />
@@ -2241,6 +2254,61 @@ export function ComponentsContent() {
                 />
               </div>
             ))}
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section id="linked-account-removal" title="Linked Account Removal">
+          <p className="text-sm leading-6 text-muted-foreground">
+            Settings confirms the exact connection and explains the messaging
+            consequence before disconnecting it. Removal is unavailable until
+            another supported sign-in can keep the account accessible.
+          </p>
+          <div
+            className="grid max-w-4xl gap-4 sm:grid-cols-2"
+            data-design-component="linked-account-removal"
+            inert
+          >
+            <div className="rounded-xl border border-border bg-card p-5">
+              <HostedSettingsIdentityRemovalView
+                displayValue="@preview_member"
+                errorMessage={null}
+                intent="replace"
+                label="Telegram"
+                onCancel={() => {}}
+                onRemove={() => {}}
+                pending={false}
+                providerAccountRemoved={false}
+                removable
+              />
+            </div>
+            <div className="rounded-xl border border-border bg-card p-5">
+              <HostedSettingsIdentityRemovalView
+                displayValue="member@example.test"
+                errorMessage={null}
+                intent="remove"
+                label="Email"
+                onCancel={() => {}}
+                onRemove={() => {}}
+                pending={false}
+                providerAccountRemoved={false}
+                removable={false}
+              />
+            </div>
+            <div className="rounded-xl border border-border bg-card p-5">
+              <HostedSettingsIdentityRemovalView
+                displayValue="Connected"
+                errorMessage="Telegram is disconnected. Finish updating Murph."
+                intent="finish"
+                label="Telegram"
+                onCancel={() => {}}
+                onRemove={() => {}}
+                pending={false}
+                providerAccountRemoved
+                removable
+              />
+            </div>
           </div>
         </Section>
 

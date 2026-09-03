@@ -2505,6 +2505,154 @@ describe("hosted runtime callbacks", () => {
     },
   );
 
+  it("abandons a recovered direct-email signup welcome after earlier direct-email first contact", async () => {
+    const earlierReplyTarget = serializeHostedEmailThreadTarget({
+      cc: [],
+      lastMessageId: "<message_earlier@example.test>",
+      references: [],
+      subject: "Earlier conversation",
+      to: ["member@example.test"],
+    });
+    const welcome = createPendingHostedDeliveryIntent({
+      actorId: null,
+      bindingDelivery: null,
+      channel: "email",
+      createdAt: "2026-04-08T00:10:00.000Z",
+      deliveryIdempotencyKey: "signup-welcome:member_placeholder",
+      explicitTarget: "member@example.test",
+      identityId: "assistant@example.test",
+      intentId: "intent_recovered_email_signup_welcome",
+      lastError: {
+        code: "ASSISTANT_AUDIENCE_UNVERIFIED",
+        message: "Audience authority was unavailable.",
+      },
+      media: [],
+      nextAttemptAt: "2026-04-08T00:30:00.000Z",
+      replyToMessageId: null,
+      status: "retryable",
+      threadId: null,
+      threadIsDirect: true,
+      turnId: "turn_recovered_email_signup_welcome",
+    });
+    const earlierAutoReply = createPendingHostedDeliveryIntent({
+      actorId: null,
+      bindingDelivery: { kind: "thread", target: earlierReplyTarget },
+      channel: "email",
+      createdAt: "2026-04-08T00:05:00.000Z",
+      deliveryIdempotencyKey: "reply_delivery_key",
+      explicitTarget: earlierReplyTarget,
+      identityId: "assistant@example.test",
+      intentId: "intent_earlier_direct_email_reply",
+      media: [],
+      nextAttemptAt: null,
+      replyToMessageId: "<message_earlier@example.test>",
+      status: "sent",
+      threadId: "hid_direct_email_thread",
+      threadIsDirect: true,
+      turnId: "turn_earlier_direct_email_reply",
+    });
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      earlierAutoReply,
+      welcome,
+    ]);
+    mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValue(
+      new Set([earlierAutoReply.intentId]),
+    );
+    mocks.shouldDispatchAssistantOutboxIntent.mockImplementation(
+      (intent) => intent.status !== "sent",
+    );
+    mocks.markAssistantOutboxIntentMirrorTerminalById.mockResolvedValue({
+      ...welcome,
+      lastError: {
+        code: "ASSISTANT_STALE_SIGNUP_WELCOME_SUPPRESSED",
+        message: "Stale signup welcome suppressed.",
+      },
+      status: "abandoned",
+    });
+
+    await expect(collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    })).resolves.toEqual([]);
+
+    expect(mocks.findAssistantAutoReplyDeliveryIntentIds).toHaveBeenCalledWith({
+      intents: [earlierAutoReply],
+      vault: "/tmp/vault",
+    });
+    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledWith({
+      error: expect.objectContaining({
+        code: "ASSISTANT_STALE_SIGNUP_WELCOME_SUPPRESSED",
+      }),
+      intentId: welcome.intentId,
+      onlyCurrentStatuses: ["pending", "retryable"],
+      status: "abandoned",
+      vault: "/tmp/vault",
+    });
+  });
+
+  it("keeps a recovered direct-email signup welcome after an earlier group-email reply", async () => {
+    const earlierGroupReplyTarget = serializeHostedEmailThreadTarget({
+      groupId: "group_placeholder",
+      recipientMemberId: "member_placeholder",
+      subject: "Group conversation",
+      targetKind: "group",
+    });
+    const welcome = createPendingHostedDeliveryIntent({
+      actorId: null,
+      bindingDelivery: null,
+      channel: "email",
+      createdAt: "2026-04-08T00:10:00.000Z",
+      deliveryIdempotencyKey: "signup-welcome:member_placeholder",
+      explicitTarget: "member@example.test",
+      identityId: "assistant@example.test",
+      intentId: "intent_recovered_email_signup_welcome",
+      media: [],
+      nextAttemptAt: "2026-04-08T00:30:00.000Z",
+      replyToMessageId: null,
+      status: "retryable",
+      threadId: null,
+      threadIsDirect: true,
+      turnId: "turn_recovered_email_signup_welcome",
+    });
+    const earlierGroupReply = createPendingHostedDeliveryIntent({
+      actorId: null,
+      bindingDelivery: { kind: "thread", target: earlierGroupReplyTarget },
+      channel: "email",
+      createdAt: "2026-04-08T00:05:00.000Z",
+      deliveryIdempotencyKey: "group_reply_delivery_key",
+      explicitTarget: earlierGroupReplyTarget,
+      identityId: "assistant@example.test",
+      intentId: "intent_earlier_group_email_reply",
+      media: [],
+      nextAttemptAt: null,
+      replyToMessageId: "<message_group@example.test>",
+      status: "sent",
+      threadId: "hid_group_email_thread",
+      threadIsDirect: false,
+      turnId: "turn_earlier_group_email_reply",
+    });
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      earlierGroupReply,
+      welcome,
+    ]);
+    mocks.shouldDispatchAssistantOutboxIntent.mockImplementation(
+      (intent) => intent.status !== "sent",
+    );
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: true,
+      preferredIntentIds: [],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId)).toEqual([
+      welcome.intentId,
+    ]);
+    expect(mocks.findAssistantAutoReplyDeliveryIntentIds).not.toHaveBeenCalled();
+    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).not.toHaveBeenCalled();
+  });
+
   it("keeps a signup welcome when its supersession claim loses to dispatch", async () => {
     const welcome = createPendingHostedDeliveryIntent({
       actorId: "actor_member",

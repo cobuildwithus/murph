@@ -285,7 +285,7 @@ describe("supplements query helpers", () => {
     expect(searchCall?.text).not.toContain("brand_candidates AS MATERIALIZED");
     expect(searchCall?.text).not.toContain("supplement_external_labels");
     expect(searchCall?.text).not.toContain("matched_dsld_id");
-    expect(searchCall?.values).toEqual(["creatine", false, 5, null]);
+    expect(searchCall?.values).toEqual(["creatine", false, 5, null, 0]);
 
     const contaminantsCall = calls[2];
     expect(contaminantsCall?.text).toContain("JOIN product_tests");
@@ -378,7 +378,7 @@ describe("supplements query helpers", () => {
 
     expect(calls).toHaveLength(2);
     expect(calls[1]?.text).toContain("fts_candidates AS MATERIALIZED");
-    expect(calls[1]?.values).toEqual(["nac ginger", false, 5, null]);
+    expect(calls[1]?.values).toEqual(["nac ginger", false, 5, null, 0]);
   });
 
   it.each(["supplement", " supplements ", "SUPPLEMENT supplements"])(
@@ -426,6 +426,7 @@ describe("supplements query helpers", () => {
       5,
       ["Doctor's Best"],
       "magnesium glycinate",
+      0,
     ]);
   });
 
@@ -1375,6 +1376,7 @@ describe("supplements query helpers", () => {
       1,
       ["Momentous"],
       "calcium",
+      0,
     ]);
   });
 
@@ -1423,7 +1425,7 @@ describe("supplements query helpers", () => {
     )).toEqual([
       {
         text: expect.stringContaining("brand_candidates AS MATERIALIZED"),
-        values: ["Life Magnesium", false, 1, ["Life"], "magnesium"],
+        values: ["Life Magnesium", false, 1, ["Life"], "magnesium", 0],
       },
     ]);
   });
@@ -1465,6 +1467,7 @@ describe("supplements query helpers", () => {
       false,
       5,
       null,
+      0,
     ]);
   });
 
@@ -1503,6 +1506,7 @@ describe("supplements query helpers", () => {
         "Blueprint",
       ],
       "essentials",
+      0,
     ]);
   });
 
@@ -1564,6 +1568,7 @@ describe("supplements query helpers", () => {
       3,
       ["Doctor's Best"],
       "magnesium",
+      0,
     ]);
   });
 
@@ -1594,6 +1599,7 @@ describe("supplements query helpers", () => {
       3,
       ["Doctor's Best"],
       "magnesium",
+      0,
     ]);
   });
 
@@ -1664,11 +1670,11 @@ describe("supplements query helpers", () => {
     ).toEqual([
       {
         text: expect.stringContaining("fts_candidates AS MATERIALIZED"),
-        values: ["Creatine", false, 5, null],
+        values: ["Creatine", false, 5, null, 0],
       },
       {
         text: expect.stringContaining("fts_candidates AS MATERIALIZED"),
-        values: ["Magnesium", false, 5, null],
+        values: ["Magnesium", false, 5, null, 0],
       },
     ]);
   });
@@ -1708,10 +1714,12 @@ describe("supplements query helpers", () => {
     expect(calls.filter((call) => call.text.includes("GROUP BY brand"))).toHaveLength(
       2,
     );
-    expect(calls.filter((call) => call.values.length === 5)).toEqual([
+    expect(calls.filter((call) =>
+      call.text.includes("brand_candidates AS MATERIALIZED"),
+    )).toEqual([
       {
         text: expect.stringContaining("brand_candidates AS MATERIALIZED"),
-        values: ["Momentous Calcium", false, 1, ["Momentous"], "calcium"],
+        values: ["Momentous Calcium", false, 1, ["Momentous"], "calcium", 0],
       },
     ]);
   });
@@ -1749,6 +1757,7 @@ describe("supplements query helpers", () => {
       5,
       ["Garden of Life Dr. Formulated", "Garden of Life"],
       "probiotics",
+      0,
     ]);
   });
 
@@ -1790,6 +1799,7 @@ describe("supplements query helpers", () => {
         "Garden of Life Sport",
       ],
       "womens multi",
+      0,
     ]);
   });
 

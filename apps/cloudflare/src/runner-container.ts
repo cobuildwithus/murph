@@ -57,7 +57,6 @@ import {
 } from "./orchestration-latency-diagnostics.ts";
 import type {
   WorkerActiveRuntimeUserFenceResult,
-  WorkerUserRunnerNamespaceLike,
 } from "./worker-contracts.ts";
 
 const RUNNER_PORT = 8080;
@@ -84,7 +83,6 @@ const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
 const DEFAULT_RUNNER_ABORT_WORKSPACE_INVOCATION_TIMEOUT_MS = 1_000;
 const DEFAULT_RUNNER_ACTIVE_LIVENESS_TIMEOUT_MS = 1_000;
 const DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS = 5_000;
-const RUNNER_RUNTIME_COMPLETION_RECEIPT_TIMEOUT_MS = 1_000;
 const RUNNER_RECENT_READINESS_PROOF_MAX_AGE_MS = 5_000;
 const RUNNER_READINESS_ABORT_SETTLEMENT_TIMEOUT_MS = 5_000;
 export const RUNNER_CONTAINER_STARTUP_FAILURE_ELAPSED_MAX_MS = 60_000;
@@ -353,9 +351,7 @@ export interface HostedExecutionContainerNamespaceLike {
   idFromString?(id: string): unknown;
 }
 
-type RunnerContainerEnvironmentSource = Readonly<Record<string, unknown>> & {
-  USER_RUNNER?: WorkerUserRunnerNamespaceLike;
-};
+type RunnerContainerEnvironmentSource = Readonly<Record<string, unknown>>;
 type RunnerContainerNameSource = HostedRunnerContainerIdentitySource;
 
 interface RunnerContainerLogContext {
@@ -712,67 +708,7 @@ export class RunnerContainer extends Container {
     });
     operation.result = result;
     this.workspaceInvocationOperations.push(operation);
-    const completedResult = await result;
-    if (this.readWorkspaceInvocationOperation() !== operation) {
-      await this.recordRuntimeCompletionBestEffort({
-        attemptId: input.job.request.attemptId,
-        generation: input.job.request.leaseGeneration,
-        result: completedResult,
-        userId: routeUserId,
-      });
-    }
-    return completedResult;
-  }
-
-  private async recordRuntimeCompletionBestEffort(input: {
-    attemptId: string;
-    generation: string;
-    result: HostedExecutionRunnerJobResult;
-    userId: string;
-  }): Promise<void> {
-    try {
-      const userRunner = this.environment.USER_RUNNER?.getByName(input.userId);
-      if (!userRunner?.recordRuntimeCompletionFromContainer) {
-        return;
-      }
-      const receipt = userRunner.recordRuntimeCompletionFromContainer(input).then(
-        () => ({ kind: "completed" as const }),
-        (error: unknown) => ({ error, kind: "failed" as const }),
-      );
-      let timeoutId: ReturnType<typeof setTimeout> | undefined;
-      const outcome = await Promise.race([
-        receipt,
-        new Promise<{ kind: "timed_out" }>((resolve) => {
-          timeoutId = setTimeout(
-            () => resolve({ kind: "timed_out" }),
-            RUNNER_RUNTIME_COMPLETION_RECEIPT_TIMEOUT_MS,
-          );
-        }),
-      ]);
-      if (timeoutId !== undefined) {
-        clearTimeout(timeoutId);
-      }
-      if (outcome.kind === "completed") {
-        return;
-      }
-      const error = outcome.kind === "failed"
-        ? outcome.error
-        : new Error("Hosted runner container completion receipt timed out.");
-      throw error;
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "runner.container",
-        details: {
-          ...buildHostedExecutionSafeErrorDiagnostics(error),
-          workspaceAttemptId: input.attemptId,
-        },
-        level: "warn",
-        message:
-          "Hosted runner container completion receipt failed; preserving completed result.",
-        phase: "checkpoint",
-        userId: input.userId,
-      });
-    }
+    return await result;
   }
 
   async destroyInstance(): Promise<void> {

@@ -1,4 +1,9 @@
 import { DurableObject } from "cloudflare:workers";
+import {
+  deriveHostedExecutionErrorCode,
+  emitHostedExecutionStructuredLog,
+  readHostedExecutionSafeErrorName,
+} from "@murphai/hosted-execution";
 
 import {
   HOSTED_STANDBY_LOCATION_HINT,
@@ -180,7 +185,18 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
       this.transactionSync(() => {
         this.store.finishProvisioning(slotName);
       });
-    } catch {
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "cloudflare.standby",
+        details: {
+          errorCode: deriveHostedExecutionErrorCode(error),
+          errorName: readHostedExecutionSafeErrorName(error),
+        },
+        error,
+        level: "warn",
+        message: "Hosted standby provisioning failed.",
+        phase: "failed",
+      });
       await this.reconcileFailedOwnedSlot(slotName, slot);
     }
   }

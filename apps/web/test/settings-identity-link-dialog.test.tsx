@@ -1,12 +1,15 @@
 import { act, createElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { HostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
+
 import { renderClientComponent } from "./render-client-component";
 
 const ORIGINAL_PRIVY_APP_ID = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
 const ORIGINAL_PRIVY_CLIENT_ID = process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID;
 
 const mocks = vi.hoisted(() => ({
+  finishHostedLinkedAccountRemovalWithRetry: vi.fn(),
   onOpenChange: vi.fn(),
   openAuthDialog: vi.fn(),
   privyLogout: vi.fn(),
@@ -16,6 +19,9 @@ const mocks = vi.hoisted(() => ({
   refresh: vi.fn(),
   useHostedPhoneLinkDiagnostics: vi.fn(),
   usePrivy: vi.fn(),
+  unlinkEmail: vi.fn(),
+  unlinkPhone: vi.fn(),
+  unlinkTelegram: vi.fn(),
   useUser: vi.fn(),
   phoneSettingsProps: [] as Array<{
     autoOpen?: boolean;
@@ -31,7 +37,19 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@privy-io/react-auth", () => ({
   usePrivy: mocks.usePrivy,
+  useUnlinkEmail: () => ({ unlink: mocks.unlinkEmail }),
+  useUnlinkPhone: () => ({ unlink: mocks.unlinkPhone }),
+  useUnlinkTelegram: () => ({ unlink: mocks.unlinkTelegram }),
   useUser: mocks.useUser,
+}));
+
+vi.mock("@/src/components/settings/hosted-linked-account-removal", () => ({
+  finishHostedLinkedAccountRemovalWithRetry:
+    mocks.finishHostedLinkedAccountRemovalWithRetry,
+  toHostedLinkedAccountRemovalErrorMessage: (error: unknown, providerRemoved: boolean) =>
+    providerRemoved
+      ? `provider removed: ${error instanceof Error ? error.message : "unknown"}`
+      : "provider unlink failed",
 }));
 
 vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({
@@ -161,6 +179,15 @@ beforeEach(() => {
     ready: true,
   });
   mocks.privyLogout.mockResolvedValue(undefined);
+  mocks.finishHostedLinkedAccountRemovalWithRetry.mockResolvedValue({
+    changed: true,
+    method: "telegram",
+    ok: true,
+    runTriggered: true,
+  });
+  mocks.unlinkEmail.mockResolvedValue(undefined);
+  mocks.unlinkPhone.mockResolvedValue(undefined);
+  mocks.unlinkTelegram.mockResolvedValue(undefined);
   mocks.useHostedPhoneLinkDiagnostics.mockReturnValue(mocks.reportPhoneDiagnostic);
   mocks.useUser.mockReturnValue({
     user: {
@@ -326,7 +353,6 @@ describe("HostedSettingsIdentityLinkDialog", () => {
           ...makeAccountSnapshot(),
           email: {
             address: "member@example.com",
-            privyEmailLinked: false,
             verifiedAt: null,
           },
           telegram: {
@@ -472,8 +498,11 @@ describe("HostedSettingsIdentityLinkDialog", () => {
           ...makeAccountSnapshot(),
           email: {
             address: "member@example.com",
-            privyEmailLinked: false,
             verifiedAt: null,
+          },
+          privySignInStates: {
+            ...removablePrivySignInStates(),
+            email: { removable: false, status: "absent" },
           },
         },
         expectedPrivyUserId: "privy-user-a",
@@ -514,7 +543,6 @@ describe("HostedSettingsIdentityLinkDialog", () => {
           ...makeAccountSnapshot(),
           email: {
             address: "member@example.com",
-            privyEmailLinked: true,
             verifiedAt: "2026-05-02T00:00:00.000Z",
           },
         },
@@ -603,9 +631,391 @@ describe("HostedSettingsIdentityLinkDialog", () => {
       await cleanup();
     }
   });
+
+  it("removes Telegram through Privy before clearing the Murph projection", async () => {
+    mocks.useUser.mockReturnValue({
+      user: {
+        id: "privy-user-a",
+        linkedAccounts: [
+          {
+            address: "member@example.com",
+            latestVerifiedAt: 1_777_680_000,
+            type: "email",
+          },
+        ],
+        telegram: {
+          id: "12345",
+        },
+      },
+    });
+    const { HostedSettingsIdentityLinkDialog } = await import(
+      "@/src/components/settings/hosted-settings-identity-link-dialog"
+    );
+    const account: HostedAccountSettingsSnapshot = {
+      ...makeAccountSnapshot(),
+    };
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedSettingsIdentityLinkDialog, {
+        account,
+        expectedPrivyUserId: "privy-user-a",
+        initialMode: "telegram",
+        intent: "remove",
+        onOpenChange: mocks.onOpenChange,
+        privySessionMatchesAppSession: true,
+      }),
+    );
+
+    try {
+      expect(container.textContent).toContain("Remove Telegram?");
+      const removeButton = Array.from(container.querySelectorAll("button")).find(
+        (candidate) => candidate.textContent === "Remove Telegram",
+      );
+
+      await act(async () => {
+        removeButton?.dispatchEvent(new Event("click", { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      expect(mocks.unlinkTelegram).toHaveBeenCalledWith({
+        telegramUserId: "12345",
+      });
+      expect(mocks.finishHostedLinkedAccountRemovalWithRetry).toHaveBeenCalledWith({
+        expectedIdentity: "12345",
+        method: "telegram",
+      });
+      expect(
+        mocks.unlinkTelegram.mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        mocks.finishHostedLinkedAccountRemovalWithRetry.mock.invocationCallOrder[0]
+        ?? Number.POSITIVE_INFINITY,
+      );
+      expect(mocks.onOpenChange).toHaveBeenCalledWith(false);
+      expect(mocks.refresh).toHaveBeenCalledTimes(1);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it.each([
+    {
+      clientUser: {
+        id: "privy-user-a",
+        linkedAccounts: [
+          {
+            phoneNumber: "+14045550999",
+            latestVerifiedAt: 1_777_680_000,
+            type: "phone",
+          },
+          {
+            address: "member@example.com",
+            latestVerifiedAt: 1_777_680_000,
+            type: "email",
+          },
+        ],
+      },
+      label: "phone",
+      method: "phone" as const,
+    },
+    {
+      clientUser: {
+        id: "privy-user-a",
+        linkedAccounts: [
+          {
+            address: "other@example.com",
+            latestVerifiedAt: 1_777_680_000,
+            type: "email",
+          },
+          {
+            phoneNumber: "+14045550123",
+            latestVerifiedAt: 1_777_680_000,
+            type: "phone",
+          },
+        ],
+      },
+      label: "email",
+      method: "email" as const,
+    },
+    {
+      clientUser: {
+        id: "privy-user-a",
+        linkedAccounts: [
+          {
+            address: "member@example.com",
+            latestVerifiedAt: 1_777_680_000,
+            type: "email",
+          },
+          {
+            telegramUserId: "99999",
+            type: "telegram",
+          },
+        ],
+      },
+      label: "Telegram",
+      method: "telegram" as const,
+    },
+  ])("does not unlink a changed $label identity", async ({ clientUser, method }) => {
+    mocks.useUser.mockReturnValue({ user: clientUser });
+    const { HostedSettingsIdentityLinkDialog } = await import(
+      "@/src/components/settings/hosted-settings-identity-link-dialog"
+    );
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedSettingsIdentityLinkDialog, {
+        account: makeAccountSnapshot(),
+        expectedPrivyUserId: "privy-user-a",
+        initialMode: method,
+        intent: "remove",
+        onOpenChange: mocks.onOpenChange,
+        privySessionMatchesAppSession: true,
+      }),
+    );
+
+    try {
+      const removeButton = Array.from(container.querySelectorAll("button")).find(
+        (candidate) => candidate.textContent?.startsWith("Remove "),
+      );
+
+      await act(async () => {
+        removeButton?.dispatchEvent(new Event("click", { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      expect(container.textContent).toContain(
+        "This sign-in changed. Refresh Settings and try again.",
+      );
+      expect(mocks.unlinkPhone).not.toHaveBeenCalled();
+      expect(mocks.unlinkEmail).not.toHaveBeenCalled();
+      expect(mocks.unlinkTelegram).not.toHaveBeenCalled();
+      expect(mocks.finishHostedLinkedAccountRemovalWithRetry).not.toHaveBeenCalled();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("disconnects the old Telegram before opening the existing link flow", async () => {
+    mocks.useUser.mockReturnValue({
+      user: {
+        id: "privy-user-a",
+        linkedAccounts: [
+          {
+            telegramUserId: "12345",
+            type: "telegram",
+          },
+          {
+            phoneNumber: "+14045550123",
+            latestVerifiedAt: 1_777_680_000,
+            type: "phone",
+          },
+        ],
+      },
+    });
+    const { HostedSettingsIdentityLinkDialog } = await import(
+      "@/src/components/settings/hosted-settings-identity-link-dialog"
+    );
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedSettingsIdentityLinkDialog, {
+        account: {
+          ...makeAccountSnapshot(),
+        },
+        expectedPrivyUserId: "privy-user-a",
+        initialMode: "telegram",
+        intent: "replace",
+        onOpenChange: mocks.onOpenChange,
+        privySessionMatchesAppSession: true,
+      }),
+    );
+
+    try {
+      const continueButton = Array.from(container.querySelectorAll("button")).find(
+        (candidate) => candidate.textContent === "Disconnect and continue",
+      );
+
+      await act(async () => {
+        continueButton?.dispatchEvent(new Event("click", { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      expect(mocks.unlinkTelegram).toHaveBeenCalledTimes(1);
+      expect(mocks.telegramCardProps.at(-1)).toEqual({
+        autoLink: true,
+        initialTelegramAccount: null,
+        showHeading: false,
+      });
+      expect(mocks.onOpenChange).not.toHaveBeenCalledWith(false);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("retries only Murph cleanup after Privy already removed the identity", async () => {
+    mocks.useUser.mockReturnValue({
+      user: {
+        id: "privy-user-a",
+        linkedAccounts: [
+          {
+            address: "member@example.com",
+            latestVerifiedAt: 1_777_680_000,
+            type: "email",
+          },
+          {
+            phoneNumber: "+14045550123",
+            latestVerifiedAt: 1_777_680_000,
+            type: "phone",
+          },
+        ],
+      },
+    });
+    mocks.finishHostedLinkedAccountRemovalWithRetry
+      .mockRejectedValueOnce(new Error("sync unavailable"))
+      .mockResolvedValueOnce({
+        changed: true,
+        method: "email",
+        ok: true,
+        runTriggered: true,
+      });
+    const { HostedSettingsIdentityLinkDialog } = await import(
+      "@/src/components/settings/hosted-settings-identity-link-dialog"
+    );
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedSettingsIdentityLinkDialog, {
+        account: {
+          ...makeAccountSnapshot(),
+        },
+        expectedPrivyUserId: "privy-user-a",
+        initialMode: "email",
+        intent: "remove",
+        onOpenChange: mocks.onOpenChange,
+        privySessionMatchesAppSession: true,
+      }),
+    );
+
+    try {
+      const removeButton = Array.from(container.querySelectorAll("button")).find(
+        (candidate) => candidate.textContent === "Remove Email",
+      );
+      await act(async () => {
+        removeButton?.dispatchEvent(new Event("click", { bubbles: true }));
+        await Promise.resolve();
+      });
+      expect(container.textContent).toContain("provider removed: sync unavailable");
+
+      const finishButton = Array.from(container.querySelectorAll("button")).find(
+        (candidate) => candidate.textContent === "Finish disconnecting",
+      );
+      await act(async () => {
+        finishButton?.dispatchEvent(new Event("click", { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      expect(mocks.unlinkEmail).toHaveBeenCalledTimes(1);
+      expect(mocks.finishHostedLinkedAccountRemovalWithRetry).toHaveBeenCalledTimes(2);
+      expect(mocks.onOpenChange).toHaveBeenCalledWith(false);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("finishes canonical cleanup after a refresh without unlinking the provider again", async () => {
+    mocks.useUser.mockReturnValue({
+      user: {
+        id: "privy-user-a",
+        linkedAccounts: [
+          {
+            phoneNumber: "+14045550123",
+            latestVerifiedAt: 1_777_680_000,
+            type: "phone",
+          },
+        ],
+      },
+    });
+    const { HostedSettingsIdentityLinkDialog } = await import(
+      "@/src/components/settings/hosted-settings-identity-link-dialog"
+    );
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedSettingsIdentityLinkDialog, {
+        account: {
+          ...makeAccountSnapshot(),
+          privySignInStates: {
+            ...removablePrivySignInStates(),
+            telegram: { removable: false, status: "absent" },
+          },
+        },
+        expectedPrivyUserId: "privy-user-a",
+        initialMode: "telegram",
+        intent: "finish",
+        onOpenChange: mocks.onOpenChange,
+        privySessionMatchesAppSession: true,
+      }),
+    );
+
+    try {
+      expect(container.textContent).toContain("Finish disconnecting Telegram?");
+      const finishButton = Array.from(container.querySelectorAll("button")).find(
+        (candidate) => candidate.textContent === "Finish disconnecting",
+      );
+
+      await act(async () => {
+        finishButton?.dispatchEvent(new Event("click", { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      expect(mocks.unlinkTelegram).not.toHaveBeenCalled();
+      expect(mocks.finishHostedLinkedAccountRemovalWithRetry).toHaveBeenCalledWith({
+        expectedIdentity: "12345",
+        method: "telegram",
+      });
+      expect(mocks.onOpenChange).toHaveBeenCalledWith(false);
+      expect(mocks.refresh).toHaveBeenCalledTimes(1);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("keeps removal unavailable when no other supported sign-in remains", async () => {
+    mocks.useUser.mockReturnValue({
+      user: {
+        id: "privy-user-a",
+        linkedAccounts: [
+          {
+            telegramUserId: "12345",
+            type: "telegram",
+          },
+        ],
+      },
+    });
+    const { HostedSettingsIdentityLinkDialog } = await import(
+      "@/src/components/settings/hosted-settings-identity-link-dialog"
+    );
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedSettingsIdentityLinkDialog, {
+        account: {
+          ...makeAccountSnapshot(),
+          privySignInStates: {
+            ...removablePrivySignInStates(),
+            telegram: { removable: false, status: "matched" },
+          },
+        },
+        expectedPrivyUserId: "privy-user-a",
+        initialMode: "telegram",
+        intent: "remove",
+        onOpenChange: mocks.onOpenChange,
+        privySessionMatchesAppSession: true,
+      }),
+    );
+
+    try {
+      expect(container.textContent).toContain("Add another email, phone, or Telegram sign-in first");
+      const removeButton = Array.from(container.querySelectorAll("button")).find(
+        (candidate) => candidate.textContent === "Remove Telegram",
+      );
+      expect(removeButton?.hasAttribute("disabled")).toBe(true);
+      expect(mocks.unlinkTelegram).not.toHaveBeenCalled();
+    } finally {
+      await cleanup();
+    }
+  });
 });
 
-function makeAccountSnapshot() {
+function makeAccountSnapshot(): HostedAccountSettingsSnapshot {
   return {
     email: {
       address: "member@example.com",
@@ -615,8 +1025,19 @@ function makeAccountSnapshot() {
       number: "+14045550123",
       verifiedAt: "2026-05-02T00:00:00.000Z",
     },
+    privySignInStates: removablePrivySignInStates(),
     telegram: {
       telegramUserId: "12345",
     },
+  };
+}
+
+function removablePrivySignInStates(): NonNullable<
+  HostedAccountSettingsSnapshot["privySignInStates"]
+> {
+  return {
+    email: { removable: true, status: "matched" },
+    phone: { removable: true, status: "matched" },
+    telegram: { removable: true, status: "matched" },
   };
 }

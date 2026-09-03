@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-03",
+  "order": 100,
+  "item": {
+    "id": "journal-patterns-cleaner-names",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Journal and Patterns use cleaner names",
+    "summary": "Repeated wearable names now group into short, consistent labels across Journal and Personal Patterns.",
+    "details": "Journal hides missing activity values and repeated details, and keeps its private-chat helper aligned. Patterns keeps labels compact and its sortable headers free of extra help controls. Weekly insights can also use verified timing and combination evidence from Journal records.",
+    "relevanceTags": ["journal", "patterns", "wearables", "usability"],
+    "sourcePullRequests": [2745, 2776, 2777]
+  }
+}

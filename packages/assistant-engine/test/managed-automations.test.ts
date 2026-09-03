@@ -1403,6 +1403,27 @@ describe('applyMurphManagedAutomations', () => {
     expect(patternsUpdateRecord?.instructions).toContain(
       'do not rely on a shell environment variable',
     )
+    expect(patternsUpdateRecord?.instructions).toContain(
+      'knowledge show journal-pattern-vocabulary',
+    )
+    expect(patternsUpdateRecord?.instructions).toContain(
+      'Merge clear synonyms into one concept',
+    )
+    expect(patternsUpdateRecord?.instructions).toContain(
+      'revise an existing label when it can be clearer or shorter',
+    )
+    expect(patternsUpdateRecord?.instructions).toContain(
+      'Use one to three plain words for each member-facing label',
+    )
+    expect(patternsUpdateRecord?.instructions).toContain(
+      'Derived detail ids containing `--` do not need concepts',
+    )
+    expect(patternsUpdateRecord?.instructions).toContain(
+      'Never use an unexplained abbreviation as the member-facing label',
+    )
+    expect(patternsUpdateRecord?.instructions).toContain(
+      'A rename must not create a notification',
+    )
     const digestRecord = managedAutomationMocks.records.get(
       MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
     )
@@ -1509,6 +1530,15 @@ describe('applyMurphManagedAutomations', () => {
     expect(insightRecord?.instructions).toContain('Food capture')
     expect(insightRecord?.instructions).toContain('Easy missing measurement')
     expect(insightRecord?.instructions).toContain('Supplement and pill routines')
+    expect(insightRecord?.instructions).toContain(
+      'canonical food, supplement, medication, and event records behind Journal',
+    )
+    expect(insightRecord?.instructions).toContain(
+      'Do not turn a generic rule into a personal finding',
+    )
+    expect(insightRecord?.instructions).toContain(
+      "If web search is unavailable, the owning skill and the member's own records decide",
+    )
     expect(insightRecord?.instructions).toContain('Food planning')
     expect(insightRecord?.instructions).toContain('Goal progress')
     expect(insightRecord?.instructions).toContain('A goal plus missing or messy logs is not enough')

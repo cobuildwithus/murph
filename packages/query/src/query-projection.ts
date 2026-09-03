@@ -99,6 +99,7 @@ import {
   buildPersonalPatternReportFromWearableBundleAndMetricPoints,
   type PersonalPatternReport,
 } from "./personal-patterns.ts";
+import { readBrowserVaultPersonalPatternVocabulary } from "./browser-replica/source.ts";
 
 export type {
   QueryCanonicalEntityFilters,
@@ -330,11 +331,12 @@ export async function buildPersonalPatternReportRuntime(
     location,
     normalizeMetricPointFilters({ limit: null }),
   );
+  const vocabulary = await readBrowserVaultPersonalPatternVocabulary(vaultRoot);
   return buildPersonalPatternReportFromWearableBundleAndMetricPoints(
     vault,
     wearableBundle,
     metricPoints,
-    options,
+    { ...options, vocabulary },
   );
 }
 

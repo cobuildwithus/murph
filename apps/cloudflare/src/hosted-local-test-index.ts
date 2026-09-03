@@ -5,7 +5,9 @@ export {
 export {
   RunnerContainer,
 } from "./hosted-local-test/runner-container.ts";
-export { StandbyRunnerContainer } from "./standby-runner-container.ts";
+export {
+  HostedLocalTestStandbyRunnerContainer as StandbyRunnerContainer,
+} from "./hosted-local-test/standby-runner-container.ts";
 export {
   HostedLocalTestUserRunnerDurableObject as UserRunnerDurableObject,
 } from "./worker/hosted-local-test-user-runner-durable-object.ts";
