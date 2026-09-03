@@ -854,10 +854,12 @@ function readJournalIngredients(value: unknown): string[] {
 function testDetailItems(attributes: Record<string, unknown>): string[] {
   const counts = testResultCounts(attributes);
   const summary = readString(attributes.summary);
+  const note = readString(attributes.note);
   return uniqueStrings([
     counts ? `Markers: ${counts.markerCount}` : null,
     counts ? `Flagged: ${counts.flaggedCount}` : null,
     summary ? `Summary: ${summary}` : null,
+    note,
   ]);
 }
 

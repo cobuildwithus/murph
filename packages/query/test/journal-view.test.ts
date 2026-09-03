@@ -532,7 +532,7 @@ test("Journal keeps canonical test and capture records concise", () => {
     "test",
     "2026-08-25T12:00:00.000Z",
     {
-      note: "Screenshot provided by member.",
+      note: "Completed after 12 hours without loud sound exposure.",
       summary: "Hearing result was within the expected range.",
       testName: "AirPods hearing test",
     },
@@ -587,6 +587,7 @@ test("Journal keeps canonical test and capture records concise", () => {
   assert.equal(view.days[0]?.events[0]?.summary, null);
   assert.deepEqual(view.days[0]?.events[0]?.details, [
     "Summary: Hearing result was within the expected range.",
+    "Completed after 12 hours without loud sound exposure.",
   ]);
   assert.equal(view.days[0]?.events[1]?.title, "Posture study");
   assert.equal(view.days[0]?.events[1]?.summary, null);
@@ -602,6 +603,45 @@ test("Journal keeps canonical test and capture records concise", () => {
     "Markers: 3",
     "Flagged: 2",
     "Summary: Two markers are outside their reference ranges.",
+  ]);
+});
+
+test("Journal preserves every canonical test note and summary in details", () => {
+  const view = buildJournalView(
+    createVaultReadModel({
+      entities: [
+        event(
+          "note_only_test",
+          "test",
+          "2026-08-24T08:00:00.000Z",
+          {
+            note: "Fasted for 12 hours.",
+            testName: "Metabolic panel",
+          },
+          "Metabolic panel",
+        ),
+        event(
+          "summary_only_test",
+          "test",
+          "2026-08-24T09:00:00.000Z",
+          {
+            summary: "No acute findings.",
+            testName: "Diagnostic report",
+          },
+          "Diagnostic report",
+        ),
+      ],
+      vaultRoot: "test://journal-canonical-test-details",
+    }),
+    [],
+    { asOf: "2026-08-24T22:00:00.000Z" },
+  );
+
+  assert.equal(view.days[0]?.events[0]?.summary, null);
+  assert.deepEqual(view.days[0]?.events[0]?.details, ["Fasted for 12 hours."]);
+  assert.equal(view.days[0]?.events[1]?.summary, null);
+  assert.deepEqual(view.days[0]?.events[1]?.details, [
+    "Summary: No acute findings.",
   ]);
 });
 
