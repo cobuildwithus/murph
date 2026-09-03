@@ -105,29 +105,31 @@ do not publish trace, attempt, mailbox, or member identifiers.
 
 ## Gemini Video Analysis Rollout
 
-Deploy Web's Gemini usage-record acceptance and date-bound Gemini 3.7 Flash
-pricing first. Next, map the platform-owned `GEMINI_API_KEY` in the private
-Murph Cloud workflow and GitHub Environment without exposing its value to the
-public repository, only after vendor approval confirms that the exact hosted
-Gemini project has the applicable paid/no-training controls required by
-Murph's health-data policy. Key presence alone does not prove those controls.
-Finally, deploy the Worker and runner bundle with the compatible egress reader
-active before a new runner request shape can reach it. The runner receives only
-the normal injected-credential sentinel; the Worker owns the real key and
+Deploy Web's dual Gemini 3.8/3.7 usage-record acceptance and date-bound pricing
+first. Next, map the platform-owned `GEMINI_API_KEY` in the private Murph Cloud
+workflow and GitHub Environment without exposing its value to the public
+repository, only after vendor approval confirms that the exact hosted Gemini
+project has the applicable paid/no-training controls required by Murph's
+health-data policy. Key presence alone does not prove those controls. Finally,
+deploy the Worker and runner bundle with the compatible egress reader active
+before a new runner request path can reach it. The runner receives only the
+normal injected-credential sentinel; the Worker owns the real key and
 substitutes it only after the exact Gemini request passes authorization and
-shape validation. During this rollout the Worker accepts the two current
-profiles, standard 1 FPS or detailed-motion 5 FPS with medium thinking and no
-explicit output-token cap, plus only the exact previous 1 FPS, low-thinking,
-1,800-token shape from a warm old runner.
+shape validation. During this rollout the Worker accepts the 3.8 path with the
+two current profiles—standard 1 FPS or detailed-motion 5 FPS with medium
+thinking and no explicit output-token cap—and the previous 3.7 path with those
+same profiles or only the exact older 1 FPS, low-thinking, 1,800-token shape.
+The capped profile is never valid on the 3.8 path.
 
-Do not deploy the Cloudflare producer ahead of Web pricing: the Worker now
-withholds a successful Gemini response until Web accepts its usage row, so an
-older Web would turn every otherwise successful analysis into a 502. Missing
-key configuration is fail-closed and
-omits `murph.analyze_video`. During this update, an old runner continues to emit
-the exact legacy profile while a new runner may emit either current profile;
-the compatible Worker accepts both without permitting arbitrary FPS, thinking,
-or output settings. Both generations expose the tool for private-direct turns
+Do not deploy the Cloudflare producer ahead of Web pricing: warm 3.7 runners
+can continue to publish usage while new 3.8 runners start. Usage-record failure
+does not withhold a successful analysis, but it would undercount allowance
+usage. Missing key configuration is fail-closed and omits
+`murph.analyze_video`. During this update, an old runner continues to emit the
+3.7 path while a new runner emits the 3.8 path with either current profile; the
+compatible Worker derives the usage model from the exact path and accepts all
+three deployed path/profile combinations without permitting arbitrary models,
+FPS, thinking, or output settings. Both generations expose the tool for private-direct turns
 and authenticated Linq/Telegram group turns with accepted user-action input.
 Any authenticated group participant may request analysis of another
 participant's video in the same accepted group turn; unverified external groups
@@ -138,13 +140,14 @@ turn start; this lets the first live-steered video be frozen and authorized
 before tool execution in that same turn. There is no schema, backfill,
 dual-write, or stored compatibility state.
 
-Do not revert the compatible Worker while a new runner can still emit the new
-request shape. Disable the tool or roll back the runner writer first, drain warm
-new runners, and only then revert the reader; the Web usage reader and pricing
-branch are safe to leave in place. Post-deploy, use consented short supported
+Do not revert the compatible Worker while a new runner can still emit the 3.8
+path. Disable the tool or roll back the runner writer to 3.7 first, drain warm
+3.8 runners, and only then revert the reader; the Web dual-model usage reader
+and pricing branch are safe to leave in place. Post-deploy, use consented short supported
 videos in a private direct conversation to verify one ordinary request selects
 standard 1 FPS and one rapid-movement or exercise-form request selects detailed
-motion 5 FPS. Confirm both finish with one Gemini call and one usage record.
+motion 5 FPS. Confirm both finish with one Gemini 3.8 call and one usage record
+whose requested model and pricing version name 3.8.
 Then use one consented group video and verify the same single-request result
 when its uploader requests analysis. Have a different authenticated participant
 request analysis of a second consented group video and verify the same result.
