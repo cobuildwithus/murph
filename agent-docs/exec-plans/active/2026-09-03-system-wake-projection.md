@@ -25,9 +25,9 @@ Updated: 2026-09-03
 
 - A focused test reproduces the current assistant-over-device projection before
   the implementation change.
-- With a retained device follow-up, the workspace's canonical `nextWakeAt`
-  remains the device deadline and the assistant deadline remains available only
-  through `nextDefaultProcessingWakeAt`.
+- With a retained device follow-up, the workspace's canonical model-free
+  `nextWakeAt` selection retains the device deadline and the assistant deadline
+  remains available only through `nextDefaultProcessingWakeAt`.
 - Foreground conversation, explicitly approved assistant continuations,
   assistant-execution blocking, and backed-off model-free work keep their
   existing priority.
@@ -96,6 +96,9 @@ Updated: 2026-09-03
   after a device item records its own follow-up deadline. Preserve a due
   foreground handoff and an exact default-owned system barrier, then keep the
   device and assistant deadlines in their existing separate fields.
+- The canonical selection still compares the device deadline with mailbox
+  import retries and other non-assistant candidates; the fix removes only the
+  duplicate assistant candidate from that ownership decision.
 
 ## Product UX Walkthrough
 
