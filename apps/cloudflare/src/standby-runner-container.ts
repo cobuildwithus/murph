@@ -9,6 +9,7 @@ import {
   type RunnerContainerEnsureReadyForProcessingInput,
   type RunnerContainerEnsureReadyForProcessingResult,
   type RunnerContainerPrewarmShellResult,
+  type RunnerContainerRuntimeCompletionRecordedInput,
   type RunnerRuntimeWakeInput,
   type RunnerRuntimeWakeResult,
   type RunnerWorkspaceInvocationAbortStatus,
@@ -168,6 +169,13 @@ export class StandbyRunnerContainer extends RunnerContainer {
   ): Promise<HostedExecutionRunnerJobResult> {
     this.authorizeBoundUser(payload.userId);
     return await super.invoke(payload);
+  }
+
+  override async onRuntimeCompletionRecorded(
+    input: RunnerContainerRuntimeCompletionRecordedInput,
+  ): Promise<void> {
+    this.authorizeBoundUser(input.userId);
+    await super.onRuntimeCompletionRecorded(input);
   }
 
   override async ensureReadyForProcessing(

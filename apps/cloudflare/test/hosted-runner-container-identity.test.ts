@@ -1446,6 +1446,7 @@ class RecordingRuntimeInvocationService extends RuntimeInvocationService {
       runnerRuntimeEnvSource: {},
       runnerStoreCache: new TestRunnerStoreCache({}),
       stateStore,
+      waitUntil: (promise) => durable.state.waitUntil(promise),
     });
   }
 
@@ -1611,6 +1612,7 @@ function createRuntimeInvocationService(input: {
     runnerRuntimeEnvSource: input.runnerRuntimeEnvSource,
     runnerStoreCache: new TestRunnerStoreCache(input.runnerRuntimeEnvSource),
     stateStore: input.stateStore,
+    waitUntil: (promise) => input.state.waitUntil(promise),
   });
 }
 

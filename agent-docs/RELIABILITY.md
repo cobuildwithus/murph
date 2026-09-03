@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-09-01
+Last verified: 2026-09-02
 
 ## Current Guardrails
 
@@ -1273,7 +1273,12 @@ Last verified: 2026-09-01
   connection mailbox wake; only that wake may fetch its exact Web-owned dirty
   row or claim its account's local jobs. A runtime-authored dirty-remainder
   retry bypasses provider scheduling so cadence cannot refill the bounded local
-  queue before the authoritative dirty payload is admitted. A generic runtime
+  queue before the authoritative dirty payload is admitted, and retains its
+  existing 30-second delay. Once all local jobs are terminal, the empty-job
+  `retained_completion_fence` is due immediately instead: it preserves the same
+  mailbox item and schedule-event identities, suppresses provider scheduling,
+  and carries the provider cadence without publishing it before the fence
+  checkpoint. A generic runtime
   timer admits neither
   dirty work, provider cadence, nor unrelated-account jobs. The connection-specific encrypted
   mailbox item stays pending while that account has queued or running work and
@@ -1360,8 +1365,8 @@ Last verified: 2026-09-01
   that committed ref starts without the SQLite execution record, reconstructs the
   pending obligation from durable mailbox authority, observes exactly one replay
   of the four provider classes (eight requests total), and makes three successful
-  recovery checkpoints. Its retained completion fence is
-  due at 00:05:30 and carries the 06:05 provider cadence. The completion pass
+  recovery checkpoints. Its retained completion fence is immediately due at
+  00:05 and carries the 06:05 provider cadence. The completion pass
   performs no third provider pull, makes two successful checkpoints, and
   publishes 06:05 only after the durable recovery/completion checkpoint. The
   first later bucket at 00:10 returns idle with no wake and performs one bounded

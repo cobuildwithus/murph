@@ -205,6 +205,7 @@ export class HostedUserRunner {
         await this.readHostedRuntimeStatusFromWeb(userId, { logLimit: 0 }),
       readHostedWebControlBaseUrl: () => this.readHostedWebControlBaseUrl(),
       readHostedWorkspaceFromWeb: async (userId, input) => await this.readHostedWorkspaceFromWeb(userId, input),
+      waitUntil: (promise) => state.waitUntil(promise),
     });
     this.runtimeInvocation = runtimeInvocation;
     this.workspaceSnapshotSessions = createWorkspaceSnapshotSessionService({
