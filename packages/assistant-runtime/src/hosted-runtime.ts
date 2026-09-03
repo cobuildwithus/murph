@@ -444,6 +444,7 @@ const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS = [
   "apply-member-channels-update",
   "apply-runtime-control-request",
   "dispatch-assistant-notification",
+  "import-group-journal-fact",
   "import-reported-daily-metric",
   "run-device-sync-wake",
   "run-environment-interview",

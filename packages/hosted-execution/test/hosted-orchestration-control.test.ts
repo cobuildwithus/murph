@@ -357,6 +357,10 @@ describe("hosted orchestration control contracts", () => {
       dedupeKey: "health.daily-metric.reported:synthetic",
       kind: "health.daily-metric.reported",
     })).toBe("model_free");
+    expect(classifyHostedSystemMailboxExecutionClass({
+      dedupeKey: "journal.group-fact.recorded:synthetic",
+      kind: "journal.group-fact.recorded",
+    })).toBe("model_free");
   });
 
   it("rejects raw payload-shaped fields in reconciliation facts contracts", () => {
