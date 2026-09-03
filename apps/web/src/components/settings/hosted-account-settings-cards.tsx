@@ -270,13 +270,13 @@ function HostedSettingsIdentityActions({
   removalPending: boolean;
   verified: boolean;
 }) {
-  const refreshRequired = privyState?.status === "ambiguous"
-    || (
-      connected
-      && verified
-      && !removalPending
-      && privyState?.status !== "matched"
-    );
+  const phoneMismatchCanRecover = method === "phone"
+    && privyState?.status === "mismatched";
+  const refreshRequired = connected
+    && verified
+    && !removalPending
+    && privyState?.status !== "matched"
+    && !phoneMismatchCanRecover;
   const label = resolveIdentityActionLabel({
     connected,
     method,

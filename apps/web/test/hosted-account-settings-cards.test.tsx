@@ -272,6 +272,7 @@ describe("HostedAccountSettingsCards", () => {
   });
 
   test("refreshes instead of offering destructive actions when identities disagree", async () => {
+    refresh.mockClear();
     const rendered = await renderClientComponent(
       React.createElement(HostedAccountSettingsCards, {
         account: {
@@ -295,6 +296,74 @@ describe("HostedAccountSettingsCards", () => {
       expect(refreshButton).toBeTruthy();
       expect(rendered.container.textContent).not.toContain("Remove");
 
+      await React.act(async () => {
+        refreshButton?.click();
+      });
+
+      expect(refresh).toHaveBeenCalledTimes(1);
+      expect(rendered.container.querySelector("[data-link-mode]")).toBeNull();
+    } finally {
+      await rendered.cleanup();
+    }
+  });
+
+  test("routes a completed provider phone change through the existing phone recovery flow", async () => {
+    refresh.mockClear();
+    const rendered = await renderClientComponent(
+      React.createElement(HostedAccountSettingsCards, {
+        account: {
+          ...makeAccountSnapshot({ phoneNumber: "+14045550123" }),
+          privySignInStates: {
+            ...protectedPrivySignInStates(),
+            phone: { removable: false, status: "mismatched" },
+          },
+        },
+      }),
+    );
+
+    try {
+      const phoneRow = Array.from(rendered.container.querySelectorAll("div")).find(
+        (candidate) =>
+          candidate.children[1]?.querySelector("span")?.textContent === "Phone",
+      );
+      const changeButton = Array.from(phoneRow?.querySelectorAll("button") ?? []).find(
+        (candidate) => candidate.textContent === "Change",
+      );
+
+      expect(changeButton).toBeTruthy();
+      await React.act(async () => {
+        changeButton?.click();
+      });
+
+      expect(refresh).not.toHaveBeenCalled();
+      expect(
+        rendered.container.querySelector("[data-link-mode]")?.getAttribute("data-link-mode"),
+      ).toBe("phone");
+      expect(
+        rendered.container.querySelector("[data-link-intent]")?.getAttribute("data-link-intent"),
+      ).toBe("manage");
+    } finally {
+      await rendered.cleanup();
+    }
+  });
+
+  test("keeps phone changes fail closed when the provider state is unknown", async () => {
+    refresh.mockClear();
+    const rendered = await renderClientComponent(
+      React.createElement(HostedAccountSettingsCards, {
+        account: {
+          ...makeAccountSnapshot({ phoneNumber: "+14045550123" }),
+          privySignInStates: null,
+        },
+      }),
+    );
+
+    try {
+      const refreshButton = Array.from(rendered.container.querySelectorAll("button")).find(
+        (candidate) => candidate.textContent === "Refresh",
+      );
+
+      expect(refreshButton).toBeTruthy();
       await React.act(async () => {
         refreshButton?.click();
       });

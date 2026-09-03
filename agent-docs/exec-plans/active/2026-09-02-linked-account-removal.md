@@ -37,10 +37,12 @@ identity so a removed channel does not stay active or visible.
   Telegram replacement stay unavailable, with direct copy to add email, phone,
   or Telegram first. The provider's last-account rejection remains a backstop.
 - Member with a stale browser, raced change, or conflicting provider identity:
-  Settings offers only Refresh until the server-approved provider identity and
-  canonical identity agree. The dialog rechecks that same canonical value
-  immediately before unlink, and the cleanup route refuses any provider type
-  that is still present or ambiguous.
+  email, Telegram, ambiguous, and unknown provider states offer only Refresh.
+  A completed provider phone change reuses the existing phone-sync recovery
+  dialog, which saves the exact provider phone without reopening or mutating
+  Privy. The unlink dialog rechecks the canonical value immediately before
+  unlink, and cleanup refuses any provider type that is still present or
+  ambiguous.
 - Provider unlink succeeds but Murph sync is temporarily unavailable: the
   dialog says the provider identity was removed and offers a retry that only
   performs idempotent Murph cleanup; it never tries to unlink twice.
@@ -76,9 +78,12 @@ identity so a removed channel does not stay active or visible.
 
 ## Verification record
 
-- Focused hosted-Web suite: 138 tests passed across account projection,
+- Focused hosted-Web suite: 175 tests passed across account projection,
   Settings rows/dialogs, removal retries, canonical projection cleanup, and the
-  authenticated DELETE route.
+  authenticated DELETE route. This includes the final phone-mismatch recovery
+  regression: Settings opens the existing phone owner, it saves the exact
+  provider phone without a second provider mutation, and unknown provider state
+  remains fail closed.
 - Changelog page suite: 48 tests passed.
 - `pnpm --dir apps/web typecheck:prepared`: passed.
 - `pnpm --dir apps/web lint`: passed with 44 pre-existing warnings and no
