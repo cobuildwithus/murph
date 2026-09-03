@@ -667,7 +667,6 @@ function renderWearableTrendResponseCardText(
   return [
     `7-day health · ${formatWearableTrendDateRange(card.localDates)}`,
     `Days: ${formatWearableTrendWeekdayLabels(card.localDates).join(' · ')}`,
-    'Avg · trend vs prior 7d',
     '',
     ...blocks,
   ].join('\n')
@@ -1022,7 +1021,6 @@ function renderTelegramWearableTrendCardHtml(
   const weekdays = `Days: ${
     formatWearableTrendWeekdayLabels(card.localDates).join(' · ')
   }`
-  const summaryAxis = 'Avg · trend vs prior 7d'
   const metrics = card.metrics.map((metric) => {
     const display = wearableTrendMetricDisplayByKey[metric.metricKey]
     const summary = `${display.compactLabel} · ${
@@ -1039,7 +1037,7 @@ function renderTelegramWearableTrendCardHtml(
   }).join('')
   return `<h2>${escapeTelegramRichHtml(heading)}</h2><p>${
     escapeTelegramRichHtml(weekdays)
-  }<br>${escapeTelegramRichHtml(summaryAxis)}</p>${metrics}`
+  }</p>${metrics}`
 }
 
 function renderTelegramExerciseRoutineCardHtml(
