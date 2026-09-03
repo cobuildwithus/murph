@@ -49,7 +49,8 @@ identity so a removed channel does not stay active or visible.
 - Phone removal disconnects both phone sign-in and Murph texting because the
   existing Settings row presents them as one connected channel. Email removal
   revokes verified-email messaging and the reply alias while retaining billing
-  contact history. Telegram removal revokes direct Telegram routing.
+  contact history without presenting that billing address as a linked sign-in.
+  Telegram removal revokes direct Telegram routing.
 - Existing Settings row, dialog, button, error, focus, and responsive patterns
   remain the visual source of truth. The current `/design?tab=components`
   identity-dialog representation will be extended with synthetic linked and
@@ -78,12 +79,14 @@ identity so a removed channel does not stay active or visible.
 
 ## Verification record
 
-- Focused hosted-Web suite: 175 tests passed across account projection,
+- Focused hosted-Web suite: 179 tests passed across account projection,
   Settings rows/dialogs, removal retries, canonical projection cleanup, and the
   authenticated DELETE route. This includes the final phone-mismatch recovery
   regression: Settings opens the existing phone owner, it saves the exact
   provider phone without a second provider mutation, and unknown provider state
-  remains fail closed.
+  remains fail closed. It also proves a retained checkout email renders as not
+  connected after cleanup, while verified pending cleanup and uncertain
+  provider states keep their existing recovery behavior.
 - Changelog page suite: 48 tests passed.
 - `pnpm --dir apps/web typecheck:prepared`: passed.
 - `pnpm --dir apps/web lint`: passed with 44 pre-existing warnings and no

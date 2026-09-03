@@ -101,6 +101,79 @@ describe("HostedAccountSettingsCards", () => {
     expect(markup).not.toContain("mail@mail.withmurph.ai");
   });
 
+  test("does not present a retained billing email as a linked sign-in", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(HostedAccountSettingsCards, {
+        account: {
+          ...makeAccountSnapshot({ phoneNumber: null }),
+          email: {
+            address: "payer@example.com",
+            verifiedAt: null,
+          },
+          privySignInStates: {
+            ...protectedPrivySignInStates(),
+            email: { removable: false, status: "absent" },
+          },
+        },
+      }),
+    );
+
+    expect(markup).not.toContain("payer@example.com");
+    expect(markup).toContain("Not connected");
+    expect(markup).toContain("Link email");
+    expect(markup).not.toContain("Verify");
+    expect(markup).not.toContain("Finish disconnecting");
+  });
+
+  test("keeps interrupted email removal recoverable while canonical cleanup is pending", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(HostedAccountSettingsCards, {
+        account: {
+          ...makeAccountSnapshot({ phoneNumber: null }),
+          email: {
+            address: "member@example.com",
+            verifiedAt: "2026-05-02T00:00:00.000Z",
+          },
+          privySignInStates: {
+            ...protectedPrivySignInStates(),
+            email: { removable: false, status: "absent" },
+          },
+        },
+      }),
+    );
+
+    expect(markup).toContain("member@example.com");
+    expect(markup).toContain("Finish disconnecting");
+    expect(markup).not.toContain("Link email");
+  });
+
+  test.each([
+    ["mismatched", { removable: false, status: "mismatched" as const }],
+    ["unknown", null],
+  ])("keeps a %s email provider state fail closed", (_label, emailState) => {
+    const markup = renderToStaticMarkup(
+      React.createElement(HostedAccountSettingsCards, {
+        account: {
+          ...makeAccountSnapshot({ phoneNumber: null }),
+          email: {
+            address: "member@example.com",
+            verifiedAt: "2026-05-02T00:00:00.000Z",
+          },
+          privySignInStates: emailState
+            ? {
+                ...protectedPrivySignInStates(),
+                email: emailState,
+              }
+            : null,
+        },
+      }),
+    );
+
+    expect(markup).toContain("member@example.com");
+    expect(markup).toContain("Refresh");
+    expect(markup).not.toContain('aria-label="Remove email"');
+  });
+
   test("shows a matched Telegram username instead of the raw Telegram id", () => {
     const markup = renderToStaticMarkup(
       React.createElement(HostedAccountSettingsCards, {

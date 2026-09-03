@@ -223,6 +223,10 @@ function HostedSettingsEmailRow({
   const emailAddress = account.email.address;
   const murphEmailAddress = account.email.murphEmailAddress;
   const privyState = account.privySignInStates?.email ?? null;
+  const connected = Boolean(
+    emailAddress
+    && (account.email.verifiedAt || privyState?.status !== "absent"),
+  );
   const removalPending = Boolean(
     emailAddress && account.email.verifiedAt && privyState?.status === "absent",
   );
@@ -231,16 +235,16 @@ function HostedSettingsEmailRow({
     <SettingsRow
       icon={<Mail className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
       label="Email"
-      value={emailAddress ?? "Not connected"}
-      empty={!emailAddress}
-      meta={emailAddress && murphEmailAddress && !removalPending ? (
+      value={connected && emailAddress ? emailAddress : "Not connected"}
+      empty={!connected}
+      meta={connected && emailAddress && murphEmailAddress && !removalPending ? (
         <SettingsContactLink href={`mailto:${murphEmailAddress}`} label="Email Murph">
           Email Murph
         </SettingsContactLink>
       ) : null}
       action={(
         <HostedSettingsIdentityActions
-          connected={Boolean(emailAddress)}
+          connected={connected}
           method="email"
           onRefresh={onRefresh}
           onSelect={onSelect}
