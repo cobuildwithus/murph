@@ -274,8 +274,7 @@ average as the largest number in the row with a small unit beside it, followed
 on the same line by one neutral arrow (`↑`, `↓`, or `→`) for the
 week-over-week direction; the unit and arrow are vertically centered against
 the number. Never spell the direction out as a word. A row with too few
-observed days to compare shows no arrow at all, and the comparison basis is
-not repeated on any row; the text recovery names both. The seven days are one
+observed days to compare shows no arrow at all, and no surface names a comparison basis; the accessibility label reads the trend word only. The seven days are one
 line in a neutral warm stroke with a point on each observed day, fitted to
 that metric's own observed range so the highest day touches the top and the
 lowest the bottom and a flat week draws a level line; there are no value
