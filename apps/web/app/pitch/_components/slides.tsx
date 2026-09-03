@@ -1014,27 +1014,27 @@ export function ValidationSlide() {
       <SlideHeading>
         The product is live.
         <br />
-        MRR grew 103% in the last 30 days.
+        MRR grew 61% in the 30 days through September 2.
       </SlideHeading>
       <p className="mt-5 max-w-[64ch] text-base leading-[1.7] text-[#635a48]">
         We shipped the personal experiment loop first. The wedge became
         obvious &mdash; people don&rsquo;t want to optimize alone, they want
         to run health challenges with friends. Group challenges shipped in
-        July. Revenue has compounded every week since.
+        July. Revenue rose every completed week in the period.
       </p>
       <div className="mt-9 grid gap-3 sm:grid-cols-3">
         {[
           {
-            value: "18% w/w MRR growth",
-            note: "Compounded over the last 30 days, with revenue up every week.",
+            value: "12% weekly compound MRR growth",
+            note: "Equivalent rate across the 30 days through September 2.",
           },
           {
-            value: "+82% paying customers",
-            note: "In 30 days, with zero paid acquisition.",
+            value: "+44% paying customers",
+            note: "In the 30 days through September 2, with zero paid acquisition.",
           },
           {
-            value: "10 msgs / day / active user",
-            note: "3,003 messages exchanged last week — 73 per weekly active user.",
+            value: "7 msgs / day / active user",
+            note: "1,623 messages exchanged August 26–September 1, 49 per weekly active user.",
           },
         ].map((card) => (
           <div
@@ -1064,8 +1064,8 @@ export function ValidationSlide() {
         <PivotCard
           highlight
           items={[
-            "12 group chats active last week, up from one in June",
-            "The most active group sent 255 messages to Murph last week",
+            "9 group chats active August 26–September 1, up from one in June",
+            "The most active group exchanged 115 total messages that week",
             "Laughs, reactions, trash talk at the referee",
             "Voice memos back and forth with Murph",
           ]}

@@ -381,7 +381,7 @@ export function ShareEnvironmentButton({
 
   if (disabled) {
     return (
-      <TooltipProvider delay={150}>
+      <TooltipProvider>
         <Tooltip>
           <TooltipTrigger
             render={

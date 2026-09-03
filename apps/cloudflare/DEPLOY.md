@@ -777,16 +777,24 @@ are correctness-compatible, so either side may be rolled back independently
 during this compatibility window. The recommended order minimizes exposure to
 the old latency path.
 
-The same producer-first order applies to the positive
-`immediateRecheckRequested` owner-release edge. New Cloudflare code signs its
-exact query and lets it override only the normal future-continuation callback
-skip; old runners simply omit the edge and fall back to the owner horizon. Web
-must not deploy the due-wake level-trigger removal before the new producer is
-available. Roll back Web before Cloudflare/runner if the pair must be reverted.
+The exact owner-release attempt pointer uses consumer-first rollout. Classify
+the private Temporal worker as patch-introducing, deploy it through its
+no-traffic direct-Current path, and prove the exact Build ID is Current with no
+prior or Ramping reader eligible for the Task Queue. Only then deploy Web,
+followed by Cloudflare/runner. During the compatibility window, Web maps old
+bodyless callbacks without an attempt pointer to the existing facts-only
+recheck. New Cloudflare code signs `runtimeAttemptId` and the optional
+`immediateRecheckRequested` edge in one canonical query; old Web rejects that
+query non-fatally, so Web must precede the producer.
 
-After both deploys, confirm there is no extra metadata-only handoff checkpoint
-for the same shutdown and actionable late input causes the existing Temporal
-recheck after owner release.
+Roll back or disable Cloudflare and Web before worker recovery. Once Web can
+emit `runtime_owner_released`, never select the previous private Build ID until
+both producers are disabled and all signal-bearing Workflow histories have
+drained. Recover the consumer forward during that interval.
+
+After all three deploys, confirm there is no extra metadata-only handoff
+checkpoint for the same shutdown and actionable late input causes the exact
+Temporal owner release to admit fresh reconciliation immediately.
 
 ## Assistant Ask Deployment
 
@@ -1422,9 +1430,26 @@ Core execution tuning:
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000` (production sets `600000`) and controls the post-completion warm lease minted only by observed conversation activity. Reducing production from 20 minutes to 10 minutes means a follow-up in the former 11–20 minute warm window can take the existing cold-start path instead. `HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS` defaults to the idle TTL when absent for rollback compatibility. Leave it unset for the additive code deploy and one legacy-TTL observation window, drain old containers, then set it to `60000` for a canary before widening the rollout. Device sync, system maintenance, replay, and generic runner activity do not extend conversation warmth. RunnerContainer derives the lease directly from the resident child process's private health watermark on every expiry, re-arms the platform timeout while the lease or active work remains, yields on uncertain cleanup state, and otherwise destroys the idle shell. An inactive old child without the watermark is cleanup-eligible; active old-child work remains protected by its independent active-work count. A replacement child starts without inheriting the old process's warmth. Dirty foreground runtime state is checkpointed by the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` path before the invocation returns; RunnerContainer never records pending checkpoint intent.
 - `HOSTED_EXECUTION_STANDBY_MODE` defaults to `off`. `shadow` maintains one
   release-scoped ENAM standby and measures readiness without allocating it;
-  `allocate` lets `UserRunner` claim it with a 250 ms total coordinator/bind
-  deadline and uses the unchanged exact-user cold path when no ready slot is
-  available. Invalid values fail deploy/runtime parsing closed.
+  `allocate` lets only a fence-free, authenticated Web-direct `default` request
+  claim it with a 250 ms total coordinator/bind deadline. Temporal requests and
+  background modes use the unchanged exact-user path. A trusted foreground
+  replacement may claim the standby after clearing an exact-user background
+  fence so it does not reuse a child that is still shutting down. Pending or
+  retained standby targets still reconcile before that fresh-claim gate. In
+  `allocate` mode the standby coordinator is the sole shell-prewarm owner; the
+  exact-user prewarm hint is skipped so it cannot reserve a competing target
+  before the claim. An unsuccessful claim still uses the ordinary exact-user
+  fallback. Accepted fresh starts persist the bounded allocation outcome,
+  reason, and elapsed milliseconds in the existing latency phase breakdown;
+  the Worker selection log emits the same metadata before fence and readiness
+  work. Deploy Web first so its strict telemetry parser accepts these additive
+  leaves, then deploy Cloudflare. Reversing that order affects diagnostics only:
+  old Web drops the unknown phase breakdown while retaining core milestones.
+  The fields remain in Worker-owned orchestration and do not change the
+  Worker/container invocation job, so this diagnostic itself needs no special
+  container rollout mode; obey any independently active production rollout
+  requirement.
+  Invalid values fail deploy/runtime parsing closed.
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production` for
   direct/local artifact rendering. The manual deploy workflow derives it from
   the selected `preview` or `production` target; do not configure a conflicting
@@ -1454,7 +1479,10 @@ effective standby mode, expected Worker release, and runner bundle/source
 fingerprints first. Then use `shadow` for at least one ordinary
 observation window and verify that exactly one current-release ENAM slot stays
 ready, failed/stale slots retire, and no processing reports a claimed standby.
-Only then set `allocate`; no Web or Temporal deploy is required.
+Only then set `allocate`; no Web or Temporal deploy is required. In the bounded
+post-deploy observation, require every claimed allocation to be a validated
+Web-direct `default` attempt and require Temporal or background starts to report
+the exact-user path instead of a claim.
 
 At the current 2-vCPU, 6-GiB-memory, 6-GB-disk shape, one continuously ready
 slot costs about $40.52 per average 730-hour month for allocated memory and
@@ -2036,6 +2064,26 @@ That command:
 
 The gradual container rollout keeps the production `RunnerContainer` and `StandbyRunnerContainer` `rollout_active_grace_period` at 300 seconds and rolls their instances through `10`, `25`, `50`, then `100` percent. Standby readiness is release-scoped, so a mixed rollout never advertises an old image for a new Worker release. The isolated `DeploySmokeRunnerContainer` uses zero active grace and a single 100 percent step: it carries no user work, and smoke probes must not defer the image replacement they are trying to verify. The manual workflow exposes a `container_rollout` input; its production default is currently `immediate` because selector-scoped vault-share deliveries are unsafe under gradual runner rollout. Selecting `immediate` passes Wrangler's `--containers-rollout=immediate` flag and can interrupt active runner containers.
 Worker replacement is checkpoint-safe at the runtime fence rather than through rollout timing alone. The snapshot-session handshake has one six-second total deadline; the runtime starts its first exact durable upload-session heartbeat immediately after that response, then keeps serialized attempts on a two-second start-to-start cadence throughout publication. `UserRunner` retains the fence and retries after one second only for that exact attempt and lease generation while its heartbeat is less than 10 seconds old and completion is absent. Successful foreground preemption bypasses this preservation and stops heartbeat liveness before detached cleanup. After Web accepts the checkpoint, the runtime stops heartbeating and best-effort marks completion; marker failure falls back to stale-heartbeat expiry. Other starts remain immediate; live snapshots have no artificial publication deadline, while a dead runtime can defer replacement for the 10-second liveness window plus at most one additional retry interval (one second) after its final heartbeat.
+
+A successful invocation also sends its exact result, attempt, and generation
+from the container process through the existing bound internal runner-control
+route after the entrypoint has cleared invocation wake and abort pointers,
+decremented active work, and cleaned request transport. `UserRunner` remains the
+sole durable completion authority and applies its existing write-fence
+compare-and-swap; this lets completion survive a `RunnerContainer` Durable
+Object activation reset without admitting a successor while the process still
+reports busy. The ordinary outer result remains the normal completion path,
+stale or duplicate receipts are no-ops, and structured receipt outcomes are
+`recorded` or `not_recorded`. The one-second best-effort receipt cannot change
+the completed result and adds no poller or recovery queue.
+
+The first deployment that introduces the container-process sender must use
+`container_rollout=immediate`. Worker code is available before its new container
+image, so a new process can safely reach the new route; an old process has no
+reset-safe sender once its disposable Worker activation is replaced. Immediate
+rollout closes that one-way mixed-version window. After managed-container smoke
+reports the candidate runner-bundle fingerprint, subsequent compatible deploys
+may return to the normal rollout policy.
 During gradual rollout, Worker code and runner container state may disagree for the rollout window. A newly deployed Worker version can handle provider egress or internal-host traffic from an already-running warm runner process whose bundle, process env, or provider-credential shape was created before the deploy. Treat this as expected rollout behavior, not proof that traffic is reaching an old Worker version. Any PR that changes a Worker/container contract, runner env shape, hosted provider credential, internal host route, parser/toolchain path, or bundle-owned runtime assumption must document the compatibility window in its PR description and final `DEPLOYMENT CONCERNS:` handoff: whether old containers can safely talk to new Worker code, whether new containers can safely talk to old web/control-plane code, whether `container_rollout=immediate` is required, and which deploy-smoke or Workers Observability checks prove the fleet has converged.
 
 The Junction scalar-timeseries continuation cutover is runner-only and requires
@@ -2267,13 +2315,13 @@ or runtime work.
 
 ## Operator task rollout
 
-Deploy shared runner/Worker code that accepts the additive `operator_task` ask
-target and `operator-message` prompt profile before deploying the Web migration
-and `/ops/tasks` admission UI. Old Web remains safe with the new reader because
-it cannot enqueue the new shapes. After Web deploy, prove one private
-diagnostic and one synthetic direct-message admission. For rollback, disable or
-roll back Web admission first, allow admitted mailbox work to drain, then roll
-back the runner/Worker reader.
+Deploy the runner/Worker first so it accepts operator prepare responses without
+the obsolete disclosure field and contains `executeOperatorDiagnostic` plus its
+native read-only profile. Then deploy Web, which stops returning that field.
+Old Web is compatible with the new runner; new Web is not compatible with the
+old runner, so the new runner becomes the rollback floor after Web deploy.
+Post-deploy, run one synthetic diagnostic that must correlate `.runtime` and
+hosted Codex session evidence without changing either root.
 
 Wrangler SSH is intentionally disabled for both runner Container classes. The
 checked-in scaffold and generated deploy config must set `ssh.enabled` to

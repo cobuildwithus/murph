@@ -128,7 +128,7 @@ export function createBrowserVaultSessionRoute() {
     ]);
 
     const replicaRef = parseHostedBrowserVaultReplicaRef(
-      workspace?.browserVaultReplicaRef ?? null,
+      nullableBrowserVaultSessionValue(workspace?.browserVaultReplicaRef),
       "Hosted browser vault session workspace replica ref",
     );
     const workspaceVersion = workspace?.version ?? null;
@@ -148,20 +148,31 @@ export function createBrowserVaultSessionRoute() {
       );
     };
 
-    if (requestRefresh || (
-      freshnessAssessment.shouldRefresh
-      && !refreshObservationOnly
-    )) {
-      scheduleRefreshAfterResponse();
-    }
-
     if (!replicaRef) {
+      // A pending device import already owns the runtime wake that will create
+      // the first replica. A parallel Browser Vault refresh can otherwise keep
+      // placing newer mailbox work ahead of that import.
+      if (shouldScheduleInitialReplicaRefresh({
+        deviceSyncImportPending,
+        refreshObservationOnly,
+        requestRefresh,
+        shouldRefresh: freshnessAssessment.shouldRefresh,
+      })) {
+        scheduleRefreshAfterResponse();
+      }
       return emptyBrowserVaultSession({
         deviceSyncImportPending,
         memberId: auth.member.id,
         refreshPending: true,
         workspaceVersion,
       });
+    }
+
+    if (requestRefresh || (
+      freshnessAssessment.shouldRefresh
+      && !refreshObservationOnly
+    )) {
+      scheduleRefreshAfterResponse();
     }
 
     const knownRefMatches = browserVaultReplicaRefsMatch(knownReplicaRef, replicaRef)
@@ -278,6 +289,23 @@ export function createBrowserVaultSessionRoute() {
       throw error;
     }
   });
+}
+
+function shouldScheduleInitialReplicaRefresh(input: {
+  deviceSyncImportPending: boolean;
+  refreshObservationOnly: boolean;
+  requestRefresh: boolean;
+  shouldRefresh: boolean;
+}): boolean {
+  return (
+    !input.deviceSyncImportPending &&
+    (input.requestRefresh ||
+      (input.shouldRefresh && !input.refreshObservationOnly))
+  );
+}
+
+function nullableBrowserVaultSessionValue<T>(value: T | undefined): T | null {
+  return value ?? null;
 }
 
 function scheduleAfterResponseOrFireAndForget(task: () => Promise<void>): void {

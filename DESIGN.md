@@ -104,6 +104,7 @@ This system rejects the two dominant defaults of the category outright. It is no
 Density is a feature, not a bug. Scientific data, expert quotes, research citations, mechanism explanations — depth IS the product. The job is to present more information with more care, not less information with more whitespace.
 
 **Key Characteristics:**
+
 - Warm desert palette on cream paper — amber, sage, slate, sand. No pure white, no pure black.
 - Serif display (Fraunces) for headlines and stat numbers, sans body (DM Sans), mono labels (DM Mono) uppercase with generous tracking.
 - Desktop-first at 1440px, two-column rhythms (Protocol + Why It Works, Charts + Timeline).
@@ -115,9 +116,11 @@ Density is a feature, not a bug. Scientific data, expert quotes, research citati
 A single-accent system. Sage green carries every affirmative signal; the rest of the interface is tinted neutrals — cream paper, slate ink, sand and amber for grain. No secondary accent competes with sage. Warning sienna appears only where warranted.
 
 ### Primary
+
 - **Sage Green** (`#7a8c6e`, dark variant `#5a6e32`): the one affirmative accent. Start Experiment CTA, positive deltas on signal cards, active-phase fill in progress bars, "strong positive signal" conclusions, sage-left-accent cards for Next Step and What Worked. The dark variant (`#5a6e32`) is the button color; the standard variant (`#7a8c6e`) is the data color.
 
 ### Neutral
+
 - **Cream** (`#f5f0e8`): the page. Paper, not white. Every surface defaults to this.
 - **Slate** (`#2d3436`): primary text and the sidebar. The ink on the page. Also the Secondary button color.
 - **Slate Muted** (`#736a58`): muted text, captions, metadata. WCAG AA compliant on cream.
@@ -127,6 +130,7 @@ A single-accent system. Sage green carries every affirmative signal; the rest of
 - **Wood Gradient** (`#2d3436 → #3a2e24 → #2a1f16`): the sidebar. Warm dark wood, not cool black.
 
 ### Tertiary
+
 - **Sienna** (`#8b5d3f`): warnings and "avoid" signals only. WCAG AA compliant on cream. Never for decoration.
 
 ### Named Rules
@@ -176,6 +180,7 @@ No drop shadows for cards. No elevation tokens. If something needs to "come forw
 Every component lives on cream paper, wears warm hairline borders, and speaks in Fraunces numbers + DM Sans copy + DM Mono labels. Touches are restrained — motion serves hierarchy, never decoration.
 
 ### Buttons
+
 - **Shape:** rounded-2xl (20px) for primary CTA; rounded-lg (12px) for secondary.
 - **Primary:** sage dark (`#5a6e32`) background, white text, 14px 24px padding, body-sans 500 weight. Used for "Start Experiment" and equivalent forward actions. Optional subtitle below in DM Mono ("14-day baseline · 14-day protocol").
 - **Secondary:** slate (`#2d3436`) background, white text, 10px 18px padding. Used for header actions and neutral affordances.
@@ -183,6 +188,7 @@ Every component lives on cream paper, wears warm hairline borders, and speaks in
 - **Hover / Focus:** primary shifts from sage-dark to sage. Focus ring uses `--ring` (`#7a8c6e`) at 2px offset 2px.
 
 ### Experiment Start Channel Picker
+
 When more than one connected channel can continue a public experiment start,
 use one compact dialog rather than a stack of large destination cards. Lead
 with a mono `START EXPERIMENT · {N}-DAY PROTOCOL` line, then show the full
@@ -195,6 +201,7 @@ review-before-send reminder. On phones the dialog sits above the safe-area edge;
 on larger screens it centers at no more than 540px wide.
 
 ### Cards
+
 - **Corner Style:** rounded-lg (10–12px).
 - **Background:** `rgba(255, 252, 246, 0.9)` — translucent card surface, warmer than cream.
 - **Border:** 1px `rgba(196, 168, 130, 0.25)` warm hairline. Never gray, never side-stripe.
@@ -203,9 +210,11 @@ on larger screens it centers at no more than 540px wide.
 - **Nesting:** prohibited. Nested cards are always wrong.
 
 ### Signal Cards
+
 Large Fraunces stat number (the value) + DM Mono unit label + delta in sage green + expected range from protocol underneath. In finished state, show "was X" baseline value under the stat. One card per tracked signal; never grid five-abreast — prefer two or three across with room to breathe.
 
 ### iMessage Nutrition Card Image
+
 Render the macOS and app-absent fallback as the compact default state of the
 shipping SwiftUI balloon, not as a second nutrition dashboard. Keep the wide
 cream field, large calorie value, calorie progress ring, and one-row protein,
@@ -242,6 +251,7 @@ whenever those tracks fit, including four-column cards, and repeat field labels
 only for genuinely overwide content.
 
 ### iMessage Challenge Standings Card Image
+
 Render the app-absent standings fallback as the static counterpart to the
 shipping SwiftUI balloon. Keep the cream field, title, rank or collective
 progress, and score hierarchy aligned with the native card. The bitmap remains
@@ -253,6 +263,7 @@ scores, progress, and coverage while using the identity-free public
 presentation defined by the challenge standings delivery contract.
 
 ### Shared iMessage Card Handoff
+
 When a shared response-card URL reaches the public homepage instead of the
 Messages extension, open one compact handoff dialog after hydration. Reuse the
 standard Dialog and Button conventions without a logo, eyebrow, numbered step
@@ -268,6 +279,7 @@ fragment, add device-specific branching, or turn the fallback into a signup
 flow.
 
 ### Ops Weekly Growth Scorecard
+
 On `/ops/growth`, lead with one large Fraunces weekly MRR growth rate and keep
 current MRR, tracked fulfilled usage top-ups, paying-customer growth, active
 usage, acquisition, activation, and conversion subordinate. Compare the
@@ -352,6 +364,7 @@ Unknown. Label raw member creation metrics as member records, never as proof of
 an acquisition channel.
 
 ### Measured Biomarker Index
+
 On `/biomarkers`, device-derived reading rows lead in a flat full-width notebook
 band bracketed by warm one-pixel rules. Do not wrap that band in a rounded card
 or give it a contrasting card background. Lab health areas follow as native
@@ -372,6 +385,7 @@ Use explicit health-area classification; never show an `Other` dump, infer that
 an unflagged result is in range, or turn a source flag into a diagnosis.
 
 ### Measured Biomarker Result Detail
+
 On `/biomarkers/results/[metricKey]`, use a sparse reading order: biomarker name
 and saved-history span, latest source status, value, collection date, then the
 numeric history chart. Do not repeat the latest value in comparison, reference,
@@ -403,6 +417,7 @@ latest-result, chart, and ledger structure rather than substituting a generic
 card grid.
 
 ### Home Experiment History Cards
+
 Completed experiment cards on `/home` are compact index entries, not miniature
 results pages. Use three columns at wide desktop widths, two at small desktop
 and mobile-landscape widths, and one where the open desktop sidebar constrains
@@ -419,7 +434,9 @@ runs keep the standard history-card treatment. Keep privacy legible with a small
 unbordered lock beside the date rather than a separate header control.
 
 ### Library List Pattern (Hero / Standard / Table)
+
 For long lists of recommendations (e.g. experiments-that-may-move-this-biomarker, recipes, protocols), break the rhythm into three tiers instead of an identical-card grid:
+
 1. **Hero rows (top 1–2)** — full-width row, image on the left (320px on desktop, 16:9 above on mobile), content on the right. Category eyebrow + serif h3 title + qualitative fit label top-right + mechanism prose + 4-stat band (`Exp. change` · `Duration` · `Burden` · `Evidence`). Optional small mono pill over the image (`RECOMMENDED FOR YOU`). The whole card is the link — no diagonal up-right arrow (it reads as "external" and is misleading); no "Open the experiment" CTA strip — the card surface itself is the affordance.
 2. **Standard cards (next 3)** — `lg:grid-cols-3` grid. Image-on-top (16:9), content stacked below. Category eyebrow + serif title + qualitative fit label on a row, mechanism `line-clamp-3`, divided 3-stat footer with smaller `text-sm` values so longer ranges (`↓ −3 to −5%`) fit on one line. Fit tone is semantic: `Strong` / `Good` use primary, `Context` uses foreground, and `Exploratory` uses muted text.
 3. **Dense table (the rest)** — single rounded card surface with a mono uppercase header row (`EXPERIMENT · EXP. CHANGE · DURATION · BURDEN · EVIDENCE · FIT`). Each row: 40px square thumbnail (rounded-md, `object-cover`, fallback to a 3-letter category chip) + serif title + category subline + tabular columns + chevron. Hover = `bg-muted/30`.
@@ -427,13 +444,17 @@ For long lists of recommendations (e.g. experiments-that-may-move-this-biomarker
 The shape compresses gracefully: before `md:` only title + fit label stay; at `md:` the full grid expands. This is the standard answer to "we have 14+ items to show on one page" — an identical card grid is the lazy alternative and is banned.
 
 ### Progress Bar (Experiment Phases)
+
 Three phases: **Baseline · 14d ✓ → Active · Day X of Y → Analysis**. DM Mono labels, sage-green fill over sand track, active phase bold. One row, full width of the surface.
 
 ### Next Step Card (Active State)
+
 Sage-green 3px left accent bar + session title (Headline) + when/context (Body) + "Next session: Friday" right-aligned (DM Mono). Only visible while experiment is active.
 
 ### Timeline
+
 Vertical dot timeline. Upcoming events at top with faded opacity; history below at full opacity. Event types and their dots:
+
 - **Session** — sage green filled dot
 - **Milestone** — sage green filled dot
 - **Skipped** — sand filled dot
@@ -442,6 +463,7 @@ Vertical dot timeline. Upcoming events at top with faded opacity; history below 
 - **End** — sage green filled dot
 
 ### Trend Charts
+
 Two distinct chart types live in the system:
 
 **Experiment trend (dual-phase).** SVG sparklines. **Baseline phase:** dashed line in sand (`#d4c4a8`) with a shaded baseline region underneath. **Active phase:** solid line in sage (`#7a8c6e`). Two phases on one chart. No filled-area gradients, no axes busy work, no tooltips that explain what HRV means.
@@ -451,7 +473,9 @@ Two distinct chart types live in the system:
 **Biomarker trend + tile pair (single-phase).** Used on the biomarker overview tab. Recharts AreaChart paired with two stacked stat tiles in a `md:grid-cols-[minmax(0,1fr)_300px] md:items-stretch` grid (chart fills, tiles each `flex-1`, heights match). Anchor the visible Y-domain on the typical band, not the data — `extraPad = bandSpan × 0.5` above and below, so the user sees headroom. Hide the Y-axis (`<YAxis hide />`) — the dashed `Typical {min}` / `Typical {max}` reference lines (sage at 50% opacity, 4-4 dash, mono labels via `insideBottomLeft` / `insideTopLeft`) carry the context. Range band is an Area at `fillOpacity={0.14}`. Series fill gradient runs `0.32 → 0.04` opacity; stroke is solid sage `2.5px`. First/last date footer in `text-[10px] text-muted-foreground` below the chart. Timeframe selector (30D / 90D / 1Y) sits top-right as a rounded pill group, active = primary fill. The two tiles: **Average tile** (mono uppercase label that adapts to timeframe — `30-DAY AVERAGE` / `90-DAY AVERAGE` / `1-YEAR AVERAGE` — Fraunces value, sans unit, sentence sub-line that reads as a finding: `"Down 4 bpm from where you started the past month."`, primary color when direction matches `goodDirection`) and **Range tile** (`55–75 bpm` Fraunces + `healthy adults` sub + right-aligned `In range` / `Out of range` pill with bg-primary/15 or bg-destructive/15 — never with an explanatory tooltip).
 
 ### Conclusions Block (Finished State Only)
+
 Four stacked cards, vertical:
+
 1. **What Worked** — sage-green 3px left accent.
 2. **What Didn't Change** — neutral card, no accent.
 3. **Key Insights** — bullet points, Body text.
@@ -460,24 +484,31 @@ Four stacked cards, vertical:
 On sparse saved outcomes, use one flat report hierarchy instead of repeating the same conclusion across cards: saved headline and plain-language read, confidence chip, measured-change charts, one limitations list, then the experiment log. Keep the report centered at a readable desktop width and let warm dividers establish sections.
 
 ### Research / Evidence Section
+
 Summary stats row (studies count · participants · years · evidence level rendered as "5/5"). Below: study cards, each with a round badge — `OBS` / `RCT` / `MA` — using DM Mono in a sand-filled circle.
 
 ### Compact Evidence Band
+
 A tighter form of the evidence section, used as a header on the biomarker research tab and anywhere a single strong claim should anchor a page section. Two stacked rows: (1) a mono uppercase metadata strip — `{N} STUDIES · {N} PARTICIPANTS · {STUDY TYPE} · 5-dot rating` (foreground for the numerals, muted for the unit words, sage filled dots for the rating, border dots for the empty); (2) a serif italic blockquote up to ~3 lines, smart-quoted, with a mono `— ATTRIBUTION, YEAR` footer below. No card surface, no shadow — the blockquote sits directly on cream paper. One quote per band; if you have multiple claims, pick the strongest and link the rest.
 
 ### Expert Cards
+
 Avatar circle filled sand (`#d4c4a8`) with initials in slate + name (Body 500) + field (Body muted) + quote (Body italic). No photos.
 
 ### Safety Section
+
 Caution-rating dots (1–5 filled sand dots) + "Who should avoid" list + "Precautions" list. Sienna (`#8b5d3f`) used only on genuine warnings here; never decoratively.
 
 ### Sidebar (App Shell)
+
 240px fixed width, wood gradient (`#2d3436 → #3a2e24 → #2a1f16`). White-at-85% text. Active item gets sage dark (`#5a6e32`) background block. Hairline border-right uses `rgba(255, 255, 255, 0.1)`.
 
 ### Inputs / Fields
+
 Cream background, 1px warm border, rounded-md (10px). Focus: border shifts to sage (`#7a8c6e`), no glow. Mono labels above, body placeholder inside. Category and library filters use the `Select` dropdown, not a horizontal toggle pill row — toggle rows look broken in the active state when one pill has primary fill and the rest sit on transparent muted-surface, and they don't compress at small widths. Search inputs only appear when there are enough rows to need them (>~15 entries); below that, the dropdown alone is enough.
 
 ### Murph Safe Search and Product Evidence
+
 The public `/search` page uses the editorial paper system without an app-shell
 dashboard. Lead with one direct question, one large explicit-submit field, and
 short privacy/evidence framing. Group results by Supplements and Branded foods;
@@ -532,6 +563,7 @@ At phone widths, preserve the first label column and let product columns scroll
 horizontally.
 
 ### Choice Cards
+
 Use the shared `ChoiceCard` with `RadioGroup` when a member must compare two to
 five consequential options. Each card has one short title, one brief purpose
 phrase, and an optional mono metadata line. Product-specific inline artwork can
@@ -569,6 +601,7 @@ their currently active shares selected, and the list includes both the current
 group request and every older share that member can still revoke.
 
 ### Group Usage Funding
+
 An authenticated group funding link opens its relevant funding control
 immediately: monthly sponsorship for an unsponsored chat, one-time contribution
 for an already sponsored chat, or payment recovery when a purchase is in
@@ -656,6 +689,7 @@ fulfillment is verified, do not carry frozen sponsor details or their
 payment-recovery instructions into the success receipt.
 
 ### Hosted AI Usage Activity
+
 On authenticated Settings, keep this read-only surface mission-first and
 compact. Do not add an explanatory hero or use a wide ledger table. Each
 mission row shows its title, status, concise deadline, reward, and reward owner;
@@ -685,15 +719,18 @@ only that the durable credit reached the account. Group funding keeps its
 separately owned fulfillment receipt and Messages handoff.
 
 ### Spinner
+
 Use the shared `Spinner` for compact pending feedback inside buttons or beside a
 short status label. Pair it with a disabled control and visible action copy such
 as `Saving`; the spinner never replaces the label or becomes a full-page loader.
 Use `MurphPulseLoader` for branded account setup states instead.
 
 ### Chips / Labels
+
 DM Mono uppercase with 0.11em tracking. Muted-surface background (`rgba(196, 168, 130, 0.15)`), slate-muted text, rounded-sm, 4px 8px padding. Used for phase names, units, and filing-card metadata.
 
 ### Contact Card Avatar Picker
+
 Post-signup step for adding Murph as a contact (`apps/web/src/components/murph/murph-contact-card-picker.tsx`, spec in `agent-docs/product-specs/murph-contact-card-picker.md`). Drawer under 768px, dialog above. Layout: contact preview (avatar circle + Fraunces "Murph" + mono kicker), then a scroll-capped radiogroup of avatar circles (3 columns, 4 from 380px up) with DM Mono labels (selected = 2px sage ring with offset), then a full-width primary "Add Murph to Contacts" CTA over a ghost "Skip for now". Headshot avatars come from `public/murph-headshots/`; the logo options are dot-grid mark rasters on slate (dark) and cream (light) circles in `public/brand-logos/`; the no-photo option is a sand circle with a serif M initial (Expert Card avatar treatment). The primary CTA downloads the member's real vCard from `/api/murph-contact-card`.
 
 ### Cross-platform first-run sequence
@@ -709,28 +746,36 @@ than showing a duplicate welcome. The companion may adapt dialog/drawer layout
 to a full-height native screen, but it must not reorder or invent options.
 
 ### About Intro Grid
+
 A 3-column intro band that sits **above** the route tabs on biomarker (and similar concept) pages. Each column: small Quiver-style icon on the left at `size-8 text-primary/85` (icon style follows "Concept Icon Sets" below), mono uppercase eyebrow above a sans body paragraph on the right. Three slots that map to "Why it matters / How it's measured / What moves it" for biomarkers; the same pattern works for any concept-introduction surface. Body text is `text-muted-foreground`, not foreground — it should match the page summary band's tone, not compete with the H1.
 
 ### Tab Bar with Sticky Title
+
 For long pages with route-driven tabs (Overview / Research / etc.), use a sticky bar that pins to `top-0` once the user scrolls past the page header. Track this with an `IntersectionObserver` on a 1px sentinel placed above the bar; when the sentinel exits the viewport, fade in the page title on the right side of the bar so users keep their orientation when they're 2,000px down the page. The tabs themselves use the shared `RouteTabs` component (sliding olive primary indicator under the active tab, view-transition-name for the indicator). The sticky bar background is `bg-background/95 backdrop-blur-md` with a single `border-b border-border` baseline — never a dropshadow.
 
 ### Changelog Archive Pagination
+
 The public changelog shows seven dated editions per server-rendered archive window. Page one keeps the clean `/changelog` URL and opens on the latest seven days; older windows use a stable `?edition=YYYY-MM-DD` cursor, and every item permalink includes the edition that owns its anchor. Navigation sits below the window on a plain warm hairline divider: Newer and Older text links at the edges, a compact current-page window with first and last page on larger screens, and `PAGE N OF N` in mono on phones. The current page uses the slate affirmative block; inactive pages stay flat and warm with no enclosing card. Major feature cards may include one compact explanatory mock from the changelog visual primitives when it makes the shipped behavior easier to understand.
 
 ### Icons
+
 Lucide React (`lucide-react`) is the default. Lucide Animated (`https://lucide-animated.com`) is reserved for icons that specifically need motion — loaders, hover affordances. Install animated icons via `pnpm dlx shadcn@latest add https://lucide-animated.com/r/{icon-name}.json`. Icons serve comprehension; they never decorate.
 
 ### Concept Icon Sets
+
 Bespoke iconography lives on its own track from Lucide. Two registers coexist:
+
 - **Quiver-authored filled paths** (e.g. `public/icons/biomarker-about/*.svg` — the heartbeat, watch face, and bidirectional arrow used in the About Intro Grid). `fill="currentColor"`, complex multi-path, hand-lettered feel. Inline the markup with `dangerouslySetInnerHTML` so callers can drive color via the surrounding text class (`text-primary/85`).
 - **Single-stroke line-art glyphs** (e.g. `apps/web/src/components/biomarkers/biomarker-icon.tsx`). The standard for concept identifier sets where every entry needs a distinct glyph (one per biomarker, one per protocol family, etc.). Spec, applied uniformly across the set: viewBox `0 0 100 100`, `stroke="currentColor" strokeWidth={2.5}`, `fill="none"` (committed across the whole set — don't mix in filled-shape members like a solid moon, the inconsistency reads as a bug), `strokeLinecap="round" strokeLinejoin="round"`, sized at `size-10` (40px) when used as a card anchor. Ship them as inline JSX paths/circles, keyed by the entity routeId, returning `null` for unknown ids so cards degrade gracefully.
 
 When in doubt, prefer authoring a bespoke glyph over a generic Lucide pick. The "lucide-heart for resting heart rate, lucide-droplet for glucose" reflex is the SaaS-cliché tell — Murph's whole point is that the metaphor is hand-drawn.
 
 ### Transitions
+
 View Transitions API (`<ViewTransition>` from `next/navigation`). No Framer Motion, no React Motion. Page transitions, tab switches, list reorders — all native. Subtle and fast; easing is exponential ease-out (quart/quint/expo). No bounce, no elastic.
 
 ### Brand Assets
+
 - Logo (light): `apps/web/public/logo.svg`
 - Logo (dark): `apps/web/public/logo-dark.svg`
 - Favicon (auto dark mode): `apps/web/app/icon.svg`
@@ -741,6 +786,7 @@ View Transitions API (`<ViewTransition>` from `next/navigation`). No Framer Moti
 - Live brand + component reference: `/design` (`?tab=brand`, `?tab=components`; nutrition and compact-table image studies live on the components tab)
 
 ### Photography
+
 Wide horizon, small human — spacious, warm, quietly cinematic. Amber-gold sunrise/sunset light, soft haze, low-contrast tonal transitions. One person held small in frame, off-center near an edge; preserve a calm side for copy. Use `public/hero.jpg` as the reference image when continuity matters.
 
 **Master image prompt** (2K working / 4K final, 16:9 hero, 4:1 ultra-wide, 3:2 or 4:5 social):
@@ -755,13 +801,24 @@ Before shipping any Murph image, verify: (1) warm not hyped, (2) breathing room 
 
 ### Personal Patterns Matrix
 
-Use one flat paper surface for repeated action-to-outcome comparisons. Put Quiver-style factor illustrations on rows and next-day outcomes on columns. Circle size shows the size of the difference. Fill color shows the evidence stage: amber for a new clue, sage for a link seen again, and dark sage with a ring for a link worth testing. The plus or minus sign shows direction. Color must not label higher values as good or lower values as bad.
+Use one flat paper surface for repeated action-to-outcome comparisons. Put Quiver-style factor illustrations on rows and outcomes on columns. Use one marker size. The arrow shows direction, and the percentage shows the size of the difference. Color reflects the meaning of the outcome, not the arrow alone: sage for a favorable change, red for an unfavorable change, and a warm neutral when higher or lower is contextual.
 
-Keep the copy observational. Use “lined up with” or “was associated with.” Never use “caused,” “proved,” or a moral label. Show matched-day counts and comparison means in the cell detail. On narrow screens, keep the row labels readable and scroll the matrix horizontally.
+Keep the matrix focused on usable comparisons. Hide a factor row or outcome
+column when every cell still needs more data. Use distinct compact icons for
+`No clear pattern` and `Not enough data`, with details on hover or focus. Show
+factor coverage as a compact five-segment bar. Its tooltip uses `Data coverage` as the
+title and gives the exact recorded-case count below it. Label total sleep time
+as `Sleep duration`. Group sleep score and sleep efficiency under `Sleep quality`. Keep
+their calculations separate and identify the metric in each result popover.
+Keep outcome headings clear without separate help controls. Keep `No clear pattern`
+descriptions to one short sentence.
+
+Keep the copy observational and conversational. Prefer `You slept less after cycling` over a statistical sentence. Never use `caused` or `proved`. Show the activity result and other comparable days as two labeled bars in the cell detail. Keep matched-day counts in accessible copy instead of repeating them visually. On narrow screens, keep the row labels readable and scroll the matrix horizontally.
 
 ## 6. Do's and Don'ts
 
 ### Do:
+
 - **Do** use sage (`#5a6e32` for buttons, `#7a8c6e` for data) as the only affirmative accent.
 - **Do** render every large number in Fraunces — stat cards, hero figures, result summaries.
 - **Do** use DM Mono uppercase with 0.10–0.12em tracking for every small label, phase name, and unit.
@@ -771,6 +828,7 @@ Keep the copy observational. Use “lined up with” or “was associated with.�
 - **Do** quote real research, name experts, cite studies with OBS/RCT/MA badges. Depth is the product.
 
 ### Don't:
+
 - **Don't** use ring charts, gamification, or "great job!" messages — these are the generic-health-app tell Murph explicitly rejects.
 - **Don't** use gray boxes, gray-gridded corporate data tables, or hero-metric templates — these are the SaaS-dashboard cliché. A warm, purposeful comparison IS allowed when it genuinely clarifies a choice (e.g. Murph vs a general chatbot): keep it on cream/sand paper surfaces, use serif + mono type with hairline `#c4a882` dividers instead of a gray grid, and let one side carry the sage affirmative treatment.
 - **Don't** use blue, teal, purple, or neon as UI accent color. Sage is the only affirmative accent.

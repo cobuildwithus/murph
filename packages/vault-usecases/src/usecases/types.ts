@@ -1524,6 +1524,7 @@ export interface QueryServices extends HealthQueryServiceMethods {
       to?: string
       providers?: string[]
       limit: number
+      includeWorkoutDetails?: boolean
     },
   ): Promise<WearableActivityListResult>
   listWearableBodyState(

@@ -103,6 +103,34 @@ test("browser vault replicas round-trip and expose the query-client selectors", 
   assert.ok(client.search("steadier").some((row) => row.entityId === "journal_1"));
 });
 
+test("browser vault Journal keeps the next local day in positive time zones", async () => {
+  const replica = await createBrowserVaultReplicaFromVault({
+    generatedAt: "2026-08-31T17:30:00.000Z",
+    sourceBundleHash: "local-day-journal".padEnd(64, "a"),
+    vault: createVaultReadModel({
+      entities: [
+        createEntity("event", "singapore_evening_note", {
+          attributes: {
+            note: "Evening walk",
+            noteType: "journal-factor",
+            source: "manual",
+            timeZone: "Asia/Singapore",
+          },
+          date: "2026-09-01",
+          kind: "note",
+          occurredAt: "2026-09-01T00:30:00.000Z",
+          title: "Evening walk",
+        }),
+      ],
+      metadata: null,
+      vaultRoot: "browser://positive-time-zone-journal",
+    }),
+  });
+
+  assert.equal(replica.journal?.days[0]?.date, "2026-09-01");
+  assert.equal(replica.journal?.days[0]?.events[0]?.title, "Evening walk");
+});
+
 test("exact experiment metric demand is not bounded by the 24-card display projection", async () => {
   const overflowIndex = 24;
   const experiments = Array.from({ length: 25 }, (_, index) => {

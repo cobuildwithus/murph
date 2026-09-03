@@ -1,9 +1,9 @@
 import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import { parseHostedCodexAuthUpdateResponse } from "@murphai/hosted-execution/parsers";
-import { HOSTED_RUNTIME_CODEX_AUTH_PATH } from "@murphai/hosted-execution/routes";
 
 import {
   fetchHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
 import {
@@ -32,7 +32,7 @@ export function createHostedRuntimeCodexAuthPort(input: {
           input.workspaceCheckpointBridge,
           "Hosted Codex auth update",
         ),
-        path: HOSTED_RUNTIME_CODEX_AUTH_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.codexAuthUpdate,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });

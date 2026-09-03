@@ -1,6 +1,12 @@
 "use client";
 
-import { usePrivy, useUser } from "@privy-io/react-auth";
+import {
+  usePrivy,
+  useUnlinkEmail,
+  useUnlinkPhone,
+  useUnlinkTelegram,
+  useUser,
+} from "@privy-io/react-auth";
 import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 
@@ -14,25 +20,46 @@ import {
   DialogTitle,
 } from "@/src/components/ui/dialog";
 import type { HostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/account-settings-snapshot";
+import {
+  extractHostedPrivyEmailAccount,
+  extractHostedPrivyPhoneAccount,
+  resolveHostedPrivyLinkedAccounts,
+  resolveHostedPrivyTelegramAccountSelection,
+  type HostedPrivyLinkedAccountContainer,
+} from "@/src/lib/hosted-onboarding/privy-shared";
+import { normalizePhoneNumber } from "@/src/lib/hosted-onboarding/phone";
+import type { HostedPrivyAuthMethod } from "@/src/lib/hosted-onboarding/types";
 
+import { ConnectedAccountCard, SettingsStatusLine } from "./connected-account-card";
 import { HostedEmailPrivyLinkHandOff } from "./hosted-email-privy-link-hand-off";
 import { HostedEmailSettings } from "./hosted-email-settings";
+import {
+  finishHostedLinkedAccountRemovalWithRetry,
+  toHostedLinkedAccountRemovalErrorMessage,
+} from "./hosted-linked-account-removal";
 import { useHostedPhoneLinkDiagnostics } from "./hosted-phone-link-diagnostics";
 import { HostedPhoneSettings } from "./hosted-phone-settings";
 import { formatMaskedPhoneNumber } from "./hosted-settings-utils";
 import { HostedTelegramCardSettings } from "./hosted-telegram-card-settings";
 
 type HostedSettingsIdentityLinkMode = "phone" | "email" | "telegram";
+export type HostedSettingsIdentityDialogIntent =
+  | "finish"
+  | "manage"
+  | "remove"
+  | "replace";
 
 export function HostedSettingsIdentityLinkDialog({
   account,
   expectedPrivyUserId,
+  intent = "manage",
   initialMode,
   onOpenChange,
   privySessionMatchesAppSession,
 }: {
   account: HostedAccountSettingsSnapshot;
   expectedPrivyUserId: string | null;
+  intent?: HostedSettingsIdentityDialogIntent;
   initialMode: HostedSettingsIdentityLinkMode;
   onOpenChange: (open: boolean) => void;
   privySessionMatchesAppSession: boolean;
@@ -40,6 +67,20 @@ export function HostedSettingsIdentityLinkDialog({
   const router = useRouter();
   const { openAuthDialog } = useAuth();
   const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID?.trim();
+  const [providerAccountRemoved, setProviderAccountRemoved] = useState(
+    intent === "finish",
+  );
+  const [telegramReplacementReady, setTelegramReplacementReady] = useState(false);
+  const effectiveAccount = telegramReplacementReady
+    ? {
+        ...account,
+        telegram: {
+          telegramUserId: null,
+          username: null,
+        },
+      }
+    : account;
+  const effectiveIntent = telegramReplacementReady ? "manage" : intent;
 
   const closeAndRefresh = () => {
     onOpenChange(false);
@@ -49,13 +90,21 @@ export function HostedSettingsIdentityLinkDialog({
     onOpenChange(false);
     openAuthDialog();
   };
+  const handleOpenChange = (open: boolean) => {
+    if (!open && providerAccountRemoved) {
+      closeAndRefresh();
+      return;
+    }
+    onOpenChange(open);
+  };
 
   if (!appId) {
     return (
       <HostedSettingsIdentityDialogFrame
-        account={account}
+        account={effectiveAccount}
+        intent={effectiveIntent}
         initialMode={initialMode}
-        onOpenChange={onOpenChange}
+        onOpenChange={handleOpenChange}
       >
         <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
           Linking isn&apos;t available yet. Please try again later.
@@ -66,11 +115,20 @@ export function HostedSettingsIdentityLinkDialog({
 
   return (
     <HostedSettingsIdentityMutationContent
-      account={account}
+      account={effectiveAccount}
       expectedPrivyUserId={expectedPrivyUserId}
+      intent={effectiveIntent}
       initialMode={initialMode}
       onClientAuthRequired={promptClientAuth}
-      onOpenChange={onOpenChange}
+      onOpenChange={handleOpenChange}
+      onProviderAccountRemoved={() => setProviderAccountRemoved(true)}
+      onRemoved={() => {
+        if (intent === "replace" && initialMode === "telegram") {
+          setTelegramReplacementReady(true);
+          return;
+        }
+        closeAndRefresh();
+      }}
       onSynced={closeAndRefresh}
       privySessionMatchesAppSession={privySessionMatchesAppSession}
     />
@@ -80,17 +138,23 @@ export function HostedSettingsIdentityLinkDialog({
 function HostedSettingsIdentityMutationContent({
   account,
   expectedPrivyUserId,
+  intent,
   initialMode,
   onClientAuthRequired,
   onOpenChange,
+  onProviderAccountRemoved,
+  onRemoved,
   onSynced,
   privySessionMatchesAppSession,
 }: {
   account: HostedAccountSettingsSnapshot;
   expectedPrivyUserId: string | null;
+  intent: HostedSettingsIdentityDialogIntent;
   initialMode: HostedSettingsIdentityLinkMode;
   onClientAuthRequired: () => void;
   onOpenChange: (open: boolean) => void;
+  onProviderAccountRemoved: () => void;
+  onRemoved: () => void;
   onSynced: () => void;
   privySessionMatchesAppSession: boolean;
 }) {
@@ -117,12 +181,6 @@ function HostedSettingsIdentityMutationContent({
     showLinkForm: initialMode === "phone",
     surface: "settings",
   });
-  const hasExisting = initialMode === "phone"
-    ? Boolean(account.phone.number)
-    : initialMode === "email"
-      ? Boolean(account.email.address)
-      : Boolean(account.telegram.telegramUserId);
-
   async function handleClientAuthRequired() {
     if (reauthPending) {
       return;
@@ -147,6 +205,7 @@ function HostedSettingsIdentityMutationContent({
     return (
       <HostedSettingsIdentityDialogFrame
         account={account}
+        intent={intent}
         initialMode={initialMode}
         onOpenChange={onOpenChange}
       >
@@ -164,11 +223,76 @@ function HostedSettingsIdentityMutationContent({
     );
   }
 
+  return (
+    <HostedSettingsIdentityAuthorizedContent
+      account={account}
+      createPhoneDiagnosticReporter={createPhoneDiagnosticReporter}
+      intent={intent}
+      initialMode={initialMode}
+      onClientAuthRequired={onClientAuthRequired}
+      onOpenChange={onOpenChange}
+      onProviderAccountRemoved={onProviderAccountRemoved}
+      onRemoved={onRemoved}
+      onSynced={onSynced}
+    />
+  );
+}
+
+function HostedSettingsIdentityAuthorizedContent({
+  account,
+  createPhoneDiagnosticReporter,
+  intent,
+  initialMode,
+  onClientAuthRequired,
+  onOpenChange,
+  onProviderAccountRemoved,
+  onRemoved,
+  onSynced,
+}: {
+  account: HostedAccountSettingsSnapshot;
+  createPhoneDiagnosticReporter: ReturnType<typeof useHostedPhoneLinkDiagnostics>;
+  intent: HostedSettingsIdentityDialogIntent;
+  initialMode: HostedSettingsIdentityLinkMode;
+  onClientAuthRequired: () => void;
+  onOpenChange: (open: boolean) => void;
+  onProviderAccountRemoved: () => void;
+  onRemoved: () => void;
+  onSynced: () => void;
+}) {
+  const hasExisting = initialMode === "phone"
+    ? Boolean(account.phone.number)
+    : initialMode === "email"
+      ? Boolean(account.email.address)
+      : Boolean(account.telegram.telegramUserId);
+
+  if (intent !== "manage") {
+    return (
+      <HostedSettingsIdentityDialogFrame
+        account={account}
+        intent={intent}
+        initialMode={initialMode}
+        onOpenChange={onOpenChange}
+      >
+        <HostedSettingsIdentityRemoval
+          account={account}
+          intent={intent}
+          method={initialMode}
+          onCancel={() => onOpenChange(false)}
+          onProviderAccountRemoved={onProviderAccountRemoved}
+          onRemoved={onRemoved}
+        />
+      </HostedSettingsIdentityDialogFrame>
+    );
+  }
+
   // The server told us the Privy user has no email linked, which means the
   // inline update form cannot work — Privy only supports linking an email
   // through its own modal. Skip our dialog entirely and hand off to Privy's,
   // so the member sees a single dialog instead of two stacked ones.
-  if (initialMode === "email" && account.email.privyEmailLinked === false) {
+  if (
+    initialMode === "email"
+    && account.privySignInStates?.email.status === "absent"
+  ) {
     return (
       <HostedEmailPrivyLinkHandOff
         onAborted={() => onOpenChange(false)}
@@ -192,6 +316,7 @@ function HostedSettingsIdentityMutationContent({
   return (
     <HostedSettingsIdentityDialogFrame
       account={account}
+      intent={intent}
       initialMode={initialMode}
       onOpenChange={onOpenChange}
     >
@@ -269,11 +394,13 @@ export function HostedIdentitySessionMismatch({
 function HostedSettingsIdentityDialogFrame({
   account,
   children,
+  intent = "manage",
   initialMode,
   onOpenChange,
 }: {
   account: HostedAccountSettingsSnapshot;
   children: ReactNode;
+  intent?: HostedSettingsIdentityDialogIntent;
   initialMode: HostedSettingsIdentityLinkMode;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -282,7 +409,12 @@ function HostedSettingsIdentityDialogFrame({
     : initialMode === "email"
       ? Boolean(account.email.address)
       : Boolean(account.telegram.telegramUserId);
-  const copy = getSettingsIdentityLinkCopy(initialMode, hasExisting, account);
+  const copy = getSettingsIdentityLinkCopy(
+    initialMode,
+    hasExisting,
+    account,
+    intent,
+  );
 
   return (
     <Dialog open onOpenChange={onOpenChange}>
@@ -305,10 +437,28 @@ function getSettingsIdentityLinkCopy(
   mode: HostedSettingsIdentityLinkMode,
   hasExisting: boolean,
   account: HostedAccountSettingsSnapshot,
+  intent: HostedSettingsIdentityDialogIntent,
 ): {
   description: string;
   title: string;
 } {
+  if (intent === "remove" || intent === "finish") {
+    return {
+      description: getSettingsIdentityRemovalConsequence(mode),
+      title: intent === "finish"
+        ? `Finish disconnecting ${getSettingsIdentityLabel(mode)}?`
+        : `Remove ${getSettingsIdentityLabel(mode)}?`,
+    };
+  }
+
+  if (intent === "replace" && mode === "telegram") {
+    return {
+      description:
+        "Your current Telegram will be disconnected first. Then we'll open Telegram so you can link another account.",
+      title: "Change Telegram",
+    };
+  }
+
   switch (mode) {
     case "phone": {
       if (!hasExisting) {
@@ -364,6 +514,249 @@ function getSettingsIdentityLinkCopy(
       };
     }
   }
+}
+
+function HostedSettingsIdentityRemoval({
+  account,
+  intent,
+  method,
+  onCancel,
+  onProviderAccountRemoved,
+  onRemoved,
+}: {
+  account: HostedAccountSettingsSnapshot;
+  intent: Exclude<HostedSettingsIdentityDialogIntent, "manage">;
+  method: HostedPrivyAuthMethod;
+  onCancel: () => void;
+  onProviderAccountRemoved: () => void;
+  onRemoved: () => void;
+}) {
+  const { user } = useUser();
+  const { unlink: unlinkEmail } = useUnlinkEmail();
+  const { unlink: unlinkPhone } = useUnlinkPhone();
+  const { unlink: unlinkTelegram } = useUnlinkTelegram();
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const privyState = account.privySignInStates?.[method] ?? null;
+  const initialProviderAccountRemoved =
+    intent === "finish" && privyState?.status === "absent";
+  const [providerAccountRemoved, setProviderAccountRemoved] = useState(
+    initialProviderAccountRemoved,
+  );
+  const removable = initialProviderAccountRemoved
+    || (privyState?.status === "matched" && privyState.removable);
+  const [expectedIdentity] = useState(() =>
+    resolveSettingsIdentitySnapshotValue(method, account),
+  );
+  const displayValue = resolveSettingsIdentityDisplayValue(method, account);
+  const label = getSettingsIdentityLabel(method);
+
+  async function handleRemoval() {
+    if (pending) {
+      return;
+    }
+    if (!removable) {
+      setErrorMessage(
+        `Add another email, phone, or Telegram sign-in before removing ${label.toLowerCase()}.`,
+      );
+      return;
+    }
+    if (!expectedIdentity) {
+      setErrorMessage("This sign-in changed. Refresh Settings and try again.");
+      return;
+    }
+
+    setErrorMessage(null);
+    setPending(true);
+    let providerRemoved = providerAccountRemoved;
+
+    try {
+      if (!providerRemoved) {
+        if (!settingsIdentityMatchesProvider(method, expectedIdentity, user)) {
+          setErrorMessage("This sign-in changed. Refresh Settings and try again.");
+          return;
+        }
+        if (method === "phone") {
+          await unlinkPhone({ phoneNumber: expectedIdentity });
+        } else if (method === "email") {
+          await unlinkEmail({ address: expectedIdentity });
+        } else {
+          await unlinkTelegram({ telegramUserId: expectedIdentity });
+        }
+        providerRemoved = true;
+        setProviderAccountRemoved(true);
+        onProviderAccountRemoved();
+      }
+
+      await finishHostedLinkedAccountRemovalWithRetry({
+        expectedIdentity,
+        method,
+      });
+      onRemoved();
+    } catch (error) {
+      setErrorMessage(
+        toHostedLinkedAccountRemovalErrorMessage(error, providerRemoved),
+      );
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <HostedSettingsIdentityRemovalView
+      displayValue={displayValue}
+      errorMessage={errorMessage}
+      intent={intent}
+      label={label}
+      onCancel={onCancel}
+      onRemove={() => void handleRemoval()}
+      pending={pending}
+      providerAccountRemoved={providerAccountRemoved}
+      removable={removable}
+    />
+  );
+}
+
+export function HostedSettingsIdentityRemovalView({
+  displayValue,
+  errorMessage,
+  intent,
+  label,
+  onCancel,
+  onRemove,
+  pending,
+  providerAccountRemoved,
+  removable,
+}: {
+  displayValue: string;
+  errorMessage: string | null;
+  intent: Exclude<HostedSettingsIdentityDialogIntent, "manage">;
+  label: string;
+  onCancel: () => void;
+  onRemove: () => void;
+  pending: boolean;
+  providerAccountRemoved: boolean;
+  removable: boolean;
+}) {
+  return (
+    <div className="space-y-5">
+      <ConnectedAccountCard
+        label={`Current ${label.toLowerCase()}`}
+        value={displayValue}
+      />
+      <p className="text-sm leading-6 text-muted-foreground">
+        {removable
+          ? "Another linked sign-in will keep your Murph account accessible. Existing messages and billing records stay in your account."
+          : "Add another email, phone, or Telegram sign-in first so you don't lose access to your Murph account."}
+      </p>
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <Button
+          type="button"
+          variant="ghost"
+          disabled={pending}
+          onClick={onCancel}
+        >
+          Cancel
+        </Button>
+        <Button
+          type="button"
+          variant={intent === "replace" ? "default" : "destructive"}
+          disabled={pending || !removable}
+          onClick={onRemove}
+        >
+          {pending
+            ? providerAccountRemoved
+              ? "Finishing…"
+              : "Removing…"
+            : providerAccountRemoved
+              ? "Finish disconnecting"
+              : intent === "replace"
+                ? "Disconnect and continue"
+                : `Remove ${label}`}
+        </Button>
+      </div>
+      <SettingsStatusLine
+        message={errorMessage}
+        tone={errorMessage ? "destructive" : "neutral"}
+      />
+    </div>
+  );
+}
+
+function settingsIdentityMatchesProvider(
+  method: HostedPrivyAuthMethod,
+  expectedIdentity: string,
+  user: HostedPrivyLinkedAccountContainer | null,
+): boolean {
+  const linkedAccounts = resolveHostedPrivyLinkedAccounts(user);
+
+  if (method === "phone") {
+    return extractHostedPrivyPhoneAccount(linkedAccounts)?.number
+      === normalizePhoneNumber(expectedIdentity);
+  }
+  if (method === "email") {
+    return normalizeComparableEmail(
+      extractHostedPrivyEmailAccount(linkedAccounts)?.address,
+    ) === normalizeComparableEmail(expectedIdentity);
+  }
+
+  const telegramSelection = resolveHostedPrivyTelegramAccountSelection(user);
+  return !telegramSelection.ambiguous
+    && telegramSelection.account?.telegramUserId === expectedIdentity;
+}
+
+function normalizeComparableEmail(value: string | null | undefined): string | null {
+  const normalized = value?.trim().toLowerCase();
+  return normalized || null;
+}
+
+function resolveSettingsIdentitySnapshotValue(
+  method: HostedPrivyAuthMethod,
+  account: HostedAccountSettingsSnapshot,
+): string | null {
+  if (method === "phone") {
+    return account.phone.number;
+  }
+  if (method === "email") {
+    return account.email.address;
+  }
+  return account.telegram.telegramUserId;
+}
+
+function resolveSettingsIdentityDisplayValue(
+  method: HostedPrivyAuthMethod,
+  account: HostedAccountSettingsSnapshot,
+): string {
+  if (method === "phone") {
+    return account.phone.number
+      ? formatMaskedPhoneNumber(account.phone.number)
+      : "Not connected";
+  }
+  if (method === "email") {
+    return account.email.address ?? "Not connected";
+  }
+
+  return account.telegram.username
+    ? `@${account.telegram.username}`
+    : account.telegram.telegramUserId
+      ? "Connected"
+      : "Not connected";
+}
+
+function getSettingsIdentityLabel(mode: HostedPrivyAuthMethod): string {
+  return mode === "phone" ? "Phone" : mode === "email" ? "Email" : "Telegram";
+}
+
+function getSettingsIdentityRemovalConsequence(
+  mode: HostedPrivyAuthMethod,
+): string {
+  if (mode === "phone") {
+    return "This removes phone sign-in and disconnects texting with Murph.";
+  }
+  if (mode === "email") {
+    return "This removes email sign-in and disconnects email with Murph.";
+  }
+  return "This removes Telegram sign-in and disconnects Telegram messaging with Murph.";
 }
 
 function toInitialEmail(

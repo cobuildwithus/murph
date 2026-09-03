@@ -73,12 +73,14 @@ describe("hosted runtime log write queue", () => {
   afterEach(async () => {
     // Never leave the module-level tail pending across tests.
     await drainHostedRuntimeLogWritesBestEffort();
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
   it.each(["debug", "info"] as const)(
-    "returns %s writes immediately while the port write is still pending",
+    "returns %s writes immediately without starting a request before the window",
     async (level) => {
+      vi.useFakeTimers();
       const { port, writes } = createControlledLogPort();
 
       await expect(writeHostedRuntimeLogBestEffort({
@@ -87,8 +89,12 @@ describe("hosted runtime log write queue", () => {
         platform: { logPort: port },
       })).resolves.toBeUndefined();
 
-      // The caller already returned, but the durable write has not settled.
       await flushMicrotasks();
+      expect(writes).toHaveLength(0);
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(writes).toHaveLength(0);
+
+      await vi.advanceTimersByTimeAsync(1);
       expect(writes).toHaveLength(1);
       // `at` is stamped at enqueue time, not at flush time.
       expect(writes[0]!.entries).toEqual([
@@ -99,12 +105,8 @@ describe("hosted runtime log write queue", () => {
         }),
       ]);
 
-      const drainSettled = trackSettled(drainHostedRuntimeLogWritesBestEffort());
-      await flushMicrotasks();
-      expect(drainSettled()).toBe(false);
       writes[0]!.resolve();
-      await flushMicrotasks();
-      expect(drainSettled()).toBe(true);
+      await expect(drainHostedRuntimeLogWritesBestEffort()).resolves.toBeUndefined();
     },
   );
 
@@ -127,27 +129,29 @@ describe("hosted runtime log write queue", () => {
       await flushMicrotasks();
       expect(infoSettled()).toBe(true);
       expect(directSettled()).toBe(false);
-      // The warn/error write starts immediately (synchronously, ahead of the
-      // microtask-scheduled info write): the crash-diagnostic tail must not
-      // wait behind backlog. `at` stamps preserve logical ordering for readers.
-      expect(writes).toHaveLength(2);
-      const directWrite = writes.find(
-        (write) => write.entries[0]!.at === "2026-06-12T00:00:02.000Z",
-      );
-      const infoWrite = writes.find(
-        (write) => write.entries[0]!.at === "2026-06-12T00:00:01.000Z",
-      );
-      expect(directWrite?.entries[0]!.level).toBe(level);
-      expect(infoWrite).toBeDefined();
+      // The warn/error starts immediately while the older info entry remains
+      // inside its coalescing window.
+      expect(writes).toHaveLength(1);
+      expect(writes[0]!.entries[0]).toEqual(expect.objectContaining({
+        at: "2026-06-12T00:00:02.000Z",
+        level,
+      }));
 
-      // The warn/error settles on its own write, independent of the info backlog.
-      directWrite!.resolve();
+      writes[0]!.resolve();
       await flushMicrotasks();
       expect(directSettled()).toBe(true);
 
-      infoWrite!.resolve();
+      const drainSettled = trackSettled(drainHostedRuntimeLogWritesBestEffort());
       await flushMicrotasks();
-      await expect(drainHostedRuntimeLogWritesBestEffort()).resolves.toBeUndefined();
+      expect(drainSettled()).toBe(false);
+      expect(writes).toHaveLength(2);
+      expect(writes[1]!.entries[0]).toEqual(expect.objectContaining({
+        at: "2026-06-12T00:00:01.000Z",
+        level: "info",
+      }));
+      writes[1]!.resolve();
+      await flushMicrotasks();
+      expect(drainSettled()).toBe(true);
     },
   );
 
@@ -186,7 +190,63 @@ describe("hosted runtime log write queue", () => {
     await expect(drainHostedRuntimeLogWritesBestEffort()).resolves.toBeUndefined();
   });
 
+  it("keeps a preempted direct suffix ahead of later rotated-port verbose entries", async () => {
+    vi.useFakeTimers();
+    const first = createControlledLogPort();
+    const second = createControlledLogPort();
+    let foregroundWaiting = false;
+    const entries = Array.from(
+      { length: HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES + 1 },
+      (_, index) => ({
+        ...buildQueueLogEntry("warn"),
+        errorCode: `DIRECT_DIAGNOSTIC_${index}`,
+      }),
+    );
+
+    const directWrite = writeHostedRuntimeLogEntriesBestEffort({
+      entries,
+      now: () => "2026-06-12T00:00:03.000Z",
+      platform: { logPort: first.port },
+      shouldYieldBetweenBatches: () => foregroundWaiting,
+    });
+    await flushMicrotasks();
+
+    expect(first.writes).toHaveLength(1);
+    expect(first.writes[0]!.entries).toHaveLength(HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES);
+
+    foregroundWaiting = true;
+    await vi.advanceTimersByTimeAsync(25);
+    await expect(directWrite).resolves.toBeUndefined();
+
+    await writeHostedRuntimeLogBestEffort({
+      entry: buildQueueLogEntry("info"),
+      now: () => "2026-06-12T00:00:04.000Z",
+      platform: { logPort: second.port },
+    });
+    await flushMicrotasks();
+    expect(first.writes).toHaveLength(1);
+    expect(second.writes).toHaveLength(0);
+
+    first.writes[0]!.resolve();
+    await flushMicrotasks();
+    expect(first.writes).toHaveLength(2);
+    expect(first.writes[1]!.entries).toHaveLength(1);
+    expect(second.writes).toHaveLength(0);
+    expect(first.writes.flatMap((write) => write.entries).map((entry) => entry.errorCode)).toEqual(
+      entries.map((entry) => entry.errorCode),
+    );
+
+    first.writes[1]!.resolve();
+    await flushMicrotasks();
+    expect(second.writes).toHaveLength(1);
+    expect(second.writes[0]!.entries[0]!.at).toBe("2026-06-12T00:00:04.000Z");
+
+    second.writes[0]!.resolve();
+    await expect(drainHostedRuntimeLogWritesBestEffort()).resolves.toBeUndefined();
+  });
+
   it("bounded drain returns on timeout while queued writes keep flushing", async () => {
+    vi.useFakeTimers();
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { port, writes } = createControlledLogPort();
 
@@ -197,11 +257,16 @@ describe("hosted runtime log write queue", () => {
     }));
     await flushMicrotasks();
     expect(infoSettled()).toBe(true);
-    expect(writes).toHaveLength(1);
+    expect(writes).toHaveLength(0);
 
     // The queued write never resolves within the bound: the drain must
-    // return (not hang) and warn that writes continue in the background.
-    await drainHostedRuntimeLogWritesBestEffort({ timeoutMs: 20 });
+    // cancel the window, start it immediately, then return (not hang) and warn
+    // that writes continue in the background.
+    const drain = drainHostedRuntimeLogWritesBestEffort({ timeoutMs: 20 });
+    await flushMicrotasks();
+    expect(writes).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(20);
+    await drain;
     expect(consoleWarn).toHaveBeenCalledWith(
       "Hosted runtime log drain timed out; queued writes continue in the background.",
       { timeoutMs: 20 },
@@ -212,7 +277,8 @@ describe("hosted runtime log write queue", () => {
     await expect(drainHostedRuntimeLogWritesBestEffort()).resolves.toBeUndefined();
   });
 
-  it("coalesces entries buffered during an in-flight request into one later request", async () => {
+  it("invocation drain cancels the window without leaving a delayed second start", async () => {
+    vi.useFakeTimers();
     const { port, writes } = createControlledLogPort();
 
     await writeHostedRuntimeLogBestEffort({
@@ -221,36 +287,46 @@ describe("hosted runtime log write queue", () => {
       platform: { logPort: port },
     });
     await flushMicrotasks();
-    expect(writes).toHaveLength(1);
+    expect(writes).toHaveLength(0);
 
-    // Entries logged while the first request is still in flight share one
-    // round trip instead of costing one each.
-    await writeHostedRuntimeLogBestEffort({
-      entry: buildQueueLogEntry("info"),
-      now: () => "2026-06-12T00:00:05.000Z",
-      platform: { logPort: port },
-    });
-    await writeHostedRuntimeLogBestEffort({
-      entry: buildQueueLogEntry("info"),
-      now: () => "2026-06-12T00:00:06.000Z",
-      platform: { logPort: port },
-    });
-    expect(writes).toHaveLength(1);
-
-    writes[0]!.resolve();
+    const drain = drainHostedRuntimeLogWritesBestEffort();
     await flushMicrotasks();
-    expect(writes).toHaveLength(2);
-    expect(writes[1]!.entries.map((entry) => entry.at)).toEqual([
+    expect(writes).toHaveLength(1);
+    writes[0]!.resolve();
+    await expect(drain).resolves.toBeUndefined();
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(writes).toHaveLength(1);
+  });
+
+  it("coalesces several idle verbose entries into one request at window end", async () => {
+    vi.useFakeTimers();
+    const { port, writes } = createControlledLogPort();
+
+    for (const [index, level] of (["info", "debug", "info"] as const).entries()) {
+      await writeHostedRuntimeLogBestEffort({
+        entry: buildQueueLogEntry(level),
+        now: () => `2026-06-12T00:00:0${index + 4}.000Z`,
+        platform: { logPort: port },
+      });
+    }
+    await flushMicrotasks();
+    expect(writes).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(writes).toHaveLength(1);
+    expect(writes[0]!.entries.map((entry) => entry.at)).toEqual([
+      "2026-06-12T00:00:04.000Z",
       "2026-06-12T00:00:05.000Z",
       "2026-06-12T00:00:06.000Z",
     ]);
 
-    writes[1]!.resolve();
-    await flushMicrotasks();
+    writes[0]!.resolve();
     await expect(drainHostedRuntimeLogWritesBestEffort()).resolves.toBeUndefined();
   });
 
-  it("keeps each request within the callback entry and body bounds", async () => {
+  it("coalesces entries buffered during an in-flight request into one later request", async () => {
+    vi.useFakeTimers();
     const { port, writes } = createControlledLogPort();
 
     await writeHostedRuntimeLogBestEffort({
@@ -258,46 +334,125 @@ describe("hosted runtime log write queue", () => {
       now: () => "2026-06-12T00:01:00.000Z",
       platform: { logPort: port },
     });
-    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(writes).toHaveLength(1);
+
+    // Entries logged while the first request is still in flight share one
+    // later round trip instead of costing one each.
+    for (const at of ["2026-06-12T00:01:01.000Z", "2026-06-12T00:01:02.000Z"]) {
+      await writeHostedRuntimeLogBestEffort({
+        entry: buildQueueLogEntry("info"),
+        now: () => at,
+        platform: { logPort: port },
+      });
+    }
+    expect(writes).toHaveLength(1);
+
+    writes[0]!.resolve();
+    await flushMicrotasks();
+    expect(writes).toHaveLength(2);
+    expect(writes[1]!.entries.map((entry) => entry.at)).toEqual([
+      "2026-06-12T00:01:01.000Z",
+      "2026-06-12T00:01:02.000Z",
+    ]);
+
+    writes[1]!.resolve();
+    await expect(drainHostedRuntimeLogWritesBestEffort()).resolves.toBeUndefined();
+  });
+
+  it("flushes promptly at the entry bound without reordering rotated ports", async () => {
+    vi.useFakeTimers();
+    const first = createControlledLogPort();
+    const second = createControlledLogPort();
+
+    await writeHostedRuntimeLogBestEffort({
+      entry: buildQueueLogEntry("info"),
+      now: () => "2026-06-12T00:02:00.000Z",
+      platform: { logPort: first.port },
+    });
 
     const bufferedCount = HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES + 3;
     for (let index = 0; index < bufferedCount; index += 1) {
       await writeHostedRuntimeLogBestEffort({
         entry: buildQueueLogEntry("info"),
-        now: () => `2026-06-12T00:02:${String(index).padStart(2, "0")}.000Z`,
-        platform: { logPort: port },
+        now: () => `2026-06-12T00:02:${String(index + 1).padStart(2, "0")}.000Z`,
+        platform: { logPort: second.port },
       });
     }
 
-    writes[0]!.resolve();
     await flushMicrotasks();
-    expect(writes[1]!.entries).toHaveLength(HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES);
+    // Filling the trailing second-port batch starts the writer immediately,
+    // but FIFO still sends the older first-port entry first.
+    expect(first.writes).toHaveLength(1);
+    expect(first.writes[0]!.entries).toHaveLength(1);
+    expect(second.writes).toHaveLength(0);
 
-    writes[1]!.resolve();
+    first.writes[0]!.resolve();
     await flushMicrotasks();
-    expect(writes[2]!.entries).toHaveLength(3);
+    expect(second.writes).toHaveLength(1);
+    expect(second.writes[0]!.entries).toHaveLength(HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES);
 
-    writes[2]!.resolve();
+    second.writes[0]!.resolve();
     await flushMicrotasks();
+    expect(second.writes).toHaveLength(2);
+    expect(second.writes[1]!.entries).toHaveLength(3);
+
+    second.writes[1]!.resolve();
     await expect(drainHostedRuntimeLogWritesBestEffort()).resolves.toBeUndefined();
   });
 
-  it("splits oversized diagnostics so one request never exceeds the body limit", async () => {
+  it("flushes promptly when the next diagnostic would cross the body bound", async () => {
     const { port, writes } = createControlledLogPort();
-    // An oversized single entry gets its own request instead of wedging the
-    // transport; two such entries must never share a request.
-    const bulkyDiagnostic = { statusSummary: "x".repeat(100 * 1024) };
+    const bulkyDiagnostic = { statusSummary: "x".repeat(40 * 1024) };
 
     await writeHostedRuntimeLogBestEffort({
-      entry: buildQueueLogEntry("info"),
+      entry: {
+        ...buildQueueLogEntry("info"),
+        redactedJson: bulkyDiagnostic,
+      },
       now: () => "2026-06-12T00:03:00.000Z",
       platform: { logPort: port },
     });
     await flushMicrotasks();
-    expect(writes).toHaveLength(1);
+    expect(writes).toHaveLength(0);
 
-    for (const at of ["2026-06-12T00:03:01.000Z", "2026-06-12T00:03:02.000Z"]) {
+    await writeHostedRuntimeLogBestEffort({
+      entry: {
+        ...buildQueueLogEntry("info"),
+        redactedJson: bulkyDiagnostic,
+      },
+      now: () => "2026-06-12T00:03:01.000Z",
+      platform: { logPort: port },
+    });
+    await flushMicrotasks();
+    expect(writes).toHaveLength(1);
+    expect(writes[0]!.entries).toHaveLength(1);
+    expect(JSON.stringify({ entries: writes[0]!.entries }).length).toBeLessThanOrEqual(
+      64 * 1024,
+    );
+
+    writes[0]!.resolve();
+    await flushMicrotasks();
+    expect(writes).toHaveLength(2);
+    expect(writes[1]!.entries).toHaveLength(1);
+    expect(JSON.stringify({ entries: writes[1]!.entries }).length).toBeLessThanOrEqual(
+      64 * 1024,
+    );
+
+    writes[1]!.resolve();
+    await flushMicrotasks();
+    await expect(drainHostedRuntimeLogWritesBestEffort()).resolves.toBeUndefined();
+  });
+
+  it("keeps oversized single diagnostics moving without combining them", async () => {
+    const { port, writes } = createControlledLogPort();
+    const bulkyDiagnostic = { statusSummary: "x".repeat(100 * 1024) };
+
+    for (const at of [
+      "2026-06-12T00:03:02.000Z",
+      "2026-06-12T00:03:03.000Z",
+      "2026-06-12T00:03:04.000Z",
+    ]) {
       await writeHostedRuntimeLogBestEffort({
         entry: {
           ...buildQueueLogEntry("info"),
@@ -307,17 +462,21 @@ describe("hosted runtime log write queue", () => {
         platform: { logPort: port },
       });
     }
+    await flushMicrotasks();
+    expect(writes).toHaveLength(1);
+    expect(writes[0]!.entries).toHaveLength(1);
 
     writes[0]!.resolve();
     await flushMicrotasks();
+    expect(writes).toHaveLength(2);
     expect(writes[1]!.entries).toHaveLength(1);
 
     writes[1]!.resolve();
     await flushMicrotasks();
+    expect(writes).toHaveLength(3);
     expect(writes[2]!.entries).toHaveLength(1);
 
     writes[2]!.resolve();
-    await flushMicrotasks();
     await expect(drainHostedRuntimeLogWritesBestEffort()).resolves.toBeUndefined();
   });
 
@@ -325,13 +484,16 @@ describe("hosted runtime log write queue", () => {
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { port, writes } = createControlledLogPort();
 
-    await writeHostedRuntimeLogBestEffort({
-      entry: buildQueueLogEntry("info"),
-      now: () => "2026-06-12T00:04:00.000Z",
-      platform: { logPort: port },
-    });
+    for (let index = 0; index < HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES; index += 1) {
+      await writeHostedRuntimeLogBestEffort({
+        entry: buildQueueLogEntry("info"),
+        now: () => `2026-06-12T00:04:00.${String(index).padStart(3, "0")}Z`,
+        platform: { logPort: port },
+      });
+    }
     await flushMicrotasks();
     expect(writes).toHaveLength(1);
+    expect(writes[0]!.entries).toHaveLength(HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES);
 
     for (let index = 0; index < HOSTED_RUNTIME_LOG_MAX_QUEUED_ENTRIES + 1; index += 1) {
       await writeHostedRuntimeLogBestEffort({
@@ -362,6 +524,7 @@ describe("hosted runtime log write queue", () => {
   });
 
   it("keeps a rotated invocation's entries in order and on their own port", async () => {
+    vi.useFakeTimers();
     // A warm runner process outlives an invocation: the bounded invocation-end
     // drain can return while a request is still in flight, so the next
     // invocation's fresh log port appears mid-queue. Older entries must still
@@ -375,6 +538,7 @@ describe("hosted runtime log write queue", () => {
       now: () => "2026-06-12T01:00:00.000Z",
       platform: { logPort: first.port },
     });
+    const invocationDrain = drainHostedRuntimeLogWritesBestEffort({ timeoutMs: 20 });
     await flushMicrotasks();
     expect(first.writes).toHaveLength(1);
 
@@ -388,7 +552,8 @@ describe("hosted runtime log write queue", () => {
     }
 
     // The invocation-end drain gives up while that request is still open.
-    await drainHostedRuntimeLogWritesBestEffort({ timeoutMs: 20 });
+    await vi.advanceTimersByTimeAsync(20);
+    await invocationDrain;
 
     // The next invocation starts on a new port.
     await writeHostedRuntimeLogBestEffort({
@@ -426,6 +591,7 @@ describe("hosted runtime log write queue", () => {
   it("bounds retained info entries across repeated port rotations", async () => {
     // The cap is process-wide, not per port: rotating ports while the endpoint
     // is stalled must not multiply what a warm process retains.
+    vi.useFakeTimers();
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const stalled = createControlledLogPort();
     const rotations = 4;
@@ -437,7 +603,7 @@ describe("hosted runtime log write queue", () => {
       now: () => "2026-06-12T02:00:00.000Z",
       platform: { logPort: stalled.port },
     });
-    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(stalled.writes).toHaveLength(1);
 
     let stamped = 0;
@@ -473,6 +639,7 @@ describe("hosted runtime log write queue", () => {
   });
 
   it("swallows batch write failures so the chain and later writes never reject", async () => {
+    vi.useFakeTimers();
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { port, writes } = createControlledLogPort();
 
@@ -481,7 +648,7 @@ describe("hosted runtime log write queue", () => {
       now: () => "2026-06-12T00:00:04.000Z",
       platform: { logPort: port },
     });
-    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(writes).toHaveLength(1);
 
     const secondInfoSettled = trackSettled(writeHostedRuntimeLogBestEffort({

@@ -82,6 +82,17 @@ function parseJsonRequestBody(body: string | Blob | undefined): Record<string, u
   return JSON.parse(body) as Record<string, unknown>
 }
 
+function createLinqMessageResponse(): Response {
+  return new Response(JSON.stringify({
+    chat_id: 'chat_123',
+    message: {
+      id: 'msg_1',
+    },
+  }), {
+    headers: { 'content-type': 'application/json' },
+  })
+}
+
 async function listJsonFiles(directory: string) {
   return (await readdir(directory)).filter((fileName) => fileName.endsWith('.json'))
 }
@@ -726,18 +737,7 @@ test('sendLinqMessage posts Linq chat message payloads to the configured API bas
           method: init.method,
           url,
         })
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
-            chat_id: 'chat_123',
-            message: {
-              id: 'msg_1',
-            },
-          }),
-          text: async () => '',
-          arrayBuffer: async () => new ArrayBuffer(0),
-        }
+        return createLinqMessageResponse()
       },
     },
   )
@@ -778,18 +778,7 @@ test('sendLinqMessage sends normal Linq chat messages when a parent message id i
       },
       fetchImplementation: async (_url, init) => {
         requests.push(parseJsonRequestBody(init.body))
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
-            chat_id: 'chat_123',
-            message: {
-              id: 'msg_1',
-            },
-          }),
-          text: async () => '',
-          arrayBuffer: async () => new ArrayBuffer(0),
-        }
+        return createLinqMessageResponse()
       },
     },
   )
@@ -824,18 +813,7 @@ test('sendLinqMessage forwards Linq idempotency keys when provided', async () =>
       },
       fetchImplementation: async (_url, init) => {
         requests.push(parseJsonRequestBody(init.body))
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
-            chat_id: 'chat_123',
-            message: {
-              id: 'msg_1',
-            },
-          }),
-          text: async () => '',
-          arrayBuffer: async () => new ArrayBuffer(0),
-        }
+        return createLinqMessageResponse()
       },
     },
   )
@@ -892,18 +870,7 @@ test('sendLinqMessage retries Linq sends after a 429 response', async () => {
             }
           }
 
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({
-              chat_id: 'chat_123',
-              message: {
-                id: 'msg_1',
-              },
-            }),
-            text: async () => '',
-            arrayBuffer: async () => new ArrayBuffer(0),
-          }
+          return createLinqMessageResponse()
         },
       },
     )
@@ -958,18 +925,7 @@ test('sendLinqMessage honors Linq Retry-After headers on 429 responses', async (
             }
           }
 
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({
-              chat_id: 'chat_123',
-              message: {
-                id: 'msg_1',
-              },
-            }),
-            text: async () => '',
-            arrayBuffer: async () => new ArrayBuffer(0),
-          }
+          return createLinqMessageResponse()
         },
       },
     )

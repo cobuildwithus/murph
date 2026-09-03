@@ -153,6 +153,12 @@ export const MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID =
   'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FY'
 export const MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID =
   'automation_X3GPAWV2CCHNCYHAAJ4CE2M144'
+export const MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID =
+  'automation_01M0A7T3RN5VPD8C2K4V6X9ZBQ'
+export const MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID =
+  'automation_01M1J7C8M0RN1NGC0NT3XT7D2A'
+export const MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID =
+  'automation_01M1J7C8AFT3RN00NC0NT3XT7A'
 export const MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID =
   'automation_01K2WKKY3F8Q4R5S6T7V8W9XAB'
 export const MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID =
@@ -396,6 +402,94 @@ const MURPH_PROACTIVE_HEALTH_OUTREACH_POLICY = [
 
 export const MURPH_MANAGED_AUTOMATIONS = [
   {
+    automationId: MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
+    slug: 'journal-connected-context-morning',
+    title: 'Journal connected context morning pass',
+    summary: 'Checks new calendar plans and narrow email travel context.',
+    schedule: {
+      kind: 'dailyLocal',
+      localTime: '08:00',
+    },
+    continuityPolicy: 'fresh',
+    ownerScope: 'member',
+    hostedRuntimeOnly: true,
+    tags: ['murph-managed:journal-connected-context'],
+    instructions: [
+      'Run the private Journal connected-context morning pass.',
+      '',
+      'Read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/journal-connected-context/SKILL.md`. Run its connection-notice check, calendar pass, email travel pass, and due follow-up checks. Use the engine-supplied occurrence local date and timezone as the time anchor.',
+      '',
+      'A newly sent connection notice is a hard stop for this occurrence. Persist its ledger state, then end the run without reading any connected account content.',
+      '',
+      'This scheduled run may read connected calendar and email only through that skill. It must never send email, create provider calendar events, or use group context.',
+      '',
+      'If the skill finds nothing user-facing, return `{"kind":"skip","privateSummary":"No new connected Journal context required attention."}`.',
+    ].join('\n'),
+  },
+  {
+    automationId: MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID,
+    slug: 'journal-connected-context-afternoon',
+    title: 'Journal connected context afternoon pass',
+    summary: 'Checks the next 36 hours of relevant calendar plans.',
+    schedule: {
+      kind: 'dailyLocal',
+      localTime: '16:00',
+    },
+    continuityPolicy: 'fresh',
+    ownerScope: 'member',
+    hostedRuntimeOnly: true,
+    tags: ['murph-managed:journal-connected-context'],
+    instructions: [
+      'Run the private Journal connected-context afternoon pass.',
+      '',
+      'Read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/journal-connected-context/SKILL.md`. Run only its connection-notice check, calendar pass, and due follow-up checks. Do not run the email travel pass. Use the engine-supplied occurrence local date and timezone as the time anchor.',
+      '',
+      'A newly sent connection notice is a hard stop for this occurrence. Persist its ledger state, then end the run without reading any connected account content.',
+      '',
+      'This scheduled run may read connected calendars only through that skill. It must never create provider calendar events or use group context.',
+      '',
+      'If the skill finds nothing user-facing, return `{"kind":"skip","privateSummary":"No new calendar Journal context required attention."}`.',
+    ].join('\n'),
+  },
+  {
+    automationId: MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
+    slug: 'personal-patterns-update',
+    title: 'Personal Patterns update',
+    summary: 'Checks for new personal observations and patterns each day.',
+    schedule: {
+      kind: 'cron',
+      expression: '0 13 * * *',
+    },
+    continuityPolicy: 'fresh',
+    ownerScope: 'member',
+    assistantTargetOverride: {
+      model: 'gpt-5.6-luna',
+      reasoningEffort: 'medium',
+    },
+    tags: [
+      'murph-managed:personal-patterns-update',
+    ],
+    instructions: [
+      'On this scheduled run, check whether Personal Patterns contains a factor-and-outcome result that this member has not seen before. Send at most one compact message for the run. Never send one message per result.',
+      '',
+      '- Run `vault-cli wearables patterns --date YYYY-MM-DD --format json` with the current local date.',
+      '- Use only the named `vault-cli` reads and writes for this decision. Do not search the workspace or inspect the `vault-cli` executable or implementation.',
+      '- Read `vault-cli knowledge show journal-pattern-vocabulary`, `vault-cli knowledge show personal-pattern-notifications`, and `vault-cli wearables sources list` exactly once each. Missing Knowledge pages are expected; do not retry or search for them another way.',
+      '- Keep `journal-pattern-vocabulary` as compact JSON with this exact shape: `{"version":1,"concepts":[{"id":"short-stable-id","label":"Short label","icon":"closed-icon","aliases":["raw-factor-id"]}]}`. Allowed icons are activity, alcohol, bed, caffeine, cycling, dance, meal, medication, mind-body, recovery, red-light, running, strength, swimming, travel, walking, and wellness. Preserve valid existing concepts, but revise an existing label when it can be clearer or shorter without losing a distinction. Add a concept only when it improves a visible base factor label or icon, or merges clear base aliases. Derived detail ids containing `--` do not need concepts. Add no unseen base factor ids. Merge clear synonyms into one concept and leave uncertain factors separate. Use one to three plain words for each member-facing label. Remove redundant timing or context words, but never truncate blindly or merge distinct factors only to shorten a label. Expand a common abbreviation when its meaning is clear in the health context. Never use an unexplained abbreviation as the member-facing label, and never guess when it is ambiguous. Use at most 50 concepts and 20 aliases per concept. Store no dates, health values, effect sizes, grades, device data, or user prose.',
+      '- If the vocabulary needs a change, write the complete JSON exactly once with `vault-cli knowledge upsert --slug journal-pattern-vocabulary --title "Journal and Pattern vocabulary" --page-type ledger --body <json>`, then run the patterns command once more. The total limit is two patterns commands. Never run a third patterns command or a second vocabulary write. Pass JSON directly as the `--body` value; do not use a shell environment variable. When an alias moves to a canonical id, carry matching seen and muted notification identities to that id before checking for new results. A rename must not create a notification.',
+      '- Finish vocabulary normalization and notification-ledger migration before deciding whether any result is new. A result seen under a concept id or any of its aliases is already seen under the canonical id. A rename or merge is never a new result.',
+      '- If the notification ledger is missing, do not assume the first report is complete. Treat it as complete only when every contributing wearable source covers the full report window, or trusted device status explicitly says its initial import completed. If completion cannot be proved, write the current identities as pending import state and return skip without messaging.',
+      '- On the first report whose import completion is proved, send one compact first digest with at most three grade A-D highlights. Describe A-C as patterns and D as early signals. State each grade and evidence count, never imply cause, then mark the initial digest sent. If there are no grade A-D results, mark it sent and stay quiet.',
+      '- A result identity is `factorId + outcomeId + comparisonBasis + outcome lagDays`. Direction, effect size, grade, and classification can change without creating a new result.',
+      '- After the initial digest is sent, only a previously unseen grade A-D identity can trigger a message. Describe A-C as patterns and D as an early signal. Grade E observations stay quiet. Always state the grade and evidence count. Never imply cause.',
+      '- Honor muted factors and result identities in the ledger. Record them as seen, but do not mention them.',
+      '- If several eligible results are new, combine at most three highlights into one short summary. Lead with the strongest or most useful result and say that the rest are available on `/patterns`. Do not list a large import one by one.',
+      '- Rewrite `personal-pattern-notifications` with `vault-cli knowledge upsert --slug personal-pattern-notifications --title "Personal Pattern notifications" --page-type ledger --body <markdown>`. Pass the Markdown directly as the `--body` value; do not rely on a shell environment variable. Preserve shared and muted entries, then add all current graded identities before sending. Keep only ids, first-shared date, last-seen grade, and mute state. Do not copy health values or user text into this ledger.',
+      '- If the initial import is still pending, the first complete report has no grade A-D result, or no later eligible identity is new, return `{"kind":"skip","privateSummary":"No new Personal Pattern result appeared."}`. Grade changes belong in the weekly health insight, not a separate notification.',
+      '- If new identities exist, give their structured report to Murph and send one natural message. Do not mention the ledger, scheduled run, model, or internal calculation.',
+    ].join('\n'),
+  },
+  {
     automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
     slug: 'weekly-health-digest',
     title: 'Weekly health digest',
@@ -490,12 +584,17 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'Before choosing a finding:',
       '- Read the derived knowledge index.',
       '- Read `vault-cli knowledge show weekly-health-insights`. If the page is missing, treat that as no prior weekly health insights.',
+      '- Read `vault-cli knowledge show personal-pattern-notifications`. Compare its last-seen grades and identities with the current report. A useful strengthening, weakening, or no-longer-supported result may appear inside this weekly note. Do not send a separate change message.',
       '- Use `weekly-health-insights` as the dedupe ledger. Do not scan every wiki page and do not create per-week insight pages.',
       '- Search other knowledge pages only when the index suggests a candidate finding may already be covered elsewhere.',
-      '- Run `vault-cli wearables patterns --date YYYY-MM-DD --format json` with the current local date. This is the first evidence pass for repeated activity or intervention links with next-day sleep and recovery.',
+      '- Run `vault-cli wearables patterns --date YYYY-MM-DD --format json` with the current local date. This is the first evidence pass for repeated factor links with same-day subjective outcomes and next-day sleep or recovery.',
+      '- Read grades A-E as evidence strength: A-C are Patterns, D is an Early signal, and E is one Observation. Grade changes can inform this weekly note, but they do not require a separate message.',
       '- If the patterns command is unavailable, fails, or does not return a usable report, continue with the existing bounded manual candidate search. Do not treat command failure as evidence that no pattern exists, and do not send a setup or process note to the member.',
-      '- Treat `new_clue`, `seen_again`, and `worth_testing` as stages of repeated association, not proof. Use `no_clear_pattern` to reject a hunch, not to force an outbound note.',
+      '- Independently inspect the same bounded canonical evidence, then compare your best supported findings with the mathematical report. Do not assume either result is correct.',
+      '- Only when a stable, reproducible candidate exposes a material engine gap, call `murph.submit_product_feedback` once with kind `feature_request`. Start the summary with `Pattern engine audit:` and include a self-contained prompt under 1,800 characters for Codex to add or improve a deterministic test before changing the engine. Remove member ids, names, exact dates, raw messages, source paths, and identifying context. Use rounded or relative values. Do not submit an audit merely to produce one, and never mention it to the member.',
+      '- Treat legacy stages as compatibility labels, not proof. Use `no_clear_pattern` to reject a hunch, not to force an outbound note.',
       '- Inspect the underlying canonical dates and other vault context before sending. Check plausible alternatives. The pattern report narrows the search; it does not make the final judgment.',
+      '- Treat canonical food, supplement, medication, and event records behind Journal as evidence. When they suggest an important timing or combination issue, verify the personal pattern and the health claim with the narrow owning skill and, when web search is available, credible current sources before surfacing it. If web search is unavailable, the owning skill and the member\'s own records decide. Do not turn a generic rule into a personal finding, and recommend clinician or pharmacist review before any medication or consequential supplement change.',
       '- Inspect only enough recent and historical vault data to test candidate patterns.',
       '- For a candidate centered on a connected wearable recovery/readiness decline, when `murph.device` is available call it with `action: list_accounts`; always read `vault-cli wearables sources list`. Verify the contributing source is healthy, its `lastDate` covers the claimed window, and `stalenessVsNewestDays` or sync gaps do not explain the decline. If source health or freshness cannot be proved, suppress the candidate.',
       '- When useful, use web search to find one or two credible studies, reviews, or guidelines that suggest a pattern worth testing against the vault. Keep the user\'s vault data as the deciding evidence. Put external source provenance in the `weekly-health-insights` section body when it materially supports the mechanism, but keep the outbound note URL-free unless the user asks for links. Do not block the run if web search is unavailable or not useful.',

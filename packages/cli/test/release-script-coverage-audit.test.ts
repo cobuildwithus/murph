@@ -274,6 +274,12 @@ function loadReviewGptOpenTargetHarness(
       }
     }
     if (
+      expression.includes('regularChatSurfaceStatus') &&
+      expression.includes('chatPoint')
+    ) {
+      return { chatPoint: null, status: 'chat-selected' }
+    }
+    if (
       expression.includes('const MODEL_STRATEGY') &&
       expression.includes('const PRIMARY_LABEL')
     ) {
@@ -1369,13 +1375,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.142')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.143')
     expect(
       pnpmWorkspace
         .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1]
         ?.split('\n')
         .filter((line) => line.includes('@cobuild/review-gpt')),
-    ).toEqual(["  - '@cobuild/review-gpt@0.5.142'"])
+    ).toEqual(["  - '@cobuild/review-gpt@0.5.143'"])
     expect(
       pnpmWorkspace
         .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1],
@@ -1393,10 +1399,11 @@ describe('monorepo release flow coverage audit', () => {
       [
         "'@cloudflare/containers@0.3.7': patches/@cloudflare__containers@0.3.7.patch",
         "'@cobuild/repo-tools@0.1.17': patches/@cobuild__repo-tools@0.1.17.patch",
-        "'@cobuild/review-gpt@0.5.142': patches/@cobuild__review-gpt@0.5.142.patch",
+        "'@cobuild/review-gpt@0.5.143': patches/@cobuild__review-gpt@0.5.143.patch",
         'incur@0.4.5: patches/incur@0.4.5.patch',
         'incur@0.5.1: patches/incur@0.5.1.patch',
         'ink@6.8.0: patches/ink@6.8.0.patch',
+        'wrangler@4.90.0: patches/wrangler@4.90.0.patch',
       ],
     )
     expect(repoToolsPatch).toContain('tracked_files=()')
@@ -1404,8 +1411,11 @@ describe('monorepo release flow coverage audit', () => {
     expect(repoToolsPatch).toContain('add -u -- "${tracked_files[@]}"')
     expect(repoToolsPatch).toContain('add -A -- "${untracked_files[@]}"')
     expect(
-      existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.142.patch')),
+      existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.143.patch')),
     ).toBe(true)
+    expect(
+      existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.142.patch')),
+    ).toBe(false)
     expect(
       existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.140.patch')),
     ).toBe(false)
@@ -1417,6 +1427,17 @@ describe('monorepo release flow coverage audit', () => {
       "(entry) => entry.type === 'page' && entry.url === ownershipUrl",
     )
     expect(reviewGptDriver).toContain('const navigation = await cdp(\'Page.navigate\', { url: chatgptUrl });')
+    expect(reviewGptDriver).toContain('function regularChatSurfaceStatus(snapshot)')
+    expect(reviewGptDriver).toContain('[data-testid^="work-usage-"]')
+    expect(reviewGptDriver).toContain(
+      'await ensureRegularChatSurface({ allowSwitch: true })',
+    )
+    expect(reviewGptDriver).toContain(
+      'await ensureRegularChatSurface({ allowSwitch: false })',
+    )
+    expect(reviewGptDriver).toContain(
+      'refuses to stage or send a normal review in ChatGPT Work',
+    )
     expect(reviewGptDriver.indexOf('ws.send(payload);')).toBeLessThan(
       reviewGptDriver.indexOf('commandDeliveryStarted = true;'),
     )

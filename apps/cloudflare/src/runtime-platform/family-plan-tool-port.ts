@@ -3,11 +3,8 @@ import {
   parseHostedRuntimeFamilyPlanToolResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
-  HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH,
-} from "@murphai/hosted-execution/routes";
-
-import {
   fetchHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
 
@@ -24,7 +21,7 @@ export function createHostedRuntimeFamilyPlanToolPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted family plan tool",
         fetchImpl: input.fetchImpl,
-        path: HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.familyPlanTool,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });

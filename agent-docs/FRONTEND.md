@@ -20,6 +20,7 @@ Colors and fonts are mapped to standard shadcn CSS variables in `apps/web/app/gl
 Invoke the installed `impeccable` skill by name. Skill installation is environment-owned; do not assume a checkout-local skill directory exists.
 
 Run via `$impeccable <command>` (or pinned shortcuts if created). Useful commands for this project:
+
 - `$impeccable craft [feature]` — shape, then build a feature end-to-end.
 - `$impeccable shape [feature]` — plan UX/UI before writing code.
 - `$impeccable critique [target]` — UX review with heuristic scoring.
@@ -85,12 +86,24 @@ cd apps/web && pnpm typecheck
 - Follow `agent-docs/operations/product-ux.md` before and after code. Treat
   loading time, progress, skeletons, empty, partial, stale, error, and recovery
   states as part of the product experience.
+- Keep loading, empty, unavailable, and error states consistent across sibling
+  dashboard pages. Preserve the page heading in every state. Use the shared
+  state pattern for message hierarchy and recovery actions. Shape loading
+  skeletons like the content they replace. Do not let a state replace the page
+  shell or introduce a feature-specific alert style without a product reason.
 - Use shadcn components and standard Tailwind classes. Arbitrary values for edge cases only.
 - No `@radix-ui/*` imports. We use base UI.
 - Motion restrained — only for hierarchy or affordance.
+- Do not add a subtitle by default. Add supporting text only when it gives the
+  user new information or helps them act. Do not repeat a visible heading,
+  date, metric, status, or control in another form. If the interface stays
+  clear without the text, remove it.
 - Verify UI changes in the browser at every viewport where the result can
   materially differ. Check phone and desktop when responsive behavior can
   change.
+- Local data personas must use synthetic records and the real product query
+  path. Keep the selector development-only. Never copy member exports into a
+  fixture, screenshot, snapshot, or client bundle.
 - Reuse [localhost:3000/design?tab=components](http://localhost:3000/design?tab=components) before creating a near-duplicate. Every user-facing hosted Web UI diff needs a repository-owned, reviewer-openable representation: the real production component or consent surface on the matching `/design` tab, or the composed section under `/screenshots/<category>`. Add or update a catalog/study state only when no existing route and anchor render the changed state.
 - Add a `/screenshots` study only when a difficult or reusable state benefits from stable presentation proof. Render the real production component with synthetic props, no live data, no live requests, and all interactive controls `inert`. A screenshot study proves presentation only, not the complete product journey.
 - For content-only authored changelog entries and edition metadata, use the narrow no-preview proof route in `apps/web/changelog/README.md`. Any changelog renderer, component, style, visual, or interaction change uses the normal current-branch proof rule.
@@ -116,6 +129,7 @@ cd apps/web && pnpm typecheck
 ## Docs to update
 
 When frontend behavior changes:
+
 - `DESIGN.md` (visual tokens, new components, updated patterns)
 - `PRODUCT.md` (only if brand personality, anti-references, or design principles shift)
 - `agent-docs/PRODUCT_SENSE.md`

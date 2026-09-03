@@ -26,6 +26,7 @@ export interface HostedRunnerStuckInvocationTestResult {
 export interface HostedRunnerActiveFenceTestResult {
   attemptId: string;
   processingMode: RunnerWriteFenceToken["processingMode"];
+  runnerContainerName: string | null;
 }
 
 export interface HostedRunnerAgedActiveFenceTestResult {
@@ -166,6 +167,7 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
       ? {
           attemptId: token.attemptId,
           processingMode: token.processingMode,
+          runnerContainerName: token.runnerContainerName,
         }
       : null;
   }

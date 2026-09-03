@@ -627,6 +627,33 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).not.toContain('unrelated work/school tasks')
   })
 
+  it('captures atomic Journal facts only in private conversations', () => {
+    const directPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+    const groupPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      conversationScope: 'group',
+    }))
+
+    expect(directPrompt).toContain('Private Journal capture:')
+    expect(directPrompt).toContain('journal-factor')
+    expect(directPrompt).toContain('journal-outcome')
+    expect(directPrompt).toContain('per independent fact')
+    expect(directPrompt).toContain('--related-id')
+    expect(directPrompt).toContain('missing data remains unknown')
+    expect(directPrompt).toContain('Save clear facts silently')
+    expect(directPrompt).toContain('start one workout')
+    expect(directPrompt).toContain('Check at 13:00 local')
+    expect(directPrompt).toContain(
+      'vault-cli wearables patterns --date <local-date> --format json',
+    )
+    expect(directPrompt).toContain('exactly once')
+    expect(directPrompt).toContain('stop proactive questions when asked')
+    expect(directPrompt).toContain('Explain capture, fixes, and refresh')
+    expect(directPrompt).toContain(
+      'tell users to ask Murph; never claim web controls',
+    )
+    expect(groupPrompt).not.toContain('Private Journal capture:')
+  })
+
   it('uses formal by default and applies a saved tone as a strict writing contract', () => {
     const defaultLayers = buildAssistantSystemPromptLayers(
       createCommonCodexPromptInput(),
@@ -1123,7 +1150,7 @@ describe('assistant execution prompt contract', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'For recurring behavior, experiments, reminders, friction, or adherence repair, read the matching domain skill and `behavior-followthrough` before setup or scheduling.',
+      'For recurring support, experiments, reminder repair, or adherence problems, read the matching domain skill and `behavior-followthrough` before setup or scheduling.',
     )
     expect(prompt).toContain(
       'Keep the first setup small, reversible, and easy to stop.',
@@ -2071,16 +2098,17 @@ describe('assistant system prompt cache stability', () => {
 
     expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(8_415)
     // This layer is resident on every turn for every member. Its ceiling is the
-    // prior 59,403-character ratchet plus 5%, rounded up, for reviewed cross-route
+    // prior 63,600-character ratchet plus 5%, rounded up, for reviewed cross-route
     // guidance that cannot live in an owning skill. Capability-specific browser,
     // connected-app, phone-call, and Family mechanics remain excluded.
     // The local automation delivery limitation, the established Apple
     // Health/WHOOP relay, cross-route repeated-set boundary, private
-    // longitudinal recommendation policy, narrowest-relevant-safety rule,
-    // response-card dietary/burn target-authority boundary, explicit
-    // group-family tool routing, and the cross-route CLI error-recovery
-    // contract set this exact ceiling.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(62_542)
+    // longitudinal recommendation, direct and group Journal capture policies,
+    // narrowest-relevant-safety rule, response-card dietary/burn
+    // target-authority boundary, explicit group-family tool routing, and the
+    // cross-route CLI error-recovery contract, and shared exact-versus-vague
+    // one-shot reminder timing policy set this exact ceiling.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(66_780)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -2383,7 +2411,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '8c5d6627b8f18d7da850f2cb02fed34b439ac54ad4589b39b5c0b464b14f17a4',
+      '78ab3e952f1071c1482495860ed1577a36a288be7abe8a723f1cbea5873bd2a7',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -2600,7 +2628,7 @@ describe('assistant experiment onboarding guidance', () => {
 
     expect(prompt).toContain('Follow-through and authorization:')
     expect(prompt).toContain(
-      'For recurring behavior, experiments, reminders, friction, or adherence repair, read the matching domain skill and `behavior-followthrough` before setup or scheduling.',
+      'For recurring support, experiments, reminder repair, or adherence problems, read the matching domain skill and `behavior-followthrough` before setup or scheduling.',
     )
     expect(prompt).toContain(
       'Keep the first setup small, reversible, and easy to stop.',
@@ -2774,6 +2802,9 @@ describe('assistant experiment onboarding guidance', () => {
     expect(groupPrompt).toContain('Understand before recommending:')
     expect(groupPrompt).toContain(
       'Read private participant records only through server-approved group results',
+    )
+    expect(groupPrompt).toContain(
+      'call `record_current_sender_journal_fact` once per fact, with the exact ref and a different index.',
     )
     expect(groupPrompt).toContain(
       'Missing context is not evidence for the most restrictive option.',
@@ -3614,6 +3645,98 @@ describe('assistant conversation scope', () => {
     )
     expect(prompt).toContain(
       'Never use saved personal/self targets in this group vault.',
+    )
+  })
+
+  it('separates exact and vague one-shot reminder timing in direct and group prompts', () => {
+    const directPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      assistantHostedAutomationAvailable: true,
+      channel: 'linq',
+      conversationScope: 'direct',
+      hostedRuntime: true,
+    }))
+    const groupPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      assistantHostedAutomationAvailable: true,
+      channel: 'linq',
+      conversationScope: 'group',
+      hostedRuntime: true,
+    }))
+
+    expect(directPrompt).toContain('One-shot reminder time selection:')
+    expect(directPrompt).toContain(
+      'Classify timing before optional reads.',
+    )
+    expect(directPrompt).toContain(
+      'An exact clock time is final: preserve its day or date and time',
+    )
+    expect(directPrompt).toContain(
+      'perform no pattern, routine, wearable, or calendar read to choose or alter it',
+    )
+    expect(directPrompt).toContain(
+      'delegates the clock time',
+    )
+    expect(directPrompt).toContain(
+      '`vault-cli wearables sleep pattern --format json`',
+    )
+    expect(directPrompt).toContain(
+      'Before choosing or saving, when connected-app tools are available, call `murph.connected_apps_manage` once with unfiltered `action: list`',
+    )
+    expect(directPrompt).toContain(
+      'do not skip this because other context seems sufficient',
+    )
+    expect(directPrompt).toContain(
+      'The connection authorizes this narrow read; do not ask permission.',
+    )
+    expect(directPrompt).toContain(
+      'Never guess or fan out.',
+    )
+    expect(directPrompt).toContain(
+      'continue without a timing question',
+    )
+    expect(directPrompt).toContain(
+      'Save exactly one fixed `at` reminder inside the window',
+    )
+    expect(directPrompt).toContain(
+      'Never add `skip-when-busy`, availability or account bindings, runtime calendar reads, or dynamic rescheduling',
+    )
+    expect(directPrompt).toContain(
+      'begin with the reminder subject, date, and time—never just `Reminder saved`',
+    )
+    expect(directPrompt).toContain(
+      'Calendar connection offer for reminder timing — last offered: YYYY-MM-DD; do not re-offer before: YYYY-MM-DD.',
+    )
+    expect(directPrompt).toContain(
+      'update that Context record by id; use `vault-cli memory upsert` only to create it once when absent',
+    )
+    expect(directPrompt).toContain('with today and 14 calendar days later')
+    expect(directPrompt).toContain(
+      'on read or write failure, omit the offer and leave the reminder unchanged',
+    )
+    expect(directPrompt).toContain(
+      'Explicit calendar setup bypasses suppression.',
+    )
+    expect(directPrompt).toContain(
+      '`Never proactively offer calendar connection for reminder timing.`',
+    )
+
+    expect(groupPrompt).toContain('One-shot reminder time selection:')
+    expect(groupPrompt).toContain(
+      'Preserve a member-supplied exact clock time and day or date exactly',
+    )
+    expect(groupPrompt).toContain(
+      'choose one reasonable concrete time inside the window from current room or message context',
+    )
+    expect(groupPrompt).toContain(
+      "Never read or write a participant's personal memory, routines, wearables, or connected calendars",
+    )
+    expect(groupPrompt).toContain(
+      'never offer personal calendar connection in the group',
+    )
+    expect(groupPrompt).not.toContain(
+      'Calendar connection offer for reminder timing —',
+    )
+    expect(groupPrompt).not.toContain(
+      '`vault-cli wearables sleep pattern --format json`',
     )
   })
 

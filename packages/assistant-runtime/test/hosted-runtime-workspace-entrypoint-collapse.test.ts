@@ -582,15 +582,17 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
     const idleCheckpointDelayMs = 180_000;
     const assistantOneObserved = createDeferred<void>();
     const assistantTwoObserved = createDeferred<void>();
+    const runtimeAbortController = new AbortController();
     let firstCheckpointStartedAtMs: number | null = null;
     let assistantPhaseCalls = 0;
+    let invocationPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
 
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     try {
       vi.setSystemTime(new Date(TEST_NOW));
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
 
-      const resultPromise = withRealTimeout(
+      invocationPromise =
         runHostedWorkspaceRuntimeJobInProcess(
           createWorkspaceRuntimeJobInput({
             request: {
@@ -654,9 +656,12 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
                 },
               };
             },
+            signal: runtimeAbortController.signal,
             vaultRoot,
           },
-        ),
+        );
+      const resultPromise = withRealTimeout(
+        invocationPromise,
         15_000,
         () => events.join(","),
       );
@@ -701,6 +706,8 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
       assert.equal(result.nextWakeReason, expectedWakeReason);
       assert.equal(assistantPhaseCalls, 2);
     } finally {
+      runtimeAbortController.abort(new DOMException("Synthetic test cleanup.", "AbortError"));
+      await invocationPromise?.catch(() => undefined);
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
     }
@@ -713,14 +720,16 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
     const checkpointObserved = createDeferred<void>();
     const assistantObserved = createDeferred<void>();
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const runtimeAbortController = new AbortController();
     let assistantPhaseCalls = 0;
+    let invocationPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
 
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     try {
       vi.setSystemTime(new Date(TEST_NOW));
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
 
-      const resultPromise = withRealTimeout(
+      invocationPromise =
         runHostedWorkspaceRuntimeJobInProcess(
           createWorkspaceRuntimeJobInput({
             request: {
@@ -772,9 +781,12 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
               };
             },
             runtimeWakeSignal,
+            signal: runtimeAbortController.signal,
             vaultRoot,
           },
-        ),
+        );
+      const resultPromise = withRealTimeout(
+        invocationPromise,
         15_000,
         () => events.join(","),
       );
@@ -801,6 +813,8 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
       assert.equal(result.immediateRecheckRequested, true);
       assert.equal(assistantPhaseCalls, 1);
     } finally {
+      runtimeAbortController.abort(new DOMException("Synthetic test cleanup.", "AbortError"));
+      await invocationPromise?.catch(() => undefined);
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
     }

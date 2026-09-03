@@ -48,13 +48,9 @@ describe('Linq compact-table app cards', () => {
         body: typeof init.body === 'string' ? JSON.parse(init.body) : null,
         url,
       })
-      return {
-        arrayBuffer: async () => new ArrayBuffer(0),
-        json: async () => ({ message: { id: 'msg_1' } }),
-        ok: true,
-        status: 200,
-        text: async () => '',
-      }
+      return new Response(JSON.stringify({ message: { id: 'msg_1' } }), {
+        headers: { 'Content-Type': 'application/json' },
+      })
     }
 
     await sendLinqIMessageAppCard({
@@ -104,13 +100,9 @@ describe('Linq compact-table app cards', () => {
       requests.push(
         typeof init.body === 'string' ? JSON.parse(init.body) : null,
       )
-      return {
-        arrayBuffer: async () => new ArrayBuffer(0),
-        json: async () => ({ message: { id: 'msg_2' } }),
-        ok: true,
-        status: 200,
-        text: async () => '',
-      }
+      return new Response(JSON.stringify({ message: { id: 'msg_2' } }), {
+        headers: { 'Content-Type': 'application/json' },
+      })
     }
 
     await sendLinqIMessageAppCard({

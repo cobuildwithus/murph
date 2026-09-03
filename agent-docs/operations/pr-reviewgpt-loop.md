@@ -52,6 +52,13 @@ the prepared draft or conversation is the user-facing result. Never implement
 this cleanup as a profile-wide tab sweep or close a target that the current run
 did not create.
 
+Normal reviews use regular Chat, never ChatGPT Work. The package confirms that
+surface before model selection, before staging, and immediately before send. A
+fresh new-chat target switches the Chat/Work control to Chat when necessary; an
+existing Work conversation or an unconfirmed new-chat surface fails closed.
+Deep Research remains on its dedicated surface. Keep this browser-DOM policy in
+ReviewGPT rather than duplicating it in Murph's lane wrapper or prompts.
+
 This ownership rule is required because the managed browser lanes keep
 background response-polling timers reliable and ReviewGPT pins only the owned
 capture page lifecycle active, then releases emulated focus before retaining or

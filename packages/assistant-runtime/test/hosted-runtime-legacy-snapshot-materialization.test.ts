@@ -8,10 +8,11 @@ import {
   writeHostedWorkspaceSkippedInlineFiles,
   type HostedWorkspaceSkippedInlineFile,
 } from "@murphai/runtime-state/node";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   materializeLegacyWorkspaceRefsForV2Snapshot,
+  prepareLegacyWorkspaceRefsForV2SnapshotMaterialization,
   type LegacyWorkspaceRefsForV2SnapshotMaterializationPlan,
 } from "../src/hosted-runtime/legacy-snapshot-materialization.ts";
 
@@ -24,6 +25,39 @@ afterEach(async () => {
 });
 
 describe("legacy workspace v2 snapshot materialization", () => {
+  it("treats a carried null snapshot ref as no legacy state", async () => {
+    const roots = await createWorkspaceRoots();
+    const skipped = createSkippedInlineFile(
+      "raw/legacy/ignored-without-ref.txt",
+      "ignored legacy bytes\n",
+    );
+    await writeHostedWorkspaceSkippedInlineFiles({
+      files: [skipped.file],
+      vaultRoot: roots.vaultRoot,
+    });
+    const artifactGet = vi.fn(async () => {
+      throw new Error("Null legacy refs must not read artifact state.");
+    });
+
+    await expect(prepareLegacyWorkspaceRefsForV2SnapshotMaterialization({
+      artifactStore: { get: artifactGet },
+      currentSnapshotRef: null,
+      vaultRoot: roots.vaultRoot,
+    })).resolves.toEqual({
+      currentSnapshotRefPresent: false,
+      legacyBundleRefPresent: false,
+      preservedInlineFileCount: 0,
+      preservedState: null,
+      skippedInlineFiles: [],
+      skippedInlineFileCount: 0,
+    });
+
+    expect(artifactGet).not.toHaveBeenCalled();
+    await expect(readHostedWorkspaceSkippedInlineFiles({
+      vaultRoot: roots.vaultRoot,
+    })).resolves.toEqual([skipped.file]);
+  });
+
   it("unwinds staged artifacts without partially mutating live roots when interrupted", async () => {
     const roots = await createWorkspaceRoots();
     const first = createSkippedInlineFile("raw/legacy/first.txt", "first legacy bytes\n");

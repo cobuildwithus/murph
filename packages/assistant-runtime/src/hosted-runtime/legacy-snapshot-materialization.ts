@@ -14,9 +14,6 @@ import {
 import type {
   HostedRuntimeArtifactReader,
 } from "./platform.ts";
-import type {
-  HostedWorkspaceRuntimeJobOptions,
-} from "../hosted-runtime.ts";
 import {
   type HostedExecutionSnapshotRef,
 } from "@murphai/hosted-execution/contracts";
@@ -56,23 +53,20 @@ export interface LegacyWorkspaceRefsForV2SnapshotMaterializationPlan {
 
 export async function prepareLegacyWorkspaceRefsForV2SnapshotMaterialization(input: {
   artifactStore: HostedRuntimeArtifactReader;
-  platform: HostedWorkspaceRuntimeJobOptions["platform"];
+  currentSnapshotRef: HostedExecutionSnapshotRef | null;
   signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<LegacyWorkspaceRefsForV2SnapshotMaterializationPlan> {
   assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
   try {
-    const currentSnapshotRef = await readHostedWorkspaceCurrentSnapshotRef({
-      platform: input.platform,
-      signal: input.signal,
-    });
-    assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
-    const legacyBundleRef = readHostedExecutionSnapshotBaseRef(currentSnapshotRef);
+    const legacyBundleRef = readHostedExecutionSnapshotBaseRef(
+      input.currentSnapshotRef,
+    );
     const preservedState = legacyBundleRef
       ? await readHostedWorkspaceEffectivePreservedState({
           artifactStore: input.artifactStore,
           signal: input.signal,
-          snapshotRef: currentSnapshotRef,
+          snapshotRef: input.currentSnapshotRef,
         })
       : null;
     assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
@@ -84,7 +78,7 @@ export async function prepareLegacyWorkspaceRefsForV2SnapshotMaterialization(inp
     assertHostedWorkspaceLegacySnapshotPreparationLive(input.signal);
 
     return {
-      currentSnapshotRefPresent: currentSnapshotRef !== null,
+      currentSnapshotRefPresent: input.currentSnapshotRef !== null,
       legacyBundleRefPresent: legacyBundleRef !== null,
       preservedInlineFileCount: preservedState?.inlineFiles.length ?? 0,
       preservedState,
@@ -159,20 +153,6 @@ export async function materializeLegacyWorkspaceRefsForV2Snapshot(input: {
     await cleanupStagedLegacyWorkspaceRefs(staged);
     throw error;
   }
-}
-
-async function readHostedWorkspaceCurrentSnapshotRef(input: {
-  platform: HostedWorkspaceRuntimeJobOptions["platform"];
-  signal?: AbortSignal | null;
-}): Promise<HostedExecutionSnapshotRef | null> {
-  if (!input.platform.workspacePort?.read) {
-    return null;
-  }
-
-  const currentWorkspace = await input.platform.workspacePort.read({
-    signal: input.signal,
-  });
-  return currentWorkspace.workspace?.snapshotRef ?? null;
 }
 
 function assertHostedWorkspaceLegacySnapshotPreparationLive(

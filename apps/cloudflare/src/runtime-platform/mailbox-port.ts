@@ -4,14 +4,9 @@ import {
   parseHostedMailboxPayloadFetchResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
-  HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
-  HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
-  HOSTED_RUNTIME_MEMBER_ACTION_OUTCOME_PATH,
-} from "@murphai/hosted-execution/routes";
-
-import {
   fetchHostedWebControlPlaneJson,
   fetchReplaySafeHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
 
@@ -36,7 +31,7 @@ export function createHostedWebMailboxPort(input: {
           boundUserId: input.boundUserId,
           description: "Hosted mailbox fetch",
           fetchImpl: input.fetchImpl,
-          path: HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
+          route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.mailboxFetch,
           ...(context?.signal ? { signal: context.signal } : {}),
           timeoutMs: input.timeoutMs,
           transport: input.transport,
@@ -74,7 +69,7 @@ export function createHostedWebMailboxPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted mailbox payload fetch",
         fetchImpl: input.fetchImpl,
-        path: HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.mailboxPayloadFetch,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });
@@ -94,7 +89,7 @@ export function createHostedWebMailboxPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted member action outcome record",
         fetchImpl: input.fetchImpl,
-        path: HOSTED_RUNTIME_MEMBER_ACTION_OUTCOME_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.memberActionOutcome,
         replayOnceOnRetryableFailure: true,
         ...(context?.signal ? { signal: context.signal } : {}),
         timeoutMs: input.timeoutMs,

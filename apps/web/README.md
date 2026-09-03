@@ -1352,17 +1352,22 @@ Callback auth contract:
   authority and seals only from that scoped cache entry, with one full retry on
   typed root drift. Legacy transaction append surfaces remain for separately
   migrated callers and are not the transaction-safe generic entrypoint.
-- `POST /api/internal/hosted-runtime/owner-released` is the payload-free
-  completion handoff. Web accepts a zero-byte body and either no query or the
-  exact signature-bound `immediateRecheckRequested=1` positive edge, binds the
-  user through the signed request plus normal nonce protection, and emits the
-  existing `runtime_recheck_requested` Temporal signal. Without the edge, Web
-  signals only for current runnable mailbox lag; a persisted default or
-  retention wake is not itself signal authority. The edge means the completed
-  invocation newly committed an unserviced schedule and carries no wake data.
-  Known future mailbox retry continuations remain deferred. Cloudflare calls the
-  route at most once, with a timeout capped at two seconds, only after exact
-  write-fence completion; failure is non-fatal and has no callback retry.
+- `POST /api/internal/hosted-runtime/owner-released` is the pointer-only
+  completion handoff. Web accepts a zero-byte body and a signed query containing
+  the opaque released `runtimeAttemptId`, plus the optional exact
+  `immediateRecheckRequested=1` positive edge. It binds the user through the
+  signed request plus normal nonce protection. Without the positive edge, Web
+  emits a signal only when current runnable mailbox lag or a live system mailbox
+  item beyond the handled-through frontier remains. Exact callbacks use
+  `runtime_owner_released`, which Temporal matches before releasing an
+  accepted-owner horizon; legacy pointerless callbacks use the facts-only
+  `runtime_recheck_requested` signal during rollout. A persisted default or
+  retention wake alone is not signal authority. The positive edge means the
+  completed invocation newly committed an unserviced schedule and carries no
+  wake data. Known future mailbox retry continuations remain deferred.
+  Cloudflare calls the route at most once, with a timeout capped at two seconds,
+  only after exact write-fence completion; failure is non-fatal and has no
+  callback retry.
 
 When you set `DEVICE_SYNC_PUBLIC_BASE_URL`, use the same stable production
 hostname as every first-party hosted app-session URL that can serve the OAuth
@@ -1690,11 +1695,12 @@ registers it with Vercel Fluid Compute, and passes that same pool to
 its existing cleanup contract. Keep session-persistent setup such as connection
 `SET` hooks out of this path because transaction pooling can move consecutive
 transactions between backend connections. The default pool limit is 15 clients
-per module runtime, with five seconds for connection acquisition and 30 seconds
-for idle retirement; tune those values only from measured pool and database
-pressure. Connection failure logs expose only fixed operation/source labels,
-retry attempt and disposition, the configured pool limit, and numeric
-pre-attempt and post-failure pool counts.
+per module runtime, with five seconds each for connection acquisition and idle
+retirement. Vercel's pool attachment extends the active invocation through that
+idle window, so keep it short and tune it only from measured invocation, pool,
+and database pressure. Connection failure logs expose only fixed
+operation/source labels, retry attempt and disposition, the configured pool
+limit, and numeric pre-attempt and post-failure pool counts.
 
 That module permits one jittered retry only for ambiguous transient failures
 that prove the database did no work. A `pool_checkout_timeout` means the
@@ -2236,7 +2242,7 @@ deleted sharing CRUD, local-vault import callbacks, or an outbox drain route. It
 still uses narrow signed hosted-web callbacks for execution-time device-sync
 runtime snapshot/apply, device connect-link starts, direct hosted usage
 recording, member-bound plan-usage reads, mailbox/workspace runtime status plus
-log callbacks, and the payload-free runtime owner-release recheck handoff.
+log callbacks, and the pointer-only runtime owner-release recheck handoff.
 
 ## Hosted onboarding routes
 

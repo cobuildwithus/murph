@@ -3,11 +3,8 @@ import {
   parseHostedRuntimeIMessageContactToolResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
-  HOSTED_RUNTIME_IMESSAGE_CONTACT_TOOL_PATH,
-} from "@murphai/hosted-execution/routes";
-
-import {
   fetchHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
 
@@ -24,7 +21,7 @@ export function createHostedRuntimeIMessageContactToolPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted iMessage contact tool",
         fetchImpl: input.fetchImpl,
-        path: HOSTED_RUNTIME_IMESSAGE_CONTACT_TOOL_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.imessageContactTool,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });

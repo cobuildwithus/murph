@@ -107,8 +107,9 @@ An exact system-mailbox pointer is admission, not completion. Web projects the
 authenticated `hostedMailboxSystemHandledThroughSeq` scalar from the existing
 redacted workspace checkpoint and classifies only the exact first live system
 row as `model_free` or `default_owned`. Environment completion is one generic
-model-free kind; Temporal does not know its product meaning or select a
-feature-specific processing mode. Temporal applies three distinct retirement
+model-free kind, as is deterministic member-channel reconciliation; Temporal
+does not know their product meaning or select a feature-specific processing
+mode. Temporal applies three distinct retirement
 rules: a handled-through frontier that reaches the pointer lane sequence retires
 it as completed; an explicit `systemMailboxFrontier: null` retires only
 Temporal's noncanonical pointer projection because the current facts admit no
@@ -446,8 +447,13 @@ conversation lag or a due assistant workspace wake selects default processing;
 system-only lag selects `system_mailbox` processing; a due inbox media retention
 wake selects `inbox_media_retention` processing when foreground/default work is
 not runnable; future or absent wakes wait. These modes are invocation input, not
-new scheduler state. Foreground/default work must replace an active
-system-mailbox or retention owner instead of waiting for its idle checkpoint.
+new scheduler state. The runtime's checkpoint projection publishes an ordinary
+default-owned mailbox wake only when a default row owns the currently
+executable frontier; a later default row does not compete with a runnable
+model-free frontier. Execution eligibility stays unchanged, and explicitly
+approved continuations retain their foreground priority. Foreground/default work must
+replace an active system-mailbox or retention owner instead of waiting for its
+idle checkpoint.
 If a default invocation's live checks disprove its overdue projection and the
 next due frontier belongs to a model-free owner, the runtime first checkpoints
 the corrected projections without advancing handled-through or the system
@@ -742,12 +748,16 @@ The hard-cut architecture is accepted when:
   candidate producer runs only in unprivileged Repo Hygiene and hands the
   trusted controller a run/head-bound bounded JSON artifact. The controller
   never owns worker code or reader policy: private Murph Cloud receives only
-  serialized fixture data, declares the immutable supported-reader set,
-  automatically includes its pinned controller revision, runs every reader,
-  and returns one producer-and-reader proof digest. The committed public policy
-  binds the private controller to a SHA-suffixed immutable tag. Missing, stale,
-  skipped, canceled, duplicated, malformed, or failed proof remains red or
-  pending.
+  serialized fixture data, derives the live Current and traffic-bearing Ramping
+  readers, automatically includes the exact dispatched private candidate and,
+  while the standby guard remains, the active legacy worker's exact live deploy
+  revision, then runs every reader. Final protected attestation re-reads the
+  complete reader set and fails on identity or routing drift before returning
+  one producer-and-reader proof digest. The public controller resolves private
+  `main` before dispatch, binds the returned first-attempt run to that exact
+  commit, and re-reads private `main` before success. Public code stores no
+  private revision pointer or reader policy. Missing, stale, skipped, canceled,
+  duplicated, malformed, or failed proof remains red or pending.
 - Focused tests prove that wake acceptance is not completion and that Temporal
   idles only after reconciliation facts are idle.
 - The hosted-local E2E harness includes a non-manual Temporal orchestration

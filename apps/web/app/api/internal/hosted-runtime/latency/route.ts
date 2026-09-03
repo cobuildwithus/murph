@@ -91,15 +91,18 @@ export const POST = withJsonError(async (request: Request) => {
           });
 
     // Assistant inputs the runtime created without an inbound messaging wake never
-    // get an ingress trace row, so reporting them is noise. Warn only when a row
-    // existed and the guarded write still declined it, which is the case an
-    // operator can act on.
+    // get an ingress trace row, so reporting them is noise. A row skipped while
+    // another callback holds its lock is also expected: the runtime retries that
+    // non-blocking write. Warn only when a traced row actually failed the guarded
+    // ownership or eligibility check.
+    const contendedCount = result.contendedCount ?? 0;
     const untracedCount = result.untracedCount ?? 0;
-    const rejectedCount = result.unmatchedCount - untracedCount;
+    const rejectedCount = result.unmatchedCount - untracedCount - contendedCount;
     if (rejectedCount > 0) {
       const eventType = traceRequest.event.type;
       const source = traceRequest.event.source;
       console.warn("Hosted runtime latency trace callback had rejected rows.", {
+        contendedCount,
         eventType,
         matchedCount: result.matchedCount,
         rejectedCount,

@@ -303,7 +303,7 @@ describe("browser vault session route", () => {
     expect(mocks.readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
   });
 
-  it("includes pending device import state without gating browser vault refresh", async () => {
+  it("lets a pending device import create the first browser vault replica", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     const createBrowserVaultSession = vi.fn();
     mocks.hasPendingDirtyConnectionForUser.mockResolvedValue(true);
@@ -317,9 +317,7 @@ describe("browser vault session route", () => {
 
     expect(response.status).toBe(200);
     expect(createBrowserVaultSession).not.toHaveBeenCalled();
-    expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
-      userId: "member_123",
-    });
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       deviceSyncImportPending: true,
       refreshPending: true,
