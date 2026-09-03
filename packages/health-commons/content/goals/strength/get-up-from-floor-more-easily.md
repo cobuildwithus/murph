@@ -42,48 +42,48 @@ safety:
   cautionLevel: moderate
 ---
 
-Getting up from the floor is a practical combination of leg strength, hip and ankle mobility, balance, and knowing a route that works for your body. It can be trained like any other skill. Start beside a stable support, break the transfer into steps, and gradually use less help.
+Getting up from the floor combines leg strength, hip and ankle mobility, balance, and a route that works for your body. It can be trained like any other skill: start beside a stable support, break the transfer into steps, and gradually use less help.
 
-There is no single correct method. A common route moves from sitting to side-sitting, then to hands and knees, half-kneeling, and standing. Another uses a squat or cross-legged rise. The best method is one you can perform safely and that matches your joints and balance.
+There is no single correct method. One common route goes from sitting to side-sitting, then hands and knees, half-kneeling, and standing. Another uses a squat or a cross-legged rise. The best method is the one you can do safely and that suits your joints and balance.
 
 ## What to do
 
-- Practice next to a sturdy chair, sofa, or rail that will not slide.
-- Learn one reliable route to the floor and back up before trying to make it elegant.
-- Strengthen chair rises, split squats, step-ups, and calf raises.
-- Practice half-kneeling and transitions between kneeling positions.
+- Practice next to a sturdy chair, sofa, or rail that won't slide.
+- Learn one reliable route down to the floor and back up before trying to make it elegant.
+- Strengthen with chair rises, split squats, step-ups, and calf raises.
+- Practice half-kneeling and the transitions between kneeling positions.
 - Train balance separately with support close by.
-- Use cushioning for sensitive knees and stable footwear or bare feet according to the surface.
+- Cushion sensitive knees; wear stable shoes or go barefoot depending on the surface.
 
-The goal is not to avoid hand support immediately. Hands are a valid tool. Progress can mean pushing less through the chair, moving more smoothly, or needing fewer pauses.
+You don't have to give up hand support right away. Hands are a valid tool. Progress can mean pushing less through the chair, moving more smoothly, or pausing less.
 
 ## A simple plan
 
-Three times per week, place a firm mat beside a sturdy chair. From standing, hold the chair, step one foot back, lower one knee to the mat, bring the other knee down, and move to hands and knees. Reverse the sequence to stand. Perform three slow repetitions leading with each leg.
+Three times per week, put a firm mat beside a sturdy chair. From standing, hold the chair, step one foot back, lower one knee to the mat, bring the other knee down, and move to hands and knees. Reverse the sequence to stand. Do three slow repetitions leading with each leg.
 
-Then do two sets of 6 to 10 chair rises, two sets of 5 split squats or supported reverse lunges per side, and two 20-second supported half-kneeling holds. If kneeling is not comfortable, use a higher padded surface or practice standing from progressively lower chairs instead.
+Then do two sets of 6 to 10 chair rises, two sets of 5 split squats or supported reverse lunges per side, and two 20-second supported half-kneeling holds. If kneeling isn't comfortable, use a higher padded surface or practice standing from progressively lower chairs instead.
 
-Each week, reduce one element of assistance: use fingertips instead of a full hand, choose a slightly lower surface, or pause less. Keep the chair close until the whole transfer is dependable. Practice the skill when rested, not only after leg fatigue.
+Each week, remove one piece of assistance: fingertips instead of a full hand, a slightly lower surface, or fewer pauses. Keep the chair close until the whole transfer is dependable. Practice when you're rested, not only after leg fatigue.
 
-Add a second route only after the first is reliable. For example, learn to roll to one side and move to hands and knees, then later practice a half-kneeling route that uses less hand support. Having more than one option is valuable when space, knee comfort, or furniture changes. Practice lowering to the floor too; confidence often improves when both directions are familiar.
+Add a second route only after the first is reliable. For example, learn to roll to one side and come up to hands and knees, then later a half-kneeling route with less hand support. More than one option helps when space, knee comfort, or furniture changes. Practice lowering to the floor too; confidence often improves once both directions feel familiar.
 
-If the floor itself is the barrier, begin from a firm bed, low bench, or stacked mats. Lower the surface gradually. This preserves the sequence while scaling the final distance.
+If the floor itself is the barrier, start from a firm bed, low bench, or stacked mats and lower the surface gradually. The sequence stays the same while the final distance scales.
 
 ## How to know it is working
 
-Track the surface, route, hand support, number of pauses, and perceived effort. Video from the side can show whether the movement becomes smoother. A useful milestone is standing with one stable hand on the chair; another is using the chair only for balance.
+Track the surface, route, hand support, number of pauses, and how hard it feels. Side-on video shows whether the movement is getting smoother. One milestone is standing with one steady hand on the chair; another is using the chair only for balance.
 
-Do not race. Speed is less important than confidence and control. The real-world test is whether getting onto the floor for play, exercise, gardening, or a household task feels less daunting.
+Don't race. Speed matters less than confidence and control. The real-world test is whether getting down on the floor for play, exercise, gardening, or a household job feels less daunting.
 
 ## If you get stuck
 
-If rising from half-kneeling is hardest, build split-squat and step-up strength. If the position itself is inaccessible, work on comfortable hip and ankle range or choose a different route. If balance is the limiter, keep support and add targeted balance practice rather than taking the chair away.
+If rising from half-kneeling is hardest, build split-squat and step-up strength. If you can't get into the position at all, work on comfortable hip and ankle range or pick a different route. If balance is the limit, keep the support and add targeted balance practice rather than taking the chair away.
 
-Fear after a fall is understandable and can change movement. A physical therapist or trained coach can help identify a safe method and provide hands-on confidence. Repeated practice should make the task feel more secure, not more threatening.
+Fear after a fall is understandable and changes how you move. A physical therapist or trained coach can help find a safe method and give hands-on confidence. Repeated practice should make the task feel more secure, not more threatening.
 
 ## A quick note
 
-Do not practice alone if falling is likely or if you cannot yet lower safely. New dizziness, repeated falls, sudden weakness, or a recent injury deserves assessment. In an actual fall with possible injury, do not force a practiced transfer when staying still and calling for help is safer.
+Don't practice alone if a fall is likely or if you can't yet lower yourself safely. New dizziness, repeated falls, sudden weakness, or a recent injury deserves assessment. In an actual fall with possible injury, don't force a practiced transfer when staying still and calling for help is safer.
 
 ## Sources
 

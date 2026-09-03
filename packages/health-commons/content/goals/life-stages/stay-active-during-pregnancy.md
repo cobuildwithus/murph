@@ -47,33 +47,33 @@ safety:
     - Stop activity and contact the obstetric care team for vaginal bleeding, fluid leakage, regular painful contractions, chest pain, dizziness or faintness, calf pain or swelling, or unusual shortness of breath before exertion.
 ---
 
-For most uncomplicated pregnancies, regular movement is safe and beneficial. A useful target is **at least 150 minutes of moderate aerobic activity per week**, spread across the week, with strength work as appropriate. If you were inactive before pregnancy, begin with small amounts. If you were already active, you can often continue with modifications rather than starting over.
+In most uncomplicated pregnancies, regular movement is safe and beneficial. A useful target is **at least 150 minutes of moderate aerobic activity per week**, spread across the week, with strength work as appropriate. If you were inactive before pregnancy, start small. If already active, you can often continue with modifications rather than starting over.
 
 ## What to do
 
-- **Choose repeatable moderate activity.** Walking, stationary cycling, swimming, water exercise, low-impact classes, and modified strength training are common options. Use the talk test: at moderate intensity you can speak in sentences, though not sing comfortably.
-- **Build from your actual baseline.** Start with 10 to 15 minutes on several days if activity is new. Add five minutes at a time until 20 to 30 minutes feels routine. A weekly total matters more than completing one long session.
-- **Keep activities you already know.** Experienced runners and athletes can often continue, but pace, volume, heat tolerance, balance, and recovery may change. Pregnancy is usually a time to maintain capacity, not prove a new maximum.
-- **Modify changing risks.** As the abdomen grows and balance shifts, choose stable surfaces and reduce activities where a fall or collision is likely. Avoid scuba diving. Be cautious with altitude, extreme heat, and prolonged flat-on-the-back positions later in pregnancy if they make you feel unwell.
-- **Hydrate and manage heat.** Drink normally across the day, bring fluid for longer sessions, choose a cooler time or indoor setting, and wear breathable layers. Heat illness is not a training adaptation to chase.
-- **Include pelvic-floor and strength work.** These can support function through pregnancy and recovery after birth, but technique, symptoms, and comfort matter more than high repetition counts.
-- **Expect variability.** Nausea, fatigue, pelvic pressure, sleep loss, and changing body size may alter what is possible. Swap running for walking, shorten a session, or divide it into ten-minute blocks without treating the adjustment as failure.
+- **Pick moderate activity you can repeat.** Walking, stationary cycling, swimming, water exercise, low-impact classes, and modified strength training are common choices. Use the talk test: at moderate intensity you can speak in sentences but not sing comfortably.
+- **Build from where you actually are.** If activity is new, start with 10 to 15 minutes on several days. Add five minutes at a time until 20 to 30 minutes feels routine. The weekly total matters more than one long session.
+- **Keep the activities you know.** Experienced runners and athletes can often continue, though pace, volume, heat tolerance, balance, and recovery may change. Pregnancy is usually a time to maintain capacity, not chase a new maximum.
+- **Adjust for changing risks.** As your belly grows and balance shifts, choose stable surfaces and reduce activities where a fall or collision is likely. Avoid scuba diving. Later in pregnancy, be cautious with altitude, extreme heat, and prolonged time flat on your back if they make you unwell.
+- **Drink enough and manage heat.** Drink normally through the day, bring fluid for longer sessions, choose a cooler time or indoor setting, and wear breathable layers. Heat illness is not a training adaptation to chase.
+- **Include pelvic-floor and strength work.** Both can help function in pregnancy and recovery after birth. Technique, symptoms, and comfort matter more than high repetition counts.
+- **Expect variability.** Nausea, fatigue, pelvic pressure, lost sleep, and a changing body alter what is possible. Swap running for walking, shorten a session, or split it into ten-minute blocks. That is adjustment, not failure.
 
 ## A simple plan
 
-For four weeks, schedule five 20- to 30-minute movement blocks. Three can be moderate aerobic sessions and two can combine an easy walk with brief strength work. If that is above your current level, begin with four 10-minute walks. Keep at least one fully flexible day for symptoms or appointments.
+For four weeks, schedule five movement blocks of 20 to 30 minutes. Three can be moderate aerobic sessions; two can pair an easy walk with brief strength work. If that is above your current level, start with four 10-minute walks. Keep at least one fully flexible day for symptoms or appointments.
 
-Before each session, check energy, dizziness, pain, heat, and any guidance from your obstetric team. During the session, use the talk test and finish feeling that you could have done a little more. Afterward, notice whether symptoms settle normally by later that day. Increase weekly time by only 10 to 20 minutes when the current amount feels comfortable.
+Before each session, check energy, dizziness, pain, heat, and any guidance from your obstetric team. During it, use the talk test and finish feeling you could have done a little more. Afterward, notice whether symptoms settle by later that day. Add 10 to 20 minutes to the weekly total only when the current amount feels comfortable.
 
 ## How to know it is working
 
-Look for a routine that survives real pregnancy: regular movement, comfortable walking, manageable breathlessness, stable mood, and confidence adjusting the plan. Pace may slow while fitness and function are maintained. The goal is not to match pre-pregnancy speed, calories, or heart-rate numbers.
+Look for a routine that survives real pregnancy: regular movement, comfortable walking, manageable breathlessness, stable mood, and confidence adjusting the plan. Pace may slow while fitness and function hold. Matching pre-pregnancy speed, calories, or heart-rate numbers is not the goal.
 
 ## If you get stuck
 
-Break the session into smaller pieces and reduce logistical friction. A ten-minute walk after a meal, a stationary bike at home, or a pool session may work when a formal workout does not. If pelvic girdle pain, urine leakage, heaviness, or abdominal discomfort limits movement, a pregnancy-informed physical therapist can modify the plan.
+Break the session into smaller pieces and cut logistical friction. A ten-minute walk after a meal, a home stationary bike, or a pool session may work when a formal workout does not. If pelvic girdle pain, urine leakage, heaviness, or abdominal discomfort limits movement, a pregnancy-informed physical therapist can modify the plan.
 
-Do not use wearable recovery scores as permission or prohibition. Symptoms, medical guidance, and how activity affects function are more important than a device's readiness label. If exhaustion is new or disproportionate, consider anemia, sleep problems, or another health issue rather than prescribing more exercise.
+Do not treat wearable recovery scores as permission or prohibition. Symptoms, medical guidance, and how activity affects function matter more than a device's readiness label. If exhaustion is new or out of proportion, consider anemia, sleep problems, or another health issue rather than prescribing more exercise.
 
 ## A quick note
 

@@ -4,7 +4,7 @@ entityType: goal_template
 key: goal_template:sleep-better-during-pregnancy
 slug: sleep-better-during-pregnancy
 title: Sleep Better During Pregnancy
-summary: Improve pregnancy sleep by addressing comfort, reflux, bathroom trips, restless legs, breathing, and insomnia with pregnancy-appropriate strategies.
+summary: Sleep better in pregnancy by working on the specific problem: comfort, reflux, bathroom trips, restless legs, breathing, or insomnia.
 status: field-testing
 quality: usable
 aliases:
@@ -47,38 +47,38 @@ safety:
     - Loud new snoring, gasping, morning headaches, or marked daytime sleepiness can signal sleep apnea and deserves evaluation.
 ---
 
-Pregnancy sleep improves when you target the specific disruption: **body comfort, reflux, bathroom trips, restless legs, breathing, or insomnia**. A larger pillow collection may help positioning, but it will not treat sleep apnea or a learned insomnia cycle. Behavioral treatment for insomnia can work during pregnancy, and physical symptoms often have practical treatments.
+Pregnancy sleep improves when you treat the specific thing waking you: **body comfort, reflux, bathroom trips, restless legs, breathing, or insomnia**. More pillows can help with positioning but will not treat sleep apnea or a learned insomnia cycle. Behavioral treatment for insomnia can work during pregnancy, and physical causes often have practical treatments.
 
 ## What to do
 
-- **Keep a steady wake time and enough sleep opportunity.** Pregnancy can increase sleep need. Anchor the morning and let bedtime move slightly earlier when you are genuinely sleepy.
-- **Build a comfortable side-sleep setup.** In the second and third trimesters, side sleeping is commonly recommended. Use a pillow between the knees, under the abdomen, or behind the back. If you wake on your back, simply reposition; do not turn sleep into a posture alarm.
-- **Move fluids earlier, not away.** Hydrate normally during the day and taper large drinks in the last hour or two before bed if bathroom trips dominate. Empty the bladder before bed.
-- **Reduce reflux.** Use smaller evening meals, stay upright after eating, and finish the last large meal earlier. Elevating the upper body can help. Ask about pregnancy-appropriate treatment when symptoms persist.
-- **Address restless legs.** An urge to move the legs that worsens at rest or at night can occur during pregnancy and may relate to iron status. Stretching or walking may provide temporary relief, but persistent symptoms deserve an iron and treatment review.
-- **Use CBT-I strategies for insomnia.** Go to bed when sleepy, avoid clock-watching, and leave bed for a quiet dim activity when wakefulness becomes prolonged and frustrating. Formal CBT-I has evidence during pregnancy.
-- **Keep morning light and regular activity.** Daytime movement and outdoor light support sleep timing and mood. Finish vigorous exercise earlier if late sessions clearly keep you awake.
+- **Keep a steady wake time and enough time for sleep.** Pregnancy can raise your sleep need. Fix the wake time and let bedtime drift earlier when genuinely sleepy.
+- **Set up for side sleeping.** Side sleeping is commonly recommended in the second and third trimesters. Use a pillow between the knees, under the belly, or behind the back. If you wake on your back, just roll over; do not turn sleep into a posture alarm.
+- **Move fluids earlier, not away.** Drink normally during the day. If bathroom trips dominate, taper large drinks in the last hour or two and empty your bladder before bed.
+- **Reduce reflux.** Eat smaller evening meals, stay upright after eating, and finish the last large meal earlier. Raising the upper body can help. If symptoms persist, ask about pregnancy-appropriate treatment.
+- **Address restless legs.** An urge to move your legs that worsens at rest or at night can happen in pregnancy and may relate to iron status. Stretching or walking may help briefly, but persistent symptoms deserve an iron and treatment review.
+- **Use CBT-I strategies for insomnia.** Go to bed when sleepy and avoid clock-watching. If you're awake and frustrated for a while, get up and do something quiet in dim light. Formal CBT-I has evidence during pregnancy.
+- **Get morning light and stay active.** Daytime movement and outdoor light help sleep timing and mood. Finish vigorous exercise earlier if late sessions clearly keep you awake.
 - **Take breathing symptoms seriously.** New loud snoring, gasping, pauses in breathing, or severe daytime sleepiness needs assessment for sleep apnea.
 
 ## A simple plan
 
-For 14 nights, keep the same wake time, get daylight in the first part of the day, and use one side-sleep setup consistently. Track the main sleep disruption each morning and rate daytime function as poor, fair, or good. Move large drinks and meals earlier while continuing normal daytime hydration.
+For 14 nights, keep the same wake time, get daylight early in the day, and use one side-sleep setup. Each morning, note the main sleep disruption and rate daytime function as poor, fair, or good. Move large drinks and meals earlier while still drinking normally during the day.
 
-If awake and frustrated for a while, get out of bed for a quiet activity and return when sleepy. At the end of two weeks, act on the dominant cause: treat reflux, review restless legs and iron, seek CBT-I, or request a breathing evaluation. Do not add several sedating products to cover an unidentified problem.
+If you lie awake and frustrated, get up for a quiet activity and return when sleepy. After two weeks, act on the main cause: treat reflux, get restless legs and iron reviewed, seek CBT-I, or ask for a breathing evaluation. Do not stack sedating products to cover a problem you have not identified.
 
 ## How to know it is working
 
-Look for easier positioning, fewer reflux or bathroom awakenings, less time struggling in bed, and better daytime function. Pregnancy can still bring more fragmented sleep than usual, so meaningful improvement is a lower burden, not eight uninterrupted hours every night. Wearable sleep-stage percentages are not useful targets.
+Look for easier positioning, fewer reflux or bathroom awakenings, less time struggling in bed, and better daytime function. Pregnancy can still bring more broken sleep than usual, so a lower burden is meaningful improvement even without eight uninterrupted hours. Wearable sleep-stage percentages are not useful targets.
 
 ## If you get stuck
 
-Persistent insomnia is not solved by spending more time in bed. If worry about sleep has become part of the problem, CBT-I is the best-supported next step. If the issue is pain, pelvic pressure, or shortness of breath, address that symptom rather than layering on relaxation advice.
+More time in bed does not fix persistent insomnia. If worry about sleep has become part of the problem, CBT-I is the best-supported next step. If the issue is pain, pelvic pressure, or shortness of breath, treat that symptom instead of piling on relaxation advice.
 
-Review caffeine timing, nasal congestion, reflux, iron status, anxiety or depression, and medicines. A care team can distinguish common pregnancy changes from a treatable sleep disorder and identify options that are appropriate in pregnancy.
+Review caffeine timing, nasal congestion, reflux, iron status, anxiety or depression, and medicines. Your care team can tell common pregnancy changes from a treatable sleep disorder and identify pregnancy-appropriate options.
 
 ## A quick note
 
-Seek prompt advice for breathing pauses, severe breathlessness, fainting, chest symptoms, or dangerous daytime sleepiness. Check every sleep medicine and supplement with the pregnancy care team.
+Seek prompt advice for breathing pauses, severe breathlessness, fainting, chest symptoms, or dangerous daytime sleepiness. Check every sleep medicine and supplement with your pregnancy care team.
 
 ## Sources
 

@@ -46,36 +46,36 @@ safety:
     - Repeated falls, rapidly worsening walking, new one-sided weakness, severe joint pain, or breathlessness out of proportion to activity needs assessment.
 ---
 
-Mobility is the ability to get where you want to go and do what matters, not a perfect flexibility score. The strongest plan combines **walking or other aerobic activity, leg strength, balance, enough joint motion, and practice of real tasks** such as stairs, curbs, carrying, and getting off the floor.
+Mobility means getting where you want to go and doing what matters there. A flexibility score does not measure that. The strongest plan combines **walking or other aerobic activity, leg strength, balance, enough joint motion, and practice of real tasks** like stairs, curbs, carrying, and getting off the floor.
 
 ## What to do
 
-- **Choose a meaningful walking target.** It might be four neighborhood blocks, 20 minutes with a friend, the distance from parking to a favorite venue, or a planned trip. A personal destination is more useful than an arbitrary step count.
-- **Walk or do another aerobic activity regularly.** Older-adult guidance recommends at least 150 minutes of moderate activity per week when possible. Begin with the amount you can tolerate and accumulate it in short sessions.
-- **Strengthen the legs and hips.** Chair stands, step-ups, calf raises, hip hinges, and supported split squats help preserve the force needed for walking, stairs, and recovery from a stumble.
-- **Train balance.** Practice near a counter or rail: narrow stance, semi-tandem stance, single-leg support, controlled direction changes, and stepping over a low obstacle. Progress support and difficulty gradually.
-- **Use mobility work where it changes function.** Ankle motion supports stairs and stride; hip and upper-back motion can support walking and reaching. Spend a few minutes on a restriction that affects a task rather than stretching every joint equally.
-- **Practice floor transfers.** If appropriate, use a sturdy chair for support and rehearse kneeling, half-kneeling, and rising. This is both useful function and a way to build confidence.
-- **Address pain without abandoning movement.** Arthritis often benefits from regular aerobic and strength activity. Reduce impact, shorten the session, or use water exercise or cycling during a flare, then rebuild.
-- **Make the environment help.** Good footwear, vision correction, a walking aid fitted correctly, safe lighting, and places to rest can expand mobility. Using support is a tool, not a loss.
+- **Pick a walking target that means something.** Four neighborhood blocks, 20 minutes with a friend, the walk from parking to a favorite venue, or a planned trip. A personal destination beats an arbitrary step count.
+- **Walk or do another aerobic activity regularly.** Older-adult guidance recommends at least 150 minutes of moderate activity per week when possible. Start with what you can tolerate and build up in short sessions.
+- **Strengthen your legs and hips.** Chair stands, step-ups, calf raises, hip hinges, and supported split squats help preserve the force needed for walking, stairs, and recovering from a stumble.
+- **Train balance.** Practice near a counter or rail: narrow stance, semi-tandem stance, single-leg support, controlled direction changes, and stepping over a low obstacle. Reduce support and add difficulty gradually.
+- **Use mobility work where it changes function.** Ankle motion helps stairs and stride. Hip and upper-back motion can help walking and reaching. Spend a few minutes on a restriction that affects a task rather than stretching every joint equally.
+- **Practice floor transfers.** If appropriate, hold a sturdy chair and rehearse kneeling, half-kneeling, and rising. It is useful function and builds confidence.
+- **Address pain without giving up movement.** Arthritis often benefits from regular aerobic and strength activity. During a flare, reduce impact, shorten the session, or use water exercise or cycling, then rebuild.
+- **Make your environment help.** Good footwear, vision correction, a correctly fitted walking aid, safe lighting, and places to rest can expand mobility. Using support is a tool, not a loss.
 
 ## A simple plan
 
-For eight weeks, walk for 15 to 30 minutes on four days per week at a pace that allows conversation. On two days, do two sets of chair stands, step-ups, calf raises, rows, and carries. Add five minutes of balance practice three days per week near stable support.
+For eight weeks, walk 15 to 30 minutes on four days per week at a conversational pace. On two days, do two sets of chair stands, step-ups, calf raises, rows, and carries. Add five minutes of balance practice three days per week near stable support.
 
-Once per week, practice one real-life task: a flight of stairs, a slightly longer route, a curb, carrying a light bag, or a supported floor transfer. Increase only one part—time, pace, hills, or load—after the current week feels manageable. Keep a shorter indoor or seated option for poor weather and lower-energy days.
+Once a week, practice one real-life task: a flight of stairs, a slightly longer route, a curb, carrying a light bag, or a supported floor transfer. Increase only one variable, whether time, pace, hills, or load, after the current week feels manageable. Keep a shorter indoor or seated option for bad weather and low-energy days.
 
 ## How to know it is working
 
-Look for a longer comfortable distance, a steadier pace, fewer rests on stairs, easier chair and floor transfers, and confidence leaving home. A simple repeated route or six-minute walk can show change, but how easily you reach valued places is the outcome that matters.
+Look for a longer comfortable distance, a steadier pace, fewer rests on stairs, easier chair and floor transfers, and confidence leaving home. A repeated route or six-minute walk can show change, but how easily you reach valued places is the outcome that matters.
 
 ## If you get stuck
 
-Find the limiting system. Breathlessness may need gradual aerobic work or medical assessment. Leg fatigue points toward strength. Fear on uneven ground points toward balance practice and environmental support. Joint pain may need a lower-impact mode, medication review, or physical therapy. Poor vision, dizziness, numb feet, and unsuitable shoes can undermine an otherwise good exercise plan.
+Find the limiting system. Breathlessness may need gradual aerobic work or medical assessment. Leg fatigue points to strength. Fear on uneven ground points to balance practice and environmental support. Joint pain may need a lower-impact activity, a medication review, or physical therapy. Poor vision, dizziness, numb feet, and unsuitable shoes can undermine a good plan.
 
-Avoid solving every problem by walking more. Walking is essential practice, but strength and balance provide reserve. If mobility has declined quickly, investigate why rather than normalizing it as age.
+Do not solve every problem by walking more. Walking is essential practice, but strength and balance provide reserve. If mobility has declined quickly, find out why rather than writing it off as age.
 
-Build a route ladder. Start with a distance and surface you can repeat confidently, then add one challenge: a slightly longer block, a gentle hill, an uneven path, a bus step, or carrying a light item. Keep a stable route for lower-energy days so mobility practice does not disappear when conditions are imperfect. Record walking time, rest stops, and one real destination reached. A faster test score can be encouraging, but being able to visit a neighbor, shop, cross a street comfortably, or move through the home without planning every step is the outcome that matters.
+Build a route ladder. Start with a distance and surface you can repeat confidently, then add one challenge: a longer block, a gentle hill, an uneven path, a bus step, or carrying a light item. Keep a stable route for low-energy days so practice does not stop when conditions are imperfect. Record walking time, rest stops, and one real destination reached. A faster test score is encouraging, but visiting a neighbor, shopping, crossing a street comfortably, or moving through your home without planning every step is what counts.
 
 ## A quick note
 
