@@ -823,7 +823,7 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
     const cacheFilePath = resolveHostedGroupParticipantDisplayNameCachePath(vaultRoot);
     expect(path.relative(vaultRoot, cacheFilePath).split(path.sep).join("/"))
       .toBe(
-        ".runtime/cache/assistant-runtime/group-participant-display-names.json",
+        ".runtime/operations/assistant/state/group-participant-display-names.json",
       );
     const raw = await readFile(cacheFilePath, "utf8");
     expect(raw).not.toContain(senderHandle);
@@ -842,18 +842,22 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
     }
   });
 
-  it("does not persist file cache entries through a symlinked cache ancestor", async () => {
+  it("does not persist file cache entries through a symlinked state ancestor", async () => {
     if (process.platform === "win32") {
       return;
     }
 
     const vaultRoot = await createTestVaultRoot();
     const externalRoot = await createTestVaultRoot();
-    await mkdir(path.join(vaultRoot, ".runtime"), {
+    await mkdir(path.join(vaultRoot, ".runtime", "operations", "assistant"), {
       mode: 0o700,
       recursive: true,
     });
-    await symlink(externalRoot, path.join(vaultRoot, ".runtime", "cache"), "dir");
+    await symlink(
+      externalRoot,
+      path.join(vaultRoot, ".runtime", "operations", "assistant", "state"),
+      "dir",
+    );
     const externalModeBefore = (await stat(externalRoot)).mode & 0o777;
     const senderHandle = "+15559990009";
     const request = vi.fn(async (): Promise<HostedRuntimeGroupToolResponse> => ({
@@ -884,7 +888,7 @@ describe("createHostedGroupParticipantDisplayNameReader", () => {
     }]);
     await expect(access(path.join(
       externalRoot,
-      "assistant-runtime/group-participant-display-names.json",
+      "group-participant-display-names.json",
     ))).rejects.toMatchObject({ code: "ENOENT" });
     expect((await stat(externalRoot)).mode & 0o777).toBe(externalModeBefore);
 

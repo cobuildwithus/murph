@@ -2002,6 +2002,12 @@ async function importHostedPreAssistantSystemMailboxForWorkspaceRunner(input: {
   requestId: string;
   signal: AbortSignal | null;
 }): Promise<HostedMailboxImportCheckpointResult | null> {
+  const initialMailboxPrefetch = input.input.initialMailboxPrefetch ?? null;
+  const establishedInitialMailboxPrefetch =
+    initialMailboxPrefetch?.importedSeqByLane.system !== undefined
+    && initialMailboxPrefetch.importedSeqByLane.system !== "0"
+      ? initialMailboxPrefetch
+      : null;
   let latestImport: HostedMailboxImportCheckpointResult | null = null;
   let previousSystemSeq: string | null = null;
   for (let importPage = 1; importPage <= HOSTED_PRE_ASSISTANT_SYSTEM_IMPORT_MAX_PAGES; importPage += 1) {
@@ -2012,10 +2018,11 @@ async function importHostedPreAssistantSystemMailboxForWorkspaceRunner(input: {
       importItemContext: input.importItemContext,
       input: input.input,
       lanes: ["system"],
-      // The shared foreground prefetch can predate a system wake that arrived
-      // while its conversation item was being imported. Establish a fresh
-      // system-lane boundary before starting the assistant.
-      prefetch: null,
+      // A zero system watermark can still be the first-owner activation race:
+      // activation may arrive while the prefetched conversation is importing.
+      // Established runtimes have already crossed that boundary, so reuse the
+      // shared snapshot and let later system work keep its durable next pass.
+      prefetch: importPage === 1 ? establishedInitialMailboxPrefetch : null,
       requestId: `${input.requestId}:pre-assistant-system:${importPage}`,
       signal: input.signal,
       suppressNoopRuntimeLog: true,

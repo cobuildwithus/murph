@@ -3071,7 +3071,19 @@ adds no durable image job, mailbox kind, scheduler, reservation, allowance
 implementation, or image-specific usage lifecycle; unfinished provider work
 may be lost with the runner invocation.
 
-Reconciliation evaluates engagement and AI-usage authorization for runnable model work even when deterministic system lag is present. Authorized conversation/default work owns the foreground pass and imports system items before the assistant phase without letting a retryable system item starve fresh conversation. When model work is blocked, or system lag is the only work, the existing `system_mailbox` mode imports only the system lane and returns before assistant execution. It adds no queue, scheduler, cursor, or durable state owner.
+Reconciliation evaluates engagement and AI-usage authorization for runnable
+model work even when deterministic system lag is present. Authorized
+conversation/default work owns the foreground pass and imports system items
+before the assistant phase without letting a retryable system item starve fresh
+conversation. An established workspace reuses the one post-restore conversation
+and system mailbox snapshot for that first system page; a workspace whose
+system watermark is still zero refreshes the system lane once to preserve the
+first-activation race boundary. Later system rows remain durable work for their
+normal wake or a later pass. System-only mailbox reads do not query the optional
+group sponsorship presentation bit. When model work is blocked, or system lag
+is the only work, the existing `system_mailbox` mode imports only the system
+lane and returns before assistant execution. It adds no queue, scheduler,
+cursor, or durable state owner.
 
 Linq group-avatar mutation is the one private-image provider boundary that
 requires a fetchable URL. After the group tool preflights current chat
@@ -3261,12 +3273,12 @@ contact evidence, while overflow remains operation-local.
 
 The assistant-runtime Linq presentation adapter owns the compound operation
 memo and one bounded private file cache at
-`vault/.runtime/cache/assistant-runtime/group-participant-display-names.json`.
+`vault/.runtime/operations/assistant/state/group-participant-display-names.json`.
 Initial prompt preparation reads unresolved unique handles in one batch; later
 live admissions reuse operation-local positive, negative, and fail-soft entries
-and read only new handles. Across ordinary turns that reuse the same local
-workspace, validated profile and owner-shared contact labels have a fixed
-14-day TTL. Web separately returns `nameMissSenderHandles` only for exact
+and read only new handles. Across ordinary turns and encrypted hosted workspace
+restore, validated profile and owner-shared contact labels have a fixed 14-day
+TTL. Web separately returns `nameMissSenderHandles` only for exact
 requested handles where every applicable authorized profile/contact source was
 successfully checked and no safe label exists; only that explicit evidence has
 a fixed six-hour TTL. An omitted handle without this evidence remains
@@ -3282,11 +3294,12 @@ timeouts, rollout skew, policy-limited contact reads, malformed or ambiguous
 responses, suspension, and authorization loss remain operation-local and are
 never written. There is no second resident
 cross-operation cache, single-flight owner, mutation invalidation, lock manager,
-or distributed coordination. `.runtime/cache/**` is excluded from hosted
-workspace checkpoints, so the file can bridge fresh reader or process instances
-only while the same local workspace survives; a cold restore or replacement
-re-reads Web. Neither the operation memo nor the cache becomes profile or
-contact truth. Profile and owner-contact labels remain presentation only, and
+or distributed coordination. The file is explicitly portable, rebuildable
+assistant operational state and therefore travels inside the encrypted hosted
+workspace snapshot. A restored label can remain visible until its existing TTL
+after a profile rename or authorization change, but neither the operation memo
+nor the cache becomes profile or contact truth. Profile and owner-contact labels
+remain presentation only, and
 the name read returns no member or participant identifier. For
 participant-scoped effects, the opaque `Message ref` plus trusted server
 derivation remains the sole path; display labels and handles are never
