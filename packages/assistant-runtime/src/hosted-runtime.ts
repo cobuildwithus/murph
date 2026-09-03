@@ -243,6 +243,7 @@ import {
   isHostedSystemMailboxModelFreeExactNotificationItem,
   readHostedSystemMailboxState,
   readHostedSystemMailboxHandledThroughSeq,
+  readHostedSystemMailboxProgress,
   type HostedSystemMailboxPendingItem,
 } from "./hosted-runtime/system-mailbox-state.ts";
 import {
@@ -8562,6 +8563,10 @@ async function withHostedMailboxProgressStatus(input: {
   const mailboxState = await readHostedMailboxImportState({
     vaultRoot: input.vaultRoot,
   });
+  const systemMailboxProgress = await readHostedSystemMailboxProgress({
+    importedSeq: mailboxState.watermarks.system,
+    vaultRoot: input.vaultRoot,
+  });
   return {
     ...(input.redactedStatus ?? {}),
     ...(mailboxState.watermarks.conversation !== "0"
@@ -8576,10 +8581,9 @@ async function withHostedMailboxProgressStatus(input: {
       : {}),
     hostedMailboxSystemImportedSeq: mailboxState.watermarks.system,
     hostedMailboxSystemHandledThroughSeq:
-      await readHostedSystemMailboxHandledThroughSeq({
-        importedSeq: mailboxState.watermarks.system,
-        vaultRoot: input.vaultRoot,
-      }),
+      systemMailboxProgress.handledThroughSeq,
+    hostedMailboxSystemFirstPendingSeq:
+      systemMailboxProgress.firstPendingSeq,
   };
 }
 
