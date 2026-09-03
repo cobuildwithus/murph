@@ -252,6 +252,27 @@ optional supporting text directly under the title. Preserve scorer-owned order,
 scores, progress, and coverage while using the identity-free public
 presentation defined by the challenge standings delivery contract.
 
+### iMessage Seven-Day Health Card Image
+Render the fixed seven-day wearable view as the static sibling of the other
+response cards: the same cream field, rectangular bitmap, embedded Murph mark,
+and optically centered badge-and-title row with the date range beneath. One
+shared day axis (`AVERAGE`, then single letters `M` through `S` in calendar
+order) heads the rows, and every metric keeps its seven days in those same
+columns. Each metric row leads with its uppercase label, then the weekly
+average as the largest number in the row with a small unit beside it, followed
+on the same line by one neutral arrow (`↑`, `↓`, or `→`) for the
+week-over-week direction. Never spell the direction out as a word. A row with
+too few observed days to compare shows no arrow at all, and the comparison
+basis is not repeated on any row; the text recovery names both. The seven days are zero-based bars in
+one neutral warm fill. Only the highest and lowest observed days carry a value
+directly above their bar, so the row reads as a chart rather than a table;
+those values share one measured size per row and step down together only when
+they would otherwise collide. A missing day keeps its column as a faint
+baseline stub with no text placeholder. A metric with no observed days
+collapses to a shorter row that reads `No data` and keeps its seven empty
+slots. No reference lines, legends, metric icons, pills, status color, or
+better/worse language.
+
 ### Shared iMessage Card Handoff
 When a shared response-card URL reaches the public homepage instead of the
 Messages extension, open one compact handoff dialog after hydration. Reuse the

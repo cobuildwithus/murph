@@ -22,8 +22,13 @@ test("design studies expose complete, sparse, and unavailable production card st
   expect(markup).toContain('data-metric-key="hrv-sdnn"');
   expect(markup).toContain('data-day-value="missing"');
   expect(markup).toContain('data-sparkline="·······"');
-  expect(markup).toContain("AVG · VS PRIOR 7D");
-  expect(markup).toContain("· unavailable");
+  expect(markup).toContain(">AVERAGE<");
+  expect(markup).toContain('data-metric-direction="not_enough_data"');
+  expect(markup).toContain('data-metric-direction="no_data"');
+  expect(markup).not.toMatch(/>[^<]*(?:too few|Higher|Lower|Steady)[^<]*</iu);
+  expect(markup).toContain(">No data<");
+  expect(markup).toContain('data-day-label="extreme"');
+  expect(markup).not.toContain("prior week");
   expect(markup).toContain('inert=""');
   expect(markup).not.toMatch(/<(?:button|footer|legend|svg)\b/u);
   expect(markup).not.toMatch(/pill|tooltip|tap to|reply with|better|worse/iu);

@@ -317,7 +317,7 @@ test("real-font wearable trend contains the sparse five-metric maximum density",
     schemaVersion: 7,
     card: SPARSE_FIVE_METRIC_WEARABLE_CARD,
   });
-  assert.deepEqual([image.width, image.height], [1_200, 1_200]);
+  assert.deepEqual([image.width, image.height], [1_200, 1_197]);
 
   const bounds = findNonBackgroundBounds(image);
   assert.ok(bounds !== null);
@@ -327,24 +327,29 @@ test("real-font wearable trend contains the sparse five-metric maximum density",
     `Expected wearable card content within the right inset: ${JSON.stringify(bounds)}`,
   );
   assert.ok(bounds.bottom <= image.height - 42);
+  // The fifth metric row still renders its summary and day slots.
   assert.equal(
     hasDarkPixel(image, {
       left: 45,
       right: 1_155,
-      top: 988,
-      bottom: 1_158,
+      top: 983,
+      bottom: 1_155,
     }),
     true,
   );
-  assert.equal(
-    hasDarkPixel(image, {
-      left: 1_040,
-      right: 1_155,
-      top: 308,
-      bottom: 1_158,
-    }),
-    true,
-  );
+  // The Sunday column keeps a bar or a visible missing marker in every row.
+  for (let row = 0; row < 5; row += 1) {
+    assert.equal(
+      hasNonBackgroundPixel(image, {
+        left: 1_040,
+        right: 1_155,
+        top: 295 + row * 172 + 20,
+        bottom: 295 + (row + 1) * 172 - 16,
+      }),
+      true,
+      `Expected a Sunday marker in wearable row ${row + 1}`,
+    );
+  }
 });
 
 test("real-font wearable trend contains all-missing slots without zero filling", async () => {
@@ -352,30 +357,35 @@ test("real-font wearable trend contains all-missing slots without zero filling",
     schemaVersion: 7,
     card: ALL_MISSING_WEARABLE_CARD,
   });
-  assert.deepEqual([image.width, image.height], [1_200, 860]);
+  assert.deepEqual([image.width, image.height], [1_200, 697]);
 
   const bounds = findNonBackgroundBounds(image);
   assert.ok(bounds !== null);
   assert.ok(bounds.right <= 1_155);
   assert.ok(bounds.bottom <= image.height - 42);
-  assert.equal(
-    hasDarkPixel(image, {
-      left: 373,
-      right: 486,
-      top: 308,
-      bottom: 818,
-    }),
-    true,
-  );
-  assert.equal(
-    hasDarkPixel(image, {
-      left: 1_040,
-      right: 1_155,
-      top: 308,
-      bottom: 818,
-    }),
-    true,
-  );
+  // Every collapsed no-data row keeps a visible missing marker in the Monday
+  // and Sunday columns rather than an empty gap, and no day carries a value.
+  for (let row = 0; row < 3; row += 1) {
+    const rect = {
+      top: 295 + row * 120 + 20,
+      bottom: 295 + (row + 1) * 120 - 16,
+    };
+    assert.equal(
+      hasNonBackgroundPixel(image, { left: 333, right: 450, ...rect }),
+      true,
+      `Expected a Monday marker in no-data row ${row + 1}`,
+    );
+    assert.equal(
+      hasNonBackgroundPixel(image, { left: 1_040, right: 1_155, ...rect }),
+      true,
+      `Expected a Sunday marker in no-data row ${row + 1}`,
+    );
+    assert.equal(
+      hasDarkPixel(image, { left: 333, right: 1_155, ...rect }),
+      false,
+      `Expected no day values in no-data row ${row + 1}`,
+    );
+  }
 });
 
 test("real-font route keeps positive-kerning text above the stacked-row divider", async () => {
@@ -587,6 +597,25 @@ function findHorizontalDividerBands(
     }
     return bands;
   }, []);
+}
+
+function hasNonBackgroundPixel(
+  image: DecodedPng,
+  rect: { bottom: number; left: number; right: number; top: number },
+): boolean {
+  for (let y = rect.top; y < rect.bottom; y += 1) {
+    for (let x = rect.left; x < rect.right; x += 1) {
+      const offset = (y * image.width + x) * 4;
+      if (
+        image.pixels[offset] !== 255
+        || image.pixels[offset + 1] !== 245
+        || image.pixels[offset + 2] !== 230
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function hasDarkPixel(
