@@ -2408,7 +2408,7 @@ async function waitForEnvironmentCompletion(input: {
       };
     }, {
       interval: 250,
-      timeout: 120_000,
+      timeout: productionIdleCheckpointDelayMs + 60_000,
     }).toEqual({
       handled: true,
       lastErrorCode: null,
