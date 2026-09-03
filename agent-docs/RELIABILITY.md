@@ -417,6 +417,11 @@ Last verified: 2026-09-01
   coordinator is the only shell-prewarm owner; the exact-user prewarm hint is
   skipped so it cannot reserve a competing target before a fresh claim. The
   ordinary exact-user start remains the fallback after a claim miss.
+  Every accepted fresh start records the bounded standby allocation outcome,
+  exact reason, and elapsed milliseconds in the existing latency phase
+  breakdown. The same metadata-only fields are emitted immediately in the
+  Worker structured log, including starts that exhaust the caller response
+  budget before an accepted runtime invocation exists.
   A coordinator transaction admits at most one winner, then replacement
   provisioning runs under `waitUntil`; alarms re-prove readiness, retry failed
   retirement, expire unbound claim tombstones, and drain stale releases. The

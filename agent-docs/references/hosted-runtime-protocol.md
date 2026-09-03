@@ -1657,9 +1657,12 @@ retained only by that same member under the ordinary conversation idle
 lifecycle and is never returned to ready. Slot invocation,
 provider-credential minting, withdrawal, account deletion, and retirement all
 re-read the exact durable binding; a member mismatch fails closed. A successful
-fresh-start acceptance records its closed standby allocation outcome alongside
-the orchestration and workspace attempt identifiers in the existing structured
-log. Failed, retried, or superseded starts do not emit an accepted attribution.
+fresh-start acceptance records the closed standby allocation outcome, bounded
+reason, and elapsed milliseconds in the existing orchestration latency phase
+breakdown and structured log. The selection log records the same metadata
+before fence or readiness work so a later caller-budget exit remains
+diagnosable without adding member or container identifiers. Failed, retried, or
+superseded starts do not emit an accepted attribution.
 
 The active-member replan durably
 appends the original conversation item. For an exact model-approved instant
