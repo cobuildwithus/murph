@@ -13,6 +13,7 @@ const STATIC_PUBLIC_ROUTES = [
   "/contact",
   "/consumer-health-data-privacy-policy",
   "/experiments",
+  "/food",
   "/knowledge",
   "/legal",
   "/legal/health-ai-safety-disclosure",

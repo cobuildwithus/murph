@@ -4736,6 +4736,13 @@ test("runtime-state portability defaults operational paths to machine-local unle
     classification: "operational",
     portability: "portable",
   });
+  expect(describeVaultLocalStateRelativePath(
+    ".runtime/operations/assistant/state/group-participant-display-names.json",
+  )).toMatchObject({
+    classification: "operational",
+    portability: "portable",
+    rebuildable: true,
+  });
   expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/state/outbox-dedupe.sqlite")).toMatchObject({
     classification: "operational",
     portability: "portable",

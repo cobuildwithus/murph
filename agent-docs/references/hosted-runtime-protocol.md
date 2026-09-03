@@ -2976,18 +2976,26 @@ restored `.runtime/operations/assistant/hosted-mailbox.json` file is the
 authoritative source for imported per-lane watermarks; `HostedWorkspace`
 redacted status is a diagnostic/status surface, not an import progress input.
 Fetching after restore keeps user messages appended during restore visible to
-the same invocation instead of hiding them behind a stale pre-restore read. The
-normal foreground path takes one authorized post-restore snapshot of the
-conversation and system lanes, consumes the conversation slice first, and then
-consumes the system slice through the existing failure-contained pre-assistant
-phase. A failed mixed snapshot falls back independently by lane, so system-lane
-denial or import failure cannot suppress current conversation work. Additional
-system pages remain ordinary system-only fetches. This snapshot defines the
-same-turn system-fact barrier: system facts accepted before the snapshot may
-affect the current turn, while facts appended after it remain durable for their
-normal wake or a later pass. Late conversation input continues through the
-active-turn import path and retains foreground priority. Cold bootstrap and
-background-only mailbox semantics are unchanged.
+the same invocation instead of hiding them behind a stale pre-restore read. An
+established conversation-first foreground path takes one authorized
+post-restore snapshot of the conversation and system lanes, consumes the
+conversation slice first, and then consumes the system slice through the
+existing failure-contained pre-assistant phase. A workspace whose imported
+system watermark is still zero refreshes the system lane before assistant
+execution because its first conversation import can race the one-time
+activation append. A pass whose initial import already fetched the system lane
+also refreshes it before assistant execution; `system_mailbox` relies on that
+post-import check to keep a newly arrived ask from bypassing its owner ordering.
+Otherwise, the shared conversation-first snapshot defines the same-turn
+system-fact barrier: system facts accepted before it may affect the current
+turn, while facts appended after it remain durable for their normal wake or a
+later pass. A failed mixed snapshot falls back
+independently by lane, so system-lane denial or import failure cannot suppress
+current conversation work. Additional system pages remain ordinary system-only
+fetches. System-only fetches omit the optional group sponsorship presentation
+read because no conversation item can consume it. Late conversation input
+continues through the active-turn import path and retains foreground priority.
+Cold bootstrap and background-only mailbox semantics are unchanged.
 The runtime stages decoded conversation rows as assistant input and marks the
 active invocation dirty. Foreground runtime work may defer intermediate checkpoints.
 The active invocation remains dirty until the runtime-owned
@@ -3045,8 +3053,8 @@ never returns a hosted member id or participant id.
 
 The assistant-runtime presentation reader owns one operation-local memo and one
 bounded versioned file cache at
-`.runtime/cache/assistant-runtime/group-participant-display-names.json` for those
-results. Initial prompt preparation reads unresolved unique handles once,
+`.runtime/operations/assistant/state/group-participant-display-names.json` for
+those results. Initial prompt preparation reads unresolved unique handles once,
 including a 20-message/four-sender burst as one four-handle request. Later live
 admissions reuse operation-local positive, negative, and fail-soft entries and
 batch only newly unresolved handles. Across ordinary turns and fresh reader or
@@ -3062,10 +3070,12 @@ rejected above two MiB. Missing, corrupt, oversized, or unreadable files are
 ordinary misses. Failures, policy-limited reads, and malformed or unauthorized
 responses are operation-local only and never written. There are no timers,
 resident mirror,
-single-flight, mutation invalidation, locks, or distributed cache owners.
-`.runtime/cache/**` is excluded from hosted workspace snapshots, so only the
-same surviving local workspace can reuse the file; cold restore or replacement
-re-reads Web. Neither cache layer becomes profile or contact state. Profile names render as display-only profile text; owner-contact labels render
+single-flight, mutation invalidation, locks, or distributed cache owners. The
+file is classified as portable, rebuildable assistant operational state, so
+encrypted hosted workspace snapshots retain it across replacement or cold
+restore. A renamed or newly unauthorized label may therefore remain visible
+until the existing fixed TTL expires. Neither cache layer becomes profile or
+contact state. Profile names render as display-only profile text; owner-contact labels render
 explicitly as unverified display-only text. Neither label nor the raw handle
 authorizes participant selection or an effect. Only an accepted opaque message
 ref plus trusted server derivation can authorize a participant-scoped action.
