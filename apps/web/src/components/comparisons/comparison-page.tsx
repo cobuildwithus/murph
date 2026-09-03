@@ -25,7 +25,7 @@ function integrationLabel(
     case "dexcom":
       return "CGM data connects to Murph through Dexcom";
     case "import":
-      return `Add your ${comparison.name} ${
+      return `Add ${comparison.name} ${
         comparison.category === "health-data" ? "records" : "results"
       } to Murph`;
   }
