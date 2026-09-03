@@ -7817,6 +7817,9 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         defaultOwnedSystemMailboxWakeAt !== null
         && Date.parse(defaultOwnedSystemMailboxWakeAt) <= Date.parse(TEST_NOW)
       );
+    const defaultOwnedSystemMailboxHandoffExpected =
+      defaultOwnedSystemMailboxWakeAt !== null
+      && Date.parse(defaultOwnedSystemMailboxWakeAt) <= Date.parse(TEST_NOW);
     const defaultOwnedItem = createMailboxItem({
       dedupeKey: "assistant.ask.requested:dirty-ack-follow-up",
       expiresAt: "2026-04-27T00:10:00.000Z",
@@ -8046,11 +8049,13 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       );
       assert.equal(
         checkpointRequests.at(-1)?.nextWakeAt,
-        defaultOwnerHandoffExpected ? TEST_NOW : followUpWakeAt,
+        defaultOwnedSystemMailboxHandoffExpected ? TEST_NOW : followUpWakeAt,
       );
       assert.equal(
         checkpointRequests.at(-1)?.nextWakeReason,
-        defaultOwnerHandoffExpected ? "assistant" : "device-sync.reconcile",
+        defaultOwnedSystemMailboxHandoffExpected
+          ? "assistant"
+          : "device-sync.reconcile",
       );
       assert.equal(
         checkpointRequests.at(-1)?.nextDefaultProcessingWakeAt,
@@ -8068,7 +8073,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => item.itemId),
         defaultOwnedSystemMailboxWakeAt === null ? [] : [defaultOwnedItem.id],
       );
-      if (!defaultOwnerHandoffExpected) {
+      if (!defaultOwnedSystemMailboxHandoffExpected) {
         const followUpCheckpointIndex = checkpointRequests.findIndex((request) =>
           request.nextWakeAt === followUpWakeAt
           && request.nextWakeReason === "device-sync.reconcile"

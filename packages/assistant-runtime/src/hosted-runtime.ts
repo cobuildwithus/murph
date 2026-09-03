@@ -265,6 +265,7 @@ import {
   HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
   HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
   createHostedRuntimeWakeCandidate,
+  hostedRuntimeWakeCandidateIsDue,
   hostedRuntimeWakeReasonUsesAssistantPhase,
   selectHostedRuntimeOwnerWakeCandidate,
   selectHostedRuntimeWakeCandidate,
@@ -1084,6 +1085,17 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
     },
     outboxWake,
   ]);
+  const deviceSyncWake = selectEarliestHostedRuntimeWake([
+    ...(input.extraCandidates ?? []).filter((candidate) =>
+      candidate.reason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
+    ),
+    createHostedRuntimeWakeCandidate(
+      systemMailboxWake.reason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
+        ? systemMailboxWake.at
+        : null,
+      HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
+    ),
+  ]);
   const assistantWake = selectEarliestHostedRuntimeWake([
     outboxWake,
     systemMailboxWakes.defaultOwned,
@@ -1103,38 +1115,54 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
       hostedRuntimeWakeReasonUsesAssistantPhase(candidate.reason)
     ),
   ]);
-  const selectedWake = input.assistantExecutionBlocked
-    ? modelFreeWake.nextWakeAt
-      ? modelFreeWake
-      : assistantWake
-    : (() => {
-        const selected = selectHostedRuntimeOwnerWakeCandidate({
-          backgroundCandidates: [
-            {
-              at: assistantWake.nextWakeAt,
-              reason: assistantWake.nextWakeReason,
-            },
-            ...input.extraCandidates ?? [],
-            createHostedRuntimeWakeCandidate(
-              input.mailboxImportRetryAt ?? null,
-              "mailbox",
-            ),
-          ],
-          foregroundCandidates: [
-            outboxWake,
-            createHostedRuntimeWakeCandidate(
-              pendingAssistantInputWakeAt,
-              HOSTED_ASSISTANT_WAKE_REASON,
-            ),
-          ],
-          nowMs: input.nowMs,
-          systemMailboxWake,
-        });
-        return {
-          nextWakeAt: selected.at,
-          nextWakeReason: selected.reason,
-        };
-      })();
+  const foregroundWake = selectHostedRuntimeWakeCandidate([
+    outboxWake,
+    createHostedRuntimeWakeCandidate(
+      pendingAssistantInputWakeAt,
+      HOSTED_ASSISTANT_WAKE_REASON,
+    ),
+  ]);
+  const selectedWake = (() => {
+    if (input.assistantExecutionBlocked) {
+      return modelFreeWake.nextWakeAt ? modelFreeWake : assistantWake;
+    }
+    if (hostedRuntimeWakeCandidateIsDue(foregroundWake, input.nowMs)) {
+      return {
+        nextWakeAt: foregroundWake.at,
+        nextWakeReason: foregroundWake.reason,
+      };
+    }
+    if (
+      (
+        systemMailboxWake.executionClass === null
+        || systemMailboxWake.reason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
+      )
+      && deviceSyncWake.nextWakeAt
+    ) {
+      return deviceSyncWake;
+    }
+
+    const selected = selectHostedRuntimeOwnerWakeCandidate({
+      backgroundCandidates: [
+        {
+          at: assistantWake.nextWakeAt,
+          reason: assistantWake.nextWakeReason,
+        },
+        ...input.extraCandidates ?? [],
+        createHostedRuntimeWakeCandidate(
+          input.mailboxImportRetryAt ?? null,
+          "mailbox",
+        ),
+      ],
+      foregroundCandidates: [foregroundWake],
+      nowMs: input.nowMs,
+      systemMailboxWake,
+    });
+    return {
+      nextWakeAt: selected.at,
+      nextWakeReason: selected.reason,
+    };
+  })();
   return {
     assistantCronWakeAt: assistantCronWake.at,
     assistantCronDueNow: assistantCronWake.dueNow,
