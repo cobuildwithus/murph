@@ -5853,6 +5853,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       );
       assert.deepEqual(cadencePublications, []);
       assert.equal(canonicalNextReconcileAt, dueAt);
+      assert.equal(recovered.nextWakeAt, nextRecoveryBucketAt);
       assert.equal(recovered.nextWakeReason, "device-sync.reconcile");
       assert.ok(currentWorkspace);
       assert.equal(currentWorkspace.version, "5");
@@ -5893,7 +5894,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         "2026-04-27T06:05:00.000Z",
       );
       const completionFenceAt = retainedItem.nextAttemptAt;
-      assert.equal(completionFenceAt, "2026-04-27T00:05:30.000Z");
+      assert.equal(completionFenceAt, "2026-04-27T00:05:00.000Z");
 
       vi.setSystemTime(new Date(completionFenceAt));
       const providerRequestsBeforeCompletion = providerRequestClasses.length;

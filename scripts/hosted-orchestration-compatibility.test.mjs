@@ -440,7 +440,11 @@ test("private run proof binds repository, workflow, main SHA, event, and first a
   }
 });
 
-test("supported-reader digest is deterministic and rejects duplicates", () => {
+test("supported-reader digest matches the SHA-only wire vector and rejects duplicates", () => {
+  assert.equal(
+    supportedReaderDigest([CURRENT_READER_SHA, RAMPING_READER_SHA]),
+    "76c0b5059fc6aef721085df3183c4184f236d4c6f7cac2d006d74ee0b8189b4b",
+  );
   assert.equal(
     supportedReaderDigest([CURRENT_READER_SHA, RAMPING_READER_SHA]),
     supportedReaderDigest([RAMPING_READER_SHA, CURRENT_READER_SHA]),
@@ -451,23 +455,20 @@ test("supported-reader digest is deterministic and rejects duplicates", () => {
   );
 });
 
-test("attestation accepts private-owned Current, Ramping, and dispatched candidate readers", () => {
+test("attestation accepts the exact SHA-only private reader proof", () => {
+  const readersDigest = supportedReaderDigest([
+    PRIVATE_SHA,
+    CURRENT_READER_SHA,
+    RAMPING_READER_SHA,
+  ]);
   assert.deepEqual(inspectAttestationJobs(proofJobs(), {
     ...proofInspectionArgs(),
   }), {
-    digest: supportedReaderDigest([
-      PRIVATE_SHA,
-      CURRENT_READER_SHA,
-      RAMPING_READER_SHA,
-    ]),
+    digest: readersDigest,
     proofDigest: compatibilityProofDigest({
       producerDigest: PRODUCER_DIGEST,
       publicSha: PUBLIC_SHA,
-      readersDigest: supportedReaderDigest([
-        PRIVATE_SHA,
-        CURRENT_READER_SHA,
-        RAMPING_READER_SHA,
-      ]),
+      readersDigest,
       requestId: REQUEST_ID,
     }),
     readerCount: 3,

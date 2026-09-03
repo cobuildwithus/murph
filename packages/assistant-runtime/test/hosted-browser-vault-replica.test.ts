@@ -399,6 +399,54 @@ describe("hosted browser-vault replica refresh preparation", () => {
     }
   });
 
+  it("refreshes when the validated Pattern vocabulary changes", async () => {
+    const { hashHostedBrowserVaultReplicaSources } = await import(
+      "../src/hosted-runtime/browser-vault-replica.ts"
+    );
+    const testTempRoot = process.env.MURPH_VITEST_TEMP_ROOT;
+    if (!testTempRoot) throw new Error("MURPH_VITEST_TEMP_ROOT is required.");
+    const vaultRoot = await mkdtemp(
+      path.join(testTempRoot, "murph-browser-vault-vocabulary-"),
+    );
+
+    try {
+      const initialHash = await hashHostedBrowserVaultReplicaSources(vaultRoot);
+      await writeVaultFile(
+        vaultRoot,
+        "derived/knowledge/pages/journal-pattern-vocabulary.md",
+        [
+          "---",
+          "title: Journal and Pattern vocabulary",
+          "slug: journal-pattern-vocabulary",
+          "pageType: ledger",
+          "status: active",
+          "---",
+          "",
+          "# Journal and Pattern vocabulary",
+          "",
+          JSON.stringify({
+            concepts: [
+              {
+                aliases: ["dancing"],
+                icon: "dance",
+                id: "dance",
+                label: "Dance",
+              },
+            ],
+            version: 1,
+          }),
+        ].join("\n"),
+      );
+      const vocabularyHash =
+        await hashHostedBrowserVaultReplicaSources(vaultRoot);
+
+      expect(vocabularyHash.hash).not.toBe(initialHash.hash);
+      expect(vocabularyHash.fileCount).toBe(initialHash.fileCount + 1);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it("projects the output of the canonical experiment outcome writer", async () => {
     const {
       createHostedBrowserVaultReplicaForSourceState,

@@ -172,6 +172,11 @@ describe("StandbyRunnerContainer", () => {
     await expect(harness.container.ensureProcessing({
       userId: "member_456",
     })).rejects.toThrow("not bound to the runtime user");
+    await expect(harness.container.onRuntimeCompletionRecorded({
+      attemptId: "attempt_wrong_member",
+      leaseGeneration: "1",
+      userId: "member_456",
+    })).rejects.toThrow("not bound to the runtime user");
     await expect(harness.container.ensureReadyForProcessing({
       timeoutMs: 1_000,
       userId: "member_123",

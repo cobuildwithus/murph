@@ -10,7 +10,12 @@ import {
   createBrowserVaultReplica,
   createVaultReadModel,
 } from "@murphai/query/browser";
-import type { PersonalPatternReport } from "@murphai/query/browser-overview";
+import type {
+  PersonalPatternCell,
+  PersonalPatternFactor,
+  PersonalPatternReport,
+  PersonalPatternStage,
+} from "@murphai/query/browser-overview";
 import { listHealthCommonsExperimentBrowseProtocols } from "@/src/lib/health-commons/experiment-browse";
 
 const mocks = vi.hoisted(() => ({
@@ -45,7 +50,10 @@ import { metadata as patternsMetadata } from "../app/(dashboard)/patterns/layout
 import { EnvironmentPrintStudy } from "../app/design/environment-print-study";
 import { PersonalPatternsComponentStudy } from "../app/design/personal-patterns-study";
 import { JournalViewContent } from "../src/components/journal/journal-view";
-import { getOutcomeDescription } from "../src/components/overview/personal-patterns-section";
+import {
+  getOutcomeDescription,
+  sortPersonalPatternReport,
+} from "../src/components/overview/personal-patterns-section";
 import { renderClientComponent } from "./render-client-component";
 
 type BrowserVaultEntity = Parameters<
@@ -276,6 +284,7 @@ test("JournalPage renders the derived private health timeline", () => {
     assert.match(markup, /Morning walk/u);
     assert.match(markup, /Last 7 days/u);
     assert.match(markup, /Update your journal in private chat with Murph/u);
+    assert.match(markup, /flex items-center gap-\[11px\] px-1 text-left/u);
     assert.match(markup, /journal-day-2026-08-12/u);
     assert.doesNotMatch(markup, /journal-day-2026-08-13/u);
     assert.doesNotMatch(markup, /No data/u);
@@ -582,6 +591,10 @@ test("Personal Patterns comparison controls use plain result language", () => {
   assert.match(markup, /data-pattern-outcome-column="total-sleep"/u);
   assert.match(markup, />Sleep duration</u);
   assert.match(markup, />Sleep quality</u);
+  assert.match(markup, /aria-label="Sort by Sleep quality/u);
+  assert.doesNotMatch(markup, /lucide-arrow-up-down/u);
+  assert.doesNotMatch(markup, /aria-label="About Sleep quality"/u);
+  assert.doesNotMatch(markup, /lucide-circle-help/u);
   assert.match(markup, />SpO₂</u);
   assert.equal(
     getOutcomeDescription("spo2"),
@@ -624,6 +637,43 @@ test("Personal Patterns comparison controls use plain result language", () => {
   assert.doesNotMatch(markup, />~</u);
   assert.doesNotMatch(markup, /font-mono font-semibold tabular-nums/u);
   assert.doesNotMatch(markup, /Scroll sideways/u);
+});
+
+test("Personal Patterns sorts comparable results and keeps missing results last", () => {
+  const report: PersonalPatternReport = {
+    asOfDate: "2026-09-02",
+    cells: [
+      patternCell("lower", -12, "no_clear_pattern"),
+      patternCell("higher", 18, "seen_again"),
+      patternCell("missing", null, "insufficient"),
+    ],
+    factors: [
+      patternFactor("missing", 30),
+      patternFactor("lower", 8),
+      patternFactor("higher", 7),
+    ],
+    lagDays: 1,
+    notes: [],
+    outcomes: [{ id: "hrv", label: "HRV", unit: "ms" }],
+    repeatableCellCount: 1,
+    testedCellCount: 2,
+    windowDays: 120,
+  };
+
+  assert.deepEqual(
+    sortPersonalPatternReport(report, {
+      columnId: "hrv",
+      direction: "descending",
+    }).factors.map((factor) => factor.id),
+    ["higher", "lower", "missing"],
+  );
+  assert.deepEqual(
+    sortPersonalPatternReport(report, {
+      columnId: "hrv",
+      direction: "ascending",
+    }).factors.map((factor) => factor.id),
+    ["lower", "higher", "missing"],
+  );
 });
 
 test("a saved synthetic Journal factor reaches Patterns and disappears after correction", async () => {
@@ -1602,4 +1652,36 @@ function addIsoDays(value: string, days: number): string {
   const date = new Date(`${value}T00:00:00.000Z`);
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
+}
+
+function patternFactor(id: string, observedDays: number): PersonalPatternFactor {
+  return {
+    id,
+    kind: "activity",
+    label: id,
+    observedDays,
+  };
+}
+
+function patternCell(
+  factorId: string,
+  deltaPercent: number | null,
+  stage: PersonalPatternStage,
+): PersonalPatternCell {
+  return {
+    comparisonDays: stage === "insufficient" ? 0 : 5,
+    comparisonMean: null,
+    delta: deltaPercent,
+    deltaPercent,
+    direction:
+      deltaPercent === null ? "flat" : deltaPercent > 0 ? "higher" : "lower",
+    exposedDays: stage === "insufficient" ? 0 : 5,
+    exposedMean: null,
+    factorId,
+    firstExposedDate: null,
+    lastExposedDate: null,
+    outcomeId: "hrv",
+    repeatedDirection: false,
+    stage,
+  };
 }

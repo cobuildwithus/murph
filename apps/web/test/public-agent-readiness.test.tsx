@@ -47,6 +47,7 @@ describe("public agent content", () => {
     assert.match(MURPH_AGENT_GUIDE_MARKDOWN, /^## Who Murph is for$/mu);
     assert.ok(MURPH_AGENT_GUIDE_MARKDOWN.length > 1_500);
     assert.ok(MURPH_AGENT_GUIDE_MARKDOWN.includes(MURPH_SECURITY_MAILTO_HREF));
+    assert.match(MURPH_AGENT_GUIDE_MARKDOWN, /\/compare/u);
   });
 
   it("serves negotiated Markdown HEAD requests without a response body", async () => {
@@ -147,11 +148,12 @@ describe("public trust pages", () => {
     assert.ok(readableText.length > 500);
   });
 
-  it("links About and Contact from the shared public footer", () => {
+  it("links About, Contact, and Comparisons from the shared public footer", () => {
     const markup = renderToStaticMarkup(createElement(SiteFooter));
 
     assert.match(markup, /href="\/about"/u);
     assert.match(markup, /href="\/contact"/u);
+    assert.match(markup, /href="\/compare"/u);
   });
 
   it("links each Contact journey to its owned inbox", () => {

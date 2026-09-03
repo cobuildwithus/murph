@@ -10262,7 +10262,7 @@ describe("RunnerContainer", () => {
     expect(renewActivityTimeout).not.toHaveBeenCalled();
   });
 
-  it("destroys an idle legacy child that omits the optional warmth watermark", async () => {
+  it("re-arms an idle legacy child that omits the optional warmth watermark", async () => {
     const renewActivityTimeout = vi.fn();
     const { container, destroy } = createContainerDouble({
       initialStatus: "running",
@@ -10279,8 +10279,8 @@ describe("RunnerContainer", () => {
 
     await container.onActivityExpired();
 
-    expect(destroy).toHaveBeenCalledOnce();
-    expect(renewActivityTimeout).not.toHaveBeenCalled();
+    expect(destroy).not.toHaveBeenCalled();
+    expect(renewActivityTimeout).toHaveBeenCalledOnce();
   });
 
   it("re-arms cleanup when child health is unavailable", async () => {

@@ -183,9 +183,10 @@ exact `activity_session` id to that assistant delivery through the existing
 outbox context-reference field. A later reply carries it forward only when a
 successful exact read or mutation returns the same id. The relationship is
 runtime-owned and absent from member-facing text. An unrelated assistant
-delivery, invalid result, multiple ids, or conflict clears implicit continuity.
-This creates no active-workout selector, focused-workout state, timeout, or
-recency fallback.
+delivery that makes no workout-context decision is transparent. An explicit
+clear, invalid result, multiple ids, mismatch, or conflict ends implicit
+continuity. This creates no active-workout selector, focused-workout state,
+timeout, or recency fallback.
 
 Starting or logging a new workout is independent of older unfinished workouts.
 Every mutation carries the exact canonical workout id and uses that workout's

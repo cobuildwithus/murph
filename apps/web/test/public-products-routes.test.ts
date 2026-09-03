@@ -53,9 +53,12 @@ describe("public product API routes", () => {
     ));
 
     expect(mocks.searchPublicProducts).toHaveBeenCalledWith({
+      foodComparisonReadyOnly: false,
+      foodSearchOrder: "relevance",
       query: "example product",
       kinds: ["supplement", "food"],
       limitPerKind: 6,
+      offsetPerKind: 0,
     });
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");

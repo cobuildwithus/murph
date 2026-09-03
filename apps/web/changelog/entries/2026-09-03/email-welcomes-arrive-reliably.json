@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-03",
+  "order": 100,
+  "item": {
+    "id": "email-welcomes-arrive-reliably",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Email welcomes arrive reliably",
+    "summary": "New members who start with email now receive Murph's first welcome instead of waiting while the same delivery retries.",
+    "details": "Delivery still uses the member's current verified email and keeps the existing first-contact safeguards. If the member has already started a direct email conversation while delivery recovers, Murph does not interrupt it with a late first-time welcome.",
+    "relevanceTags": ["assistant", "email", "onboarding", "reliability"],
+    "sourcePullRequests": [2764]
+  }
+}

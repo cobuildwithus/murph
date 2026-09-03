@@ -1,5 +1,9 @@
 import Link from "next/link";
 
+import { PRODUCT_DATABASE_STATS } from "@/src/lib/product-database-stats";
+
+const DATABASE_COUNT_FORMATTER = new Intl.NumberFormat("en-US");
+
 function LabelLookupArtifact() {
   return (
     <div className="rounded-2xl bg-[#fffcf6] p-5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)]">
@@ -87,9 +91,9 @@ function DatabaseFactsPanel() {
       </p>
 
       {[
-        ["Food labels", "2,027,814"],
-        ["Supplement facts", "239,365"],
-        ["Product tests", "20,697"],
+        ["Food labels", DATABASE_COUNT_FORMATTER.format(PRODUCT_DATABASE_STATS.foodLabels)],
+        ["Supplement facts", DATABASE_COUNT_FORMATTER.format(PRODUCT_DATABASE_STATS.supplementFacts)],
+        ["Product tests", DATABASE_COUNT_FORMATTER.format(PRODUCT_DATABASE_STATS.productTests)],
       ].map(([name, count]) => (
         <div
           key={name}
@@ -107,7 +111,7 @@ function DatabaseFactsPanel() {
       </p>
 
       <p className="pt-3 text-[0.75rem] leading-[1.5] text-black/60">
-        Counted July 2026. Growing weekly as new labels and lab results come
+        Counted {PRODUCT_DATABASE_STATS.countedThrough}. Growing weekly as new labels and lab results come
         in.
       </p>
     </div>

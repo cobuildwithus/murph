@@ -519,6 +519,49 @@ only for genuine warnings or failures. Evidence gaps stay neutral and explicit.
 At phone widths, metadata wraps under identity and long product/source strings
 must break without horizontal scrolling.
 
+### Food Label Lab
+The public `/food` page uses the same editorial paper system with less text.
+Start with one search field. A category choice loads four useful products from
+different popular brands. An exact product choice adds only that record.
+Keep the active search phrase in the field after a product or example loads.
+The quiet catalog count may open one compact facts popover with current counts,
+and source families. Put the brand, the differentiating product name, and the
+package or serving size in each column. When configured, use Brandfetch Search
+for the brand logo. Add the broad product category to the brand query and accept
+only a result whose name contains the requested brand. Cache each result in
+memory for the page session. Fall back to deterministic brand color and local
+category art. Mark the winner
+in each complete metric row with one sage check only; no tinted rows, no Lowest
+or Highest labels. Nothing may read as a health or safety score. Keep four fixed
+product slots so add and remove actions do not resize the table. Scroll
+horizontally for up to ten and show a subtle edge shadow only while meaningful
+content remains hidden to the right. Four products fit without that shadow on
+desktop. Keep one clear-comparison action in the header.
+
+Show related products below the table in three desktop columns. Reveal four
+rows at a time, then load 12 more. Keep an added card in place and replace its
+action with a quiet selected state. Do not create a nested scroll area.
+
+Keep evidence in one separate row as a five-segment coverage meter that opens
+one combined evidence drawer. Use sienna only for a confirmed result above an
+available screening limit, amber for unknown or not comparable, and sage for
+within a comparable limit. Product headers and metric cells open the same
+drawer. Never
+assign a winner when a selected product lacks that metric, and
+never give tied values unequal ordinal ranks. Treat a source nutrition panel
+whose every reported value is zero as unusable comparison data. Keep a product
+only when it still has linked lab evidence; otherwise reject it before it enters
+the table. Also reject impossible per-100-gram values caused by a bad source
+scale. The drawer shows coverage and record source in one compact popover.
+It formats the ingredient statement as a list and explains source-backed
+ingredient flags in tooltips. Lab observations group repeated analytes and show
+compact status marks before optional exact measurements. Gap explanations stay
+in tooltips. Observation summaries must show returned versus total scope when
+the public DTO is truncated. The tests sheet must not infer sample identity or
+coverage from report metadata.
+At phone widths, preserve the first label column and let product columns scroll
+horizontally.
+
 ### Choice Cards
 
 Use the shared `ChoiceCard` with `RadioGroup` when a member must compare two to
@@ -767,8 +810,8 @@ factor coverage as a compact five-segment bar. Its tooltip uses `Data coverage` 
 title and gives the exact recorded-case count below it. Label total sleep time
 as `Sleep duration`. Group sleep score and sleep efficiency under `Sleep quality`. Keep
 their calculations separate and identify the metric in each result popover.
-Outcome headings reveal a short explanation of why each result matters on hover,
-focus, or press. Keep `No clear pattern` descriptions to one short sentence.
+Keep outcome headings clear without separate help controls. Keep `No clear pattern`
+descriptions to one short sentence.
 
 Keep the copy observational and conversational. Prefer `You slept less after cycling` over a statistical sentence. Never use `caused` or `proved`. Show the activity result and other comparable days as two labeled bars in the cell detail. Keep matched-day counts in accessible copy instead of repeating them visually. On narrow screens, keep the row labels readable and scroll the matrix horizontally.
 
