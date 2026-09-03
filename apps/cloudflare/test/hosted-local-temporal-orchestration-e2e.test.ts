@@ -10,6 +10,7 @@ import {
   buildHostedExecutionEnvironmentInterviewCompletedWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
+  buildHostedExecutionMemberPreferencesUpdatedWake,
 } from "@murphai/hosted-execution";
 import {
   startHostedLocalFullStackScenario,
@@ -234,18 +235,17 @@ describe("hosted local Temporal orchestration e2e", () => {
     const providerRequestBaseline = activeScenario.assistantProviderRequests.length;
 
     const retainedEventId =
-      `member.channels.updated:paused-retention:${Date.now()}`;
+      `member.preferences.updated:paused-retention:${Date.now()}`;
     const retainedAppend = await appendHostedExecutionWakeForTest({
       environment: activeScenario.runtimeEnv,
-      wake: buildHostedExecutionMemberChannelsUpdatedWake({
+      wake: buildHostedExecutionMemberPreferencesUpdatedWake({
         eventId: retainedEventId,
-        memberChannels: {
-          email: false,
-          linq: true,
-          telegram: false,
-        },
         memberId: pausedRetentionUserId,
         occurredAt: new Date().toISOString(),
+        preferences: {
+          personality: { detail: 6 },
+          tone: "casual",
+        },
       }),
     });
     const retainedSignal = await signalHostedMailboxAppendRuntimeForTest({
@@ -321,7 +321,7 @@ describe("hosted local Temporal orchestration e2e", () => {
       userId: pausedRetentionUserId,
     })).resolves.toMatchObject({
       consumedAt: null,
-      kind: "member.channels.updated",
+      kind: "member.preferences.updated",
       lane: "system",
     });
     expect(activeScenario.assistantProviderRequests).toHaveLength(
@@ -364,6 +364,47 @@ describe("hosted local Temporal orchestration e2e", () => {
       expectedSeq: modelFreeAppend.wake.seq,
       userId: modelFreeFrontierUserId,
     });
+
+    const memberChannelsEventId =
+      `member.channels.updated:temporal-frontier:${Date.now()}`;
+    const memberChannelsAppend = await appendHostedExecutionWakeForTest({
+      environment: activeScenario.runtimeEnv,
+      wake: buildHostedExecutionMemberChannelsUpdatedWake({
+        eventId: memberChannelsEventId,
+        memberChannels: {
+          email: false,
+          linq: true,
+          telegram: false,
+        },
+        memberId: modelFreeFrontierUserId,
+        occurredAt: new Date().toISOString(),
+      }),
+    });
+    const memberChannelsSignalStartedAt = new Date();
+    const memberChannelsSignal = await signalHostedMailboxAppendRuntimeForTest({
+      environment: activeScenario.runtimeEnv,
+      expectedUserId: modelFreeFrontierUserId,
+      mailboxItemId: memberChannelsAppend.wake.id,
+    });
+    const memberChannelsState = await waitForWorkflowExecutionState({
+      env: activeScenario.runtimeEnv,
+      executionNotBefore: memberChannelsSignalStartedAt,
+      workflowId: memberChannelsSignal.workflowId,
+    });
+    expect(memberChannelsState.lastExecutionErrorCode).toBeNull();
+    await waitForSystemMailboxHandledThrough({
+      expectedSeq: memberChannelsAppend.wake.seq,
+      userId: modelFreeFrontierUserId,
+    });
+    await expect(readHostedMailboxItemForTest({
+      dedupeKey: memberChannelsEventId,
+      environment: activeScenario.runtimeEnv,
+      userId: modelFreeFrontierUserId,
+    })).resolves.toMatchObject({
+      consumedAt: expect.any(String),
+      kind: "member.channels.updated",
+      lane: "system",
+    });
     expect(activeScenario.assistantProviderRequests).toHaveLength(
       modelFreeProviderBaseline,
     );
@@ -376,18 +417,17 @@ describe("hosted local Temporal orchestration e2e", () => {
     const defaultOwnedProviderBaseline =
       activeScenario.assistantProviderRequests.length;
     const defaultOwnedEventId =
-      `member.channels.updated:temporal-frontier:${Date.now()}`;
+      `member.preferences.updated:temporal-frontier:${Date.now()}`;
     const defaultOwnedAppend = await appendHostedExecutionWakeForTest({
       environment: activeScenario.runtimeEnv,
-      wake: buildHostedExecutionMemberChannelsUpdatedWake({
+      wake: buildHostedExecutionMemberPreferencesUpdatedWake({
         eventId: defaultOwnedEventId,
-        memberChannels: {
-          email: false,
-          linq: true,
-          telegram: false,
-        },
         memberId: defaultOwnedFrontierUserId,
         occurredAt: new Date().toISOString(),
+        preferences: {
+          personality: { detail: 6 },
+          tone: "casual",
+        },
       }),
     });
     const defaultOwnedSignal = await signalHostedMailboxAppendRuntimeForTest({
@@ -413,7 +453,7 @@ describe("hosted local Temporal orchestration e2e", () => {
       userId: defaultOwnedFrontierUserId,
     })).resolves.toMatchObject({
       consumedAt: null,
-      kind: "member.channels.updated",
+      kind: "member.preferences.updated",
       lane: "system",
     });
     const defaultOwnedStatus = await activeScenario.harness.readUserStatus(
