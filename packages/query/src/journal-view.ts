@@ -8,6 +8,7 @@ import { selectMetricSeries, type MetricPoint } from "./metrics/index.ts";
 import type { CanonicalEntity } from "./canonical-entities.ts";
 import type { VaultReadModel } from "./read-model.ts";
 import {
+  canonicalFactorToken,
   resolvePersonalPatternVocabularyConcept,
   type PersonalPatternVocabulary,
 } from "./personal-patterns.ts";
@@ -228,7 +229,11 @@ function journalCandidateFromEvent(
 }
 
 function isHiddenJournalEvent(event: CanonicalEntity): boolean {
-  return isJournalProfileEvent(event) || event.tags.includes("generated-image");
+  return (
+    isJournalProfileEvent(event) ||
+    event.tags.includes("capture") ||
+    event.tags.includes("generated-image")
+  );
 }
 
 function journalEventPresentation(
@@ -249,15 +254,16 @@ function journalEventPresentation(
       observationMetric,
     };
   }
-  const rawKey =
+  const rawKey = canonicalFactorToken(
     resolveAdherenceObservationActivityKind({
       attributes: event.attributes,
-    }) ?? "activity";
+    }),
+  ) ?? "activity";
   const concept = resolvePersonalPatternVocabularyConcept(vocabulary, rawKey);
   return {
     activityKey: concept?.id ?? rawKey,
     exerciseNames: activityExerciseNames(event.attributes),
-    label: concept?.label ?? eventLabel(event),
+    label: concept?.label ?? humanize(rawKey),
     observationMetric,
   };
 }
@@ -722,7 +728,8 @@ function eventSummary(event: CanonicalEntity): string | null {
   if (event.kind === "experiment_context") {
     return experimentJournalSummary(event, summary);
   }
-  if (event.kind === "meal") return mealSummary(event.attributes);
+  if (event.kind === "meal") return mealSummary(event.attributes, event.title);
+  if (event.kind === "test") return testSummary(event.attributes);
   const resultSummary = readString(event.attributes.resultSummary);
   if (resultSummary) return resultSummary;
   if (summary) return summary;
@@ -749,12 +756,30 @@ function eventSummary(event: CanonicalEntity): string | null {
   return event.body?.trim() || null;
 }
 
-function mealSummary(attributes: Record<string, unknown>): string | null {
-  return (
-    readString(attributes.mealName) ??
-    readString(attributes.dishName) ??
-    null
-  );
+function testSummary(attributes: Record<string, unknown>): string | null {
+  const markerCount = readNumber(attributes.markerCount);
+  if (markerCount === null) return null;
+  const flaggedCount = readNumber(attributes.flaggedCount);
+  return [
+    `${markerCount} ${markerCount === 1 ? "marker" : "markers"}`,
+    flaggedCount !== null && flaggedCount > 0
+      ? `${flaggedCount} need attention`
+      : null,
+  ]
+    .filter((value): value is string => value !== null)
+    .join(" · ");
+}
+
+function mealSummary(
+  attributes: Record<string, unknown>,
+  title: string | null,
+): string | null {
+  const name =
+    readString(attributes.mealName) ?? readString(attributes.dishName);
+  if (name && name.toLowerCase() !== title?.trim().toLowerCase()) return name;
+  if (title && title.trim().toLowerCase() !== "meal") return null;
+  const ingredients = readJournalIngredients(attributes.ingredients).slice(0, 3);
+  return ingredients.length > 0 ? ingredients.join(", ") : null;
 }
 
 function journalEventDetailItems(event: CanonicalEntity): string[] {
@@ -797,8 +822,10 @@ function experimentDetailItems(event: CanonicalEntity): string[] {
 function mealDetailItems(attributes: Record<string, unknown>): string[] {
   const nutrition = readRecord(attributes.nutrition);
   const totals = readRecord(nutrition?.totals);
+  const ingredients = readJournalIngredients(attributes.ingredients);
   return uniqueStrings([
     readString(attributes.summary) ?? readString(attributes.note),
+    ingredients.length > 0 ? `Ingredients: ${ingredients.join(", ")}` : null,
     formatJournalDetail("Energy", readNumber(totals?.calories), "kcal"),
     formatJournalDetail("Protein", readNumber(totals?.proteinGrams), "g"),
     formatJournalDetail(
@@ -807,6 +834,12 @@ function mealDetailItems(attributes: Record<string, unknown>): string[] {
       "g",
     ),
   ]);
+}
+
+function readJournalIngredients(value: unknown): string[] {
+  return Array.isArray(value)
+    ? uniqueStrings(value.map((ingredient) => readString(ingredient)))
+    : [];
 }
 
 function testDetailItems(attributes: Record<string, unknown>): string[] {

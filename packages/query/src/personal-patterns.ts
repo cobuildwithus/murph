@@ -387,10 +387,7 @@ function collectFactorAccumulators(
 
   for (const event of events) {
     for (const rawCandidate of readFactorCandidates(event)) {
-      const candidate = {
-        ...rawCandidate,
-        token: vocabulary.aliasToId.get(rawCandidate.token) ?? rawCandidate.token,
-      };
+      const candidate = applyFactorVocabulary(rawCandidate, vocabulary);
       if (candidate.date < fromDate || candidate.date > toDate) continue;
 
       const existing = factors.get(candidate.token);
@@ -434,6 +431,29 @@ function collectFactorAccumulators(
   }
 
   return factors;
+}
+
+function applyFactorVocabulary(
+  candidate: FactorCandidate,
+  vocabulary: PersonalPatternVocabularyIndex,
+): FactorCandidate {
+  const separatorIndex = candidate.token.indexOf("--");
+  const baseToken =
+    separatorIndex === -1
+      ? candidate.token
+      : candidate.token.slice(0, separatorIndex);
+  const detailSuffix =
+    separatorIndex === -1 ? "" : candidate.token.slice(separatorIndex);
+  const canonicalBase = vocabulary.aliasToId.get(baseToken) ?? baseToken;
+  if (canonicalBase === baseToken) return candidate;
+  return {
+    ...candidate,
+    episodeId:
+      candidate.episodeId === `${baseToken}:${candidate.date}`
+        ? `${canonicalBase}:${candidate.date}`
+        : candidate.episodeId,
+    token: `${canonicalBase}${detailSuffix}`,
+  };
 }
 
 function pruneRedundantFactorDetails(
@@ -1442,7 +1462,7 @@ function readFiniteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function canonicalFactorToken(value: string | null): string | null {
+export function canonicalFactorToken(value: string | null): string | null {
   switch (value) {
     case "run":
       return "running";

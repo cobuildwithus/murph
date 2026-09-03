@@ -1410,7 +1410,10 @@ describe('applyMurphManagedAutomations', () => {
       'Merge clear synonyms into one concept',
     )
     expect(patternsUpdateRecord?.instructions).toContain(
-      'Cover every factor id in the current report',
+      'Derived detail ids containing `--` do not need concepts',
+    )
+    expect(patternsUpdateRecord?.instructions).toContain(
+      'Never use an unexplained abbreviation as the member-facing label',
     )
     expect(patternsUpdateRecord?.instructions).toContain(
       'A rename must not create a notification',

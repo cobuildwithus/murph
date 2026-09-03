@@ -53,7 +53,10 @@ import {
   VAULT_CLI_BATCH_RESULT_SCHEMA,
   vaultCliBatchResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
-import { readVaultRawTolerant } from '@murphai/query'
+import {
+  parsePersonalPatternVocabulary,
+  readVaultRawTolerant,
+} from '@murphai/query'
 import { showAssistantPersonality } from '@murphai/vault-usecases/preferences'
 import {
   logLiveWorkoutSet,
@@ -11105,6 +11108,15 @@ describeRealCodex('real Codex Personal Patterns vocabulary normalization e2e', (
       expect(vocabularyWrite).toMatch(/dancing/iu)
       expect(vocabularyWrite).toMatch(/dance/iu)
       expect(vocabularyWrite).toMatch(/"icon":"dance"/iu)
+      expect(vocabularyWrite).toMatch(/physical therapy/iu)
+      expect(vocabularyWrite).toMatch(/pt/iu)
+      const parsedVocabulary = parsePersonalPatternVocabulary(vocabularyWrite)
+      expect(parsedVocabulary).not.toBeNull()
+      expect(
+        parsedVocabulary?.concepts.some((concept) =>
+          [concept.id, ...concept.aliases].some((token) => token.includes('--')),
+        ),
+      ).toBe(false)
       expect(await readFile(ledgerCapturePath, 'utf8')).toMatch(/dance/iu)
       expect(finishCalls.length).toBeLessThanOrEqual(1)
       if (result.finalMessage !== '') {
@@ -27860,7 +27872,14 @@ async function materializePersonalPatternsBaselineVaultCli(input: {
       '    exit 1',
       '    ;;',
       '  *"knowledge upsert --slug journal-pattern-vocabulary"*)',
-      `    printf '%s\\n' "$*" > ${JSON.stringify(input.vocabularyCapturePath)}`,
+      '    while [ "$#" -gt 0 ]; do',
+      '      if [ "$1" = "--body" ]; then',
+      '        shift',
+      `        printf '%s\\n' "$1" > ${JSON.stringify(input.vocabularyCapturePath)}`,
+      '        break',
+      '      fi',
+      '      shift',
+      '    done',
       "    printf '%s\\n' '{\"ok\":true}'",
       '    ;;',
       '  *"knowledge upsert --slug personal-pattern-notifications"*)',
@@ -27892,10 +27911,18 @@ async function materializePersonalPatternsVocabularyVaultCli(input: {
       cells: [
         personalPatternFixtureCell('cardio-dance'),
         personalPatternFixtureCell('dancing'),
+        personalPatternFixtureCell('pt'),
+        personalPatternFixtureCell('coffee--amount-high'),
       ],
       factors: [
         personalPatternFixtureFactor('cardio-dance', 'Cardio dance'),
         personalPatternFixtureFactor('dancing', 'Dancing'),
+        personalPatternFixtureFactor('pt', 'Pt', 'intervention'),
+        personalPatternFixtureFactor(
+          'coffee--amount-high',
+          'Coffee · amount high',
+          'intervention',
+        ),
       ],
       lagDays: 1,
       outcomes: [{ id: 'hrv', label: 'HRV', unit: 'ms' }],
@@ -27905,8 +27932,24 @@ async function materializePersonalPatternsVocabularyVaultCli(input: {
     filters: { date: '2026-09-02', windowDays: 120 },
     report: {
       asOfDate: '2026-09-02',
-      cells: [personalPatternFixtureCell('dance')],
-      factors: [personalPatternFixtureFactor('dance', 'Dance')],
+      cells: [
+        personalPatternFixtureCell('dance'),
+        personalPatternFixtureCell('physical-therapy'),
+        personalPatternFixtureCell('coffee--amount-high'),
+      ],
+      factors: [
+        personalPatternFixtureFactor('dance', 'Dance'),
+        personalPatternFixtureFactor(
+          'physical-therapy',
+          'Physical therapy',
+          'intervention',
+        ),
+        personalPatternFixtureFactor(
+          'coffee--amount-high',
+          'Coffee · amount high',
+          'intervention',
+        ),
+      ],
       lagDays: 1,
       outcomes: [{ id: 'hrv', label: 'HRV', unit: 'ms' }],
     },
@@ -27927,6 +27970,24 @@ async function materializePersonalPatternsVocabularyVaultCli(input: {
         comparisonBasis: 'matched_weekday',
         factorId: 'dancing',
         firstSharedDate: '2026-08-21',
+        lagDays: 1,
+        lastSeenGrade: 'D',
+        muted: false,
+        outcomeId: 'hrv',
+      },
+      {
+        comparisonBasis: 'matched_weekday',
+        factorId: 'pt',
+        firstSharedDate: '2026-08-22',
+        lagDays: 1,
+        lastSeenGrade: 'D',
+        muted: false,
+        outcomeId: 'hrv',
+      },
+      {
+        comparisonBasis: 'matched_weekday',
+        factorId: 'coffee--amount-high',
+        firstSharedDate: '2026-08-23',
         lagDays: 1,
         lastSeenGrade: 'D',
         muted: false,
@@ -27958,7 +28019,14 @@ async function materializePersonalPatternsVocabularyVaultCli(input: {
       `    printf '%s\\n' '${ledger}'`,
       '    ;;',
       '  *"knowledge upsert --slug journal-pattern-vocabulary"*)',
-      `    printf '%s\\n' "$*" > ${JSON.stringify(input.vocabularyCapturePath)}`,
+      '    while [ "$#" -gt 0 ]; do',
+      '      if [ "$1" = "--body" ]; then',
+      '        shift',
+      `        printf '%s\\n' "$1" > ${JSON.stringify(input.vocabularyCapturePath)}`,
+      '        break',
+      '      fi',
+      '      shift',
+      '    done',
       "    printf '%s\\n' '{\"ok\":true}'",
       '    ;;',
       '  *"knowledge upsert --slug personal-pattern-notifications"*)',
@@ -27996,10 +28064,14 @@ function personalPatternFixtureCell(factorId: string) {
   }
 }
 
-function personalPatternFixtureFactor(id: string, label: string) {
+function personalPatternFixtureFactor(
+  id: string,
+  label: string,
+  kind = 'activity',
+) {
   return {
     id,
-    kind: 'activity',
+    kind,
     label,
     observedDays: 8,
   }

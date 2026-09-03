@@ -37,7 +37,12 @@ without adding a new service or model API path.
 - [x] Add focused deterministic tests and a real-Codex Luna journey.
 - [x] Replay dense, sparse, incomplete, and provider-variant journeys on mobile
   and desktop, including the isolated sanitized export.
+- [x] Keep long test results in details, hide raw capture rows, and require Luna
+  to replace clear health abbreviations with plain member-facing labels.
+- [x] Preserve one independent comparison case when same-day aliases merge,
+  keep derived detail factors outside the sparse vocabulary, and retain meal
+  ingredients in concise rows and expanded details.
 - [ ] Complete required review, PR, CI, and merge workflow.
 
 Status: active
-Updated: 2026-09-02
+Updated: 2026-09-03

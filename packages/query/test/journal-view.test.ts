@@ -151,7 +151,7 @@ test("Journal remains useful with notes only and keeps independent facts separat
   ]);
 });
 
-test("Journal keeps meal prose in details instead of the timeline", () => {
+test("Journal keeps canonical meal ingredients concise and moves prose to details", () => {
   const view = buildJournalView(
     createVaultReadModel({
       entities: [
@@ -170,7 +170,7 @@ test("Journal keeps meal prose in details instead of the timeline", () => {
             },
             source: "manual",
           },
-          "Eggs and spinach",
+          "Meal",
         ),
       ],
       vaultRoot: "test://journal-meal",
@@ -181,12 +181,44 @@ test("Journal keeps meal prose in details instead of the timeline", () => {
 
   const meal = view.days[0]?.events[0];
   assert.equal(meal?.kind, "meal");
-  assert.equal(meal?.title, "Eggs and spinach");
-  assert.equal(meal?.summary, null);
+  assert.equal(meal?.title, "Meal");
+  assert.equal(meal?.summary, "Eggs, Spinach, Toast");
   assert.deepEqual(meal?.details, [
     "Photo estimate with ingredients and uncertain portions.",
+    "Ingredients: Eggs, Spinach, Toast, Olive oil",
     "Energy: 540 kcal",
     "Protein: 31 g",
+  ]);
+});
+
+test("Journal does not repeat a descriptive meal title in the timeline", () => {
+  const view = buildJournalView(
+    createVaultReadModel({
+      entities: [
+        event(
+          "meal_named",
+          "meal",
+          "2026-08-20T17:00:00.000Z",
+          {
+            dishName: "Vegetable stir-fry",
+            ingredients: ["Noodles", "Vegetables", "Egg"],
+            summary: "A detailed photo estimate with uncertain portions.",
+          },
+          "Vegetable stir-fry",
+        ),
+      ],
+      vaultRoot: "test://journal-named-meal",
+    }),
+    [],
+    { asOf: "2026-08-20" },
+  );
+
+  const meal = view.days[0]?.events[0];
+  assert.equal(meal?.title, "Vegetable stir-fry");
+  assert.equal(meal?.summary, null);
+  assert.deepEqual(meal?.details, [
+    "A detailed photo estimate with uncertain portions.",
+    "Ingredients: Noodles, Vegetables, Egg",
   ]);
 });
 
@@ -464,7 +496,37 @@ test("Journal groups activity aliases with the shared vocabulary", () => {
   assert.equal(view.days[0]?.events[0]?.summary, "55 min across 2 sessions");
 });
 
-test("Journal uses structured results and hides generated image attachments", () => {
+test("Journal groups deterministic activity aliases without vocabulary", () => {
+  const view = buildJournalView(
+    createVaultReadModel({
+      entities: [
+        event(
+          "run_1",
+          "activity_session",
+          "2026-08-25T07:00:00.000Z",
+          { activityType: "run", durationMinutes: 20 },
+          "Run",
+        ),
+        event(
+          "run_2",
+          "activity_session",
+          "2026-08-25T18:00:00.000Z",
+          { activityType: "running", durationMinutes: 35 },
+          "Running",
+        ),
+      ],
+      vaultRoot: "test://journal-canonical-activity-aliases",
+    }),
+    [],
+    { asOf: "2026-08-25T22:00:00.000Z" },
+  );
+
+  assert.equal(view.eventCount, 1);
+  assert.equal(view.days[0]?.events[0]?.title, "Running");
+  assert.equal(view.days[0]?.events[0]?.summary, "55 min across 2 sessions");
+});
+
+test("Journal keeps test results in details and hides raw capture attachments", () => {
   const hearingTest = event(
     "hearing_test",
     "test",
@@ -486,21 +548,50 @@ test("Journal uses structured results and hides generated image attachments", ()
     ),
     tags: ["assistant-generated-image", "generated-image"],
   };
+  const rawCapture = {
+    ...event(
+      "raw_capture",
+      "note",
+      "2026-08-25T12:02:00.000Z",
+      { note: "Collection: posture-study" },
+      "Capture - posture-study",
+    ),
+    tags: ["capture", "collection-posture-study"],
+  };
+  const bloodTest = event(
+    "blood_test",
+    "test",
+    "2026-08-25T13:00:00.000Z",
+    {
+      flaggedCount: 3,
+      markerCount: 18,
+      resultSummary: "Three markers are outside their reference ranges.",
+      testName: "Blood test results",
+    },
+    "Blood test results",
+  );
   const view = buildJournalView(
     createVaultReadModel({
-      entities: [hearingTest, generatedImage],
+      entities: [hearingTest, generatedImage, rawCapture, bloodTest],
       vaultRoot: "test://journal-structured-result",
     }),
     [],
     { asOf: "2026-08-25T22:00:00.000Z" },
   );
 
-  assert.equal(view.eventCount, 1);
+  assert.equal(view.eventCount, 2);
   assert.equal(view.days[0]?.events[0]?.title, "AirPods hearing test");
-  assert.equal(
-    view.days[0]?.events[0]?.summary,
-    "Hearing result was within the expected range.",
-  );
+  assert.equal(view.days[0]?.events[0]?.summary, null);
+  assert.deepEqual(view.days[0]?.events[0]?.details, [
+    "Summary: Hearing result was within the expected range.",
+  ]);
+  assert.equal(view.days[0]?.events[1]?.title, "Blood test results");
+  assert.equal(view.days[0]?.events[1]?.summary, "18 markers · 3 need attention");
+  assert.deepEqual(view.days[0]?.events[1]?.details, [
+    "Markers: 18",
+    "Flagged: 3",
+    "Summary: Three markers are outside their reference ranges.",
+  ]);
 });
 
 test("Journal omits missing and repeated activity details", () => {

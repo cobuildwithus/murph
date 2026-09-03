@@ -164,6 +164,70 @@ test("Personal Patterns applies one validated vocabulary before aggregation", as
   );
 });
 
+test("Personal Patterns counts merged aliases once per independent day", () => {
+  const vocabulary = parsePersonalPatternVocabulary(
+    JSON.stringify({
+      concepts: [
+        {
+          aliases: ["cardio-dance", "dancing"],
+          icon: "dance",
+          id: "dance",
+          label: "Dance",
+        },
+      ],
+      version: 1,
+    }),
+  );
+  assert.ok(vocabulary);
+  const sharedOutcomes = [
+    observation("baseline_1", "2026-07-21", "hrv", 50, "ms"),
+    observation("baseline_2", "2026-07-28", "hrv", 50, "ms"),
+    observation("dance_result_1", "2026-08-04", "hrv", 80, "ms"),
+    observation("dance_result_2", "2026-08-18", "hrv", 80, "ms"),
+  ];
+  const oneDay = buildPersonalPatternReport(
+    createVaultReadModel({
+      entities: [
+        event("dance_1", "2026-08-03", "activity_session", {
+          activityType: "dancing",
+        }),
+        event("dance_2", "2026-08-03", "activity_session", {
+          activityType: "cardio_dance",
+        }),
+        ...sharedOutcomes,
+      ],
+      vaultRoot: "test://personal-pattern-one-merged-day",
+    }),
+    { asOf: "2026-08-18", vocabulary, windowDays: 35 },
+  );
+  const oneDayCell = oneDay.cells.find(
+    (cell) => cell.factorId === "dance" && cell.outcomeId === "hrv",
+  );
+  assert.equal(oneDayCell?.exposedDays, 1);
+  assert.equal(oneDayCell?.grade, "E");
+
+  const twoDays = buildPersonalPatternReport(
+    createVaultReadModel({
+      entities: [
+        event("dance_1", "2026-08-03", "activity_session", {
+          activityType: "dancing",
+        }),
+        event("dance_2", "2026-08-17", "activity_session", {
+          activityType: "cardio_dance",
+        }),
+        ...sharedOutcomes,
+      ],
+      vaultRoot: "test://personal-pattern-two-merged-days",
+    }),
+    { asOf: "2026-08-18", vocabulary, windowDays: 35 },
+  );
+  const twoDayCell = twoDays.cells.find(
+    (cell) => cell.factorId === "dance" && cell.outcomeId === "hrv",
+  );
+  assert.equal(twoDayCell?.exposedDays, 2);
+  assert.equal(twoDayCell?.grade, "D");
+});
+
 test("Personal Patterns rejects ambiguous or unbounded vocabulary", () => {
   assert.equal(
     parsePersonalPatternVocabulary(
