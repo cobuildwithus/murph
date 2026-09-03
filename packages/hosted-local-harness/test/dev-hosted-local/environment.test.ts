@@ -569,13 +569,20 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBe(generatedPrivateJwkJson);
   });
 
-  it("preserves matching persisted local authority signing keys and key version", () => {
+  it("migrates matching persisted local authority keys from a legacy version name", () => {
+    const legacyKeyVersionName =
+      "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/legacy-local";
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
       existing: {
         HOSTED_CRYPTO_ENV: "local",
-        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION:
-          "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/legacy-local",
+        HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON: JSON.stringify({
+          [legacyKeyVersionName]: {
+            publicKeyPem: existingAuthorityPublicPem.trim(),
+            status: "active",
+          },
+        }),
+        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION: legacyKeyVersionName,
         HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM: existingAuthorityPublicPem,
         HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: existingAuthorityPrivateJwkJson,
         HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: "existing-wrap-key",
@@ -592,8 +599,11 @@ describe("mergeCloudflareLocalEnv", () => {
       }),
     });
 
-    expect(merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION).toBe(
-      "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/legacy-local",
+    expect(merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION).toMatch(
+      /^projects\/murph-local\/locations\/global\/keyRings\/hosted-local\/cryptoKeys\/authority-sign\/cryptoKeyVersions\/[1-9][0-9]*$/u,
+    );
+    expect(merged.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION).toBe(
+      merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION,
     );
     expect(merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM).toBe(
       existingAuthorityPublicPem.trim(),
@@ -601,6 +611,16 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK).toBe(
       existingAuthorityPrivateJwkJson,
     );
+    expect(JSON.parse(merged.HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON)).toEqual({
+      [legacyKeyVersionName]: {
+        publicKeyPem: existingAuthorityPublicPem.trim(),
+        status: "verify_only",
+      },
+      [merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION]: {
+        publicKeyPem: existingAuthorityPublicPem.trim(),
+        status: "active",
+      },
+    });
   });
 
   it("rejects mismatched persisted local authority signing keys instead of regenerating", () => {
