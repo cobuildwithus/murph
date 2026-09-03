@@ -66,16 +66,29 @@ Last verified: 2026-09-01
   lifecycle. See
   `agent-docs/operations/native-android-hosted-e2e.md`.
 - Required Temporal compatibility is one public commit status backed by a
-  trusted default-branch controller and the private owner's immutable
-  supported-reader manifest. Irrelevant changes complete without private work;
-  relevant changes require the same current public head throughout selection
-  and dispatch. The exact candidate producer runs in unprivileged public CI;
-  the trusted controller sends only its bounded canonical fixture JSON and
-  digest to private CI. The private proof digest binds public SHA, request id,
-  supported-reader digest, and producer digest. Missing artifacts or dispatch
+  trusted default-branch controller and the private owner's live Current and
+  Ramping reader attestation over the bounded reconciliation fixture corpus.
+  While the private standby guard remains, the reader set also includes the
+  active legacy worker's exact live deploy revision. Final protected
+  attestation re-reads the complete set and fails on identity or routing drift.
+  Private CI never checks out or imports public pull-request candidate code.
+  Irrelevant changes complete without private work; relevant changes require
+  the same current public head throughout selection and dispatch. The exact
+  candidate producer runs in unprivileged public CI; the trusted controller
+  sends only its bounded canonical fixture JSON and digest to private CI. Using
+  the repository-scoped GitHub App token, it resolves private `main` to an exact
+  commit, validates the fixed private workflow identity, revalidates the exact
+  public PR head, and dispatches that workflow at `main` with returned run
+  details. It accepts only the returned first-attempt run whose workflow and
+  `head_sha` match the pre-resolved private commit. The private proof digest
+  binds public SHA, request id, the private-derived supported-reader digest,
+  and producer digest; the public repository owns no private reader policy.
+  Missing artifacts or dispatch
   identity, stale heads, incomplete pagination, duplicate or failed readers,
   skipped proof jobs, a mismatched digest, cancellation, or private failure
-  cannot publish success. Once dispatch returns a run id, the controller allows
+  cannot publish success. After successful run and job attestation, the
+  controller re-reads private `main` and fails closed if it moved. Once dispatch
+  returns a run id, the controller allows
   five exact-id reads over at most 60 seconds for GitHub to make that newly
   accepted run visible; only `404` is retryable, and the controller never
   searches for or guesses a run. After the exact run is visible, uncertain

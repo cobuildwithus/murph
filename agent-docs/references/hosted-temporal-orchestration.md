@@ -748,12 +748,16 @@ The hard-cut architecture is accepted when:
   candidate producer runs only in unprivileged Repo Hygiene and hands the
   trusted controller a run/head-bound bounded JSON artifact. The controller
   never owns worker code or reader policy: private Murph Cloud receives only
-  serialized fixture data, declares the immutable supported-reader set,
-  automatically includes its pinned controller revision, runs every reader,
-  and returns one producer-and-reader proof digest. The committed public policy
-  binds the private controller to a SHA-suffixed immutable tag. Missing, stale,
-  skipped, canceled, duplicated, malformed, or failed proof remains red or
-  pending.
+  serialized fixture data, derives the live Current and traffic-bearing Ramping
+  readers, automatically includes the exact dispatched private candidate and,
+  while the standby guard remains, the active legacy worker's exact live deploy
+  revision, then runs every reader. Final protected attestation re-reads the
+  complete reader set and fails on identity or routing drift before returning
+  one producer-and-reader proof digest. The public controller resolves private
+  `main` before dispatch, binds the returned first-attempt run to that exact
+  commit, and re-reads private `main` before success. Public code stores no
+  private revision pointer or reader policy. Missing, stale, skipped, canceled,
+  duplicated, malformed, or failed proof remains red or pending.
 - Focused tests prove that wake acceptance is not completion and that Temporal
   idles only after reconciliation facts are idle.
 - The hosted-local E2E harness includes a non-manual Temporal orchestration
