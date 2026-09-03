@@ -1244,10 +1244,11 @@ describe("hosted runner container identity", () => {
         standbyAllocationOutcome: "fallback",
         standbyAllocationReason: "claim_timed_out",
       });
+    // Date.now() can trail the timeout clock by one millisecond at the boundary.
     expect(
       timedOutController.invocationService.invokedInputs[0]?.orchestration
         ?.standbyAllocationElapsedMs,
-    ).toBeGreaterThanOrEqual(HOSTED_STANDBY_CLAIM_TIMEOUT_MS);
+    ).toBeGreaterThanOrEqual(HOSTED_STANDBY_CLAIM_TIMEOUT_MS - 1);
   });
 
   it("keeps a late standby bind as the exact retry target", async () => {
