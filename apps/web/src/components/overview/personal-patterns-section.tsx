@@ -5,7 +5,6 @@ import {
   ArrowDown,
   ArrowRight,
   ArrowUp,
-  CircleHelp,
   Ellipsis,
   Minus,
   Moon,
@@ -656,11 +655,8 @@ function PatternOutcomeHeader({
   outcome: PatternOutcomeColumn;
   sortDirection: PatternSort["direction"] | null;
 }) {
-  const pointerAnchor = usePointerPopoverAnchor();
-  const popover = useExclusivePatternPopover();
-
   return (
-    <div className="flex items-center justify-center gap-1">
+    <div className="flex items-center justify-center">
       <button
         aria-label={`Sort by ${outcome.label}${
           sortDirection ? `, ${sortDirection}` : ""
@@ -674,41 +670,6 @@ function PatternOutcomeHeader({
       >
         <span>{outcome.label}</span>
       </button>
-      <Popover open={popover.open} onOpenChange={popover.onOpenChange}>
-        <PopoverTrigger
-          closeDelay={200}
-          delay={150}
-          openOnHover
-          render={
-            <button
-              aria-label={`About ${outcome.label}`}
-              className="rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-              onKeyDown={pointerAnchor.onKeyDown}
-              onPointerMove={pointerAnchor.onPointerMove}
-              type="button"
-            >
-              <CircleHelp aria-hidden="true" className="size-3" />
-            </button>
-          }
-        />
-        <PopoverContent
-          align="center"
-          anchor={pointerAnchor.anchor}
-          className="w-[min(19rem,calc(100vw-2rem))]"
-          positionMethod="fixed"
-          side="right"
-          sideOffset={10}
-        >
-          <PopoverHeader className="gap-1">
-            <PopoverTitle className="font-serif text-base font-semibold">
-              {outcome.label}
-            </PopoverTitle>
-            <PopoverDescription className="text-xs leading-5 text-muted-foreground">
-              {outcome.description}
-            </PopoverDescription>
-          </PopoverHeader>
-        </PopoverContent>
-      </Popover>
     </div>
   );
 }
