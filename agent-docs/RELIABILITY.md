@@ -1281,13 +1281,15 @@ Last verified: 2026-09-01
   manifest-safe payload/window, dedupe identity, priority, next retry time, and
   remaining attempt limit, including worker-created child jobs. The same wake
   carries the provider's advanced cadence, but Web does not receive that
-  cadence until a terminal completion-fence checkpoint has made the exact
-  retained state durable. Terminal success or terminal failure then clears the
-  source. Web dirty rows separately remain authoritative until dirty
-  resource/deletion jobs are terminally acknowledged. Because the device-sync
-  SQLite store is intentionally excluded from hosted snapshots, a replacement
-  runner rebuilds from those owners; it never projects local retry timing into
-  `nextReconcileAt`. Per-connection mailbox ordering and scheduler scoping
+  cadence until the post-record checkpoint has made the exact completion state
+  durable. The post-checkpoint recorder then publishes cadence, clears the
+  source, and checkpoints that removal within the same runtime admission.
+  Terminal failure uses the same replayable record. Web dirty rows separately
+  remain authoritative until dirty resource/deletion jobs are terminally
+  acknowledged. Because the device-sync SQLite store is intentionally excluded
+  from hosted snapshots, a replacement runner rebuilds from those owners; it
+  never projects local retry timing into `nextReconcileAt`. Per-connection
+  mailbox ordering and scheduler scoping
   prevent a future retry for one connection from blocking or advancing due work
   for another. A later due webhook for that same connection may admit the older
   exact retained mailbox item so newly dirty data can enter the local worker
@@ -1360,14 +1362,13 @@ Last verified: 2026-09-01
   that committed ref starts without the SQLite execution record, reconstructs the
   pending obligation from durable mailbox authority, observes exactly one replay
   of the four provider classes (eight requests total), and makes three successful
-  recovery checkpoints. Its retained completion fence is
-  due at 00:05:30 and carries the 06:05 provider cadence. The completion pass
-  performs no third provider pull, makes two successful checkpoints, and
-  publishes 06:05 only after the durable recovery/completion checkpoint. The
-  first later bucket at 00:10 returns idle with no wake and performs one bounded
+  recovery checkpoints. The second durably records completion, the same
+  admission publishes the 06:05 provider cadence, and the third checkpoints
+  mailbox removal. There is no third provider pull or empty completion runtime.
+  A redundant later bucket at 00:10 returns idle with no wake and performs one bounded
   post-publication convergence checkpoint; the following 00:15 bucket is fully
-  quiescent. Within the measured incident window, the proof records eight
-  checkpoint attempts, seven commits, one injected failure, and no provider work
+  quiescent. Within the measured incident window, the proof records six
+  checkpoint attempts, five commits, one injected failure, and no provider work
   after the single four-class replay.
   Future provider cadence remains projected as the workspace follow-up wake and
   is recorded with a system-mailbox checkpoint handoff; once that cadence is

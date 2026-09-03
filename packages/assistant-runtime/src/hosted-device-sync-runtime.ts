@@ -40,6 +40,7 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+  findHostedExecutionDeviceSyncRuntimeApplyEntry,
   mergeHostedDeviceSyncConnectionMetadata,
   mergeHostedDeviceSyncEventToProviderSendBuckets,
   normalizeHostedDeviceSyncJobHints,
@@ -430,6 +431,92 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
   }
 
   return state;
+}
+
+export function isHostedDeviceSyncCompletionFenceWake(
+  wake: HostedRuntimeEvent,
+): wake is HostedExecutionDeviceSyncWake {
+  return wake.kind === "device-sync.wake"
+    && resolveHostedDeviceSyncWakeContext(wake).hint?.reason
+      === HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON;
+}
+
+export async function publishHostedDeviceSyncCompletionFence(input: {
+  deviceSyncPort: HostedRuntimeDeviceSyncPort;
+  signal?: AbortSignal | null;
+  wake: HostedExecutionDeviceSyncWake;
+}): Promise<string | null> {
+  const wakeContext = resolveHostedDeviceSyncWakeContext(input.wake);
+  if (
+    wakeContext.hint?.reason !== HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON
+    || !Object.hasOwn(wakeContext.hint, "nextReconcileAt")
+  ) {
+    throw new TypeError(
+      "Hosted device-sync completion fence requires its canonical cadence.",
+    );
+  }
+  const connectionId = wakeContext.connectionId;
+  if (!connectionId) {
+    return null;
+  }
+
+  const snapshot = await input.deviceSyncPort.fetchSnapshot({
+    connectionId,
+    includeCredentialMaterial: false,
+    limit: 1,
+    ...(input.signal ? { signal: input.signal } : {}),
+  });
+  const baseline = snapshot.connections.find((entry) =>
+    entry.connection.id === connectionId
+  ) ?? null;
+  if (
+    !baseline
+    || (
+      wakeContext.expectedConnectedAt !== null
+      && baseline.connection.connectedAt !== wakeContext.expectedConnectedAt
+    )
+  ) {
+    return null;
+  }
+
+  const nextReconcileAt = resolveHostedWakeNextReconcileAt(
+    baseline.localState.nextReconcileAt,
+    wakeContext.hint.nextReconcileAt,
+  );
+  if (!nextReconcileAt) {
+    return baseline.localState.nextReconcileAt;
+  }
+
+  const response = await input.deviceSyncPort.applyUpdates({
+    occurredAt: input.wake.occurredAt,
+    ...(input.signal ? { signal: input.signal } : {}),
+    updates: [{
+      connectionId,
+      localState: { nextReconcileAt },
+      observedConnectedAt: baseline.connection.connectedAt,
+      observedUpdatedAt: baseline.connection.updatedAt ?? null,
+    }],
+  });
+  const applied = findHostedExecutionDeviceSyncRuntimeApplyEntry(
+    response,
+    connectionId,
+  );
+  if (!applied) {
+    throw new Error(
+      "Hosted device-sync completion fence apply response omitted its connection.",
+    );
+  }
+  switch (applied.writeUpdate) {
+    case "applied":
+    case "unchanged":
+      return nextReconcileAt;
+    case "missing":
+      return null;
+    case "skipped_version_mismatch":
+      throw new Error(
+        "Hosted device-sync completion fence lost its connection version fence.",
+      );
+  }
 }
 
 export async function applyHostedPendingDirtyDeviceSyncStateForWake(input: {

@@ -5171,7 +5171,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
     }
   });
 
-  test("system mailbox device-sync preserves one canonical schedule event and one durable mailbox item through bounded at-least-once provider replay and quiescence", async () => {
+  test("system mailbox device-sync preserves one canonical schedule event and one durable mailbox item through bounded replay, single-admission completion, and quiescence", async () => {
     const warmWorkspaceRoot = await mkdtemp(
       path.join(tmpdir(), "murph-workspace-device-sync-closed-loop-warm-"),
     );
@@ -5253,7 +5253,13 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         }
         return {
           appliedAt: request.occurredAt ?? new Date().toISOString(),
-          updates: [],
+          updates: request.updates.map((update) => ({
+            connection: null,
+            connectionId: update.connectionId,
+            status: "updated" as const,
+            tokenUpdate: "unchanged" as const,
+            writeUpdate: "applied" as const,
+          })),
           userId: TEST_USER_ID,
         };
       },
@@ -5851,8 +5857,10 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         [...replayedProviderRequestClasses].sort(),
         [...initialProviderRequestClasses].sort(),
       );
-      assert.deepEqual(cadencePublications, []);
-      assert.equal(canonicalNextReconcileAt, dueAt);
+      assert.deepEqual(cadencePublications, ["2026-04-27T06:05:00.000Z"]);
+      assert.equal(canonicalNextReconcileAt, "2026-04-27T06:05:00.000Z");
+      assert.equal(recovered.status, "scheduled");
+      assert.equal(recovered.nextWakeAt, "2026-04-27T06:05:00.000Z");
       assert.equal(recovered.nextWakeReason, "device-sync.reconcile");
       assert.ok(currentWorkspace);
       assert.equal(currentWorkspace.version, "5");
@@ -5869,67 +5877,29 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         event.startsWith(`checkpoint.commit:${recoveryAttemptId}:`) ? [index] : []
       );
       assert.equal(recoveryCheckpointCommitIndexes.length, 3);
-      const durableRecoveryCompletionCheckpointIndex =
+      const durableRecoveryRecordCheckpointIndex =
+        recoveryCheckpointCommitIndexes[recoveryCheckpointCommitIndexes.length - 2];
+      const durableRecoveryRemovalCheckpointIndex =
         recoveryCheckpointCommitIndexes[recoveryCheckpointCommitIndexes.length - 1];
-      assert.notEqual(durableRecoveryCompletionCheckpointIndex, undefined);
-      const retainedCompletionFence = await readHostedSystemMailboxState(coldVaultRoot);
-      assert.equal(retainedCompletionFence.pending.length, 1);
-      const retainedItem = retainedCompletionFence.pending[0];
-      assert.ok(retainedItem);
-      assert.equal(retainedItem.itemId, mailboxItemId);
-      assert.equal(retainedItem.mailboxDedupeKey, scheduleEventId);
-      observedMailboxItemIds.add(retainedItem.itemId);
-      assert.equal(retainedItem.status, "pending");
-      assert.equal(retainedItem.wake.kind, "device-sync.wake");
-      if (retainedItem.wake.kind !== "device-sync.wake") {
-        throw new Error("Expected retained completion-fence wake after cold restore.");
-      }
-      assert.equal(retainedItem.wake.eventId, scheduleEventId);
-      observedScheduleEventIds.add(retainedItem.wake.eventId);
-      assert.equal(retainedItem.wake.hint?.reason, "retained_completion_fence");
-      assert.deepEqual(retainedItem.wake.hint?.jobs, []);
-      assert.equal(
-        retainedItem.wake.hint?.nextReconcileAt,
-        "2026-04-27T06:05:00.000Z",
-      );
-      const completionFenceAt = retainedItem.nextAttemptAt;
-      assert.equal(completionFenceAt, "2026-04-27T00:05:30.000Z");
-
-      vi.setSystemTime(new Date(completionFenceAt));
-      const providerRequestsBeforeCompletion = providerRequestClasses.length;
-      const settled = await runSystemPass({
-        attemptId: "attempt_device_sync_closed_loop_completion_fence",
-        vaultRoot: coldVaultRoot,
-      });
-
-      assert.equal(providerRequestClasses.length, providerRequestsBeforeCompletion);
-      assert.equal(providerRequestClasses.length, 8);
-      assert.deepEqual(cadencePublications, ["2026-04-27T06:05:00.000Z"]);
-      assert.equal(canonicalNextReconcileAt, "2026-04-27T06:05:00.000Z");
+      assert.notEqual(durableRecoveryRecordCheckpointIndex, undefined);
+      assert.notEqual(durableRecoveryRemovalCheckpointIndex, undefined);
       const cadenceEventIndex = events.indexOf(
         "cadence.publish:2026-04-27T06:05:00.000Z",
       );
       assert.notEqual(cadenceEventIndex, -1);
       assert.ok(
-        durableRecoveryCompletionCheckpointIndex !== undefined
-        && durableRecoveryCompletionCheckpointIndex < cadenceEventIndex,
+        durableRecoveryRecordCheckpointIndex !== undefined
+        && durableRecoveryRecordCheckpointIndex < cadenceEventIndex,
+      );
+      assert.ok(
+        durableRecoveryRemovalCheckpointIndex !== undefined
+        && cadenceEventIndex < durableRecoveryRemovalCheckpointIndex,
       );
       assert.deepEqual((await readHostedSystemMailboxState(coldVaultRoot)).pending, []);
-      assert.equal(settled.status, "scheduled");
-      assert.equal(settled.nextWakeAt, "2026-04-27T06:05:00.000Z");
-      assert.equal(settled.nextWakeReason, "device-sync.reconcile");
-      assert.deepEqual(
-        checkpointRequests.slice(5, 8).map((request) =>
-          request.expectedWorkspaceVersion
-        ),
-        ["5", "6", "7"],
-      );
-      assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "8");
 
       const checkpointAttemptsAfterSettlement = checkpointAttempt;
-      assert.equal(checkpointAttemptsAfterSettlement, 8);
-      assert.equal(checkpointRequests.length, 8);
+      assert.equal(checkpointAttemptsAfterSettlement, 5);
+      assert.equal(checkpointRequests.length, 5);
       assert.equal(
         events.filter((event) => event.startsWith("checkpoint.fail:")).length,
         1,
@@ -5951,9 +5921,9 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(converged.nextWakeReason, undefined);
       assert.equal(providerRequestClasses.length, providerRequestsBeforeConvergence);
       assert.equal(checkpointAttempt, checkpointAttemptsBeforeConvergence + 1);
-      assert.equal(checkpointRequests.at(-1)?.expectedWorkspaceVersion, "8");
+      assert.equal(checkpointRequests.at(-1)?.expectedWorkspaceVersion, "5");
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "9");
+      assert.equal(currentWorkspace.version, "6");
 
       const quiescentBucketAt = "2026-04-27T00:15:00.000Z";
       const quiescentAttemptId =
@@ -5971,17 +5941,17 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       assert.equal(providerRequestClasses.length, providerRequestsBeforeQuiescence);
       assert.equal(checkpointAttempt, checkpointAttemptsBeforeQuiescence);
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "9");
+      assert.equal(currentWorkspace.version, "6");
       assert.equal(
         providerRequestClasses.length,
         providerRequestClassesAfterSettlement,
       );
       assert.equal(checkpointAttempt, checkpointAttemptsAfterSettlement + 1);
-      assert.equal(checkpointAttempt, 9);
+      assert.equal(checkpointAttempt, 6);
       assert.equal(checkpointAttempt, checkpointRequests.length);
       assert.equal(
         events.filter((event) => event.startsWith("checkpoint.commit:")).length,
-        8,
+        5,
       );
       assert.deepEqual([...observedScheduleEventIds], [scheduleEventId]);
       assert.deepEqual([...observedMailboxItemIds], [mailboxItemId]);

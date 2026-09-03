@@ -7,6 +7,9 @@ This package exists so hosted runtimes such as `apps/cloudflare` do not need to 
 Current responsibilities:
 
 - run bounded hosted workspace invocations for assistant, inbox, and device-sync work behind an explicit runtime context object
+- publish a device-sync completion record's retained provider cadence and
+  checkpoint mailbox removal inside the same runtime admission after the exact
+  completion record is durable, without another provider-free completion wake
 - drain each hosted device-sync pass through one bounded worker call so
   canonical imports can safely reuse a pass-local event identity index, while
   cumulative progress remains observable and the service-owned foreground
