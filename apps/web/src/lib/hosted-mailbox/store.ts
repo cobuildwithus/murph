@@ -843,7 +843,8 @@ export async function appendHostedMailboxEnvelopeTx(input: {
 /**
  * Scheduled v3 device-sync wakes retain one stable identity while their
  * runtime-owned retry is pending. Once retention removes the imported payload,
- * only the runtime import watermark can prove that retry still has an owner.
+ * the runtime checkpoint must identify this row as its exact first pending
+ * system item before Web can reuse that owner.
  */
 export async function appendHostedScheduledDeviceSyncWakeEnvelopeTx(input: {
   envelope: HostedExecutionDeviceSyncWake;
@@ -3624,6 +3625,9 @@ async function hasHostedMailboxRuntimeImportedRetiredDuplicateTx(input: {
         AND item."content_retired_at" IS NOT NULL
         AND item."retention_disposition" IS NULL
         AND item."lane_seq" = lane_counter."consumed_seq" + 1::bigint
+        AND workspace."redacted_status_json"
+          -> 'hostedMailboxSystemFirstPendingSeq'
+          = to_jsonb(item."lane_seq"::text)
         AND NOT EXISTS (
           SELECT 1
           FROM "hosted_mailbox_payload" AS payload

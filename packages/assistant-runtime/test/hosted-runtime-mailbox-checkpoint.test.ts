@@ -31,6 +31,7 @@ import {
   readHostedMailboxImportState,
   writeHostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
+import { updateHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
 import type {
   HostedMailboxPostCheckpointEffectResult,
 } from "../src/hosted-runtime/mailbox-import.ts";
@@ -83,6 +84,7 @@ describe("hosted mailbox import checkpoint wrapper", () => {
             hostedMailboxFetchedCount: 1,
             hostedMailboxImportedCount: 1,
             hostedMailboxRetryableBlockedCount: 0,
+            hostedMailboxSystemFirstPendingSeq: null,
             hostedMailboxSystemHandledThroughSeq: "0",
             hostedMailboxSystemImportedSeq: "0",
           });
@@ -148,6 +150,7 @@ describe("hosted mailbox import checkpoint wrapper", () => {
         hostedMailboxFetchedCount: 1,
         hostedMailboxImportedCount: 1,
         hostedMailboxRetryableBlockedCount: 0,
+        hostedMailboxSystemFirstPendingSeq: null,
         hostedMailboxSystemHandledThroughSeq: "0",
         hostedMailboxSystemImportedSeq: "0",
       });
@@ -225,6 +228,97 @@ describe("hosted mailbox import checkpoint wrapper", () => {
         force: true,
         recursive: true,
       });
+    }
+  });
+
+  test("publishes no exact pending sequence after a legacy-blocked fast-forward", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-mailbox-checkpoint-"));
+    const item = createMailboxItem({
+      dedupeKey: "runtime-control:maintenance:successor",
+      id: "mailbox_item_system_successor",
+      kind: "runtime.maintenance-requested",
+      lane: "system",
+      laneSeq: "2",
+    });
+    const { mailboxPort } = createMailboxPort({
+      consumedSeqByLane: [{ consumedSeq: "1", lane: "system" }],
+      items: [item],
+    });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const workspacePort: HostedRuntimeWorkspacePort = {
+      async checkpoint(request): Promise<HostedWorkspaceCheckpointResponse> {
+        checkpointRequests.push(request);
+        return createCheckpointResponse(request);
+      },
+    };
+
+    try {
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [
+          {
+            attemptCount: 0,
+            itemId: "legacy_pending_runtime_control",
+            lastAttemptAt: null,
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            mailboxDedupeKey: "runtime-control:maintenance:legacy",
+            mailboxLaneSeq: null,
+            nextAttemptAt: null,
+            occurredAt: "2026-04-25T00:00:00.000Z",
+            postCheckpointRecord: null,
+            preferenceCausalSeq: null,
+            requestId: null,
+            routeAction: "apply-runtime-control-request",
+            status: "pending",
+            wake: {
+              eventId: "runtime-control:maintenance:legacy",
+              kind: "runtime.maintenance-requested",
+              occurredAt: "2026-04-25T00:00:00.000Z",
+              userId: TEST_USER_ID,
+            },
+          },
+        ],
+      }));
+
+      const result = await importHostedMailboxPrefixAndCheckpoint({
+        createCheckpointRequest(input) {
+          return {
+            attemptId: "attempt_legacy_blocked_fast_forward",
+            expectedWorkspaceVersion: "0",
+            leaseGeneration: "1",
+            nextWakeAt: null,
+            nextWakeReason: null,
+            reason: "import",
+            redactedStatus: input.redactedStatus,
+            snapshotRef: null,
+          };
+        },
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          return { status: "imported" };
+        },
+        lanes: ["system"],
+        limitPerLane: 10,
+        mailboxPort,
+        now: () => TEST_NOW,
+        requestId: "request_legacy_blocked_fast_forward",
+        vaultRoot,
+        workspacePort,
+      });
+
+      assert.equal(result.state.watermarks.system, "2");
+      assert.deepEqual(checkpointRequests[0]?.redactedStatus, {
+        hostedMailboxBlockedCount: 0,
+        hostedMailboxConversationImportedSeq: "0",
+        hostedMailboxFetchedCount: 1,
+        hostedMailboxImportedCount: 1,
+        hostedMailboxRetryableBlockedCount: 0,
+        hostedMailboxSystemFirstPendingSeq: null,
+        hostedMailboxSystemHandledThroughSeq: "0",
+        hostedMailboxSystemImportedSeq: "2",
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
     }
   });
 
@@ -672,6 +766,7 @@ describe("hosted mailbox import checkpoint wrapper", () => {
 });
 
 function createMailboxPort(input: {
+  consumedSeqByLane?: HostedMailboxFetchResponse["consumedSeqByLane"];
   items: readonly HostedMailboxItem[];
 }): {
   fetchRequests: HostedMailboxFetchRequest[];
@@ -687,6 +782,9 @@ function createMailboxPort(input: {
       async fetch(request): Promise<HostedMailboxFetchResponse> {
         fetchRequests.push(request);
         return {
+          ...(input.consumedSeqByLane === undefined
+            ? {}
+            : { consumedSeqByLane: input.consumedSeqByLane }),
           fetchedAt: TEST_NOW,
           items: input.items.filter((item) =>
             request.lanes.some((lane) =>

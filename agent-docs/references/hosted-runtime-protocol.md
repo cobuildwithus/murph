@@ -2674,14 +2674,18 @@ still stale. That signal is recovery admission for the existing mailbox/event
 identity and must not mint another schedule-event or mailbox-item identity.
 After mailbox retention has removed a scheduled v3 wake's payload, Web accepts
 the stable duplicate without another signal only when the remaining row matches
-the schedule identity, its lane sequence is exactly one greater than the
-canonical handled frontier, and the canonical system imported watermark covers
-that sequence without exceeding the allocated high-water mark. The row must
-have no inline ciphertext, sidecar, payload reference, byte count, or hash. A
+the schedule identity and the runtime checkpoint identifies its lane sequence
+as `hostedMailboxSystemFirstPendingSeq`. The same checkpoint's canonical system
+imported watermark must cover that sequence without exceeding the allocated
+high-water mark, and the lane counter must agree that it is the first unhandled
+sequence. The row must have no inline ciphertext, sidecar, payload reference,
+byte count, or hash. A missing or different first-pending sequence—including
+when supported legacy unsequenced work makes the frontier ambiguous—a
 never-imported row, malformed watermark, remaining payload surface, or
 structural mismatch stays a dedupe conflict and fails recovery closed.
 Runtime-owned retry state remains the sole continuation owner for an accepted
-retired duplicate.
+retired duplicate. Deploy the runtime checkpoint projection before Web begins
+requiring it; older runtime checkpoints omit the fact and therefore fail closed.
 It does not promise exactly-once provider execution. Dirty rows are not
 independently swept; due-reconcile candidates may include dirty or stuck rows
 when canonical `nextReconcileAt` is due. Dirty state remains the work source,

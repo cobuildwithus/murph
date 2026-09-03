@@ -56,9 +56,14 @@ Updated: 2026-09-03
    frontier relation and add direct regression coverage and protocol wording.
 3. Completed: rerun focused PostgreSQL/unit/recovery/changelog checks, ESLint,
    typecheck, complexity, diff, and privacy checks.
-4. In progress: commit and push the corrected candidate, update PR evidence, and
-   run ReviewGPT round 2 concurrently with required CI.
-5. Pending: merge only after resolved review and green required checks, then
+4. Completed: push the round-2 candidate and run ReviewGPT concurrently with
+   required CI.
+5. Completed: replace aggregate ownership inference with the runtime-owned
+   exact first-pending sequence and add the composed legacy regression required
+   by the recorded round-2 retrospective.
+6. In progress: commit and push the verified redesigned candidate, then
+   resolve ReviewGPT round 3 and exact-head CI.
+7. Pending: merge only after resolved review and green required checks, then
    retire the task worktree.
 
 ## Decisions
@@ -67,6 +72,12 @@ Updated: 2026-09-03
   facts, so only their exact contiguous frontier relation proves this target.
 - Prefer one stricter SQL equality and focused tests over new per-item state or
   another recovery owner.
+- Round-2 retrospective: the contiguous equality still inferred item ownership
+  from aggregate watermarks when legacy unsequenced pending work held the
+  handled frontier at zero. Keep that legacy state supported but fail closed
+  while it is ambiguous. Project the exact first pending sequenced item from the
+  existing runtime state owner through the existing checkpoint, with no new
+  schema, state owner, receipt set, queue, or repair path.
 
 ## Verification
 
@@ -74,7 +85,15 @@ Updated: 2026-09-03
   Web device-sync, mailbox, and recovery tests; 69 runtime import, checkpoint,
   and pending-state tests; 59 changelog tests; focused ESLint; Web typecheck;
   `pnpm complexity:diff`; `git diff --check`; and the privacy scan.
-- Pending: exact-head ReviewGPT round 2 and required GitHub checks.
+- ReviewGPT round 2 returned `RETROSPECTIVE_REQUIRED`; its repeated aggregate
+  inference finding was accepted and the requirement-level redesign decision
+  was recorded on the PR.
+- Redesigned proof passed: 15 PostgreSQL retention cases; 70 runtime mailbox
+  state, import, and checkpoint tests; 279 surrounding Web wake, mailbox, and
+  recovery tests; 59 changelog tests; Web and assistant-runtime typechecks;
+  focused Web ESLint; `pnpm complexity:diff`; `git diff --check`; and the
+  privacy scan.
+- Pending: exact-head ReviewGPT round 3 and required GitHub checks.
 - Expected outcomes: the safe contiguous case is accepted without another
   signal; the skipped-middle case stays a conflict; every completion gate is
   green on the merge candidate.
