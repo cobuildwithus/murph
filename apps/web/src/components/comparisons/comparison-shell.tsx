@@ -22,7 +22,7 @@ function ComparisonClosingCta({ authenticated }: { authenticated: boolean }) {
             Try Murph with your own questions.
           </h2>
           <p className="mt-4 text-[0.92rem] leading-7 text-[#665d4c]">
-            A private conversation in the messaging app you already use. Free to start, no card needed.
+            Text Murph in iMessage or Telegram. It is free to start, and you do not need a card.
           </p>
         </div>
         {authenticated ? (
