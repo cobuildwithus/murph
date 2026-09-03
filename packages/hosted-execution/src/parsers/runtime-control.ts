@@ -40,6 +40,8 @@ import {
   HOSTED_RUNTIME_ASSISTANT_MILESTONES,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_SIDE_INPUT_UNAVAILABLE_CODES,
+  HOSTED_STANDBY_ALLOCATION_OUTCOMES,
+  HOSTED_STANDBY_ALLOCATION_REASONS,
   HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS,
@@ -102,6 +104,8 @@ import {
   type HostedRuntimeLatencyTraceProviderStartedEvent,
   type HostedRuntimeLatencyTraceRequest,
   type HostedRuntimeLatencyTraceResponse,
+  type HostedStandbyAllocationOutcome,
+  type HostedStandbyAllocationReason,
   type HostedRuntimeLogComponent,
   type HostedRuntimeLogEntry,
   type HostedRuntimeLogEventCode,
@@ -7507,6 +7511,10 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
         "freshStartRequestedAtEpochMs",
         orchestrationLabel,
       ),
+      ...requireOptionalStandbyAllocationDiagnostics(
+        orchestration,
+        orchestrationLabel,
+      ),
       ...requireOptionalNonNegativeInteger(
         orchestration,
         "freshStartFenceBoundAtEpochMs",
@@ -8242,6 +8250,71 @@ function requireOptionalDirectEnsureOutcome(
     directEnsureResultKind,
     directEnsureRuntimeAttemptId,
   };
+}
+
+function requireOptionalStandbyAllocationDiagnostics(
+  record: Record<string, unknown>,
+  label: string,
+): {
+  standbyAllocationElapsedMs?: number;
+  standbyAllocationOutcome?: HostedStandbyAllocationOutcome;
+  standbyAllocationReason?: HostedStandbyAllocationReason;
+} {
+  const standbyAllocationElapsedMs = requireOptionalNonNegativeInteger(
+    record,
+    "standbyAllocationElapsedMs",
+    label,
+  );
+  const outcome = record.standbyAllocationOutcome;
+  const reason = record.standbyAllocationReason;
+  const elapsedMs = record.standbyAllocationElapsedMs;
+  if (elapsedMs === undefined && outcome === undefined && reason === undefined) {
+    return {};
+  }
+  if (elapsedMs === undefined || outcome === undefined || reason === undefined) {
+    throw new TypeError(
+      `${label} standby allocation elapsed time, outcome, and reason must be recorded together.`,
+    );
+  }
+  const parsedOutcome = parseAllowedString(
+    outcome,
+    `${label}.standbyAllocationOutcome`,
+    HOSTED_STANDBY_ALLOCATION_OUTCOMES,
+  );
+  const parsedReason = parseAllowedString(
+    reason,
+    `${label}.standbyAllocationReason`,
+    HOSTED_STANDBY_ALLOCATION_REASONS,
+  );
+  if (!standbyAllocationReasonMatchesOutcome(parsedOutcome, parsedReason)) {
+    throw new TypeError(`${label} standby allocation outcome and reason are inconsistent.`);
+  }
+  return {
+    ...standbyAllocationElapsedMs,
+    standbyAllocationOutcome: parsedOutcome,
+    standbyAllocationReason: parsedReason,
+  };
+}
+
+function standbyAllocationReasonMatchesOutcome(
+  outcome: HostedStandbyAllocationOutcome,
+  reason: HostedStandbyAllocationReason,
+): boolean {
+  switch (outcome) {
+    case "claimed":
+      return reason === "bind_completed" || reason === "bind_recovered";
+    case "disabled":
+      return reason === "exact_user_pending"
+        || reason === "mode_not_allocate"
+        || reason === "not_trusted_web_direct"
+        || reason === "processing_mode_not_default";
+    case "fallback":
+      return reason === "bind_rejected"
+        || reason === "bindings_unavailable"
+        || reason.startsWith("claim_");
+    case "retained":
+      return reason === "retained";
+  }
 }
 
 function parseHostedRuntimeLatencyTraceProviderStartedEvent(

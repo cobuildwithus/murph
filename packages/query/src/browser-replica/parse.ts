@@ -9,6 +9,10 @@ import type {
   JournalView,
   JournalWeekSummary,
 } from "../journal-view.ts";
+import {
+  parsePersonalPatternIcon,
+  type PersonalPatternIcon,
+} from "../personal-patterns.ts";
 import { experimentOutcomeSchema } from "@murphai/contracts";
 import {
   BROWSER_VAULT_REPLICA_POLICY_ID,
@@ -674,10 +678,27 @@ function parsePersonalPatternFactor(value: unknown, label: string): PersonalPatt
           ),
         }),
     id: requireString(record.id, `${label}.id`),
+    ...(record.icon === undefined
+      ? {}
+      : {
+          icon: requirePersonalPatternIcon(
+            record.icon,
+            `${label}.icon`,
+          ),
+        }),
     kind,
     label: requireString(record.label, `${label}.label`),
     observedDays: requireNonNegativeInteger(record.observedDays, `${label}.observedDays`),
   };
+}
+
+function requirePersonalPatternIcon(
+  value: unknown,
+  label: string,
+): PersonalPatternIcon {
+  const icon = parsePersonalPatternIcon(value);
+  if (!icon) throw new TypeError(`${label} must be a supported pattern icon.`);
+  return icon;
 }
 
 function parsePersonalPatternOutcome(value: unknown, label: string): PersonalPatternOutcome {

@@ -558,13 +558,13 @@ function resolveSettingsAccountPresentation(input: {
   const privySessionMatchesAppSession =
     freshPrivySession !== null
     && freshPrivySession.identity.userId === session?.privyUserId;
-  const serverApprovedPrivyLinkedAccounts = privySessionMatchesAppSession
-    ? freshPrivySession.linkedAccounts
+  const serverApprovedPrivyUser = privySessionMatchesAppSession
+    ? freshPrivySession.verifiedPrivyUser
     : null;
   const accountWithPrivyDisplay = account
     ? withServerApprovedPrivyAccountHints({
         snapshot: account,
-        serverApprovedPrivyLinkedAccounts,
+        serverApprovedPrivyUser,
       })
     : account;
   const murphPhoneNumber =

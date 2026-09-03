@@ -1439,7 +1439,16 @@ Core execution tuning:
   `allocate` mode the standby coordinator is the sole shell-prewarm owner; the
   exact-user prewarm hint is skipped so it cannot reserve a competing target
   before the claim. An unsuccessful claim still uses the ordinary exact-user
-  fallback.
+  fallback. Accepted fresh starts persist the bounded allocation outcome,
+  reason, and elapsed milliseconds in the existing latency phase breakdown;
+  the Worker selection log emits the same metadata before fence and readiness
+  work. Deploy Web first so its strict telemetry parser accepts these additive
+  leaves, then deploy Cloudflare. Reversing that order affects diagnostics only:
+  old Web drops the unknown phase breakdown while retaining core milestones.
+  The fields remain in Worker-owned orchestration and do not change the
+  Worker/container invocation job, so this diagnostic itself needs no special
+  container rollout mode; obey any independently active production rollout
+  requirement.
   Invalid values fail deploy/runtime parsing closed.
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production` for
   direct/local artifact rendering. The manual deploy workflow derives it from
@@ -2306,13 +2315,13 @@ or runtime work.
 
 ## Operator task rollout
 
-Deploy shared runner/Worker code that accepts the additive `operator_task` ask
-target and `operator-message` prompt profile before deploying the Web migration
-and `/ops/tasks` admission UI. Old Web remains safe with the new reader because
-it cannot enqueue the new shapes. After Web deploy, prove one private
-diagnostic and one synthetic direct-message admission. For rollback, disable or
-roll back Web admission first, allow admitted mailbox work to drain, then roll
-back the runner/Worker reader.
+Deploy the runner/Worker first so it accepts operator prepare responses without
+the obsolete disclosure field and contains `executeOperatorDiagnostic` plus its
+native read-only profile. Then deploy Web, which stops returning that field.
+Old Web is compatible with the new runner; new Web is not compatible with the
+old runner, so the new runner becomes the rollback floor after Web deploy.
+Post-deploy, run one synthetic diagnostic that must correlate `.runtime` and
+hosted Codex session evidence without changing either root.
 
 Wrangler SSH is intentionally disabled for both runner Container classes. The
 checked-in scaffold and generated deploy config must set `ssh.enabled` to

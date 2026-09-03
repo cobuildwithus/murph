@@ -546,18 +546,17 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     const providerRequestBaseline =
       requireScenario().assistantProviderRequests.length;
     const predecessorEventId =
-      `member.channels.updated:environment-ordering:${runId}`;
+      `member.preferences.updated:environment-ordering:${runId}`;
     const predecessor = await appendHostedExecutionWakeForTest({
       environment: requireScenario().runtimeEnv,
-      wake: buildHostedExecutionMemberChannelsUpdatedWake({
+      wake: buildHostedExecutionMemberPreferencesUpdatedWake({
         eventId: predecessorEventId,
-        memberChannels: {
-          email: false,
-          linq: true,
-          telegram: false,
-        },
         memberId: environmentOrderingProbe.userId,
         occurredAt: new Date().toISOString(),
+        preferences: {
+          personality: { detail: 6 },
+          tone: "casual",
+        },
       }),
     });
     expect(predecessor.inserted).toBe(true);
@@ -626,7 +625,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       environment: requireScenario().runtimeEnv,
       userId: environmentOrderingProbe.userId,
     })).resolves.toMatchObject({
-      kind: "member.channels.updated",
+      kind: "member.preferences.updated",
       lane: "system",
     });
     expect(requireScenario().assistantProviderRequests).toHaveLength(
@@ -2408,7 +2407,7 @@ async function waitForEnvironmentCompletion(input: {
       };
     }, {
       interval: 250,
-      timeout: 120_000,
+      timeout: productionIdleCheckpointDelayMs + 60_000,
     }).toEqual({
       handled: true,
       lastErrorCode: null,

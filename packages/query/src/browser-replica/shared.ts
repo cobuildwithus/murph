@@ -13,7 +13,10 @@ import type {
   OverviewMetric,
   OverviewWeeklySampleSummary,
 } from "../overview.ts";
-import type { PersonalPatternReport } from "../personal-patterns.ts";
+import type {
+  PersonalPatternReport,
+  PersonalPatternVocabulary,
+} from "../personal-patterns.ts";
 import type { JournalView } from "../journal-view.ts";
 import type { VaultReadModel } from "../read-model.ts";
 import type { TimelineEntry } from "../timeline.ts";
@@ -398,6 +401,7 @@ export interface CreateBrowserVaultReplicaInput {
   experimentOutcomes?: readonly ExperimentOutcome[];
   generatedAt?: string;
   metricPoints: readonly MetricPoint[];
+  personalPatternVocabulary?: PersonalPatternVocabulary | null;
   signal?: AbortSignal;
   sourceBundleHash: string;
   vault: VaultReadModel;

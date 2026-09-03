@@ -61,6 +61,12 @@ describe('assistant appointment reminder policy', () => {
     expect(normalizedSkill).toContain(
       'without separate confirmation unless the user opts out',
     )
+    expect(normalizedSkill).toContain(
+      'timing defaults below apply only when the member supplied neither an exact clock time nor a broad time window',
+    )
+    expect(normalizedSkill).toContain(
+      'never replace an exact member time with an appointment default',
+    )
     expect(normalizedSkill).toContain('before noon local')
     expect(normalizedSkill).toContain(
       'the prior evening at a known pre-bed reminder time or 8:00 PM',
