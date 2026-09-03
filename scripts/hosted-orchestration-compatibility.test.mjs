@@ -95,14 +95,14 @@ function privateRun(overrides = {}) {
   };
 }
 
-function proofJobs({ proofDigest = compatibilityProofDigest({
+function proofJobs({ legacyReaderState = "none", proofDigest = compatibilityProofDigest({
   producerDigest: PRODUCER_DIGEST,
   publicSha: PUBLIC_SHA,
   readersDigest: supportedReaderDigest([
     PRIVATE_SHA,
     CURRENT_READER_SHA,
     RAMPING_READER_SHA,
-  ]),
+  ], legacyReaderState),
   requestId: REQUEST_ID,
 }) } = {}) {
   return [
@@ -432,29 +432,36 @@ test("supported-reader digest is deterministic and rejects duplicates", () => {
     () => supportedReaderDigest([CURRENT_READER_SHA, CURRENT_READER_SHA]),
     /duplicate SHA/u,
   );
+  assert.notEqual(
+    supportedReaderDigest([CURRENT_READER_SHA], "active"),
+    supportedReaderDigest([CURRENT_READER_SHA], "suspended"),
+  );
+  assert.throws(
+    () => supportedReaderDigest([CURRENT_READER_SHA], "unknown"),
+    /Legacy reader state is invalid/u,
+  );
 });
 
-test("attestation accepts private-owned Current, Ramping, and dispatched candidate readers", () => {
-  assert.deepEqual(inspectAttestationJobs(proofJobs(), {
-    ...proofInspectionArgs(),
-  }), {
-    digest: supportedReaderDigest([
+test("attestation accepts every bounded private legacy-reader state", () => {
+  for (const legacyReaderState of ["none", "active", "suspended"]) {
+    const readersDigest = supportedReaderDigest([
       PRIVATE_SHA,
       CURRENT_READER_SHA,
       RAMPING_READER_SHA,
-    ]),
-    proofDigest: compatibilityProofDigest({
-      producerDigest: PRODUCER_DIGEST,
-      publicSha: PUBLIC_SHA,
-      readersDigest: supportedReaderDigest([
-        PRIVATE_SHA,
-        CURRENT_READER_SHA,
-        RAMPING_READER_SHA,
-      ]),
-      requestId: REQUEST_ID,
-    }),
-    readerCount: 3,
-  });
+    ], legacyReaderState);
+    assert.deepEqual(inspectAttestationJobs(proofJobs({ legacyReaderState }), {
+      ...proofInspectionArgs(),
+    }), {
+      digest: readersDigest,
+      proofDigest: compatibilityProofDigest({
+        producerDigest: PRODUCER_DIGEST,
+        publicSha: PUBLIC_SHA,
+        readersDigest,
+        requestId: REQUEST_ID,
+      }),
+      readerCount: 3,
+    });
+  }
 });
 
 test("attestation rejects omission of the dispatched private candidate", () => {
