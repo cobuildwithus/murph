@@ -1,6 +1,6 @@
 # Retired device-sync wake frontier remediation
 
-Status: active
+Status: completed
 Created: 2026-09-03
 Updated: 2026-09-03
 
@@ -61,10 +61,9 @@ Updated: 2026-09-03
 5. Completed: replace aggregate ownership inference with the runtime-owned
    exact first-pending sequence and add the composed legacy regression required
    by the recorded round-2 retrospective.
-6. In progress: commit and push the verified redesigned candidate, then
-   resolve ReviewGPT round 3 and exact-head CI.
-7. Pending: merge only after resolved review and green required checks, then
-   retire the task worktree.
+6. Completed: commit and push the verified redesigned candidate, then resolve
+   ReviewGPT round 3 and exact-head CI.
+7. Ready: merge the reviewed, green candidate and retire the task worktree.
 
 ## Decisions
 
@@ -93,7 +92,26 @@ Updated: 2026-09-03
   recovery tests; 59 changelog tests; Web and assistant-runtime typechecks;
   focused Web ESLint; `pnpm complexity:diff`; `git diff --check`; and the
   privacy scan.
-- Pending: exact-head ReviewGPT round 3 and required GitHub checks.
+- ReviewGPT round 3 returned `ROUND_OUTCOME: PASS` on the exact production
+  candidate. Subsequent changes were limited to test expectations and base
+  alignment; no production source changed after the reviewed head.
+- All 33 applicable required GitHub checks passed on the merge candidate,
+  including the exact public/private Temporal reader proof. The initial
+  compatibility failure was caused by a temporary cross-repository CI wire
+  mismatch and passed unchanged after the private contract repair merged.
 - Expected outcomes: the safe contiguous case is accepted without another
   signal; the skipped-middle case stays a conflict; every completion gate is
   green on the merge candidate.
+
+## Results
+
+- Runtime checkpoints now expose the exact first pending sequenced system item
+  from the existing system-mailbox state owner; legacy unsequenced work makes
+  that ownership fact unknown and therefore fail-closed.
+- Web accepts a retired scheduled wake only when that exact runtime-owned
+  sequence also satisfies the existing contiguous frontier, imported
+  watermark, high-water, structure, and privacy proofs.
+- Focused PostgreSQL and runtime regressions prove the retained positive cases,
+  the skipped-middle negative case, and the legacy fast-forward ambiguity
+  without restoring private payload content or creating another retry owner.
+Completed: 2026-09-03
