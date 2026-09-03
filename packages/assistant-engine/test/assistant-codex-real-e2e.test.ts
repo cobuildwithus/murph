@@ -32,6 +32,7 @@ import {
 } from '@murphai/core'
 import {
   buildHostedExecutionGroupContextHandoffInstructions,
+  buildHostedMemberSignupWelcomeInstructions,
 } from '@murphai/hosted-execution'
 import {
   buildMurphHostedPermissionProfileTomlLines,
@@ -13293,6 +13294,90 @@ describeRealCodex('real Codex legacy weekly digest prompt compatibility e2e', ()
     },
     360_000,
   )
+})
+
+describeRealCodex('real Codex direct email signup welcome e2e', () => {
+  it('delivers the exact activation welcome through the production notification turn', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-direct-email-signup-welcome-e2e-'),
+    )
+    const modelTarget = createAssistantModelTarget({
+      approvalPolicy: 'never',
+      codexCommand:
+        normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND),
+      codexHome: config.codexHome,
+      model: config.model,
+      modelProvider: config.modelProvider,
+      provider: 'codex-cli',
+      reasoningEffort: 'low',
+      sandbox: 'workspace-write',
+    })
+    if (!modelTarget) {
+      throw new Error('Expected a real Codex signup welcome target.')
+    }
+    const welcomeText = 'Welcome to Murph. What would you like help with first?'
+
+    try {
+      await initializeVault({
+        timezone: 'America/New_York',
+        vaultRoot: workingDirectory,
+      })
+      const result = await sendAssistantNotificationLocal({
+        actorId: null,
+        bindingDeliveryTarget: 'member@example.test',
+        channel: 'email',
+        deliveryDedupeToken: 'signup-welcome:synthetic-member',
+        deliveryDispatchMode: 'queue-only',
+        deliveryIdempotencyKey: 'signup-welcome:synthetic-member',
+        deliveryTarget: 'member@example.test',
+        executionContext: {
+          hosted: {
+            defaultTarget: modelTarget,
+            memberId: 'synthetic-member',
+            userEnvKeys: [],
+          },
+        },
+        firstContactPolicy: {
+          markSeenOnDeliveryAccepted: true,
+        },
+        identityId: 'synthetic-email-identity',
+        instructions: buildHostedMemberSignupWelcomeInstructions(welcomeText),
+        responsePolicy: {
+          kind: 'require_send_exact_text',
+          text: welcomeText,
+        },
+        threadId: null,
+        threadIsDirect: true,
+        turnEnvironment: {
+          currentWorkingDirectory: workingDirectory,
+          env: config.env,
+        },
+        turnTrigger: 'manual-deliver',
+        vault: workingDirectory,
+        workingDirectory,
+      })
+
+      process.stdout.write(
+        `[real-codex direct email signup welcome] ${JSON.stringify({
+          decision: result.decision.kind,
+          delivery: result.deliveryOutcome?.kind ?? null,
+          reply: result.response,
+        })}\n`,
+      )
+      expect(result.decision).toMatchObject({
+        kind: 'send_message',
+        text: welcomeText,
+      })
+      expect(result.deliveryOutcome?.kind).toBe('queued')
+      expect(result.response).toBe(welcomeText)
+    } finally {
+      await removeRealCodexTemporaryPaths([
+        workingDirectory,
+        ...config.temporaryPaths,
+      ])
+    }
+  }, 360_000)
 })
 
 describeRealCodex('real Codex independent scheduled reminder authority e2e', () => {

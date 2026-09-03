@@ -581,6 +581,14 @@ export function buildHostedExecutionMemberActivatedWake(input: {
   };
 }
 
+export function buildHostedMemberSignupWelcomeInstructions(text: string): string {
+  return [
+    "Prepare the first in-chat onboarding reply.",
+    "Use this user-facing reply only:",
+    text,
+  ].join("\n\n");
+}
+
 function cloneMemberActivationSignupWelcome(
   value: HostedExecutionMemberActivationSignupWelcome,
 ): HostedExecutionMemberActivationSignupWelcome {
