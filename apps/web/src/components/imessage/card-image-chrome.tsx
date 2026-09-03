@@ -96,17 +96,23 @@ export function IMessageCardBadge({
   );
 }
 
-/** Shared logo, heading, and optional subtitle hierarchy for card fallbacks. */
+/**
+ * Shared logo, heading, and optional subtitle hierarchy for card fallbacks.
+ * `trailing` renders at the end of the title row, for a short secondary value
+ * that belongs beside the title rather than beneath it.
+ */
 export function IMessageCardHeader({
   height,
   logoSrc,
   subtitle,
   title,
+  trailing = null,
 }: {
   height: number;
   logoSrc: string;
   subtitle: IMessageCardHeaderText | null;
   title: IMessageCardHeaderText;
+  trailing?: React.ReactNode;
 }) {
   return (
     <div
@@ -146,6 +152,7 @@ export function IMessageCardHeader({
         >
           {title.text}
         </h1>
+        {trailing}
       </div>
       {subtitle === null ? null : (
         <div

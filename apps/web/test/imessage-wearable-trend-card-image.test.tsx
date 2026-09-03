@@ -110,17 +110,6 @@ const ALL_MISSING_CARD: WearableTrendResponseCardV1 = {
   })),
 };
 
-const WIDE_VALUE_CARD: WearableTrendResponseCardV1 = {
-  ...COMPLETE_CARD,
-  metrics: [
-    {
-      metricKey: "total-sleep-minutes",
-      values: [612, 708, 428, 1_388, 435, 39, 434],
-      trend: "lower",
-    },
-  ],
-};
-
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -134,7 +123,7 @@ test("wearable trend image leads each row with its average and neutral direction
   );
 
   expect(getWearableTrendCardImageSize(COMPLETE_CARD)).toEqual({
-    height: 853,
+    height: 815,
     width: 1_200,
   });
   expect(markup.match(/data-wearable-trend-day-axis="shared"/gu)).toHaveLength(1);
@@ -148,7 +137,9 @@ test("wearable trend image leads each row with its average and neutral direction
     Array.from(axisMarkup.matchAll(/>([A-Z])</gu), (match) => match[1]).join(""),
   ).toBe("MTWTFSS");
   expect(markup).toContain("7-day health");
-  expect(markup).toContain("Aug 24–30");
+  // The date range sits on the title row, not beneath it.
+  expect(markup).toContain('data-card-date-range="Aug 24–30"');
+  expect(markup).not.toContain('data-card-text-lines="1">Aug');
 
   expect(markup).toContain(">STEPS<");
   expect(markup).toContain('data-metric-average="8.6k"');
@@ -165,30 +156,27 @@ test("wearable trend image leads each row with its average and neutral direction
   expect(markup).toContain(">ms<");
   expect(markup).not.toContain("prior week");
 
-  // Only each row's highest and lowest day carry a value.
-  expect(markup.match(/data-day-label="extreme"/gu)).toHaveLength(6);
-  for (const extreme of ["10.2k", "6.8k", "7h21m", "7h08m", "50", "37"]) {
-    expect(markup).toContain(`>${extreme}<`);
+  // The chart carries no value labels; the average is the row's only number.
+  for (const dayValue of ["10.2k", "6.8k", "7h21m", "7h08m", "7h12m", "50", "37", "41"]) {
+    expect(markup).not.toContain(`>${dayValue}<`);
   }
-  for (const middle of ["7.9k", "9.4k", "8.7k", "7.1k", "9.8k", "7h12m", "41"]) {
-    expect(markup).not.toContain(`>${middle}<`);
-  }
+  // One continuous fitted line per complete row, with a point on every day.
+  expect(markup.match(/<svg\b/gu)).toHaveLength(3);
+  expect(markup.match(/<path\b/gu)).toHaveLength(3);
   expect(markup.match(/data-day-value="observed"/gu)).toHaveLength(21);
   expect(markup).not.toContain('data-day-value="missing"');
-  // Bars are the only 52px-wide boxes. Each row's tallest bar reaches the
-  // full 96px and nothing exceeds it; bars are zero-based, so a near-maximum
-  // value may round to the same height.
-  const barHeights = Array.from(
-    markup.matchAll(/width:52px;height:(\d+)px/gu),
+  // The highest day of each row touches the top inset and the lowest the
+  // bottom inset, so a metric's own range fills the chart.
+  const pointHeights = Array.from(
+    markup.matchAll(/cy="([\d.]+)"/gu),
     (match) => Number(match[1]),
   );
-  expect(barHeights).toHaveLength(21);
-  expect(Math.max(...barHeights)).toBe(96);
-  expect(barHeights.filter((height) => height === 96).length).toBeGreaterThanOrEqual(3);
+  expect(Math.min(...pointHeights)).toBe(14);
+  expect(Math.max(...pointHeights)).toBe(136);
   expect(markup).toContain("data-sparkline=\"▁▃▆▅█▂▇\"");
   expect(markup.match(/data-sparkline=/gu)).toHaveLength(3);
   expect(markup).toContain('data-murph-card-badge="svg"');
-  expect(markup).not.toMatch(/<(?:button|footer|legend|svg)\b/u);
+  expect(markup).not.toMatch(/<(?:button|footer|legend)\b/u);
   expect(markup).not.toMatch(/pill|tooltip|tap|reply|better|worse/iu);
 });
 
@@ -212,14 +200,16 @@ test("wearable trend image preserves sparse and unavailable calendar slots", asy
   expect(sparseMarkup.match(/>(?:↑|↓|→)</gu)).toHaveLength(1);
   expect(sparseMarkup).toContain("data-sparkline=\"▁··▅··█\"");
   expect(sparseMarkup).toContain("Tue no data");
-  // A missing day keeps its column marker but never a text placeholder.
+  // A missing day keeps its column marker but never a text placeholder, and
+  // the line breaks around it instead of bridging the gap.
   expect(sparseMarkup).not.toContain(">—<");
-  expect(sparseMarkup.match(/data-day-label="extreme"/gu)).toHaveLength(6);
+  expect(sparseMarkup.match(/<path\b/gu)).toHaveLength(3);
+  expect(sparseMarkup.match(/data-day-value="observed"/gu)).toHaveLength(12);
 
   // Metrics with no observed days collapse to a shorter row and never show a
   // zero, a placeholder average, or a day label.
   expect(getWearableTrendCardImageSize(ALL_MISSING_CARD)).toEqual({
-    height: 697,
+    height: 629,
     width: 1_200,
   });
   expect(missingMarkup.match(/data-day-value="missing"/gu)).toHaveLength(21);
@@ -227,32 +217,10 @@ test("wearable trend image preserves sparse and unavailable calendar slots", asy
   expect(missingMarkup.match(/data-metric-direction="no_data"/gu)).toHaveLength(3);
   expect(missingMarkup.match(/>No data</gu)).toHaveLength(3);
   expect(missingMarkup).not.toContain("data-metric-average=");
-  expect(missingMarkup).not.toContain("data-day-label=");
+  expect(missingMarkup).not.toContain("<path");
   expect(missingMarkup).not.toContain(">—<");
   expect(missingMarkup).not.toContain(">0<");
   expect(missingMarkup).not.toContain(">0 ");
-});
-
-test("wearable trend image steps a row's day values down together when the widest value would collide", async () => {
-  const { WearableTrendCardImage } = await import(
-    "@/src/components/imessage/wearable-trend-card-image"
-  );
-  const markup = renderToStaticMarkup(
-    <WearableTrendCardImage card={WIDE_VALUE_CARD} />,
-  );
-
-  const valueFontSizes = new Set(
-    Array.from(
-      markup.matchAll(/data-day-label="extreme"[^>]*font-size:(\d+)px/gu),
-      (match) => match[1],
-    ),
-  );
-  expect(valueFontSizes.size).toBe(1);
-  const [fontSize] = valueFontSizes;
-  expect(Number(fontSize)).toBeLessThan(30);
-  expect(Number(fontSize)).toBeGreaterThanOrEqual(20);
-  expect(markup).toContain(">23h08m<");
-  expect(markup).toContain(">39m<");
 });
 
 test("response-card image route accepts only the exact schema-seven wearable envelope", async () => {
@@ -272,7 +240,7 @@ test("response-card image route accepts only the exact schema-seven wearable env
 
   const [imageTree, init] = getImageResponseCall();
   assert.equal(init.width, 1_200);
-  assert.equal(init.height, 853);
+  assert.equal(init.height, 815);
   const markup = renderToStaticMarkup(imageTree);
   assert.match(markup, /imessage-native-wearable-trend-card/u);
   assert.match(markup, /10\.2k/u);

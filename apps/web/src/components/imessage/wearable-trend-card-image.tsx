@@ -15,21 +15,23 @@ import {
 import {
   IMessageCardHeader,
   IMESSAGE_CARD_COLOR,
+  IMESSAGE_CARD_HEADER_TITLE_ROW_HEIGHT,
 } from "./card-image-chrome";
-import { measureDmSans600Text } from "./dm-sans-600-card-metrics";
 
 export const IMESSAGE_WEARABLE_TREND_CARD_IMAGE_WIDTH = 1_200;
 
 const CARD_HORIZONTAL_PADDING = 45;
 const CARD_VERTICAL_PADDING = 38;
-const HEADER_HEIGHT = 183;
-const AXIS_MARGIN_TOP = 20;
+const HEADER_HEIGHT = IMESSAGE_CARD_HEADER_TITLE_ROW_HEIGHT;
+const HEADER_DATE_FONT_SIZE = 44;
+const AXIS_MARGIN_TOP = 34;
 const AXIS_HEIGHT = 40;
 const AXIS_MARGIN_BOTTOM = 14;
-const METRIC_ROW_HEIGHT = 172;
+const METRIC_ROW_VERTICAL_INSET = 16;
+const CHART_HEIGHT = 150;
+const EMPTY_CHART_HEIGHT = 40;
+const METRIC_ROW_HEIGHT = CHART_HEIGHT + 2 * METRIC_ROW_VERTICAL_INSET;
 const EMPTY_METRIC_ROW_HEIGHT = 120;
-const METRIC_ROW_TOP_INSET = 22;
-const METRIC_ROW_BOTTOM_INSET = 16;
 const BOTTOM_PADDING = 42;
 const SUMMARY_WIDTH = 264;
 const SERIES_GAP = 24;
@@ -39,24 +41,22 @@ const CHART_WIDTH = IMESSAGE_WEARABLE_TREND_CARD_IMAGE_WIDTH
   - SERIES_GAP;
 const DAY_COLUMN_WIDTH = CHART_WIDTH / 7;
 
-const AXIS_FONT_SIZE = 32;
+const AXIS_FONT_SIZE = 30;
 const METRIC_LABEL_FONT_SIZE = 30;
 const AVERAGE_FONT_SIZE = 60;
-const AVERAGE_UNIT_FONT_SIZE = 27;
+const AVERAGE_UNIT_FONT_SIZE = 28;
 const DIRECTION_GLYPH_FONT_SIZE = 40;
 const NO_DATA_FONT_SIZE = 34;
-const VALUE_FONT_SIZE = 30;
-const VALUE_MIN_FONT_SIZE = 20;
-const VALUE_MIN_COLUMN_GAP = 8;
 
-const BAR_MAX_HEIGHT = 96;
-const BAR_MIN_HEIGHT = 6;
-const BAR_WIDTH = 52;
-const BAR_LABEL_GAP = 6;
+const CHART_INSET = 14;
+const LINE_WIDTH = 4;
+const POINT_RADIUS = 7;
+const MISSING_STUB_WIDTH = 40;
+const MISSING_STUB_HEIGHT = 6;
 
 const COLOR = {
   ...IMESSAGE_CARD_COLOR,
-  /** One neutral, warm series fill; it carries no better/worse meaning. */
+  /** One neutral, warm series stroke; it carries no better/worse meaning. */
   series: "#7A7168",
   seriesMissing: "rgba(122,113,104,0.38)",
 } as const;
@@ -125,8 +125,24 @@ export function WearableTrendCardImage({
       <IMessageCardHeader
         height={HEADER_HEIGHT}
         logoSrc={logoSrc}
-        subtitle={{ lineCount: 1, text: dateRange }}
+        subtitle={null}
         title={{ lineCount: 1, text: "7-day health" }}
+        trailing={
+          <div
+            data-card-date-range={dateRange}
+            style={{
+              display: "flex",
+              marginLeft: 24,
+              color: COLOR.secondary,
+              fontSize: HEADER_DATE_FONT_SIZE,
+              fontWeight: 400,
+              lineHeight: 1,
+              whiteSpace: "nowrap",
+            }}
+          >
+            {dateRange}
+          </div>
+        }
       />
 
       <DayAxis weekdayLabels={weekdayLabels} />
@@ -243,8 +259,8 @@ function MetricRow({
         display: "flex",
         height: metricRowHeight(metric.values),
         boxSizing: "border-box",
-        alignItems: "flex-end",
-        paddingBottom: METRIC_ROW_BOTTOM_INSET,
+        alignItems: "center",
+        padding: `${METRIC_ROW_VERTICAL_INSET}px 0`,
         borderTop: `2px solid ${COLOR.divider}`,
       }}
     >
@@ -255,9 +271,9 @@ function MetricRow({
         metricKey={metric.metricKey}
       />
       <DayChart
+        height={average === null ? EMPTY_CHART_HEIGHT : CHART_HEIGHT}
         localDates={localDates}
         sparkline={sparkline}
-        valueLabels={valueLabels}
         values={metric.values}
       />
     </div>
@@ -287,8 +303,6 @@ function MetricSummary({
         flexShrink: 0,
         flexDirection: "column",
         alignItems: "flex-start",
-        alignSelf: "flex-start",
-        marginTop: METRIC_ROW_TOP_INSET,
       }}
     >
       <div
@@ -324,7 +338,7 @@ function MetricSummary({
           data-metric-average={number}
           style={{
             display: "flex",
-            alignItems: "baseline",
+            alignItems: "center",
             marginTop: 10,
             whiteSpace: "nowrap",
           }}
@@ -375,22 +389,26 @@ function MetricSummary({
 }
 
 function DayChart({
+  height,
   localDates,
   sparkline,
-  valueLabels,
   values,
 }: {
+  height: number;
   localDates: WearableTrendResponseCardV1["localDates"];
   sparkline: string;
-  valueLabels: string[];
   values: readonly (number | null)[];
 }) {
-  const observed = values.filter((value): value is number => value !== null);
-  const maximum = observed.length === 0 ? null : Math.max(...observed);
-  const labelledIndices = selectLabelledDays(values);
-  const valueFontSize = fitValueFontSize(
-    valueLabels.filter((_label, index) => labelledIndices.has(index)),
+  const levels = normalizeLevels(values);
+  const points = levels.map((level, index) =>
+    level === null
+      ? null
+      : {
+        x: DAY_COLUMN_WIDTH * (index + 0.5),
+        y: CHART_INSET + (1 - level) * (height - 2 * CHART_INSET),
+      }
   );
+  const segments = connectedSegments(points);
 
   return (
     <div
@@ -399,78 +417,103 @@ function DayChart({
       style={{
         display: "flex",
         width: CHART_WIDTH,
+        height,
         flexShrink: 0,
         marginLeft: SERIES_GAP,
-        alignItems: "flex-end",
+        alignSelf: "flex-end",
       }}
     >
-      {values.map((value, index) => (
-        <DayColumn
-          key={localDates[index]}
-          label={labelledIndices.has(index) ? valueLabels[index] ?? null : null}
-          labelFontSize={valueFontSize}
-          value={value}
-          maximum={maximum}
-        />
-      ))}
+      <svg
+        height={height}
+        viewBox={`0 0 ${CHART_WIDTH} ${height}`}
+        width={CHART_WIDTH}
+      >
+        {segments.map((segment) => (
+          <path
+            d={segment}
+            fill="none"
+            key={segment}
+            stroke={COLOR.series}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={LINE_WIDTH}
+          />
+        ))}
+        {points.map((point, index) =>
+          point === null
+            ? (
+              <rect
+                data-day-value="missing"
+                fill={COLOR.seriesMissing}
+                height={MISSING_STUB_HEIGHT}
+                key={localDates[index]}
+                rx={MISSING_STUB_HEIGHT / 2}
+                width={MISSING_STUB_WIDTH}
+                x={DAY_COLUMN_WIDTH * (index + 0.5) - MISSING_STUB_WIDTH / 2}
+                y={height - MISSING_STUB_HEIGHT}
+              />
+            )
+            : (
+              <circle
+                cx={point.x}
+                cy={point.y}
+                data-day-value="observed"
+                fill={COLOR.series}
+                key={localDates[index]}
+                r={POINT_RADIUS}
+              />
+            )
+        )}
+      </svg>
     </div>
   );
 }
 
-function DayColumn({
-  label,
-  labelFontSize,
-  maximum,
-  value,
-}: {
-  label: string | null;
-  labelFontSize: number;
-  maximum: number | null;
-  value: number | null;
-}) {
-  const missing = value === null || maximum === null || maximum === 0;
-  const barHeight = missing ? BAR_MIN_HEIGHT : scaleBarHeight(value, maximum);
+/**
+ * Each metric is fitted to its own observed range: the lowest day sits at the
+ * bottom of the chart, the highest at the top, and a flat week draws a level
+ * line through the middle. Missing days stay null.
+ */
+function normalizeLevels(values: readonly (number | null)[]): (number | null)[] {
+  const observed = values.filter((value): value is number => value !== null);
+  if (observed.length === 0) {
+    return values.map(() => null);
+  }
+  const minimum = Math.min(...observed);
+  const maximum = Math.max(...observed);
+  return values.map((value) => {
+    if (value === null) {
+      return null;
+    }
+    return maximum === minimum ? 0.5 : (value - minimum) / (maximum - minimum);
+  });
+}
 
-  return (
-    <div
-      data-day-value={value === null ? "missing" : "observed"}
-      style={{
-        display: "flex",
-        width: DAY_COLUMN_WIDTH,
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "flex-end",
-      }}
-    >
-      {label === null ? null : (
-        <div
-          data-day-label="extreme"
-          style={{
-            display: "flex",
-            marginBottom: BAR_LABEL_GAP,
-            fontSize: labelFontSize,
-            fontWeight: 600,
-            lineHeight: 1,
-            whiteSpace: "nowrap",
-          }}
-        >
-          {label}
-        </div>
-      )}
-      <div
-        style={{
-          display: "flex",
-          width: BAR_WIDTH,
-          height: barHeight,
-          borderTopLeftRadius: missing ? 3 : 6,
-          borderTopRightRadius: missing ? 3 : 6,
-          borderBottomLeftRadius: missing ? 3 : 2,
-          borderBottomRightRadius: missing ? 3 : 2,
-          backgroundColor: missing ? COLOR.seriesMissing : COLOR.series,
-        }}
-      />
-    </div>
-  );
+/** SVG path data for each run of adjacent observed days. */
+function connectedSegments(
+  points: readonly ({ x: number; y: number } | null)[],
+): string[] {
+  const segments: string[] = [];
+  let current: string[] = [];
+  const flush = () => {
+    if (current.length > 1) {
+      segments.push(current.join(" "));
+    }
+    current = [];
+  };
+  for (const point of points) {
+    if (point === null) {
+      flush();
+      continue;
+    }
+    current.push(`${current.length === 0 ? "M" : "L"} ${round(point.x)} ${round(point.y)}`);
+  }
+  flush();
+  return segments;
+}
+
+function round(value: number): number {
+  return Math.round(value * 100) / 100;
 }
 
 type DirectionPresentation = {
@@ -513,48 +556,4 @@ function averageUnit(metricKey: WearableTrendMetricKey): string | null {
     case "total-sleep-minutes":
       return null;
   }
-}
-
-/**
- * Label only the highest and lowest observed days. The first occurrence wins a
- * tie, and a flat week labels one day, so every row keeps at most two values.
- */
-function selectLabelledDays(values: readonly (number | null)[]): Set<number> {
-  let highest: number | null = null;
-  let lowest: number | null = null;
-  for (const [index, value] of values.entries()) {
-    if (value === null) continue;
-    if (highest === null || value > (values[highest] as number)) highest = index;
-    if (lowest === null || value < (values[lowest] as number)) lowest = index;
-  }
-  return new Set(
-    [highest, lowest].filter((index): index is number => index !== null),
-  );
-}
-
-function scaleBarHeight(value: number, maximum: number): number {
-  return Math.max(
-    BAR_MIN_HEIGHT,
-    Math.round((value / maximum) * BAR_MAX_HEIGHT),
-  );
-}
-
-/**
- * Day values share one font size per row. When the widest formatted value
- * would collide with its neighbours at the default size, the whole row steps
- * down together so every contract-valid value stays inside its own column.
- */
-function fitValueFontSize(valueLabels: readonly string[]): number {
-  const available = DAY_COLUMN_WIDTH - VALUE_MIN_COLUMN_GAP;
-  const widest = Math.max(
-    0,
-    ...valueLabels.map((label) => measureDmSans600Text(label, VALUE_FONT_SIZE)),
-  );
-  if (widest <= available) {
-    return VALUE_FONT_SIZE;
-  }
-  return Math.max(
-    VALUE_MIN_FONT_SIZE,
-    Math.floor(VALUE_FONT_SIZE * (available / widest)),
-  );
 }

@@ -317,7 +317,7 @@ test("real-font wearable trend contains the sparse five-metric maximum density",
     schemaVersion: 7,
     card: SPARSE_FIVE_METRIC_WEARABLE_CARD,
   });
-  assert.deepEqual([image.width, image.height], [1_200, 1_197]);
+  assert.deepEqual([image.width, image.height], [1_200, 1_179]);
 
   const bounds = findNonBackgroundBounds(image);
   assert.ok(bounds !== null);
@@ -332,8 +332,8 @@ test("real-font wearable trend contains the sparse five-metric maximum density",
     hasDarkPixel(image, {
       left: 45,
       right: 1_155,
-      top: 983,
-      bottom: 1_155,
+      top: 955,
+      bottom: 1_137,
     }),
     true,
   );
@@ -343,8 +343,8 @@ test("real-font wearable trend contains the sparse five-metric maximum density",
       hasNonBackgroundPixel(image, {
         left: 1_040,
         right: 1_155,
-        top: 295 + row * 172 + 20,
-        bottom: 295 + (row + 1) * 172 - 16,
+        top: 227 + row * 182 + 16,
+        bottom: 227 + (row + 1) * 182 - 16,
       }),
       true,
       `Expected a Sunday marker in wearable row ${row + 1}`,
@@ -357,7 +357,7 @@ test("real-font wearable trend contains all-missing slots without zero filling",
     schemaVersion: 7,
     card: ALL_MISSING_WEARABLE_CARD,
   });
-  assert.deepEqual([image.width, image.height], [1_200, 697]);
+  assert.deepEqual([image.width, image.height], [1_200, 629]);
 
   const bounds = findNonBackgroundBounds(image);
   assert.ok(bounds !== null);
@@ -367,8 +367,8 @@ test("real-font wearable trend contains all-missing slots without zero filling",
   // and Sunday columns rather than an empty gap, and no day carries a value.
   for (let row = 0; row < 3; row += 1) {
     const rect = {
-      top: 295 + row * 120 + 20,
-      bottom: 295 + (row + 1) * 120 - 16,
+      top: 227 + row * 120 + 20,
+      bottom: 227 + (row + 1) * 120 - 16,
     };
     assert.equal(
       hasNonBackgroundPixel(image, { left: 333, right: 450, ...rect }),

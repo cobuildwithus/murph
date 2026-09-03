@@ -255,23 +255,26 @@ presentation defined by the challenge standings delivery contract.
 ### iMessage Seven-Day Health Card Image
 Render the fixed seven-day wearable view as the static sibling of the other
 response cards: the same cream field, rectangular bitmap, embedded Murph mark,
-and optically centered badge-and-title row with the date range beneath. One
+and optically centered badge-and-title row, with the date range as quiet
+secondary text at the end of that same title row rather than beneath it. One
 shared day axis (`AVERAGE`, then single letters `M` through `S` in calendar
 order) heads the rows, and every metric keeps its seven days in those same
 columns. Each metric row leads with its uppercase label, then the weekly
 average as the largest number in the row with a small unit beside it, followed
 on the same line by one neutral arrow (`↑`, `↓`, or `→`) for the
-week-over-week direction. Never spell the direction out as a word. A row with
-too few observed days to compare shows no arrow at all, and the comparison
-basis is not repeated on any row; the text recovery names both. The seven days are zero-based bars in
-one neutral warm fill. Only the highest and lowest observed days carry a value
-directly above their bar, so the row reads as a chart rather than a table;
-those values share one measured size per row and step down together only when
-they would otherwise collide. A missing day keeps its column as a faint
-baseline stub with no text placeholder. A metric with no observed days
-collapses to a shorter row that reads `No data` and keeps its seven empty
-slots. No reference lines, legends, metric icons, pills, status color, or
-better/worse language.
+week-over-week direction; the unit and arrow are vertically centered against
+the number. Never spell the direction out as a word. A row with too few
+observed days to compare shows no arrow at all, and the comparison basis is
+not repeated on any row; the text recovery names both. The seven days are one
+line in a neutral warm stroke with a point on each observed day, fitted to
+that metric's own observed range so the highest day touches the top and the
+lowest the bottom and a flat week draws a level line; there are no value
+labels, so the average is the only number in the row and the text recovery
+carries every day value. A missing day breaks the line and keeps its column
+as a faint baseline stub with no text placeholder. A metric with no observed
+days collapses to a shorter row that reads `No data` and keeps its seven
+empty slots. No reference lines, legends, metric icons, pills, status color,
+or better/worse language.
 
 ### Shared iMessage Card Handoff
 When a shared response-card URL reaches the public homepage instead of the
