@@ -14,12 +14,12 @@ const SECTION_HEADING =
 
 const INTEGRATION_LABELS: Record<
   NonNullable<ComparisonEntry["integration"]>,
-  { href: string; label: string }
+  string
 > = {
-  "apple-health": { href: "/connect", label: "Syncs to Murph through Apple Health" },
-  dexcom: { href: "/connect", label: "CGM data connects to Murph through Dexcom" },
-  direct: { href: "/connect", label: "Connects to Murph" },
-  import: { href: "/connect", label: "Results can be added to Murph" },
+  "apple-health": "Syncs to Murph through Apple Health",
+  dexcom: "CGM data connects to Murph through Dexcom",
+  direct: "Connects to Murph",
+  import: "Results can be added to Murph",
 };
 
 function IntegrationPill({
@@ -27,17 +27,14 @@ function IntegrationPill({
 }: {
   integration: NonNullable<ComparisonEntry["integration"]>;
 }) {
-  const { href, label } = INTEGRATION_LABELS[integration];
-
   return (
-    <Link
-      className="mt-6 inline-flex min-h-8 items-center gap-2 rounded-full border border-[#c4a882]/40 px-3.5 text-[0.76rem] font-medium text-[#f5f0e8]/85 transition-colors hover:border-[#c4a882]/80 hover:text-[#f5f0e8]"
+    <span
+      className="mt-6 inline-flex min-h-8 items-center gap-2 rounded-full border border-[#c4a882]/40 px-3.5 text-[0.76rem] font-medium text-[#f5f0e8]/85"
       data-comparison-integration={integration}
-      href={href}
     >
       <span aria-hidden="true" className="size-1.5 rounded-full bg-[#9db07f]" />
-      {label}
-    </Link>
+      {INTEGRATION_LABELS[integration]}
+    </span>
   );
 }
 
