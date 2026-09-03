@@ -526,14 +526,14 @@ test("Journal groups deterministic activity aliases without vocabulary", () => {
   assert.equal(view.days[0]?.events[0]?.summary, "55 min across 2 sessions");
 });
 
-test("Journal keeps test results in details and hides raw capture attachments", () => {
+test("Journal keeps canonical test and capture records concise", () => {
   const hearingTest = event(
     "hearing_test",
     "test",
     "2026-08-25T12:00:00.000Z",
     {
       note: "Screenshot provided by member.",
-      resultSummary: "Hearing result was within the expected range.",
+      summary: "Hearing result was within the expected range.",
       testName: "AirPods hearing test",
     },
     "AirPods hearing test",
@@ -563,9 +563,12 @@ test("Journal keeps test results in details and hides raw capture attachments", 
     "test",
     "2026-08-25T13:00:00.000Z",
     {
-      flaggedCount: 3,
-      markerCount: 18,
-      resultSummary: "Three markers are outside their reference ranges.",
+      results: [
+        { analyte: "Ferritin", flag: "low", unit: "ng/mL", value: 18 },
+        { analyte: "Glucose", flag: "normal", unit: "mg/dL", value: 90 },
+        { analyte: "Vitamin D", flag: "high", unit: "ng/mL", value: 105 },
+      ],
+      summary: "Two markers are outside their reference ranges.",
       testName: "Blood test results",
     },
     "Blood test results",
@@ -579,18 +582,26 @@ test("Journal keeps test results in details and hides raw capture attachments", 
     { asOf: "2026-08-25T22:00:00.000Z" },
   );
 
-  assert.equal(view.eventCount, 2);
+  assert.equal(view.eventCount, 3);
   assert.equal(view.days[0]?.events[0]?.title, "AirPods hearing test");
   assert.equal(view.days[0]?.events[0]?.summary, null);
   assert.deepEqual(view.days[0]?.events[0]?.details, [
     "Summary: Hearing result was within the expected range.",
   ]);
-  assert.equal(view.days[0]?.events[1]?.title, "Blood test results");
-  assert.equal(view.days[0]?.events[1]?.summary, "18 markers · 3 need attention");
+  assert.equal(view.days[0]?.events[1]?.title, "Posture study");
+  assert.equal(view.days[0]?.events[1]?.summary, null);
   assert.deepEqual(view.days[0]?.events[1]?.details, [
-    "Markers: 18",
-    "Flagged: 3",
-    "Summary: Three markers are outside their reference ranges.",
+    "Collection: posture-study",
+  ]);
+  assert.equal(view.days[0]?.events[2]?.title, "Blood test results");
+  assert.equal(
+    view.days[0]?.events[2]?.summary,
+    "3 markers · 2 need attention",
+  );
+  assert.deepEqual(view.days[0]?.events[2]?.details, [
+    "Markers: 3",
+    "Flagged: 2",
+    "Summary: Two markers are outside their reference ranges.",
   ]);
 });
 

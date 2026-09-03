@@ -128,12 +128,7 @@ export function buildJournalView(
   const fromDate = addDays(asOfDate, -(windowDays - 1));
   const candidates = normalizeJournalCandidates([
     ...vault.events.flatMap((event) =>
-      journalCandidateFromEvent(
-        event,
-        fromDate,
-        asOfDate,
-        options.vocabulary,
-      ),
+      journalCandidateFromEvent(event, fromDate, asOfDate, options.vocabulary),
     ),
     ...journalCandidatesFromExperiments(
       vault.experiments,
@@ -229,11 +224,7 @@ function journalCandidateFromEvent(
 }
 
 function isHiddenJournalEvent(event: CanonicalEntity): boolean {
-  return (
-    isJournalProfileEvent(event) ||
-    event.tags.includes("capture") ||
-    event.tags.includes("generated-image")
-  );
+  return isJournalProfileEvent(event) || event.tags.includes("generated-image");
 }
 
 function journalEventPresentation(
@@ -254,11 +245,12 @@ function journalEventPresentation(
       observationMetric,
     };
   }
-  const rawKey = canonicalFactorToken(
-    resolveAdherenceObservationActivityKind({
-      attributes: event.attributes,
-    }),
-  ) ?? "activity";
+  const rawKey =
+    canonicalFactorToken(
+      resolveAdherenceObservationActivityKind({
+        attributes: event.attributes,
+      }),
+    ) ?? "activity";
   const concept = resolvePersonalPatternVocabularyConcept(vocabulary, rawKey);
   return {
     activityKey: concept?.id ?? rawKey,
@@ -706,6 +698,9 @@ function eventLabel(event: CanonicalEntity): string {
   if (event.kind === "experiment_context") {
     return event.title ?? "Personal experiment";
   }
+  if (event.tags.includes("capture")) {
+    return captureEventLabel(event.title);
+  }
   if (event.title) return event.title;
   if (event.kind === "intervention_session") {
     return humanize(
@@ -723,6 +718,14 @@ function eventLabel(event: CanonicalEntity): string {
   return humanize(event.kind);
 }
 
+function captureEventLabel(title: string | null): string {
+  const normalizedTitle = title?.trim();
+  const generatedTitle = normalizedTitle?.match(/^Capture\s*-\s*(.+)$/iu)?.[1];
+  return generatedTitle
+    ? humanize(generatedTitle)
+    : normalizedTitle ?? "Media capture";
+}
+
 function eventSummary(event: CanonicalEntity): string | null {
   const summary = readString(event.attributes.summary);
   if (event.kind === "experiment_context") {
@@ -730,6 +733,7 @@ function eventSummary(event: CanonicalEntity): string | null {
   }
   if (event.kind === "meal") return mealSummary(event.attributes, event.title);
   if (event.kind === "test") return testSummary(event.attributes);
+  if (event.tags.includes("capture")) return null;
   const resultSummary = readString(event.attributes.resultSummary);
   if (resultSummary) return resultSummary;
   if (summary) return summary;
@@ -757,14 +761,11 @@ function eventSummary(event: CanonicalEntity): string | null {
 }
 
 function testSummary(attributes: Record<string, unknown>): string | null {
-  const markerCount = readNumber(attributes.markerCount);
-  if (markerCount === null) return null;
-  const flaggedCount = readNumber(attributes.flaggedCount);
+  const counts = testResultCounts(attributes);
+  if (!counts) return null;
   return [
-    `${markerCount} ${markerCount === 1 ? "marker" : "markers"}`,
-    flaggedCount !== null && flaggedCount > 0
-      ? `${flaggedCount} need attention`
-      : null,
+    `${counts.markerCount} ${counts.markerCount === 1 ? "marker" : "markers"}`,
+    counts.flaggedCount > 0 ? `${counts.flaggedCount} need attention` : null,
   ]
     .filter((value): value is string => value !== null)
     .join(" · ");
@@ -778,7 +779,10 @@ function mealSummary(
     readString(attributes.mealName) ?? readString(attributes.dishName);
   if (name && name.toLowerCase() !== title?.trim().toLowerCase()) return name;
   if (title && title.trim().toLowerCase() !== "meal") return null;
-  const ingredients = readJournalIngredients(attributes.ingredients).slice(0, 3);
+  const ingredients = readJournalIngredients(attributes.ingredients).slice(
+    0,
+    3,
+  );
   return ingredients.length > 0 ? ingredients.join(", ") : null;
 }
 
@@ -800,7 +804,12 @@ function journalEventDetailItems(event: CanonicalEntity): string[] {
   }
 
   if (event.kind === "note") {
-    return noteDetailItems(event.attributes);
+    return event.tags.includes("capture")
+      ? uniqueStrings([
+          readString(event.attributes.note),
+          ...noteDetailItems(event.attributes),
+        ])
+      : noteDetailItems(event.attributes);
   }
 
   return [];
@@ -843,14 +852,32 @@ function readJournalIngredients(value: unknown): string[] {
 }
 
 function testDetailItems(attributes: Record<string, unknown>): string[] {
-  const markerCount = readNumber(attributes.markerCount);
-  const flaggedCount = readNumber(attributes.flaggedCount);
-  const summary = readString(attributes.resultSummary);
+  const counts = testResultCounts(attributes);
+  const summary = readString(attributes.summary);
   return uniqueStrings([
-    markerCount === null ? null : `Markers: ${markerCount}`,
-    flaggedCount === null ? null : `Flagged: ${flaggedCount}`,
+    counts ? `Markers: ${counts.markerCount}` : null,
+    counts ? `Flagged: ${counts.flaggedCount}` : null,
     summary ? `Summary: ${summary}` : null,
   ]);
+}
+
+function testResultCounts(
+  attributes: Record<string, unknown>,
+): { flaggedCount: number; markerCount: number } | null {
+  if (!Array.isArray(attributes.results)) return null;
+  const results = attributes.results.flatMap((value) => {
+    const result = readRecord(value);
+    return result ? [result] : [];
+  });
+  if (results.length === 0) return null;
+  const attentionFlags = new Set(["abnormal", "critical", "high", "low"]);
+  return {
+    flaggedCount: results.filter((result) => {
+      const flag = readString(result.flag);
+      return flag ? attentionFlags.has(flag.toLowerCase()) : false;
+    }).length,
+    markerCount: results.length,
+  };
 }
 
 function noteDetailItems(attributes: Record<string, unknown>): string[] {
@@ -947,9 +974,7 @@ function activityDetailItems(
   ]);
 }
 
-function activityExerciseNames(
-  attributes: Record<string, unknown>,
-): string[] {
+function activityExerciseNames(attributes: Record<string, unknown>): string[] {
   const workout = readRecord(attributes.workout);
   return readJournalExerciseNames(workout?.exercises);
 }
@@ -1072,17 +1097,15 @@ function buildEventPresentation(
       records.flatMap((record) => record.exerciseNames),
     ).sort((left, right) => left.localeCompare(right));
     return {
-      details: uniqueStrings(
-        [
-          ...records.flatMap((record) => [
-            ...record.detailItems,
-            ...(record.kind === "note" ? [record.summary] : []),
-          ]),
-          exerciseNames.length > 0
-            ? `Exercises: ${exerciseNames.join(", ")}`
-            : null,
-        ],
-      ),
+      details: uniqueStrings([
+        ...records.flatMap((record) => [
+          ...record.detailItems,
+          ...(record.kind === "note" ? [record.summary] : []),
+        ]),
+        exerciseNames.length > 0
+          ? `Exercises: ${exerciseNames.join(", ")}`
+          : null,
+      ]),
       metrics: {
         ...emptyJournalEventMetrics(),
         activityMinutes,
