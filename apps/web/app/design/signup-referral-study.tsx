@@ -108,7 +108,7 @@ export function SignupReferralFlowStudy() {
     >
       <section className="rounded-3xl border border-border bg-background p-5 sm:p-8">
         <p className="mb-4 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-          Settings · Connected sign-ins
+          Settings · Messaging
         </p>
         <div inert>
           <HostedAccountSettingsCards

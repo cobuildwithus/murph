@@ -1,6 +1,6 @@
 # Linked account replacement and removal
 
-Status: active
+Status: completed
 
 ## Outcome
 
@@ -103,3 +103,11 @@ identity so a removed channel does not stay active or visible.
   expected-identity race guard, idempotent cleanup, channel-specific routing
   revocation, and post-commit mailbox wake paths walked without an open proof
   gap.
+- Final ReviewGPT round 6: passed on the full auth-sensitive patch with every
+  prior finding verified closed and no remaining merge-veto finding.
+- Exact CI-remediation proof: `biomarker-design-studies.test.tsx` passed 10
+  tests after restoring its established Settings study heading; frontend design
+  proof passed 12 tests. This final change is confined to the non-production
+  design catalog and does not alter reviewed product behavior.
+Updated: 2026-09-03
+Completed: 2026-09-03
