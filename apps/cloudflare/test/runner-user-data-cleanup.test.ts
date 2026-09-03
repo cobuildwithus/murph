@@ -733,15 +733,19 @@ describe("hosted runner user data cleanup", () => {
       userId: USER_ID,
     });
     await bucket.put(validObjectKey, "encrypted-snapshot");
+    const readHostedWorkspaceFromWeb = vi.fn(async (userId: string) => {
+      expect(bucket.deleted).toEqual([]);
+      return {
+        fetchedAt: NOW,
+        workspace: createWorkspaceState(userId),
+      };
+    });
     const service = createWorkspaceSnapshotSessionService({
       bucket,
       runnerStoreCache: createUnusedRunnerStoreCache(),
       state: durable.state,
       stateStore,
-      readHostedWorkspaceFromWeb: async (userId) => ({
-        fetchedAt: NOW,
-        workspace: createWorkspaceState(userId),
-      }),
+      readHostedWorkspaceFromWeb,
       assertWorkspaceBelongsToRunnerUser(workspace, userId) {
         if (workspace?.userId !== userId) {
           throw new Error("Workspace user mismatch.");
@@ -756,6 +760,7 @@ describe("hosted runner user data cleanup", () => {
     expect(durable.storageValues.has(malformedCandidateKey)).toBe(false);
     expect(durable.storageValues.has(validCandidateKey)).toBe(false);
     expect(stateStore.boundUsers).toEqual([USER_ID]);
+    expect(readHostedWorkspaceFromWeb).toHaveBeenCalledExactlyOnceWith(USER_ID);
   });
 
   it("protects every live browser-vault shard while deleting replaced replica objects", async () => {

@@ -101,6 +101,75 @@ conversation and turn-scoped automation overrides resolve and is the normalized
 value passed to the Codex provider attempt. Raw provider configuration, prompts,
 messages, credentials, and paths remain excluded.
 
+### Web-control preflight rejection attribution
+
+Ordinary hosted-runtime callers select branded route descriptors from the same
+registry that derives the shared Cloudflare allowlist. If runtime validation
+nevertheless detects a descriptor/policy mismatch, it throws the dedicated
+`HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED` error before issuing a request.
+Before throwing, Cloudflare writes the immediate event
+`runner.web_control_preflight_rejected` through the existing durable runtime-log
+port. That event contains only bounded policy metadata and deliberately omits
+the route, query, payload, description, member id, and credentials. Failure to
+persist telemetry never replaces the original typed error. When the rejected
+call belongs to retained system-mailbox work, the existing
+`mailbox.system_processed` retry warning preserves that code in the typed
+`error_code` column.
+
+Use a fixed half-open observation window to count all observed preflight
+rejections without returning subject keys or raw JSON:
+
+```sql
+SELECT
+  redacted_json->>'method' AS method,
+  redacted_json->>'operation' AS operation,
+  redacted_json->>'reason' AS reason,
+  redacted_json->>'transport' AS transport,
+  COUNT(*) AS event_count,
+  COUNT(DISTINCT subject_key) AS distinct_subject_count,
+  MIN(at) AS first_at,
+  MAX(at) AS last_at
+FROM hosted_runtime_log
+WHERE at >= :window_start
+  AND at < :window_end
+  AND event_code = 'runner.web_control_preflight_rejected'
+  AND error_code = 'HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED'
+GROUP BY
+  redacted_json->>'method',
+  redacted_json->>'operation',
+  redacted_json->>'reason',
+  redacted_json->>'transport'
+ORDER BY method, operation, reason, transport;
+```
+
+Use the existing processing outcome to attribute retained system-mailbox
+retries:
+
+```sql
+SELECT
+  redacted_json->>'status' AS status,
+  redacted_json->>'wakeKind' AS wake_kind,
+  redacted_json->>'routeAction' AS route_action,
+  COUNT(*) AS event_count,
+  COUNT(DISTINCT subject_key) AS distinct_subject_count,
+  MIN(at) AS first_at,
+  MAX(at) AS last_at
+FROM hosted_runtime_log
+WHERE at >= :window_start
+  AND at < :window_end
+  AND event_code = 'mailbox.system_processed'
+  AND error_code = 'HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED'
+GROUP BY
+  redacted_json->>'status',
+  redacted_json->>'wakeKind',
+  redacted_json->>'routeAction'
+ORDER BY status, wake_kind, route_action;
+```
+
+Return only those aggregates. Never return `subject_key` values or raw JSON.
+The preflight log uses the existing runtime-log transport, and the error remains
+on the existing retry path; both changes are observability-only.
+
 ### Assistant-notification validation attribution
 
 An existing `mailbox.system_processed` warning with

@@ -6,6 +6,8 @@ import {
   cloudflareDevVarsPath,
   DEFAULT_DATABASE_URL,
   DEFAULT_STRIPE_ENV_FILE,
+  HOSTED_LOCAL_HTTPS_ORIGIN,
+  HOSTED_LOCAL_PUBLIC_WEB_BASE_URL_ENV,
   HOSTED_WORKER_OPTIONAL_SECRET_NAMES,
   HOSTED_WORKER_REQUIRED_SECRET_NAMES,
   HOSTED_LOCAL_DEV_CRYPTO_STATE_FILE,
@@ -693,9 +695,18 @@ export function buildHostedLocalDevOverrides(
   cloudflareDevVars: Record<string, string>,
   input: {
     retellWebhookPublicBaseUrl?: string | null;
+    webPublicBaseUrl?: string | null;
   } = {},
 ): NodeJS.ProcessEnv {
-  const webOrigin = `http://${config.webHost}:${config.webPort}`;
+  const internalWebOrigins = [
+    `http://localhost:${config.webPort}`,
+    `http://127.0.0.1:${config.webPort}`,
+  ];
+  const internalWebOrigin = `http://${config.webHost}:${config.webPort}`;
+  const webOrigin = resolveHostedLocalPublicWebOrigin(
+    input.webPublicBaseUrl,
+    internalWebOrigin,
+  );
   const deviceSyncPublicBaseUrl = `${webOrigin}/api/device-sync`;
   const retellWebhookPublicBaseUrl =
     normalizeOptionalString(input.retellWebhookPublicBaseUrl);
@@ -730,7 +741,10 @@ export function buildHostedLocalDevOverrides(
     DEVICE_SYNC_PUBLIC_BASE_URL: deviceSyncPublicBaseUrl,
     HOSTED_EXECUTION_CONTROL_URL: workerBaseUrl,
     HOSTED_EXECUTION_DISPATCH_URL: workerBaseUrl,
+    HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS:
+      [...new Set([webOrigin, ...internalWebOrigins])].join(","),
     HOSTED_ONBOARDING_PUBLIC_BASE_URL: webOrigin,
+    HOSTED_WEB_BASE_URL: webOrigin,
     ...(retellWebhookPublicBaseUrl
       ? { RETELL_WEBHOOK_PUBLIC_BASE_URL: retellWebhookPublicBaseUrl }
       : {}),
@@ -749,7 +763,6 @@ export function buildHostedLocalDevOverrides(
     HOSTED_MAILBOX_FINGERPRINT_KEY:
       cloudflareDevVars.HOSTED_MAILBOX_FINGERPRINT_KEY?.trim()
       || HOSTED_LOCAL_MAILBOX_FINGERPRINT_KEY,
-    HOSTED_WEB_BASE_URL: webOrigin,
     ...(!cloudflareDevVars.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK?.trim()
       && cloudflareAutomationPrivateJwkJson
       ? {
@@ -772,6 +785,22 @@ export function buildHostedLocalDevOverrides(
     ...(callbackKeyId ? { HOSTED_WEB_CALLBACK_SIGNING_KEY_ID: callbackKeyId } : {}),
     VERCEL_PROJECT_PRODUCTION_URL: `${config.webHost}:${config.webPort}`,
   };
+}
+
+function resolveHostedLocalPublicWebOrigin(
+  value: string | null | undefined,
+  fallbackOrigin: string,
+): string {
+  const configured = normalizeOptionalString(value);
+  if (!configured) {
+    return fallbackOrigin;
+  }
+  if (configured === HOSTED_LOCAL_HTTPS_ORIGIN) {
+    return configured;
+  }
+  throw new Error(
+    `${HOSTED_LOCAL_PUBLIC_WEB_BASE_URL_ENV} must be ${HOSTED_LOCAL_HTTPS_ORIGIN}.`,
+  );
 }
 
 function copyNonEmptyEnv(source: Record<string, string>, key: string): NodeJS.ProcessEnv {
@@ -1078,6 +1107,9 @@ export function buildWranglerLocalDevConfig(
 
   return {
     name: workerName,
+    ...(normalizeOptionalString(source.CLOUDFLARE_ACCOUNT_ID)
+      ? { account_id: normalizeOptionalString(source.CLOUDFLARE_ACCOUNT_ID) }
+      : {}),
     main: toWranglerConfigRelativePath(
       configDir,
       path.join(cloudflareAppDir, "src", resolveWranglerLocalDevWorkerEntrypoint(source)),

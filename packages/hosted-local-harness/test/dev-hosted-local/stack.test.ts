@@ -609,6 +609,11 @@ describe("hosted local dev stack", () => {
     const runtimeModule = await import("../../src/dev-hosted-local/runtime.ts");
     const vercelModule = await import("../../src/dev-hosted-local/vercel.ts");
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+    vi.mocked(environmentModule.buildHostedLocalDevOverrides).mockReturnValueOnce({
+      DEVICE_SYNC_PUBLIC_BASE_URL:
+        "https://local.withmurph.ai:3443/api/device-sync",
+      HOSTED_WEB_BASE_URL: "https://local.withmurph.ai:3443",
+    });
     vi.mocked(runtimeModule.assertHostedWebDevServerAvailable).mockImplementationOnce(
       async () => {
         expect(process.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
@@ -628,6 +633,7 @@ describe("hosted local dev stack", () => {
         ...process.env,
         HOSTED_APP_SESSION_HMAC_KEY: inheritedAppSessionHmacKey,
         LINQ_API_BASE_URL: "http://host.docker.internal:4011",
+        MURPH_DEV_WEB_PUBLIC_BASE_URL: "https://local.withmurph.ai:3443",
       },
       webProcessEnvOverrides: {
         LINQ_API_BASE_URL: "http://127.0.0.1:4011",
@@ -636,6 +642,7 @@ describe("hosted local dev stack", () => {
     await stack.ready;
     await stack.stop();
 
+    expect(stack.webBaseUrl).toBe("https://local.withmurph.ai:3443");
     expect(process.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
     expect(stack.runtimeEnv.LINQ_API_BASE_URL).toBe(
       "http://host.docker.internal:4011",
@@ -673,9 +680,10 @@ describe("hosted local dev stack", () => {
         "--var",
         "HOSTED_WEB_BASE_URL:http://localhost:3000",
         "--var",
-        "DEVICE_SYNC_PUBLIC_BASE_URL:http://localhost:3000/api/device-sync",
+        "DEVICE_SYNC_PUBLIC_BASE_URL:https://local.withmurph.ai:3443/api/device-sync",
       ],
       expect.objectContaining({
+        HOSTED_WEB_BASE_URL: "http://localhost:3000",
         HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
           expect.stringContaining("automation-d"),

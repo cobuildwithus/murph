@@ -698,6 +698,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       handoff: "personal_active",
       ask_current_sender: "participant_aware",
       record_current_sender_daily_metric: "participant_aware",
+      record_current_sender_journal_fact: "participant_aware",
       ask_member: "participant_aware",
       arm_usage_referral: "participant_aware",
       cancel_usage_referral: "participant_aware",
@@ -722,6 +723,8 @@ describe("handleHostedRuntimeGroupTool", () => {
       read_shared: "participant_aware",
       revoke_own_email_share: "participant_aware",
       set_chat_avatar: "owner_active",
+      set_current_sender_journal_capture: "participant_aware",
+      set_journal_capture: "personal_active",
       share_contact_card: "owner_active",
       update_display_name: "owner_active",
     });

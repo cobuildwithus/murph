@@ -1,5 +1,5 @@
 export const HOSTED_RUNNER_SMOKE_RESULT_SCHEMA = "murph.cloudflare-hosted-runner-smoke.v2";
-export const HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT = 4;
+export const HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT = 5;
 export const HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT = 12;
 export const HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT = 2;
 export const HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_MUTATION_DENIED_COUNT = 5;
@@ -377,6 +377,14 @@ const assistantCliSurfaceHotPathProofs: readonly {
     snippets: [
       "args <provider>",
       "--returnTo=string",
+    ],
+  },
+  {
+    command: "wearables activity list",
+    snippets: [
+      "--includeWorkoutDetails",
+      "One data read only. Day totals (`sessionCount`, `sessionMinutes`, distinct `activityTypes`): omit detail; no false flag or schema read.",
+      "Workout/subset facts: include detail first.",
     ],
   },
 ];

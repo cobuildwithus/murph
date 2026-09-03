@@ -23,6 +23,32 @@ That rendered surface is then used by:
 The rendered deploy helper path is the canonical direct Wrangler deploy contract consumed from the private deployment workflow. The checked-in Wrangler scaffold remains useful for local development, but production deploys must run from private Murph Cloud and use the rendered config so hosted email send bindings stay environment-specific and sender-restricted.
 `deploy:worker:apply` validates the generated Wrangler config, worker secrets payload, and `.deploy/runner-bundle/` manifest before invoking Wrangler. The runner bundle manifest records the assembled workspace closure and source/bundle fingerprints. Production assembly now builds the runner bundle first and renders those exact fingerprints into the Worker config; applying after a stale hosted-local bundle, a smoke-mutated bundle, or a config rendered for another bundle fails before upload.
 The deploy helper also rejects generated config or secrets that no longer match the current environment, and rejects runner bundles assembled with `runner:bundle:assemble-only` so smoke-only build shortcuts cannot be uploaded as production artifacts.
+Every protected deploy must set `HOSTED_EXECUTION_DEPLOY_TAG` to the private
+workflow run and attempt identity. The direct deploy emits one ephemeral
+`container_release_receipt` containing schema version 1, that tag, Wrangler's
+exact Worker version ID, and one sorted entry per rendered container: application
+and class names, `created`/`updated`/`unchanged`, the provider application
+version, and a SHA-256 digest of the provider image reference. The helper keeps
+raw application IDs, image references, account identifiers, tokens, and provider
+errors out of the receipt. Exact-name application discovery uses the provider
+list only to resolve one application identifier; both the pre-deploy and
+post-deploy receipt snapshots come from that application's detail endpoint.
+After Wrangler reports a successful container change, the deploy helper waits
+up to two minutes for the provider to expose the exact transition. While a
+rollout is active, the receipt uses that new rollout's authoritative target
+version and image only when its current version and image match the pre-deploy
+application and its identifier differs from any pre-existing active rollout.
+If the rollout has already completed, the receipt uses the transitioned
+application detail instead. Unreadable, reused, reverted, replaced, or
+unrelated rollout evidence fails closed instead of issuing a stale receipt.
+The provider application version is a release identity, not a deploy counter;
+an `updated` entry requires the existing provider application identity to
+remain continuous and either a newly active target or a completed detail
+transition. A later protected observer must match the receipt to 100% Worker
+traffic and the final container versions, image digests, capacities, and rollout
+outcomes. Land
+this public producer before enabling a private workflow that requires the
+receipt; the reverse order intentionally fails closed.
 Docker runner smoke derives a separate `.deploy/runner-smoke-bundle/` from the validated production bundle and overlays smoke-only entrypoints there, so the production `.deploy/runner-bundle/` remains the deploy artifact after smoke.
 Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budgets and assembly-time probes: the in-container `vault-cli` binary (`scripts/runner-bundle/bundle-cli.ts`) and the container entrypoint itself (`scripts/runner-bundle/bundle-entrypoint.ts`, output `dist-bundled/`, run by the image CMD). The Node-only CLI chunks use native UTF-8 output so existing Unicode literals are not expanded into ASCII escapes; assembly retains absolute entry-chunk and static-startup-closure caps, while canonical Ubuntu x86_64 host-support CI builds the exact candidate and its exact first parent in isolated sibling checkouts and permits total output growth only up to `max(96 KiB, floor(1% of base total))`. The CLI probe creates private synthetic initialized-vault fixtures, requires exact bundled/unbundled parity for populated `memory show --format json`, and separately preserves the successful empty result when canonical memory is absent. The bundled entrypoint cuts cold-boot module loading from ~960 file reads to ~27 chunk reads on lazily pulled image layers; package resolvers that derive asset paths from their own module location are pinned to the installed package copies via Dockerfile ENV (`MURPH_ASSISTANT_SKILLS_ROOT`, `MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH`, `MURPH_HEALTH_COMMONS_PACKAGE_ROOT`). Health Commons stays installed in the runner bundle for its compact protocol and biomarker desired-direction artifacts, while its JS is inlined and assembly probes set the same package-root pin for bundled and unbundled parity. The web-only Health Commons artifact tree remains excluded. Zod stays installed for deferred package-loader paths, but production assembly removes declaration files, TypeScript source, the legacy v3 runtime, and unused mini variants after verifying that staged JavaScript imports only the retained root and v4 surfaces.
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
@@ -751,16 +777,24 @@ are correctness-compatible, so either side may be rolled back independently
 during this compatibility window. The recommended order minimizes exposure to
 the old latency path.
 
-The same producer-first order applies to the positive
-`immediateRecheckRequested` owner-release edge. New Cloudflare code signs its
-exact query and lets it override only the normal future-continuation callback
-skip; old runners simply omit the edge and fall back to the owner horizon. Web
-must not deploy the due-wake level-trigger removal before the new producer is
-available. Roll back Web before Cloudflare/runner if the pair must be reverted.
+The exact owner-release attempt pointer uses consumer-first rollout. Classify
+the private Temporal worker as patch-introducing, deploy it through its
+no-traffic direct-Current path, and prove the exact Build ID is Current with no
+prior or Ramping reader eligible for the Task Queue. Only then deploy Web,
+followed by Cloudflare/runner. During the compatibility window, Web maps old
+bodyless callbacks without an attempt pointer to the existing facts-only
+recheck. New Cloudflare code signs `runtimeAttemptId` and the optional
+`immediateRecheckRequested` edge in one canonical query; old Web rejects that
+query non-fatally, so Web must precede the producer.
 
-After both deploys, confirm there is no extra metadata-only handoff checkpoint
-for the same shutdown and actionable late input causes the existing Temporal
-recheck after owner release.
+Roll back or disable Cloudflare and Web before worker recovery. Once Web can
+emit `runtime_owner_released`, never select the previous private Build ID until
+both producers are disabled and all signal-bearing Workflow histories have
+drained. Recover the consumer forward during that interval.
+
+After all three deploys, confirm there is no extra metadata-only handoff
+checkpoint for the same shutdown and actionable late input causes the exact
+Temporal owner release to admit fresh reconciliation immediately.
 
 ## Assistant Ask Deployment
 
@@ -1379,6 +1413,9 @@ Core execution tuning:
 - `CF_COMPATIBILITY_DATE` defaults to `2026-03-27`
 - `CF_CONTAINER_INSTANCE_TYPE` defaults to `{"vcpu":2,"memory_mib":6144,"disk_mb":6000}`. This restores the two-vCPU production shape after measured cold-start and same-size workspace-restore regressions on the smaller allocation. The post-completion conversation idle lease remains independently configured at ten minutes.
 - `CF_CONTAINER_MAX_INSTANCES` defaults to `1000`
+- `CF_STANDBY_CONTAINER_MAX_INSTANCES` defaults to the resolved
+  `CF_CONTAINER_MAX_INSTANCES` value. Set it separately only when the standby
+  application needs a different ceiling from ordinary member runners.
 - `CF_MAX_EVENT_ATTEMPTS` defaults to `3`
 - `CF_RETRY_DELAY_MS` defaults to `30000`
 - `CF_WEB_CONTROL_TIMEOUT_MS` defaults to `30000`
@@ -1393,9 +1430,12 @@ Core execution tuning:
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000` (production sets `600000`) and controls the post-completion warm lease minted only by observed conversation activity. Reducing production from 20 minutes to 10 minutes means a follow-up in the former 11–20 minute warm window can take the existing cold-start path instead. `HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS` defaults to the idle TTL when absent for rollback compatibility. Leave it unset for the additive code deploy and one legacy-TTL observation window, drain old containers, then set it to `60000` for a canary before widening the rollout. Device sync, system maintenance, replay, and generic runner activity do not extend conversation warmth. RunnerContainer derives the lease directly from the resident child process's private health watermark on every expiry, re-arms the platform timeout while the lease or active work remains, yields on uncertain cleanup state, and otherwise destroys the idle shell. An inactive old child without the watermark is cleanup-eligible; active old-child work remains protected by its independent active-work count. A replacement child starts without inheriting the old process's warmth. Dirty foreground runtime state is checkpointed by the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` path before the invocation returns; RunnerContainer never records pending checkpoint intent.
 - `HOSTED_EXECUTION_STANDBY_MODE` defaults to `off`. `shadow` maintains one
   release-scoped ENAM standby and measures readiness without allocating it;
-  `allocate` lets `UserRunner` claim it with a 250 ms total coordinator/bind
-  deadline and uses the unchanged exact-user cold path when no ready slot is
-  available. Invalid values fail deploy/runtime parsing closed.
+  `allocate` lets only a fresh, authenticated Web-direct `default` start claim
+  it with a 250 ms total coordinator/bind deadline. Temporal starts, background
+  modes, and replacement of work already using the member's exact container use
+  the unchanged exact-user path. Pending or retained standby targets still
+  reconcile before that fresh-claim gate. Invalid values fail deploy/runtime
+  parsing closed.
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production` for
   direct/local artifact rendering. The manual deploy workflow derives it from
   the selected `preview` or `production` target; do not configure a conflicting
@@ -1414,12 +1454,21 @@ scheduling retry alarms until fresh nudge/manual input resets the counter.
 
 Deploy the Worker, both new Durable Object classes, bindings, migration `v7`,
 and the prepared `StandbyRunnerContainer` image while the mode remains `off`.
+For the bounded 100-instance standby capacity trial, set the protected
+production environment to `CF_CONTAINER_MAX_INSTANCES=648` and
+`CF_STANDBY_CONTAINER_MAX_INSTANCES=100`. Together with the fixed one-instance
+deploy-smoke application, this preserves the existing 749-instance declared
+total. The standby ceiling does not reserve a ready slot: at saturation, a
+100th claimed standby can leave no ready replacement until capacity frees.
 Run exact-version endpoint smoke and managed-container smoke to prove the
 effective standby mode, expected Worker release, and runner bundle/source
 fingerprints first. Then use `shadow` for at least one ordinary
 observation window and verify that exactly one current-release ENAM slot stays
 ready, failed/stale slots retire, and no processing reports a claimed standby.
-Only then set `allocate`; no Web or Temporal deploy is required.
+Only then set `allocate`; no Web or Temporal deploy is required. In the bounded
+post-deploy observation, require every claimed allocation to be a validated
+Web-direct `default` attempt and require Temporal or background starts to report
+the exact-user path instead of a claim.
 
 At the current 2-vCPU, 6-GiB-memory, 6-GB-disk shape, one continuously ready
 slot costs about $40.52 per average 730-hour month for allocated memory and
@@ -1691,6 +1740,9 @@ If the selected GitHub environment already defines container sizing overrides, u
 
 - `CF_CONTAINER_INSTANCE_TYPE={"vcpu":2,"memory_mib":6144,"disk_mb":6000}`
 - `CF_CONTAINER_MAX_INSTANCES=1000`
+- `CF_STANDBY_CONTAINER_MAX_INSTANCES=1000` when standby needs a ceiling that
+  differs from the ordinary runner application; otherwise omit it to inherit
+  `CF_CONTAINER_MAX_INSTANCES`
 
 When hosted email sender identity is configured, deploy automation renders one native `send_email` binding named `HOSTED_EMAIL` and constrains it with `allowed_sender_addresses` to that resolved sender address. Hosted email outbound send no longer requires a runtime Cloudflare account id or email-send API token inside the Worker.
 

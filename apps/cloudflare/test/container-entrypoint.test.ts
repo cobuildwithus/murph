@@ -1484,7 +1484,7 @@ describe("startHostedContainerEntrypoint", () => {
     const runCodexShellSmoke = vi.fn(async () => ({
       client: "codex-app-server" as const,
       cliSurfaceContractBytes: 37282,
-      cliSurfaceHotPathProofCount: 4,
+      cliSurfaceHotPathProofCount: 5,
       murphPathBytes: 28,
       noteAddBytes: 128,
       stderrBytes: 0,
@@ -1516,7 +1516,7 @@ describe("startHostedContainerEntrypoint", () => {
       codexShell: {
         client: "codex-app-server",
         cliSurfaceContractBytes: 37282,
-        cliSurfaceHotPathProofCount: 4,
+        cliSurfaceHotPathProofCount: 5,
         murphPathBytes: 28,
         noteAddBytes: 128,
         stderrBytes: 0,

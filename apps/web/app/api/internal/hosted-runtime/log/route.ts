@@ -2,6 +2,7 @@ import {
   parseHostedRuntimeLogRequest,
   parseHostedRuntimeLogResponse,
 } from "@murphai/hosted-execution/parsers";
+import { after } from "next/server";
 
 import {
   requireHostedCloudflareCallbackRequest,
@@ -17,6 +18,10 @@ import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
   writeHostedRuntimeLogs,
 } from "@/src/lib/hosted-runtime-log/write";
+import {
+  hasHostedPersonalPatternsRunAlert,
+  reportHostedPersonalPatternsRunAlerts,
+} from "@/src/lib/hosted-runtime-log/personal-patterns-run-alert";
 import {
   claimHostedAcceptedAttemptFailureRecheck,
 } from "@/src/lib/hosted-workspace/store";
@@ -46,6 +51,11 @@ export const POST = withJsonError(async (request: Request) => {
     entries: body.entries,
     userId,
   });
+  if (loggedCount > 0 && hasHostedPersonalPatternsRunAlert(body.entries)) {
+    after(() => reportHostedPersonalPatternsRunAlerts({
+      entries: body.entries,
+    }));
+  }
 
   return jsonOk(parseHostedRuntimeLogResponse({
     loggedCount,

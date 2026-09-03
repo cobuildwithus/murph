@@ -1154,7 +1154,9 @@ describe("HostedUserRunner execution coordination", () => {
     const ensure = harness.runner.ensureRuntimeProcessingForUser({
       commandTimeoutMs:
         HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS + foregroundBudgetMs,
-      orchestrationAttemptId: "standby-binding-timeout",
+      orchestration: { triggeredByWebDirect: true },
+      orchestrationAttemptId:
+        "web-ingress-99999999-9999-4999-8999-999999999999",
       userId: TEST_USER_ID,
     });
     await bindingReadStarted.promise;
@@ -1561,10 +1563,12 @@ describe("HostedUserRunner execution coordination", () => {
     expect(ownerReleaseCalls[0]?.[0]).toMatchObject({
       boundUserId: TEST_USER_ID,
       method: "POST",
+      search: expect.stringMatching(
+        /^\?runtimeAttemptId=runtime-write-[A-Za-z0-9_-]+$/u,
+      ),
       timeoutMs: 2_000,
     });
     expect(ownerReleaseCalls[0]?.[0]).not.toHaveProperty("body");
-    expect(ownerReleaseCalls[0]?.[0]).not.toHaveProperty("search");
     expect(alarms).toEqual([]);
   });
 
@@ -1655,7 +1659,11 @@ describe("HostedUserRunner execution coordination", () => {
         (call) => call[0].path === HOSTED_RUNTIME_OWNER_RELEASED_PATH,
       );
     expect(ownerReleaseCalls).toHaveLength(1);
-    expect(ownerReleaseCalls[0]?.[0]).not.toHaveProperty("search");
+    expect(ownerReleaseCalls[0]?.[0]).toMatchObject({
+      search: expect.stringMatching(
+        /^\?runtimeAttemptId=runtime-write-[A-Za-z0-9_-]+$/u,
+      ),
+    });
   });
 
   it("carries an immediate recheck request in the signed owner-release query", async () => {
@@ -1695,7 +1703,9 @@ describe("HostedUserRunner execution coordination", () => {
       );
     expect(ownerReleaseCalls).toHaveLength(1);
     expect(ownerReleaseCalls[0]?.[0]).toMatchObject({
-      search: "?immediateRecheckRequested=1",
+      search: expect.stringMatching(
+        /^\?runtimeAttemptId=runtime-write-[A-Za-z0-9_-]+&immediateRecheckRequested=1$/u,
+      ),
     });
     expect(ownerReleaseCalls[0]?.[0]).not.toHaveProperty("body");
   });
@@ -4173,9 +4183,10 @@ describe("HostedUserRunner execution coordination", () => {
   });
 
   it.each([
-    ["retention-only", "default", "inbox_media_retention", undefined, false],
-    ["retention-only", "system-mailbox", "inbox_media_retention", "system_mailbox", false],
-    ["system-mailbox", "default", "system_mailbox", undefined, true],
+    ["retention-only", "default", "inbox_media_retention", undefined, false, false],
+    ["retention-only", "system-mailbox", "inbox_media_retention", "system_mailbox", false, false],
+    ["system-mailbox", "default", "system_mailbox", undefined, true, false],
+    ["completing system-mailbox", "default", "system_mailbox", undefined, true, true],
   ] as const)(
     "preempts active %s work before starting %s processing",
     async (
@@ -4184,6 +4195,7 @@ describe("HostedUserRunner execution coordination", () => {
       activeProcessingMode,
       processingMode,
       triggeredByWebDirect,
+      completeDuringAbort,
     ) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -4215,21 +4227,43 @@ describe("HostedUserRunner execution coordination", () => {
     const runnerRuntimeEnvSource = {
       ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
       CF_VERSION_METADATA: { id: "current" },
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
     };
     const priorRunnerContainerName = `${TEST_USER_ID}--v-prior`;
     const currentRunnerContainerName = `${TEST_USER_ID}--v-current`;
+    const activeRunnerContainerName = triggeredByWebDirect
+      ? currentRunnerContainerName
+      : priorRunnerContainerName;
+    const claimReadyStandby = vi.fn(async () => ({
+      outcome: "no_ready_slot" as const,
+    }));
     const { invoke, runner, runnerContainerNames, sql } = createRunnerHarness({
       abortWorkspaceInvocation,
       ensureProcessing,
       invocationResults: [invocationResult.promise],
       readActiveRuntimeUserFence,
       runnerRuntimeEnvSource,
+      standbyContainerNamespace: {
+        getByName() {
+          throw new Error("Background preemption must reuse the exact-user container.");
+        },
+      },
+      standbyCoordinatorNamespace: {
+        getByName() {
+          return {
+            claimReadyStandby,
+            async ensureReadyStandby() {
+              return { accepted: true } as const;
+            },
+          };
+        },
+      },
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
     const token = writeRuntimeFenceForTest(sql, {
       processingMode: activeProcessingMode,
-      runnerContainerName: priorRunnerContainerName,
+      runnerContainerName: activeRunnerContainerName,
       workspaceVersion: "7",
     });
     activeAttemptId = token.attemptId;
@@ -4278,7 +4312,16 @@ describe("HostedUserRunner execution coordination", () => {
     expect(abortWorkspaceInvocation).toHaveBeenCalledOnce();
     expect(ensureRuntimeProcessingSettled).toBe(false);
     expect(invoke).not.toHaveBeenCalled();
-    expect(runnerContainerNames[0]).toBe(priorRunnerContainerName);
+    expect(runnerContainerNames[0]).toBe(activeRunnerContainerName);
+    if (completeDuringAbort) {
+      await expect(runner.recordRuntimeCompletionFromContainer({
+        attemptId: token.attemptId,
+        generation: String(token.generation),
+        result: { nextWakeAt: null, status: "idle" },
+        userId: TEST_USER_ID,
+      })).resolves.toEqual({ completed: true });
+      expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+    }
     abortResult.resolve("accepted");
 
     await expect(ensureRuntimeProcessing).resolves.toMatchObject({
@@ -4295,6 +4338,7 @@ describe("HostedUserRunner execution coordination", () => {
       userId: TEST_USER_ID,
     });
     expect(ensureProcessing).not.toHaveBeenCalled();
+    expect(claimReadyStandby).not.toHaveBeenCalled();
     expect(ensureRuntimeProcessingSettled).toBe(true);
     expect(invoke).toHaveBeenCalledOnce();
     expect(runnerContainerNames).toContain(currentRunnerContainerName);
@@ -4302,7 +4346,7 @@ describe("HostedUserRunner execution coordination", () => {
       processingMode,
     );
     expect(invoke.mock.calls[0]?.[0].orchestration).toMatchObject({
-      replacedStaleFence: false,
+      ...(completeDuringAbort ? {} : { replacedStaleFence: false }),
       ...(triggeredByWebDirect
         ? {
             runtimeInvocationOrchestrationAttemptId: orchestrationAttemptId,
@@ -4310,6 +4354,11 @@ describe("HostedUserRunner execution coordination", () => {
           }
         : {}),
     });
+    if (completeDuringAbort) {
+      expect(invoke.mock.calls[0]?.[0].orchestration).not.toHaveProperty(
+        "replacedStaleFence",
+      );
+    }
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: expect.not.stringMatching(token.attemptId),
       active_expires_at: null,

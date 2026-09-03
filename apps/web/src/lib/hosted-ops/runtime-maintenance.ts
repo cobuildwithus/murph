@@ -19,6 +19,20 @@ import {
   type HostedRuntimeStalledRecheckCandidateScan,
 } from "../hosted-runtime-progress/alert-monitor";
 import { getPrisma } from "../prisma";
+import {
+  captureHostedRuntimeRecoveryWitnesses,
+  isHostedRuntimeRecoveryMemberId,
+  type HostedRuntimeRecoveryVerificationResult,
+  type HostedRuntimeRecoveryWitness,
+  verifyHostedRuntimeRecoveryWitnesses,
+} from "./runtime-recheck-verification";
+
+export type {
+  HostedRuntimeRecoveryVerificationResult,
+  HostedRuntimeRecoveryVerificationStatus,
+  HostedRuntimeRecoveryVerificationUserResult,
+  HostedRuntimeRecoveryWitness,
+} from "./runtime-recheck-verification";
 
 export const HOSTED_RUNTIME_MAINTENANCE_DEFAULT_READ_LIMIT = 20;
 export const HOSTED_RUNTIME_MAINTENANCE_MAX_READ_LIMIT = 100;
@@ -27,8 +41,6 @@ export const HOSTED_RUNTIME_MAINTENANCE_MAX_WAKE_LIMIT = 3;
 export const HOSTED_RUNTIME_STALLED_RECHECK_DEFAULT_READ_LIMIT = 100;
 export const HOSTED_RUNTIME_STALLED_RECHECK_MAX_READ_LIMIT = 100;
 export const HOSTED_RUNTIME_RECHECK_MAX_SIGNAL_LIMIT = 3;
-const HOSTED_RUNTIME_MEMBER_ID_MAX_LENGTH = 128;
-const HOSTED_RUNTIME_MEMBER_ID_PATTERN = /^hbm_[A-Za-z0-9_-]+$/u;
 
 export interface HostedRuntimeMaintenanceWorkspace {
   checkpointedAt: string | null;
@@ -71,6 +83,7 @@ export type HostedRuntimeRecheckUserResult =
   | {
       status: "signaled";
       userId: string;
+      witness: HostedRuntimeRecoveryWitness;
     }
   | {
       errorMessage: string;
@@ -252,24 +265,33 @@ export async function readHostedRuntimeStalledRecheckOverview(input: {
 
 export async function signalHostedRuntimeRecheckBatch(input: {
   abortSignal?: AbortSignal;
+  now?: Date;
   prisma?: PrismaClient;
   signalRuntimeRecheck?: HostedRuntimeRecheckSignal;
   userIds: readonly string[];
 }): Promise<HostedRuntimeRecheckResult> {
   const prisma = input.prisma ?? getPrisma();
   const userIds = normalizeRuntimeRecheckUserIds(input.userIds);
-  const workspaceRows = await prisma.hostedWorkspace.findMany({
-    select: { userId: true },
-    where: { userId: { in: userIds } },
+  const witnesses = await captureHostedRuntimeRecoveryWitnesses({
+    now: input.now ?? new Date(),
+    prisma,
+    userIds,
   });
-  const workspaceUserIds = new Set(workspaceRows.map((row) => row.userId));
+  const orderedWitnesses = userIds.map((userId) => {
+    const witness = witnesses.get(userId);
+    if (!witness) {
+      throw new Error("Runtime recovery witness capture returned an incomplete batch.");
+    }
+    return witness;
+  });
   const signalRuntimeRecheck = input.signalRuntimeRecheck
     ?? signalHostedRuntimeRecheckRuntime;
   const deadlineMs = createHostedPostCommitDeadline(undefined);
   const results: HostedRuntimeRecheckUserResult[] = [];
 
-  for (const userId of userIds) {
-    if (!workspaceUserIds.has(userId)) {
+  for (const [index, userId] of userIds.entries()) {
+    const witness = orderedWitnesses[index]!;
+    if (witness.workspaceVersion === null) {
       results.push({
         errorMessage: "No hosted runtime workspace exists for this member id.",
         errorName: "HostedRuntimeWorkspaceNotFound",
@@ -291,6 +313,7 @@ export async function signalHostedRuntimeRecheckBatch(input: {
       results.push({
         status: "signaled",
         userId,
+        witness,
       });
     } catch (error) {
       results.push({
@@ -308,6 +331,14 @@ export async function signalHostedRuntimeRecheckBatch(input: {
     requestedCount: userIds.length,
     results,
   };
+}
+
+export async function verifyHostedRuntimeRecheckBatch(input: {
+  baselines: readonly unknown[];
+  now?: Date;
+  prisma?: PrismaClient;
+}): Promise<HostedRuntimeRecoveryVerificationResult> {
+  return await verifyHostedRuntimeRecoveryWitnesses(input);
 }
 
 async function readHostedRuntimeMaintenanceCandidateForUser(input: {
@@ -417,10 +448,7 @@ function normalizeRuntimeRecheckUserIds(
       message: `At most ${HOSTED_RUNTIME_RECHECK_MAX_SIGNAL_LIMIT} runtime member ids can be rechecked at once.`,
     });
   }
-  if (userIds.some((userId) => (
-    userId.length > HOSTED_RUNTIME_MEMBER_ID_MAX_LENGTH
-    || !HOSTED_RUNTIME_MEMBER_ID_PATTERN.test(userId)
-  ))) {
+  if (userIds.some((userId) => !isHostedRuntimeRecoveryMemberId(userId))) {
     throw hostedOnboardingError({
       code: "HOSTED_RUNTIME_RECHECK_USER_ID_INVALID",
       httpStatus: 400,

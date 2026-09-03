@@ -409,20 +409,32 @@ function resolveHostedSystemMailboxWakeCandidatesFromState(input: {
   defaultOwned: HostedRuntimeWakeCandidate;
   next: HostedSystemMailboxWakeCandidate;
 } {
-  const { now, state } = input;
-  const remainingState = input.excludeItemId
+  const { now } = input;
+  const remainingStateBeforeAdmission = input.excludeItemId
     ? {
-        pending: state.pending.filter((item) =>
+        pending: input.state.pending.filter((item) =>
           item.itemId !== input.excludeItemId
         ),
       }
-    : state;
+    : input.state;
+  const remainingState = projectHostedSystemMailboxRetainedDeviceWebhookAdmission({
+    now,
+    state: remainingStateBeforeAdmission,
+  });
+  const wakeOwnerState = projectHostedSystemMailboxWakeOwnerFrontier(
+    remainingState,
+  );
+  const modelFreeFrontierState = projectHostedSystemMailboxModelFreeFrontier(
+    remainingState,
+  );
   const modelFreeProjectedState = shouldProjectHostedSystemMailboxModelFreeFrontier({
     allowedRouteActions: input.allowedRouteActions ?? null,
     allowedWakeKinds: input.allowedWakeKinds ?? null,
   })
-    ? projectHostedSystemMailboxModelFreeFrontier(remainingState)
-    : remainingState;
+    ? modelFreeFrontierState
+    : input.allowedRouteActions == null
+      ? wakeOwnerState
+      : remainingState;
   const selectionState = input.allowedWakeKinds == null
     ? modelFreeProjectedState
     : {
@@ -439,20 +451,41 @@ function resolveHostedSystemMailboxWakeCandidatesFromState(input: {
     now,
     state: selectionState,
   });
-  const defaultOwnedItems = findNextHostedSystemMailboxQueueItemsForWake({
-    allowedRouteActions: null,
-    state: remainingState,
-  }).filter((item) =>
-    resolveHostedSystemMailboxItemExecutionClass(item) === "default_owned"
-  );
   const readyItemAcrossAllRoutes = findNextHostedSystemMailboxQueueItem({
     allowedRouteActions: null,
     now,
-    state: remainingState,
+    state: wakeOwnerState,
   });
+  const runnableModelFreeFrontier = modelFreeFrontierState.pending[0] ?? null;
+  const defaultWakeOwnerState = runnableModelFreeFrontier !== null
+      && systemMailboxItemIsDue(runnableModelFreeFrontier, now)
+      && (
+        readyItemAcrossAllRoutes === null
+        || !isHostedApprovedContinuationSystemMailboxItem(
+          readyItemAcrossAllRoutes,
+        )
+      )
+    ? {
+        // Keep execution eligibility unchanged. Only the independently
+        // published default wake yields to a runnable model-free owner;
+        // explicitly approved continuations retain foreground priority.
+        pending: wakeOwnerState.pending.filter(
+          isHostedApprovedContinuationSystemMailboxItem,
+        ),
+      }
+    : wakeOwnerState;
+  const defaultOwnedItems = findNextHostedSystemMailboxQueueItemsForWake({
+    allowedRouteActions: null,
+    state: defaultWakeOwnerState,
+  }).filter((item) =>
+    resolveHostedSystemMailboxItemExecutionClass(item) === "default_owned"
+  );
   const readyDefaultOwnedItem = readyItemAcrossAllRoutes !== null
       && resolveHostedSystemMailboxItemExecutionClass(readyItemAcrossAllRoutes)
         === "default_owned"
+      && defaultWakeOwnerState.pending.some((item) =>
+        item.itemId === readyItemAcrossAllRoutes.itemId
+      )
     ? readyItemAcrossAllRoutes
     : findNextHostedSystemMailboxQueueItem({
         allowedRouteActions: null,
@@ -510,10 +543,13 @@ export function findNextHostedSystemMailboxQueueItem(input: {
   now: string;
   state: HostedSystemMailboxState;
 }): HostedSystemMailboxPendingItem | null {
-  const state = excludeExpiredHostedGroupContextHandoffSystemMailboxItems(
-    input.state,
-    input.now,
-  );
+  const state = projectHostedSystemMailboxRetainedDeviceWebhookAdmission({
+    now: input.now,
+    state: excludeExpiredHostedGroupContextHandoffSystemMailboxItems(
+      input.state,
+      input.now,
+    ),
+  });
   if (input.allowedRouteActions == null) {
     const approvedContinuation = state.pending.find((item) =>
       systemMailboxItemIsDue(item, input.now)
@@ -539,6 +575,70 @@ export function findNextHostedSystemMailboxQueueItem(input: {
     ...input,
     state,
   });
+}
+
+export function projectHostedSystemMailboxRetainedDeviceWebhookAdmission(input: {
+  now: string;
+  state: HostedSystemMailboxState;
+}): HostedSystemMailboxState {
+  const futureRetainedByConnection = new Map<
+    string,
+    HostedSystemMailboxPendingItem
+  >();
+  const admittedItemIds = new Set<string>();
+
+  for (const item of input.state.pending) {
+    if (
+      item.routeAction !== "run-device-sync-wake"
+      || item.wake.kind !== "device-sync.wake"
+      || !item.wake.connectionId
+    ) {
+      continue;
+    }
+    const connectionId = item.wake.connectionId;
+    const retained = futureRetainedByConnection.get(connectionId);
+    if (!retained) {
+      if (isHostedFutureRetainedDeviceJobRetry(item, input.now)) {
+        futureRetainedByConnection.set(connectionId, item);
+      }
+      continue;
+    }
+    if (
+      item.wake.reason === "webhook_hint"
+      && systemMailboxItemIsDue(item, input.now)
+    ) {
+      admittedItemIds.add(retained.itemId);
+    }
+  }
+
+  return admittedItemIds.size === 0
+    ? input.state
+    : {
+        pending: input.state.pending.map((item) =>
+          admittedItemIds.has(item.itemId)
+            ? { ...item, nextAttemptAt: null }
+            : item
+        ),
+      };
+}
+
+function isHostedFutureRetainedDeviceJobRetry(
+  item: HostedSystemMailboxPendingItem,
+  now: string,
+): boolean {
+  if (
+    item.status !== "pending"
+    || item.postCheckpointRecord !== null
+    || item.nextAttemptAt === null
+    || item.wake.kind !== "device-sync.wake"
+    || !item.wake.connectionId
+    || systemMailboxItemIsDue(item, now)
+  ) {
+    return false;
+  }
+  return item.wake.hint?.jobs?.some((job) =>
+    job.availableAt === item.nextAttemptAt
+  ) === true;
 }
 
 function findNextHostedSystemMailboxQueueItemByOrder(input: {
@@ -706,6 +806,23 @@ export function projectHostedSystemMailboxModelFreeFrontier(
       && isHostedSystemMailboxModelFreeFrontierItem(durableFrontier)
       ? [durableFrontier]
       : [],
+  };
+}
+
+export function projectHostedSystemMailboxWakeOwnerFrontier(
+  state: HostedSystemMailboxState,
+): HostedSystemMailboxState {
+  const modelFreeFrontier = projectHostedSystemMailboxModelFreeFrontier(state)
+    .pending[0] ?? null;
+  return {
+    pending: state.pending.filter((item) =>
+      // Default-owned work remains independently eligible. Model-free work is
+      // serialized behind the durable frontier, except for its sequence-less
+      // dense-retention owner.
+      resolveHostedSystemMailboxItemExecutionClass(item) === "default_owned"
+      || item.itemId === modelFreeFrontier?.itemId
+      || isHostedDeviceSyncDenseRawRetentionMailboxItem(item)
+    ),
   };
 }
 
@@ -1246,7 +1363,7 @@ function resolveHostedSystemMailboxSerializationKey(
   return item.routeAction;
 }
 
-function systemMailboxItemIsDue(
+export function systemMailboxItemIsDue(
   item: HostedSystemMailboxPendingItem,
   now: string,
 ): boolean {

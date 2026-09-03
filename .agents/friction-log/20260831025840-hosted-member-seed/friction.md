@@ -1,6 +1,7 @@
 ---
 title: 'Hosted member seed helpers race process-wide environment when called concurrently'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2647'
 ---
 
 ## Expected Behavior

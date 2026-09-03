@@ -65,7 +65,7 @@ import {
   createHostedWorkspaceCheckpointRequestBuilder,
   createHostedWorkspaceSnapshotCheckpointRequestBuilder,
   HostedWorkspaceRunnerUserMismatchError,
-  runHostedWorkspaceUntilIdleOrBudget,
+  runHostedWorkspaceUntilIdleOrBudget as runHostedWorkspaceUntilIdleOrBudgetWithoutDrain,
   type HostedMailboxImportCheckpointResult,
   type HostedRuntimeEffectsPort,
   type HostedWorkspaceRunnerRuntimeStatusCheckpointInput,
@@ -76,6 +76,7 @@ import type {
 } from "../src/hosted-runtime/platform.ts";
 import {
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES,
+  readHostedCanonicalWriteReceiptLog,
 } from "../src/hosted-runtime/canonical-write-receipt-log.ts";
 import {
   collectHostedAssistantDeliverySideEffects,
@@ -90,6 +91,7 @@ import {
   readHostedMailboxImportState,
   writeHostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
+import { drainHostedRuntimeLogWritesBestEffort } from "../src/hosted-runtime/runtime-logs.ts";
 import {
   enqueueHostedPendingAssistantInputId,
   ensureHostedPendingAssistantInputIndex,
@@ -104,6 +106,7 @@ import {
   restoreHostedWorkspaceRuntimeJobWorkspace,
 } from "../src/hosted-runtime/workspace-restore.ts";
 import {
+  createHostedWorkspaceCanonicalWriteCheckpointCoalescer,
   resolveHostedUsageNoticeDeliveryTargetFromAcceptedInputs,
   runHostedWorkspaceCanonicalWriteAtBoundary,
   type HostedWorkspaceRunnerAssistantInputBatch,
@@ -151,6 +154,16 @@ const TEST_BROWSER_VAULT_REPLICA_REF = {
   schema: "murph.hosted-browser-vault-replica-ref.v1",
   sourceBundleHash: "bundle_hash_synthetic_runner",
 } as const;
+
+async function runHostedWorkspaceUntilIdleOrBudget(
+  ...args: Parameters<typeof runHostedWorkspaceUntilIdleOrBudgetWithoutDrain>
+) {
+  try {
+    return await runHostedWorkspaceUntilIdleOrBudgetWithoutDrain(...args);
+  } finally {
+    await drainHostedRuntimeLogWritesBestEffort();
+  }
+}
 
 describe("runHostedWorkspaceUntilIdleOrBudget", () => {
   test("carries two initial conversation inputs through singleton foreground reruns before checkpointing", async () => {
@@ -1595,18 +1608,21 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       }).catch(() => undefined);
       await Promise.resolve();
       assert.equal(deferredUsageCompletionSettled, true);
+      await drainHostedRuntimeLogWritesBestEffort();
+      const initialLogEntries = logRequests.flatMap((request) => request.entries);
       assert.deepEqual(
-        logRequests.map((request) => request.entries[0]?.eventCode),
+        initialLogEntries.map((entry) => entry.eventCode),
         ["mailbox.imported", "mailbox.imported"],
       );
       assert.deepEqual(
-        logRequests.map((request) => request.entries[0]?.mailboxLane),
+        initialLogEntries.map((entry) => entry.mailboxLane),
         ["conversation", "system"],
       );
 
       releaseEffect();
       assert.ok(result.mailboxPostCheckpointEffectsFinished);
       await result.mailboxPostCheckpointEffectsFinished;
+      await drainHostedRuntimeLogWritesBestEffort();
       assert.deepEqual(events, [
         "import:1",
         "assistant",
@@ -1614,7 +1630,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "mailbox:afterCheckpoint:done",
       ]);
       assert.deepEqual(
-        logRequests.map((request) => request.entries[0]?.eventCode),
+        logRequests.flatMap((request) => request.entries).map((entry) => entry.eventCode),
         [
           "mailbox.imported",
           "mailbox.imported",
@@ -3227,6 +3243,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       effectRelease.current?.();
       assert.ok(result.mailboxPostCheckpointEffectsFinished);
       await result.mailboxPostCheckpointEffectsFinished;
+      await drainHostedRuntimeLogWritesBestEffort();
       const effectLog = logRequests.flatMap((request) => request.entries)
         .find((entry) => entry.eventCode === "mailbox.post_checkpoint_effects_finished");
       assert.ok(effectLog);
@@ -3301,6 +3318,54 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         checkpointRequests.map((request) => request.reason),
         [],
       );
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("marks a projection-only assistant checkpoint request dirty without claiming application progress", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const { mailboxPort } = createMailboxPort({ items: [] });
+
+    try {
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_projection_checkpoint",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("Import should not run without mailbox items.");
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_projection_checkpoint",
+        async runAssistantPhase() {
+          return {
+            progressed: false,
+            runtimeProjectionCheckpointRequested: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.equal(result.runtimeStateDirty, true);
+      assert.equal(result.assistantPhaseResult?.progressed, false);
+      assert.equal(result.assistantPhaseResult?.checkpointReason, undefined);
+      assert.deepEqual(checkpointRequests, []);
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -3542,6 +3607,247 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         force: true,
         recursive: true,
       });
+    }
+  });
+
+  test("checkpoints the eighth deferred background canonical write", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    await initializeVault({
+      createdAt: new Date(TEST_NOW),
+      timezone: "UTC",
+      title: "Hosted Workspace Deferred Canonical Write Test Vault",
+      vaultRoot,
+    });
+    const checkpointInputs: HostedWorkspaceRunnerRuntimeStatusCheckpointInput[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const coalescer = createHostedWorkspaceCanonicalWriteCheckpointCoalescer();
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+    let workspace = createWorkspaceState({ version: "0" });
+    let redactedStatus = workspace.redactedStatus ?? null;
+    const platform = createPlatform({
+      artifactBytesByHash,
+      async artifactPut(artifact) {
+        artifactBytesByHash.set(artifact.sha256, artifact.bytes);
+      },
+      mailboxPort: createMailboxPort({ items: [] }).mailboxPort,
+      workspacePort: createWorkspacePort({ checkpointRequests }),
+    });
+
+    try {
+      for (let writeIndex = 1; writeIndex <= 8; writeIndex += 1) {
+        const result = await runHostedWorkspaceCanonicalWriteAtBoundary({
+          canonicalWriteCheckpointCoalescer: coalescer,
+          previousRedactedStatus: redactedStatus,
+          runnerInput: {
+            async checkpointRuntimeRedactedStatus(checkpointInput) {
+              checkpointInputs.push(checkpointInput);
+              workspace = createWorkspaceState({
+                nextWakeAt: checkpointInput.nextWakeAt ?? null,
+                nextWakeReason: checkpointInput.nextWakeReason ?? null,
+                redactedStatus: checkpointInput.redactedStatus,
+                version: String(checkpointInputs.length),
+              });
+              return { checkpointed: true, workspace };
+            },
+            checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+              attemptId: `attempt_deferred_canonical_write_${writeIndex}`,
+              expectedWorkspaceVersion: workspace.version,
+              leaseGeneration: "1",
+              nextWakeAt: null,
+              nextWakeReason: null,
+              snapshotRef: null,
+            }),
+            expectedUserId: TEST_USER_ID,
+            async importItem() {
+              throw new Error("Mailbox import is not used at a canonical boundary.");
+            },
+            limitPerLane: 10,
+            now: () => TEST_NOW,
+            platform,
+            requestId: `request_deferred_canonical_write_${writeIndex}`,
+            vaultRoot,
+            workspace,
+          },
+          async write() {
+            await applyCanonicalWriteBatch({
+              audit: {
+                action: "device_import",
+                commandName: "test.deferredCanonicalWrite",
+                summary: `Synthetic deferred canonical write ${writeIndex}.`,
+              },
+              operationType: "device_batch_import",
+              summary: `Synthetic deferred canonical write ${writeIndex}`,
+              textWrites: [{
+                content: `deferred canonical write ${writeIndex}\n`,
+                overwrite: true,
+                relativePath: `bank/deferred-canonical-write-${writeIndex}.md`,
+              }],
+              vaultRoot,
+            });
+          },
+        });
+        redactedStatus = result.redactedStatus;
+        workspace = result.workspace ?? workspace;
+        assert.equal(checkpointInputs.length, writeIndex === 8 ? 1 : 0);
+      }
+
+      assert.equal(
+        checkpointInputs[0]?.canonicalSystemProgressCommitted,
+        true,
+      );
+      assert.equal(coalescer.pendingCheckpoint(), null);
+      assert.equal(workspace.version, "1");
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("excludes a failed threshold write from the owner flush and publishes it once on retry", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    await initializeVault({
+      createdAt: new Date(TEST_NOW),
+      timezone: "UTC",
+      title: "Hosted Workspace Threshold Rollback Test Vault",
+      vaultRoot,
+    });
+    const checkpointInputs: HostedWorkspaceRunnerRuntimeStatusCheckpointInput[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    let committedDeviceProgressCount = 0;
+    const coalescer = createHostedWorkspaceCanonicalWriteCheckpointCoalescer({
+      onCanonicalSystemProgressCommitted() {
+        committedDeviceProgressCount += 1;
+      },
+    });
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+    let checkpointFailurePending = true;
+    let workspace = createWorkspaceState({ version: "0" });
+    let redactedStatus = workspace.redactedStatus ?? null;
+    const platform = createPlatform({
+      artifactBytesByHash,
+      async artifactPut(artifact) {
+        artifactBytesByHash.set(artifact.sha256, artifact.bytes);
+      },
+      mailboxPort: createMailboxPort({ items: [] }).mailboxPort,
+      workspacePort: createWorkspacePort({ checkpointRequests }),
+    });
+    const runWrite = async (
+      writeIndex: number,
+      failAfterWrite = false,
+    ) => await runHostedWorkspaceCanonicalWriteAtBoundary({
+      canonicalWriteCheckpointCoalescer: coalescer,
+      previousRedactedStatus: workspace.redactedStatus ?? redactedStatus,
+      runnerInput: {
+        async checkpointRuntimeRedactedStatus(checkpointInput) {
+          checkpointInputs.push(checkpointInput);
+          if (checkpointFailurePending) {
+            checkpointFailurePending = false;
+            throw new Error("synthetic threshold checkpoint failure");
+          }
+          workspace = createWorkspaceState({
+            redactedStatus: checkpointInput.redactedStatus,
+            version: String(BigInt(workspace.version) + 1n),
+          });
+          return { checkpointed: true, workspace };
+        },
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: `attempt_threshold_rollback_${writeIndex}`,
+          expectedWorkspaceVersion: workspace.version,
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          throw new Error("Mailbox import is not used at a canonical boundary.");
+        },
+        limitPerLane: 10,
+        now: () => TEST_NOW,
+        platform,
+        requestId: `request_threshold_rollback_${writeIndex}`,
+        vaultRoot,
+        workspace,
+      },
+      async write() {
+        await applyCanonicalWriteBatch({
+          audit: {
+            action: "device_import",
+            commandName: "test.thresholdRollbackCanonicalWrite",
+            summary: `Synthetic threshold rollback write ${writeIndex}.`,
+          },
+          operationType: "device_batch_import",
+          summary: `Synthetic threshold rollback write ${writeIndex}`,
+          textWrites: [{
+            content: `threshold rollback write ${writeIndex}\n`,
+            overwrite: true,
+            relativePath: `bank/threshold-rollback-write-${writeIndex}.md`,
+          }],
+          vaultRoot,
+        });
+        if (failAfterWrite) {
+          throw new Error("synthetic owner failure after retry");
+        }
+      },
+    });
+
+    try {
+      for (let writeIndex = 1; writeIndex <= 7; writeIndex += 1) {
+        const result = await runWrite(writeIndex);
+        redactedStatus = result.redactedStatus;
+        workspace = result.workspace ?? workspace;
+      }
+
+      await assert.rejects(
+        runWrite(8),
+        /synthetic threshold checkpoint failure/,
+      );
+
+      assert.deepEqual(
+        await Promise.all(checkpointInputs.map(async (input) =>
+          (await readHostedCanonicalWriteReceiptLog({
+            artifactStore: platform.artifactStore,
+            status: input.redactedStatus,
+          })).entryCount
+        )),
+        [8, 7],
+      );
+      assert.equal(committedDeviceProgressCount, 7);
+      assert.equal(
+        existsSync(path.join(vaultRoot, "bank/threshold-rollback-write-8.md")),
+        false,
+      );
+      assert.equal(
+        (await readHostedCanonicalWriteReceiptLog({
+          artifactStore: platform.artifactStore,
+          status: checkpointInputs[1]?.redactedStatus,
+        })).entryCount,
+        7,
+      );
+      assert.equal(coalescer.pendingCheckpoint(), null);
+
+      await assert.rejects(
+        runWrite(8, true),
+        /synthetic owner failure after retry/,
+      );
+
+      assert.equal(committedDeviceProgressCount, 8);
+      assert.equal(
+        await readFile(
+          path.join(vaultRoot, "bank/threshold-rollback-write-8.md"),
+          "utf8",
+        ),
+        "threshold rollback write 8\n",
+      );
+      assert.equal(
+        (await readHostedCanonicalWriteReceiptLog({
+          artifactStore: platform.artifactStore,
+          status: checkpointInputs[2]?.redactedStatus,
+        })).entryCount,
+        8,
+      );
+      assert.equal(coalescer.pendingCheckpoint(), null);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
     }
   });
 
@@ -4546,6 +4852,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       await flushBackgroundMailboxEffects();
+      await drainHostedRuntimeLogWritesBestEffort();
 
       assert.deepEqual(events, [
         "import:1",
@@ -4554,12 +4861,13 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       ]);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
       ]);
-      assert.deepEqual(logRequests.map((request) => request.entries[0]?.phase), [
+      const logEntries = logRequests.flatMap((request) => request.entries);
+      assert.deepEqual(logEntries.map((entry) => entry.phase), [
         "import",
         "import",
         "import",
       ]);
-      assert.deepEqual(logRequests[2]?.entries[0]?.redactedJson, {
+      assert.deepEqual(logEntries.at(-1)?.redactedJson, {
         attemptedCount: 1,
         effectAttachmentEvidenceUpdated: [true],
         effectKinds: ["inbox_projection"],
@@ -4712,20 +5020,18 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       await flushBackgroundMailboxEffects();
+      await drainHostedRuntimeLogWritesBestEffort();
 
       assert.equal(result.assistantPhaseResult?.progressed, true);
       assert.equal(result.latestWorkspace?.version, "0");
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
       ]);
-      assert.deepEqual(events, [
+      assert.deepEqual(events.filter((event) => event !== "optional:log"), [
         "import:1",
-        "optional:log",
-        "optional:log",
         "assistant",
-        "optional:log",
         "optional:projection",
-        "optional:log",
       ]);
+      assert.equal(events.filter((event) => event === "optional:log").length, 2);
     } finally {
       warn.mockRestore();
       await rm(vaultRoot, {
@@ -5301,11 +5607,18 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           { importedSeq: "1", lane: "conversation" },
         ],
       ]);
+      await drainHostedRuntimeLogWritesBestEffort();
+      const mailboxImportedEntries = logRequests
+        .flatMap((request) => request.entries)
+        .filter((entry) => entry.eventCode === "mailbox.imported");
       assert.deepEqual(
-        logRequests.map((request) => request.entries[0]?.eventCode).slice(0, 2),
+        mailboxImportedEntries.map((entry) => entry.eventCode).slice(0, 2),
         ["mailbox.imported", "mailbox.imported"],
       );
-      assert.deepEqual(logRequests[2]?.entries[0], {
+      assert.deepEqual(mailboxImportedEntries.find((entry) =>
+        entry.phase === "active_turn_input"
+        && entry.mailboxSeqEnd === "3"
+      ), {
         at: TEST_NOW,
         attemptId: "attempt_synthetic_runner_active_turn",
         component: "mailbox",
@@ -7304,15 +7617,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    let flushSawAssistantCheckpointLog = false;
     const usageRecordPort: HostedRuntimeUsageRecordPort = {
       async recordUsage(record) {
-        flushSawAssistantCheckpointLog = logRequests
-          .flatMap((request) => request.entries)
-          .some((entry) =>
-            entry.eventCode === "checkpoint.runtime_residue_deferred"
-            && entry.redactedJson?.checkpointPhase === "assistant"
-          );
         events.push("usage:flush");
         assert.equal(record.usageId, "turn_runner_usage.attempt-1");
         return {
@@ -7409,7 +7715,11 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(checkpointRequests, []);
       assert.equal(events.filter((event) => event === "usage:flush").length, 1);
       assert.equal(events.includes("assistant:afterCheckpoint"), false);
-      assert.equal(flushSawAssistantCheckpointLog, true);
+      await drainHostedRuntimeLogWritesBestEffort();
+      assert.equal(logRequests.flatMap((request) => request.entries).some((entry) =>
+        entry.eventCode === "checkpoint.runtime_residue_deferred"
+        && entry.redactedJson?.checkpointPhase === "assistant"
+      ), true);
     } finally {
       await rm(vaultRoot, {
         force: true,
@@ -7809,7 +8119,14 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
           { importedSeq: "1", lane: "conversation" },
         ],
       ]);
-      assert.deepEqual(logRequests[2]?.entries[0]?.redactedJson, {
+      await drainHostedRuntimeLogWritesBestEffort();
+      const blockedImportLog = logRequests
+        .flatMap((request) => request.entries)
+        .find((entry) =>
+          entry.eventCode === "mailbox.imported"
+          && entry.redactedJson?.blockedCount === 1
+        );
+      assert.deepEqual(blockedImportLog?.redactedJson, {
         assistantInputCount: 1,
         assistantInputPresent: true,
         blockCodes: ["synthetic.retryable-block"],

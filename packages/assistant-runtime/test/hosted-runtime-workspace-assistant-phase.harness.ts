@@ -30,7 +30,7 @@ import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
 } from "@murphai/hosted-execution/env";
-import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 
 type HostedAssistantPhaseMockName =
@@ -315,7 +315,7 @@ import {
   type AssistantOutboxIntent,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import {
-  runHostedWorkspaceAssistantPhase,
+  runHostedWorkspaceAssistantPhase as runHostedWorkspaceAssistantPhaseWithoutDrain,
   type HostedWorkspaceRuntimeAssistantPhaseInput,
 } from "../src/hosted-runtime/workspace-assistant-phase.ts";
 import {
@@ -341,6 +341,7 @@ import type {
 import {
   buildHostedRuntimeLogContextFields,
   compactHostedRuntimeLogCodes,
+  drainHostedRuntimeLogWritesBestEffort,
   summarizeHostedRuntimeStatusCounts,
   toHostedRuntimeLogCode,
   writeHostedRuntimeLogBestEffort,
@@ -378,10 +379,16 @@ type HostedSystemMailboxModule =
 function withoutAssistantTurnTimingLogs(
   logRequests: HostedRuntimeLogRequest[],
 ): HostedRuntimeLogRequest[] {
-  return logRequests.filter(
-    (request) =>
-      request.entries[0]?.redactedJson?.schema
-        !== "murph.assistant-turn-timing.v1",
+  return logRequests.flatMap((request) =>
+    request.entries
+      .filter(
+        (entry) =>
+          entry.redactedJson?.schema !== "murph.assistant-turn-timing.v1",
+      )
+      .map((entry) => ({
+        ...request,
+        entries: [entry],
+      }))
   );
 }
 
@@ -831,6 +838,20 @@ beforeEach(() => {
     scheduled: 0,
   });
 });
+
+afterEach(async () => {
+  await drainHostedRuntimeLogWritesBestEffort();
+});
+
+async function runHostedWorkspaceAssistantPhase(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+) {
+  try {
+    return await runHostedWorkspaceAssistantPhaseWithoutDrain(input);
+  } finally {
+    await drainHostedRuntimeLogWritesBestEffort();
+  }
+}
 
 function expectAssistantLaneCallWithoutDeviceSyncOptions(
   expected?: Record<string, unknown>,
@@ -2105,6 +2126,7 @@ export {
   loadHostedSystemMailboxRealImplementation,
   mocks,
   resolveHostedPendingAssistantInputWakeAtWithRealImplementation,
+  runHostedWorkspaceAssistantPhase,
   runHostedWorkspaceDurableCheckpointEffects,
   runRealForegroundApprovalAdmissionScenario,
   seedDirectLinqAssistantInputRoute,

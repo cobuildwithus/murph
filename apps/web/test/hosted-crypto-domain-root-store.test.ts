@@ -3573,6 +3573,8 @@ function createHostedMemberIdentityServiceTransaction(): HostedCryptoTestTransac
           input.data.assistantPersonaCausalSeq === null
             ? null
             : BigInt(input.data.assistantPersonaCausalSeq),
+        groupJournalCaptureConsentRequestedAt: null,
+        groupJournalCaptureEnabled: null,
         assistantDetail: null,
         assistantDetailCausalSeq:
           input.data.assistantDetailCausalSeq === undefined ||

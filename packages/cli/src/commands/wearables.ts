@@ -424,19 +424,30 @@ const personalPatternStageSchema = z.enum([
   'seen_again',
   'worth_testing',
 ])
+const personalPatternGradeSchema = z.enum(['A', 'B', 'C', 'D', 'E'])
+const personalPatternClassificationSchema = z.enum([
+  'observation',
+  'early_signal',
+  'pattern',
+])
 
 const personalPatternReportSchema = z.object({
   asOfDate: localDateSchema,
   cells: z.array(z.object({
+    classification: personalPatternClassificationSchema.nullable().optional(),
+    comparisonBasis: z.enum(['confirmed_absence', 'unobserved_baseline']).optional(),
+    comparisonDates: z.array(localDateSchema).optional(),
     comparisonDays: z.number().int().nonnegative(),
     comparisonMean: z.number().nullable(),
     delta: z.number().nullable(),
     deltaPercent: z.number().nullable(),
     direction: z.enum(['higher', 'lower', 'flat']),
     exposedDays: z.number().int().nonnegative(),
+    exposedDates: z.array(localDateSchema).optional(),
     exposedMean: z.number().nullable(),
     factorId: z.string().min(1),
     firstExposedDate: localDateSchema.nullable(),
+    grade: personalPatternGradeSchema.nullable().optional(),
     lastExposedDate: localDateSchema.nullable(),
     outcomeId: z.string().min(1),
     repeatedDirection: z.boolean(),
@@ -447,11 +458,14 @@ const personalPatternReportSchema = z.object({
     kind: z.enum(['activity', 'intervention', 'mixed']),
     label: z.string().min(1),
     observedDays: z.number().int().nonnegative(),
+    confirmedAbsentDays: z.number().int().nonnegative().optional(),
+    episodeCount: z.number().int().nonnegative().optional(),
   })),
   lagDays: z.literal(1),
   notes: z.array(z.string()),
   outcomes: z.array(z.object({
     id: z.string().min(1),
+    lagDays: z.union([z.literal(0), z.literal(1)]).optional(),
     label: z.string().min(1),
     unit: z.string(),
   })),
@@ -861,7 +875,7 @@ export function registerWearablesCommands(
       },
     ],
     hint:
-      'Use `wearables day` as the first read for date-specific wearable questions. Use the list subcommands for longer windows and provider/source freshness checks.',
+      'Use `wearables day` as the first read for date-specific wearable questions except workout activity questions; use `wearables activity list` for those. Choose compact or detailed output from the question before the first and only activity-list data read; never use compact output as a probe before retrying with detail. Omit workout detail only when the answer is entirely available from day-level `sessionCount`, `sessionMinutes`, and distinct `activityTypes`; include it whenever selecting, comparing, grouping, ordering, or attributing individual workouts, including type-specific count, duration, distance, start time, provider, heart rate, cadence, power, speed, or splits. Use the other list subcommands for longer windows and provider/source freshness checks.',
     output: wearablesDayResultSchema,
     async run({ args, options }) {
       const result = await services.query.showWearableDay({
@@ -1033,7 +1047,16 @@ export function registerWearablesCommands(
     description:
       'List semantic daily activity summaries instead of raw activity-session and sample rows.',
     args: emptyArgsSchema,
-    options: withWearableListOptions(),
+    options: withWearableListOptions().extend({
+      includeWorkoutDetails: z
+        .boolean()
+        .default(false)
+        .describe(
+          'Include bounded workoutFeatures and splits (up to 32 workouts per day and 64 splits per workout). Choose compact or detailed output from the question before the first and only activity-list data read; never use compact output as a probe before retrying with detail. Omit this option only when the answer is entirely available from day-level sessionCount, sessionMinutes, and distinct activityTypes. Pass it truthy whenever selecting, comparing, grouping, ordering, or attributing individual workouts, including type-specific count, duration, distance, start time, provider, heart rate, cadence, power, speed, or splits.',
+        ),
+    }),
+    hint:
+      'One data read only. Day totals (`sessionCount`, `sessionMinutes`, distinct `activityTypes`): omit detail; no false flag or schema read. Workout/subset facts: include detail first.',
     output: wearablesActivityListResultSchema,
     async run({ options }) {
       assertWearableDateRangeOrdered(options)
@@ -1045,6 +1068,7 @@ export function registerWearablesCommands(
         to: options.to,
         providers: normalizeWearableProviders(options.provider),
         limit: options.limit,
+        includeWorkoutDetails: options.includeWorkoutDetails,
       })
 
       return wearablesActivityListResultSchema.parse(withoutWearableVaultPath(result))

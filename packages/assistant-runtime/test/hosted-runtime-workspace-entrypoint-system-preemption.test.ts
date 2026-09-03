@@ -20,6 +20,7 @@ import {
   readConversationImportedSeqs,
   removeTempRoot,
   requireEventIndex,
+  runHostedWorkspaceRuntimeJobInProcess,
   waitUntil,
   withRealTimeout,
   writeMailboxImportStateFile,
@@ -49,6 +50,7 @@ import {
 import {
   VAULT_LAYOUT,
 } from "@murphai/contracts";
+import { readHostedExecutionSnapshotBaseRef } from "@murphai/hosted-execution/parsers";
 import {
   appendAssistantTranscriptEntries,
   createAssistantOutboxIntent,
@@ -95,7 +97,6 @@ import {
   HostedWorkspaceRunnerUserMismatchError,
   drainHostedRuntimeDeferredUsageCompletionsBestEffort,
   parseHostedAssistantWorkspaceRuntimeJobInput,
-  runHostedWorkspaceRuntimeJobInProcess,
   type HostedWorkspaceRuntimeJobOptions,
   type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
@@ -927,26 +928,26 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
       assert.equal(browserPublishCalls, 0);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "canonical_runtime_commit",
-        "canonical_runtime_commit",
         "idle_shutdown",
       ]);
       assert.equal(checkpointRequests[0]?.expectedWorkspaceVersion, "0");
       assert.equal(checkpointRequests[1]?.expectedWorkspaceVersion, "1");
-      assert.equal(checkpointRequests[2]?.expectedWorkspaceVersion, "2");
       assert.equal(checkpointRequests[0]?.nextWakeReason, "device-sync.reconcile");
       assert.equal(
-        typeof checkpointRequests[1]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
-        "string",
+        readHostedExecutionSnapshotBaseRef(
+          checkpointRequests[1]?.snapshotRef ?? null,
+        )?.key,
+        "users/bundles/member-synthetic/system-mailbox-device-host-abort-after-apply.bundle.json",
       );
       assert.equal(
-        checkpointRequests[2]?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
+        checkpointRequests[1]?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
         "0",
       );
-      assert.equal(typeof checkpointRequests[2]?.nextWakeAt, "string");
+      assert.equal(typeof checkpointRequests[1]?.nextWakeAt, "string");
       // The canonical write may make an immediate assistant snapshot refresh
       // earlier than the device continuation; either wake must be checkpointed.
       assert.match(
-        checkpointRequests[2]?.nextWakeReason ?? "",
+        checkpointRequests[1]?.nextWakeReason ?? "",
         /^(assistant|device-sync\.reconcile)$/u,
       );
       const retainedState = await readHostedSystemMailboxState(vaultRoot);
@@ -1471,6 +1472,156 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
       assert.equal(result.nextWakeReason, "assistant");
       assert.equal(enrichmentCalls, 0);
       assert.equal(checkpointRequests.length, 1);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("checkpoint-reported foreground input does not block model-free recording when assistant execution is blocked", async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-workspace-entrypoint-"),
+    );
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const deviceItem = createMailboxItem({
+      dedupeKey: "device-sync.wake:blocked-assistant-recording",
+      id: "mailbox_item_system_mailbox_blocked_assistant_recording",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const baseDeviceSyncPort = createEmptyDeviceSyncPort();
+    let dirtyAckCalls = 0;
+    const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+      ...baseDeviceSyncPort,
+      async ackDirtyStateProcessed(request) {
+        dirtyAckCalls += 1;
+        return {
+          connectionId: request.connectionId,
+          dirtyRevision: request.processedRevision,
+          nextWakeAt: null,
+          processedRevision: request.processedRevision,
+          recorded: true,
+          stillDirty: false,
+          userId: TEST_USER_ID,
+        };
+      },
+    };
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      mocks.prepareHostedCodexAssistantProcess.mockClear();
+      mocks.cancelPendingWarmCodexPreinitialization.mockClear();
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await enqueueDeviceSyncSystemMailboxItemForTest({
+        item: deviceItem,
+        vaultRoot,
+      });
+      await updateHostedSystemMailboxState(vaultRoot, (state) => ({
+        pending: state.pending.map((item) =>
+          item.itemId === deviceItem.id
+            ? {
+                ...item,
+                postCheckpointRecord: {
+                  connectionId:
+                    "device_sync_connection_blocked_assistant_recording",
+                  kind: "device-sync.dirty-processed" as const,
+                  processedDirtyPayloadIds: [
+                    "dirty_payload_blocked_assistant_recording",
+                  ],
+                  processedRevision: "8",
+                },
+                status: "recording" as const,
+              }
+            : item,
+        ),
+      }));
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "1";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/system-mailbox-blocked-assistant-recording-before.bundle.json",
+        vaultRoot,
+      });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            assistantExecutionBlocked: true,
+            attemptId:
+              "attempt_synthetic_system_mailbox_blocked_assistant_recording",
+            processingMode: "system_mailbox",
+            workspaceVersion: "0",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "c".repeat(64),
+                key: "users/bundles/member-synthetic/system-mailbox-blocked-assistant-recording.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error(
+              "Already-imported system mailbox work should not import a new row.",
+            );
+          },
+          platform: createPlatform({
+            artifactBytesByHash: new Map([
+              [restoredWorkspace.hash, restoredWorkspace.bytes],
+            ]),
+            deviceSyncPort,
+            mailboxPort: createMailboxPort({ events, items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              checkpointResponse(request) {
+                return {
+                  checkpointed: true,
+                  conversationInputAhead: true,
+                  workspace: createWorkspaceState({
+                    inboxMediaRetentionWakeAt:
+                      request.inboxMediaRetentionWakeAt ?? null,
+                    nextWakeAt: request.nextWakeAt ?? null,
+                    nextWakeReason: request.nextWakeReason ?? null,
+                    redactedStatus: request.redactedStatus ?? null,
+                    snapshotRef: request.snapshotRef,
+                    version: String(
+                      BigInt(request.expectedWorkspaceVersion) + 1n,
+                    ),
+                  }),
+                };
+              },
+              events,
+              workspace: createWorkspaceState({
+                snapshotRef: restoredWorkspace.snapshotRef,
+                version: "0",
+              }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            throw new Error(
+              "Blocked system mailbox work must not enter assistant phase.",
+            );
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(result.immediateRecheckRequested, true);
+      assert.equal(dirtyAckCalls, 1);
+      assert.equal(checkpointRequests.length, 2);
+      assert.deepEqual(
+        (await readHostedSystemMailboxState(vaultRoot)).pending,
+        [],
+      );
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);

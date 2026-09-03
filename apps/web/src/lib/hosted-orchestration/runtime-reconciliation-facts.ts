@@ -98,7 +98,7 @@ const HOSTED_RUNTIME_RECONCILIATION_FACTS_LOG_SCHEMA =
 const HOSTED_RUNTIME_RECONCILIATION_ENGAGEMENT_PAUSE_RETRY_MS =
   24 * 60 * 60 * 1000;
 
-export async function readHostedRuntimeOwnerReleaseMailboxLagActionable(input: {
+export async function readHostedRuntimeOwnerReleaseActionable(input: {
   now?: Date | string;
   userId: string;
 }): Promise<boolean> {
@@ -121,18 +121,25 @@ export async function readHostedRuntimeOwnerReleaseMailboxLagActionable(input: {
       redactedStatusJson: redactedStatus,
     })
   );
-  if (!hasHostedMailboxLag(mailboxLag)) {
-    return false;
-  }
-
   const deferredMailboxContinuation =
     isHostedRuntimeFutureMailboxContinuation({
       nextWakeAt: workspace.nextWakeAt,
       nextWakeReason: workspace.nextWakeReason,
       redactedStatus,
     }, now.getTime());
+  if (hasHostedMailboxLag(mailboxLag) && !deferredMailboxContinuation) {
+    return true;
+  }
 
-  return !deferredMailboxContinuation;
+  return await readHostedRuntimeSystemMailboxFrontier({
+    at: now,
+    handledThroughSeq:
+      readHostedRuntimeSystemHandledThroughSeq(workspace.redactedStatusJson)
+        ?? "0",
+    maxSeqByLane,
+    prisma,
+    userId: input.userId,
+  }) !== null;
 }
 
 export async function readHostedRuntimeReconciliationFacts(

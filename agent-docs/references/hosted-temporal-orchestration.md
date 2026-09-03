@@ -446,8 +446,19 @@ conversation lag or a due assistant workspace wake selects default processing;
 system-only lag selects `system_mailbox` processing; a due inbox media retention
 wake selects `inbox_media_retention` processing when foreground/default work is
 not runnable; future or absent wakes wait. These modes are invocation input, not
-new scheduler state. Foreground/default work must replace an active
-system-mailbox or retention owner instead of waiting for its idle checkpoint.
+new scheduler state. The runtime's checkpoint projection publishes an ordinary
+default-owned mailbox wake only when a default row owns the currently
+executable frontier; a later default row does not compete with a runnable
+model-free frontier. Execution eligibility stays unchanged, and explicitly
+approved continuations retain their foreground priority. Foreground/default work must
+replace an active system-mailbox or retention owner instead of waiting for its
+idle checkpoint.
+If a default invocation's live checks disprove its overdue projection and the
+next due frontier belongs to a model-free owner, the runtime first checkpoints
+the corrected projections without advancing handled-through or the system
+progress generation. The checkpoint re-reads all default-work sources, so
+genuinely due default work remains armed; Temporal continues interpreting only
+the resulting durable facts.
 The runtime projects an outbox-only continuation as `assistant_delivery` rather
 than model-capable `assistant`. Web admits that due delivery continuation
 without the managed-AI usage gate; Temporal still selects ordinary processing,

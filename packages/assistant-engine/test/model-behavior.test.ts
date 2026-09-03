@@ -627,6 +627,33 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).not.toContain('unrelated work/school tasks')
   })
 
+  it('captures atomic Journal facts only in private conversations', () => {
+    const directPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+    const groupPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      conversationScope: 'group',
+    }))
+
+    expect(directPrompt).toContain('Private Journal capture:')
+    expect(directPrompt).toContain('journal-factor')
+    expect(directPrompt).toContain('journal-outcome')
+    expect(directPrompt).toContain('per independent fact')
+    expect(directPrompt).toContain('--related-id')
+    expect(directPrompt).toContain('missing data remains unknown')
+    expect(directPrompt).toContain('Save clear facts silently')
+    expect(directPrompt).toContain('start one workout')
+    expect(directPrompt).toContain('Check at 13:00 local')
+    expect(directPrompt).toContain(
+      'vault-cli wearables patterns --date <local-date> --format json',
+    )
+    expect(directPrompt).toContain('exactly once')
+    expect(directPrompt).toContain('stop proactive questions when asked')
+    expect(directPrompt).toContain('Explain capture, fixes, and refresh')
+    expect(directPrompt).toContain(
+      'tell users to ask Murph; never claim web controls',
+    )
+    expect(groupPrompt).not.toContain('Private Journal capture:')
+  })
+
   it('uses formal by default and applies a saved tone as a strict writing contract', () => {
     const defaultLayers = buildAssistantSystemPromptLayers(
       createCommonCodexPromptInput(),
@@ -2076,11 +2103,11 @@ describe('assistant system prompt cache stability', () => {
     // connected-app, phone-call, and Family mechanics remain excluded.
     // The local automation delivery limitation, the established Apple
     // Health/WHOOP relay, cross-route repeated-set boundary, private
-    // longitudinal recommendation policy, narrowest-relevant-safety rule,
-    // response-card dietary/burn target-authority boundary, explicit
-    // group-family tool routing, and the cross-route CLI error-recovery
-    // contract set this exact ceiling.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(62_542)
+    // longitudinal recommendation, direct and group Journal capture policies,
+    // narrowest-relevant-safety rule, response-card dietary/burn
+    // target-authority boundary, explicit group-family tool routing, and the
+    // cross-route CLI error-recovery contract set this exact ceiling.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(63_600)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -2774,6 +2801,9 @@ describe('assistant experiment onboarding guidance', () => {
     expect(groupPrompt).toContain('Understand before recommending:')
     expect(groupPrompt).toContain(
       'Read private participant records only through server-approved group results',
+    )
+    expect(groupPrompt).toContain(
+      'call `record_current_sender_journal_fact` once per fact, with the exact ref and a different index.',
     )
     expect(groupPrompt).toContain(
       'Missing context is not evidence for the most restrictive option.',

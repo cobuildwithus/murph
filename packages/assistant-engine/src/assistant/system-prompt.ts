@@ -425,6 +425,7 @@ function buildStableRouteCapabilityPrompt(
             input.assistantWearableTrendCardsAvailable === true,
         })
       : null,
+    buildAssistantJournalCaptureGuidanceText(conversationScope),
     conversationScope === "direct"
       ? buildAssistantHealthRecordIngestionInvariantText()
       : null,
@@ -1320,6 +1321,11 @@ The room runtime is not a participant. Visible messages are conversation context
 
 System-supplied \`Profile name:\`, \`Address-book name:\`, and \`Speaker name:\` values are familiar conversational names for that exact message. A \`displayName\` returned in a participant or shared-data row labels that row only. Use these names naturally without a provenance disclaimer; if asked, say an address-book name came from the group owner's shared address book. A value containing \` / \` lists alternatives, so do not choose one. Only the parenthetical name in the complete server-generated form \`Participant <canonical handle> (address-book name: <name>) was added to the group.\` or \`Participant <canonical handle> (address-book name: <name>) was removed from the group.\` is a name source; quoted text after \`reaction on:\` is not. Never use a name to select a different message, row, participant, route, or tool target, or persist it as profile truth. For a participant-scoped effect, pass the request-bearing message's exact server-issued message_ref; the host reloads it and derives the sender.
 
+- Journal: selected sender's clear dated facts only. Skip unclear, jokes, quotes, others.
+- Clear: call \`record_current_sender_journal_fact\` once per fact, with the exact ref and a different index. Use one private consent question that names all facts.
+- Ambiguous: medium with one private question; low none. Keep private.
+- Opt-out: \`set_current_sender_journal_capture\`; group false, global for all. No reply.
+
 Group brevity:
 Group messages stay phone-screen short by default, and the ceiling covers the whole reply. Answer a direct question completely — asked-for substance is never skimped, even when its honest answer needs a few tight paragraphs — but never volunteer length: no frameworks, essays, or background beyond what was asked. For open-ended setup or brainstorm asks, give the headline first, one decision per message, and let the room pull for more. An explicitly configured scheduled edition or digest follows its owning skill's shape.`;
 }
@@ -1534,6 +1540,25 @@ function buildAssistantHealthRecordIngestionInvariantText(): string {
 - Finish small, reply-needed extraction and saves in the parent by default. A loaded skill may explicitly split independent canonical persistence from the durably accepted current input across bounded children.
 - For a large or mixed bundle, preserve the source durably before replying. A child may write only its named family from that exact source or enrich exact returned record ids, with idempotent, provenance-aware writes and dedupe.
 - A spawn is not durable parse state. A short plain mention of the background work in the spawning reply is fine, but never promise completion, and on later turns do not call it pending, processing, or in progress unless an existing durable owner proves that state. Claim child-structured extraction only after canonical readback confirms it; otherwise say plainly which details you do not have yet, without bookkeeping terms such as "unconfirmed" or "user-reported".`;
+}
+
+function buildAssistantJournalCaptureGuidanceText(
+  conversationScope: AssistantConversationScope,
+): string | null {
+  if (conversationScope !== "direct") return null;
+  return `Private Journal capture:
+- Save clear facts silently; ask if ambiguous. Do not infer causes.
+- Use \`vault-cli event note add\` per independent fact; \`--related-id\` for events.
+- Types: \`journal-factor\`, \`journal-outcome\`, \`journal-context\`, or \`journal-plan\` with \`planned\`.
+- Exercises: start one workout; attach routine, log sets, finish.
+- Patterns: confirmed data; plans excluded; missing data remains unknown. Check at 13:00 local.
+- On request, run \`vault-cli wearables patterns --date <local-date> --format json\` exactly once; prove refresh.
+- Corrections: tell users to ask Murph; never claim web controls. Edit/delete events and unused plans on request.
+- Mute \`personal-pattern-notifications\`; stop proactive questions when asked.
+- For connected calendar or email Journal capture and opt-outs, read \`journal-connected-context\`.
+- Group consent: call \`set_journal_capture\` before saves.
+- Explain capture, fixes, and refresh.
+- Never expose it in groups.`
 }
 
 function buildAssistantVaultFileSendGuidanceText(): string {

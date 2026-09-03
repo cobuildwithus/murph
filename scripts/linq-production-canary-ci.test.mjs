@@ -73,5 +73,6 @@ test("Linq production canary runner proves the welcome and three bounded replies
   assert.match(runner, /message\.platform !== "imessage"/u);
   assert.match(runner, /message\.sender\?\.id !== input\.userId/u);
   assert.match(runner, /space\.id !== input\.spaceId/u);
+  assert.match(runner, /const code = error instanceof Error \? error\.name : "unknown";\s+console\.error\(`Linq production canary failed \(\$\{code\}\)\.`\);/u);
   assert.doesNotMatch(runner, /console\.(?:log|info)\([^\n]*(?:reply|prompt|phone)/u);
 });

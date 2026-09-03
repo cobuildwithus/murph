@@ -89,6 +89,7 @@ import {
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH,
+  HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH,
   HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH,
   HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
   HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH,
@@ -217,6 +218,16 @@ type HostedSystemProgressProjection = Required<Pick<
   | "systemMailboxProgressGeneration"
 >>;
 const ALLOWLISTED_WEB_CONTROL_CASES = [
+  {
+    body: {
+      action: "authorize",
+      expiresAt: "2036-08-25T18:10:00.000Z",
+      requestId: "assistant.notification.requested:operator-task:opt_synthetic",
+      taskId: "opt_synthetic",
+    },
+    name: "hosted operator task control",
+    path: HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH,
+  },
   {
     body: {
       action: "upgrade_edge",

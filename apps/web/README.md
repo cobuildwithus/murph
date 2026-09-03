@@ -977,8 +977,8 @@ Hosted onboarding extras:
   row cap; execution that starts after denial is measured from its earliest
   milestone even when ingress is older than that window. The monitor sends
   no alert for scheduled automation turns, including Flex-tier turns, because
-  they do not own a user-ingress reply trace. The monitor sends one email per
-  continuous incident, suppresses sends from 11 PM through 7 AM
+  they do not own a user-ingress reply trace. The latency monitor sends one
+  email per continuous incident, suppresses sends from 11 PM through 7 AM
   operator-local time, and adds up to ten minutes of stable wake/retry jitter.
   The existing seven-day trace cleanup retires a trace only when both ingress
   and latest activity are stale, so recent resumed work remains observable
@@ -1011,8 +1011,10 @@ Hosted onboarding extras:
   lane, age, and pending-item counts only. It has its own singleton incident
   row, so an active reply-latency incident cannot suppress a newly discovered
   progress stall. While one progress incident remains anomalous, the same row
-  sends a fresh aggregate reminder every six hours plus stable jitter, outside
-  quiet hours. Each fresh reminder claim persists a new generation identity
+  sends a fresh aggregate reminder every six hours plus stable jitter,
+  including during quiet hours. The first progress alert also bypasses the
+  shared quiet-hours deferral. Each fresh reminder claim persists a new
+  generation identity
   before Resend, while an ambiguous retry reuses that identity and the exact
   body. The latency monitor remains one email per continuous incident. Recovery
   silently rearms each monitor independently and sends no recovery email.
@@ -1322,17 +1324,22 @@ Callback auth contract:
   authority and seals only from that scoped cache entry, with one full retry on
   typed root drift. Legacy transaction append surfaces remain for separately
   migrated callers and are not the transaction-safe generic entrypoint.
-- `POST /api/internal/hosted-runtime/owner-released` is the payload-free
-  completion handoff. Web accepts a zero-byte body and either no query or the
-  exact signature-bound `immediateRecheckRequested=1` positive edge, binds the
-  user through the signed request plus normal nonce protection, and emits the
-  existing `runtime_recheck_requested` Temporal signal. Without the edge, Web
-  signals only for current runnable mailbox lag; a persisted default or
-  retention wake is not itself signal authority. The edge means the completed
-  invocation newly committed an unserviced schedule and carries no wake data.
-  Known future mailbox retry continuations remain deferred. Cloudflare calls the
-  route at most once, with a timeout capped at two seconds, only after exact
-  write-fence completion; failure is non-fatal and has no callback retry.
+- `POST /api/internal/hosted-runtime/owner-released` is the pointer-only
+  completion handoff. Web accepts a zero-byte body and a signed query containing
+  the opaque released `runtimeAttemptId`, plus the optional exact
+  `immediateRecheckRequested=1` positive edge. It binds the user through the
+  signed request plus normal nonce protection. Without the positive edge, Web
+  emits a signal only when current runnable mailbox lag or a live system mailbox
+  item beyond the handled-through frontier remains. Exact callbacks use
+  `runtime_owner_released`, which Temporal matches before releasing an
+  accepted-owner horizon; legacy pointerless callbacks use the facts-only
+  `runtime_recheck_requested` signal during rollout. A persisted default or
+  retention wake alone is not signal authority. The positive edge means the
+  completed invocation newly committed an unserviced schedule and carries no
+  wake data. Known future mailbox retry continuations remain deferred.
+  Cloudflare calls the route at most once, with a timeout capped at two seconds,
+  only after exact write-fence completion; failure is non-fatal and has no
+  callback retry.
 
 When you set `DEVICE_SYNC_PUBLIC_BASE_URL`, use the same stable production
 hostname as every first-party hosted app-session URL that can serve the OAuth
@@ -2206,7 +2213,7 @@ deleted sharing CRUD, local-vault import callbacks, or an outbox drain route. It
 still uses narrow signed hosted-web callbacks for execution-time device-sync
 runtime snapshot/apply, device connect-link starts, direct hosted usage
 recording, member-bound plan-usage reads, mailbox/workspace runtime status plus
-log callbacks, and the payload-free runtime owner-release recheck handoff.
+log callbacks, and the pointer-only runtime owner-release recheck handoff.
 
 ## Hosted onboarding routes
 

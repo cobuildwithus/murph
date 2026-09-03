@@ -3,6 +3,7 @@ import { BrandContent } from "./brand-content";
 import { ComponentsContent } from "./components-content";
 import { ConsentContent } from "./consent-content";
 import { ExperimentCadenceStudy } from "./experiment-cadence-study";
+import { JournalStudy } from "./journal-study";
 
 const TABS = [
   { id: "brand", label: "Brand" },
@@ -47,6 +48,7 @@ export function DesignPage({ activeTab = "brand" }: { activeTab?: string }) {
       ) : (
         <>
           <ExperimentCadenceStudy />
+          <JournalStudy />
           <ComponentsContent />
         </>
       )}

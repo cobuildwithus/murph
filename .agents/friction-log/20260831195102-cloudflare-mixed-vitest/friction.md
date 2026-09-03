@@ -1,6 +1,7 @@
 ---
 title: 'Cloudflare mixed Vitest projects do not release coordinator'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2678'
 ---
 
 ## Expected Behavior

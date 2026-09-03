@@ -1,6 +1,7 @@
 ---
 title: 'Hosted-local E2E does not preflight external Temporal protocol compatibility'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2661'
 ---
 
 ## Expected Behavior

@@ -177,7 +177,7 @@ test("clinical typed date options return native field-specific envelopes", async
     }
     assert.equal(result.error.code, "VALIDATION_ERROR");
     assert.equal(result.error.fieldErrors?.[0]?.path, entry.path);
-    assert.equal(result.error.fieldErrors?.[0]?.received, "");
+    assert.equal(result.error.fieldErrors?.[0]?.received, "invalid");
     assert.equal(JSON.stringify(result).includes(privateDate), false);
   }
 });

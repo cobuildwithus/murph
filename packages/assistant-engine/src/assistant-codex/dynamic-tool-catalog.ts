@@ -13,6 +13,10 @@ import {
 } from '@murphai/contracts'
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
+  HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+  HOSTED_EXECUTION_GROUP_JOURNAL_FACT_MAX_NOTE_LENGTH,
+  HOSTED_EXECUTION_GROUP_JOURNAL_FACT_MAX_TITLE_LENGTH,
+  HOSTED_EXECUTION_GROUP_JOURNAL_FACT_NOTE_TYPES,
 } from '@murphai/hosted-execution/contracts'
 import {
   HOSTED_RUNTIME_PENDING_GROUP_SETUP_ROOM_CONTEXT_MAX_CODE_POINTS,
@@ -289,7 +293,7 @@ export const MURPH_ATTACH_RESPONSE_CARD_TOOL = {
     'For a clear request-relevant suitability outcome, explicitly name the requested target or metric. For a tracked workout, attempt the complete verified card and let input validation decide whether its actual encoded envelope fits; never refuse from an estimated exercise or set count or ask the member to simplify saved workout data. If validation rejects the complete envelope, use the full deterministic text recovery. ' +
     'Attach one private-direct response card when the current accepted member message or the saved instructions for the exact scheduled automation occurrence request a structured answer that the card alone can represent, during managed meal closeout, for the verified initial card after starting or exact-reading one canonical workout, or for an unambiguous update to its established workout card, including the just-completed final snapshot. Occurrence authority alone is not card intent. The card replaces the entire final response: attach it only when the card alone completely satisfies the current request; answer compound requests with complete ordinary text and no card. For routine daily_nutrition, including an authorized meal estimate, use one workflow and end with one card or concise fallback. Never narrate safety, totals, estimation, or target resolution. ' +
     'Before every goal-aware daily_nutrition card, first run vault-cli goal list --status active --limit 200 --format json. If it returns 200 records, fail closed with ordinary text, no Goal or measurement mutation, and no card. Otherwise run vault-cli goal show <goal-id> --format json for every returned active Goal whose list item reports a nonzero data.metricTargetsCount; never select detail reads by title, slug, domain, context-snapshot visibility, or the default list prefix. Resolve metric identity, unit, comparator, effective date, conflicts, and the 1,200-kcal boundary only after inspecting that complete detail set. Keep this active-target authority read separate from any all-status lookup used to reuse or honor Murph\'s managed paused or abandoned proposal; neither read substitutes for the other. For daily_nutrition, immediately beforehand run vault-cli meal totals --from <date> --to <same-date> and copy its exact canonical metric { total, mealCount } values; never calculate or reuse totals. Only on a member-explicit interactive daily-card or daily-summary request, if any metric mealCount is below the top-level mealCount, follow food-journal selected-date incomplete-meal recovery before attaching a card. Default attachment intent after a meal mutation does not authorize reading, editing, or asking about another meal; when fresh totals remain incomplete, use the short food-journal fallback with no card. Use accepted current equivalence or matching saved ingredient and portion evidence, not an informal name alone. If recovery still needs identity or amount, ask one compact question and stop without a card; after the answer, edit and read back the exact existing meal and rerun fresh totals. Do not ask merely to enable numbers when numeric presentation is suppressed. A partial card is only for an explicit request to see the currently available partial data after the limitation is clear, not the normal interactive closeout. Scheduled closeout keeps automatic-meal-capture\'s existing question authority. New authoring uses V2 with fiber and five required goal snapshots; nullable V2 goals and nutrition V1 remain legacy replay and rendering compatibility only. ' +
-    'For the exact card localDate, require the containing active Goal window and each target\'s optional startAt/targetAt interval to include that date, with inclusive boundaries; use the selected capture date for a scheduled closeout, which may differ from the occurrence date for a historical catch-up, or the explicitly requested date, never wall-clock today. Ignore out-of-window targets for current authority and conflicts, and never expose, compare, copy, derive from, or mutate a Goal because of them. Require one unambiguous applicable exact-point target per card unit: canonical dietary-calories in kcal plus protein-grams, carbs-grams, fat-grams, and fiber-grams in g, across active Goals. Author only dietary-calories. When exactly one compatible canonical calorie owner exists, use it and ignore every globally ambiguous calories target. Only without a canonical owner may targetId daily-calories with metric calories and unit kcal substitute, and only when its same containing Goal owns the complete compatible historical set: daily-protein / protein-grams / g, daily-carbohydrates / carbs-grams / g, daily-fat / fat-grams / g, and daily-fiber / fiber-grams / g. Any other calories target is not dietary authority even when co-located with all four nutrition metrics. Never combine the historical set with another Goal or managed proposal, and never infer ownership from title, slug, domain, or description. Multiple qualifying historical sets or ambiguity inside one means no card. Never mutate a Goal to repair its key. Apply the 1,200-kcal boundary and residual math to resolved calories. ' +
+    'For the exact card localDate, require the containing active Goal window and each target\'s optional startAt/targetAt interval to include that date, with inclusive boundaries; use the engine-supplied occurrence local date for a scheduled closeout, or the explicitly requested date for an interactive request, never wall-clock today. A historical automatic capture cannot authorize a scheduled card. Ignore out-of-window targets for current authority and conflicts, and never expose, compare, copy, derive from, or mutate a Goal because of them. Require one unambiguous applicable exact-point target per card unit: canonical dietary-calories in kcal plus protein-grams, carbs-grams, fat-grams, and fiber-grams in g, across active Goals. Author only dietary-calories. When exactly one compatible canonical calorie owner exists, use it and ignore every globally ambiguous calories target. Only without a canonical owner may targetId daily-calories with metric calories and unit kcal substitute, and only when its same containing Goal owns the complete compatible historical set: daily-protein / protein-grams / g, daily-carbohydrates / carbs-grams / g, daily-fat / fat-grams / g, and daily-fiber / fiber-grams / g. Any other calories target is not dietary authority even when co-located with all four nutrition metrics. Never combine the historical set with another Goal or managed proposal, and never infer ownership from title, slug, domain, or description. Multiple qualifying historical sets or ambiguity inside one means no card. Never mutate a Goal to repair its key. Apply the 1,200-kcal boundary and residual math to resolved calories. ' +
     'Each target must be an exact card point with comparator between and identical numeric value and highValue. Accept selected-value evaluation normally. The complete same-Goal historical daily-* nutrition set above has one read-only display-compatibility path when every target instead uses rolling-window evaluation with statistic mean plus selectionPolicyOverride kind daily-aggregate with statistic mean: copy each unchanged point bound into the card for the selected localDate, preserve the Goal, and never extend this exception to another identity or workflow. A mixed evaluation bundle or any other rolling-window statistic or daily-aggregate statistic is incompatible. A one-sided threshold, non-identical range, or other shape remains authoritative but makes the bundle comparator-incompatible: never expose, compare, copy, or derive from its bound or create, replace, or remove a managed target around it; use ordinary text with no card or managed Goal mutation, and ask no question on a scheduled closeout. A target in another unit likewise remains authoritative but makes the bundle incompatible: never compare, convert, copy, or derive from its raw value. If a daily_nutrition call is rejected for malformed arguments, use the returned validation paths to correct only invalid fields and retry this tool once with the same verified totals and targets; if that retry fails, use the truthful text fallback without narrating tool or schema mechanics. An explicit numeric-card request or the one first eligible managed closeout authorizes only the goal-aware workflow\'s paused canonical proposal, not activation or use. When any target is missing, follow nutrition-strategy/references/daily-nutrition-card-goals.md: hold applicable, compatible exact point targets fixed, derive missing macros from residual calories, and require every AMDR plus a 50 kcal energy tolerance before any Goal write; an infeasible bundle means ordinary text and no mutation. Save one paused canonical proposal, explain its values, reasoning, and effective date in ordinary text with no card, and activate it only after member acceptance. On first creation, set Goal window.startAt explicitly: use a member-requested effective date when present, otherwise the selected card localDate for a dated card request, otherwise the engine-supplied current vault-local date; never rely on the write-day default. Preserve that window on every later edit, activation, or card request and never silently rebase it to another card date. Any derived target addition or change atomically pauses the complete managed bundle until acceptance. A scheduled closeout never asks for inputs or activates provisional targets. ' +
     'On the first eligible managed closeout only, if the complete all-status Goal read proves the stable managed slug has never existed and already-known inputs pass the known-context suitability and derivation rules, create and explain one paused proposal in ordinary text with no card; once that Goal exists in any status, scheduled turns never create, change, or automatically repeat it. Without a complete accepted bundle or that one first-run proposal path, use ordinary closeout text and no card. When an explicit card request caused the proposal, its next unambiguous acceptance may complete that pending request only after reapplying the known-context suitability rule, then activation and readback, and a fresh same-date totals read; corrections, declines, ambiguous replies, target-setting-only requests, and compound requests remain text-only. Explicit active targets win metric by metric; conflicts, thresholds, ranges, unsafe numbers, or missing responsible calorie inputs mean ordinary text or one consolidated question, never a goal-less card. Freeze each exact point target and Murph\'s context-aware status without a universal threshold. Use compact_table for an explicit table or structured-tracker request, a structured plan or schedule that the table alone can fully represent within its bounds, that verified initial live-workout card, or an unambiguous update to the same exact open or just-finished workout; with multiple plausible workouts, do not infer authority and ask one narrow question. Never invent or silently truncate values. For tracked workouts, first update or resolve the canonical workout and re-read it successfully. A structured workout card has exactly kind compact_table, version 1, title, subtitle null, footer, tracking with kind workout plus the exact evt_<ULID> entityId, and workout; never add rowHeader, columns, or rows. The runtime records tracking snapshotAt. Use only when numerical output is permitted. Runtime renders durable text and fallbacks, so do not repeat card values in final send_message. This tool does not send and cannot combine with response media.',
   inputSchema: {
@@ -892,7 +896,7 @@ const ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA = {
   type: 'string',
   pattern: ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN,
   description:
-    'Opaque Message ref shown beside an accepted inbound message in the current prompt. Required for current-sender actions, record_current_sender_daily_metric, and revoke_own_email_share. For offer_access, include it only when the group explicitly asks to repost the native access message; the trusted host binds the replacement to that exact request. It is otherwise optional only for create_signup_referral_link and read_usage_referral. Use the exact ref beside the relevant request or clarification answer; this is not a provider message id.',
+    'Opaque Message ref shown beside an accepted inbound message in the current prompt. Required for current-sender actions, record_current_sender_daily_metric, record_current_sender_journal_fact, set_current_sender_journal_capture, and revoke_own_email_share. For offer_access, include it only when the group explicitly asks to repost the native access message; the trusted host binds the replacement to that exact request. It is otherwise optional only for create_signup_referral_link and read_usage_referral. Use the exact ref beside the relevant request or clarification answer; this is not a provider message id.',
 } as const
 
 export const GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING =
@@ -913,6 +917,7 @@ export const MURPH_GROUP_TOOL_FAMILY_ACTIONS = {
   ],
   group_data: [
     'record_current_sender_daily_metric',
+    'record_current_sender_journal_fact',
     'post_disclosure_request',
     'revoke_disclosure_grant',
     'read_shared',
@@ -920,6 +925,8 @@ export const MURPH_GROUP_TOOL_FAMILY_ACTIONS = {
     'revoke_own_email_share',
   ],
   group_membership: [
+    'set_journal_capture',
+    'set_current_sender_journal_capture',
     'read_current',
     'prepare_next_group',
     'read_next_group',
@@ -1190,11 +1197,62 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
           'For action="offer_access" only. Set true only when the room explicitly asks for a standalone link; otherwise omit it and let the trusted host choose the best presentation for this channel.',
       },
       message_ref: ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA,
+      confidence: {
+        type: 'string',
+        enum: ['high', 'medium'],
+        description:
+          'For Journal facts: high is clear; medium needs one private question. Do not call for low confidence.',
+      },
       date: {
         type: 'string',
         pattern: '^\\d{4}-\\d{2}-\\d{2}$',
         description:
-          'Required only for record_current_sender_daily_metric. Exact member-reported civil date in YYYY-MM-DD form. Do not infer a date when the sender did not provide enough context.',
+          'Required for record_current_sender_daily_metric and record_current_sender_journal_fact. Exact member-reported civil date in YYYY-MM-DD form. Do not infer a date when the sender did not provide enough context.',
+      },
+      factIndex: {
+        type: 'integer',
+        minimum: 1,
+        maximum: 8,
+        description:
+          'Journal fact order in the selected message, starting at 1.',
+      },
+      title: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_EXECUTION_GROUP_JOURNAL_FACT_MAX_TITLE_LENGTH,
+        description:
+          'Short private Journal title in the sender language.',
+      },
+      note: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_EXECUTION_GROUP_JOURNAL_FACT_MAX_NOTE_LENGTH,
+        description:
+          'Current-sender fact only. Exclude group commentary, quotes, jokes, and third-party claims.',
+      },
+      noteType: {
+        type: 'string',
+        enum: HOSTED_EXECUTION_GROUP_JOURNAL_FACT_NOTE_TYPES,
+        description:
+          'Canonical Journal note type for this fact.',
+      },
+      privateQuestion: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
+        description:
+          'High: use the same consent question for every fact and name all clear facts. The host asks the first. Medium: ask only to clarify.',
+      },
+      enabled: {
+        type: 'boolean',
+        description:
+          'set_journal_capture: true accepts capture, false disables all. After true, save all named facts. set_current_sender_journal_capture uses scope.',
+      },
+      scope: {
+        type: 'string',
+        enum: ['global', 'group'],
+        description:
+          'Use group for this group, or global only when the sender says all groups.',
       },
       metric: {
         type: 'string',
@@ -1224,11 +1282,14 @@ const MURPH_GROUP_TOOL_FAMILY_PROPERTIES = {
     'context', 'grantId', 'membershipId', 'message_ref', 'question',
   ],
   group_data: [
-    'audience', 'date', 'displayName', 'grantId', 'message_ref', 'metric',
-    'permissionText', 'projectionScopes', 'standaloneLink', 'unit', 'value',
+    'audience', 'confidence', 'date', 'displayName', 'factIndex', 'grantId',
+    'message_ref', 'metric', 'note', 'noteType', 'permissionText',
+    'privateQuestion', 'projectionScopes', 'standaloneLink', 'title', 'unit',
+    'value',
   ],
   group_membership: [
-    'cursor', 'disclosureGrantCursor', 'membershipId', 'setup',
+    'cursor', 'disclosureGrantCursor', 'enabled', 'membershipId', 'message_ref',
+    'scope', 'setup',
   ],
   group_usage: ['message_ref', 'policyCode', 'policyCodes'],
   group_chat: [
@@ -1362,7 +1423,7 @@ export const MURPH_GROUP_DATA_TOOL = buildMurphGroupFamilyTool({
 export const MURPH_GROUP_MEMBERSHIP_TOOL = buildMurphGroupFamilyTool({
   name: 'group_membership',
   description:
-    'Read/change membership or next-group setup.',
+    'Read/change membership or next-group setup. On a direct answer to private group Journal consent, call set_journal_capture before saving every named fact.',
 })
 
 export const MURPH_GROUP_USAGE_TOOL = buildMurphGroupFamilyTool({

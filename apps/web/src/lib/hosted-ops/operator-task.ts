@@ -8,6 +8,7 @@ import {
   buildHostedExecutionAssistantNotificationRequestedWake,
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
+  HOSTED_EXECUTION_OPERATOR_DIAGNOSTIC_PERMISSION_TEXT,
   type HostedOperatorTaskControlRequest,
   type HostedOperatorTaskControlResponse,
   type HostedExecutionAssistantAskResult,
@@ -302,8 +303,7 @@ export async function tryHandleHostedOperatorDiagnosticControl(input: {
       response: {
         action: "prepare",
         disclosure: {
-          permissionText:
-            "An authorized Murph operator requested one private, read-only diagnostic. Inspect only this member's Murph context needed to answer the question. Do not send a member message, change state, invoke tools, or disclose anyone else's information. Return the concise diagnostic only to the authorized operator.",
+          permissionText: HOSTED_EXECUTION_OPERATOR_DIAGNOSTIC_PERMISSION_TEXT,
         },
         question: wake.ask.question,
         status: "ready",

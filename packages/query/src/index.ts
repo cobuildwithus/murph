@@ -159,9 +159,18 @@ export {
   buildPersonalPatternReportFromWearableBundle,
   emptyPersonalPatternReport,
 } from "./personal-patterns.ts";
+export { buildJournalView, emptyJournalView } from "./journal-view.ts";
+export type {
+  JournalDay,
+  JournalEvent,
+  JournalRecord,
+  JournalView,
+} from "./journal-view.ts";
 export type {
   PersonalPatternCell,
+  PersonalPatternClassification,
   PersonalPatternFactor,
+  PersonalPatternGrade,
   PersonalPatternOutcome,
   PersonalPatternReport,
   PersonalPatternStage,

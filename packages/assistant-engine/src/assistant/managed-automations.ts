@@ -153,6 +153,12 @@ export const MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID =
   'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FY'
 export const MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID =
   'automation_X3GPAWV2CCHNCYHAAJ4CE2M144'
+export const MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID =
+  'automation_01M0A7T3RN5VPD8C2K4V6X9ZBQ'
+export const MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID =
+  'automation_01M1J7C8M0RN1NGC0NT3XT7D2A'
+export const MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID =
+  'automation_01M1J7C8AFT3RN00NC0NT3XT7A'
 export const MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID =
   'automation_01K2WKKY3F8Q4R5S6T7V8W9XAB'
 export const MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID =
@@ -224,7 +230,7 @@ export const MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION = {
     '',
     'Use the engine-supplied `Occurrence local date` from the Scheduled occurrence context as the action and search-date anchor, even when the wall-clock `Today\'s date` differs. Use the occurrence instant for bounded same-occurrence retry evidence.',
     '',
-    'If the skill selects neither a retained photo nor a same-occurrence removal revision, return `{"kind":"skip","privateSummary":"No captured meals are awaiting closeout."}`. A removal failure or any selected photo remaining fails the run. After successful cleanup, follow the skill\'s presentation rules. Return its compact unresolved-capture question when required. If a response card is attached, return a `send_message` decision whose text contains no nutrition values because the runtime replaces it with deterministic card text. Otherwise return the ordinary compact closeout. Do not expose images, internal paths, or automation details.',
+    'If the skill selects neither a retained photo nor a same-occurrence removal revision, return `{"kind":"skip","privateSummary":"No captured meals are awaiting closeout."}`. A removal failure or any selected photo remaining fails the run. After successful cleanup, follow the skill\'s presentation rules: historical-only work returns its required `skip`, and historical captures never contribute to a current-date response. For eligible current-date work, return the compact unresolved-capture question when required. If a response card is attached, return a `send_message` decision whose text contains no nutrition values because the runtime replaces it with deterministic card text. Otherwise return the ordinary compact closeout. Do not expose images, internal paths, or automation details.',
   ].join('\n'),
 } satisfies MurphManagedAutomationSeed
 
@@ -396,6 +402,89 @@ const MURPH_PROACTIVE_HEALTH_OUTREACH_POLICY = [
 
 export const MURPH_MANAGED_AUTOMATIONS = [
   {
+    automationId: MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
+    slug: 'journal-connected-context-morning',
+    title: 'Journal connected context morning pass',
+    summary: 'Checks new calendar plans and narrow email travel context.',
+    schedule: {
+      kind: 'dailyLocal',
+      localTime: '08:00',
+    },
+    continuityPolicy: 'fresh',
+    ownerScope: 'member',
+    hostedRuntimeOnly: true,
+    tags: ['murph-managed:journal-connected-context'],
+    instructions: [
+      'Run the private Journal connected-context morning pass.',
+      '',
+      'Read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/journal-connected-context/SKILL.md`. Run its connection-notice check, calendar pass, email travel pass, and due follow-up checks. Use the engine-supplied occurrence local date and timezone as the time anchor.',
+      '',
+      'A newly sent connection notice is a hard stop for this occurrence. Persist its ledger state, then end the run without reading any connected account content.',
+      '',
+      'This scheduled run may read connected calendar and email only through that skill. It must never send email, create provider calendar events, or use group context.',
+      '',
+      'If the skill finds nothing user-facing, return `{"kind":"skip","privateSummary":"No new connected Journal context required attention."}`.',
+    ].join('\n'),
+  },
+  {
+    automationId: MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID,
+    slug: 'journal-connected-context-afternoon',
+    title: 'Journal connected context afternoon pass',
+    summary: 'Checks the next 36 hours of relevant calendar plans.',
+    schedule: {
+      kind: 'dailyLocal',
+      localTime: '16:00',
+    },
+    continuityPolicy: 'fresh',
+    ownerScope: 'member',
+    hostedRuntimeOnly: true,
+    tags: ['murph-managed:journal-connected-context'],
+    instructions: [
+      'Run the private Journal connected-context afternoon pass.',
+      '',
+      'Read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/journal-connected-context/SKILL.md`. Run only its connection-notice check, calendar pass, and due follow-up checks. Do not run the email travel pass. Use the engine-supplied occurrence local date and timezone as the time anchor.',
+      '',
+      'A newly sent connection notice is a hard stop for this occurrence. Persist its ledger state, then end the run without reading any connected account content.',
+      '',
+      'This scheduled run may read connected calendars only through that skill. It must never create provider calendar events or use group context.',
+      '',
+      'If the skill finds nothing user-facing, return `{"kind":"skip","privateSummary":"No new calendar Journal context required attention."}`.',
+    ].join('\n'),
+  },
+  {
+    automationId: MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
+    slug: 'personal-patterns-update',
+    title: 'Personal Patterns update',
+    summary: 'Checks for new personal observations and patterns each day.',
+    schedule: {
+      kind: 'cron',
+      expression: '0 13 * * *',
+    },
+    continuityPolicy: 'fresh',
+    ownerScope: 'member',
+    assistantTargetOverride: {
+      model: 'gpt-5.6-luna',
+      reasoningEffort: 'medium',
+    },
+    tags: [
+      'murph-managed:personal-patterns-update',
+    ],
+    instructions: [
+      'On this scheduled run, check whether Personal Patterns contains a factor-and-outcome result that this member has not seen before. Send at most one compact message for the run. Never send one message per result.',
+      '',
+      '- Run `vault-cli wearables patterns --date YYYY-MM-DD --format json` with the current local date.',
+      '- Read `vault-cli knowledge show personal-pattern-notifications` and `vault-cli wearables sources list` exactly once each. A missing ledger is expected; do not retry or search for it another way. If the ledger is missing, do not assume the first report is complete. Treat it as complete only when every contributing wearable source covers the full report window, or trusted device status explicitly says its initial import completed. If completion cannot be proved, write the current identities as pending import state and return skip without messaging.',
+      '- On the first report whose import completion is proved, send one compact first digest with at most three grade A-D highlights. Describe A-C as patterns and D as early signals. State each grade and evidence count, never imply cause, then mark the initial digest sent. If there are no grade A-D results, mark it sent and stay quiet.',
+      '- A result identity is `factorId + outcomeId + comparisonBasis + outcome lagDays`. Direction, effect size, grade, and classification can change without creating a new result.',
+      '- After the initial digest is sent, only a previously unseen grade A-D identity can trigger a message. Describe A-C as patterns and D as an early signal. Grade E observations stay quiet. Always state the grade and evidence count. Never imply cause.',
+      '- Honor muted factors and result identities in the ledger. Record them as seen, but do not mention them.',
+      '- If several eligible results are new, combine at most three highlights into one short summary. Lead with the strongest or most useful result and say that the rest are available on `/patterns`. Do not list a large import one by one.',
+      '- Rewrite `personal-pattern-notifications` with `vault-cli knowledge upsert --slug personal-pattern-notifications --title "Personal Pattern notifications" --page-type ledger --body <markdown>`. Pass the Markdown directly as the `--body` value; do not rely on a shell environment variable. Preserve shared and muted entries, then add all current graded identities before sending. Keep only ids, first-shared date, last-seen grade, and mute state. Do not copy health values or user text into this ledger.',
+      '- If the initial import is still pending, the first complete report has no grade A-D result, or no later eligible identity is new, return `{"kind":"skip","privateSummary":"No new Personal Pattern result appeared."}`. Grade changes belong in the weekly health insight, not a separate notification.',
+      '- If new identities exist, give their structured report to Murph and send one natural message. Do not mention the ledger, scheduled run, model, or internal calculation.',
+    ].join('\n'),
+  },
+  {
     automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
     slug: 'weekly-health-digest',
     title: 'Weekly health digest',
@@ -490,11 +579,15 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'Before choosing a finding:',
       '- Read the derived knowledge index.',
       '- Read `vault-cli knowledge show weekly-health-insights`. If the page is missing, treat that as no prior weekly health insights.',
+      '- Read `vault-cli knowledge show personal-pattern-notifications`. Compare its last-seen grades and identities with the current report. A useful strengthening, weakening, or no-longer-supported result may appear inside this weekly note. Do not send a separate change message.',
       '- Use `weekly-health-insights` as the dedupe ledger. Do not scan every wiki page and do not create per-week insight pages.',
       '- Search other knowledge pages only when the index suggests a candidate finding may already be covered elsewhere.',
-      '- Run `vault-cli wearables patterns --date YYYY-MM-DD --format json` with the current local date. This is the first evidence pass for repeated activity or intervention links with next-day sleep and recovery.',
+      '- Run `vault-cli wearables patterns --date YYYY-MM-DD --format json` with the current local date. This is the first evidence pass for repeated factor links with same-day subjective outcomes and next-day sleep or recovery.',
+      '- Read grades A-E as evidence strength: A-C are Patterns, D is an Early signal, and E is one Observation. Grade changes can inform this weekly note, but they do not require a separate message.',
       '- If the patterns command is unavailable, fails, or does not return a usable report, continue with the existing bounded manual candidate search. Do not treat command failure as evidence that no pattern exists, and do not send a setup or process note to the member.',
-      '- Treat `new_clue`, `seen_again`, and `worth_testing` as stages of repeated association, not proof. Use `no_clear_pattern` to reject a hunch, not to force an outbound note.',
+      '- Independently inspect the same bounded canonical evidence, then compare your best supported findings with the mathematical report. Do not assume either result is correct.',
+      '- Only when a stable, reproducible candidate exposes a material engine gap, call `murph.submit_product_feedback` once with kind `feature_request`. Start the summary with `Pattern engine audit:` and include a self-contained prompt under 1,800 characters for Codex to add or improve a deterministic test before changing the engine. Remove member ids, names, exact dates, raw messages, source paths, and identifying context. Use rounded or relative values. Do not submit an audit merely to produce one, and never mention it to the member.',
+      '- Treat legacy stages as compatibility labels, not proof. Use `no_clear_pattern` to reject a hunch, not to force an outbound note.',
       '- Inspect the underlying canonical dates and other vault context before sending. Check plausible alternatives. The pattern report narrows the search; it does not make the final judgment.',
       '- Inspect only enough recent and historical vault data to test candidate patterns.',
       '- For a candidate centered on a connected wearable recovery/readiness decline, when `murph.device` is available call it with `action: list_accounts`; always read `vault-cli wearables sources list`. Verify the contributing source is healthy, its `lastDate` covers the claimed window, and `stalenessVsNewestDays` or sync gaps do not explain the decline. If source health or freshness cannot be proved, suppress the candidate.',

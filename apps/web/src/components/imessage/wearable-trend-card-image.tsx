@@ -242,7 +242,7 @@ function MetricRow({
   const accessibilityLabel = [
     presentation.displayName,
     average === null ? "average unavailable" : `${renderedAverage} average`,
-    `${formatWearableTrendDirection(metric.trend)} versus prior seven days`,
+    `trend ${formatWearableTrendDirection(metric.trend)}`,
     ...localDates.map((_localDate, index) =>
       `${weekdayLabels[index] ?? "Day"} ${
         metric.values[index] === null ? "no data" : valueLabels[index] ?? "no data"

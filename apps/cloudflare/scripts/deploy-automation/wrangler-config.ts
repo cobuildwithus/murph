@@ -104,7 +104,7 @@ export function buildHostedWranglerDeployConfig(
       buildRunnerContainerConfig({
         className: "StandbyRunnerContainer",
         constraints: { regions: ["ENAM"] },
-        maxInstances: environment.containerMaxInstances,
+        maxInstances: environment.standbyContainerMaxInstances,
         rolloutActiveGracePeriodSeconds:
           RUNNER_CONTAINER_ROLLOUT_ACTIVE_GRACE_PERIOD_SECONDS,
       }),

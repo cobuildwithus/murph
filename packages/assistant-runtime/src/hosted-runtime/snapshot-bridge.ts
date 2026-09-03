@@ -79,6 +79,9 @@ import {
 import {
   pruneHostedWorkspaceSnapshotRuntimeOwnedSymlinks,
 } from "./snapshot-cleanup.ts";
+import type {
+  HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
+} from "./workspace-runner.ts";
 import {
   clearLegacyWorkspaceRefsForV2SnapshotMaterialization,
   materializeLegacyWorkspaceRefsForV2Snapshot,
@@ -166,6 +169,10 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
     createCheckpointSnapshot: async (checkpointInput, context) => {
       await input.waitForBackgroundAssistantWork(context?.signal ?? null);
       return await createHostedWorkspaceBridgeCheckpointSnapshot({
+        currentSnapshotRef: resolveHostedWorkspaceBridgeCurrentSnapshotRef(
+          checkpointInput,
+          input.request,
+        ),
         platform: input.platform,
         readCurrentLease,
         request: {
@@ -250,7 +257,18 @@ export function createHostedRuntimeBridgeLeaseFromWorkspaceRequest(
   };
 }
 
+function resolveHostedWorkspaceBridgeCurrentSnapshotRef(
+  checkpointInput: HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
+  request: HostedWorkspaceInvocationRequest,
+): HostedExecutionSnapshotRef | null {
+  if (Object.hasOwn(checkpointInput, "currentSnapshotRef")) {
+    return checkpointInput.currentSnapshotRef ?? null;
+  }
+  return request.workspace?.snapshotRef ?? null;
+}
+
 async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
+  currentSnapshotRef: HostedExecutionSnapshotRef | null;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   previousWorkspaceCheckpointedAt: string | null;
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
@@ -304,6 +322,7 @@ type HostedWorkspaceSnapshotStage =
   "plan" | "session" | "archive" | "upload" | "checkpoint";
 
 interface HostedWorkspaceBridgeV2SnapshotInput {
+  currentSnapshotRef: HostedExecutionSnapshotRef | null;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   previousWorkspaceCheckpointedAt: string | null;
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
@@ -356,7 +375,7 @@ async function createHostedWorkspaceV2Snapshot(
     const legacyMaterializationPlan =
       await prepareLegacyWorkspaceRefsForV2SnapshotMaterialization({
         artifactStore: input.platform.artifactStore,
-        platform: input.platform,
+        currentSnapshotRef: input.currentSnapshotRef,
         signal: input.signal,
         vaultRoot: input.vaultRoot,
       });

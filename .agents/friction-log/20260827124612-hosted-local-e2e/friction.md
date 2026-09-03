@@ -1,6 +1,7 @@
 ---
 title: 'Hosted-local E2E cannot start when the runner total-byte baseline lags current main'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2513'
 ---
 
 ## Expected Behavior

@@ -40,6 +40,10 @@ describe("hosted orchestration control contracts", () => {
         mailboxItemId: "mailbox_item_test",
       },
       {
+        kind: "runtime_owner_released",
+        runtimeAttemptId: "runtime_attempt_test",
+      },
+      {
         kind: "runtime_recheck_requested",
       },
       {
@@ -50,6 +54,23 @@ describe("hosted orchestration control contracts", () => {
     for (const signal of signals) {
       expect(parseHostedRuntimeSignal(signal)).toEqual(signal);
     }
+  });
+
+  it("keeps runtime owner release signals pointer-only", () => {
+    expect(() => parseHostedRuntimeSignal({
+      kind: "runtime_owner_released",
+      runtimeAttemptId: "runtime_attempt_test",
+      workspaceVersion: "42",
+    })).toThrow(
+      "Hosted runtime owner-release signal must not include workspaceVersion.",
+    );
+
+    expect(() => parseHostedRuntimeSignal({
+      kind: "runtime_owner_released",
+      runtimeAttemptId: "not a bounded pointer",
+    })).toThrow(
+      "Hosted runtime owner-release signal runtimeAttemptId must be a bounded opaque identifier.",
+    );
   });
 
   it("rejects raw payload-shaped fields in runtime signals", () => {
@@ -328,6 +349,10 @@ describe("hosted orchestration control contracts", () => {
       dedupeKey: "assistant.notification.requested:generic",
       kind: "assistant.notification.requested",
     })).toBe("default_owned");
+    expect(classifyHostedSystemMailboxExecutionClass({
+      dedupeKey: "health.daily-metric.reported:synthetic",
+      kind: "health.daily-metric.reported",
+    })).toBe("model_free");
   });
 
   it("rejects raw payload-shaped fields in reconciliation facts contracts", () => {

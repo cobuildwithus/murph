@@ -26,12 +26,14 @@ import type {
   HostedRuntimeMaintenanceOverview,
   HostedRuntimeMaintenanceWakeResult,
   HostedRuntimeMaintenanceWorkspace,
+  HostedRuntimeRecoveryVerificationResult,
   HostedRuntimeRecheckResult,
   HostedRuntimeStalledRecheckOverview,
 } from "@/src/lib/hosted-ops/runtime-maintenance";
 import type { HostedOpsJunctionDiagnosticResult } from "@/src/lib/hosted-ops/device-sync-diagnostic-types";
 
 import {
+  hasUnresolvedRuntimeRecheckWitness,
   parseRuntimeRecheckUserIds,
   removeSignaledRuntimeRecheckUserIds,
   RuntimeRecheckPanel,
@@ -48,6 +50,7 @@ type PendingAction =
   | { kind: "refresh" }
   | { kind: "refresh-stalled-discovery" }
   | { kind: "recheck-runtime-batch" }
+  | { kind: "verify-runtime-recheck-batch" }
   | { kind: "wake-batch"; limit: number }
   | { kind: "wake-user"; userId: string };
 
@@ -64,8 +67,12 @@ export function RuntimeMaintenanceClient({
   const [runtimeRecheckUserIdsText, setRuntimeRecheckUserIdsText] = useState("");
   const [runtimeRecheckResult, setRuntimeRecheckResult] =
     useState<HostedRuntimeRecheckResult | null>(null);
+  const [runtimeRecheckVerificationResult, setRuntimeRecheckVerificationResult] =
+    useState<HostedRuntimeRecoveryVerificationResult | null>(null);
   const [runtimeRecheckError, setRuntimeRecheckError] =
     useState<RuntimeRecheckError | null>(null);
+  const [runtimeRecheckVerificationError, setRuntimeRecheckVerificationError] =
+    useState<string | null>(null);
   const [junctionDiagnosticResult, setJunctionDiagnosticResult] =
     useState<HostedOpsJunctionDiagnosticResult | null>(null);
   const [pending, setPending] = useState<PendingAction | null>(null);
@@ -76,6 +83,10 @@ export function RuntimeMaintenanceClient({
     [overview.generatedAt],
   );
   const pendingLabel = describeMaintenancePendingAction(pending);
+  const hasUnresolvedRuntimeRecheckBatch = hasUnresolvedRuntimeRecheckWitness(
+    runtimeRecheckResult,
+    runtimeRecheckVerificationResult,
+  );
 
   async function refreshOverview(cursor = overview.nextCursor): Promise<void> {
     setPending({ kind: "refresh" });
@@ -163,6 +174,10 @@ export function RuntimeMaintenanceClient({
   }
 
   async function recheckRuntimeBatch(): Promise<void> {
+    if (hasUnresolvedRuntimeRecheckBatch) {
+      return;
+    }
+
     const parsedInput = parseRuntimeRecheckUserIds(runtimeRecheckUserIdsText);
     const userIds = parsedInput.userIds.slice(0, 3);
     if (parsedInput.invalidEntries.length > 0 || userIds.length === 0) {
@@ -171,7 +186,6 @@ export function RuntimeMaintenanceClient({
 
     setPending({ kind: "recheck-runtime-batch" });
     setRuntimeRecheckError(null);
-    setRuntimeRecheckResult(null);
     try {
       const result = await requestJson<HostedRuntimeRecheckResult>(
         "/api/ops/runtime-maintenance",
@@ -186,6 +200,8 @@ export function RuntimeMaintenanceClient({
           method: "POST",
         },
       );
+      setRuntimeRecheckVerificationError(null);
+      setRuntimeRecheckVerificationResult(null);
       setRuntimeRecheckResult(result);
       setRuntimeRecheckUserIdsText((currentValue) => (
         removeSignaledRuntimeRecheckUserIds(currentValue, result)
@@ -198,6 +214,49 @@ export function RuntimeMaintenanceClient({
     } finally {
       setPending(null);
     }
+  }
+
+  async function verifyRuntimeRecheckBatch(): Promise<void> {
+    const baselines = runtimeRecheckResult?.results.flatMap((entry) =>
+      entry.status === "signaled" ? [entry.witness] : []
+    ) ?? [];
+    if (baselines.length === 0) {
+      return;
+    }
+
+    setPending({ kind: "verify-runtime-recheck-batch" });
+    setRuntimeRecheckVerificationError(null);
+    try {
+      setRuntimeRecheckVerificationResult(
+        await requestJson<HostedRuntimeRecoveryVerificationResult>(
+          "/api/ops/runtime-maintenance",
+          {
+            body: JSON.stringify({
+              baselines,
+              operation: "verify-runtime-rechecks",
+            }),
+            headers: {
+              "Content-Type": "application/json",
+            },
+            method: "POST",
+          },
+        ),
+      );
+    } catch (verifyError) {
+      setRuntimeRecheckVerificationError(describeClientError(verifyError));
+    } finally {
+      setPending(null);
+    }
+  }
+
+  function stopTrackingRuntimeRecheckBatch(): void {
+    if (!hasUnresolvedRuntimeRecheckBatch) {
+      return;
+    }
+
+    setRuntimeRecheckResult(null);
+    setRuntimeRecheckVerificationResult(null);
+    setRuntimeRecheckVerificationError(null);
   }
 
   async function runJunctionDiagnostic(formData: FormData): Promise<void> {
@@ -394,6 +453,8 @@ export function RuntimeMaintenanceClient({
         onInputChange={setRuntimeRecheckUserIdsText}
         onRecheck={() => void recheckRuntimeBatch()}
         onRefresh={() => void refreshStalledDiscovery()}
+        onStopTracking={stopTrackingRuntimeRecheckBatch}
+        onVerify={() => void verifyRuntimeRecheckBatch()}
         onUseDetectedCandidates={() => {
           setRuntimeRecheckUserIdsText((currentValue) => {
             const queuedUserIds = parseRuntimeRecheckUserIds(currentValue).userIds;
@@ -403,12 +464,13 @@ export function RuntimeMaintenanceClient({
             ])].join("\n");
           });
           setRuntimeRecheckError(null);
-          setRuntimeRecheckResult(null);
         }}
         overview={stalledRecheckOverview}
         pendingAction={readRuntimeRecheckPendingAction(pending)}
         result={runtimeRecheckResult}
         userIdsText={runtimeRecheckUserIdsText}
+        verificationError={runtimeRecheckVerificationError}
+        verificationResult={runtimeRecheckVerificationResult}
       />
 
       <section
@@ -951,6 +1013,7 @@ function describeMaintenancePendingAction(pending: PendingAction | null): string
   if (
     pending.kind === "refresh-stalled-discovery"
     || pending.kind === "recheck-runtime-batch"
+    || pending.kind === "verify-runtime-recheck-batch"
   ) {
     return "";
   }
@@ -959,12 +1022,15 @@ function describeMaintenancePendingAction(pending: PendingAction | null): string
 
 function readRuntimeRecheckPendingAction(
   pending: PendingAction | null,
-): "recheck" | "refresh" | null {
+): "recheck" | "refresh" | "verify" | null {
   if (pending?.kind === "refresh-stalled-discovery") {
     return "refresh";
   }
   if (pending?.kind === "recheck-runtime-batch") {
     return "recheck";
+  }
+  if (pending?.kind === "verify-runtime-recheck-batch") {
+    return "verify";
   }
   return null;
 }

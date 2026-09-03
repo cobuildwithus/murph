@@ -84,6 +84,7 @@ export type HostedLocalE2eScenarioName =
   | "foreground-reply-priority"
   | "hosted-web-browser-smoke"
   | "idle-checkpoint-deferred-progress"
+  | "idle-checkpoint-runtime-handoff"
   | "imessage-member-action-timestamp"
   | "junction-link-connect"
   | "junction-wearable-fixture"
@@ -219,6 +220,11 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
     file: "apps/cloudflare/test/hosted-local-idle-checkpoint-deferred-progress-e2e.test.ts",
     name: "idle-checkpoint-deferred-progress",
+    testControls: true,
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-idle-checkpoint-runtime-handoff-e2e.test.ts",
+    name: "idle-checkpoint-runtime-handoff",
     testControls: true,
   },
   {

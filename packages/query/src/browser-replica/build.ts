@@ -2,6 +2,7 @@ import type { CanonicalEntity } from "../canonical-entities.ts";
 import { experimentOutcomeSchema } from "@murphai/contracts";
 import { metricPointRecordIds } from "../metrics/index.ts";
 import { buildPersonalPatternReportFromWearableBundleAndMetricPoints } from "../personal-patterns.ts";
+import { buildJournalView } from "../journal-view.ts";
 import { isDefaultProjectedQueryEntity } from "../query-visibility.ts";
 import type { OverviewWeeklySampleSummary } from "../overview.ts";
 import { summarizeDailySamples, type DailySampleSummary } from "../summaries.ts";
@@ -129,6 +130,9 @@ export async function createBrowserVaultReplica(
       row.biomarkerKey !== null &&
       row.value !== null
     ),
+    journal: buildJournalView(input.vault, allMetricPoints, {
+      asOf: addDaysToIsoDate(generatedAt.slice(0, 10), 1),
+    }),
     labResultRows,
     metricGoalProgressRows: buildMetricGoalProgressRows(defaultProjectedVault.entities, allMetricPoints, generatedAt),
     metricRows,
@@ -744,4 +748,8 @@ function subtractDaysFromIsoDate(value: string, days: number): string {
 
   parsed.setUTCDate(parsed.getUTCDate() - days);
   return parsed.toISOString().slice(0, 10);
+}
+
+function addDaysToIsoDate(value: string, days: number): string {
+  return subtractDaysFromIsoDate(value, -days);
 }

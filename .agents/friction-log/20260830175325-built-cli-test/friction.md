@@ -1,6 +1,7 @@
 ---
 title: 'Built CLI test harness ignores stale assistant-cli runtime artifacts'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2639'
 ---
 
 ## Expected Behavior

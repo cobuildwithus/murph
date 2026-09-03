@@ -6,6 +6,7 @@ import {
 } from "../src/builders.ts";
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
+  HOSTED_EXECUTION_OPERATOR_DIAGNOSTIC_PERMISSION_TEXT,
 } from "../src/contracts.ts";
 import { parseHostedExecutionWake } from "../src/parsers.ts";
 import {
@@ -14,6 +15,21 @@ import {
 } from "../src/operator-task-control.ts";
 
 describe("hosted operator task contracts", () => {
+  it("keeps the diagnostic permission scoped to one read-only target workspace", () => {
+    expect(HOSTED_EXECUTION_OPERATOR_DIAGNOSTIC_PERMISSION_TEXT).toMatch(
+      /targeted Murph workspace/u,
+    );
+    expect(HOSTED_EXECUTION_OPERATOR_DIAGNOSTIC_PERMISSION_TEXT).toMatch(
+      /available read-only tools/u,
+    );
+    expect(HOSTED_EXECUTION_OPERATOR_DIAGNOSTIC_PERMISSION_TEXT).toMatch(
+      /only to the authorized operator/u,
+    );
+    expect(HOSTED_EXECUTION_OPERATOR_DIAGNOSTIC_PERMISSION_TEXT).not.toMatch(
+      /invoke tools/u,
+    );
+  });
+
   it("round trips the closed read-only operator task target", () => {
     const occurredAt = "2026-08-25T18:00:00.000Z";
     const wake = buildHostedExecutionAssistantAskRequestedWake({

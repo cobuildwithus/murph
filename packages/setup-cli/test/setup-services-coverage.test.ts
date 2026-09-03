@@ -1166,6 +1166,7 @@ test('incur error bridge maps rich VaultCliError metadata and preserves typed de
     command: 'setup',
     displayName: 'setup',
     env: {},
+    globals: {},
     error(options) {
       throw new Error(options.message)
     },

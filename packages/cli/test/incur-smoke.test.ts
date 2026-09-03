@@ -4,7 +4,8 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { Cli, z } from 'incur'
+import { PassThrough } from 'node:stream'
+import { Cli, Errors, Mcp, Parser, z } from 'incur'
 import { EVENT_KINDS } from '@murphai/contracts'
 import { initializeVault } from '@murphai/core'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -234,7 +235,7 @@ async function withInProcessCliProcessStateLock<T>(
 }
 
 async function runJsonCli<TData>(
-  cli: Cli.Cli,
+  cli: { serve: Cli.Cli['serve'] },
   args: string[],
 ): Promise<{
   envelope: CliEnvelope<TData>
@@ -257,6 +258,48 @@ async function runJsonCli<TData>(
     envelope: JSON.parse(output.join('').trim()) as CliEnvelope<TData>,
     exitCode,
   }
+}
+
+async function runHumanCli(
+  cli: Pick<Cli.Cli, 'serve'>,
+  args: string[],
+): Promise<{
+  exitCode: number | null
+  output: string
+}> {
+  return await withInProcessCliProcessStateLock(async () => {
+    const stdoutTtyDescriptor = Object.getOwnPropertyDescriptor(
+      process.stdout,
+      'isTTY',
+    )
+    const output: string[] = []
+    let exitCode: number | null = null
+
+    Object.defineProperty(process.stdout, 'isTTY', {
+      configurable: true,
+      value: true,
+    })
+
+    try {
+      await cli.serve(args, {
+        env: process.env,
+        exit(code) {
+          exitCode = code
+        },
+        stdout(chunk) {
+          output.push(chunk)
+        },
+      })
+    } finally {
+      if (stdoutTtyDescriptor) {
+        Object.defineProperty(process.stdout, 'isTTY', stdoutTtyDescriptor)
+      } else {
+        delete (process.stdout as { isTTY?: boolean }).isTTY
+      }
+    }
+
+    return { exitCode, output: output.join('') }
+  })
 }
 
 async function runBuiltCliProcess(args: string[]): Promise<{
@@ -316,6 +359,113 @@ async function snapshotVaultFiles(vaultRoot: string): Promise<Array<[string, str
   return snapshot.sort(([left], [right]) => left.localeCompare(right))
 }
 
+function assertSafeParseValidationError(error: unknown): void {
+  assert.deepEqual(error, {
+    code: 'VALIDATION_ERROR',
+    message: 'The command arguments are invalid.',
+    retryable: false,
+    hint: 'Run the command with --help and correct its arguments or options.',
+    stage: 'validation',
+    fieldErrors: [
+      {
+        code: 'custom',
+        missing: false,
+        path: 'arguments',
+        expected: '',
+        received: 'invalid',
+        message: 'This field is invalid.',
+      },
+    ],
+  })
+}
+
+function assertSafeParseValidationEnvelope(envelope: CliEnvelope<unknown>): void {
+  assert.equal(envelope.ok, false)
+  if (envelope.ok) {
+    assert.fail('Expected malformed command arguments to fail.')
+  }
+
+  assertSafeParseValidationError(envelope.error)
+}
+
+function assertSafeInputValidationError(
+  error: unknown,
+  field: { code: string; missing: boolean; path: string } = {
+    code: 'custom',
+    missing: false,
+    path: 'input',
+  },
+): void {
+  assert.deepEqual(error, {
+    code: 'VALIDATION_ERROR',
+    message: 'The command input is invalid.',
+    retryable: false,
+    hint: 'Check the command schema and correct the invalid input.',
+    stage: 'validation',
+    fieldErrors: [
+      {
+        ...field,
+        expected: '',
+        received: field.missing ? 'missing' : 'invalid',
+        message: field.missing ? 'This field is required.' : 'This field is invalid.',
+      },
+    ],
+  })
+}
+
+function assertSafeInputValidationEnvelope(
+  envelope: CliEnvelope<unknown>,
+  field: { code: string; missing: boolean; path: string } = {
+    code: 'custom',
+    missing: false,
+    path: 'input',
+  },
+): void {
+  assert.equal(envelope.ok, false)
+  if (envelope.ok) {
+    assert.fail('Expected invalid command input to fail.')
+  }
+
+  assertSafeInputValidationError(envelope.error, field)
+}
+
+test('public schema repair details reject private paths and unknown issue codes', () => {
+  const privateMarker = 'PrivateSchemaProjectionMarker'
+  const schema = z.object({ visible: z.string() }).superRefine((_value, context) => {
+    context.addIssue({ code: 'custom', message: privateMarker, path: [] })
+    context.addIssue({
+      code: 'custom',
+      message: privateMarker,
+      path: [privateMarker, 'nested'],
+    })
+  })
+  let caught: unknown
+
+  try {
+    Parser.zodParse(schema, { visible: 'ok' }, { exposeSchemaFields: true })
+  } catch (error) {
+    caught = error
+  }
+
+  assert.ok(caught instanceof Errors.ValidationError)
+  const privatePathError = Errors.toErrorEnvelope(caught)
+  assertSafeInputValidationError(privatePathError)
+  assert.equal(JSON.stringify(privatePathError).includes(privateMarker), false)
+
+  const unknownCodeError = Errors.toErrorEnvelope(
+    new Errors.ValidationError({
+      message: privateMarker,
+      publicIssues: [{ code: privateMarker, missing: false, path: 'visible' }],
+    }),
+  )
+  assertSafeInputValidationError(unknownCodeError, {
+    code: 'custom',
+    missing: false,
+    path: 'visible',
+  })
+  assert.equal(JSON.stringify(unknownCodeError).includes(privateMarker), false)
+})
+
 test('root help exposes the Incur built-ins and simple health CRUD command groups', async () => {
   const help = await runSourceCliRaw(['--help'])
 
@@ -326,7 +476,7 @@ test('root help exposes the Incur built-ins and simple health CRUD command group
   assert.match(help, /search\s+Search commands for the shared local query projection/u)
   assert.match(help, /timeline\s+Build a descending cross-record timeline/u)
   assert.match(help, /completions\s+Generate shell completion script/u)
-  assert.match(help, /mcp add\s+Register as MCP server/u)
+  assert.match(help, /mcp\s+Register as MCP server \(add, doctor\)/u)
   assert.match(help, /skills\s+Sync skill files to agents \(add, list\)/u)
   assert.match(help, /--config/u)
   assert.match(help, /--no-config/u)
@@ -386,6 +536,803 @@ test('built CLI discovery surfaces remain available', async () => {
   )
   assert.match(completions, /_incur_complete_vault_cli/u)
 }, INCUR_ROOT_HELP_TIMEOUT_MS)
+
+test('source and built CLI parse failures are typed, private, and write-free', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-incur-parse-error-'))
+  const vaultRoot = path.join(tempRoot, 'vault')
+  const privateMarker = 'PrivateMalformedArgumentMarker'
+  const privateValue = 'PrivateMalformedArgumentValue'
+  const malformedArgs = [
+    'goal',
+    'list',
+    `--${privateMarker}=${privateValue}`,
+    '--vault',
+    vaultRoot,
+  ]
+  const validArgs = ['goal', 'list', '--vault', vaultRoot]
+
+  try {
+    await initializeVault({ vaultRoot })
+    const before = await snapshotVaultFiles(vaultRoot)
+
+    const sourceResult = await runJsonCli(createVaultCli(), malformedArgs)
+    assert.equal(sourceResult.exitCode, 1)
+    assertSafeParseValidationEnvelope(sourceResult.envelope)
+
+    const builtResult = await runBuiltCliProcess([
+      ...malformedArgs,
+      '--full-output',
+      '--format',
+      'json',
+    ])
+    assert.equal(builtResult.exitCode, 1)
+    const builtEnvelope = JSON.parse(builtResult.stdout) as CliEnvelope
+    assertSafeParseValidationEnvelope(builtEnvelope)
+
+    const humanResult = await runHumanCli(createVaultCli(), malformedArgs)
+    assert.equal(humanResult.exitCode, 1)
+    assert.match(
+      humanResult.output,
+      /invalid value for <arguments>: This field is invalid\./u,
+    )
+
+    for (const serialized of [
+      JSON.stringify(sourceResult.envelope),
+      `${builtResult.stdout}\n${builtResult.stderr}`,
+      humanResult.output,
+    ]) {
+      assert.equal(serialized.includes(privateMarker), false)
+      assert.equal(serialized.includes(privateValue), false)
+      assert.equal(serialized.includes(vaultRoot), false)
+      assert.equal(serialized.includes('Unknown flag'), false)
+      assert.equal(serialized.includes('UNKNOWN'), false)
+    }
+    assert.deepEqual(await snapshotVaultFiles(vaultRoot), before)
+
+    const sourceValid = await runJsonCli(createVaultCli(), validArgs)
+    const builtValid = await runBuiltCliProcess([
+      ...validArgs,
+      '--full-output',
+      '--format',
+      'json',
+    ])
+    const builtValidEnvelope = JSON.parse(builtValid.stdout) as CliEnvelope
+
+    assert.equal(sourceValid.envelope.ok, true)
+    assert.equal(builtValid.exitCode, 0)
+    assert.equal(builtValidEnvelope.ok, true)
+    if (sourceValid.envelope.ok && builtValidEnvelope.ok) {
+      assert.deepEqual(builtValidEnvelope.data, sourceValid.envelope.data)
+    }
+  } finally {
+    await rm(tempRoot, { force: true, recursive: true })
+  }
+}, INCUR_KNOWLEDGE_BOUNDARY_TIMEOUT_MS)
+
+test('early validation failures honor explicit JSON and retain the human recovery hint', async () => {
+  const privateMarker = 'PrivateEarlyParseMarker'
+  let handlerCalls = 0
+  const cli = Cli.create('early-validation-smoke', {
+    globals: z.object({ limit: z.number() }),
+  }).command('ping', {
+    run() {
+      handlerCalls++
+      return { pong: true }
+    },
+  })
+
+  const builtinJson = await runHumanCli(cli, [
+    '--token-limit',
+    privateMarker,
+    '--format',
+    'json',
+  ])
+  assert.equal(builtinJson.exitCode, 1)
+  assert.deepEqual(JSON.parse(builtinJson.output), {
+    code: 'VALIDATION_ERROR',
+    message: 'The command arguments are invalid.',
+    retryable: false,
+    hint: 'Run the command with --help and correct its arguments or options.',
+    stage: 'validation',
+    fieldErrors: [
+      {
+        code: 'custom',
+        missing: false,
+        path: 'arguments',
+        expected: '',
+        received: 'invalid',
+        message: 'This field is invalid.',
+      },
+    ],
+  })
+
+  const globalsJson = await runHumanCli(cli, [
+    'ping',
+    '--limit',
+    privateMarker,
+    '--format',
+    'json',
+  ])
+  assert.equal(globalsJson.exitCode, 1)
+  assert.deepEqual(JSON.parse(globalsJson.output), {
+    code: 'VALIDATION_ERROR',
+    message: 'The command input is invalid.',
+    retryable: false,
+    hint: 'Check the command schema and correct the invalid input.',
+    stage: 'validation',
+    fieldErrors: [
+      {
+        code: 'invalid_type',
+        missing: false,
+        path: 'limit',
+        expected: '',
+        received: 'invalid',
+        message: 'This field is invalid.',
+      },
+    ],
+  })
+
+  const builtFullOutput = await runBuiltCliProcess([
+    '--token-limit',
+    privateMarker,
+    '--full-output',
+    '--format',
+    'json',
+  ])
+  assert.equal(builtFullOutput.exitCode, 1)
+  const builtEnvelope = JSON.parse(builtFullOutput.stdout) as CliEnvelope<unknown>
+  assertSafeParseValidationEnvelope(builtEnvelope)
+  assert.deepEqual(builtEnvelope.meta, {
+    command: 'vault-cli',
+    duration: '0ms',
+  })
+
+  const globalFullOutput = await runJsonCli<unknown>(cli, [
+    'ping',
+    '--limit',
+    privateMarker,
+  ])
+  assert.equal(globalFullOutput.exitCode, 1)
+  assertSafeInputValidationEnvelope(globalFullOutput.envelope, {
+    code: 'invalid_type',
+    missing: false,
+    path: 'limit',
+  })
+  assert.deepEqual(globalFullOutput.envelope.meta, {
+    command: 'early-validation-smoke',
+    duration: '0ms',
+  })
+
+  const human = await runHumanCli(cli, ['--token-limit', privateMarker])
+  assert.equal(human.exitCode, 1)
+  assert.match(human.output, /Error \(VALIDATION_ERROR\): The command arguments are invalid\./u)
+  assert.match(
+    human.output,
+    /Hint: Run the command with --help and correct its arguments or options\./u,
+  )
+
+  const humanInput = await runHumanCli(cli, ['ping', '--limit', privateMarker])
+  assert.equal(humanInput.exitCode, 1)
+  assert.match(humanInput.output, /Error \(VALIDATION_ERROR\): The command input is invalid\./u)
+  assert.match(
+    humanInput.output,
+    /Hint: Check the command schema and correct the invalid input\./u,
+  )
+
+  for (const flag of ['--format', '--filter-output', '--token-limit', '--token-offset']) {
+    const missingValue = await runHumanCli(cli, ['ping', flag])
+    assert.equal(missingValue.exitCode, 1, flag)
+    assert.match(missingValue.output, /Error \(VALIDATION_ERROR\)/u, flag)
+    assert.match(
+      missingValue.output,
+      /Hint: Run the command with --help and correct its arguments or options\./u,
+      flag,
+    )
+    assert.equal(missingValue.output.includes('COMMAND_NOT_FOUND'), false, flag)
+  }
+
+  for (const output of [
+    builtinJson.output,
+    globalsJson.output,
+    builtFullOutput.stdout,
+    JSON.stringify(globalFullOutput.envelope),
+    human.output,
+    humanInput.output,
+  ]) {
+    assert.equal(output.includes(privateMarker), false)
+    assert.equal(output.includes('UNKNOWN'), false)
+  }
+
+  assert.equal(handlerCalls, 0)
+  const valid = await runJsonCli<{ pong: boolean }>(cli, ['ping', '--limit', '3'])
+  assert.equal(valid.exitCode, null)
+  assert.equal(valid.envelope.ok, true)
+  if (valid.envelope.ok) {
+    assert.deepEqual(valid.envelope.data, { pong: true })
+  }
+  assert.equal(handlerCalls, 1)
+})
+
+test('native command and HTTP validation errors use safe envelopes', async () => {
+  const privateMarker = 'PrivateValidationInputMarker'
+  const privateSchema = z.string().refine(() => false, {
+    message: `Invalid submitted value: ${privateMarker}`,
+  })
+  let commandCalls = 0
+  const commandCli = Cli.create('command-validation-smoke').command('check', {
+    options: z.object({ value: privateSchema }),
+    run() {
+      commandCalls += 1
+      return { ok: true }
+    },
+  })
+
+  const commandResult = await runJsonCli(commandCli, [
+    'check',
+    '--value',
+    privateMarker,
+  ])
+  assert.equal(commandResult.exitCode, 1)
+  assertSafeInputValidationEnvelope(commandResult.envelope, {
+    code: 'custom',
+    missing: false,
+    path: 'value',
+  })
+  assert.equal(JSON.stringify(commandResult.envelope).includes(privateMarker), false)
+  assert.equal(commandCalls, 0)
+
+  let fetchCalls = 0
+  const fetchCli = Cli.create('http-validation-smoke', {
+    globals: z.object({ credential: privateSchema }),
+  }).command('check', {
+    run() {
+      fetchCalls += 1
+      return { ok: true }
+    },
+  })
+  const response = await fetchCli.fetch(
+    new Request(
+      `http://localhost/check?credential=${encodeURIComponent(privateMarker)}`,
+    ),
+  )
+  const fetchEnvelope = (await response.json()) as CliEnvelope<unknown>
+
+  assert.equal(response.status, 400)
+  assertSafeInputValidationEnvelope(fetchEnvelope, {
+    code: 'custom',
+    missing: false,
+    path: 'credential',
+  })
+  assert.equal(JSON.stringify(fetchEnvelope).includes(privateMarker), false)
+  assert.equal(fetchCalls, 0)
+
+  let bodyCalls = 0
+  const bodyCli = Cli.create('http-body-validation-smoke', {
+    globals: z.object({ trace: z.boolean().optional() }),
+  }).command('check', {
+    options: z.object({ value: z.string().optional() }),
+    run() {
+      bodyCalls += 1
+      return { ok: true }
+    },
+  })
+
+  for (const bodyText of [`{"value":"${privateMarker}`, 'null']) {
+    const bodyResponse = await bodyCli.fetch(
+      new Request('http://localhost/check', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: bodyText,
+      }),
+    )
+    const bodyEnvelope = (await bodyResponse.json()) as CliEnvelope<unknown>
+    assert.equal(bodyResponse.status, 400)
+    assertSafeInputValidationEnvelope(bodyEnvelope)
+    const serialized = JSON.stringify(bodyEnvelope)
+    assert.equal(serialized.includes(privateMarker), false)
+    assert.equal(serialized.includes('UNKNOWN'), false)
+    assert.equal(serialized.includes('TypeError'), false)
+  }
+  assert.equal(bodyCalls, 0)
+
+  let forwardedBody = ''
+  const gatewayCli = Cli.create('http-gateway-body-smoke').command('api', {
+    async fetch(request) {
+      forwardedBody = await request.text()
+      return Response.json({ ok: true })
+    },
+  })
+  const gatewayResponse = await gatewayCli.fetch(
+    new Request('http://localhost/api/write', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ value: privateMarker }),
+    }),
+  )
+  assert.equal(gatewayResponse.status, 200)
+  assert.equal(forwardedBody, JSON.stringify({ value: privateMarker }))
+})
+
+test('config failures expose a safe repair target without paths or contents', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'incur-config-recovery-'))
+  const privateMarker = 'PrivateConfigRecoveryMarker'
+  const missingPath = path.join(tempRoot, `${privateMarker}.json`)
+  const invalidPath = path.join(tempRoot, 'invalid.json')
+  const validPath = path.join(tempRoot, 'valid.json')
+  let handlerCalls = 0
+  const cli = Cli.create('config-recovery-smoke', {
+    config: { flag: 'config' },
+  }).command('check', {
+    run() {
+      handlerCalls += 1
+      return { ok: true }
+    },
+  })
+
+  try {
+    await writeFile(invalidPath, `{ "private": "${privateMarker}"`)
+    await writeFile(validPath, JSON.stringify({ commands: { check: {} } }))
+
+    const missing = await runJsonCli(cli, ['check', '--config', missingPath])
+    assert.equal(missing.exitCode, 1)
+    assert.equal(missing.envelope.ok, false)
+    if (!missing.envelope.ok) {
+      assert.deepEqual(missing.envelope.error, {
+        code: 'VALIDATION_ERROR',
+        message: 'The selected config file was not found.',
+        retryable: false,
+        hint: 'Select an existing config file or omit the config override and retry.',
+        stage: 'validation',
+        fieldErrors: [
+          {
+            code: 'custom',
+            missing: true,
+            path: 'config',
+            expected: '',
+            received: 'missing',
+            message: 'This field is required.',
+          },
+        ],
+      })
+    }
+
+    const invalid = await runJsonCli(cli, ['check', '--config', invalidPath])
+    assert.equal(invalid.exitCode, 1)
+    assert.equal(invalid.envelope.ok, false)
+    if (!invalid.envelope.ok) {
+      assert.deepEqual(invalid.envelope.error, {
+        code: 'VALIDATION_ERROR',
+        message: 'The command configuration is invalid.',
+        retryable: false,
+        hint: 'Correct the command configuration and retry.',
+        stage: 'validation',
+        fieldErrors: [
+          {
+            code: 'custom',
+            missing: false,
+            path: 'config',
+            expected: '',
+            received: 'invalid',
+            message: 'This field is invalid.',
+          },
+        ],
+      })
+    }
+
+    const unavailable = await runJsonCli(cli, ['check', '--config', tempRoot])
+    assert.equal(unavailable.exitCode, 1)
+    assert.equal(unavailable.envelope.ok, false)
+    if (!unavailable.envelope.ok) {
+      assert.deepEqual(unavailable.envelope.error, {
+        code: 'VALIDATION_ERROR',
+        message: 'The config file could not be read.',
+        retryable: false,
+        hint: 'Check that the selected config file is readable and retry.',
+        stage: 'validation',
+        fieldErrors: [
+          {
+            code: 'custom',
+            missing: false,
+            path: 'config',
+            expected: '',
+            received: 'invalid',
+            message: 'This field is invalid.',
+          },
+        ],
+      })
+    }
+
+    assert.equal(handlerCalls, 0)
+    assert.equal(JSON.stringify(missing.envelope).includes(privateMarker), false)
+    assert.equal(JSON.stringify(invalid.envelope).includes(privateMarker), false)
+    assert.equal(JSON.stringify(unavailable.envelope).includes(tempRoot), false)
+
+    const valid = await runJsonCli(cli, ['check', '--config', validPath])
+    assert.equal(valid.exitCode, null)
+    assert.equal(valid.envelope.ok, true)
+    assert.equal(handlerCalls, 1)
+  } finally {
+    await rm(tempRoot, { force: true, recursive: true })
+  }
+})
+
+test('config structural failures share one fixed invalid recovery', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'incur-config-structure-'))
+  const configPath = path.join(tempRoot, 'config.json')
+  const privateMarker = 'PrivateConfigStructureMarker'
+  const expectedError = {
+    code: 'VALIDATION_ERROR',
+    message: 'The command configuration is invalid.',
+    retryable: false,
+    hint: 'Correct the command configuration and retry.',
+    stage: 'validation',
+    fieldErrors: [
+      {
+        code: 'custom',
+        missing: false,
+        path: 'config',
+        expected: '',
+        received: 'invalid',
+        message: 'This field is invalid.',
+      },
+    ],
+  }
+  let handlerCalls = 0
+  const fileCli = Cli.create('config-structure-smoke', {
+    config: { flag: 'config' },
+  }).command('check', {
+    options: z.object({ known: z.boolean().optional() }),
+    run() {
+      handlerCalls += 1
+      return { ok: true }
+    },
+  })
+
+  try {
+    for (const config of [
+      { commands: { check: { options: privateMarker } } },
+      { commands: { check: { options: { [privateMarker]: true } } } },
+    ]) {
+      await writeFile(configPath, JSON.stringify(config))
+      const result = await runJsonCli(fileCli, ['check', '--config', configPath])
+      assert.equal(result.exitCode, 1)
+      assert.equal(result.envelope.ok, false)
+      if (!result.envelope.ok) assert.deepEqual(result.envelope.error, expectedError)
+      assert.equal(JSON.stringify(result.envelope).includes(privateMarker), false)
+    }
+
+    const loaderConfig = {
+      flag: 'config',
+      loader: () => ({}),
+    }
+    assert.equal(Reflect.set(loaderConfig, 'loader', () => privateMarker), true)
+    const loaderCli = Cli.create('config-loader-smoke', {
+      config: loaderConfig,
+    }).command('check', {
+      run() {
+        handlerCalls += 1
+        return { ok: true }
+      },
+    })
+    const loaderResult = await runJsonCli(loaderCli, [
+      'check',
+      '--config',
+      path.join(tempRoot, privateMarker),
+    ])
+    assert.equal(loaderResult.exitCode, 1)
+    assert.equal(loaderResult.envelope.ok, false)
+    if (!loaderResult.envelope.ok)
+      assert.deepEqual(loaderResult.envelope.error, expectedError)
+    assert.equal(JSON.stringify(loaderResult.envelope).includes(privateMarker), false)
+    assert.equal(handlerCalls, 0)
+  } finally {
+    await rm(tempRoot, { force: true, recursive: true })
+  }
+})
+
+test('real MCP transports defer validation to the safe Incur envelope', async () => {
+  const privateMarker = 'PrivateMcpTransportMarker'
+  let handlerCalls = 0
+  const commands = new Map([
+    [
+      'check',
+      {
+        options: z.object({
+          value: z.string().refine(() => false, {
+            message: `Invalid submitted value: ${privateMarker}`,
+          }),
+        }),
+        run() {
+          handlerCalls += 1
+          return { ok: true }
+        },
+      },
+    ],
+  ])
+  const initializeParams = {
+    protocolVersion: '2024-11-05',
+    capabilities: {},
+    clientInfo: { name: 'transport-smoke', version: '1.0.0' },
+  }
+
+  async function runSession(
+    discovery: 'direct' | 'progressive',
+    messages: Array<{ id: number; method: string; params: unknown }>,
+  ) {
+    const input = new PassThrough()
+    const output = new PassThrough()
+    let outputText = ''
+    output.on('data', (chunk) => {
+      outputText += chunk.toString()
+    })
+
+    const done = Mcp.serve('transport-smoke', '1.0.0', commands, {
+      input,
+      output,
+      tools: { discovery },
+    })
+    for (const message of messages)
+      input.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`)
+
+    const deadline = Date.now() + 2_000
+    while (outputText.trim().split('\n').filter(Boolean).length < messages.length) {
+      if (Date.now() > deadline) throw new Error('Timed out waiting for MCP transport responses.')
+      await new Promise<void>((resolve) => setTimeout(resolve, 5))
+    }
+    input.end()
+    await done
+    return outputText.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line))
+  }
+
+  const directResponses = await runSession('direct', [
+    { id: 1, method: 'initialize', params: initializeParams },
+    { id: 2, method: 'tools/list', params: {} },
+    {
+      id: 3,
+      method: 'tools/call',
+      params: { name: 'check', arguments: { value: privateMarker } },
+    },
+  ])
+  assert.equal(
+    directResponses[1]?.result?.tools?.[0]?.inputSchema?.properties?.value?.type,
+    'string',
+  )
+
+  const progressiveResponses = await runSession('progressive', [
+    { id: 1, method: 'initialize', params: initializeParams },
+    {
+      id: 2,
+      method: 'tools/call',
+      params: {
+        name: 'search_tools',
+        arguments: { limit: 0, query: privateMarker },
+      },
+    },
+  ])
+
+  for (const [response, field] of [
+    [directResponses[2], { code: 'custom', missing: false, path: 'value' }],
+    [progressiveResponses[1], { code: 'too_small', missing: false, path: 'limit' }],
+  ] as const) {
+    assert.equal(response?.result?.isError, true)
+    const content = response?.result?.content?.[0]
+    assert.equal(content?.type, 'text')
+    assert.deepEqual(JSON.parse(content?.text ?? '{}'), {
+      code: 'VALIDATION_ERROR',
+      message: 'The command input is invalid.',
+      retryable: false,
+      hint: 'Check the command schema and correct the invalid input.',
+      stage: 'validation',
+      fieldErrors: [
+        {
+          ...field,
+          expected: '',
+          received: 'invalid',
+          message: 'This field is invalid.',
+        },
+      ],
+    })
+    const serialized = JSON.stringify(response)
+    assert.equal(serialized.includes(privateMarker), false)
+    assert.equal(serialized.includes('UNKNOWN'), false)
+  }
+  assert.equal(handlerCalls, 0)
+})
+
+test('MCP streaming parse failures use the safe validation envelope', async () => {
+  const privateMarker = 'PrivateMcpStreamingMarker'
+  const commands = new Map([
+    [
+      'stream',
+      {
+        description: 'Stream a synthetic result.',
+        async *run() {
+          throw new Errors.ParseError({
+            message: `Unknown flag: --${privateMarker}`,
+          })
+        },
+      },
+    ],
+  ])
+  const tool = Mcp.collectTools(commands, [])[0]
+  assert.ok(tool)
+
+  const result = await Mcp.callTool(tool, {})
+  const content = result.content[0]
+  assert.ok(content)
+  const error = JSON.parse(content.text) as Record<string, unknown>
+
+  assert.equal(result.isError, true)
+  assert.deepEqual(error, {
+    code: 'VALIDATION_ERROR',
+    message: 'The command arguments are invalid.',
+    retryable: false,
+    hint: 'Run the command with --help and correct its arguments or options.',
+    stage: 'validation',
+    fieldErrors: [
+      {
+        code: 'custom',
+        missing: false,
+        path: 'arguments',
+        expected: '',
+        received: 'invalid',
+        message: 'This field is invalid.',
+      },
+    ],
+  })
+  assert.equal(content.text.includes(privateMarker), false)
+  assert.equal(content.text.includes('UNKNOWN'), false)
+})
+
+test('CLI and HTTP streaming catches preserve typed parse recovery', async () => {
+  const privateMarker = 'PrivateStreamingRecoveryMarker'
+  const cli = Cli.create('stream-recovery-smoke').command('stream', {
+    async *run() {
+      yield { progress: 1 }
+      throw new Errors.ParseError({
+        message: `Unknown flag: --${privateMarker}`,
+      })
+    },
+  })
+  const parseRecords = (output: string): Record<string, unknown>[] =>
+    output
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+
+  for (const format of ['jsonl', 'json'] as const) {
+    const output: string[] = []
+    let exitCode: number | null = null
+    await cli.serve(['stream', '--format', format, '--full-output'], {
+      env: process.env,
+      exit(code) {
+        exitCode = code
+      },
+      stdout(chunk) {
+        output.push(chunk)
+      },
+    })
+
+    const serialized = output.join('').trim()
+    const record =
+      format === 'jsonl'
+        ? parseRecords(serialized).find((candidate) => candidate.type === 'error')
+        : (JSON.parse(serialized) as Record<string, unknown>)
+    assert.ok(record)
+    assert.equal(exitCode, 1)
+    assertSafeParseValidationError(record.error)
+    assert.equal(serialized.includes(privateMarker), false)
+    assert.equal(serialized.includes('UNKNOWN'), false)
+  }
+
+  const response = await cli.fetch(
+    new Request('http://localhost/stream', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    }),
+  )
+  const responseText = await response.text()
+  const terminal = parseRecords(responseText).find((candidate) => candidate.type === 'error')
+  assert.ok(terminal)
+  assert.equal(response.status, 200)
+  assert.match(response.headers.get('content-type') ?? '', /application\/x-ndjson/u)
+  assertSafeParseValidationError(terminal.error)
+  assert.equal(responseText.includes(privateMarker), false)
+  assert.equal(responseText.includes('UNKNOWN'), false)
+})
+
+test('fetch gateway malformed options use the safe validation envelope', async () => {
+  const privateMarker = 'PrivateMissingFetchValueMarker'
+  const forwardedRequests: string[] = []
+  const cli = Cli.create('fetch-parse-smoke', {
+    description: 'fetch parse smoke test',
+  })
+  cli.command('api', {
+    fetch(request) {
+      forwardedRequests.push(request.url)
+      return Response.json({ ok: true })
+    },
+  })
+
+  for (const args of [
+    ['api', 'users', `--${privateMarker}`],
+    ['api', 'users', '-H'],
+    ['api', 'users', '--header', `${privateMarker} name: value`],
+    ['api', 'users', '-H', `X-Test: before\n${privateMarker}`],
+    ['api', 'users', '--method', `${privateMarker} method`],
+    ['api', 'users', '-X', `${privateMarker} method`],
+  ]) {
+    const { envelope, exitCode } = await runJsonCli(cli, args)
+
+    assert.equal(exitCode, 1)
+    assertSafeParseValidationEnvelope(envelope)
+    const serialized = JSON.stringify(envelope)
+    assert.equal(serialized.includes(privateMarker), false)
+    assert.equal(serialized.includes('Missing value'), false)
+    assert.equal(serialized.includes('Invalid fetch'), false)
+    assert.equal(serialized.includes('TypeError'), false)
+    assert.equal(serialized.includes('UNKNOWN'), false)
+  }
+
+  assert.deepEqual(forwardedRequests, [])
+})
+
+test('command typo suggestions do not replay unrelated private arguments', async () => {
+  const privateMarker = 'PrivateSuggestionArgumentMarker'
+  const cases = [
+    ['goel', `--private=${privateMarker}`],
+    ['skills', 'addd', `--private=${privateMarker}`],
+    ['mcp', 'addd', `--private=${privateMarker}`],
+  ]
+
+  for (const args of cases) {
+    const output = await runSourceCliRaw(args)
+    assert.equal(output.includes(privateMarker), false)
+    assert.equal(output.includes('--private'), false)
+  }
+})
+
+test('unexpected Incur command exceptions remain UNKNOWN', async () => {
+  const cli = Cli.create('unexpected-error', {
+    run() {
+      throw new Error('Synthetic unexpected failure.')
+    },
+  })
+
+  const { envelope, exitCode } = await runJsonCli(cli, [])
+
+  assert.equal(exitCode, 1)
+  assert.equal(envelope.ok, false)
+  if (!envelope.ok) {
+    assert.equal(envelope.error.code, 'UNKNOWN')
+    assert.equal(envelope.error.message, 'Synthetic unexpected failure.')
+  }
+
+  let varsHandlerCalls = 0
+  const varsCli = Cli.create('unexpected-vars-error', {
+    vars: z.object({ requestId: z.string() }),
+  }).command('check', {
+    run() {
+      varsHandlerCalls += 1
+      return { ok: true }
+    },
+  })
+  const varsResult = await runHumanCli(varsCli, [
+    'check',
+    '--format',
+    'json',
+    '--full-output',
+  ])
+  assert.equal(varsResult.exitCode, 1)
+  const varsEnvelope = JSON.parse(varsResult.output) as CliEnvelope<unknown>
+  assert.equal(varsEnvelope.ok, false)
+  if (!varsEnvelope.ok) {
+    assert.equal(varsEnvelope.error.code, 'UNKNOWN')
+  }
+  assert.equal(varsHandlerCalls, 0)
+})
 
 test('built duplicate-vault failures emit one safe machine document in every mode', async () => {
   const firstVault = '/private/synthetic/first-vault'
