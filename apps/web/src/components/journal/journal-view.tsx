@@ -1437,7 +1437,7 @@ function JournalEntryActions({
   contactOptions: readonly MurphContactOption[];
 }) {
   const helper = (
-    <span className="flex items-start gap-[11px] px-1 text-left">
+    <span className="flex items-center gap-[11px] px-1 text-left">
       <span className="flex size-6 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground">
         <NotebookPen className="size-3" aria-hidden="true" />
       </span>

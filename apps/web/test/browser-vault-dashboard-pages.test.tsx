@@ -284,6 +284,7 @@ test("JournalPage renders the derived private health timeline", () => {
     assert.match(markup, /Morning walk/u);
     assert.match(markup, /Last 7 days/u);
     assert.match(markup, /Update your journal in private chat with Murph/u);
+    assert.match(markup, /flex items-center gap-\[11px\] px-1 text-left/u);
     assert.match(markup, /journal-day-2026-08-12/u);
     assert.doesNotMatch(markup, /journal-day-2026-08-13/u);
     assert.doesNotMatch(markup, /No data/u);
@@ -592,7 +593,8 @@ test("Personal Patterns comparison controls use plain result language", () => {
   assert.match(markup, />Sleep quality</u);
   assert.match(markup, /aria-label="Sort by Sleep quality/u);
   assert.doesNotMatch(markup, /lucide-arrow-up-down/u);
-  assert.match(markup, /aria-label="About Sleep quality"/u);
+  assert.doesNotMatch(markup, /aria-label="About Sleep quality"/u);
+  assert.doesNotMatch(markup, /lucide-circle-help/u);
   assert.match(markup, />SpO₂</u);
   assert.equal(
     getOutcomeDescription("spo2"),
