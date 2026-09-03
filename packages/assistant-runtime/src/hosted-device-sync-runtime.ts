@@ -436,9 +436,12 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
 export function isHostedDeviceSyncCompletionFenceWake(
   wake: HostedRuntimeEvent,
 ): wake is HostedExecutionDeviceSyncWake {
-  return wake.kind === "device-sync.wake"
-    && resolveHostedDeviceSyncWakeContext(wake).hint?.reason
-      === HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON;
+  if (wake.kind !== "device-sync.wake") {
+    return false;
+  }
+  const wakeContext = resolveHostedDeviceSyncWakeContext(wake);
+  return wakeContext.hint?.reason === HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON
+    && normalizeHostedDeviceSyncJobHints(wakeContext.hint).length === 0;
 }
 
 export async function publishHostedDeviceSyncCompletionFence(input: {
@@ -450,9 +453,10 @@ export async function publishHostedDeviceSyncCompletionFence(input: {
   if (
     wakeContext.hint?.reason !== HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON
     || !Object.hasOwn(wakeContext.hint, "nextReconcileAt")
+    || normalizeHostedDeviceSyncJobHints(wakeContext.hint).length > 0
   ) {
     throw new TypeError(
-      "Hosted device-sync completion fence requires its canonical cadence.",
+      "Hosted device-sync completion fence requires its canonical cadence and no retained jobs.",
     );
   }
   const connectionId = wakeContext.connectionId;
@@ -470,11 +474,10 @@ export async function publishHostedDeviceSyncCompletionFence(input: {
     entry.connection.id === connectionId
   ) ?? null;
   if (
-    !baseline
-    || (
-      wakeContext.expectedConnectedAt !== null
-      && baseline.connection.connectedAt !== wakeContext.expectedConnectedAt
-    )
+    wakeContext.expectedConnectedAt === null
+    || !baseline
+    || baseline.connection.connectedAt !== wakeContext.expectedConnectedAt
+    || baseline.connection.status !== "active"
   ) {
     return null;
   }

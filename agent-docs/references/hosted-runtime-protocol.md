@@ -2734,7 +2734,10 @@ reconstructs the pending obligation from durable mailbox authority, and replays
 those same four method/path classes exactly once,
 for eight requests total. That 00:05 recovery pass makes three successful
 checkpoints. The second durably records completion, the same admission publishes
-the 06:05 provider cadence, and the third checkpoints mailbox removal. There is
+the 06:05 provider cadence only because the retained job set is empty and the
+wake's non-null epoch still names the current active connection, and the third
+checkpoints mailbox removal. Epoch-less legacy, replaced, missing, or terminal
+connection records drain without a cadence write. There is
 no third provider pull or empty completion runtime. A redundant 00:10 pass
 returns idle with no wake and makes one bounded post-publication convergence
 checkpoint; the 00:15 pass is fully quiescent. Within the measured incident

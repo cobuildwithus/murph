@@ -19,7 +19,9 @@ provider-free completion-fence runtime.
 - Checkpoint, cadence-publication, and final-checkpoint failures remain
   replay-safe without repeating provider work after a durable completion
   record exists.
-- Legacy retained completion-fence snapshots still drain safely.
+- A completion-origin wake carrying retryable jobs stays pending, while
+  epoch-less legacy and terminal retained completion fences drain without
+  mutating provider cadence.
 - Foreground priority, dirty-state ownership, provider cadence, and bounded job
   execution remain unchanged.
 - Focused runtime proof, package typecheck, exact-head CI, and the required
@@ -62,8 +64,13 @@ provider-free completion-fence runtime.
   item between the completion-record and removal checkpoints in one admission.
 - Recovery: cadence version conflict retains the committed record; replay
   observes an already-published cadence and clears it without provider work.
-- Difference from plan: none. No member-visible result, authority, provider
-  input, or cadence policy changes.
+- Recovery: a completion-origin wake with a reconstructed provider retry keeps
+  the exact mailbox item, and an epoch-less legacy or terminal completion drains
+  without writing cadence.
+- Difference from plan: final ReviewGPT exposed that completion reason alone was
+  insufficient authority. Eligibility now derives from the empty retained-job
+  set and exact active connection epoch, with no new state owner. No
+  member-visible result, provider input, or cadence policy changes.
 - Verdict: Ready.
 
 ## Risks and mitigations
@@ -75,8 +82,11 @@ provider-free completion-fence runtime.
    Mitigation: make publication idempotent and take the existing follow-up
    checkpoint; restore replays the committed record without provider work.
 3. Risk: old retained completion fences stop draining.
-   Mitigation: keep the legacy reader and retained record shape while preventing
-   a clean record from becoming a separately scheduled wake.
+   Mitigation: keep the legacy reader and retained record shape; epoch-less or
+   terminal records drain without cadence mutation.
+4. Risk: a completion-origin wake is later reconstructed with retryable jobs.
+   Mitigation: direct completion requires zero normalized retained jobs, so the
+   mailbox item remains the exact retry owner regardless of its reason label.
 
 ## Tasks
 
@@ -94,6 +104,8 @@ provider-free completion-fence runtime.
   both inside one runtime admission.
 - Treat the already-checkpointed post-checkpoint record as the completion
   outbox; do not introduce another state owner.
+- Derive completion authority from zero retained jobs plus the exact current
+  active connection epoch; the reason label is classification, not authority.
 - Keep PR #2741 separate because its container-lifecycle change has a distinct
   owner and does not remove the completion runtime admission.
 - Changelog is not applicable because this removes an internal redundant

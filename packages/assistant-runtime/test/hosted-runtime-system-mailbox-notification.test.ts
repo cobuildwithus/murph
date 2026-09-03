@@ -3661,27 +3661,11 @@ describe("hosted system mailbox notification execution context", () => {
         },
       },
     });
-    const item: HostedSystemMailboxPendingItem = {
-      attemptCount: 1,
+    const item = createDeviceSyncCompletionRecordingItem({
       itemId: "mailbox_item_system_device_sync_completion_checkpoint_replay",
-      lastAttemptAt: FIXED_NOW,
-      lastErrorCode: null,
-      lastErrorMessage: null,
-      mailboxDedupeKey: retainedWake.eventId,
-      mailboxLaneSeq: "1",
-      nextAttemptAt: null,
-      occurredAt: FIXED_NOW,
-      postCheckpointRecord: {
-        kind: "device-sync.dirty-processed-batch",
-        records: [],
-        retainMailboxItemUntil: retryAt,
-        retainedWake,
-      },
-      requestId: null,
-      routeAction: "run-device-sync-wake",
-      status: "recording",
-      wake: retainedWake,
-    };
+      retainedWake,
+      retryAt,
+    });
 
     try {
       await restoreHostedSystemMailboxCheckpointRollbackState({
@@ -3760,27 +3744,11 @@ describe("hosted system mailbox notification execution context", () => {
         fetchSnapshot,
       },
     });
-    const item: HostedSystemMailboxPendingItem = {
-      attemptCount: 1,
+    const item = createDeviceSyncCompletionRecordingItem({
       itemId: "mailbox_item_system_device_sync_completion_version_retry",
-      lastAttemptAt: FIXED_NOW,
-      lastErrorCode: null,
-      lastErrorMessage: null,
-      mailboxDedupeKey: retainedWake.eventId,
-      mailboxLaneSeq: "1",
-      nextAttemptAt: null,
-      occurredAt: FIXED_NOW,
-      postCheckpointRecord: {
-        kind: "device-sync.dirty-processed-batch",
-        records: [],
-        retainMailboxItemUntil: retryAt,
-        retainedWake,
-      },
-      requestId: null,
-      routeAction: "run-device-sync-wake",
-      status: "recording",
-      wake: retainedWake,
-    };
+      retainedWake,
+      retryAt,
+    });
 
     try {
       await restoreHostedSystemMailboxCheckpointRollbackState({
@@ -3816,6 +3784,175 @@ describe("hosted system mailbox notification execution context", () => {
       });
       expect(fetchSnapshot).toHaveBeenCalledTimes(2);
       expect(applyUpdates).toHaveBeenCalledTimes(1);
+      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending).toEqual([]);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("keeps retryable jobs carried by a completion-origin wake", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const retryAt = "2026-04-27T00:05:00.000Z";
+    const retainedWake = buildHostedExecutionDeviceSyncWake({
+      connectionId: "dsc_completion_with_retry",
+      eventId: "device-sync.wake:completion-with-retry",
+      expectedConnectedAt: "2026-04-01T00:00:00.000Z",
+      hint: {
+        jobs: [{
+          availableAt: retryAt,
+          dedupeKey: "completion-origin-retry",
+          kind: "reconcile",
+          maxAttempts: 2,
+          priority: 25,
+        }],
+        nextReconcileAt: "2026-04-27T06:00:00.000Z",
+        reason: "retained_completion_fence",
+      },
+      occurredAt: FIXED_NOW,
+      provider: "oura",
+      reason: "reconcile_due",
+      userId: "member_123",
+    });
+    const fetchSnapshot = vi.fn(async () => {
+      throw new Error("Retained provider work must not publish completion.");
+    });
+    const applyUpdates = vi.fn(async () => {
+      throw new Error("Retained provider work must not publish completion.");
+    });
+    const runtime = createRuntime({
+      deviceSyncPort: {
+        ...createDeviceSyncPortStub(),
+        applyUpdates,
+        fetchSnapshot,
+      },
+    });
+    const item = createDeviceSyncCompletionRecordingItem({
+      itemId: "mailbox_item_system_device_sync_completion_with_retry",
+      retainedWake,
+      retryAt,
+    });
+
+    try {
+      await restoreHostedSystemMailboxCheckpointRollbackState({
+        state: { pending: [item] },
+        vaultRoot: workspace.vaultRoot,
+      });
+      const restoredItem = (await readHostedSystemMailboxState(workspace.vaultRoot)).pending[0];
+      assert.ok(restoredItem);
+
+      await expect(recordHostedSystemMailboxItemAfterCheckpoint({
+        item: restoredItem,
+        runtime,
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toEqual({
+        failed: 0,
+        nextWakeAt: retryAt,
+        nextWakeReason: "device-sync.reconcile",
+        recorded: 0,
+      });
+      expect(fetchSnapshot).not.toHaveBeenCalled();
+      expect(applyUpdates).not.toHaveBeenCalled();
+      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending).toEqual([
+        expect.objectContaining({
+          itemId: item.itemId,
+          nextAttemptAt: retryAt,
+          postCheckpointRecord: null,
+          status: "pending",
+          wake: retainedWake,
+        }),
+      ]);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it.each([
+    {
+      expectedConnectedAt: undefined,
+      label: "a missing connection epoch",
+      snapshotStatus: "active" as const,
+      suffix: "missing_epoch",
+    },
+    {
+      expectedConnectedAt: "2026-03-01T00:00:00.000Z",
+      label: "a replaced connection epoch",
+      snapshotStatus: "active" as const,
+      suffix: "replaced_epoch",
+    },
+    {
+      expectedConnectedAt: "2026-04-01T00:00:00.000Z",
+      label: "a disconnected connection",
+      snapshotStatus: "disconnected" as const,
+      suffix: "disconnected_connection",
+    },
+    {
+      expectedConnectedAt: "2026-04-01T00:00:00.000Z",
+      label: "a connection requiring reauthorization",
+      snapshotStatus: "reauthorization_required" as const,
+      suffix: "reauthorization_required",
+    },
+  ])("drains completion for $label without publishing cadence", async (scenario) => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const connectionId = `dsc_completion_${scenario.suffix}`;
+    const retryAt = "2026-04-27T00:00:30.000Z";
+    const retainedWake = buildHostedExecutionDeviceSyncWake({
+      connectionId,
+      eventId: `device-sync.wake:completion-${scenario.suffix}`,
+      ...(scenario.expectedConnectedAt
+        ? { expectedConnectedAt: scenario.expectedConnectedAt }
+        : {}),
+      hint: {
+        jobs: [],
+        nextReconcileAt: "2026-04-27T06:00:00.000Z",
+        reason: "retained_completion_fence",
+      },
+      occurredAt: FIXED_NOW,
+      provider: "oura",
+      reason: "reconcile_due",
+      userId: "member_123",
+    });
+    const applyUpdates = vi.fn(async () => {
+      throw new Error("An authorityless completion must not write cadence.");
+    });
+    const runtime = createRuntime({
+      deviceSyncPort: {
+        ...createDeviceSyncPortStub(),
+        applyUpdates,
+        async fetchSnapshot() {
+          return createDeviceSyncCompletionSnapshot({
+            connectedAt: "2026-04-01T00:00:00.000Z",
+            connectionId,
+            nextReconcileAt: FIXED_NOW,
+            status: scenario.snapshotStatus,
+            updatedAt: "2026-04-26T00:00:00.000Z",
+          });
+        },
+      },
+    });
+    const item = createDeviceSyncCompletionRecordingItem({
+      itemId: `mailbox_item_system_device_sync_completion_${scenario.suffix}`,
+      retainedWake,
+      retryAt,
+    });
+
+    try {
+      await restoreHostedSystemMailboxCheckpointRollbackState({
+        state: { pending: [item] },
+        vaultRoot: workspace.vaultRoot,
+      });
+      const restoredItem = (await readHostedSystemMailboxState(workspace.vaultRoot)).pending[0];
+      assert.ok(restoredItem);
+
+      await expect(recordHostedSystemMailboxItemAfterCheckpoint({
+        item: restoredItem,
+        runtime,
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toEqual({
+        failed: 0,
+        nextWakeAt: null,
+        recorded: 0,
+      });
+      expect(applyUpdates).not.toHaveBeenCalled();
       expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending).toEqual([]);
     } finally {
       await workspace.cleanup();
@@ -5710,6 +5847,7 @@ function createDeviceSyncCompletionSnapshot(input: {
   connectedAt: string;
   connectionId: string;
   nextReconcileAt: string | null;
+  status?: "active" | "disconnected" | "reauthorization_required";
   updatedAt: string;
 }) {
   return {
@@ -5724,7 +5862,7 @@ function createDeviceSyncCompletionSnapshot(input: {
         metadata: {},
         provider: "oura",
         scopes: [],
-        status: "active" as const,
+        status: input.status ?? "active",
         updatedAt: input.updatedAt,
       },
       credential: {
@@ -5744,6 +5882,34 @@ function createDeviceSyncCompletionSnapshot(input: {
     generatedAt: FIXED_NOW,
     nextCursor: null,
     userId: "member_123",
+  };
+}
+
+function createDeviceSyncCompletionRecordingItem(input: {
+  itemId: string;
+  retainedWake: ReturnType<typeof buildHostedExecutionDeviceSyncWake>;
+  retryAt: string;
+}): HostedSystemMailboxPendingItem {
+  return {
+    attemptCount: 1,
+    itemId: input.itemId,
+    lastAttemptAt: FIXED_NOW,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    mailboxDedupeKey: input.retainedWake.eventId,
+    mailboxLaneSeq: "1",
+    nextAttemptAt: null,
+    occurredAt: FIXED_NOW,
+    postCheckpointRecord: {
+      kind: "device-sync.dirty-processed-batch",
+      records: [],
+      retainMailboxItemUntil: input.retryAt,
+      retainedWake: input.retainedWake,
+    },
+    requestId: null,
+    routeAction: "run-device-sync-wake",
+    status: "recording",
+    wake: input.retainedWake,
   };
 }
 

@@ -1247,11 +1247,14 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   any job created by that wake is retryable. Before checkpoint publication the
   item is narrowed to unfinished job hints with their original kind, payload,
   dedupe identity, next retry time, and remaining attempt limit; after terminal
-  success or failure, the checkpointed post-record publishes the retained
-  provider cadence and removes the item within that same runtime admission,
-  followed by the existing removal checkpoint. Web dirty rows independently
-  remain authoritative for dirty resource/deletion work until terminal
-  acknowledgement.
+  success or failure, a checkpointed post-record with zero retained jobs may
+  publish the retained provider cadence and remove the item within that same
+  runtime admission, followed by the existing removal checkpoint. Publication
+  requires the wake's non-null connection epoch to match a current active
+  connection. Legacy epoch-less, replaced, missing, or terminal connection
+  records have no cadence authority and drain without a write. Web dirty rows
+  independently remain authoritative for dirty resource/deletion work until
+  terminal acknowledgement.
   Hosted snapshots intentionally exclude the device-sync SQLite execution cache,
   so a cold runner reconstructs unfinished work from those existing durable
   owners. Mailbox ordering is per connection, preventing one connection's future

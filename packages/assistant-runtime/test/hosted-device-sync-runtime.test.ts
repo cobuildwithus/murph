@@ -12017,6 +12017,28 @@ describe("hosted device-sync runtime", () => {
       assert.equal("windowKind" in (retainedJob?.payload ?? {}), false);
       assert.deepEqual(parseHostedExecutionWake(recovery.wake), recovery.wake);
 
+      const completionOriginRecovery = resolveHostedDeviceSyncWakeRecovery({
+        service: firstService,
+        state: firstState,
+        wake: buildDeviceSyncWake({
+          connectionId,
+          eventId: "device-sync.wake:completion-origin-recovery",
+          hint: {
+            nextReconcileAt: occurredAt,
+            reason: "retained_completion_fence",
+          },
+          occurredAt,
+          provider: "strava",
+          reason: "reconcile_due",
+        }),
+      });
+      assert.ok(completionOriginRecovery);
+      assert.equal(
+        completionOriginRecovery.wake.hint?.reason,
+        "retained_completion_fence",
+      );
+      assert.equal(completionOriginRecovery.wake.hint?.jobs?.length, 1);
+
       firstStore.completeJob(claimed.id, retryAt);
       const completionFence = resolveHostedDeviceSyncWakeRecovery({
         service: firstService,

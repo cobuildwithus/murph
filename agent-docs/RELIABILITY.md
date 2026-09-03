@@ -1282,8 +1282,12 @@ Last verified: 2026-09-01
   remaining attempt limit, including worker-created child jobs. The same wake
   carries the provider's advanced cadence, but Web does not receive that
   cadence until the post-record checkpoint has made the exact completion state
-  durable. The post-checkpoint recorder then publishes cadence, clears the
-  source, and checkpoints that removal within the same runtime admission.
+  durable. The post-checkpoint recorder treats the record as complete only when
+  its normalized retained-job set is empty. It then publishes cadence only for
+  a non-null wake epoch matching a current active connection, clears the source,
+  and checkpoints that removal within the same runtime admission. An epoch-less
+  legacy record or a replaced, missing, disconnected, or reauthorization-required
+  connection has no cadence authority and drains without a Web write.
   Terminal failure uses the same replayable record. Web dirty rows separately
   remain authoritative until dirty resource/deletion jobs are terminally
   acknowledged. Because the device-sync SQLite store is intentionally excluded
