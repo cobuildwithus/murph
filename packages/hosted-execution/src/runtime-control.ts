@@ -29,6 +29,7 @@ import type {
   HostedExecutionAssistantAskOrigin,
   HostedExecutionAssistantAskResult,
   HostedExecutionDailyMetricReportedPayload,
+  HostedExecutionGroupJournalFactPayload,
   HostedBrowserVaultReplicaCursorRef,
   HostedBrowserVaultReplicaRef,
   HostedExecutionLinqExternalThreadRouteAuthority,
@@ -166,6 +167,7 @@ export const HOSTED_MAILBOX_KINDS = [
   "device-sync.wake",
   "environment-interview.completed",
   "environment-voice.captured",
+  "journal.group-fact.recorded",
   "health.daily-metric.reported",
   "meal-photo.captured",
   "member.action.requested",
@@ -979,6 +981,7 @@ export interface HostedRuntimeProductFeedbackRecord {
 }
 
 export const HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX = "Support escalation:";
+export const HOSTED_PATTERN_ENGINE_AUDIT_PREFIX = "Pattern engine audit:";
 
 export function isHostedProductSupportEscalationSummary(
   value: string | null | undefined,
@@ -1510,6 +1513,29 @@ export type HostedRuntimeGroupToolRequest =
       >;
     }
   | {
+      action: "record_current_sender_journal_fact";
+      confidence: "high" | "medium";
+      journalFact: HostedExecutionGroupJournalFactPayload;
+      origin: Extract<
+        HostedExecutionAssistantAskOrigin,
+        { kind: "accepted_input" }
+      >;
+      privateQuestion: string;
+    }
+  | {
+      action: "set_current_sender_journal_capture";
+      enabled: boolean;
+      origin: Extract<
+        HostedExecutionAssistantAskOrigin,
+        { kind: "accepted_input" }
+      >;
+      scope: "global" | "group";
+    }
+  | {
+      action: "set_journal_capture";
+      enabled: boolean;
+    }
+  | {
       action: "ask_member";
       grantId: string;
       origin: HostedExecutionAssistantAskOrigin;
@@ -1650,6 +1676,10 @@ export type HostedRuntimeGroupDailyMetricReportResult =
   | { status: "accepted" }
   | { status: "unavailable"; unavailableReason: string };
 
+export type HostedRuntimeGroupJournalActionResult =
+  | { status: "handled" }
+  | { status: "unavailable"; unavailableReason: string };
+
 export type HostedRuntimeGroupToolResponse =
   | {
       action: "ask";
@@ -1666,6 +1696,20 @@ export type HostedRuntimeGroupToolResponse =
   | {
       action: "record_current_sender_daily_metric";
       result: HostedRuntimeGroupDailyMetricReportResult;
+    }
+  | {
+      action: "record_current_sender_journal_fact";
+      result: HostedRuntimeGroupJournalActionResult;
+    }
+  | {
+      action: "set_current_sender_journal_capture";
+      result: HostedRuntimeGroupJournalActionResult;
+    }
+  | {
+      action: "set_journal_capture";
+      result:
+        | { enabled: boolean; status: "updated" }
+        | { status: "unavailable"; unavailableReason: string };
     }
   | { action: "ask_member"; result: HostedRuntimeGroupMemberAskResult }
   | {
@@ -3635,6 +3679,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "runner.lease_superseded",
   "runner.provider_egress_diagnostic",
   "runner.started",
+  "runner.web_control_preflight_rejected",
   "runtime.invocation_finished",
   "workspace.codex_home_snapshot",
 ] as const;

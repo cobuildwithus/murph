@@ -51,6 +51,12 @@ import type {
   HostedExecutionContainerNamespaceLike,
   HostedExecutionContainerStubLike,
 } from "../src/runner-container.ts";
+import {
+  HOSTED_STANDBY_LOCATION_HINT,
+  HOSTED_STANDBY_REGION,
+  createHostedStandbySlotName,
+  type HostedStandbyRunnerContainerStubLike,
+} from "../src/standby-runner-contract.ts";
 import type {
   DurableObjectStateLike,
   DurableObjectStorageLike,
@@ -377,6 +383,7 @@ describe("cloudflare worker routes", () => {
       "test-read-active-runtime-fence",
       "test-age-active-runtime-fence",
       "test-start-stuck-invocation",
+      "test-ensure-standby-ready",
       "test-temporal-mailbox-signal-fault-arm",
       "test-temporal-mailbox-signal-fault-clear",
       "test-temporal-mailbox-signal-fault-consume",
@@ -2021,6 +2028,92 @@ describe("cloudflare worker routes", () => {
       env,
     );
     expect(invalidResponse.status).toBe(400);
+  });
+
+  it("stops the standby container that owns the active runtime fence", async () => {
+    const standbyContainerName = createHostedStandbySlotName("release_1");
+    const beginExactShutdown = vi.fn(async () => ({ ok: true as const }));
+    const beginStandbyShutdown = vi.fn(async () => ({ ok: true as const }));
+    const baseRunnerContainerNamespace = createRunnerContainerNamespace();
+    const exactStub = {
+      ...baseRunnerContainerNamespace.getByName("member_123"),
+      beginShutdownCheckpointGracefulStopForTest: beginExactShutdown,
+    };
+    const standbyStub = {
+      ...baseRunnerContainerNamespace.getByName(standbyContainerName),
+      bindStandbySlot: vi.fn(async (input) => ({
+        ...input,
+        bound: true as const,
+      })),
+      beginShutdownCheckpointGracefulStopForTest: beginStandbyShutdown,
+      prepareStandbySlot: vi.fn(async (input) => ({
+        ...input,
+        prepared: true as const,
+      })),
+      readStandbySlotBinding: vi.fn(async () => ({
+        claimId: "standby-claim-00000000-0000-4000-8000-000000000000",
+        releaseId: "release_1",
+        region: HOSTED_STANDBY_REGION,
+        slotName: standbyContainerName,
+        state: "bound" as const,
+        userId: "member_123",
+      })),
+      readStandbySlotCoordinatorState: vi.fn(async () => ({
+        coordinatorOwned: false,
+        releaseId: "release_1",
+        slotName: standbyContainerName,
+        state: "bound" as const,
+      })),
+      retireStandbySlot: vi.fn(async () => ({ retired: true as const })),
+    } satisfies HostedStandbyRunnerContainerStubLike & {
+      beginShutdownCheckpointGracefulStopForTest(
+        input: { userId: string },
+      ): Promise<{ ok: true }>;
+    };
+    const exactGetByName = vi.fn(() => exactStub);
+    const standbyGetByName = vi.fn(() => standbyStub);
+    const readActiveRuntimeFenceForTest = vi.fn(async () => ({
+      attemptId: "runtime-attempt-standby",
+      processingMode: "default" as const,
+      runnerContainerName: standbyContainerName,
+    }));
+    const env = createWorkerEnv(createUserRunnerStub({
+      readActiveRuntimeFenceForTest,
+    }), {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+      RUNNER_CONTAINER: {
+        getByName: exactGetByName,
+      },
+      STANDBY_RUNNER_CONTAINER: {
+        getByName: standbyGetByName,
+      },
+    });
+
+    const response = await hostedLocalTestWorker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/users/member_123"
+          + "/shutdown-checkpoint-publication-barrier?action=shutdown",
+        { method: "POST" },
+      ), {
+        boundUserId: "member_123",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+    expect(readActiveRuntimeFenceForTest).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    expect(standbyGetByName).toHaveBeenCalledWith(standbyContainerName, {
+      locationHint: HOSTED_STANDBY_LOCATION_HINT,
+    });
+    expect(beginStandbyShutdown).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    expect(exactGetByName).not.toHaveBeenCalled();
+    expect(beginExactShutdown).not.toHaveBeenCalled();
   });
 
   it("maps the user-scoped foreground-priority ordering controls", async () => {
@@ -4637,7 +4730,7 @@ function createRunnerContainerNamespace(): WorkerEnvironmentSource["RUNNER_CONTA
 function createCodexShellSmokeResult() {
   return {
     cliSurfaceContractBytes: 37282,
-    cliSurfaceHotPathProofCount: 4,
+    cliSurfaceHotPathProofCount: 5,
     client: "codex-app-server",
     murphPathBytes: 28,
     noteAddBytes: 128,

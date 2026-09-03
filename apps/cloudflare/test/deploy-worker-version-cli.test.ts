@@ -8,12 +8,12 @@ const wranglerMocks = vi.hoisted(() => ({
   runWranglerLoggedCaptured: vi.fn(),
 }));
 const receiptMocks = vi.hoisted(() => ({
-  buildContainerReleaseEntries: vi.fn(),
-  createCloudflareContainerApplicationLister: vi.fn(),
+  createCloudflareContainerProvider: vi.fn(),
   parseWranglerContainerActions: vi.fn(),
   parseWranglerWorkerVersionId: vi.fn(),
   readCloudflareContainerApplicationIdentities: vi.fn(),
   readRenderedContainerIdentities: vi.fn(),
+  waitForCloudflareContainerReleaseEntries: vi.fn(),
 }));
 
 vi.mock("../scripts/wrangler-runner.js", () => ({
@@ -22,14 +22,14 @@ vi.mock("../scripts/wrangler-runner.js", () => ({
   runWranglerLoggedCaptured: wranglerMocks.runWranglerLoggedCaptured,
 }));
 vi.mock("../scripts/container-release-receipt.js", () => ({
-  buildContainerReleaseEntries: receiptMocks.buildContainerReleaseEntries,
-  createCloudflareContainerApplicationLister:
-    receiptMocks.createCloudflareContainerApplicationLister,
+  createCloudflareContainerProvider: receiptMocks.createCloudflareContainerProvider,
   parseWranglerContainerActions: receiptMocks.parseWranglerContainerActions,
   parseWranglerWorkerVersionId: receiptMocks.parseWranglerWorkerVersionId,
   readCloudflareContainerApplicationIdentities:
     receiptMocks.readCloudflareContainerApplicationIdentities,
   readRenderedContainerIdentities: receiptMocks.readRenderedContainerIdentities,
+  waitForCloudflareContainerReleaseEntries:
+    receiptMocks.waitForCloudflareContainerReleaseEntries,
 }));
 
 import { runDeployWorkerVersionCli } from "../scripts/deploy-worker-version.cli.js";
@@ -40,10 +40,11 @@ describe("runDeployWorkerVersionCli", () => {
     wranglerMocks.runWranglerLogged.mockReset();
     wranglerMocks.runWranglerLoggedCaptured.mockReset();
     wranglerMocks.runWranglerLoggedCaptured.mockResolvedValue({ stderr: "", stdout: "deploy" });
-    receiptMocks.buildContainerReleaseEntries.mockReset();
-    receiptMocks.buildContainerReleaseEntries.mockReturnValue(releasedContainers);
-    receiptMocks.createCloudflareContainerApplicationLister.mockReset();
-    receiptMocks.createCloudflareContainerApplicationLister.mockReturnValue(vi.fn());
+    receiptMocks.createCloudflareContainerProvider.mockReset();
+    receiptMocks.createCloudflareContainerProvider.mockReturnValue({
+      listApplications: vi.fn(),
+      readRollout: vi.fn(),
+    });
     receiptMocks.parseWranglerContainerActions.mockReset();
     receiptMocks.parseWranglerContainerActions.mockReturnValue([]);
     receiptMocks.parseWranglerWorkerVersionId.mockReset();
@@ -52,6 +53,8 @@ describe("runDeployWorkerVersionCli", () => {
     receiptMocks.readCloudflareContainerApplicationIdentities.mockResolvedValue([]);
     receiptMocks.readRenderedContainerIdentities.mockReset();
     receiptMocks.readRenderedContainerIdentities.mockResolvedValue(renderedContainers);
+    receiptMocks.waitForCloudflareContainerReleaseEntries.mockReset();
+    receiptMocks.waitForCloudflareContainerReleaseEntries.mockResolvedValue(releasedContainers);
   });
 
   it("passes app-root deploy artifact paths to the deploy entrypoint", async () => {
@@ -140,27 +143,23 @@ describe("runDeployWorkerVersionCli", () => {
       CF_WORKER_NAME: "hosted-worker",
     };
     const listApplications = vi.fn();
+    const readRollout = vi.fn();
     const before = [{
       applicationId: "provider-app-id",
       applicationName: "hosted-worker-runnercontainer",
       image: "image-before",
       version: 6,
     }];
-    const after = [{
-      applicationId: "provider-app-id",
-      applicationName: "hosted-worker-runnercontainer",
-      image: "image-after",
-      version: 7,
-    }];
     const actions = [{
       action: "modified",
       applicationName: "hosted-worker-runnercontainer",
       className: "RunnerContainer",
     }];
-    receiptMocks.createCloudflareContainerApplicationLister.mockReturnValue(listApplications);
-    receiptMocks.readCloudflareContainerApplicationIdentities
-      .mockResolvedValueOnce(before)
-      .mockResolvedValueOnce(after);
+    receiptMocks.createCloudflareContainerProvider.mockReturnValue({
+      listApplications,
+      readRollout,
+    });
+    receiptMocks.readCloudflareContainerApplicationIdentities.mockResolvedValueOnce(before);
     receiptMocks.parseWranglerContainerActions.mockReturnValue(actions);
 
     await runDeployWorkerVersionCli(
@@ -201,23 +200,29 @@ describe("runDeployWorkerVersionCli", () => {
     expect(receiptMocks.readRenderedContainerIdentities).toHaveBeenCalledWith(
       "/tmp/wrangler.generated.jsonc",
     );
-    expect(receiptMocks.createCloudflareContainerApplicationLister).toHaveBeenCalledWith({
+    expect(receiptMocks.createCloudflareContainerProvider).toHaveBeenCalledWith({
       accountId: "account-fixture",
       apiToken: "token-fixture",
     });
     expect(receiptMocks.readCloudflareContainerApplicationIdentities)
-      .toHaveBeenNthCalledWith(1, renderedContainers, listApplications, "before");
+      .toHaveBeenNthCalledWith(
+        1,
+        renderedContainers,
+        listApplications,
+        "before",
+        readRollout,
+      );
     expect(receiptMocks.parseWranglerContainerActions).toHaveBeenCalledWith(
       "deploy\n",
       renderedContainers,
     );
     expect(receiptMocks.parseWranglerWorkerVersionId).toHaveBeenCalledWith("deploy\n");
-    expect(receiptMocks.readCloudflareContainerApplicationIdentities)
-      .toHaveBeenNthCalledWith(2, renderedContainers, listApplications, "after");
-    expect(receiptMocks.buildContainerReleaseEntries).toHaveBeenCalledWith({
+    expect(receiptMocks.waitForCloudflareContainerReleaseEntries).toHaveBeenCalledWith({
       actions,
-      after,
       before,
+      expectedContainers: renderedContainers,
+      listApplications,
+      readRollout,
     });
   });
 

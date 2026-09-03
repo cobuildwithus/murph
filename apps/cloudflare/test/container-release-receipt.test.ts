@@ -2,11 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   buildContainerReleaseEntries,
-  createCloudflareContainerApplicationLister,
+  createCloudflareContainerProvider,
   parseWranglerContainerActions,
   parseWranglerWorkerVersionId,
   readCloudflareContainerApplicationIdentities,
   readRenderedContainerIdentities,
+  waitForCloudflareContainerReleaseEntries,
   type CloudflareContainerApplicationIdentity,
   type WranglerContainerAction,
 } from "../scripts/container-release-receipt.js";
@@ -211,7 +212,7 @@ describe("container release receipt", () => {
             },
         ok: true,
       }));
-      const listApplications = createCloudflareContainerApplicationLister({
+      const { listApplications } = createCloudflareContainerProvider({
         accountId: "account-fixture",
         apiToken: "token-fixture",
         fetchImpl,
@@ -250,13 +251,55 @@ describe("container release receipt", () => {
       });
     });
 
+    it("reads the exact active rollout through the provider application boundary", async () => {
+      const fetchImpl = vi.fn(async (input: URL) => ({
+        json: async () => input.pathname.endsWith("/rollouts/rollout-current")
+          ? {
+              result: providerRollout(
+                "rollout-current",
+                5,
+                "current-image",
+                6,
+                "target-image",
+              ),
+              success: true,
+            }
+          : { result: {}, success: true },
+        ok: true,
+      }));
+      const provider = createCloudflareContainerProvider({
+        accountId: "account-fixture",
+        apiToken: "token-fixture",
+        fetchImpl,
+      });
+
+      await expect(provider.readRollout("app-id", "rollout-current")).resolves.toEqual(
+        providerRollout("rollout-current", 5, "current-image", 6, "target-image"),
+      );
+      expect(fetchImpl).toHaveBeenCalledWith(
+        new URL(
+          "https://api.cloudflare.com/client/v4/accounts/account-fixture"
+            + "/containers/applications/app-id/rollouts/rollout-current",
+        ),
+        {
+          cache: "no-store",
+          headers: {
+            Accept: "application/json",
+            Authorization: "Bearer token-fixture",
+          },
+          method: "GET",
+          signal: expect.any(AbortSignal),
+        },
+      );
+    });
+
     it.each([
       { result: [], success: false },
       { result: {}, success: true },
       { result: [], result_info: { next_page_token: "more" }, success: true },
       { result: [], result_info: { total_count: 1 }, success: true },
     ])("rejects invalid or non-exhaustive Cloudflare list responses", async (payload) => {
-      const listApplications = createCloudflareContainerApplicationLister({
+      const { listApplications } = createCloudflareContainerProvider({
         accountId: "account-fixture",
         apiToken: "token-fixture",
         fetchImpl: async () => ({ json: async () => payload, ok: true }),
@@ -268,7 +311,7 @@ describe("container release receipt", () => {
     });
 
     it("redacts transport, response, URL, and credential detail from list failures", async () => {
-      const listApplications = createCloudflareContainerApplicationLister({
+      const { listApplications } = createCloudflareContainerProvider({
         accountId: "sensitive-account-fixture",
         apiToken: "sensitive-token-fixture",
         fetchImpl: async () => {
@@ -305,7 +348,7 @@ describe("container release receipt", () => {
           : detailPayload,
         ok: true,
       }));
-      const listApplications = createCloudflareContainerApplicationLister({
+      const { listApplications } = createCloudflareContainerProvider({
         accountId: "account-fixture",
         apiToken: "token-fixture",
         fetchImpl,
@@ -329,7 +372,7 @@ describe("container release receipt", () => {
         }
         throw new Error("sensitive detail transport failure");
       });
-      const listApplications = createCloudflareContainerApplicationLister({
+      const { listApplications } = createCloudflareContainerProvider({
         accountId: "sensitive-account-fixture",
         apiToken: "sensitive-token-fixture",
         fetchImpl,
@@ -453,6 +496,126 @@ describe("container release receipt", () => {
       })).toThrow("Container release evidence did not form an exact provider transition.");
     });
 
+    it("waits for modified application detail to expose the provider transition", async () => {
+      const modifiedAction = [
+        { action: "modified", applicationName: "app", className: "Container" },
+      ] as const;
+      const before = [identity("app", "id", 2, "old-image")];
+      const listApplications = vi.fn()
+        .mockResolvedValueOnce([providerIdentity("app", "id", 2, "old-image")])
+        .mockResolvedValueOnce([providerIdentity("app", "id", 3, "new-image")]);
+      const sleep = vi.fn(async () => {});
+
+      await expect(waitForCloudflareContainerReleaseEntries({
+        actions: modifiedAction,
+        before,
+        expectedContainers: [{ applicationName: "app", className: "Container" }],
+        listApplications,
+        maxAttempts: 2,
+        retryDelayMs: 7,
+        sleep,
+      })).resolves.toEqual([
+        expect.objectContaining({ disposition: "updated", version: 3 }),
+      ]);
+      expect(sleep).toHaveBeenCalledOnce();
+      expect(sleep).toHaveBeenCalledWith(7);
+      expect(listApplications).toHaveBeenCalledTimes(2);
+    });
+
+    it("uses a new active rollout target while application detail remains on current state", async () => {
+      const modifiedAction = [
+        { action: "modified", applicationName: "app", className: "Container" },
+      ] as const;
+      const before = [identity("app", "id", 2, "old-image")];
+      const listApplications = vi.fn(async () => [
+        providerIdentity("app", "id", 2, "old-image", "rollout-new"),
+      ]);
+      const readRollout = vi.fn(async () =>
+        providerRollout("rollout-new", 2, "old-image", 3, "new-image")
+      );
+
+      await expect(waitForCloudflareContainerReleaseEntries({
+        actions: modifiedAction,
+        before,
+        expectedContainers: [{ applicationName: "app", className: "Container" }],
+        listApplications,
+        maxAttempts: 1,
+        readRollout,
+      })).resolves.toEqual([
+        {
+          applicationName: "app",
+          className: "Container",
+          disposition: "updated",
+          imageSha256: "97e67a5645969953f1a4cfe2ea75649864ff99789189cdd3f6db03e59f8a8ebf",
+          version: 3,
+        },
+      ]);
+      expect(readRollout).toHaveBeenCalledWith("id", "rollout-new");
+    });
+
+    it("rejects an already-active rollout as evidence for a new modified action", () => {
+      const modifiedAction = [
+        { action: "modified", applicationName: "app", className: "Container" },
+      ] as const;
+      const activeRollout = rolloutIdentity(
+        "rollout-existing",
+        2,
+        "old-image",
+        3,
+        "new-image",
+      );
+
+      expect(() => buildContainerReleaseEntries({
+        actions: modifiedAction,
+        after: [{ ...identity("app", "id", 2, "old-image"), activeRollout }],
+        before: [{ ...identity("app", "id", 2, "old-image"), activeRollout }],
+      })).toThrow("Container release evidence did not form an exact provider transition.");
+    });
+
+    it("rejects a prior rollout completing without a new active rollout identity", () => {
+      const modifiedAction = [
+        { action: "modified", applicationName: "app", className: "Container" },
+      ] as const;
+      const priorRollout = rolloutIdentity(
+        "rollout-existing",
+        2,
+        "old-image",
+        3,
+        "intermediate-image",
+      );
+
+      expect(() => buildContainerReleaseEntries({
+        actions: modifiedAction,
+        after: [identity("app", "id", 3, "intermediate-image")],
+        before: [{ ...identity("app", "id", 2, "old-image"), activeRollout: priorRollout }],
+      })).toThrow("Container release evidence did not form an exact provider transition.");
+    });
+
+    it("fails closed when modified application detail never exposes a transition", async () => {
+      const modifiedAction = [
+        { action: "modified", applicationName: "app", className: "Container" },
+      ] as const;
+      const before = [identity("app", "id", 2, "old-image")];
+      const listApplications = vi.fn(async () => [
+        providerIdentity("app", "id", 2, "old-image"),
+      ]);
+      const sleep = vi.fn(async () => {});
+
+      await expect(waitForCloudflareContainerReleaseEntries({
+        actions: modifiedAction,
+        before,
+        expectedContainers: [{ applicationName: "app", className: "Container" }],
+        listApplications,
+        maxAttempts: 2,
+        retryDelayMs: 0,
+        sleep,
+      })).rejects.toThrow(
+        "Container release evidence did not form an exact provider transition.",
+      );
+      expect(sleep).toHaveBeenCalledOnce();
+      expect(listApplications).toHaveBeenCalledTimes(2);
+    });
+
     it("rejects missing, extra, or duplicate provider state", () => {
       const unchangedAction = [
         { action: "unchanged", applicationName: "app", className: "Container" },
@@ -483,13 +646,42 @@ function providerIdentity(
   id: string,
   version: number,
   image: string,
+  activeRolloutId?: string,
 ): Record<string, unknown> {
   return {
+    ...(activeRolloutId ? { active_rollout_id: activeRolloutId } : {}),
     configuration: { image },
     id,
     name: applicationName,
     version,
   };
+}
+
+function providerRollout(
+  rolloutId: string,
+  currentVersion: number,
+  currentImage: string,
+  targetVersion: number,
+  targetImage: string,
+): Record<string, unknown> {
+  return {
+    current_configuration: { image: currentImage },
+    current_version: currentVersion,
+    id: rolloutId,
+    status: "progressing",
+    target_configuration: { image: targetImage },
+    target_version: targetVersion,
+  };
+}
+
+function rolloutIdentity(
+  rolloutId: string,
+  currentVersion: number,
+  currentImage: string,
+  targetVersion: number,
+  targetImage: string,
+) {
+  return { currentImage, currentVersion, rolloutId, targetImage, targetVersion };
 }
 
 function identity(

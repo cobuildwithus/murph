@@ -1477,6 +1477,7 @@ function createIntegratedQueryServices(): QueryServices {
       to?: string
       providers?: string[]
       limit: number
+      includeWorkoutDetails?: boolean
     }) {
       const normalized = normalizeWearableSummaryInput(input)
       const query = await loadQueryRuntime()
@@ -1484,7 +1485,17 @@ function createIntegratedQueryServices(): QueryServices {
         input.vault,
         normalized.queryFilters,
       )
-      const items = limitedCompactWearableCommandSummaryArray(rawItems, normalized.filters.limit)
+      const outputItems = input.includeWorkoutDetails
+        ? rawItems
+        : rawItems.map((item) => {
+            const summary: Record<string, unknown> = { ...item }
+            delete summary.workoutFeatures
+            return summary
+          })
+      const items = limitedCompactWearableCommandSummaryArray(
+        outputItems,
+        normalized.filters.limit,
+      )
 
       return {
         filters: normalized.filters,

@@ -34,6 +34,9 @@ import {
   reportHostedContainerFatalBestEffort,
   type HostedContainerFatalStage,
 } from "./container-fatal-report.ts";
+import {
+  recordHostedContainerRuntimeCompletionBestEffort,
+} from "./container-runtime-completion.ts";
 import type {
   HostedContainerHeavyRuntime,
   HostedContainerHeavyRuntimeCore,
@@ -50,6 +53,7 @@ import {
 import {
   parseHostedExecutionRunnerJobInput,
   type HostedExecutionRunnerJobInput,
+  type HostedExecutionRunnerJobResult,
 } from "./runner-job-transport.ts";
 import {
   readHostedRuntimeOrchestrationLatencyHeaders,
@@ -330,6 +334,10 @@ export async function startHostedContainerEntrypoint(input: {
     let workspaceRestorePreparation: Promise<HostedWorkspaceRestorePreparation> | null = null;
     let runtimeWakeForRequest: ((notification?: HostedContainerRuntimeWakeNotification) => boolean) | null = null;
     let job: HostedExecutionRunnerJobInput | null = null;
+    let completedInvocation: {
+      job: HostedExecutionRunnerJobInput;
+      result: HostedExecutionRunnerJobResult;
+    } | null = null;
     let stopActiveJobDiagnostics: (() => void) | null = null;
     let activeAbortRecord: {
       abort: (reason: Error) => void;
@@ -941,6 +949,7 @@ export async function startHostedContainerEntrypoint(input: {
         supervisorEnv: runtime.startupConfig.supervisorEnv,
         waitForBackgroundAssistantWork: heavyRuntime.waitForBackgroundAssistantWork,
       });
+      completedInvocation = { job, result };
 
       if (requestAbort.signal.aborted || response.destroyed) {
         settleConversationActivity();
@@ -1037,6 +1046,9 @@ export async function startHostedContainerEntrypoint(input: {
         activeHostedRunnerJobCount = Math.max(0, activeHostedRunnerJobCount - 1);
       }
       requestAbort.cleanup();
+      await recordHostedContainerRuntimeCompletionIfPresent(
+        completedInvocation,
+      );
       maybeExitAfterContainerShutdownDrain();
     }
   });
@@ -1537,6 +1549,18 @@ function readHostedContainerRuntimeWakeOrchestration(
   value: unknown,
 ): HostedRuntimeOrchestrationLatencyDiagnostics | null {
   return sanitizeHostedRuntimeOrchestrationLatencyDiagnostics(value);
+}
+
+async function recordHostedContainerRuntimeCompletionIfPresent(
+  input: {
+    job: HostedExecutionRunnerJobInput;
+    result: HostedExecutionRunnerJobResult;
+  } | null,
+): Promise<void> {
+  if (!input) {
+    return;
+  }
+  await recordHostedContainerRuntimeCompletionBestEffort(input);
 }
 
 function hostedContainerRuntimeWakeIdentityMatches(

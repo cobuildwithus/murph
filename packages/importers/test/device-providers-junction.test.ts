@@ -15845,6 +15845,55 @@ test("Junction normalizer ignores aggregator provider and ambiguous type provena
   });
 });
 
+test("Junction workout normalization prefers a specific sport over a generic activity type", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-04-22T12:00:00.000Z",
+    summaries: {
+      workouts: [{
+        durationMinutes: 42,
+        endAt: "2026-04-22T12:42:00.000Z",
+        observedAt: "2026-04-22T12:42:00.000Z",
+        sourceProviderSlug: "oura",
+        sport: { name: "Trail Run", type: "workout" },
+        startAt: "2026-04-22T12:00:00.000Z",
+        type: "workout",
+      }],
+    },
+  });
+
+  const workoutEvent = payload.events?.find(
+    (event) => event.kind === "activity_session",
+  );
+  assert.equal(workoutEvent?.fields?.activityType, "trail-run");
+  assert.equal(workoutEvent?.title, "Trail Run");
+});
+
+test("Junction workout normalization uses a specific title when a provider reports an unknown sport", () => {
+  for (const sourceProviderSlug of ["oura", "whoop"]) {
+    const payload = normalizeJunctionSnapshot({
+      importedAt: "2026-08-29T12:00:00.000Z",
+      summaries: {
+        workouts: [{
+          durationMinutes: 40,
+          endAt: "2026-08-29T12:40:00.000Z",
+          observedAt: "2026-08-29T12:40:00.000Z",
+          sourceProviderSlug,
+          sport: { name: "Unknown", type: "unknown" },
+          startAt: "2026-08-29T12:00:00.000Z",
+          title: "yardwork",
+          type: "unknown",
+        }],
+      },
+    });
+
+    const workoutEvent = payload.events?.find(
+      (event) => event.kind === "activity_session",
+    );
+    assert.equal(workoutEvent?.fields?.activityType, "yardwork");
+    assert.equal(workoutEvent?.title, "yardwork");
+  }
+});
+
 test("Junction migration daily coverage finalizes only after the provider-local day closes", () => {
   const event = {
     dataOrigin: { sourceProviderSlug: "fitbit" },

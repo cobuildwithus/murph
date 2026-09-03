@@ -535,6 +535,8 @@ function createHostedMember(
   overrides: Partial<HostedMember> = {},
 ): HostedMember {
   return {
+    groupJournalCaptureConsentRequestedAt: null,
+    groupJournalCaptureEnabled: null,
     assistantPersona: null,
     assistantPersonaCausalSeq: null,
     assistantDetail: null,

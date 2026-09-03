@@ -14,6 +14,7 @@ import type {
   OverviewWeeklySampleSummary,
 } from "../overview.ts";
 import type { PersonalPatternReport } from "../personal-patterns.ts";
+import type { JournalView } from "../journal-view.ts";
 import type { VaultReadModel } from "../read-model.ts";
 import type { TimelineEntry } from "../timeline.ts";
 import type {
@@ -323,6 +324,8 @@ export interface BrowserVaultReplica {
   /** Absent only on legacy replicas produced before generation-aware freshness. */
   generation?: number;
   labResultRows: BrowserVaultLabResultRow[];
+  /** Absent only on replicas produced before the derived Journal view shipped. */
+  journal?: JournalView;
   metricGoalProgressRows: BrowserVaultMetricGoalProgressRow[];
   metricRows: BrowserVaultMetricRow[];
   metricSelectionRows: BrowserVaultMetricSelectionRow[];
@@ -347,6 +350,7 @@ type BrowserVaultLegacyCompatibleCoreReplica = Pick<
   | "generatedAt"
   | "generation"
   | "hasLabBiomarkers"
+  | "journal"
   | "personalPatterns"
   | "policy"
   | "schema"

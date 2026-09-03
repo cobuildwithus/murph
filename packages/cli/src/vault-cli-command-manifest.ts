@@ -1533,6 +1533,8 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['wearables', 'activity', 'list'],
         description: 'List semantic daily activity summaries with deduped workouts, steps, and distance details.',
+        hint:
+          'One data read only. Day totals (`sessionCount`, `sessionMinutes`, distinct `activityTypes`): omit detail; no false flag or schema read. Workout/subset facts: include detail first.',
         output: wearablesActivityListResultSchema,
       },
       {

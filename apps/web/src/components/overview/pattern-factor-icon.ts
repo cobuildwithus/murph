@@ -4,7 +4,7 @@ const PATTERN_ASSET_ROOT = "/design-assets/patterns";
 const HABITAT_ASSET_ROOT = "/design-assets/habitat";
 
 export const ACTIVITY_FALLBACK_ICON = `${PATTERN_ASSET_ROOT}/activity.svg`;
-export const INTERVENTION_FALLBACK_ICON = `${PATTERN_ASSET_ROOT}/tag.svg`;
+export const INTERVENTION_FALLBACK_ICON = ACTIVITY_FALLBACK_ICON;
 
 const RULES: ReadonlyArray<{ icon: string; tokens: readonly string[] }> = [
   {
@@ -136,6 +136,7 @@ const RULES: ReadonlyArray<{ icon: string; tokens: readonly string[] }> = [
     icon: pattern("mind-body"),
     tokens: ["meditation", "pilates", "yoga", "barre", "barre3", "stretching"],
   },
+  { icon: pattern("mobility"), tokens: ["mobility"] },
   {
     icon: pattern("performance"),
     tokens: [
@@ -169,6 +170,10 @@ const RULES: ReadonlyArray<{ icon: string; tokens: readonly string[] }> = [
       "high-stress-work",
       "coaching",
     ],
+  },
+  {
+    icon: pattern("housework"),
+    tokens: ["housework", "house-work", "household-chores", "chores"],
   },
   { icon: pattern("work"), tokens: ["manual-labor", "yard-work", "cleaning"] },
   { icon: pattern("general-activity"), tokens: ["activity", "other"] },
@@ -227,7 +232,18 @@ const RULES: ReadonlyArray<{ icon: string; tokens: readonly string[] }> = [
     ],
   },
   { icon: habitat("bed"), tokens: ["bedtime", "nap", "sleep"] },
-  { icon: habitat("redlight"), tokens: ["red-light"] },
+  {
+    icon: habitat("night-temp"),
+    tokens: ["bedroom-temperature", "night-temperature"],
+  },
+  {
+    icon: habitat("redlight"),
+    tokens: [
+      "red-light",
+      "blue-light-blocking-glasses",
+      "red-amber-evening-glasses",
+    ],
+  },
 ];
 
 export function resolvePatternFactorIcon(

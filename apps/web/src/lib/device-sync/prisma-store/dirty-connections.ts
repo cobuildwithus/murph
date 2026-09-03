@@ -9,6 +9,9 @@ import {
 } from "@murphai/contracts";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
+  JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
+} from "@murphai/device-syncd/junction-resources";
+import {
   isDeviceSyncCredentialIndependentImportJob,
   isHostedDeviceSyncEventToProviderSendBucket,
   mergeHostedDeviceSyncEventToProviderSendBuckets,
@@ -425,10 +428,7 @@ export class PrismaHostedDirtyConnectionStore {
 
     return prepareDirtyPayloadRows({
       connectionId: input.connectionId,
-      dirtyRevision: resolveDirtyPayloadRevision({
-        existing,
-        resourceBatch,
-      }),
+      dirtyRevision: resolveDirtyPayloadRevision(existing),
       provider: input.provider,
       resources: resourceBatch.payloadResources,
       traceId: input.traceId,
@@ -450,10 +450,7 @@ export class PrismaHostedDirtyConnectionStore {
       throw new TypeError("Dirty connection preparation owner did not match the dirty connection.");
     }
 
-    const dirtyRevision = resolveDirtyPayloadRevision({
-      existing,
-      resourceBatch,
-    });
+    const dirtyRevision = resolveDirtyPayloadRevision(existing);
     const payloadCrypto = resourceBatch.payloadResources.length === 0
       ? undefined
       : await prepareHostedDeviceSyncDirtyPayloadCrypto({
@@ -629,10 +626,7 @@ export class PrismaHostedDirtyConnectionStore {
     ) {
       preparedDirtyPayloadRows = await prepareDirtyPayloadRows({
         connectionId: input.connectionId,
-        dirtyRevision: resolveDirtyPayloadRevision({
-          existing,
-          resourceBatch: input.resourceBatch,
-        }),
+        dirtyRevision: resolveDirtyPayloadRevision(existing),
         provider: input.provider,
         resources: input.resourceBatch.payloadResources,
         traceId: input.traceId,
@@ -662,10 +656,7 @@ export class PrismaHostedDirtyConnectionStore {
       });
       if (
         !existing
-        || preparedDirtyPayloadRows?.dirtyRevision !== resolveDirtyPayloadRevision({
-          existing,
-          resourceBatch: input.resourceBatch,
-        })
+        || preparedDirtyPayloadRows?.dirtyRevision !== resolveDirtyPayloadRevision(existing)
       ) {
         throw createDirtyStateContentionError("update");
       }
@@ -748,30 +739,6 @@ export class PrismaHostedDirtyConnectionStore {
     }
 
     const becameDirty = existing.processedRevision >= existing.dirtyRevision;
-    if (
-      !becameDirty
-      && isPayloadOnlyDirtyAppend(resourceBatch)
-    ) {
-      const payloadCreateResult = await createDirtyPayloadRows({
-        connectionId: input.connectionId,
-        dirtyRevision: existing.dirtyRevision,
-        provider: input.provider,
-        precomputed: filteredPayloadRows,
-        resources: resourceBatch.payloadResources,
-        traceId: input.traceId,
-        tx: prisma,
-        userId: input.userId,
-      });
-
-      return {
-        dirty: withDirtyPayloadResources(
-          mapDirtyConnectionRecord(existing),
-          payloadCreateResult.resources,
-        ),
-        shouldRequestWake: false,
-      };
-    }
-
     const priorResources = becameDirty ? {} : readDirtyResourcesJson(existing.dirtyResourcesJson);
     const resources = mergeDirtyResources(
       priorResources,
@@ -1441,22 +1408,14 @@ async function mapLimit<TInput, TOutput>(
   return results;
 }
 
-function resolveDirtyPayloadRevision(input: {
-  existing: DeviceSyncDirtyConnectionPrismaRecord | null;
-  resourceBatch: DirtyResourceBatch;
-}): bigint {
-  if (!input.existing) {
+function resolveDirtyPayloadRevision(
+  existing: DeviceSyncDirtyConnectionPrismaRecord | null,
+): bigint {
+  if (!existing) {
     return 1n;
   }
 
-  if (
-    input.existing.processedRevision < input.existing.dirtyRevision
-    && isPayloadOnlyDirtyAppend(input.resourceBatch)
-  ) {
-    return input.existing.dirtyRevision;
-  }
-
-  return input.existing.dirtyRevision + 1n;
+  return existing.dirtyRevision + 1n;
 }
 
 function createDirtyConnectionPreparationSnapshot(
@@ -1505,11 +1464,6 @@ function requirePreparedDirtyConnectionUpsert(
   return details;
 }
 
-function isPayloadOnlyDirtyAppend(resourceBatch: DirtyResourceBatch): boolean {
-  return Object.keys(resourceBatch.compactResources).length === 0
-    && resourceBatch.payloadResources.length > 0;
-}
-
 function createDirtyPayloadId(input: {
   connectionId: string;
   dirtyRevision: bigint;
@@ -1526,13 +1480,28 @@ function createDirtyPayloadId(input: {
     ].join("\0")).slice(0, 40)}`;
   }
 
+  const payloadIdentity = serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(
+    input.resource.payload,
+  );
+  if (
+    input.resource.resource === JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE
+    && payloadIdentity !== null
+  ) {
+    return `dsp_${sha256Hex([
+      input.connectionId,
+      JUNCTION_COMPANION_HEALTH_METADATA_RESOURCE,
+      String(input.index),
+      payloadIdentity,
+    ].join("\0")).slice(0, 40)}`;
+  }
+
   const identity = [
     input.connectionId,
     input.dirtyRevision.toString(),
     normalizeNullableString(input.traceId) ?? "trace",
     String(input.index),
     buildDirtyResourceKey(input.resource),
-    serializeHostedExecutionDeviceSyncDirtyPayloadIdentity(input.resource.payload),
+    payloadIdentity,
   ].join("\0");
 
   return `dsp_${sha256Hex(identity).slice(0, 40)}`;

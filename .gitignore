@@ -115,3 +115,6 @@ agent-docs/product-ideas.md
 .plasticlist-work/
 .product-tests-work/
 .env*.local
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/

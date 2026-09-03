@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-08-31
+Last verified: 2026-09-02
 
 This workflow applies to repo code/docs/test/config changes after implementation is materially complete.
 Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether plan mechanics apply.
@@ -235,14 +235,54 @@ The final ReviewGPT gate never becomes a fallback product-decision owner.
    Inspect each selected image at native resolution, keep it ignored and
    redacted under `.artifacts/review-gpt/`, and remove a one-off capture spec
    after proof unless it adds durable regression value.
+
+   Before any image or video leaves the machine, inspect each screenshot at
+   native resolution and replay each video, including its audio. Prefer
+   synthetic fixtures, then crop or redact all private or identifying material:
+   names, handles, email addresses, phone numbers, member or provider
+   identifiers, real faces or identifying avatars, health or conversation
+   content, secrets and tokens, sensitive URLs or query strings, local usernames
+   or home-directory paths, notifications, and unrelated browser or system
+   chrome. Strip embedded location or device metadata, use a flattened export
+   rather than editable redaction overlays, and keep file names, alt text, and
+   surrounding prose identifier-free. Treat GitHub attachments as public, durable
+   third-party artifacts: never upload an unsafe original with the intention to
+   edit or delete it later. If redaction would remove the proof or privacy is
+   uncertain, do not upload the media; record the evidence blocker and use
+   another proof surface.
+
+   Publish only the selected privacy-safe media with GitHub CLI 2.99.0 or newer.
+   Use the repeatable `--attach` flag on `gh pr create`, `gh pr edit`, or
+   `gh pr comment`; append `#<alt text>` to an image path, while video paths do
+   not accept alt text. When the body already references the same local path,
+   `gh` replaces that reference with the uploaded URL; otherwise it appends the
+   attachment. For example:
+
+   ```bash
+   gh pr comment <pr-number> \
+     --body 'Responsive design proof' \
+     --attach './.artifacts/review-gpt/<task-slug>/desktop.png#Desktop changed state' \
+     --attach './.artifacts/review-gpt/<task-slug>/phone.png#Phone changed state'
+   ```
+
+   Reopen the rendered PR or comment after upload. Confirm the intended media
+   and image alt text appear, no private material is visible, and no local path
+   remains. A nonzero command can still mean some attachments were published;
+   inspect the rendered result before retrying and retry only missing media.
+   See GitHub's
+   [media attachment announcement](https://github.blog/changelog/2026-09-01-github-cli-media-in-issues-pull-requests-and-comments/)
+   for the supported command surface.
 7. Commit and push the review candidate from the task worktree, open or update
    the PR, and keep any active plan open. For plan-bearing work this is
    an intermediate scoped commit, not the final task commit;
-   `scripts/finish-task` still owns plan closure later. Ensure the PR body
-   contains the outcome, Product UX result, direct evidence, non-obvious
-   surfaces, architecture and reuse, complexity impact, hot reply path impact,
-   provider-input impact, deployment and changelog decisions, the change-shape
-   breakdown, and applicable design proof required below.
+   `scripts/committer` requires every changed file to be listed explicitly and
+   rejects directory targets. Directory expansion belongs only to
+   `scripts/finish-task`, which still owns plan closure and the final task
+   commit later. Ensure the PR body contains the outcome, Product UX result,
+   direct evidence, non-obvious surfaces, architecture and reuse, complexity
+   impact, hot reply path impact, provider-input impact, deployment and
+   changelog decisions, the change-shape breakdown, and applicable design proof
+   required below.
 8. When the final ReviewGPT gate is selected, establish its immutable round-one
    baseline on the exact pushed candidate head. The candidate must already have
    focused local proof and a parent candidate review. Run final ReviewGPT
@@ -307,7 +347,9 @@ Every PR includes:
   state why Product UX does not apply.
 - **Evidence.** List the direct journey proof and focused checks. For frontend
   work, state the changed states and viewports. Link screenshots only when they
-  add proof. There is no screenshot quota.
+  add proof. Every uploaded image or video must pass the privacy review and use
+  the GitHub CLI attachment procedure in sequence step 6. There is no screenshot
+  quota.
 - **Non-obvious affected surfaces.** Name every production behavior, shared
   subsystem, workflow, state owner, or deploy/runtime surface changed even
   though it is not obvious from the PR's purpose. State why each change is
@@ -386,7 +428,11 @@ Every PR includes:
   Select `Deployment: applicable` and complete the deployment contract when the
   change crosses a deploy boundary; otherwise select
   `Deployment: not applicable` with a concrete reason. The pull-request
-  evidence guard validates this section.
+  evidence guard validates this section. For a shared protocol between
+  independently deployed components, identify the producer and consumer, use a
+  consumer-first safe order, and name direct proof for every supported
+  mixed-version pair. Current-head producer/consumer proof alone is
+  insufficient.
 - **Changelog.** Add exactly one `## Changelog` section with
   `Changelog: updated` and its item IDs, or `Changelog: not applicable` with a
   concrete reason. The changelog guard validates this section.

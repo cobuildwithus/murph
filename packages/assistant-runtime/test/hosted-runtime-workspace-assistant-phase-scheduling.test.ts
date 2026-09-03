@@ -11,6 +11,7 @@ import {
   expectAssistantLaneCallWithoutDeviceSyncOptions,
   extractTopLevelFunctionBody,
   mocks,
+  runHostedWorkspaceAssistantPhase,
   writeHostedPhaseExperimentSource,
 } from "./hosted-runtime-workspace-assistant-phase.harness.ts";
 
@@ -65,10 +66,10 @@ import {
   type AssistantAutomationOperationScope,
   type AssistantExecutionContext,
 } from "@murphai/assistant-engine";
-import {
-  runHostedWorkspaceAssistantPhase,
-  type HostedWorkspaceRuntimeAssistantPhaseInput,
+import type {
+  HostedWorkspaceRuntimeAssistantPhaseInput,
 } from "../src/hosted-runtime/workspace-assistant-phase.ts";
+import { drainHostedRuntimeLogWritesBestEffort } from "../src/hosted-runtime/runtime-logs.ts";
 import {
   isHostedDeviceSyncMaintenanceModuleLoadError,
   loadHostedDeviceSyncMaintenanceModule,
@@ -2274,10 +2275,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
     expect("afterCheckpoint" in result).toBe(false);
     await Promise.resolve();
-    expect(logRequests.map((request) => request.entries[0]?.eventCode)).toEqual([
+    await drainHostedRuntimeLogWritesBestEffort();
+    expect(logRequests.flatMap((request) => request.entries).map((entry) => entry.eventCode)).toEqual(expect.arrayContaining([
       "assistant.device_connect",
       "device-sync.maintenance_failed",
-    ]);
+    ]));
     const failureEntries = logRequests.flatMap((request) => request.entries);
     const failureLog = failureEntries
       .find((entry) => entry.eventCode === "device-sync.maintenance_failed");

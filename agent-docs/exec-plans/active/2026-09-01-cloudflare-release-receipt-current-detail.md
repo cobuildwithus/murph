@@ -6,13 +6,13 @@ Updated: 2026-09-01
 
 ## Goal
 
-- Make the protected Cloudflare deploy receipt identify the exact container application state produced by the current Wrangler deploy, so certification cannot compare a delayed application-list snapshot with current application detail.
+- Make the protected Cloudflare deploy receipt identify the exact container release started by the current Wrangler deploy, while certification independently proves that release became final.
 
 ## Success criteria
 
 - Exact-name application discovery resolves each provider application through its authoritative detail endpoint before the receipt records version or image identity.
-- A Wrangler `modified` action cannot publish a receipt when the post-deploy detail state is byte-for-byte unchanged from the pre-deploy detail state.
-- Focused tests reproduce a stale list result paired with a current detail result and prove the receipt uses only the current detail.
+- A Wrangler `modified` action accepts only a new active rollout whose authoritative current state matches the pre-deploy application and records that rollout's target version and image.
+- Focused tests reproduce stale application detail during an active rollout and prove the receipt records the exact target without mistaking a pre-existing rollout for the current deploy.
 - The protected production workflow reports deploy success, smoke success, and release convergence for one exact Worker and all three exact container applications.
 
 ## Scope
@@ -25,12 +25,15 @@ Updated: 2026-09-01
 - Two consecutive protected deploys recorded receipts whose three container versions were each exactly one snapshot behind the final provider detail state, and whose image digests all differed from that final state.
 - The Worker version and tag matched exactly, all three final container rollouts completed, and no other protected deploy workflow overlapped.
 - The receipt writer currently records version and image from the container application list response, while certification resolves the same application through the detail endpoint.
+- After the detail-source correction, Wrangler reported all three applications modified and moved the Worker to the exact new version, while the immediate post-deploy detail reads still returned every pre-deploy container version. The one-shot receipt classification therefore rejected a real asynchronous provider transition before smoke or certification could start.
+- A bounded two-minute retry still failed after all three Wrangler updates succeeded. Cloudflare's application summary showed the large runner rollout was not terminal, matching Cloudflare's documented contract that deploy success means a rollout started and that the effective application can remain on the preceding image while instances are replaced.
+- Cloudflare's rollout resource already owns the exact `current_version`, `current_configuration`, `target_version`, and `target_configuration` required to identify the release before convergence. The private certifier already polls until application detail matches that target and the rollout is complete.
 
 ## Plan
 
 1. Resolve list-discovered application identifiers through exact application detail reads before parsing receipt identity.
-2. Reject an unchanged post-deploy detail state when Wrangler reports `modified`.
-3. Add focused stale-list/current-detail, malformed-detail, redaction, and unchanged-transition regressions.
+2. Resolve a newly active rollout after Wrangler succeeds and derive the immutable receipt from its authoritative target while application detail is still current-state stale.
+3. Add focused stale-list/current-detail, active-target, reused-rollout, malformed-detail, redaction, and unchanged-transition regressions.
 4. Run focused Cloudflare tests, app typecheck, complexity, diff/privacy review, exact-head CI, merge, and protected deployment.
 5. Verify exact release convergence and then recheck the independent residual runtime backlog.
 
@@ -38,11 +41,11 @@ Updated: 2026-09-01
 
 - The public receipt producer must merge before the next protected private deployment consumes it.
 - Old private verification remains compatible with the schema-1 receipt; only the evidence source changes.
-- A failed detail read stops before publishing a receipt. A successful receipt continues to require exact Worker traffic, container version, image, capacity, and terminal rollout proof.
+- An active rollout that is unreadable, reused from before this deploy, or does not join the pre-deploy current state to one exact target stops before publishing a receipt. A successful receipt continues to require exact Worker traffic, container version, image, capacity, and terminal rollout proof.
 
 ## Verification
 
-- Passed: 59 focused Cloudflare receipt and deploy-helper tests.
+- Passed: 65 focused Cloudflare receipt and deploy-helper tests, including active-rollout target evidence, delayed provider-detail convergence, and fail-closed exhaustion.
 - Passed: `apps/cloudflare` package typecheck.
 - Passed: cyclomatic-complexity diff; the changed receipt owner remains below the threshold with no new debt.
 - Passed: `git diff --check` and parent inspection of the complete source, test, documentation, and plan diff.

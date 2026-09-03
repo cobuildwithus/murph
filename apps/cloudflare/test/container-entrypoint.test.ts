@@ -41,6 +41,12 @@ type SpawnMock = (
 const mocks = vi.hoisted(() => ({
   drainHostedRuntimeDeferredUsageCompletionsBestEffort: vi.fn(async () => undefined),
   emitHostedExecutionStructuredLog: vi.fn(),
+  recordHostedContainerRuntimeCompletionBestEffort: vi.fn(
+    async (_input: {
+      job: { request: { attemptId: string } };
+      result: { status: string };
+    }) => undefined,
+  ),
   registerStopWarmCodexAppServer: vi.fn(),
   registerWaitForWarmCodexBackgroundWork: vi.fn(),
   runHostedWorkspaceInvocation: vi.fn(),
@@ -95,6 +101,11 @@ vi.mock("@murphai/assistant-runtime/hosted-invocation", async () => {
       mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort,
   };
 });
+
+vi.mock("../src/container-runtime-completion.js", () => ({
+  recordHostedContainerRuntimeCompletionBestEffort:
+    mocks.recordHostedContainerRuntimeCompletionBestEffort,
+}));
 
 import {
   classifyRunnerJobError,
@@ -153,6 +164,9 @@ beforeEach(() => {
   vi.unstubAllGlobals();
   globalThis.fetch = nativeFetch;
   mocks.drainHostedRuntimeDeferredUsageCompletionsBestEffort.mockResolvedValue(undefined);
+  mocks.recordHostedContainerRuntimeCompletionBestEffort.mockResolvedValue(
+    undefined,
+  );
   mocks.runHostedWorkspaceInvocation.mockResolvedValue(buildWorkspaceRunnerResult());
   mocks.spawn.mockReset();
   mocks.stopWarmCodexAppServer.mockResolvedValue(undefined);
@@ -1484,7 +1498,7 @@ describe("startHostedContainerEntrypoint", () => {
     const runCodexShellSmoke = vi.fn(async () => ({
       client: "codex-app-server" as const,
       cliSurfaceContractBytes: 37282,
-      cliSurfaceHotPathProofCount: 4,
+      cliSurfaceHotPathProofCount: 5,
       murphPathBytes: 28,
       noteAddBytes: 128,
       stderrBytes: 0,
@@ -1516,7 +1530,7 @@ describe("startHostedContainerEntrypoint", () => {
       codexShell: {
         client: "codex-app-server",
         cliSurfaceContractBytes: 37282,
-        cliSurfaceHotPathProofCount: 4,
+        cliSurfaceHotPathProofCount: 5,
         murphPathBytes: 28,
         noteAddBytes: 128,
         stderrBytes: 0,
