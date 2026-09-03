@@ -36,7 +36,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberAssistantModelPreference: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
   readHostedActiveGroupRunningBit: vi.fn(),
-  readHostedRuntimeOwnerReleaseMailboxLagActionable: vi.fn(),
+  readHostedRuntimeOwnerReleaseActionable: vi.fn(),
   readHostedWorkspace: vi.fn(),
   recordHostedIngressAssistantInputStaged: vi.fn(),
   recordHostedIngressAssistantMilestone: vi.fn(),
@@ -148,8 +148,8 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/runtime-reconciliation-facts", () => ({
-  readHostedRuntimeOwnerReleaseMailboxLagActionable:
-    mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable,
+  readHostedRuntimeOwnerReleaseActionable:
+    mocks.readHostedRuntimeOwnerReleaseActionable,
 }));
 
 type MailboxFetchRoute = typeof import("../app/api/internal/hosted-mailbox/fetch/route");
@@ -272,7 +272,7 @@ describe("hosted runtime internal web routes", () => {
     });
     mocks.readHostedActiveGroupRunningBit.mockResolvedValue(null);
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveHostedMemberRecord());
-    mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable.mockResolvedValue(true);
+    mocks.readHostedRuntimeOwnerReleaseActionable.mockResolvedValue(true);
     mocks.claimHostedAcceptedAttemptFailureRecheck.mockResolvedValue(false);
     mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
       status: "allowed",
@@ -291,6 +291,7 @@ describe("hosted runtime internal web routes", () => {
   });
 
   it("signals an exact authenticated runtime owner release", async () => {
+    mocks.readHostedRuntimeOwnerReleaseActionable.mockResolvedValue(true);
     const request = new Request(
       "https://join.example.test/api/internal/hosted-runtime/owner-released"
         + "?runtimeAttemptId=runtime_attempt_routes_1",
@@ -305,7 +306,7 @@ describe("hosted runtime internal web routes", () => {
       request,
       { maxBodyBytes: 0 },
     );
-    expect(mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable).toHaveBeenCalledWith({
+    expect(mocks.readHostedRuntimeOwnerReleaseActionable).toHaveBeenCalledWith({
       userId: "member_routes_1",
     });
     expect(mocks.signalHostedRuntimeOwnerReleasedRuntime).toHaveBeenCalledWith({
@@ -315,11 +316,10 @@ describe("hosted runtime internal web routes", () => {
   });
 
   it("signals an authenticated explicit immediate recheck without a mailbox read", async () => {
-    mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable.mockResolvedValue(false);
+    mocks.readHostedRuntimeOwnerReleaseActionable.mockResolvedValue(false);
     const request = new Request(
       "https://join.example.test/api/internal/hosted-runtime/owner-released"
-        + "?runtimeAttemptId=runtime_attempt_routes_1"
-        + "&immediateRecheckRequested=1",
+        + "?immediateRecheckRequested=1",
       { method: "POST" },
     );
 
@@ -331,11 +331,11 @@ describe("hosted runtime internal web routes", () => {
       request,
       { maxBodyBytes: 0 },
     );
-    expect(mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable).not.toHaveBeenCalled();
-    expect(mocks.signalHostedRuntimeOwnerReleasedRuntime).toHaveBeenCalledWith({
-      runtimeAttemptId: "runtime_attempt_routes_1",
+    expect(mocks.readHostedRuntimeOwnerReleaseActionable).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
       userId: "member_routes_1",
     });
+    expect(mocks.signalHostedRuntimeOwnerReleasedRuntime).not.toHaveBeenCalled();
   });
 
   it("keeps legacy owner releases on the facts-only recheck during rollout", async () => {
@@ -372,17 +372,25 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.signalHostedRuntimeOwnerReleasedRuntime).not.toHaveBeenCalled();
   });
 
-  it("preserves the owner horizon when no durable work is visible", async () => {
-    mocks.readHostedRuntimeOwnerReleaseMailboxLagActionable.mockResolvedValue(false);
+  it.each([
+    ["exact", "?runtimeAttemptId=runtime_attempt_routes_1"],
+    ["legacy", ""],
+  ])("preserves the %s owner horizon when no durable work is visible", async (
+    _kind,
+    search,
+  ) => {
+    mocks.readHostedRuntimeOwnerReleaseActionable.mockResolvedValue(false);
 
     const response = await runtimeOwnerReleasedRoute.POST(new Request(
-      "https://join.example.test/api/internal/hosted-runtime/owner-released"
-        + "?runtimeAttemptId=runtime_attempt_routes_1",
+      `https://join.example.test/api/internal/hosted-runtime/owner-released${search}`,
       { method: "POST" },
     ));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ signaled: false });
+    expect(mocks.readHostedRuntimeOwnerReleaseActionable).toHaveBeenCalledWith({
+      userId: "member_routes_1",
+    });
     expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeOwnerReleasedRuntime).not.toHaveBeenCalled();
   });
@@ -2551,7 +2559,6 @@ describe("hosted runtime internal web routes", () => {
     await mocks.after.mock.calls[0]?.[0]();
     expect(mocks.reportHostedPersonalPatternsRunAlerts).toHaveBeenCalledWith({
       entries,
-      memberId: "member_routes_1",
     });
   });
 
@@ -3020,6 +3027,35 @@ describe("hosted runtime internal web routes", () => {
       });
       expect(warn).not.toHaveBeenCalled();
 
+      mocks.recordHostedIngressAssistantMilestone.mockResolvedValue({
+        contendedCount: 1,
+        matchedCount: 0,
+        recorded: false,
+        unmatchedCount: 1,
+      });
+      const contendedResponse = await runtimeLatencyRoute.POST(jsonRequest(
+        "/api/internal/hosted-runtime/latency",
+        {
+          event: {
+            assistantInputIds: ["input_contended_1"],
+            at: FIXED_NOW,
+            milestone: "linq_typing_accepted",
+            runtimeAttemptId: "attempt_routes_1",
+            source: "linq",
+            type: "assistant_milestone",
+          },
+        },
+        runtimeWriteFenceHeaders(),
+      ));
+
+      expect(contendedResponse.status).toBe(200);
+      expect(await contendedResponse.json()).toEqual({
+        matchedCount: 0,
+        recorded: false,
+        unmatchedCount: 1,
+      });
+      expect(warn).not.toHaveBeenCalled();
+
       mocks.recordHostedIngressProviderStarted.mockResolvedValue({
         matchedCount: 1,
         recorded: true,
@@ -3046,6 +3082,7 @@ describe("hosted runtime internal web routes", () => {
       expect(warn).toHaveBeenCalledWith(
         "Hosted runtime latency trace callback had rejected rows.",
         {
+          contendedCount: 0,
           eventType: "provider_started",
           matchedCount: 1,
           rejectedCount: 1,

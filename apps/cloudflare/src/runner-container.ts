@@ -57,7 +57,6 @@ import {
 } from "./orchestration-latency-diagnostics.ts";
 import type {
   WorkerActiveRuntimeUserFenceResult,
-  WorkerUserRunnerNamespaceLike,
 } from "./worker-contracts.ts";
 
 const RUNNER_PORT = 8080;
@@ -84,7 +83,6 @@ const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
 const DEFAULT_RUNNER_ABORT_WORKSPACE_INVOCATION_TIMEOUT_MS = 1_000;
 const DEFAULT_RUNNER_ACTIVE_LIVENESS_TIMEOUT_MS = 1_000;
 const DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS = 5_000;
-const RUNNER_RUNTIME_COMPLETION_RECEIPT_TIMEOUT_MS = 1_000;
 const RUNNER_RECENT_READINESS_PROOF_MAX_AGE_MS = 5_000;
 const RUNNER_READINESS_ABORT_SETTLEMENT_TIMEOUT_MS = 5_000;
 export const RUNNER_CONTAINER_STARTUP_FAILURE_ELAPSED_MAX_MS = 60_000;
@@ -312,6 +310,12 @@ export interface RunnerContainerBeginShellPrewarmResult {
   accepted: true;
 }
 
+export interface RunnerContainerRuntimeCompletionRecordedInput {
+  attemptId: string;
+  leaseGeneration: string;
+  userId: string;
+}
+
 interface HostedExecutionContainerRunnerInput {
   job: HostedExecutionRunnerJobInput;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
@@ -340,6 +344,9 @@ export interface HostedExecutionContainerStubLike {
   ): Promise<RunnerContainerPrewarmShellResult>;
   ensureProcessing?(input: RunnerContainerEnsureProcessingInput): Promise<RunnerContainerEnsureProcessingResult>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerJobResult>;
+  onRuntimeCompletionRecorded?(
+    input: RunnerContainerRuntimeCompletionRecordedInput,
+  ): Promise<void>;
   readActiveRuntimeUserFence?(): Promise<WorkerActiveRuntimeUserFenceResult>;
   readStandbySlotBinding?(): Promise<HostedStandbySlotBinding>;
   retireStandbySlot?(input: { claimId?: string }): Promise<{ retired: true }>;
@@ -353,9 +360,7 @@ export interface HostedExecutionContainerNamespaceLike {
   idFromString?(id: string): unknown;
 }
 
-type RunnerContainerEnvironmentSource = Readonly<Record<string, unknown>> & {
-  USER_RUNNER?: WorkerUserRunnerNamespaceLike;
-};
+type RunnerContainerEnvironmentSource = Readonly<Record<string, unknown>>;
 type RunnerContainerNameSource = HostedRunnerContainerIdentitySource;
 
 interface RunnerContainerLogContext {
@@ -482,6 +487,17 @@ interface RunnerContainerHealth {
   conversationWarmActivityCompletedAtEpochMs: number | null | undefined;
 }
 
+interface RunnerContainerPendingCompletionCleanup
+  extends RunnerContainerRuntimeCompletionRecordedInput {
+  expectedInteractionGeneration: number;
+  result: HostedExecutionRunnerJobResult;
+}
+
+interface RunnerContainerRecordedCompletionCleanup
+  extends RunnerContainerRuntimeCompletionRecordedInput {
+  expectedInteractionGeneration: number;
+}
+
 type RunnerContainerLifecycleEvaluationInput =
   | {
       expectedInteractionGeneration: number;
@@ -494,6 +510,15 @@ type RunnerContainerLifecycleEvaluationInput =
       trigger: "invoke-completed";
       userId: string;
     };
+
+function runnerCompletionCleanupMatches(
+  pending: RunnerContainerPendingCompletionCleanup,
+  input: RunnerContainerRuntimeCompletionRecordedInput,
+): boolean {
+  return pending.attemptId === input.attemptId
+    && pending.leaseGeneration === input.leaseGeneration
+    && pending.userId === input.userId;
+}
 
 interface RunnerWorkspaceInvocationOperation {
   abortController: AbortController;
@@ -651,6 +676,8 @@ export class RunnerContainer extends Container {
   private stopObservers = new Set<() => void>();
   private warmShellInvalidatedByUnsettledDestroy = false;
   private pointerlessWakeBlockingLifecycleCount = 0;
+  private pendingCompletionCleanup: RunnerContainerPendingCompletionCleanup | null = null;
+  private recordedCompletionCleanup: RunnerContainerRecordedCompletionCleanup | null = null;
   private workspaceInvocationOperations: RunnerWorkspaceInvocationOperation[] = [];
   private workspaceInvocationNoPointerAbort:
     RunnerWorkspaceInvocationNoPointerAbort | null = null;
@@ -727,82 +754,65 @@ export class RunnerContainer extends Container {
     operation.result = result;
     this.workspaceInvocationOperations.push(operation);
     const completedResult = await result;
+    const expectedInteractionGeneration = this.containerInteractionGeneration;
     if (this.readWorkspaceInvocationOperation() !== operation) {
-      const interactionGenerationAtCompletion = this.containerInteractionGeneration;
-      const completionRecorded = await this.recordRuntimeCompletionBestEffort({
+      const pending: RunnerContainerPendingCompletionCleanup = {
         attemptId: input.job.request.attemptId,
-        generation: input.job.request.leaseGeneration,
+        expectedInteractionGeneration,
+        leaseGeneration: input.job.request.leaseGeneration,
         result: completedResult,
         userId: routeUserId,
-      });
-      if (completionRecorded) {
-        await this.withLifecycleLock(async () => {
+      };
+      await this.withLifecycleLock(async () => {
+        if (this.readWorkspaceInvocationOperation() === operation) {
+          return;
+        }
+        const recorded = this.recordedCompletionCleanup;
+        if (recorded && runnerCompletionCleanupMatches(pending, recorded)) {
+          this.pendingCompletionCleanup = null;
+          this.recordedCompletionCleanup = null;
           await this.evaluateWarmContainerLifecycle({
-            expectedInteractionGeneration: interactionGenerationAtCompletion,
-            result: completedResult,
+            expectedInteractionGeneration:
+              recorded.expectedInteractionGeneration,
+            result: pending.result,
             trigger: "invoke-completed",
-            userId: routeUserId,
+            userId: pending.userId,
           });
-        }, { blockPointerlessWake: false });
-      }
+          return;
+        }
+        this.pendingCompletionCleanup = pending;
+      }, { blockPointerlessWake: false });
     }
     return completedResult;
   }
 
-  private async recordRuntimeCompletionBestEffort(input: {
-    attemptId: string;
-    generation: string;
-    result: HostedExecutionRunnerJobResult;
-    userId: string;
-  }): Promise<boolean> {
-    try {
-      const userRunner = this.environment.USER_RUNNER?.getByName(input.userId);
-      if (!userRunner?.recordRuntimeCompletionFromContainer) {
-        return false;
+  async onRuntimeCompletionRecorded(
+    input: RunnerContainerRuntimeCompletionRecordedInput,
+  ): Promise<void> {
+    await this.withLifecycleLock(async () => {
+      const pending = this.pendingCompletionCleanup;
+      if (!pending || !runnerCompletionCleanupMatches(pending, input)) {
+        this.recordedCompletionCleanup = {
+          ...input,
+          expectedInteractionGeneration: this.containerInteractionGeneration,
+        };
+        return;
       }
-      const receipt = userRunner.recordRuntimeCompletionFromContainer(input).then(
-        (value) => ({ completed: value.completed, kind: "completed" as const }),
-        (error: unknown) => ({ error, kind: "failed" as const }),
-      );
-      let timeoutId: ReturnType<typeof setTimeout> | undefined;
-      const outcome = await Promise.race([
-        receipt,
-        new Promise<{ kind: "timed_out" }>((resolve) => {
-          timeoutId = setTimeout(
-            () => resolve({ kind: "timed_out" }),
-            RUNNER_RUNTIME_COMPLETION_RECEIPT_TIMEOUT_MS,
-          );
-        }),
-      ]);
-      if (timeoutId !== undefined) {
-        clearTimeout(timeoutId);
-      }
-      if (outcome.kind === "completed") {
-        return outcome.completed;
-      }
-      const error = outcome.kind === "failed"
-        ? outcome.error
-        : new Error("Hosted runner container completion receipt timed out.");
-      throw error;
-    } catch (error) {
-      emitHostedExecutionStructuredLog({
-        component: "runner.container",
-        details: {
-          ...buildHostedExecutionSafeErrorDiagnostics(error),
-          workspaceAttemptId: input.attemptId,
-        },
-        level: "warn",
-        message:
-          "Hosted runner container completion receipt failed; preserving completed result.",
-        phase: "checkpoint",
-        userId: input.userId,
+      this.pendingCompletionCleanup = null;
+      this.recordedCompletionCleanup = null;
+      await this.evaluateWarmContainerLifecycle({
+        expectedInteractionGeneration: pending.expectedInteractionGeneration,
+        result: pending.result,
+        trigger: "invoke-completed",
+        userId: pending.userId,
       });
-      return false;
-    }
+    }, { blockPointerlessWake: false });
   }
 
   async destroyInstance(): Promise<void> {
     this.noteContainerInteraction();
+    this.pendingCompletionCleanup = null;
+    this.recordedCompletionCleanup = null;
     this.shellPrewarmObservation = null;
     this.supersedeShellPrewarm();
     const operationsAtDestroy = [...this.workspaceInvocationOperations];

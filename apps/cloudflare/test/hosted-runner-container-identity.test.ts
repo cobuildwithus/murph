@@ -953,7 +953,9 @@ describe("hosted runner container identity", () => {
     });
 
     const response = await controller.ensureForUser({
-      orchestrationAttemptId: "orchestration_attempt_standby",
+      orchestration: { triggeredByWebDirect: true },
+      orchestrationAttemptId:
+        "web-ingress-11111111-1111-4111-8111-111111111111",
       userId: TEST_USER_ID,
     });
     expect(response).toMatchObject({
@@ -973,7 +975,8 @@ describe("hosted runner container identity", () => {
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         details: expect.objectContaining({
-          orchestrationAttemptId: "orchestration_attempt_standby",
+          orchestrationAttemptId:
+            "web-ingress-11111111-1111-4111-8111-111111111111",
           standbyAllocationOutcome: "claimed",
           workspaceAttemptId: response.runtimeAttemptId,
         }),
@@ -981,6 +984,110 @@ describe("hosted runner container identity", () => {
       }),
     );
   });
+
+  it.each([
+    [
+      "Temporal default work",
+      {
+        orchestrationAttemptId: "temporal-default-standby-ineligible",
+      },
+    ],
+    [
+      "an untrusted direct flag",
+      {
+        orchestration: { triggeredByWebDirect: true },
+        orchestrationAttemptId: "web-ingress-invalid",
+      },
+    ],
+    [
+      "a direct-shaped id without Web authentication",
+      {
+        orchestrationAttemptId:
+          "web-ingress-22222222-2222-4222-8222-222222222222",
+      },
+    ],
+    [
+      "trusted Web-direct system-mailbox work",
+      {
+        orchestration: { triggeredByWebDirect: true },
+        orchestrationAttemptId:
+          "web-ingress-33333333-3333-4333-8333-333333333333",
+        processingMode: "system_mailbox",
+      },
+    ],
+    [
+      "trusted Web-direct retention work",
+      {
+        orchestration: { triggeredByWebDirect: true },
+        orchestrationAttemptId:
+          "web-ingress-44444444-4444-4444-8444-444444444444",
+        processingMode: "inbox_media_retention",
+      },
+    ],
+  ] as const)(
+    "uses the exact-user container without claiming standby for %s",
+    async (_label, ensureInput) => {
+      const durable = createRunnerDurableState();
+      const stateStore = new RunnerStateStore(durable.state);
+      const readyContainerNames: string[] = [];
+      const slotName =
+        "standby--v-release_1--0123456789abcdef0123456789abcdef";
+      const standby = createAllocatingStandbyHarness({ slotName, stateStore });
+      const claimReadyStandby = vi.fn(async () => ({
+        outcome: "claimed" as const,
+        slotName,
+      }));
+      const controller = new RuntimeProcessingController({
+        env: createHostedExecutionEnvironment(),
+        invocationService: new RecordingRuntimeInvocationService(),
+        runnerContainerNamespace: createHostedRunnerContainerNamespaceRouter({
+          exactUser: createRunnerContainerNamespace({ readyContainerNames }),
+          standby: standby.namespace,
+        }),
+        runnerRuntimeEnvSource: {
+          CF_VERSION_METADATA: { id: "release_1" },
+          HOSTED_EXECUTION_STANDBY_MODE: "allocate",
+        },
+        standbyContainerNamespace: standby.namespace,
+        standbyCoordinatorNamespace: {
+          getByName() {
+            return {
+              claimReadyStandby,
+              async ensureReadyStandby() {
+                return { accepted: true } as const;
+              },
+            };
+          },
+        },
+        stateStore,
+      });
+
+      await expect(controller.ensureForUser({
+        ...ensureInput,
+        userId: TEST_USER_ID,
+      })).resolves.toMatchObject({
+        action: "started",
+        kind: "runtime_processing_accepted",
+      });
+
+      expect(claimReadyStandby).not.toHaveBeenCalled();
+      expect(standby.bindStandbySlot).not.toHaveBeenCalled();
+      expect(readyContainerNames).toEqual([
+        resolveHostedExecutionRunnerContainerName({
+          source: { CF_VERSION_METADATA: { id: "release_1" } },
+          userId: TEST_USER_ID,
+        }),
+      ]);
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          details: expect.objectContaining({
+            standbyAllocationOutcome: "disabled",
+          }),
+          message: "Hosted runner selected a fresh container target.",
+        }),
+      );
+    },
+  );
 
   it("caps standby claim dispatch at the foreground command budget", async () => {
     vi.useFakeTimers();
@@ -1025,7 +1132,9 @@ describe("hosted runner container identity", () => {
 
     await createController(boundedClaim).ensureForUser({
       commandTimeoutMs,
-      orchestrationAttemptId: "standby-budget-bounded",
+      orchestration: { triggeredByWebDirect: true },
+      orchestrationAttemptId:
+        "web-ingress-55555555-5555-4555-8555-555555555555",
       userId: TEST_USER_ID,
     });
 
@@ -1039,7 +1148,9 @@ describe("hosted runner container identity", () => {
     await createController(expiredClaim).ensureForUser({
       commandStartedAtEpochMs: Date.now() - 101,
       commandTimeoutMs,
-      orchestrationAttemptId: "standby-budget-expired",
+      orchestration: { triggeredByWebDirect: true },
+      orchestrationAttemptId:
+        "web-ingress-66666666-6666-4666-8666-666666666666",
       userId: TEST_USER_ID,
     });
 
@@ -1094,7 +1205,9 @@ describe("hosted runner container identity", () => {
     });
 
     const first = controller.ensureForUser({
-      orchestrationAttemptId: "standby-bind-late",
+      orchestration: { triggeredByWebDirect: true },
+      orchestrationAttemptId:
+        "web-ingress-77777777-7777-4777-8777-777777777777",
       userId: TEST_USER_ID,
     });
     await vi.waitFor(() => expect(claimReadyStandby).toHaveBeenCalledOnce());
@@ -1114,7 +1227,8 @@ describe("hosted runner container identity", () => {
       claimDelayMs + bindDelayMs - HOSTED_STANDBY_CLAIM_TIMEOUT_MS,
     );
     const retained = controller.ensureForUser({
-      orchestrationAttemptId: "standby-bind-retained",
+      orchestrationAttemptId: "temporal-standby-bind-retained",
+      processingMode: "system_mailbox",
       userId: TEST_USER_ID,
     });
     await vi.waitFor(() =>
@@ -1238,6 +1352,7 @@ class RecordingRuntimeInvocationService extends RuntimeInvocationService {
       runnerRuntimeEnvSource: {},
       runnerStoreCache: new TestRunnerStoreCache({}),
       stateStore,
+      waitUntil: (promise) => durable.state.waitUntil(promise),
     });
   }
 
@@ -1398,6 +1513,7 @@ function createRuntimeInvocationService(input: {
     runnerRuntimeEnvSource: input.runnerRuntimeEnvSource,
     runnerStoreCache: new TestRunnerStoreCache(input.runnerRuntimeEnvSource),
     stateStore: input.stateStore,
+    waitUntil: (promise) => input.state.waitUntil(promise),
   });
 }
 

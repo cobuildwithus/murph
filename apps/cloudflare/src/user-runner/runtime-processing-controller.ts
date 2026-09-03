@@ -307,6 +307,22 @@ export class RuntimeProcessingController {
   ): Promise<void> {
     const orchestrationAttemptId =
       orchestration?.shellPrewarmOrchestrationAttemptId;
+    if (readHostedStandbyMode(this.input.runnerRuntimeEnvSource) === "allocate") {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          shellPrewarmAdmissionOutcome: "skipped_standby_pool",
+          ...(orchestrationAttemptId === undefined
+            ? {}
+            : { orchestrationAttemptId }),
+          shellPrewarmSource: source ?? "unknown",
+        },
+        message: "Hosted runner shell prewarm admission decided.",
+        phase: "scheduled",
+        userId,
+      });
+      return;
+    }
     const namespace = this.input.runnerContainerNamespace;
     if (!namespace) {
       throw new Error("Runner container namespace is unavailable.");
@@ -528,10 +544,7 @@ export class RuntimeProcessingController {
 
     const requestedProcessingMode = normalizeRuntimeProcessingMode(input.input.processingMode);
     const triggeredByTrustedWebDirect =
-      input.input.orchestration?.triggeredByWebDirect === true
-      && isHostedRuntimeDirectEnsureOrchestrationAttemptId(
-        input.input.orchestrationAttemptId,
-      );
+      isTrustedWebDirectRuntimeProcessing(input.input);
     const cooperativeMailboxOwnerHandoff =
       activeFence.processingMode === "system_mailbox"
       && requestedProcessingMode === "default";
@@ -761,15 +774,13 @@ export class RuntimeProcessingController {
       generation: String(activeFence.generation),
       userId: record.userId,
     });
-    if (!cleared.cleared) {
+    if (!cleared.cleared && cleared.record.writeFence) {
       const convergedInput = withoutSupersededRuntimeFenceDiagnostics(inputAtClearStart);
       return await this.ensureExistingRuntimeProcessing({
         commandBudget: input.commandBudget,
-        input: cleared.record.writeFence
-          ? withRuntimeProcessingOrchestration(convergedInput, {
-              activeFenceObservedAtEpochMs: Date.now(),
-            })
-          : convergedInput,
+        input: withRuntimeProcessingOrchestration(convergedInput, {
+          activeFenceObservedAtEpochMs: Date.now(),
+        }),
         record: cleared.record,
         runtimeWakeStartedAt: input.runtimeWakeStartedAt,
       });
@@ -781,16 +792,17 @@ export class RuntimeProcessingController {
         userId: input.input.userId,
       });
     }
-
     const replacementFenceClearedAtEpochMs = Date.now();
-    const replacementInput = withRuntimeProcessingOrchestration(inputAtClearStart, {
-      replacedStaleFence: input.replacedStaleFence ?? true,
-      replacementFenceClearElapsedMs: Math.max(
-        0,
-        replacementFenceClearedAtEpochMs - replacementFenceClearStartedAtEpochMs,
-      ),
-      replacementFenceClearedAtEpochMs,
-    });
+    const replacementInput = cleared.cleared
+      ? withRuntimeProcessingOrchestration(inputAtClearStart, {
+          replacedStaleFence: input.replacedStaleFence ?? true,
+          replacementFenceClearElapsedMs: Math.max(
+            0,
+            replacementFenceClearedAtEpochMs - replacementFenceClearStartedAtEpochMs,
+          ),
+          replacementFenceClearedAtEpochMs,
+        })
+      : withoutSupersededRuntimeFenceDiagnostics(inputAtClearStart);
     return await this.startRuntimeProcessing({
       action: "replaced",
       commandBudget: input.commandBudget,
@@ -1047,7 +1059,11 @@ export class RuntimeProcessingController {
       }
     }
 
-    if (readHostedStandbyMode(this.input.runnerRuntimeEnvSource) !== "allocate") {
+    if (
+      readHostedStandbyMode(this.input.runnerRuntimeEnvSource) !== "allocate"
+      || normalizeRuntimeProcessingMode(input.input.processingMode) !== "default"
+      || !isTrustedWebDirectRuntimeProcessing(input.input)
+    ) {
       return {
         kind: "ready",
         runnerContainerName: input.exactRunnerContainerName,
@@ -1972,4 +1988,13 @@ function normalizeRuntimeProcessingMode(
       || value === "system_mailbox"
     ? value
     : "default";
+}
+
+function isTrustedWebDirectRuntimeProcessing(
+  input: RuntimeProcessingInput,
+): boolean {
+  return input.orchestration?.triggeredByWebDirect === true
+    && isHostedRuntimeDirectEnsureOrchestrationAttemptId(
+      input.orchestrationAttemptId,
+    );
 }

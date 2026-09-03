@@ -1361,11 +1361,20 @@ describe("buildWranglerVarArgs", () => {
     expect(
       buildWranglerVarArgs({
         HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "CUSTOM_API_KEY",
+        HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: "bundle-fingerprint",
+        HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: "source-fingerprint",
+        HOSTED_EXECUTION_STANDBY_MODE: "allocate",
         HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "45000",
       }),
     ).toEqual([
       "--var",
       "HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS:CUSTOM_API_KEY",
+      "--var",
+      "HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT:bundle-fingerprint",
+      "--var",
+      "HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT:source-fingerprint",
+      "--var",
+      "HOSTED_EXECUTION_STANDBY_MODE:allocate",
       "--var",
       "HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS:45000",
     ]);
@@ -1495,6 +1504,9 @@ describe("buildWranglerEnvFileText", () => {
       EXA_API_KEY: "exa-secret",
       HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph",
       HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "CUSTOM_API_KEY",
+      HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: "bundle-fingerprint",
+      HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: "source-fingerprint",
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
       HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "45000",
       MURPH_ELEVENLABS_MODEL_ID: "eleven_multilingual_v2",
       MURPH_ELEVENLABS_VOICE_ID: "voice-murph",
@@ -1504,6 +1516,9 @@ describe("buildWranglerEnvFileText", () => {
     expect(text).toContain('EXA_API_KEY="exa-secret"');
     expect(text).toContain('HOSTED_EMAIL_DEFAULT_SUBJECT="Murph"');
     expect(text).toContain('HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS="CUSTOM_API_KEY"');
+    expect(text).toContain('HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT="bundle-fingerprint"');
+    expect(text).toContain('HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT="source-fingerprint"');
+    expect(text).toContain('HOSTED_EXECUTION_STANDBY_MODE="allocate"');
     expect(text).toContain('HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS="45000"');
     expect(text).toContain('MURPH_ELEVENLABS_MODEL_ID="eleven_multilingual_v2"');
     expect(text).toContain('MURPH_ELEVENLABS_VOICE_ID="voice-murph"');

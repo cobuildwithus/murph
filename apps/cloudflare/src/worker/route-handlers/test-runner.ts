@@ -13,6 +13,9 @@ import type {
 import {
   resolveHostedExecutionRunnerContainerName,
 } from "../../runner-container.ts";
+import {
+  createHostedRunnerContainerNamespaceRouter,
+} from "../../standby-runner-contract.ts";
 import type {
   HostedRunnerActiveFenceTestResult,
   HostedRunnerStuckInvocationTestResult,
@@ -162,6 +165,46 @@ function hasHostedLocalTestRunnerContainerShutdownCheckpointPublicationBarrierCo
     && typeof stub.readShutdownCheckpointPublicationBarrierForTest === "function"
     && "releaseShutdownCheckpointPublicationBarrierForTest" in stub
     && typeof stub.releaseShutdownCheckpointPublicationBarrierForTest === "function";
+}
+
+function hasHostedLocalTestRunnerContainerGracefulStopControl(
+  stub: object,
+): stub is HostedLocalTestRunnerContainerStubLike & Required<Pick<
+  HostedLocalTestRunnerContainerStubLike,
+  "beginShutdownCheckpointGracefulStopForTest"
+>> {
+  return "beginShutdownCheckpointGracefulStopForTest" in stub
+    && typeof stub.beginShutdownCheckpointGracefulStopForTest === "function";
+}
+
+async function beginActiveHostedLocalTestRunnerGracefulStop(input: {
+  context: WorkerRouteContext;
+  fallbackRunnerContainerName: string;
+  userId: string;
+}): Promise<{ ok: true }> {
+  const userRunner = input.context.env.USER_RUNNER.getByName(input.userId) as
+    HostedLocalTestUserRunnerStubLike;
+  const activeFence = await userRunner.readActiveRuntimeFenceForTest({
+    userId: input.userId,
+  });
+  const runnerContainerNamespace = createHostedRunnerContainerNamespaceRouter({
+    exactUser: input.context.env.RUNNER_CONTAINER,
+    standby: input.context.env.STANDBY_RUNNER_CONTAINER ?? null,
+  });
+  if (!runnerContainerNamespace) {
+    throw new Error("Hosted runner container binding is unavailable.");
+  }
+  const activeStub = runnerContainerNamespace.getByName(
+    activeFence?.runnerContainerName ?? input.fallbackRunnerContainerName,
+  );
+  if (!hasHostedLocalTestRunnerContainerGracefulStopControl(activeStub)) {
+    throw new Error(
+      "Hosted runner container graceful shutdown test RPC is unavailable.",
+    );
+  }
+  return await activeStub.beginShutdownCheckpointGracefulStopForTest({
+    userId: input.userId,
+  });
 }
 
 function hasHostedLocalTestRunnerContainerActiveOperationControl(
@@ -746,6 +789,13 @@ export async function handleTestShutdownCheckpointPublicationBarrierRoute(
     source: context.env,
     userId,
   });
+  if (action === "shutdown") {
+    return json(await beginActiveHostedLocalTestRunnerGracefulStop({
+      context,
+      fallbackRunnerContainerName: runnerContainerName,
+      userId,
+    }));
+  }
   const stub = context.env.RUNNER_CONTAINER.getByName(runnerContainerName);
   if (!hasHostedLocalTestRunnerContainerShutdownCheckpointPublicationBarrierControl(stub)) {
     throw new Error(
@@ -760,8 +810,6 @@ export async function handleTestShutdownCheckpointPublicationBarrierRoute(
       return json(await stub.armIdleSnapshotStartBarrierForTest({ userId }));
     case "arm":
       return json(await stub.armShutdownCheckpointPublicationBarrierForTest({ userId }));
-    case "shutdown":
-      return json(await stub.beginShutdownCheckpointGracefulStopForTest({ userId }));
     case "status":
       return json(await stub.readShutdownCheckpointPublicationBarrierForTest({ userId }));
     case "release":

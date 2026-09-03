@@ -72,11 +72,13 @@ import {
   syncHostedDeviceSyncControlPlaneState,
   type HostedDeviceSyncRuntimeSyncState,
 } from "../src/hosted-device-sync-runtime.ts";
+import { HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT } from "../src/hosted-device-sync-limits.ts";
 import {
   HostedRuntimeArtifactWriteError,
   type HostedRuntimeDeviceSyncPort,
 } from "../src/hosted-runtime/platform.ts";
 import {
+  prepareHostedSystemMailboxItemForCheckpoint,
   recordHostedDeviceSyncDirtyPostCheckpointRecord,
   recordHostedSystemMailboxItemAfterCheckpoint,
 } from "../src/hosted-runtime/system-mailbox.ts";
@@ -475,6 +477,7 @@ function buildDirtyState(input: {
   dirtyRevision?: string;
   dirtyResources?: HostedExecutionDeviceSyncDirtyStateResponse["dirtyResources"];
   eventCount?: string;
+  processedRevision?: string;
   provider?: string;
   resourceCategoryCounts?: Record<string, number>;
   sourceProviderCounts?: Record<string, number>;
@@ -487,7 +490,7 @@ function buildDirtyState(input: {
     dirtyResources: input.dirtyResources ?? [],
     eventCount: input.eventCount ?? "1",
     latestDirtyAt: "2026-04-04T10:00:00.000Z",
-    processedRevision: "0",
+    processedRevision: input.processedRevision ?? "0",
     provider: input.provider ?? "demo",
     resourceCategoryCounts: input.resourceCategoryCounts ?? {},
     sourceProviderCounts: input.sourceProviderCounts ?? {},
@@ -6210,6 +6213,240 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
+  test("a full retained queue defers its webhook edge until capacity can advance", async () => {
+    const workspace = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-full-retained-queue-",
+    );
+    await mkdir(workspace.vaultRoot, { recursive: true });
+    const occurredAt = "2026-04-04T10:00:00.000Z";
+    const immediateWakeAt = "2026-04-04T10:00:01.000Z";
+    const beforeRetryAt = "2026-04-04T10:05:00.000Z";
+    const retryAt = "2026-04-04T10:10:00.000Z";
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(occurredAt));
+    const connectionId = "hosted_full_retained_queue";
+    const executeJob = vi.fn(async () => ({}));
+    const service = createDeviceSyncServiceForVault(
+      workspace.vaultRoot,
+      [createFakeProvider({ jobExecutor: { executeJob } })],
+    );
+    const retainedWake = buildDeviceSyncWake({
+      connectionId,
+      eventId: "device-sync.wake:full-retained-owner",
+      hint: {
+        jobs: Array.from({ length: HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT }, (_, index) => ({
+          availableAt: retryAt,
+          dedupeKey: `retained-future-job-${index}`,
+          kind: "reconcile",
+          maxAttempts: 2,
+          priority: 30,
+        })),
+        reason: "dirty",
+      },
+      occurredAt,
+      reason: "webhook_hint",
+    });
+    const snapshot = buildRuntimeSnapshot({
+      connectionId,
+      externalAccountId: "full-retained-queue",
+    });
+    const ackDirtyStateProcessed = vi.fn(async (
+      request: Parameters<HostedRuntimeDeviceSyncPort["ackDirtyStateProcessed"]>[0],
+    ) => ({
+      connectionId,
+      dirtyRevision: "2",
+      nextWakeAt: immediateWakeAt,
+      processedRevision: request.processedRevision,
+      recorded: true,
+      stillDirty: true,
+      userId: "member_123",
+    }));
+    const port: HostedRuntimeDeviceSyncPort = {
+      ackDirtyStateProcessed,
+      async applyUpdates() {
+        throw new Error("applyUpdates should not be called during sync");
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called during sync");
+      },
+      async fetchDirtyStates() {
+        return {
+          hasMore: false,
+          items: [buildDirtyState({
+            connectionId,
+            dirtyRevision: "2",
+            dirtyResources: [{
+              count: 1,
+              dirtyPayloadId: "dsp_full_retained_queue_fresh",
+              jobKind: "resource",
+              payload: {
+                resourceId: "full-retained-queue-fresh",
+                resourceType: "activity",
+              },
+              resource: "activity",
+              resourceCategory: "activity",
+              sourceProviderSlug: "demo",
+              windowEnd: null,
+              windowStart: null,
+            }],
+            processedRevision: "1",
+          })],
+          nextWakeAt: immediateWakeAt,
+          userId: "member_123",
+        };
+      },
+      async fetchSnapshot() {
+        return snapshot;
+      },
+    };
+
+    try {
+      const syncState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port,
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        wake: retainedWake,
+      });
+      const localAccountId = syncState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(localAccountId);
+      assert.equal(readJobsForAccount(service, localAccountId).length, 100);
+      assert.deepEqual(syncState.pendingDirtyAcks, [{
+        connectionId,
+        nextWakeAt: immediateWakeAt,
+        processedRevision: "1",
+      }]);
+      assert.deepEqual(syncState.pendingDirtyPayloadJobs, []);
+      assert.equal(await service.drainWorker(100, localAccountId), 0);
+      assert.equal(executeJob.mock.calls.length, 0);
+
+      const recovery = resolveHostedDeviceSyncWakeRecovery({
+        service,
+        state: syncState,
+        wake: retainedWake,
+      });
+      assert.ok(recovery);
+      assert.equal(recovery.retryAt, retryAt);
+      assert.equal(recovery.wake.hint?.jobs?.length, HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT);
+      const retainedItem: HostedSystemMailboxPendingItem = {
+        attemptCount: 1,
+        itemId: "mailbox_item_full_retained_owner",
+        lastAttemptAt: occurredAt,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        mailboxDedupeKey: "device-sync.wake:full-retained-owner",
+        mailboxLaneSeq: "1",
+        nextAttemptAt: null,
+        occurredAt,
+        postCheckpointRecord: {
+          kind: "device-sync.dirty-processed-batch",
+          nextWakeAt: immediateWakeAt,
+          records: syncState.pendingDirtyAcks,
+          retainedWake: recovery.wake,
+          retainMailboxItemUntil: retryAt,
+        },
+        preferenceCausalSeq: null,
+        requestId: null,
+        routeAction: "run-device-sync-wake",
+        status: "recording",
+        wake: retainedWake,
+      };
+      const laterWebhook = buildDirtyDeviceSyncWake(connectionId, occurredAt);
+      await updateHostedSystemMailboxState(workspace.vaultRoot, () => ({
+        pending: [
+          retainedItem,
+          {
+            attemptCount: 0,
+            itemId: "mailbox_item_full_retained_webhook",
+            lastAttemptAt: null,
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            mailboxDedupeKey: "device-sync.wake:full-retained-webhook",
+            mailboxLaneSeq: "2",
+            nextAttemptAt: null,
+            occurredAt,
+            postCheckpointRecord: null,
+            preferenceCausalSeq: null,
+            requestId: null,
+            routeAction: "run-device-sync-wake",
+            status: "pending",
+            wake: laterWebhook,
+          },
+        ],
+      }));
+
+      assert.deepEqual(await recordHostedSystemMailboxItemAfterCheckpoint({
+        item: retainedItem,
+        runtime: createDeviceSyncPostCheckpointRuntime(port),
+        vaultRoot: workspace.vaultRoot,
+      }), {
+        failed: 0,
+        nextWakeAt: retryAt,
+        nextWakeReason: "device-sync.reconcile",
+        recorded: 1,
+      });
+      assert.deepEqual(
+        (await readHostedSystemMailboxState(workspace.vaultRoot)).pending.map((item) => ({
+          itemId: item.itemId,
+          nextAttemptAt: item.nextAttemptAt,
+        })),
+        [
+          { itemId: retainedItem.itemId, nextAttemptAt: retryAt },
+          { itemId: "mailbox_item_full_retained_webhook", nextAttemptAt: retryAt },
+        ],
+      );
+      assert.equal(ackDirtyStateProcessed.mock.calls.length, 1);
+      assert.equal(
+        await prepareHostedSystemMailboxItemForCheckpoint({
+          allowedRouteActions: ["run-device-sync-wake"],
+          executionContext: null,
+          now: () => beforeRetryAt,
+          retainProcessedItemUntilRecorded: true,
+          runtime: createDeviceSyncPostCheckpointRuntime(port),
+          runtimeEnv: {},
+          vaultRoot: workspace.vaultRoot,
+        }),
+        null,
+      );
+
+      const retainedJobs = readJobsForAccount(service, localAccountId);
+      assert.ok(retainedJobs.every((job) => job.availableAt === retryAt));
+      vi.setSystemTime(new Date(retryAt));
+      assert.equal(await service.drainWorker(100, localAccountId), 100);
+      assert.equal(executeJob.mock.calls.length, 100);
+
+      const continuedState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: port,
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        wake: buildDeviceSyncWake({
+          connectionId,
+          hint: { reason: "retained_dirty_remainder" },
+          occurredAt: retryAt,
+          reason: "reconcile_due",
+        }),
+      });
+      assert.deepEqual(continuedState.pendingDirtyAcks, [{
+        connectionId,
+        nextWakeAt: immediateWakeAt,
+        processedRevision: "2",
+      }]);
+      assert.equal(continuedState.pendingDirtyPayloadJobs.length, 1);
+      assert.equal(
+        getStore(service).listPendingJobsForAccount(localAccountId, 2).length,
+        1,
+      );
+      assert.ok(
+        readJobsForAccount(service, localAccountId)
+          .slice(0, HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT)
+          .every((job) => job.availableAt === retryAt),
+      );
+    } finally {
+      vi.useRealTimers();
+      closeHostedRuntimeDeviceSyncService(service);
+      await workspace.cleanup();
+    }
+  });
+
   test("expired final-attempt dirty work preserves identity without re-execution", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-04T10:00:00.000Z"));
@@ -6576,6 +6813,7 @@ describe("hosted device-sync runtime", () => {
         runtime: createDeviceSyncPostCheckpointRuntime(deviceSyncPort),
       });
       assert.deepEqual(recorded, {
+        newerRevisionPending: false,
         nextWakeAt: retryJob.availableAt,
         recorded: 1,
         stillDirty: true,
@@ -6627,6 +6865,7 @@ describe("hosted device-sync runtime", () => {
           runtime: createDeviceSyncPostCheckpointRuntime(deviceSyncPort),
         }),
         {
+          newerRevisionPending: false,
           nextWakeAt: null,
           recorded: 1,
           stillDirty: false,

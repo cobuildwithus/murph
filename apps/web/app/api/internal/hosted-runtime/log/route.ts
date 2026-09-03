@@ -54,7 +54,6 @@ export const POST = withJsonError(async (request: Request) => {
   if (loggedCount > 0 && hasHostedPersonalPatternsRunAlert(body.entries)) {
     after(() => reportHostedPersonalPatternsRunAlerts({
       entries: body.entries,
-      memberId: userId,
     }));
   }
 

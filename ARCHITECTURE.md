@@ -1587,9 +1587,31 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   readiness and atomic availability only; the per-member `UserRunner` persists
   the exact opaque stop target, binds it once, then owns the ordinary write
   fence, workspace restore, invocation, retention, and retirement. Standby
-  readiness warms the image, heavy runtime, and a disposable content-free Codex
-  initialization, while the member-specific resident Codex process remains
-  post-restore. Claimed containers are never returned for another member.
+  allocation is available only to a fence-free, OIDC-authenticated Web-direct
+  `default` request with a validated direct-attempt identity. Background modes
+  and Temporal requests retain the exact-user target. A foreground request that
+  has finished preempting an exact-user background child may claim the ready
+  standby instead of reusing the child while it shuts down. A previously
+  reserved standby is reconciled before this eligibility check so retries and
+  replacements already bound to a standby cannot split ownership. In
+  `allocate` mode the standby coordinator is the sole shell-prewarm owner; the
+  exact-user prewarm hint is skipped so it cannot reserve a competing target
+  before the claim, while the normal exact-user start remains the claim-miss
+  fallback.
+  Standby readiness warms the image, heavy runtime, and a disposable
+  content-free Codex initialization, while the member-specific resident Codex
+  process remains post-restore. Claimed containers are never returned for
+  another member.
+- `UserRunner` remains the sole durable runtime write-fence owner when a
+  `RunnerContainer` Durable Object activation is replaced. After a successful
+  invocation, the container entrypoint first clears its wake and abort pointers,
+  decrements active work, and cleans up request transport. It then sends the
+  exact result, attempt, and generation over the existing bound internal
+  runner-control route before running shutdown drain. `UserRunner` applies its
+  existing exact completion compare-and-swap; the ordinary outer result remains
+  the normal completion path, and a duplicate or stale receipt is a no-op. The
+  one-second best-effort receipt adds no recovery queue, poller, persisted
+  promise, or second completion authority.
 - The same Cloudflare app owns one production database-health singleton that is
   deliberately independent of hosted Web and Postgres. A five-minute Cron
   Trigger asks a SQLite-backed `DatabaseHealthDurableObject` to discover and
@@ -3635,17 +3657,19 @@ new assistant input locally, that real dirty state is checkpointed with a due
 `assistant` wake so the restored runtime cannot strand it. This is an ordinary
 dirty-state checkpoint, not a synthetic wake-handoff snapshot.
 
-After a parsed successful runtime result has settled and RunnerContainer has
-removed the exact active-operation pointer, RunnerContainer sends UserRunner one
-best-effort internal completion receipt bound to user, attempt, and generation.
-RunnerContainer waits at most one second for that receipt before returning the
-completed result so a slow or unavailable UserRunner cannot block the outer
-completion fallback.
-UserRunner applies the same exact write-fence compare-and-swap used by the outer
-invocation path; whichever path wins is the only owner that can release the
-runtime owner, while the outer path remains the mixed-version and callback-loss
-fallback. A checkpoint, elapsed time, or container lifecycle event is not a
-completion receipt. After an exact successful runtime completion clears its
+After a parsed successful runtime result settles, the container entrypoint
+clears the invocation's wake and abort pointers, decrements its active-job
+count, and cleans request transport before sending UserRunner one best-effort
+internal completion receipt bound to user, attempt, and generation. This keeps
+the process reusable before the durable fence can admit a successor. Both the
+fetch abort and an independent hard deadline cap the receipt at one second; an
+unavailable route, non-success response, transport failure, invalid response,
+or non-settling fetch preserves the completed result.
+UserRunner applies the same exact write-fence compare-and-swap used by the
+ordinary outer invocation path; whichever path wins is the only owner that can
+release the runtime owner. The disposable RunnerContainer activation sends no
+second receipt. A checkpoint, elapsed time, or container lifecycle event is not
+a completion receipt. After an exact successful runtime completion clears its
 write fence, Cloudflare makes at most one signed, bodyless, best-effort callback
 to web with a timeout of at most two seconds; a known future mailbox retry
 continuation skips it. The signed query binds the opaque released runtime

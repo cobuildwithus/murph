@@ -362,7 +362,7 @@ test("browser vault shard parsers validate schemas, bucket placement, and genera
 test("browser vault metric bucket assignment has stable SHA-256 test vectors", async () => {
   // Changing any vector requires a generation bump so old refs are never read
   // with a new canonical-key placement rule.
-  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 14);
+  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 15);
   assert.equal(await getBrowserVaultMetricBucketId("spo2"), "02");
   assert.equal(await getBrowserVaultMetricBucketId("lowest-spo2"), "19");
   assert.equal(await getBrowserVaultMetricBucketId("estimated-vo2-max"), "0d");

@@ -9,6 +9,7 @@ import {
   type RunnerContainerEnsureReadyForProcessingInput,
   type RunnerContainerEnsureReadyForProcessingResult,
   type RunnerContainerPrewarmShellResult,
+  type RunnerContainerRuntimeCompletionRecordedInput,
   type RunnerRuntimeWakeInput,
   type RunnerRuntimeWakeResult,
   type RunnerWorkspaceInvocationAbortStatus,
@@ -170,6 +171,13 @@ export class StandbyRunnerContainer extends RunnerContainer {
     return await super.invoke(payload);
   }
 
+  override async onRuntimeCompletionRecorded(
+    input: RunnerContainerRuntimeCompletionRecordedInput,
+  ): Promise<void> {
+    this.authorizeBoundUser(input.userId);
+    await super.onRuntimeCompletionRecorded(input);
+  }
+
   override async ensureReadyForProcessing(
     payload: RunnerContainerEnsureReadyForProcessingInput,
   ): Promise<RunnerContainerEnsureReadyForProcessingResult> {
@@ -260,21 +268,50 @@ export class StandbyRunnerContainer extends RunnerContainer {
       "HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT",
     );
     const runnerBundle = isRecord(payload.runnerBundle) ? payload.runnerBundle : null;
-    if (
-      payload.activeJobCount !== 0
-      || payload.codexShellPreflightStatus !== "ready"
-      || typeof payload.codexShellPreflightCompletedAtEpochMs !== "number"
-      || payload.cloudflareRegion !== input.region
-      || payload.heavyRuntimeHydrationStatus !== "ready"
-      || payload.hostedRuntimeArchitectureVersion !== HOSTED_RUNTIME_ARCHITECTURE_VERSION
-      || payload.hostedWorkerReleaseId !== input.releaseId
-      || payload.poisoned !== false
-      || payload.workspaceInvocationAcceptedCount !== 0
-      || runnerBundle?.bundleFingerprint !== expectedBundleFingerprint
-      || runnerBundle.sourceFingerprint !== expectedSourceFingerprint
-    ) {
-      throw new Error("Hosted standby slot failed pristine readiness proof.");
+    const expectedHealthRegion = this.resolveExpectedStandbyHealthRegion(
+      input.region,
+    );
+    const failedChecks: string[] = [];
+    if (payload.activeJobCount !== 0) failedChecks.push("active_job_count");
+    if (payload.codexShellPreflightStatus !== "ready") {
+      failedChecks.push("codex_shell_preflight_status");
     }
+    if (typeof payload.codexShellPreflightCompletedAtEpochMs !== "number") {
+      failedChecks.push("codex_shell_preflight_completed_at");
+    }
+    if (payload.cloudflareRegion !== expectedHealthRegion) {
+      failedChecks.push("cloudflare_region");
+    }
+    if (payload.heavyRuntimeHydrationStatus !== "ready") {
+      failedChecks.push("heavy_runtime_hydration_status");
+    }
+    if (payload.hostedRuntimeArchitectureVersion !== HOSTED_RUNTIME_ARCHITECTURE_VERSION) {
+      failedChecks.push("hosted_runtime_architecture_version");
+    }
+    if (payload.hostedWorkerReleaseId !== input.releaseId) {
+      failedChecks.push("hosted_worker_release_id");
+    }
+    if (payload.poisoned !== false) failedChecks.push("poisoned");
+    if (payload.workspaceInvocationAcceptedCount !== 0) {
+      failedChecks.push("workspace_invocation_accepted_count");
+    }
+    if (runnerBundle?.bundleFingerprint !== expectedBundleFingerprint) {
+      failedChecks.push("runner_bundle_fingerprint");
+    }
+    if (runnerBundle?.sourceFingerprint !== expectedSourceFingerprint) {
+      failedChecks.push("runner_source_fingerprint");
+    }
+    if (failedChecks.length > 0) {
+      throw new Error(
+        `Hosted standby slot failed pristine readiness proof: ${failedChecks.join(", ")}.`,
+      );
+    }
+  }
+
+  protected resolveExpectedStandbyHealthRegion(
+    region: typeof HOSTED_STANDBY_REGION,
+  ): string {
+    return region;
   }
 }
 
