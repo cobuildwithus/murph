@@ -1755,11 +1755,11 @@ Last verified: 2026-09-01
   lane's `COUNT(*) OVER()`; system-lane selection remains unchanged. A system
   `device-sync.wake` head covered by the workspace's canonical
   `hostedMailboxSystemImportedSeq` ages from the later of its creation and the
-  scheduled wake. The runtime keeps that device deadline in canonical
-  `nextWakeAt` and projects an independent assistant deadline through
-  `nextDefaultProcessingWakeAt`, so orchestration retains both owners without
-  polling unchanged system progress. The first live system item above the
-  imported frontier keeps its own creation-time clock, and an absent,
+  scheduled wake. The runtime keeps that device deadline in the canonical
+  model-free `nextWakeAt` selection and projects an independent assistant
+  deadline through `nextDefaultProcessingWakeAt`, so orchestration retains both
+  owners without polling unchanged system progress. The first live system item
+  above the imported frontier keeps its own creation-time clock, and an absent,
   malformed, behind-head, or beyond-high-water imported frontier cannot defer
   the head. Other system work still ages from creation, and a covered device
   retry becomes anomalous when it remains pending for 15 minutes after that
