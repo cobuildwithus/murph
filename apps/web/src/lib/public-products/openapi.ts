@@ -34,7 +34,7 @@ export function createPublicProductsOpenApiDocument(): Record<string, unknown> {
           operationId: "searchProducts",
           summary: "Search supplements and branded foods",
           description:
-            "Returns separately ranked supplement and branded-food matches. The submitted query is not echoed in the response.",
+            "Returns separately ranked supplement and branded-food matches. Supports bounded 30-result pages. Food callers can exclude records without usable comparison data and can request evidence-first or category-popularity ordering inside bounded candidate sets. The submitted query is not echoed in the response.",
           tags: ["Products"],
           security: [],
           requestBody: {
@@ -46,6 +46,9 @@ export function createPublicProductsOpenApiDocument(): Record<string, unknown> {
                   query: "example product",
                   kinds: ["supplement", "food"],
                   limitPerKind: 6,
+                  offsetPerKind: 0,
+                  foodComparisonReadyOnly: false,
+                  foodSearchOrder: "relevance",
                 },
               },
             },
