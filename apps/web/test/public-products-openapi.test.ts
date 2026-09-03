@@ -94,9 +94,12 @@ describe("Murph Product Data OpenAPI", () => {
     const parameter = requiredRecord(parameters[0], "product ref parameter");
 
     expect(publicProductSearchRequestSchema.parse(requestJson.example)).toEqual({
+      foodComparisonReadyOnly: false,
+      foodSearchOrder: "relevance",
       query: "example product",
       kinds: ["supplement", "food"],
       limitPerKind: 6,
+      offsetPerKind: 0,
     });
     expect(publicProductRefSchema.parse(parameter.example)).toBe(
       "supplement_ZHNsZDoxMjM",
