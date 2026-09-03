@@ -1,6 +1,6 @@
 # Fix foreground preemption standby recovery
 
-Status: active
+Status: completed
 Created: 2026-09-02
 Updated: 2026-09-02
 
@@ -140,3 +140,35 @@ Updated: 2026-09-02
   callback; the real Environment-to-foreground handoff finishes both owners;
   deployment converges to one reviewed Worker/container release and the
   production canary receives a reply.
+
+## Completion evidence
+
+- PR #2738 merged as `2f1fc8abb2b961ab7ca4811c65348d970300daeb`
+  after focused Cloudflare, hosted-runtime, Journal, typecheck, complexity, and
+  exact reset-before-result and foreground-priority journey checks passed.
+- The protected production deployment run `33701001804` deployed that exact
+  public commit with immediate container rollout. The Worker reached 100% on
+  one release, the Runner, StandbyRunner, and DeploySmoke containers converged,
+  and allocate mode retained one standby-pool owner with capacity 100.
+- Production conversation canary run `33702453259` passed its exact-deployment
+  guards and three-turn reciprocal journey. A deliberate immediate repeat in
+  run `33703064373` delivered all replies without runtime or delivery errors but
+  exceeded the 20-second turn-two latency budget at 24.7 seconds; this was
+  recorded as diagnostic variance rather than used to justify a speculative
+  runtime change.
+- Bounded post-deploy health evidence showed no accepted-runner failures. A
+  production standby was retained and reused, while the reset-specific
+  completion-receipt line was not captured by the sampled live tail. The
+  deployed reset-before-result full-stack journey and exact-bundle smoke remain
+  the direct proof for that receipt boundary.
+- An exact-head ReviewGPT round found one purpose-drift issue: the recovery PR
+  also completed the consumer parser for the already-existing Journal
+  group-fact producer. The packaging concern is valid, but deleting that parser
+  after merge would reactivate unsupported-route retries in an existing
+  user-critical private-data flow. Separately owned PR #2747 already carries
+  the focused feature-specific proof, so no production rollback or cross-owner
+  branch mutation is safe or necessary here. An independent exact-head
+  Mountain round reproduced that same single finding and reported no additional
+  qualifying defect; its completion-warning and best-effort admission-read
+  observations were explicitly non-blocking.
+Completed: 2026-09-02
