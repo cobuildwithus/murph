@@ -4327,6 +4327,9 @@ describe("HostedUserRunner execution coordination", () => {
           state: standbyBinding.state,
         };
       },
+      async resolveRetainedStandbySlot() {
+        return standbyBinding;
+      },
       async retireStandbySlot() {
         throw new Error("A successfully bound standby must not be retired.");
       },
