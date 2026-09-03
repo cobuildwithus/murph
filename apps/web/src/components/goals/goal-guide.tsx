@@ -8,6 +8,7 @@ import { MarkdownView } from "@/src/components/ui/markdown-view";
 import type { GoalCategory } from "@/src/lib/goals/goal-categories";
 import { describeGoalSourcePublisher } from "@/src/lib/goals/goal-source-labels";
 import {
+  isGoalGuideRelatedSection,
   isGoalGuideSafetySection,
   isGoalGuideSourcesSection,
   splitGoalGuideBody,
@@ -43,8 +44,11 @@ export function GoalGuide({
 }) {
   const outline = splitGoalGuideBody(goal.body);
   const sourcesSection = outline.sections.find(isGoalGuideSourcesSection) ?? null;
+  // The hand-written "Related goals" list is superseded by the category
+  // links rendered after the article, so it is not shown.
   const articleSections = outline.sections.filter(
-    (section) => !isGoalGuideSourcesSection(section),
+    (section) =>
+      !isGoalGuideSourcesSection(section) && !isGoalGuideRelatedSection(section),
   );
   const showSources = goal.sources.length > 0 || sourcesSection !== null;
   const outlineEntries = [
@@ -152,14 +156,24 @@ export function GoalGuide({
       ) : null}
 
       <footer className="mt-12 border-t border-border/70 pt-5 text-xs text-muted-foreground">
-        Created by Murph Health Commons
-        <span className="px-2" aria-hidden="true">·</span>
-        <Link
-          href="/goals/methodology"
-          className="font-medium text-foreground underline decoration-border underline-offset-4 hover:decoration-foreground"
-        >
-          How these guides are made
-        </Link>
+        <p className="max-w-3xl text-[13px]/6 text-pretty" data-goal-disclaimer>
+          This guide is educational health information, not medical advice.
+          It is not meant to diagnose, treat, or prevent any disease or
+          condition, and it does not replace advice from your clinician. If
+          you are or may be pregnant, nursing, have a history of an eating
+          disorder, or have another medical condition, talk to your doctor
+          before acting on it.
+        </p>
+        <p className="mt-4">
+          Created by Murph Health Commons
+          <span className="px-2" aria-hidden="true">·</span>
+          <Link
+            href="/goals/methodology"
+            className="font-medium text-foreground underline decoration-border underline-offset-4 hover:decoration-foreground"
+          >
+            How these guides are made
+          </Link>
+        </p>
       </footer>
     </article>
   );

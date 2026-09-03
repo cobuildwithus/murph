@@ -11,6 +11,10 @@ describe("describeGoalSourcePublisher", () => {
     expect(describeGoalSourcePublisher("https://professional.heart.org/en/guidelines")).toBe("American Heart Association");
     expect(describeGoalSourcePublisher("https://www.niddk.nih.gov/health-information")).toBe("NIDDK");
     expect(describeGoalSourcePublisher("https://nccih.nih.gov/health/x")).toBe("NCCIH");
+    expect(describeGoalSourcePublisher("https://www.aasld.org/practice-guidelines")).toBe("AASLD");
+    expect(describeGoalSourcePublisher("https://www.accessdata.fda.gov/scripts/x")).toBe("FDA");
+    expect(describeGoalSourcePublisher("https://alcoholtreatment.niaaa.nih.gov/")).toBe("NIAAA");
+    expect(describeGoalSourcePublisher("https://home.nps.gov/subjects/x")).toBe("National Park Service");
   });
 
   it("falls back to the bare hostname and never throws", () => {

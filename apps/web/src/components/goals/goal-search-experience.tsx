@@ -19,10 +19,10 @@ import {
 
 const GOAL_SEARCH_BATCH_SIZE = 16;
 const GOAL_SEARCH_EXAMPLES = [
-  "sleep better",
   "lower blood pressure",
   "run a 5K",
   "reduce stress",
+  "build muscle",
 ] as const;
 
 export interface GoalCategoryDirectoryEntry {
@@ -69,11 +69,8 @@ export function GoalSearchExperience({
       <header className="border-b border-[#c4a882]/35 pb-10 sm:pb-12">
         <div className="mx-auto max-w-3xl text-center">
           <h1 className="font-serif text-4xl font-semibold leading-[1.02] tracking-[-0.04em] text-balance text-[#2d3436] sm:text-5xl lg:text-6xl">
-            What do you want to work on?
+            Hey Murph, help me…
           </h1>
-          <p className="mx-auto mt-5 max-w-2xl font-serif text-lg leading-tight tracking-[-0.02em] text-pretty text-muted-foreground sm:text-xl">
-            Practical guides you can follow on your own or with Murph.
-          </p>
         </div>
         <div className="mx-auto mt-10 max-w-2xl">
           <div
@@ -95,7 +92,7 @@ export function GoalSearchExperience({
               inputSize="xl"
               maxLength={100}
               onInput={(event) => setQuery(event.currentTarget.value)}
-              placeholder="Sleep better, lower blood pressure, run a 5K"
+              placeholder="sleep through the night"
               spellCheck={false}
               type="search"
             />

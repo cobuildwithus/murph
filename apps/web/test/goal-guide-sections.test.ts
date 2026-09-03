@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isGoalGuideRelatedSection,
   isGoalGuideSafetySection,
   isGoalGuideSourcesSection,
   splitGoalGuideBody,
@@ -65,6 +66,11 @@ describe("splitGoalGuideBody", () => {
       .toEqual(["a-quick-note"]);
     expect(outline.sections.filter(isGoalGuideSourcesSection).map((s) => s.id))
       .toEqual(["sources"]);
+  });
+
+  it("recognizes the hand-written related goals section by title", () => {
+    expect(isGoalGuideRelatedSection({ title: "Related goals" })).toBe(true);
+    expect(isGoalGuideRelatedSection({ title: "What to do" })).toBe(false);
   });
 
   it("handles a body without headings", () => {

@@ -11,6 +11,7 @@ export interface GoalGuideOutline {
 
 export const GOAL_GUIDE_SAFETY_SECTION_TITLE = "A quick note";
 export const GOAL_GUIDE_SOURCES_SECTION_TITLE = "Sources";
+export const GOAL_GUIDE_RELATED_SECTION_TITLE = "Related goals";
 
 const GOAL_GUIDE_SECTION_HEADING = /^##\s+(?<title>.+?)\s*$/u;
 
@@ -49,6 +50,12 @@ export function isGoalGuideSafetySection(
   section: Pick<GoalGuideSection, "title">,
 ): boolean {
   return section.title === GOAL_GUIDE_SAFETY_SECTION_TITLE;
+}
+
+export function isGoalGuideRelatedSection(
+  section: Pick<GoalGuideSection, "title">,
+): boolean {
+  return section.title === GOAL_GUIDE_RELATED_SECTION_TITLE;
 }
 
 export function isGoalGuideSourcesSection(
