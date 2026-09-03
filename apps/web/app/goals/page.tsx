@@ -3,25 +3,34 @@ import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 
 import { GoalBrowseCard } from "@/src/components/goals/goal-browse-card";
+import { GoalContactActionContents } from "@/src/components/goals/goal-contact-action";
 import {
   GoalSearchExperience,
   type GoalCategoryDirectoryEntry,
 } from "@/src/components/goals/goal-search-experience";
 import { GoalCategoryArtwork } from "@/src/components/goals/goal-visual";
+import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
+import { buttonVariants } from "@/src/components/ui/button";
 import { GOAL_CATEGORIES } from "@/src/lib/goals/goal-categories";
+import { resolveGoalContactOption } from "@/src/lib/goals/goal-contact";
 import type { GoalIndexEntryModel } from "@/src/lib/goals/goal-models";
 import { createGoalSearchItem } from "@/src/lib/goals/goal-search";
+import { resolvePublicMurphLinePhoneNumber } from "@/src/lib/goals/public-murph-line";
 import {
   listHealthCommonsGoalEntries,
   listTopLevelGoals,
 } from "@/src/lib/health-commons/goal-projections";
+import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import {
   createMurphPageMetadata,
   MURPH_INDEXABLE_PAGE_ROBOTS,
 } from "@/src/lib/site-metadata";
+import { cn } from "@/src/lib/utils";
 
 const GOALS_DESCRIPTION =
   "Clear, research-backed guides for the health and fitness goals people care about most.";
+const GOALS_START_PROMPT =
+  "Hey Murph, I have a goal in mind that isn’t in the library yet.";
 
 export const metadata: Metadata = createMurphPageMetadata({
   alternates: { canonical: "/goals" },
@@ -31,7 +40,12 @@ export const metadata: Metadata = createMurphPageMetadata({
   title: "Health Goals | Murph",
 });
 
-export default function GoalsPage() {
+export default async function GoalsPage() {
+  const startOption = resolveGoalContactOption({
+    murphPhoneNumber: await resolvePublicMurphLinePhoneNumber(),
+    startPrompt: GOALS_START_PROMPT,
+    textAvailable: true,
+  });
   const goals = listHealthCommonsGoalEntries();
   const searchGoals = goals.map((goal) => createGoalSearchItem(goal));
   const sections = GOAL_CATEGORIES.flatMap((category) => {
@@ -122,13 +136,17 @@ export default function GoalsPage() {
             </section>
           );
         })}
-        <GoalsClosingSection />
+        <GoalsClosingSection startOption={startOption} />
       </div>
     </GoalSearchExperience>
   );
 }
 
-function GoalsClosingSection() {
+function GoalsClosingSection({
+  startOption,
+}: {
+  startOption: MurphContactOption;
+}) {
   return (
     <section
       className="border-t border-[#c4a882]/30 pt-12 sm:pt-14"
@@ -145,13 +163,13 @@ function GoalsClosingSection() {
           </p>
         </div>
         <div className="flex shrink-0 flex-col items-start gap-3 sm:items-end">
-          <Link
-            className="inline-flex items-center gap-2 rounded-full bg-[#2d3436] px-5 py-2.5 text-[0.875rem] font-medium text-[#f5f0e8] transition-colors hover:bg-[#3a4044]"
-            href="/"
+          <MurphContactLink
+            actionLabel="Start with Murph"
+            className={cn(buttonVariants({ size: "xl" }), "w-full sm:w-auto")}
+            option={startOption}
           >
-            Start with Murph
-            <ArrowRight aria-hidden="true" className="size-4" />
-          </Link>
+            <GoalContactActionContents label="Start with Murph" />
+          </MurphContactLink>
           <Link
             className="text-[0.8125rem] text-[#736a58] underline-offset-4 hover:underline"
             href="/goals/methodology"

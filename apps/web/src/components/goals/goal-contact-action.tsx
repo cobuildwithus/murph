@@ -206,7 +206,11 @@ function cancelGoalContactAttempt(
   return true;
 }
 
-function GoalContactActionContents() {
+export function GoalContactActionContents({
+  label = "Ask Murph to help",
+}: {
+  label?: string;
+}) {
   return (
     <>
       <Image
@@ -217,7 +221,7 @@ function GoalContactActionContents() {
         src="/icons/murph-mark.svg"
         width={36}
       />
-      Ask Murph to help
+      {label}
       <ArrowRight data-icon="inline-end" aria-hidden="true" />
     </>
   );

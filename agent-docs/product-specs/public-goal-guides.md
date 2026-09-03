@@ -90,7 +90,11 @@ The primary action shows the Murph mark followed by `Ask Murph to help`.
   member routing.
 - Before that signed-in route resolves, the action is an inert button rather
   than an anonymous link; an early click waits for the same private resolution.
-- Anonymous visitors open Telegram directly with the same prefilled prompt. A
+- Anonymous visitors open Messages directly with the same prefilled prompt,
+  addressed to Murph's public conversation line. The page resolves that line
+  server-side from the Linq line table (a configured conversation number the
+  table confirms healthy, else any healthy line), caches it briefly, and falls
+  back to the configured list when the database is slow or unavailable. A
   signed-in member uses Telegram only when Telegram is their available linked
   messaging channel and no text route is expected.
 - If authenticated routing cannot be resolved, the action stays on the page

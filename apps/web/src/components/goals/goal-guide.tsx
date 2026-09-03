@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import { GoalBrowseCard } from "@/src/components/goals/goal-browse-card";
 import { GoalContactAction } from "@/src/components/goals/goal-contact-action";
+import { GoalOutline } from "@/src/components/goals/goal-outline";
 import { GoalCategoryArtwork } from "@/src/components/goals/goal-visual";
 import { MarkdownView } from "@/src/components/ui/markdown-view";
 import type { GoalCategory } from "@/src/lib/goals/goal-categories";
@@ -127,23 +128,7 @@ export function GoalGuide({
 
         <aside className="hidden lg:block">
           <div className="sticky top-28">
-            <nav aria-label="On this page">
-              <span className="text-xs font-medium text-muted-foreground">
-                On this page
-              </span>
-              <ol className="mt-3 flex flex-col border-l border-[#c4a882]/30">
-                {outlineEntries.map((entry) => (
-                  <li key={entry.id}>
-                    <a
-                      href={`#${entry.id}`}
-                      className="-ml-px block border-l border-transparent py-1.5 pl-4 text-sm/6 text-[#635a48] transition-colors hover:border-[#5a6e32] hover:text-foreground"
-                    >
-                      {entry.title}
-                    </a>
-                  </li>
-                ))}
-              </ol>
-            </nav>
+            <GoalOutline entries={outlineEntries} />
           </div>
         </aside>
       </div>

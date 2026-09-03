@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@/src/lib/goals/public-murph-line", () => ({
+  resolvePublicMurphLinePhoneNumber: async () => "+15550100001",
+}));
 
 import GoalsPage from "../app/goals/page";
 import { GoalBrowseCard } from "../src/components/goals/goal-browse-card";
@@ -45,8 +49,12 @@ describe("Goal visual system", () => {
   });
 
   it("renders full-width search and one illustration per category, not repeated glyphs", async () => {
-    const element = <GoalsPage />;
+    const element = await GoalsPage();
     const markup = renderToStaticMarkup(element);
+
+    assert.match(markup, /aria-label="Start with Murph in Messages"/u);
+    assert.match(markup, /href="sms:\+15550100001\?body=/u);
+    assert.doesNotMatch(markup, /t\.me\//u);
 
     assert.match(markup, /data-goal-search="full-width"/u);
     assert.doesNotMatch(markup, /<form[^>]*(?:action=|method=)/u);

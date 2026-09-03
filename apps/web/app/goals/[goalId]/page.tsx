@@ -16,6 +16,7 @@ import {
   resolveHealthCommonsGoalPage,
 } from "@/src/lib/health-commons/goal-projections";
 import { resolveGoalContactOption } from "@/src/lib/goals/goal-contact";
+import { resolvePublicMurphLinePhoneNumber } from "@/src/lib/goals/public-murph-line";
 import { selectRelatedGoals } from "@/src/lib/goals/goal-related";
 import { serializeStructuredData } from "@/src/lib/public-agent-content";
 import {
@@ -101,10 +102,12 @@ export default async function GoalOrCategoryPage({
     notFound();
   }
 
+  // Anonymous visitors text Murph's public line; a signed-in member's own
+  // line is resolved at click time by the contact action.
   const contactOption = resolveGoalContactOption({
-    murphPhoneNumber: null,
+    murphPhoneNumber: await resolvePublicMurphLinePhoneNumber(),
     startPrompt: resolved.goal.startPrompt,
-    textAvailable: false,
+    textAvailable: true,
   });
   const categoryGoals = listHealthCommonsGoalsByCategory(goalCategory.slug);
   const related = {

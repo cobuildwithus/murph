@@ -282,6 +282,10 @@ const mocks = vi.hoisted(() => ({
   resolveHealthCommonsGoalPage: vi.fn(),
 }));
 
+vi.mock("@/src/lib/goals/public-murph-line", () => ({
+  resolvePublicMurphLinePhoneNumber: async () => "+15550100001",
+}));
+
 vi.mock("next/navigation", () => ({
   notFound: mocks.notFound,
   permanentRedirect: mocks.permanentRedirect,
@@ -419,11 +423,12 @@ describe("public goal pages", () => {
     expect(markup).toContain("Ask Murph to help");
     expect(markup).toContain("/icons/murph-mark.svg");
     expect(markup).not.toContain("Do this with Murph");
-    expect(markup).toContain("https://t.me/withmurph_bot?text=");
+    expect(markup).toContain("sms:+15550100001?body=");
+    expect(markup).not.toContain("t.me/");
     expect(mocks.resolveGoalContactOption).toHaveBeenCalledWith({
-      murphPhoneNumber: null,
+      murphPhoneNumber: "+15550100001",
       startPrompt: fixtureGoal.startPrompt,
-      textAvailable: false,
+      textAvailable: true,
     });
     expect(mocks.getHostedMurphContactContext).not.toHaveBeenCalled();
     expect(markup).not.toContain("Review or edit this message");
