@@ -1667,11 +1667,12 @@ registers it with Vercel Fluid Compute, and passes that same pool to
 its existing cleanup contract. Keep session-persistent setup such as connection
 `SET` hooks out of this path because transaction pooling can move consecutive
 transactions between backend connections. The default pool limit is 15 clients
-per module runtime, with five seconds for connection acquisition and 30 seconds
-for idle retirement; tune those values only from measured pool and database
-pressure. Connection failure logs expose only fixed operation/source labels,
-retry attempt and disposition, the configured pool limit, and numeric
-pre-attempt and post-failure pool counts.
+per module runtime, with five seconds each for connection acquisition and idle
+retirement. Vercel's pool attachment extends the active invocation through that
+idle window, so keep it short and tune it only from measured invocation, pool,
+and database pressure. Connection failure logs expose only fixed
+operation/source labels, retry attempt and disposition, the configured pool
+limit, and numeric pre-attempt and post-failure pool counts.
 
 That module permits one jittered retry only for ambiguous transient failures
 that prove the database did no work. A `pool_checkout_timeout` means the
