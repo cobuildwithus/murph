@@ -66,6 +66,7 @@ import {
   buildHostedExecutionEnvironmentInterviewCompletedWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
+  buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionRuntimeControlWake,
   deriveHostedExecutionErrorCode,
 } from "@murphai/hosted-execution";
@@ -4788,6 +4789,11 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       expectedProjectionMode: null,
       kind: "health.daily-metric.reported",
     },
+    {
+      dedupeKey: "member.channels.updated:settings-change",
+      expectedProjectionMode: null,
+      kind: "member.channels.updated",
+    },
   ] as const)("system mailbox mode drains model-free $kind work", async ({
     dedupeKey,
     expectedProjectionMode,
@@ -4845,6 +4851,28 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           item: dailyMetricItem,
           vaultRoot,
           wake: dailyMetricWake,
+        });
+      } else if (kind === "member.channels.updated") {
+        const memberChannelsItem: HostedMailboxResolvedImportItem = {
+          ...resolvedItem,
+          route: {
+            ...resolvedItem.route,
+            action: "apply-member-channels-update",
+          },
+        };
+        await enqueueHostedSystemMailboxItem({
+          item: memberChannelsItem,
+          vaultRoot,
+          wake: buildHostedExecutionMemberChannelsUpdatedWake({
+            eventId: maintenanceItem.dedupeKey,
+            memberChannels: {
+              email: false,
+              linq: false,
+              telegram: false,
+            },
+            memberId: TEST_USER_ID,
+            occurredAt: maintenanceItem.occurredAt,
+          }),
         });
       } else {
         await enqueueHostedSystemMailboxItem({
