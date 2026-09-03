@@ -58,6 +58,7 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     ],
     headline:
       "WHOOP scores your recovery. Murph reads it and helps you plan the day.",
+    integration: "direct",
     lastVerified: "2026-08-31",
     metaDescription:
       "WHOOP tracks strain, sleep, and recovery with a screen-free sensor. Murph is a personal health assistant that reads your WHOOP data next to your food, labs, and records.",
@@ -218,6 +219,7 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     ],
     headline:
       "Oura scores your nights. Murph reads the scores and explains what changed.",
+    integration: "direct",
     lastVerified: "2026-08-31",
     metaDescription:
       "Oura Ring turns overnight sensing into Sleep, Readiness, and Activity scores. Murph is a personal health assistant that reads your Oura data beside your food, training, and records.",
@@ -382,6 +384,7 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     ],
     headline:
       "Garmin records the workout. Murph fits it into the rest of your health.",
+    integration: "direct",
     lastVerified: "2026-08-31",
     metaDescription:
       "Garmin Connect turns watch data into training metrics, routes, and plans. Murph is a personal health assistant that reads your Garmin data beside your sleep, food, labs, and records.",
@@ -540,6 +543,7 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     ],
     headline:
       "Google coaches from your Fitbit. Murph starts with the question you bring.",
+    integration: "direct",
     lastVerified: "2026-08-31",
     metaDescription:
       "Google Health Premium builds Gemini coaching around Fitbit and Pixel Watch data. Murph is a personal health assistant that reads Fitbit data beside your labs, records, and symptoms.",
@@ -704,6 +708,7 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     ],
     headline:
       "Apple Health keeps the record. Murph reads it and helps you use it.",
+    integration: "direct",
     lastVerified: "2026-08-31",
     metaDescription:
       "Apple Health stores your device and app data, and Fitness tracks activity. Murph is a personal health assistant that reads Apple Health and turns trends into plans and reminders.",
@@ -1018,6 +1023,7 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     ],
     headline:
       "Ultrahuman tracks you quietly. Murph helps you decide which readings matter.",
+    integration: "apple-health",
     lastVerified: "2026-08-31",
     metaDescription:
       "Ultrahuman Ring PRO tracks sleep, recovery, and movement from a ring with no core subscription. Murph is a personal health assistant that helps you decide what a pattern means.",
@@ -1174,6 +1180,7 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     ],
     headline:
       "Polar measures your training load. Murph fits it into the rest of your week.",
+    integration: "direct",
     lastVerified: "2026-08-31",
     metaDescription:
       "POLAR Loop tracks activity, sleep, and recovery from a screen-free band. Murph is a personal health assistant that reads your Polar data beside your labs, meals, and calendar.",
@@ -1330,6 +1337,7 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     ],
     headline:
       "COROS analyzes your training. Murph weighs it against everything else.",
+    integration: "apple-health",
     lastVerified: "2026-08-31",
     metaDescription:
       "COROS pairs GPS watches with EvoLab and Training Hub for endurance analysis. Murph is a personal health assistant for questions that reach past training into sleep, food, and labs.",
@@ -1500,6 +1508,7 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     ],
     headline:
       "Helio Strap Pro measures the workout. Murph helps you decide what to change.",
+    integration: "apple-health",
     lastVerified: "2026-08-31",
     metaDescription:
       "Amazfit Helio Strap Pro tracks workouts, sleep, recovery, and movement in the Zepp app. Murph is a personal health assistant that weighs those readings against food, labs, and your week.",
@@ -1652,6 +1661,7 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     ],
     headline:
       "RingConn tracks your nights. Murph helps you work out what a trend means.",
+    integration: "apple-health",
     lastVerified: "2026-08-31",
     metaDescription:
       "RingConn is a smart ring that tracks sleep, recovery, and vital signs with no subscription. Murph is a personal health assistant that reads a trend beside your symptoms and records.",
@@ -1804,6 +1814,7 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     ],
     headline:
       "Circular Ring 2 takes the readings. Murph helps you weigh them carefully.",
+    integration: "apple-health",
     lastVerified: "2026-08-31",
     metaDescription:
       "Circular Ring 2 combines sleep tracking, ECG checks, and vibration alerts in a smart ring. Murph is a personal health assistant that helps you read the results and act on them.",
@@ -1956,6 +1967,7 @@ export const WEARABLE_COMPARISONS = defineComparisons([
     ],
     headline:
       "Withings measures you at home. Murph reads the results and talks them through.",
+    integration: "direct",
     lastVerified: "2026-08-31",
     metaDescription:
       "Withings brings watch, scale, blood pressure, and sleep measurements into one app. Murph is a personal health assistant that reads your Withings data beside your meals, labs, and records.",

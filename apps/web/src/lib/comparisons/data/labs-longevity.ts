@@ -57,6 +57,7 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     headline: "Function Health runs labs twice a year. Murph works with the results in between.",
+    integration: "import",
     lastVerified: "2026-08-31",
     metaDescription:
       "Function Health is an annual lab membership with 160+ tests and optional scans. Murph is a personal health assistant that charts your results and helps you follow the plan.",
@@ -207,6 +208,7 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     headline: "Murph keeps a Superpower protocol going between yearly draws.",
+    integration: "import",
     lastVerified: "2026-08-31",
     metaDescription:
       "Superpower bundles a yearly 100+ biomarker blood test, an AI protocol, and a marketplace. Murph is a personal health assistant that charts those results and keeps the plan going.",
@@ -354,6 +356,7 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     headline: "Keep InsideTracker for its scores. Add Murph for the plan and the reminders.",
+    integration: "import",
     lastVerified: "2026-08-31",
     metaDescription:
       "InsideTracker turns blood, DNA, and wearable data into scores and ranges. Murph is a personal health assistant that explains your labs in plain terms and helps you act on them.",
@@ -513,6 +516,7 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     headline: "SiPhox mails you a blood kit on a schedule. Murph keeps the plan on track.",
+    integration: "import",
     lastVerified: "2026-08-31",
     metaDescription:
       "SiPhox Health mails at-home blood kits on a monthly, quarterly, or six-month cycle. Murph is a personal health assistant that explains the results and keeps the plan going.",
@@ -676,6 +680,7 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     headline: "Lifeforce pairs labs with a clinician. Murph remembers what they told you.",
+    integration: "import",
     lastVerified: "2026-08-31",
     metaDescription:
       "Lifeforce pairs repeat labs with clinician visits and coaching. Murph is a personal health assistant that helps you prepare for visits and follow the plan afterward.",
@@ -827,6 +832,7 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     headline: "Mito lets you pick and price each test. Murph turns the plan into daily habits.",
+    integration: "import",
     lastVerified: "2026-08-31",
     metaDescription:
       "Mito Health sells lab tests one at a time, with clinician reviewed action plans. Murph is a personal health assistant that charts the results and keeps you on the plan.",
@@ -978,6 +984,7 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     headline: "A Parsley clinician reads your labs. Murph helps you stick to the plan.",
+    integration: "import",
     lastVerified: "2026-08-31",
     metaDescription:
       "Parsley's Clinical Lab Review pairs an 80+ biomarker panel with a clinician visit. Murph is a personal health assistant that helps you prepare for the visit and follow the plan.",
@@ -1133,6 +1140,7 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     headline: "Wild Health is a precision medicine clinic. Murph is the assistant you text.",
+    integration: "import",
     lastVerified: "2026-08-31",
     metaDescription:
       "Wild Health pairs genetics and quarterly labs with physicians and coaches. Murph is a personal health assistant that helps you keep up with the plan between visits.",
@@ -1292,6 +1300,7 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     headline: "Hone handles hormone care. Murph keeps track of everything around it.",
+    integration: "import",
     lastVerified: "2026-08-31",
     metaDescription:
       "Hone Health runs hormone and metabolic labs and treats eligible patients by telehealth. Murph is a personal health assistant that keeps your records, questions, and reminders in order.",
@@ -1447,6 +1456,7 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     headline: "Quest runs the panel and posts the numbers. Murph puts them in plain English.",
+    integration: "import",
     lastVerified: "2026-08-31",
     metaDescription:
       "Quest Health sells lab panels like the $399 Elite Health Profile with no doctor visit needed. Murph is a personal health assistant that charts the results and explains them plainly.",
@@ -1598,6 +1608,7 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     headline: "Labcorp OnDemand runs the test. Murph reads the report with you.",
+    integration: "import",
     lastVerified: "2026-08-31",
     metaDescription:
       "Labcorp OnDemand sells one-time lab tests, like the $169 Comprehensive Health Test. Murph is a personal health assistant that charts the results and helps you follow up.",
@@ -1749,6 +1760,7 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     headline: "Bioniq mixes a supplement from your blood test. Murph tracks how you feel on it.",
+    integration: "import",
     lastVerified: "2026-08-31",
     metaDescription:
       "Bioniq PRO turns a qualifying blood report into a custom daily supplement. Murph is a personal health assistant that tracks the routine alongside your other health data.",
@@ -1912,6 +1924,7 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     headline: "Neko scans you in an hour. Murph carries the plan through the rest of the year.",
+    integration: "import",
     lastVerified: "2026-08-31",
     metaDescription:
       "Neko Health is a one-hour in-person sensor scan with selected labs and a clinician review. Murph is a personal health assistant that keeps the action plan going after you leave.",
@@ -2067,6 +2080,7 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     headline: "Fountain Life does the annual workup. Murph is the daily check-in.",
+    integration: "import",
     lastVerified: "2026-08-31",
     metaDescription:
       "Fountain Life is a center-based membership with imaging, 100+ labs, genetics, and physician review. Murph is a personal health assistant that keeps the care plan on track.",
@@ -2218,6 +2232,7 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     headline: "Prenuvo scans your body by MRI. Murph keeps track of the follow-up.",
+    integration: "import",
     lastVerified: "2026-08-31",
     metaDescription:
       "Prenuvo offers preventive MRI read by radiologists, as a one-off scan or an annual membership with labs. Murph is a personal health assistant that helps you manage the follow-up.",
@@ -2365,6 +2380,7 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     headline: "TruDiagnostic estimates biological age. Murph compares it with your other data.",
+    integration: "import",
     lastVerified: "2026-08-31",
     metaDescription:
       "TruDiagnostic estimates biological age from a $499 finger-prick DNA methylation test. Murph is a personal health assistant that reads the report alongside your labs, sleep, and habits.",
@@ -2516,6 +2532,7 @@ export const LABS_LONGEVITY_COMPARISONS = defineComparisons([
       },
     ],
     headline: "Tally scores your age twice a year. Murph works with you week to week.",
+    integration: "import",
     lastVerified: "2026-08-31",
     metaDescription:
       "Tally Health pairs a cheek-swab age estimate with a lifestyle plan and a daily supplement. Murph is a personal health assistant that works with all your health data, not one score.",

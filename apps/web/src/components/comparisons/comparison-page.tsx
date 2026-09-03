@@ -12,6 +12,35 @@ import {
 const SECTION_HEADING =
   "font-serif text-[clamp(1.65rem,3vw,2.35rem)] font-semibold leading-[1.05] tracking-[-0.025em]";
 
+const INTEGRATION_LABELS: Record<
+  NonNullable<ComparisonEntry["integration"]>,
+  { href: string; label: string }
+> = {
+  "apple-health": { href: "/connect", label: "Syncs to Murph through Apple Health" },
+  dexcom: { href: "/connect", label: "CGM data connects to Murph through Dexcom" },
+  direct: { href: "/connect", label: "Connects to Murph" },
+  import: { href: "/connect", label: "Results can be added to Murph" },
+};
+
+function IntegrationPill({
+  integration,
+}: {
+  integration: NonNullable<ComparisonEntry["integration"]>;
+}) {
+  const { href, label } = INTEGRATION_LABELS[integration];
+
+  return (
+    <Link
+      className="mt-6 inline-flex min-h-8 items-center gap-2 rounded-full border border-[#c4a882]/40 px-3.5 text-[0.76rem] font-medium text-[#f5f0e8]/85 transition-colors hover:border-[#c4a882]/80 hover:text-[#f5f0e8]"
+      data-comparison-integration={integration}
+      href={href}
+    >
+      <span aria-hidden="true" className="size-1.5 rounded-full bg-[#9db07f]" />
+      {label}
+    </Link>
+  );
+}
+
 function HeroLockup({ comparison }: { comparison: ComparisonEntry }) {
   const tile =
     "flex size-[84px] shrink-0 items-center justify-center rounded-2xl border border-[#c4a882]/30 bg-[#f5f0e8] p-4 sm:size-[104px] sm:rounded-[1.25rem] sm:p-5 lg:size-[124px] lg:p-6";
@@ -95,6 +124,9 @@ export function ComparisonArticle({
               <p className="mt-5 max-w-[36ch] text-balance font-serif text-[clamp(1.2rem,2.1vw,1.55rem)] font-medium leading-[1.3] tracking-[-0.015em] text-[#f5f0e8]/80">
                 {comparison.headline}
               </p>
+              {comparison.integration ? (
+                <IntegrationPill integration={comparison.integration} />
+              ) : null}
             </div>
             <HeroLockup comparison={comparison} />
           </div>

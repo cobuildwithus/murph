@@ -369,6 +369,7 @@ export const HEALTH_ASSISTANT_COMPARISONS = defineComparisons([
       },
     ],
     headline: "Hume measures you with its Pod and Band. Murph helps you decide what to do next.",
+    integration: "apple-health",
     lastVerified: "2026-08-31",
     metaDescription:
       "Hume Health pairs its Pod and Band with body composition and recovery estimates. Murph is a personal health assistant with no sensors that keeps labs, records, and wearables in one chat.",

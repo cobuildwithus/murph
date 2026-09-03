@@ -58,6 +58,7 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     ],
     headline:
       "Eight Sleep controls the bed. Murph reads its data and keeps a plan going.",
+    integration: "direct",
     lastVerified: "2026-08-31",
     metaDescription:
       "Eight Sleep heats and cools each side of the bed and scores your sleep. Murph is a personal health assistant that reads that data next to food, training, and labs, then keeps a plan going.",
@@ -209,6 +210,7 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     ],
     headline:
       "Sleep Cycle tracks the night and wakes you. Murph works out what to change.",
+    integration: "apple-health",
     lastVerified: "2026-08-31",
     metaDescription:
       "Sleep Cycle tracks sleep from a bedside phone and wakes you in a light phase. Murph is a personal health assistant that reads those nights via Apple Health and helps you change them.",
@@ -515,6 +517,7 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     ],
     headline:
       "AutoSleep charts your Apple Watch nights. Murph helps you act on them.",
+    integration: "apple-health",
     lastVerified: "2026-08-31",
     metaDescription:
       "AutoSleep turns Apple Watch data into detailed sleep charts. Murph is a personal health assistant that reads those nights through Apple Health and works out what they mean.",
@@ -666,6 +669,7 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     ],
     headline:
       "Pillow records the night on Apple devices. Murph helps you change it.",
+    integration: "apple-health",
     lastVerified: "2026-08-31",
     metaDescription:
       "Pillow tracks sleep with an Apple Watch or an iPhone microphone. Murph is a personal health assistant that reads those nights via Apple Health and helps you plan a fix.",
@@ -813,6 +817,7 @@ export const SLEEP_MENTAL_COMPARISONS = defineComparisons([
     ],
     headline:
       "SleepWatch tracks and coaches sleep. Murph ties it to the rest of your health.",
+    integration: "apple-health",
     lastVerified: "2026-08-31",
     metaDescription:
       "SleepWatch builds an Apple Watch sleep record and adds coaching. Murph is a personal health assistant that reads that record via Apple Health and weighs it with symptoms and routines.",

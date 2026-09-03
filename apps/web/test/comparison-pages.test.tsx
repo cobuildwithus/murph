@@ -303,6 +303,12 @@ describe("comparison catalog", () => {
             `${comparison.slug} claims a connection Murph does not offer.`,
           );
           assert.ok(
+            comparison.integration === "direct"
+              || comparison.integration === "apple-health"
+              || comparison.integration === "dexcom",
+            `${comparison.slug} shows via-connection rows but names no connection path.`,
+          );
+          assert.ok(
             row.competitor === "yes" || row.competitor === "limited",
             `${comparison.slug}.${row.capability} via-connection rows describe data the competitor produces.`,
           );

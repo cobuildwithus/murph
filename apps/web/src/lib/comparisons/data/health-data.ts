@@ -58,6 +58,7 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
     ],
     headline:
       "Guava organizes your records. Murph stores them and explains them.",
+    integration: "import",
     lastVerified: "2026-08-31",
     metaDescription:
       "Guava builds a health record from patient portals, devices, and logs. Murph is a personal health assistant that also imports records, then explains them and follows up over chat.",
@@ -842,6 +843,7 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
     ],
     headline:
       "Welltory scores your stress from HRV. Murph explains your health and follows up.",
+    integration: "apple-health",
     lastVerified: "2026-08-31",
     metaDescription:
       "Welltory turns camera or wearable HRV readings into stress, energy, and recovery scores. Murph is a personal health assistant that explains your health data by chat and follows up.",
@@ -1299,6 +1301,7 @@ export const HEALTH_DATA_COMPARISONS = defineComparisons([
     ],
     headline:
       "CommonHealth is a free Android record wallet. Murph explains your records.",
+    integration: "import",
     lastVerified: "2026-08-31",
     metaDescription:
       "CommonHealth is a free Android wallet for provider records and health cards. Murph is a personal health assistant that also imports records, then explains them and follows up.",

@@ -56,6 +56,7 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       },
     ],
     headline: "MyFitnessPal logs the meal. Murph ties it to your sleep, training, and labs.",
+    integration: "direct",
     lastVerified: "2026-08-31",
     metaDescription:
       "MyFitnessPal is a fast calorie and macro diary with barcode scanning. Murph is a personal health assistant that logs meals too, then links them to your sleep, training, and labs.",
@@ -199,6 +200,7 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       },
     ],
     headline: "Cronometer counts every nutrient. Murph helps you decide what to change.",
+    integration: "direct",
     lastVerified: "2026-08-31",
     metaDescription:
       "Cronometer tracks vitamins, minerals, and biometrics in detail. Murph is a personal health assistant that imports that data and reads it beside your labs, sleep, and symptoms.",
@@ -364,7 +366,7 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       {
         capability: "Energy expenditure estimates",
         evidence: "insightStyle",
-        murph: "connected",
+        murph: "limited",
         competitor: "yes",
       },
       {
@@ -1658,6 +1660,7 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       },
     ],
     headline: "January predicts your glucose response. Murph handles the rest of your health.",
+    integration: "dexcom",
     lastVerified: "2026-08-31",
     metaDescription:
       "January scans a meal and predicts your glucose response. Murph is a personal health assistant that logs meals, reads Dexcom data, and covers the questions beyond the prediction.",
@@ -1807,6 +1810,7 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       },
     ],
     headline: "Signos pairs a CGM with coaching. Murph handles the health questions around it.",
+    integration: "dexcom",
     lastVerified: "2026-08-31",
     metaDescription:
       "Signos pairs a CGM with scores, dietitians, and a medication program. Murph is a personal health assistant that reads glucose beside your sleep, food, and labs, and does not prescribe.",
@@ -1956,6 +1960,7 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       },
     ],
     headline: "Levels tracks glucose, meals, and labs. Murph covers the rest of your health.",
+    integration: "dexcom",
     lastVerified: "2026-08-31",
     metaDescription:
       "Levels puts glucose, meals, wearables, and labs in one metabolic dashboard. Murph is a personal health assistant for the questions beyond the program, and it remembers what you decide.",
@@ -2546,6 +2551,7 @@ export const NUTRITION_COMPARISONS = defineComparisons([
       },
     ],
     headline: "Nutrisense runs the CGM experiment. Murph weighs the result with sleep and labs.",
+    integration: "dexcom",
     lastVerified: "2026-08-31",
     metaDescription:
       "Nutrisense pairs CGM analysis with Nora AI and dietitian coaching. Murph is a personal health assistant that weighs a glucose result beside your sleep, food, and labs.",

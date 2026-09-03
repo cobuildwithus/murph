@@ -1073,6 +1073,7 @@ export const FITNESS_COMPARISONS = defineComparisons([
     ],
     headline:
       "Peloton runs the class. Murph connects it to your sleep, meals, and records.",
+    integration: "direct",
     lastVerified: "2026-08-31",
     metaDescription:
       "Peloton App streams live and on-demand classes with instructors and music from $15.99 a month. Murph is a personal health assistant that ties each workout to your sleep, meals, and records.",
@@ -2076,6 +2077,7 @@ export const FITNESS_COMPARISONS = defineComparisons([
     ],
     headline:
       "Strava keeps the map and the kudos. Murph reads the run with your sleep.",
+    integration: "apple-health",
     lastVerified: "2026-08-31",
     metaDescription:
       "Strava records, maps, and shares activities, free or $11.99 a month. Murph is a personal health assistant that reads your runs from your watch next to your sleep, meals, and labs.",

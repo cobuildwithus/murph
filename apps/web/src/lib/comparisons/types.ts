@@ -94,6 +94,15 @@ export type CompetitorEvidence = {
 // member connects (for Murph: authorized wearable, lab, and app connections).
 export type ComparisonQuickStatus = "yes" | "connected" | "limited" | "no";
 
+// How a product's data reaches Murph today: a direct connection on the
+// connect page, a sync through Apple Health, a Dexcom CGM connection, or
+// results a member can upload or paste in (labs, imaging, records).
+export type ComparisonIntegration =
+  | "direct"
+  | "apple-health"
+  | "dexcom"
+  | "import";
+
 export interface ComparisonQuickRow {
   capability: string;
   competitor: ComparisonQuickStatus;
@@ -110,6 +119,7 @@ export interface ComparisonEntry {
   competitorEvidence: CompetitorEvidence;
   faqs: readonly [ComparisonFaq, ComparisonFaq, ComparisonFaq];
   headline: string;
+  integration?: ComparisonIntegration;
   lastVerified: ComparisonIsoDate;
   metaDescription: string;
   name: string;
