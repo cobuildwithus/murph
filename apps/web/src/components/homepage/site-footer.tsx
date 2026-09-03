@@ -40,6 +40,7 @@ function XIcon() {
 const footerLinks = {
   murph: [
     { label: "About", href: "/about", external: false },
+    { label: "Comparisons", href: "/compare", external: false },
     { label: "Contact", href: "/contact", external: false },
     { label: "Clubs", href: "/clubs", external: false },
     { label: "Referrals", href: "/refer", external: false },

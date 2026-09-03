@@ -6,6 +6,7 @@ export const VERCEL_TELEMETRY_PATHNAMES = [
   "/biomarkers",
   "/changelog",
   "/clubs",
+  "/compare",
   "/connect",
   "/consumer-health-data-privacy-policy",
   "/contact",
@@ -76,6 +77,13 @@ const VERCEL_TELEMETRY_DYNAMIC_PATHNAME_RULES = [
       "iu",
     ),
     pathname: "/biomarkers/results/[metric]",
+  },
+  {
+    pattern: new RegExp(
+      `^/compare/(?:murph-vs-${PUBLIC_PATH_SEGMENT_PATTERN}|\\[competitor\\])$`,
+      "iu",
+    ),
+    pathname: "/compare/[competitor]",
   },
   {
     pattern: new RegExp(
