@@ -1030,8 +1030,9 @@ export const assistantOutboxIntentSchema = z
       .nullable()
       .optional(),
     // Persisted delivery context only: null means no context decision, [] is
-    // an explicit clear, and omission is legacy-ambiguous. Exact references
-    // grant no mutation authority; later turns must use ordinary domain tools.
+    // an explicit clear, and omission is historical read compatibility only.
+    // Exact references grant no mutation authority; later turns must use
+    // ordinary domain tools.
     automationContextReferences: automationContextReferencesSchema
       .nullable()
       .optional(),

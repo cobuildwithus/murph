@@ -290,7 +290,7 @@ describe('assistant outbox runtime', () => {
     )
   })
 
-  it('distinguishes legacy absence, no decision, and an explicit clear', async () => {
+  it('normalizes missing current input to no decision and preserves an explicit clear', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-empty-context-references-',
     )
@@ -312,10 +312,10 @@ describe('assistant outbox runtime', () => {
     )
     const persistedEmpty = await readRawOutboxIntent(vaultRoot, empty.intentId)
 
-    expect(absent).not.toHaveProperty('automationContextReferences')
+    expect(absent.automationContextReferences).toBeNull()
     expect(noDecision.automationContextReferences).toBeNull()
     expect(empty.automationContextReferences).toEqual([])
-    expect(persistedAbsent).not.toHaveProperty('automationContextReferences')
+    expect(persistedAbsent.automationContextReferences).toBeNull()
     expect(persistedNoDecision.automationContextReferences).toBeNull()
     expect(persistedEmpty.automationContextReferences).toEqual([])
   })
@@ -8704,7 +8704,9 @@ async function createIntent(
     actorId: overrides.actorId ?? null,
     answeredMailboxItemIds: overrides.answeredMailboxItemIds,
     automationAuthority: overrides.automationAuthority,
-    automationContextReferences: overrides.automationContextReferences,
+    ...(overrides.automationContextReferences === undefined
+      ? {}
+      : { automationContextReferences: overrides.automationContextReferences }),
     card: overrides.card ?? null,
     channel: overrides.channel ?? 'telegram',
     createdAt: overrides.createdAt,
