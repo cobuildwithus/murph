@@ -100,10 +100,19 @@ describe("FoodLabelWebMcp", () => {
       readOnlyHint: true,
       untrustedContentHint: true,
     });
+    expect(search.inputSchema).toMatchObject({
+      properties: { limit: { maximum: 10 } },
+    });
+    expect(compare.inputSchema).toMatchObject({
+      properties: { productRefs: { maxItems: 10 } },
+    });
 
     await expect(compare.execute({ productRefs: ["food_one"] })).rejects.toThrow(
-      "two to four",
+      "two to ten",
     );
+    await expect(compare.execute({
+      productRefs: Array.from({ length: 11 }, (_, index) => `food_${index}`),
+    })).rejects.toThrow("two to ten");
     await expect(search.execute({ query: "plain yogurt", extra: true })).rejects.toThrow(
       "Unexpected tool input: extra",
     );
@@ -154,7 +163,7 @@ describe("FoodLabelWebMcp", () => {
     }
     second.serving.grams = 121;
     third.nutrition.rows = third.nutrition.rows.filter(
-      (row) => row.name !== "Total Fat",
+      (row) => row.name !== "Sodium, Na",
     );
     const byRef = new Map(products.map((product) => [product.productRef, product]));
     vi.stubGlobal("fetch", vi.fn(async (resource: RequestInfo | URL) => {
@@ -191,7 +200,7 @@ describe("FoodLabelWebMcp", () => {
     const comparisonRecord = requireRecord(comparison, "comparison result");
     const metrics = requireRecordArray(comparisonRecord.metrics, "comparison metrics");
     const sugars = findMetricResult(metrics, "sugars");
-    const fat = findMetricResult(metrics, "fat");
+    const sodium = findMetricResult(metrics, "sodium");
 
     expect(sugars).toMatchObject({
       complete: true,
@@ -201,9 +210,11 @@ describe("FoodLabelWebMcp", () => {
       { productRef: first.productRef, unit: "g", value: 3.3 },
       { productRef: second.productRef, unit: "g", value: 3.3 },
     ]));
-    expect(fat).toMatchObject({ complete: false, winnerProductRefs: [] });
-    expect(comparisonRecord.comparableMetricCount).toBe(3);
-    expect(rendered.container.textContent).toContain("3.3 glowest3.3 glowest");
+    expect(sodium).toMatchObject({ complete: false, winnerProductRefs: [] });
+    expect(comparisonRecord.comparableMetricCount).toBe(5);
+    expect(rendered.container.querySelectorAll(
+      '[data-food-metric="sugars"] [data-food-winner="lowest"]',
+    )).toHaveLength(2);
 
     const servingButton = rendered.container.querySelector<HTMLButtonElement>(
       'button[aria-label="Compare per serving"]',
@@ -218,7 +229,7 @@ describe("FoodLabelWebMcp", () => {
     const current = await findTool(captured, "get_food_comparison").execute({});
     const currentRecord = requireRecord(current, "current comparison");
     expect(currentRecord.basis).toBe("per_serving");
-    expect(currentRecord.metrics).toHaveLength(4);
+    expect(currentRecord.metrics).toHaveLength(6);
     const currentSugars = findMetricResult(
       requireRecordArray(currentRecord.metrics, "current comparison metrics"),
       "sugars",

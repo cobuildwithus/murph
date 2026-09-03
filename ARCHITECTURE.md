@@ -1280,6 +1280,16 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   content. Ordinary browser technical metadata still reaches incident.io and
   is disclosed in the public subprocessor register.
 
+  The public Food comparison may search for brand logos directly through
+  Brandfetch when its optional client identifier is configured. The browser
+  sends only a bounded brand name plus a broad food category to the fixed search
+  origin with no referrer or credentials. It sends no user search term, UPC,
+  nutrition, test, account, or health data. The client accepts only matching
+  brand names and fixed Brandfetch CDN image URLs. A missing or failed logo uses
+  local category art. Hosted Web stores no logo copy and runs no proxy. Results
+  are deduplicated in page memory. CSP admits only the fixed Brandfetch API and
+  image origins.
+
   Nullable hosted-member model and reasoning preferences are web-owned,
   billing-gated control facts. Active personal members may select Luna or
   Terra; only an active paid Edge personal member may select Sol. The common
@@ -1893,14 +1903,26 @@ those contracts. Browser search posts to the public route, while the
 server-rendered detail page calls the same service directly. The public catalog
 excludes generic food origins, never returns raw labels wholesale, and links
 tests only by the selected row's exact foreign key. Public search uses bounded
-SQL candidate sets; detail reads cap stored label transfer and aggregate DTO
-size. One Vercel-aware singleton pool is shared by public and private label
+SQL candidate sets. Its optional food evidence order checks indexed exact test
+links only inside the 250-row public candidate bound. The food comparison also
+has an optional category-popularity order. It matches a dated US Google Shopping
+brand snapshot against at most 10,000 indexed text candidates. Soda searches
+may add at most 900 rows through bounded probes of the existing `foods(brand)`
+index. The query then retains 250 rows, spreads early results across brands, and
+applies indexed exact test counts as a secondary signal. Comparison-ready
+search also rejects empty, zero-only, and physically impossible per-100-gram
+nutrition. Queries without a matching snapshot keep the stable relevance
+fallback. Detail reads cap stored label transfer and aggregate DTO size.
+One Vercel-aware singleton pool is shared by public and private label
 readers. Vercel custom firewall rules sit in front of public search and detail,
 and the production build verifies their exact active configuration.
 
-`/food` keeps temporary comparison state in the browser and derives four
+`/food` keeps temporary comparison state in the browser and derives six
 nutrition comparisons plus a separate exact-evidence summary from existing
-public DTOs. A nutrition winner exists only when every compared product has the
+public DTOs. Its share URL contains only public product references and the
+nutrition basis; the raw search query stays out of the URL. It derives
+related-search categories from its existing local food
+taxonomy and does not persist them as product truth. A nutrition winner exists only when every compared product has the
 metric. Evidence keeps the DTO's returned, total, and truncated observation
 scope. The evidence meter and drawer statuses derive only from DTO fields
 (nutrition rows, serving mass, ingredients, returned observations and their

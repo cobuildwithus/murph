@@ -51,6 +51,14 @@ Last verified: 2026-08-31
   document pathname, query, or fragment. Murph Safe retains its route-specific
   `no-referrer` override. Event-payload redaction is defense in depth and must
   not substitute for this transport-level boundary.
+- The public `/food` page may search for a brand logo through Brandfetch when
+  the optional client identifier exists. Send only the bounded brand name plus
+  a broad food category to the fixed `api.brandfetch.io/v2/search/` endpoint.
+  Send no user search term, UPC, nutrition, test, account, or health data. Use
+  omitted credentials, `no-referrer`, fixed CSP API and image origins, strict
+  matching of the returned brand name, and a fixed Brandfetch CDN hostname.
+  Keep no server proxy, durable result cache, or logo copy. Deduplicate results
+  only in page memory and fall back to local category art.
 - Do not echo model API keys, base headers, or other provider credentials in CLI output, fixtures, or persisted artifacts.
 - For hosted Junction webhook recovery, an active provider result means every
   matching exact-source row returned by the live provider-list call has the

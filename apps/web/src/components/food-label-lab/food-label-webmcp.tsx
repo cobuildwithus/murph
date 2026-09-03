@@ -24,7 +24,7 @@ export interface FoodWebMcpComparisonResult {
   }>;
   basis: "per_100_g" | "per_serving";
   metrics: Array<{
-    metric: "calories" | "protein" | "sugars" | "fat";
+    metric: "calories" | "protein" | "sugars" | "fat" | "saturated_fat" | "sodium";
     preference: "higher" | "lower";
     complete: boolean;
     values: Array<{
@@ -92,7 +92,7 @@ const PRODUCT_SUMMARY_SCHEMA = {
     observationReturned: { type: "integer", minimum: 0, maximum: 20 },
     observationsTruncated: { type: "boolean" },
     evidence: { type: "string", enum: ["limited", "partial", "reported"] },
-    wins: { type: "integer", minimum: 0, maximum: 4 },
+    wins: { type: "integer", minimum: 0, maximum: 6 },
   },
   required: [
     "productRef",
@@ -112,27 +112,30 @@ const PRODUCT_SUMMARY_SCHEMA = {
 const COMPARISON_OUTPUT_SCHEMA = {
   type: "object",
   properties: {
-    products: { type: "array", maxItems: 4, items: PRODUCT_SUMMARY_SCHEMA },
+    products: { type: "array", maxItems: 10, items: PRODUCT_SUMMARY_SCHEMA },
     basis: { type: "string", enum: ["per_100_g", "per_serving"] },
     metrics: {
       type: "array",
-      minItems: 4,
-      maxItems: 4,
+      minItems: 6,
+      maxItems: 6,
       items: {
         type: "object",
         properties: {
-          metric: { type: "string", enum: ["calories", "protein", "sugars", "fat"] },
+          metric: {
+            type: "string",
+            enum: ["calories", "protein", "sugars", "fat", "saturated_fat", "sodium"],
+          },
           preference: { type: "string", enum: ["higher", "lower"] },
           complete: { type: "boolean" },
           values: {
             type: "array",
-            maxItems: 4,
+            maxItems: 10,
             items: {
               type: "object",
               properties: {
                 productRef: { type: "string" },
                 value: { type: "number" },
-                unit: { type: "string", enum: ["kcal", "g"] },
+                unit: { type: "string", enum: ["kcal", "g", "mg"] },
               },
               required: ["productRef", "value", "unit"],
               additionalProperties: false,
@@ -140,7 +143,7 @@ const COMPARISON_OUTPUT_SCHEMA = {
           },
           winnerProductRefs: {
             type: "array",
-            maxItems: 4,
+            maxItems: 10,
             items: { type: "string" },
           },
         },
@@ -154,10 +157,10 @@ const COMPARISON_OUTPUT_SCHEMA = {
         additionalProperties: false,
       },
     },
-    comparableMetricCount: { type: "integer", minimum: 0, maximum: 4 },
+    comparableMetricCount: { type: "integer", minimum: 0, maximum: 6 },
     topMatchProductRefs: {
       type: "array",
-      maxItems: 4,
+      maxItems: 10,
       items: { type: "string" },
     },
   },
@@ -215,7 +218,7 @@ function createFoodWebMcpTools(
         type: "object",
         properties: {
           query: { type: "string", minLength: 2, maxLength: 128 },
-          limit: { type: "integer", minimum: 1, maximum: 6, default: 6 },
+          limit: { type: "integer", minimum: 1, maximum: 10, default: 10 },
         },
         required: ["query"],
         additionalProperties: false,
@@ -223,10 +226,10 @@ function createFoodWebMcpTools(
       outputSchema: {
         type: "object",
         properties: {
-          total: { type: "integer", minimum: 0, maximum: 6 },
+          total: { type: "integer", minimum: 0, maximum: 10 },
           results: {
             type: "array",
-            maxItems: 6,
+            maxItems: 10,
             items: {
               type: "object",
               properties: {
@@ -249,8 +252,8 @@ function createFoodWebMcpTools(
         assertOnlyKeys(value, ["query", "limit"]);
         const query = readBoundedString(value.query, 2, 128, "query");
         const limit = value.limit === undefined
-          ? 6
-          : readBoundedInteger(value.limit, 1, 6, "limit");
+          ? 10
+          : readBoundedInteger(value.limit, 1, 10, "limit");
         const results = await actionsRef.current.search(query, limit);
         return { total: results.length, results };
       },
@@ -258,14 +261,14 @@ function createFoodWebMcpTools(
     {
       name: "compare_food_products",
       description:
-        "Compare two to four exact branded foods and show the result on the open page. Use productRef values returned by search_food_products.",
+        "Compare two to ten exact branded foods and show the result on the open page. Use productRef values returned by search_food_products.",
       inputSchema: {
         type: "object",
         properties: {
           productRefs: {
             type: "array",
             minItems: 2,
-            maxItems: 4,
+            maxItems: 10,
             uniqueItems: true,
             items: {
               type: "string",
@@ -393,8 +396,8 @@ function readBoundedInteger(
 }
 
 function readProductRefs(value: unknown): string[] {
-  if (!Array.isArray(value) || value.length < 2 || value.length > 4) {
-    throw new Error("productRefs must contain two to four products.");
+  if (!Array.isArray(value) || value.length < 2 || value.length > 10) {
+    throw new Error("productRefs must contain two to ten products.");
   }
   const refs = value.map(readFoodProductRef);
   if (new Set(refs).size !== refs.length) {

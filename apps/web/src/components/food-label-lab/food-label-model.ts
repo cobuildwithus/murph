@@ -9,28 +9,46 @@ export const FOOD_METRICS = [
     label: "Calories",
     preference: "lower",
     aliases: ["calories", "energy"],
+    unit: "kcal",
   },
   {
     id: "protein",
     label: "Protein",
     preference: "higher",
     aliases: ["protein"],
+    unit: "g",
   },
   {
     id: "sugars",
     label: "Total sugars",
     preference: "lower",
     aliases: ["total sugars", "sugars, total", "sugars"],
+    unit: "g",
   },
   {
     id: "fat",
     label: "Total fat",
     preference: "lower",
     aliases: ["total fat", "total lipid (fat)", "fat, total"],
+    unit: "g",
+  },
+  {
+    id: "saturated_fat",
+    label: "Saturated fat",
+    preference: "lower",
+    aliases: ["saturated fat", "fatty acids, total saturated"],
+    unit: "g",
+  },
+  {
+    id: "sodium",
+    label: "Sodium",
+    preference: "lower",
+    aliases: ["sodium", "sodium, na"],
+    unit: "mg",
   },
 ] as const;
 
-export const FOOD_COMPARISON_LIMIT = 4;
+export const FOOD_COMPARISON_LIMIT = 10;
 
 export type FoodMetric = (typeof FOOD_METRICS)[number];
 export type FoodMetricId = FoodMetric["id"];
@@ -104,11 +122,15 @@ export function getFoodMetric(metricId: FoodMetricId): FoodMetric {
   return metric;
 }
 
-export function getFoodMetricValue(
+function readFoodMetricValue(
   product: PublicProductDetail,
   metricId: FoodMetricId,
   basis: FoodMetricBasis,
 ): FoodMetricValue | null {
+  if (hasOnlyZeroFoodNutrition(product)) {
+    return null;
+  }
+
   const metric = getFoodMetric(metricId);
   const row = product.nutrition.rows.find((candidate) => {
     const normalizedName = normalizeMetricName(candidate.name);
@@ -121,7 +143,7 @@ export function getFoodMetricValue(
   }
 
   const sourceUnit = normalizeUnit(amount.unit);
-  const expectedUnit = metricId === "calories" ? "kcal" : "g";
+  const expectedUnit = metric.unit;
   if (sourceUnit !== expectedUnit) {
     return null;
   }
@@ -135,11 +157,73 @@ export function getFoodMetricValue(
     return null;
   }
 
-  const value = basis === "per_100_g"
-    ? amount.value * (100 / servingGrams)
-    : amount.value * (servingGrams / 100);
+  const value =
+    basis === "per_100_g"
+      ? amount.value * (100 / servingGrams)
+      : amount.value * (servingGrams / 100);
 
   return foodMetricValue(value, expectedUnit);
+}
+
+const FOOD_METRIC_PER_100_G_MAX: Record<FoodMetricId, number> = {
+  calories: 1_000,
+  protein: 100,
+  sugars: 100,
+  fat: 100,
+  saturated_fat: 100,
+  sodium: 100_000,
+};
+
+function isPlausibleFoodMetricValue(
+  metricId: FoodMetricId,
+  value: FoodMetricValue,
+  basis: FoodMetricBasis,
+): boolean {
+  return (
+    basis !== "per_100_g" || value.value <= FOOD_METRIC_PER_100_G_MAX[metricId]
+  );
+}
+
+export function getFoodMetricValue(
+  product: PublicProductDetail,
+  metricId: FoodMetricId,
+  basis: FoodMetricBasis,
+): FoodMetricValue | null {
+  const value = readFoodMetricValue(product, metricId, basis);
+  return value && isPlausibleFoodMetricValue(metricId, value, basis)
+    ? value
+    : null;
+}
+
+export function hasOnlyZeroFoodNutrition(
+  product: PublicProductDetail,
+): boolean {
+  const values = product.nutrition.rows.flatMap((row) =>
+    row.amount?.value == null ? [] : [row.amount.value],
+  );
+  return values.length > 0 && values.every((value) => value === 0);
+}
+
+export function hasUsefulFoodComparisonData(
+  product: PublicProductDetail,
+): boolean {
+  const hasImplausibleMetric = FOOD_METRICS.some((metric) => {
+    const value = readFoodMetricValue(product, metric.id, "per_100_g");
+    return (
+      value !== null &&
+      !isPlausibleFoodMetricValue(metric.id, value, "per_100_g")
+    );
+  });
+  if (hasImplausibleMetric) {
+    return false;
+  }
+  if (hasOnlyZeroFoodNutrition(product)) {
+    return false;
+  }
+  return (["calories", "protein", "sugars", "fat"] as const).every(
+    (metricId) =>
+      getFoodMetricValue(product, metricId, "per_100_g") !== null,
+  );
 }
 
 export function compareFoodMetrics(
@@ -170,6 +254,9 @@ export function compareFoodMetrics(
           winnerRefs.add(productRef);
         }
       }
+      if (winnerRefs.size === products.length) {
+        winnerRefs.clear();
+      }
     }
 
     return {
@@ -191,12 +278,15 @@ export function getFoodTopMatch(
   let comparableMetricCount = 0;
 
   for (const comparison of comparisons) {
-    if (!comparison.complete || comparison.winnerRefs.size === 0) {
+    if (!comparison.complete) {
       continue;
     }
     comparableMetricCount += 1;
     for (const productRef of comparison.winnerRefs) {
-      winsByProductRef.set(productRef, (winsByProductRef.get(productRef) ?? 0) + 1);
+      winsByProductRef.set(
+        productRef,
+        (winsByProductRef.get(productRef) ?? 0) + 1,
+      );
     }
   }
 
@@ -213,30 +303,6 @@ export function getFoodTopMatch(
   return { productRefs, winsByProductRef, comparableMetricCount };
 }
 
-export function getFoodLeadSummary(
-  products: PublicProductDetail[],
-  topMatch: FoodTopMatch,
-): string | null {
-  if (topMatch.productRefs.size === 0 || products.length < 2) {
-    return null;
-  }
-  const leaders = products
-    .filter((product) => topMatch.productRefs.has(product.productRef))
-    .map((product) => {
-      const identity = getFoodProductIdentity(product);
-      return identity.brand ? `${identity.brand} ${identity.title}` : identity.title;
-    });
-  const wins = Math.max(...topMatch.winsByProductRef.values());
-  const rows = `${wins} of ${topMatch.comparableMetricCount} comparable rows`;
-  if (leaders.length === 1) {
-    return `${leaders[0]} leads ${rows}.`;
-  }
-  if (leaders.length === products.length) {
-    return `All ${products.length} products lead ${rows}.`;
-  }
-  return `${listNames(leaders)} tie for most rows led (${rows}).`;
-}
-
 export function getFoodEvidenceSummary(
   product: PublicProductDetail,
 ): FoodEvidenceSummary {
@@ -248,7 +314,12 @@ export function getFoodEvidenceSummary(
     alertCount,
     alertsLowerBound: alertCount === 5,
     gapCount,
-    level: observationCount === 0 ? "limited" : gapCount === 0 ? "reported" : "partial",
+    level:
+      observationCount === 0
+        ? "limited"
+        : gapCount === 0
+        ? "reported"
+        : "partial",
     observationCount,
     returnedObservationCount: product.productTests.returned,
     observationsTruncated: product.productTests.truncated,
@@ -263,7 +334,10 @@ export function getFoodEvidenceCoverage(
     {
       id: "nutrition",
       label: "Nutrition label",
-      covered: product.nutrition.rows.length > 0 && !codes.has("NUTRITION_UNAVAILABLE"),
+      covered:
+        product.nutrition.rows.length > 0 &&
+        !hasOnlyZeroFoodNutrition(product) &&
+        !codes.has("NUTRITION_UNAVAILABLE"),
     },
     {
       id: "serving",
@@ -273,8 +347,10 @@ export function getFoodEvidenceCoverage(
     {
       id: "ingredients",
       label: "Ingredients",
-      covered: Boolean(product.ingredients.statement) || product.ingredients.active.length > 0
-        || product.ingredients.other.length > 0,
+      covered:
+        Boolean(product.ingredients.statement) ||
+        product.ingredients.active.length > 0 ||
+        product.ingredients.other.length > 0,
     },
     {
       id: "tests",
@@ -284,7 +360,9 @@ export function getFoodEvidenceCoverage(
     {
       id: "limits",
       label: "Comparable screening limit",
-      covered: product.productTests.observations.some((observation) => observation.screening !== null),
+      covered: product.productTests.observations.some(
+        (observation) => observation.screening !== null,
+      ),
     },
   ];
   return {
@@ -298,12 +376,14 @@ export function getFoodEvidenceStatuses(
 ): FoodEvidenceStatus[] {
   const tests = product.productTests;
   if (tests.total === 0) {
-    return [{
-      id: "tests",
-      tone: "unknown",
-      title: "Not tested",
-      detail: "No product-level test is linked to this exact record.",
-    }];
+    return [
+      {
+        id: "tests",
+        tone: "unknown",
+        title: "Not tested",
+        detail: "No product-level test is linked to this exact record.",
+      },
+    ];
   }
 
   const scope = tests.truncated
@@ -319,12 +399,14 @@ export function getFoodEvidenceStatuses(
     (observation) => observation.screening === null,
   ).length;
 
-  const statuses: FoodEvidenceStatus[] = [{
-    id: "tests",
-    tone: "neutral",
-    title: "Tested",
-    detail: scope,
-  }];
+  const statuses: FoodEvidenceStatus[] = [
+    {
+      id: "tests",
+      tone: "neutral",
+      title: "Tested",
+      detail: scope,
+    },
+  ];
   if (above > 0) {
     statuses.push({
       id: "above",
@@ -363,10 +445,13 @@ export function getFoodMetricConclusion(
       : `Values for ${comparison.values.size} of ${productCount} products`;
   }
   if (comparison.winnerRefs.has(activeProductRef)) {
-    const direction = comparison.metric.preference === "higher" ? "highest" : "lowest";
+    const direction =
+      comparison.metric.preference === "higher" ? "highest" : "lowest";
     return comparison.winnerRefs.size > 1
       ? `Tied for ${direction}`
-      : direction === "highest" ? "Highest" : "Lowest";
+      : direction === "highest"
+      ? "Highest"
+      : "Lowest";
   }
   return `Compared across ${productCount} products`;
 }
@@ -379,7 +464,8 @@ export function formatFoodMetricValue(value: FoodMetricValue): string {
 }
 
 function foodMetricValue(value: number, unit: string): FoodMetricValue {
-  const rounded = Math.round((value + Number.EPSILON) * 10) / 10;
+  const precision = unit === "kcal" ? 1 : 10;
+  const rounded = Math.round((value + Number.EPSILON) * precision) / precision;
   return { value: Object.is(rounded, -0) ? 0 : rounded, unit };
 }
 
@@ -394,7 +480,7 @@ const SIZE_UNIT_LABELS: Record<string, string> = {
   "fl oz": "fl oz",
   "fl. oz": "fl oz",
   "fl.oz": "fl oz",
-  "floz": "fl oz",
+  floz: "fl oz",
   ounce: "oz",
   ounces: "oz",
   oz: "oz",
@@ -428,46 +514,129 @@ export function getFoodPackageSize(name: string): string | null {
   if (unit === "g" && Number.parseFloat(amount) < 100) {
     return null;
   }
-  const count = amount.includes("×") ? null : PACKAGE_COUNT_PATTERN.exec(name)?.[1];
+  const count = amount.includes("×")
+    ? null
+    : PACKAGE_COUNT_PATTERN.exec(name)?.[1];
   return count ? `${count} × ${amount} ${unit}` : `${amount} ${unit}`;
+}
+
+function getFoodDisplayBrand(
+  name: string,
+  rawBrand: string | null,
+): string | null {
+  const reportedBrand = rawBrand?.trim();
+  if (!reportedBrand) {
+    return null;
+  }
+
+  const leadingMark = name.split(",")[0]?.trim() ?? "";
+  const corporateBrand =
+    /(?:\/|\b(?:inc|company|corporation|corp|llc|ltd)\b)/iu.test(reportedBrand);
+  if (!corporateBrand) {
+    return recaseShouting(reportedBrand, true);
+  }
+
+  const alphanumericMark = /^(?=.*[a-z])(?=.*\d)[a-z\d&'+.-]{2,30}$/iu.test(
+    leadingMark,
+  );
+  if (alphanumericMark) {
+    return recaseShouting(leadingMark, true);
+  }
+
+  const embeddedConsumerMark = reportedBrand
+    .split("/")
+    .slice(1)
+    .map((segment) => segment.split("-")[0]?.trim() ?? "")
+    .find((segment) => /^[a-z][a-z\d&'+.]{1,29}$/u.test(segment));
+  if (!embeddedConsumerMark) {
+    return recaseShouting(reportedBrand, true);
+  }
+
+  const displayBrand =
+    embeddedConsumerMark.charAt(0).toUpperCase() +
+    embeddedConsumerMark.slice(1);
+  return recaseShouting(displayBrand, true);
+}
+
+function getFoodServingSize(
+  serving: PublicProductDetail["serving"] | undefined,
+): string | null {
+  if (!serving) {
+    return null;
+  }
+  if (serving.grams) {
+    return `${formatServingAmount(serving.grams)} g`;
+  }
+  if (serving.amount && serving.unit) {
+    const unit = SIZE_UNIT_LABELS[serving.unit.toLowerCase()] ?? serving.unit;
+    return `${formatServingAmount(serving.amount)} ${unit}`;
+  }
+
+  const description = serving.description?.trim();
+  if (!description || /^\d+(?:[.,]\d+)?\s*(?:fl)?$/iu.test(description)) {
+    return null;
+  }
+  return description;
+}
+
+function combineFoodSizes(
+  packageSize: string | null,
+  servingSize: string | null,
+): string | null {
+  if (packageSize && servingSize) {
+    return `${packageSize} · ${servingSize}`;
+  }
+  return packageSize ?? servingSize;
 }
 
 export function getFoodProductIdentity(
   product: Pick<PublicProductDetail, "name" | "brand"> & {
     serving?: PublicProductDetail["serving"];
+    servingGrams?: number | null;
   },
 ): FoodProductIdentity {
-  const brand = product.brand ? recaseShouting(product.brand.trim()) : null;
+  const brand = getFoodDisplayBrand(product.name, product.brand);
+  const packageSize = getFoodPackageSize(product.name);
   let title = product.name.trim();
-  if (brand && title.toLowerCase().startsWith(brand.toLowerCase()) && title.length > brand.length + 2) {
+  if (brand && title.toLowerCase().startsWith(brand.toLowerCase())) {
     title = title.slice(brand.length).replace(/^[\s,:®™-]+/u, "");
   }
   title = leadWithVariant(dropRepeatedTrailingSegment(title));
+  title = packageSize ? stripPackageDetails(title) || title : title;
   title = recaseShouting(title);
+  if (brand && /^(?:bottle|can|container|package|pack)$/iu.test(title.trim())) {
+    title = "";
+  }
 
-  const packageSize = getFoodPackageSize(product.name);
-  const serving = product.serving;
-  const servingSize = serving
-    ? serving.grams
-      ? `${formatServingAmount(serving.grams)} g serving`
-      : serving.amount && serving.unit
-        ? `${formatServingAmount(serving.amount)} ${SIZE_UNIT_LABELS[serving.unit.toLowerCase()] ?? serving.unit} serving`
-        : serving.description
-          ? `${serving.description} serving`
-          : null
-    : null;
+  const servingSize =
+    getFoodServingSize(product.serving) ??
+    (product.servingGrams
+      ? `${formatServingAmount(product.servingGrams)} g`
+      : null);
 
   return {
     brand,
-    title: title || product.name.trim(),
-    size: packageSize && servingSize
-      ? `${packageSize} · ${servingSize}`
-      : packageSize ?? servingSize,
+    title: title || (brand ? "" : product.name.trim()),
+    size: combineFoodSizes(packageSize, servingSize),
   };
 }
 
+function stripPackageDetails(name: string): string {
+  return name
+    .replace(PACKAGE_SIZE_PATTERN, "")
+    .replace(PACKAGE_COUNT_PATTERN, "")
+    .replace(/[\s,/:–-]+$/gu, "")
+    .replace(/^\s*[,/:–-]+\s*/gu, "")
+    .replace(/\s*[,/:–-]+\s*[,/:–-]+\s*/gu, ", ")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
 function dropRepeatedTrailingSegment(name: string): string {
-  const segments = name.split(",").map((segment) => segment.trim()).filter(Boolean);
+  const segments = name
+    .split(",")
+    .map((segment) => segment.trim())
+    .filter(Boolean);
   while (segments.length > 1) {
     const last = segments[segments.length - 1]?.toLowerCase() ?? "";
     const head = segments.slice(0, -1).join(", ").toLowerCase();
@@ -481,32 +650,36 @@ function dropRepeatedTrailingSegment(name: string): string {
 }
 
 function leadWithVariant(name: string): string {
-  const segments = name.split(",").map((segment) => segment.trim()).filter(Boolean);
-  const variant = segments.length >= 2 ? segments[segments.length - 1] : undefined;
+  const segments = name
+    .split(",")
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  const variant =
+    segments.length >= 2 ? segments[segments.length - 1] : undefined;
   if (
-    !variant
-    || variant.split(/\s+/u).length > 3
-    || getFoodPackageSize(variant)
-    || PACKAGE_COUNT_PATTERN.test(variant)
+    !variant ||
+    variant.split(/\s+/u).length > 3 ||
+    getFoodPackageSize(variant) ||
+    PACKAGE_COUNT_PATTERN.test(variant)
   ) {
     return name;
   }
   return `${variant} ${segments.slice(0, -1).join(", ")}`;
 }
 
-function recaseShouting(value: string): string {
+function recaseShouting(value: string, preserveShortBrand = false): string {
   const letters = value.replace(/[^A-Za-z]/gu, "");
   if (letters.length === 0 || /[a-z]/u.test(letters)) {
     return value;
   }
   const words = value.split(/\s+/u);
-  if (words.length === 1 && letters.length <= 5) {
+  if (preserveShortBrand && words.length === 1 && letters.length <= 5) {
     return value;
   }
   return words
-    .map((word) => word.length <= 1
-      ? word
-      : word.charAt(0) + word.slice(1).toLowerCase())
+    .map((word) =>
+      word.length <= 1 ? word : word.charAt(0) + word.slice(1).toLowerCase(),
+    )
     .join(" ");
 }
 
@@ -514,16 +687,9 @@ function formatServingAmount(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
-function listNames(names: string[]): string {
-  if (names.length <= 2) {
-    return names.join(" and ");
-  }
-  return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
-}
-
-export function dedupeFoodSearchHits<T extends Pick<PublicProductSearchHit, "productRef" | "upc">>(
-  hits: T[],
-): T[] {
+export function dedupeFoodSearchHits<
+  T extends Pick<PublicProductSearchHit, "productRef" | "upc">,
+>(hits: T[]): T[] {
   const seenUpcs = new Set<string>();
   const seenRefs = new Set<string>();
   return hits.filter((hit) => {
@@ -543,40 +709,286 @@ export function dedupeFoodSearchHits<T extends Pick<PublicProductSearchHit, "pro
   });
 }
 
+export function selectDiverseFoodSearchHits<
+  T extends Pick<PublicProductSearchHit, "brand" | "productRef">,
+>(hits: T[], limit: number): T[] {
+  if (limit <= 0) {
+    return [];
+  }
+
+  const selected: T[] = [];
+  const selectedRefs = new Set<string>();
+  const selectedBrands = new Set<string>();
+
+  for (const hit of hits) {
+    const brandKey = normalizeFoodSearchRankingText(hit.brand);
+    if (brandKey && selectedBrands.has(brandKey)) {
+      continue;
+    }
+    selected.push(hit);
+    selectedRefs.add(hit.productRef);
+    if (brandKey) {
+      selectedBrands.add(brandKey);
+    }
+    if (selected.length === limit) {
+      return selected;
+    }
+  }
+
+  for (const hit of hits) {
+    if (selectedRefs.has(hit.productRef)) {
+      continue;
+    }
+    selected.push(hit);
+    if (selected.length === limit) {
+      break;
+    }
+  }
+
+  return selected;
+}
+
+export function orderFoodSearchHitsForDiversity<
+  T extends Pick<PublicProductSearchHit, "brand" | "productRef">,
+>(hits: T[]): T[] {
+  const buckets = new Map<string, T[]>();
+  for (const hit of hits) {
+    const brandKey =
+      normalizeFoodSearchRankingText(hit.brand) || `product:${hit.productRef}`;
+    const bucket = buckets.get(brandKey);
+    if (bucket) {
+      bucket.push(hit);
+    } else {
+      buckets.set(brandKey, [hit]);
+    }
+  }
+
+  const ordered: T[] = [];
+  const brandBuckets = [...buckets.values()];
+  const longestBucket = Math.max(
+    0,
+    ...brandBuckets.map((bucket) => bucket.length),
+  );
+  for (let index = 0; index < longestBucket; index += 1) {
+    for (const bucket of brandBuckets) {
+      const hit = bucket[index];
+      if (hit) {
+        ordered.push(hit);
+      }
+    }
+  }
+  return ordered;
+}
+
+export interface FoodComparisonUrlState {
+  basis: FoodMetricBasis;
+  productRefs: string[];
+}
+
+export function parseFoodComparisonUrl(search: string): FoodComparisonUrlState {
+  const params = new URLSearchParams(search);
+  const productRefs = dedupeStrings(
+    (params.get("compare") ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(isShareableFoodProductRef),
+  ).slice(0, FOOD_COMPARISON_LIMIT);
+
+  return {
+    basis: params.get("basis") === "per_serving" ? "per_serving" : "per_100_g",
+    productRefs,
+  };
+}
+
+export function buildFoodComparisonUrl(
+  currentUrl: string,
+  productRefs: string[],
+  basis: FoodMetricBasis,
+): string {
+  const url = new URL(currentUrl, "https://www.withmurph.ai");
+  const safeRefs = dedupeStrings(
+    productRefs.filter(isShareableFoodProductRef),
+  ).slice(0, FOOD_COMPARISON_LIMIT);
+
+  if (safeRefs.length === 0) {
+    url.searchParams.delete("compare");
+    url.searchParams.delete("basis");
+  } else {
+    url.searchParams.set("compare", safeRefs.join(","));
+    if (basis === "per_serving") {
+      url.searchParams.set("basis", basis);
+    } else {
+      url.searchParams.delete("basis");
+    }
+  }
+
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
+function isShareableFoodProductRef(value: string): boolean {
+  return /^food_[A-Za-z0-9_-]{3,500}$/u.test(value);
+}
+
+function dedupeStrings(values: string[]): string[] {
+  return [...new Set(values)];
+}
+
+const MULTIPACK_NAME_PATTERN =
+  /\b\d+\s*(?:count|ct|pack|pk)\b|\b\d+\s*[-x×]\s*\d+(?:[.,]\d+)?\s*(?:fl\.?\s*oz|ounces?|oz|ml|l)\b/iu;
+const MULTIPACK_QUERY_PATTERN = /\b(?:count|ct|pack|pk)\b|\b\d+\s*[-x×]\s*\d/iu;
+
+export function cleanFoodSearchHits(
+  hits: PublicProductSearchHit[],
+  query: string,
+  foodSearchOrder: "relevance" | "evidence" | "popular" = "relevance",
+): PublicProductSearchHit[] {
+  const normalizedQuery = query.trim().toLocaleLowerCase("en-US");
+  if (/^\d+$/u.test(normalizedQuery)) {
+    return hits;
+  }
+  const rankingQuery = normalizeFoodSearchRankingText(query);
+  const meaningMatchedHits = hits.filter(
+    (hit) =>
+      !(
+        (rankingQuery === "soda" || rankingQuery === "cola") &&
+        /\bbaking soda\b/iu.test(hit.name)
+      ),
+  );
+  const categoryCandidates =
+    meaningMatchedHits.length > 0 ? meaningMatchedHits : hits;
+
+  const singleProducts = categoryCandidates.filter(
+    (hit) => !MULTIPACK_NAME_PATTERN.test(hit.name),
+  );
+  const candidates =
+    !MULTIPACK_QUERY_PATTERN.test(normalizedQuery) && singleProducts.length > 0
+      ? singleProducts
+      : categoryCandidates;
+  const brandQuery = candidates.some(
+    (hit) => normalizeFoodSearchRankingText(hit.brand) === rankingQuery,
+  );
+
+  return candidates
+    .map((hit, index) => {
+      const identity = getFoodProductIdentity(hit);
+      const normalizedName = normalizeFoodSearchRankingText(hit.name);
+      const normalizedTitle = normalizeFoodSearchRankingText(identity.title);
+      return {
+        exactProductMatch:
+          brandQuery &&
+          (normalizedName === rankingQuery || normalizedTitle === rankingQuery),
+        hasLinkedTests: hit.productTests.total > 0,
+        hasSize: identity.size !== null,
+        hit,
+        index,
+        titleLength: normalizedTitle.length,
+      };
+    })
+    .sort((left, right) => {
+      if (left.exactProductMatch !== right.exactProductMatch) {
+        return Number(right.exactProductMatch) - Number(left.exactProductMatch);
+      }
+      if (
+        foodSearchOrder === "evidence" &&
+        left.hasLinkedTests !== right.hasLinkedTests
+      ) {
+        return Number(right.hasLinkedTests) - Number(left.hasLinkedTests);
+      }
+      if (brandQuery && left.titleLength !== right.titleLength) {
+        return left.titleLength - right.titleLength;
+      }
+      if (foodSearchOrder === "relevance" && left.hasSize !== right.hasSize) {
+        return Number(right.hasSize) - Number(left.hasSize);
+      }
+      return left.index - right.index;
+    })
+    .map(({ hit }) => hit);
+}
+
+function normalizeFoodSearchRankingText(value: string | null): string {
+  return (value ?? "")
+    .trim()
+    .toLocaleLowerCase("en-US")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+const PROTEIN_SHAKE_CATEGORY_PATTERN =
+  /\b(?:high\s+)?protein(?:\s+\d+(?:\.\d+)?\s*g)?\s+(?:milk\s+)?shakes?\b|\bprotein drinks?\b|nutrition shake|meal replacement/u;
+
 const NAMED_CATEGORIES: Array<[string, RegExp]> = [
-  ["frozen-desserts", /ice cream|gelato|sorbet|frozen yogurt|frozen dessert|popsicle|\bpops\b/u],
-  ["protein-shake", /protein (?:milk )?shake|protein drink|nutrition shake|meal replacement/u],
-  ["plant-milk", /oat milk|almond milk|soy milk|coconut milk|cashew milk|rice milk|oat ?beverage|almond ?beverage/u],
-  ["bars", /\b(?:protein|snack|energy|granola|nut|cereal|breakfast|fruit)\s?bars?\b|\bbars?\b|\bbites\b/u],
+  [
+    "frozen-desserts",
+    /ice cream|gelato|sorbet|frozen yogurt|frozen dessert|popsicle|\bpops\b/u,
+  ],
+  ["protein-shake", PROTEIN_SHAKE_CATEGORY_PATTERN],
+  [
+    "plant-milk",
+    /oat milk|almond milk|soy milk|coconut milk|cashew milk|rice milk|oat ?beverage|almond ?beverage/u,
+  ],
+  [
+    "bars",
+    /\b(?:protein|snack|energy|granola|nut|cereal|breakfast|fruit)\s?bars?\b|\bbars?\b|\bbites\b/u,
+  ],
   ["yogurt", /yogurt|yoghurt|skyr|kefir/u],
   ["cheese", /cheese|cheddar|mozzarella|parmesan|brie|feta/u],
-  ["nut-butter-spreads", /peanut butter|almond butter|nut butter|hazelnut spread|\bjam\b|jelly|preserves|marmalade/u],
+  [
+    "nut-butter-spreads",
+    /peanut butter|almond butter|nut butter|hazelnut spread|\bjam\b|jelly|preserves|marmalade/u,
+  ],
   ["chips", /\bchips?\b|crisps|tortilla chip|pretzel|popcorn|cheese puffs/u],
   ["crackers-rice-cakes", /cracker|rice cake/u],
   ["cereal-oats", /cereal|oatmeal|\boats\b|granola|muesli/u],
-  ["dairy-milk", /\bmilk\b(?! chocolate)|\bcream\b|half-and-half|half & half|creamer/u],
-  ["cookies-sweets", /cookie|candy|chocolate|gummy|gummies|licorice|caramel|marshmallow|sweet/u],
+  [
+    "dairy-milk",
+    /\bmilk\b(?! chocolate)|\bcream\b|half-and-half|half & half|creamer/u,
+  ],
+  [
+    "cookies-sweets",
+    /cookie|candy|chocolate|gummy|gummies|licorice|caramel|marshmallow|sweet/u,
+  ],
   ["bakery", /\bcake\b|muffin|pastry|donut|doughnut|croissant|brownie|pie\b/u],
   ["bread", /bread|bagel|tortilla|bun\b|roll\b|pita|naan|english muffin/u],
   ["pasta-noodles", /pasta|noodle|spaghetti|macaroni|ramen|lasagna/u],
   ["pizza-flatbread", /pizza|flatbread/u],
   ["soups-stews", /soup|stew|chili|broth|bone broth/u],
-  ["sauces-condiments", /sauce|ketchup|mustard|mayo|dressing|salsa|hummus|dip\b|relish|vinaigrette/u],
+  [
+    "sauces-condiments",
+    /sauce|ketchup|mustard|mayo|dressing|salsa|hummus|dip\b|relish|vinaigrette/u,
+  ],
   ["sweeteners", /honey|maple syrup|agave|sweetener|\bsyrup\b|sugar\b/u],
-  ["prepared-meals", /\bmeal\b|\bbowl\b|entrée|entree|dinner|burrito|frozen meal|mac and cheese/u],
+  [
+    "prepared-meals",
+    /\bmeal\b|\bbowl\b|entrée|entree|dinner|burrito|frozen meal|mac and cheese/u,
+  ],
   ["eggs", /\beggs?\b|omelet/u],
   ["poultry", /chicken|turkey|duck/u],
-  ["seafood", /salmon|tuna|\bfish\b|shrimp|\bcod\b|sardine|anchov|crab|lobster/u],
+  [
+    "seafood",
+    /salmon|tuna|\bfish\b|shrimp|\bcod\b|sardine|anchov|crab|lobster/u,
+  ],
   ["meat", /beef|pork|steak|bacon|\bham\b|sausage|jerky|salami|hot dog/u],
-  ["plant-protein", /tofu|tempeh|seitan|plant protein|plant-based|veggie burger/u],
+  [
+    "plant-protein",
+    /tofu|tempeh|seitan|plant protein|plant-based|veggie burger/u,
+  ],
   ["legumes", /\bbeans?\b|lentil|chickpea|edamame/u],
-  ["nuts-seeds", /almond|peanut|cashew|walnut|pistachio|pecan|\bseeds?\b|trail mix/u],
+  [
+    "nuts-seeds",
+    /almond|peanut|cashew|walnut|pistachio|pecan|\bseeds?\b|trail mix/u,
+  ],
   ["oils-fats", /olive oil|avocado oil|coconut oil|butter|ghee|margarine/u],
-  ["fruit", /fruit|apple|banana|berry|berries|orange|mango|grape|raisin|dried fruit/u],
+  [
+    "fruit",
+    /fruit|apple|banana|berry|berries|orange|mango|grape|raisin|dried fruit/u,
+  ],
   ["vegetables", /vegetable|broccoli|spinach|carrot|kale|salad|greens/u],
   ["grains", /\brice\b|quinoa|grain|couscous|barley/u],
   ["coffee-tea", /coffee|\btea\b|matcha|latte|espresso|cold brew/u],
-  ["sweet-drinks", /soda|cola|juice|energy drink|sports drink|lemonade|kombucha|soft drink/u],
+  [
+    "sweet-drinks",
+    /soda|cola|juice|energy drink|sports drink|lemonade|kombucha|soft drink/u,
+  ],
   ["water", /water|seltzer|sparkling/u],
   ["alcohol", /beer|wine|vodka|whiskey|whisky|alcohol|hard seltzer|cider/u],
   ["baby-food", /baby food|infant|toddler/u],
@@ -593,7 +1005,17 @@ const INGREDIENT_CATEGORIES: Array<[string, RegExp]> = [
   ["sweet-drinks", /carbonated water|corn syrup/u],
 ];
 
-export const FOOD_CATEGORY_FALLBACK_ASSET = "/design-assets/food-label-lab/packaged-food.svg";
+export const FOOD_CATEGORY_FALLBACK_ASSET =
+  "/design-assets/food-label-lab/packaged-food.svg";
+
+const CATEGORY_SEARCH_QUERY_OVERRIDES: Record<string, string> = {
+  "cereal-oats": "cereal",
+  "cookies-sweets": "cookies",
+  "crackers-rice-cakes": "crackers",
+  "nut-butter-spreads": "nut butter",
+  "oils-fats": "cooking oil",
+  "sweet-drinks": "soda",
+};
 
 export function getFoodCategoryAsset(
   product: Pick<PublicProductDetail, "name" | "brand"> & {
@@ -601,17 +1023,53 @@ export function getFoodCategoryAsset(
   },
 ): string {
   const name = product.name.toLowerCase();
-  const namedCategory = NAMED_CATEGORIES.find(([, pattern]) => pattern.test(name))?.[0];
+  const namedCategory = NAMED_CATEGORIES.find(([, pattern]) =>
+    pattern.test(name),
+  )?.[0];
   if (namedCategory) {
     return `/design-assets/food-label-lab/${namedCategory}.svg`;
   }
 
   const statement = product.ingredients?.statement?.toLowerCase() ?? "";
-  const ingredientCategory = INGREDIENT_CATEGORIES.find(([, pattern]) => pattern.test(statement))?.[0];
+  const ingredientCategory = INGREDIENT_CATEGORIES.find(([, pattern]) =>
+    pattern.test(statement),
+  )?.[0];
   if (ingredientCategory) {
     return `/design-assets/food-label-lab/${ingredientCategory}.svg`;
   }
   return FOOD_CATEGORY_FALLBACK_ASSET;
+}
+
+export function getFoodComparisonCategoryQuery(
+  product: Pick<PublicProductDetail, "name" | "brand"> & {
+    ingredients?: PublicProductDetail["ingredients"];
+  },
+): string | null {
+  const name = [product.brand, product.name]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  if (/\bprotein\b[^,]{0,50}\bbars?\b/u.test(name)) {
+    return "protein bars";
+  }
+  if (
+    /\bprotein\b[^,]{0,50}\bshakes?\b/u.test(name) ||
+    PROTEIN_SHAKE_CATEGORY_PATTERN.test(name)
+  ) {
+    return "protein shakes";
+  }
+  if (/\bgreek\b[^,]{0,40}\byogurt\b/u.test(name)) {
+    return "greek yogurt";
+  }
+
+  const asset = getFoodCategoryAsset(product);
+  if (asset === FOOD_CATEGORY_FALLBACK_ASSET) {
+    return null;
+  }
+  const category = asset.slice(asset.lastIndexOf("/") + 1, -4);
+  return (
+    CATEGORY_SEARCH_QUERY_OVERRIDES[category] ?? category.replaceAll("-", " ")
+  );
 }
 
 function normalizeMetricName(value: string): string {

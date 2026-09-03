@@ -168,9 +168,12 @@ describe("public product API contracts", () => {
         query: "  creatine  ",
       }),
     ).toEqual({
+      foodComparisonReadyOnly: false,
+      foodSearchOrder: "relevance",
       query: "creatine",
       kinds: ["supplement", "food"],
       limitPerKind: 6,
+      offsetPerKind: 0,
     });
 
     expect(
@@ -192,7 +195,14 @@ describe("public product API contracts", () => {
     expect(
       publicProductSearchRequestSchema.safeParse({
         query: "creatine",
-        limitPerKind: 11,
+        limitPerKind: 31,
+      }).success,
+    ).toBe(false);
+    expect(
+      publicProductSearchRequestSchema.safeParse({
+        query: "creatine",
+        limitPerKind: 30,
+        offsetPerKind: 221,
       }).success,
     ).toBe(false);
     expect(
@@ -448,6 +458,15 @@ describe("public product API contracts", () => {
     expect(schemas.PublicProductSearchRequest).toMatchObject({
       additionalProperties: false,
       properties: {
+        foodComparisonReadyOnly: {
+          default: false,
+          type: "boolean",
+        },
+        foodSearchOrder: {
+          default: "relevance",
+          enum: ["relevance", "evidence", "popular"],
+          type: "string",
+        },
         kinds: {
           default: ["supplement", "food"],
           maxItems: 2,
@@ -456,8 +475,13 @@ describe("public product API contracts", () => {
         },
         limitPerKind: {
           default: 6,
-          maximum: 10,
+          maximum: 30,
           minimum: 1,
+        },
+        offsetPerKind: {
+          default: 0,
+          maximum: 220,
+          minimum: 0,
         },
         query: {
           maxLength: 128,

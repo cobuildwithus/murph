@@ -1,6 +1,8 @@
 import type { PublicProductDetail } from "@murphai/contracts";
 
+import { FoodBrandVisual } from "@/src/components/food-label-lab/food-brand-visual";
 import { FoodLabelLab } from "@/src/components/food-label-lab/food-label-lab";
+import { getFoodCategoryAsset } from "@/src/components/food-label-lab/food-label-model";
 
 const CHOBANI = createFood({
   productRef: "food_design_chobani",
@@ -13,6 +15,8 @@ const CHOBANI = createFood({
   protein: 9.3,
   sugars: 2.7,
   fat: 0,
+  saturatedFat: 0,
+  sodium: 47,
   testCount: 57,
   analytes: ["Lead", "Cadmium", "Arsenic", "Mercury", "Glyphosate", "Aflatoxin M1"],
   screening: "none",
@@ -29,6 +33,8 @@ const STRAUS = createFood({
   protein: 10,
   sugars: 3.5,
   fat: 5.9,
+  saturatedFat: 3.5,
+  sodium: 41,
   testCount: 57,
   analytes: ["Lead", "Cadmium", "Arsenic", "Mercury"],
   screening: "within",
@@ -45,12 +51,30 @@ const FAGE = createFood({
   protein: 9,
   sugars: 3,
   fat: 5,
+  saturatedFat: 3,
+  sodium: 35,
   testCount: 1,
   analytes: ["Lead"],
   screening: "exceeds",
 });
 
 export const FOOD_LABEL_DESIGN_PRODUCTS = [CHOBANI, STRAUS, FAGE];
+
+export function FoodBrandVisualStudy() {
+  return (
+    <div className="flex flex-wrap gap-4" data-design-state="local-fallbacks">
+      {FOOD_LABEL_DESIGN_PRODUCTS.map((product) => (
+        <div key={product.productRef} className="flex items-center gap-3 rounded-xl border border-border bg-card p-3">
+          <FoodBrandVisual
+            asset={getFoodCategoryAsset(product)}
+            brand={product.brand}
+          />
+          <span className="text-sm font-medium text-foreground">{product.brand}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export function FoodLabelLabStudy() {
   return (
@@ -79,6 +103,8 @@ function createFood(input: {
   protein: number;
   sugars: number;
   fat: number;
+  saturatedFat: number;
+  sodium: number;
   testCount: number;
   analytes: string[];
   screening: "none" | "within" | "exceeds";
@@ -125,6 +151,8 @@ function createFood(input: {
         nutritionRow("Protein", input.protein, "g"),
         nutritionRow("Total Sugars", input.sugars, "g"),
         nutritionRow("Total Fat", input.fat, "g"),
+        nutritionRow("Fatty acids, total saturated", input.saturatedFat, "g"),
+        nutritionRow("Sodium, Na", input.sodium, "mg"),
       ],
     },
     productTests: {

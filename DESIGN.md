@@ -490,25 +490,44 @@ must break without horizontal scrolling.
 
 ### Food Label Lab
 The public `/food` page uses the same editorial paper system with less text.
-Start with one search field, then show a two-to-four-column comparison table.
-Put category art, the brand, the differentiating product name, and the package
-or serving size in each column. Mark the winner in each complete metric row with
-one sage check only; no tinted rows, no Lowest or Highest labels. Each row states
-its rule as "Lowest marked" or "Highest marked". One optional plain sentence may
-count visible rows led, but nothing may read as a health or safety score. The
-table stays visible with one product, and empty columns are dashed add targets.
+Start with one search field. A category choice loads four useful products from
+different popular brands. An exact product choice adds only that record.
+Keep the active search phrase in the field after a product or example loads.
+The quiet catalog count may open one compact facts popover with current counts,
+and source families. Put the brand, the differentiating product name, and the
+package or serving size in each column. When configured, use Brandfetch Search
+for the brand logo. Add the broad product category to the brand query and accept
+only a result whose name contains the requested brand. Cache each result in
+memory for the page session. Fall back to deterministic brand color and local
+category art. Mark the winner
+in each complete metric row with one sage check only; no tinted rows, no Lowest
+or Highest labels. Nothing may read as a health or safety score. Keep four fixed
+product slots so add and remove actions do not resize the table. Scroll
+horizontally for up to ten and show a subtle edge shadow only while meaningful
+content remains hidden to the right. Four products fit without that shadow on
+desktop. Keep one clear-comparison action in the header.
+
+Show related products below the table in three desktop columns. Reveal four
+rows at a time, then load 12 more. Keep an added card in place and replace its
+action with a quiet selected state. Do not create a nested scroll area.
 
 Keep evidence in one separate row as a five-segment coverage meter that opens
 one combined evidence drawer. Use sienna only for a confirmed result above an
 available screening limit, amber for unknown or not comparable, and sage for
-within a comparable limit. One metric cell opens a compact comparison-bar
-popover. Never assign a winner when a selected product lacks that metric, and
-never give tied values unequal ordinal ranks. The drawer starts with coverage,
-then statuses, then gaps, with raw reports hidden by default. Observation summaries must show returned versus total scope when the
-public DTO is truncated. Gap rows use the DTO-owned titles and descriptions.
-The tests sheet must not infer sample identity or coverage from report metadata.
-Its optional observation disclosure shows each returned result separately and
-names the exact screening threshold and authority used for any status.
+within a comparable limit. Product headers and metric cells open the same
+drawer. Never
+assign a winner when a selected product lacks that metric, and
+never give tied values unequal ordinal ranks. Treat a source nutrition panel
+whose every reported value is zero as unusable comparison data. Keep a product
+only when it still has linked lab evidence; otherwise reject it before it enters
+the table. Also reject impossible per-100-gram values caused by a bad source
+scale. The drawer shows coverage and record source in one compact popover.
+It formats the ingredient statement as a list and explains source-backed
+ingredient flags in tooltips. Lab observations group repeated analytes and show
+compact status marks before optional exact measurements. Gap explanations stay
+in tooltips. Observation summaries must show returned versus total scope when
+the public DTO is truncated. The tests sheet must not infer sample identity or
+coverage from report metadata.
 At phone widths, preserve the first label column and let product columns scroll
 horizontally.
 
