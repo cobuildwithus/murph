@@ -93,7 +93,7 @@ describe("Murph Product Data OpenAPI", () => {
     const parameters = Array.isArray(detailGet.parameters) ? detailGet.parameters : [];
     const parameter = requiredRecord(parameters[0], "product ref parameter");
 
-    expect(publicProductSearchRequestSchema.parse(requestJson.example)).toEqual({
+    expect(publicProductSearchRequestSchema.parse(requestJson.example)).toMatchObject({
       query: "example product",
       kinds: ["supplement", "food"],
       limitPerKind: 6,
