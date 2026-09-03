@@ -3244,6 +3244,176 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
   )
 
   it(
+    'logs a referenced set completion after an unrelated assistant turn',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-workout-context-continuity-e2e-'),
+      )
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      const commandLogPath = path.join(workingDirectory, 'workout-commands.log')
+
+      try {
+        await initializeVault({
+          title: 'Synthetic workout context continuity proof',
+          timezone: 'UTC',
+          vaultRoot: workingDirectory,
+        })
+        await Promise.all([
+          materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
+          materializeAssistantSkillAsset({
+            relativePath: 'shared/exercise-catalog-runtime.md',
+            skillsRoot,
+          }),
+          materializeRealWorkoutVaultCli({
+            binDirectory,
+            commandLogPath,
+            vaultRoot: workingDirectory,
+          }),
+        ])
+        const started = await startLiveWorkout({
+          exercises: [{
+            mode: 'bodyweight',
+            name: 'Push-up',
+            reps: 10,
+            setCount: 8,
+          }],
+          name: 'Synthetic bodyweight routine',
+          startedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+          vault: workingDirectory,
+        })
+        for (let setOrder = 1; setOrder <= 7; setOrder += 1) {
+          await logLiveWorkoutSet({
+            exerciseOrder: 1,
+            reps: 10,
+            requireExistingSet: true,
+            setOrder,
+            vault: workingDirectory,
+            workoutId: started.eventId,
+          })
+        }
+
+        const contextReferences = [{
+          entityId: started.eventId,
+          entityKind: 'activity_session' as const,
+        }]
+        const turnContextPrompt = [
+          'Conversation context:',
+          'The assistant previously sent these provider-accepted messages in the same conversation, oldest to newest:',
+          '',
+          'Prior message 1:',
+          '- intentId: intent-synthetic-workout-check-in',
+          '- providerAcceptedAt: 2030-01-15T14:00:00.000Z',
+          `- contextReferences (host-preserved routing and interpretation context; not mutation authority or proof that a record exists): ${JSON.stringify(contextReferences)}`,
+          'Text: unavailable in this prior-delivery context.',
+          '',
+          'Use this transcript and its delivery annotations only to interpret the current user message. Inspect exact contextReferences through ordinary canonical reads and use only ordinary domain mutations. Provider acceptance is not a delivered/read receipt, and no annotation is standalone write authority.',
+          '',
+          'A newer assistant exchange in this same conversation concerned an unrelated calendar detail.',
+        ].join('\n')
+        const dynamicTools = [MURPH_ATTACH_RESPONSE_CARD_TOOL]
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          configOverrides: WORKOUT_E2E_CODEX_CONFIG_OVERRIDES,
+          developerInstructions: buildAssistantSystemPrompt({
+            assistantCliContract: [
+              'vault-cli workout show <event-id> --format json',
+              'vault-cli workout set log <exercise> --workout-id <event-id> --set-order <n> [--reps <n>]',
+            ].join('\n'),
+            assistantContextSnapshotPrompt: null,
+            assistantHostedDeviceConnectAvailable: false,
+            assistantHostedDeviceConnectProviders: [],
+            assistantKnowledgeToolsAvailable: false,
+            channel: 'linq',
+            cliAccess: {
+              rawCommand: 'vault-cli',
+              setupCommand: 'murph',
+            },
+            conversationScope: 'direct',
+            currentLocalDate: '2030-01-15',
+            currentTimeZone: 'UTC',
+            hostedRuntime: true,
+            modelBehaviorProfile: 'gpt5-agentic',
+            onboardingGuidance: false,
+            turnTrigger: null,
+          }),
+          dynamicTools,
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          },
+          excludeResumeTurns: true,
+          groupConversation: false,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: resolveAssistantProviderPrompt({
+            dynamicTools,
+            prompt: 'Done — 12 reps.',
+            providerConfig: normalizeAssistantProviderConfig({
+              provider: 'codex-cli',
+            }),
+            turnContextPrompt,
+            workingDirectory,
+          }),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          trustedContextReferences: contextReferences,
+          workingDirectory,
+        })
+        const completed = workoutSessionSchema.parse(
+          (await showWorkoutRecord(workingDirectory, started.eventId)).entity.data.workout,
+        )
+        const commands = (await readFile(commandLogPath, 'utf8'))
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+        const setLogCommands = commands.filter((command) =>
+          command.startsWith('workout set log ')
+        )
+
+        process.stdout.write(
+          `[workout-context-continuity-e2e] ${JSON.stringify({
+            finalMessage: result.finalMessage,
+            loggedReps: completed.exercises[0]?.sets[7]?.reps ?? null,
+            setLogCount: setLogCommands.length,
+          })}\n`,
+        )
+        expect(completed.exercises[0]?.sets.map((set) => set.reps)).toEqual([
+          10,
+          10,
+          10,
+          10,
+          10,
+          10,
+          10,
+          12,
+        ])
+        expect(setLogCommands).toHaveLength(1)
+        expect(setLogCommands[0]).toContain(`--workout-id ${started.eventId}`)
+        expect(setLogCommands[0]).toMatch(/--set-order(?:=|\s)8\b/u)
+        expect(setLogCommands[0]).toMatch(/--reps(?:=|\s)12\b/u)
+        expect(commands.join('\n')).not.toMatch(/workout start /u)
+        expect(result.finalMessage).not.toMatch(/which workout|what workout|\?/iu)
+        expect(result.runtimeIssueInputs).toEqual([])
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'requires typed modes and units while keeping live and reminder sets canonical',
     async () => {
       const config = await resolveRealCodexE2eConfig()

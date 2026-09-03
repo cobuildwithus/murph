@@ -3335,7 +3335,7 @@ describe('assistant auto-reply event-first path', () => {
     expect(sendInput.prompt).toContain('What do I do for this reset?')
   })
 
-  it('treats the latest unrelated same-session delivery as a context breaker', async () => {
+  it('preserves earlier referenced same-session context across a newer unrelated delivery', async () => {
     const vault = await createTempVault()
     replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
       created: false,
@@ -3350,12 +3350,14 @@ describe('assistant auto-reply event-first path', () => {
           entityId: 'evt_current_workout',
           entityKind: 'activity_session',
         }],
+        channel: 'linq',
         intentId: 'intent-workout-question',
         message: 'How did that set go?',
         sentAt: '2026-04-08T00:05:00.000Z',
         sessionId: 'session-chat',
       }),
       createOutboxMessage({
+        channel: 'linq',
         intentId: 'intent-unrelated-answer',
         message: 'Your appointment is at noon.',
         sentAt: '2026-04-08T00:06:00.000Z',
@@ -3366,14 +3368,14 @@ describe('assistant auto-reply event-first path', () => {
 
     await processAssistantAutoReplyGroup({
       allowSelfAuthored: false,
-      context: createReplyContext(createAssistantInputCandidate({
+      context: createReplyContext(createLinqGroupCandidate({
+        inputId: 'ain_22222222222222222222222222222222',
+        messageId: 'linq-msg-current-completion',
         occurredAt: '2026-04-08T00:10:00.000Z',
-        optionalInboxCaptureId: null,
-        source: 'email',
-        text: 'Done',
+        text: 'Done — 12 reps.',
         threadIsDirect: true,
       })),
-      enabledChannels: ['email'],
+      enabledChannels: ['linq'],
       inboxServices: createInboxServices(),
       requestId: null,
       sessionMaxAgeMs: null,
@@ -3381,8 +3383,12 @@ describe('assistant auto-reply event-first path', () => {
     })
 
     const sendInput = readSentInput()
-    expect(sendInput.trustedContextReferences).toEqual([])
-    expect(sendInput.turnContext ?? '').not.toContain('evt_current_workout')
+    expect(sendInput.trustedContextReferences).toEqual([{
+      entityId: 'evt_current_workout',
+      entityKind: 'activity_session',
+    }])
+    expect(sendInput.turnContext).toContain('evt_current_workout')
+    expect(sendInput.turnContext).not.toContain('Your appointment is at noon.')
     expect(sendInput.receiptMetadata).toEqual(expect.objectContaining({
       [AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]:
         'intent-unrelated-answer',

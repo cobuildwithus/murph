@@ -4883,20 +4883,13 @@ async function resolveAssistantAutoReplyCrossSessionDeliveryContext(input: {
       ) > 0,
     )
     const selected = deliveries.at(-1) ?? null
-    const projectedDeliveries = selected === null
-      ? []
-      : deliveries.flatMap((delivery) => {
-          const projected = projectAssistantAutoReplyPriorDelivery({
-            delivery: delivery.intentId === selected.intentId
-              ? delivery
-              : {
-                  ...delivery,
-                  automationContextReferences: [],
-                },
-            sessionId: input.session?.sessionId ?? null,
-          })
-          return projected === null ? [] : [projected]
-        })
+    const projectedDeliveries = deliveries.flatMap((delivery) => {
+      const projected = projectAssistantAutoReplyPriorDelivery({
+        delivery,
+        sessionId: input.session?.sessionId ?? null,
+      })
+      return projected === null ? [] : [projected]
+    })
     return {
       claim: selected === null
         ? null
