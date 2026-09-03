@@ -1532,8 +1532,8 @@ The workspace stores an independent assistant deadline in
 `nextDefaultProcessingWakeAt`, so assistant work does not replace the device
 owner and both remain visible to orchestration. The first live system item
 above the imported frontier independently keeps its creation-time origin; an
-absent, malformed, behind-head,
-or beyond-high-water frontier fails closed to the head's creation time. Covered
+absent, malformed, behind-head, or beyond-high-water frontier fails closed to
+the head's creation time. Covered
 work is therefore not stalled before its next runtime opportunity, but becomes
 alertable 15 minutes after it is due.
 Non-device system heads continue to age from mailbox creation. The selected
