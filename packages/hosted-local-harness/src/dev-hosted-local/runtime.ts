@@ -61,6 +61,7 @@ const HOSTED_RUNNER_LOCAL_WORKER_NAME_LABEL = "murph.hosted.local-worker-name";
 const HOSTED_RUNNER_LOCAL_IMAGE_REPOSITORIES = [
   "cloudflare-dev/deploysmokerunnercontainer",
   "cloudflare-dev/runnercontainer",
+  "cloudflare-dev/standbyrunnercontainer",
   "murph-cloudflare-runner",
 ] as const;
 const HOSTED_RUNNER_IMAGE_RM_BATCH_SIZE = 40;
@@ -76,6 +77,7 @@ const HOSTED_RUNNER_LOCAL_DO_CLASS_NAMES = [
   "UserRunnerDurableObject",
   "RunnerContainer",
   "DeploySmokeRunnerContainer",
+  "StandbyRunnerContainer",
 ] as const;
 const HOSTED_LOCAL_E2E_WORKER_CONTAINER_NAME_PREFIX = "workerd-murph-hosted-e2e-";
 const HOSTED_LOCAL_WORKTREE_WORKER_CONTAINER_NAME_PREFIX = "workerd-murph-worktree-";
@@ -1367,6 +1369,7 @@ function isHostedRunnerLocalImageRef(value: string): boolean {
   return repository.startsWith("murph-hosted-e2e-")
     && (
       repository.endsWith("-deploysmokerunnercontainer")
+      || repository.endsWith("-standbyrunnercontainer")
       || repository.endsWith("-runnercontainer")
     );
 }

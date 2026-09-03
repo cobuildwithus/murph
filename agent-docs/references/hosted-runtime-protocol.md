@@ -1626,17 +1626,22 @@ does not select a mailbox owner, create a write fence, wait for health
 readiness, or invoke workspace work. Withdrawal and account deletion consume
 the reserved exact target, and `destroyInstance()` supersedes an in-progress
 hint before stopping that container. A denied admission starts nothing.
+When standby mode is `allocate`, this exact-user shell-prewarm hint is skipped.
+The standby coordinator is then the sole prewarm owner, so a hint cannot reserve
+the member stop target before the foreground request gets its one fresh claim
+opportunity. A standby miss still falls back to the ordinary exact-user start.
 
 The release-scoped ENAM standby is a separate optimization and does not trust
 that typing hint. A memberless coordinator maintains at most one advertised
 pristine slot after exact release, image fingerprints, architecture,
 heavy-runtime, and content-free Codex App Server initialize/stop readiness all
 pass. In allocation mode, one storage transaction removes that slot from ready
-and records an opaque claim tombstone only for a fresh `started` action whose
-`default` work came from authenticated Web-direct ingress with a validated
-direct-attempt identity. Temporal starts, background processing modes, spoofed
-direct inputs, and replacement of work already using the member's exact
-container keep the unchanged exact-user target. The requesting `UserRunner`
+and records an opaque claim tombstone only for fence-free `default` work from
+authenticated Web-direct ingress with a validated direct-attempt identity.
+Temporal requests, background processing modes, and spoofed direct inputs keep
+the unchanged exact-user target. A trusted foreground replacement may claim the
+slot after the exact-user background fence is cleared rather than reusing a
+child that is still shutting down. The requesting `UserRunner`
 durably reserves the opaque stop target before immutable bind-once member
 attachment, then opens its normal write fence and restores the encrypted
 workspace. The real resident Codex App Server remains post-restore because its
@@ -2886,18 +2891,27 @@ the fence regardless of whether a status read appears to show progress. Exact
 successful completion clears the fence only by the matching attempt identity.
 This prevents duplicate replacement while a live child may still be running and
 leaves replacement ownership in the exact identity-aware wake path.
-After RunnerContainer receives and parses a successful invocation result, and
-only after its exact active-operation record has been removed, it sends the
-per-user UserRunner a best-effort completion receipt carrying that result plus
-the attempt and generation. UserRunner re-reads the current runtime fence and
-uses the existing full-token completion compare-and-swap; a stale, duplicate,
-wrong-user, or wrong-generation receipt is a no-op. The compare-and-swap winner
-alone may emit the existing owner-release callback. Receipt failure cannot
-change the completed runner result; RunnerContainer stops waiting after one
-second, consumes any late rejection, and lets the original outer UserRunner
-continuation remain the mixed-version and callback-loss fallback. The receipt
-does not make checkpoint success, idle expiry, container stop, or elapsed time
-completion authority.
+After a successful hosted runtime invocation settles, the container entrypoint
+clears the invocation's wake and abort pointers, decrements its active-job
+count, and cleans request transport. Only then does the container process send
+the parsed result plus its exact attempt and generation to the existing
+internal runner-control host. This release-first order lets a successor use the
+process as soon as the durable fence is cleared instead of receiving a busy
+response. Outbound interception binds the request to the container's user and
+runner, then forwards it to that per-user UserRunner. UserRunner re-reads the
+current runtime fence inside its atomic completion method and uses the existing
+full-token completion compare-and-swap; a stale, duplicate, wrong-user, or
+wrong-generation receipt is a no-op. The compare-and-swap winner alone may emit
+the existing owner-release callback. This process-origin receipt survives
+replacement of the RunnerContainer Durable Object activation and its in-memory
+active-operation record. Both a fetch abort and an independent hard deadline
+bound the receipt to one second, and any failure preserves the completed runner
+result. The ordinary outer RunnerContainer-to-UserRunner result remains the
+normal completion path. Structured receipt outcomes distinguish only
+`recorded` from `not_recorded`; UserRunner logs the exact durable reason. The
+receipt adds no poller, queue, stored recovery job, or second completion
+authority, and does not make checkpoint success, idle expiry, container stop,
+or elapsed time completion authority.
 When the outer RunnerContainer active-operation pointer is missing, a container
 wake response must carry explicit identity-checked wake metadata before an
 accepted wake is trusted; identity-blind accepted responses from deploy-skewed

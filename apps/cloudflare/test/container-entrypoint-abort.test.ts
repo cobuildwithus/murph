@@ -9,6 +9,12 @@ import { HOSTED_RUNTIME_ARCHITECTURE_VERSION } from "../src/hosted-runtime-archi
 import "../src/container-entrypoint-heavy-runtime.js";
 
 const mocks = vi.hoisted(() => ({
+  recordHostedContainerRuntimeCompletionBestEffort: vi.fn(
+    async (_input: {
+      job: { request: { attemptId: string } };
+      result: { status: string };
+    }) => undefined,
+  ),
   reportHostedContainerFatalBestEffort: vi.fn(async () => undefined),
   runHostedWorkspaceInvocation: vi.fn(),
 }));
@@ -33,11 +39,19 @@ vi.mock("../src/container-fatal-report.js", async () => {
   };
 });
 
+vi.mock("../src/container-runtime-completion.js", () => ({
+  recordHostedContainerRuntimeCompletionBestEffort:
+    mocks.recordHostedContainerRuntimeCompletionBestEffort,
+}));
+
 import { startHostedContainerEntrypoint } from "../src/container-entrypoint.js";
 
 const servers: Array<Awaited<ReturnType<typeof startHostedContainerEntrypoint>>> = [];
 
 beforeEach(() => {
+  mocks.recordHostedContainerRuntimeCompletionBestEffort.mockResolvedValue(
+    undefined,
+  );
   mocks.runHostedWorkspaceInvocation.mockResolvedValue(buildWorkspaceRunnerResult());
 });
 
@@ -230,6 +244,11 @@ describe("container entrypoint abort boundary", () => {
   it("keeps an accepted workspace invocation running when only the response closes", async () => {
     const invocationStarted = createDeferred<AbortSignal>();
     const finishInvocation = createDeferred();
+    const completionStarted = createDeferred<{
+      job: { request: { attemptId: string } };
+      result: { status: string };
+    }>();
+    const releaseCompletion = createDeferred();
     const exit = vi.fn();
     const readFile = vi.fn(async () => {
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
@@ -245,6 +264,17 @@ describe("container entrypoint abort boundary", () => {
         await finishInvocation.promise;
         expect(signal.aborted).toBe(false);
         return buildWorkspaceRunnerResult();
+      },
+    );
+    let completionCallCount = 0;
+    mocks.recordHostedContainerRuntimeCompletionBestEffort.mockImplementation(
+      async (input) => {
+        completionCallCount += 1;
+        if (completionCallCount !== 1) {
+          return;
+        }
+        completionStarted.resolve(input);
+        await releaseCompletion.promise;
       },
     );
 
@@ -277,16 +307,24 @@ describe("container entrypoint abort boundary", () => {
 
     finishInvocation.resolve();
 
-    await waitForAssertion(async () => {
-      const health = await sendHostedContainerGetRequest({
-        path: "/health",
-        port: address.port,
-      });
-      expect(health.status).toBe(200);
-      expect(health.json).toMatchObject({
-        activeJobCount: 0,
-        poisoned: false,
-      });
+    await expect(completionStarted.promise).resolves.toMatchObject({
+      job: {
+        request: {
+          attemptId: "attempt_evt_response_close_after_accept",
+        },
+      },
+      result: {
+        status: "idle",
+      },
+    });
+    const healthDuringCompletion = await sendHostedContainerGetRequest({
+      path: "/health",
+      port: address.port,
+    });
+    expect(healthDuringCompletion.status).toBe(200);
+    expect(healthDuringCompletion.json).toMatchObject({
+      activeJobCount: 0,
+      poisoned: false,
     });
     expect(exit).not.toHaveBeenCalled();
     expect(mocks.reportHostedContainerFatalBestEffort).not.toHaveBeenCalled();
@@ -300,6 +338,10 @@ describe("container entrypoint abort boundary", () => {
     });
     expect(nextInvocation.status).toBe(200);
     expect(mocks.runHostedWorkspaceInvocation).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.recordHostedContainerRuntimeCompletionBestEffort,
+    ).toHaveBeenCalledTimes(2);
+    releaseCompletion.resolve();
   });
 
   it("aborts an accepted workspace invocation through the internal abort endpoint", async () => {

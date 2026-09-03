@@ -327,6 +327,18 @@ Last verified: 2026-09-01
   release a newer owner. The signal creates no work and normal reconciliation
   facts still choose the processing mode. Callback or signal failure retains
   the existing durable owner horizon.
+- A completed hosted runtime does not depend on the originating
+  `RunnerContainer` activation surviving long enough to deliver its result.
+  After a successful invocation, the container entrypoint clears its local wake
+  and abort pointers, decrements active work, and cleans request transport before
+  sending the exact result, attempt, and generation over the existing bound
+  internal route to `UserRunner`. That release-first order prevents the durable
+  fence from admitting a successor while the process still reports busy.
+  `UserRunner`'s existing compare-and-swap remains the only write-fence clear
+  authority. The ordinary outer result remains the normal path; duplicate or
+  stale receipts are harmless. The one-second best-effort receipt reports only
+  `recorded` or `not_recorded`, never changes the completed result, and adds no
+  completion poller or recovery queue.
 - Hosted background admission uses one capability-scoped projection on the
   existing workspace checkpoint row. A capable runtime checkpoints an absolute
   `systemMailboxProgressGeneration` plus the independently calculated next
@@ -393,13 +405,18 @@ Last verified: 2026-09-01
 - Cloudflare standby allocation is an optional one-slot optimization, not a
   scheduler. `off` is the source-controlled default, `shadow` maintains and
   re-proves one current-release ENAM slot without allocating it, and `allocate`
-  offers one 250 ms claim/bind deadline only to a fresh, authenticated
-  Web-direct `default` start. Temporal and background starts, plus foreground
-  replacement of work already using the member's exact container, keep the
-  ordinary exact-user target. A miss before slot ownership uses that same
-  fallback; an ambiguous bind after the per-member stop target is durably
-  reserved retries that exact target instead of risking two live containers.
-  Pending and retained targets are reconciled before fresh-claim eligibility.
+  offers one 250 ms claim/bind deadline only to a fence-free, authenticated
+  Web-direct `default` request. Temporal and background requests keep the
+  ordinary exact-user target. After foreground preemption has cleared an
+  exact-user background fence, the trusted foreground replacement may claim
+  the ready standby instead of reusing the child while it shuts down. A miss
+  before slot ownership uses the same exact-user fallback; an ambiguous bind
+  after the per-member stop target is durably reserved retries that exact
+  target instead of risking two live containers. Pending and retained targets
+  are reconciled before fresh-claim eligibility. In `allocate` mode the standby
+  coordinator is the only shell-prewarm owner; the exact-user prewarm hint is
+  skipped so it cannot reserve a competing target before a fresh claim. The
+  ordinary exact-user start remains the fallback after a claim miss.
   A coordinator transaction admits at most one winner, then replacement
   provisioning runs under `waitUntil`; alarms re-prove readiness, retry failed
   retirement, expire unbound claim tombstones, and drain stale releases. The

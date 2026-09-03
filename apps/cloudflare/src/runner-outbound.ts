@@ -67,19 +67,24 @@ import {
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
-import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "./internal-hosts.ts";
+import {
+  CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_PATH,
+  CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
+} from "./internal-hosts.ts";
 import { json, jsonError, methodNotAllowed, notFound, readJsonObject, unauthorized } from "./json.ts";
 import {
   readHostedRuntimeArtifactFetchTelemetry,
 } from "./runner-outbound/headers.ts";
 import {
-  requireRunnerRuntimeWriteFenceHeaders,
   requireRunnerRuntimeWriteFenceWrite,
   RunnerRuntimeWriteFenceError,
   requireRunnerRuntimeWriteFenceWorkspaceWrite,
   writeRunnerRuntimeWriteFenceHeaders,
 } from "./runner-outbound/write-fence.ts";
 import { handleRunnerResultsRequest } from "./runner-outbound/results.ts";
+import {
+  handleRunnerRuntimeCompletionRequest,
+} from "./runner-outbound/runtime-completion.ts";
 import { handleRunnerWebControlRequest } from "./runner-outbound/web-control.ts";
 import {
   readHostedRunnerDiagnosticMethod,
@@ -88,8 +93,8 @@ import {
 } from "./runner-outbound/diagnostics.ts";
 import {
   resolveRunnerOutboundUserCryptoContext,
-  resolveRunnerOutboundUserRunnerStub,
   requireRunnerOutboundUserStubMethod,
+  resolveRunnerOutboundUserRunnerStub,
   type RunnerOutboundEnvironmentSource,
 } from "./runner-outbound/shared.ts";
 import {
@@ -141,15 +146,15 @@ export async function handleRunnerOutboundRequest(
     const url = new URL(request.url);
 
     const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
-    if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort) {
-      return handleRunnerResultsRequest({
-        bucket: env.BUNDLES,
-        env,
-        environment,
-        request,
-        url,
-        userId,
-      });
+    const dedicatedPortResponse = await handleRunnerDedicatedPortRequest({
+      env,
+      environment,
+      request,
+      url,
+      userId,
+    });
+    if (dedicatedPortResponse) {
+      return dedicatedPortResponse;
     }
 
     if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane) {
@@ -324,6 +329,35 @@ export async function handleRunnerOutboundRequest(
       ...(errorName ? { errorName } : {}),
     }, 500);
   }
+}
+
+async function handleRunnerDedicatedPortRequest(input: {
+  env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  request: Request;
+  url: URL;
+  userId: string;
+}): Promise<Response | null> {
+  if (input.url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.runnerControl) {
+    if (input.url.pathname !== CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_PATH) {
+      return notFound();
+    }
+    if (input.request.method !== "POST") {
+      return methodNotAllowed();
+    }
+    return await handleRunnerRuntimeCompletionRequest(input);
+  }
+  if (input.url.hostname !== CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort) {
+    return null;
+  }
+  return await handleRunnerResultsRequest({
+    bucket: input.env.BUNDLES,
+    env: input.env,
+    environment: input.environment,
+    request: input.request,
+    url: input.url,
+    userId: input.userId,
+  });
 }
 
 function safeRunnerOutboundRequestUrl(value: string): URL | null {

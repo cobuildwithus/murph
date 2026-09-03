@@ -307,6 +307,22 @@ export class RuntimeProcessingController {
   ): Promise<void> {
     const orchestrationAttemptId =
       orchestration?.shellPrewarmOrchestrationAttemptId;
+    if (readHostedStandbyMode(this.input.runnerRuntimeEnvSource) === "allocate") {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          shellPrewarmAdmissionOutcome: "skipped_standby_pool",
+          ...(orchestrationAttemptId === undefined
+            ? {}
+            : { orchestrationAttemptId }),
+          shellPrewarmSource: source ?? "unknown",
+        },
+        message: "Hosted runner shell prewarm admission decided.",
+        phase: "scheduled",
+        userId,
+      });
+      return;
+    }
     const namespace = this.input.runnerContainerNamespace;
     if (!namespace) {
       throw new Error("Runner container namespace is unavailable.");
@@ -1005,7 +1021,6 @@ export class RuntimeProcessingController {
   }
 
   private async resolveFreshRunnerContainer(input: {
-    allowFreshStandbyClaim: boolean;
     commandBudget: RuntimeProcessingCommandBudget;
     exactRunnerContainerName: string;
     initialRecord: RunnerStateRecord;
@@ -1046,7 +1061,6 @@ export class RuntimeProcessingController {
 
     if (
       readHostedStandbyMode(this.input.runnerRuntimeEnvSource) !== "allocate"
-      || !input.allowFreshStandbyClaim
       || normalizeRuntimeProcessingMode(input.input.processingMode) !== "default"
       || !isTrustedWebDirectRuntimeProcessing(input.input)
     ) {
@@ -1351,7 +1365,6 @@ export class RuntimeProcessingController {
       throw new Error("Hosted runner container identity did not match the runtime start user.");
     }
     const resolution = await this.resolveFreshRunnerContainer({
-      allowFreshStandbyClaim: input.action === "started",
       commandBudget: input.commandBudget,
       exactRunnerContainerName: runnerContainerIdentity.runnerContainerName,
       initialRecord,
