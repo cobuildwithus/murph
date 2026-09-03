@@ -23,8 +23,6 @@ const MAX_CHANGED_FILES = 3_000;
 const MAX_PRODUCER_FIXTURE_BYTES = 32 * 1024;
 const MAX_PRODUCER_FIXTURES = 16;
 const PAGE_SIZE = 100;
-const LEGACY_READER_STATES = ["none", "active", "suspended"];
-
 const RELEVANT_PREFIXES = [
   "apps/cloudflare/",
   "apps/web/",
@@ -288,7 +286,7 @@ export function inspectPrivateRun(raw, { privateSha, runId, workflowId }) {
   };
 }
 
-export function supportedReaderDigest(readerShas, legacyReaderState = "none") {
+export function supportedReaderDigest(readerShas) {
   if (!Array.isArray(readerShas) || readerShas.length === 0) {
     throw new Error("Supported-reader set must not be empty.");
   }
@@ -299,14 +297,11 @@ export function supportedReaderDigest(readerShas, legacyReaderState = "none") {
   if (new Set(normalized).size !== normalized.length) {
     throw new Error("Supported-reader set contains a duplicate SHA.");
   }
-  if (!LEGACY_READER_STATES.includes(legacyReaderState)) {
-    throw new Error("Legacy reader state is invalid.");
-  }
   // Cross-repository wire format: sorted lowercase SHAs, one per line, with a
-  // trailing bounded legacy-state line. The private attestation computes this
-  // exact digest from protected live routing and suspension evidence.
+  // trailing newline. Private CI binds lifecycle state separately so public
+  // verification does not duplicate private routing policy.
   return createHash("sha256")
-    .update(`${normalized.join("\n")}\nlegacy-state:${legacyReaderState}\n`)
+    .update(`${normalized.join("\n")}\n`)
     .digest("hex");
 }
 
@@ -374,22 +369,17 @@ export function inspectAttestationJobs(jobs, {
   if (!readers.includes(privateSha)) {
     throw new Error("Supported-reader proof omitted the dispatched private candidate.");
   }
-  const proof = LEGACY_READER_STATES.map((legacyReaderState) => {
-    const digest = supportedReaderDigest(readers, legacyReaderState);
-    return {
-      digest,
-      proofDigest: compatibilityProofDigest({
-        producerDigest,
-        publicSha,
-        readersDigest: digest,
-        requestId,
-      }),
-    };
-  }).find(({ proofDigest }) => attestations[0] === proofDigest);
-  if (!proof) {
+  const digest = supportedReaderDigest(readers);
+  const proofDigest = compatibilityProofDigest({
+    producerDigest,
+    publicSha,
+    readersDigest: digest,
+    requestId,
+  });
+  if (attestations[0] !== proofDigest) {
     throw new Error("Private compatibility attestation does not bind the requested proof.");
   }
-  return { ...proof, readerCount: readers.length };
+  return { digest, proofDigest, readerCount: readers.length };
 }
 
 export function inspectJobPage(raw) {
