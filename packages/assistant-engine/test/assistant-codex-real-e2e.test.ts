@@ -32,7 +32,6 @@ import {
 } from '@murphai/core'
 import {
   buildHostedExecutionGroupContextHandoffInstructions,
-  HOSTED_EXECUTION_OPERATOR_DIAGNOSTIC_PERMISSION_TEXT,
 } from '@murphai/hosted-execution'
 import {
   buildMurphHostedPermissionProfileTomlLines,
@@ -80,7 +79,7 @@ import {
   resolveCodexCommandFamily,
 } from '../src/assistant-codex/command-family.ts'
 import {
-  executeConsentedReadOnlyAssistantAsk,
+  executeOperatorDiagnostic,
   executeReadOnlyAssistantAsk,
 } from '../src/assistant-ask.ts'
 import {
@@ -12770,9 +12769,9 @@ describeRealCodex('real Codex connected health record awareness e2e', () => {
   )
 })
 
-describeRealCodex('real Codex operator diagnostic read tools e2e', () => {
+describeRealCodex('real Codex direct operator diagnostic e2e', () => {
   it(
-    'reads an automation support kind without changing canonical state',
+    'correlates runtime and hosted session evidence without changing canonical state',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const vaultRoot = await mkdtemp(
@@ -12804,35 +12803,79 @@ describeRealCodex('real Codex operator diagnostic read tools e2e', () => {
         )
         const createdAutomation = await upsertAutomation({
           continuityPolicy: 'fresh',
-          instructions: 'Summarize the synthetic workspace status this evening.',
+          instructions: 'Canonical mutation sentinel only.',
           now: new Date('2026-06-14T12:00:00.000Z'),
           route: {
             channel: 'linq',
-            deliveryTarget: 'synthetic-workspace-summary',
+            deliveryTarget: 'synthetic-canonical-sentinel',
             identityId: null,
             participantId: null,
-            threadId: 'synthetic-workspace-summary',
+            threadId: 'synthetic-canonical-sentinel',
             threadIsDirect: false,
           },
           schedule: { kind: 'dailyLocal', localTime: '21:17' },
-          slug: 'synthetic-evening-workspace-summary',
+          slug: 'synthetic-operator-diagnostic-mutation-sentinel',
           status: 'active',
           supportKind: 'review',
           tags: [],
-          title: 'Synthetic evening workspace summary',
+          title: 'Synthetic operator diagnostic mutation sentinel',
           vaultRoot,
         })
+        const correlationKey = 'synthetic-correlation-7f4d9a'
+        const runtimeMarker = 'runtime-marker-a13c8e'
+        const sessionMarker = 'session-marker-b72d4f'
+        const runtimeEvidencePath = path.join(
+          vaultRoot,
+          '.runtime',
+          'operator-diagnostic',
+          'synthetic-runtime-evidence.json',
+        )
+        await mkdir(path.dirname(runtimeEvidencePath), { recursive: true })
+        await writeFile(
+          runtimeEvidencePath,
+          `${JSON.stringify({
+            correlationKey,
+            kind: 'synthetic_operator_runtime_evidence',
+            runtimeMarker,
+            status: 'ready',
+          }, null, 2)}\n`,
+          { encoding: 'utf8', mode: 0o600 },
+        )
+        const runtimeEvidenceBefore = await readFile(runtimeEvidencePath, 'utf8')
         const canonicalVaultBefore = await snapshotRealCodexCanonicalVault(
           vaultRoot,
         )
         const permissionConfig =
-          await materializeRealCodexHostedPermissionHome(config, {
-            trustedProjectRoot: vaultRoot,
-          })
+          await materializeRealCodexHostedPermissionHome(config)
         permissionHomePaths = permissionConfig.temporaryPaths
+        const sessionEvidencePath = path.join(
+          permissionConfig.codexHome,
+          'sessions',
+          '2026',
+          '06',
+          '15',
+          'rollout-synthetic-operator-diagnostic.jsonl',
+        )
+        await mkdir(path.dirname(sessionEvidencePath), { recursive: true })
+        await writeFile(
+          sessionEvidencePath,
+          `${JSON.stringify({
+            payload: {
+              message: [
+                'Synthetic hosted rollout evidence only.',
+                `correlation_key=${correlationKey}`,
+                `session_marker=${sessionMarker}`,
+              ].join(' '),
+              type: 'agent_message',
+            },
+            timestamp: '2026-06-15T11:59:00.000Z',
+            type: 'event_msg',
+          })}\n`,
+          { encoding: 'utf8', mode: 0o600 },
+        )
+        const sessionEvidenceBefore = await readFile(sessionEvidencePath, 'utf8')
 
-        const result = await executeConsentedReadOnlyAssistantAsk({
-          answerMode: 'caller_handoff',
+        const result = await executeOperatorDiagnostic({
           codexCommand:
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
             ?? undefined,
@@ -12844,14 +12887,13 @@ describeRealCodex('real Codex operator diagnostic read tools e2e', () => {
           onProviderUsage: ({ usage }) => {
             recordRealCodexProviderUsage(usage.usage)
           },
-          permissionText:
-            HOSTED_EXECUTION_OPERATOR_DIAGNOSTIC_PERMISSION_TEXT,
           question: [
-            'Inspect the one active evening workspace-summary automation in this workspace.',
-            'Return only its exact automation ID, persisted support kind, schedule, and workspace timezone.',
+            'Use the synthetic operator runtime evidence and hosted Codex rollout/session evidence.',
+            `Find the records joined by correlation key ${correlationKey}.`,
+            'Return only the exact runtime marker and session marker.',
+            'Ordinary canonical automation data is not evidence for this answer.',
           ].join(' '),
           reasoningEffort: 'low',
-          workspaceInspection: 'read_tools',
           workspaceRoot: vaultRoot,
         })
 
@@ -12859,15 +12901,15 @@ describeRealCodex('real Codex operator diagnostic read tools e2e', () => {
         if (result.outcome !== 'answered') {
           throw new Error('Expected the operator diagnostic to answer.')
         }
-        expect(result.answer).toContain(
+        expect(result.answer).toContain(runtimeMarker)
+        expect(result.answer).toContain(sessionMarker)
+        expect(result.answer).not.toContain(
           createdAutomation.record.automationId,
         )
-        expect(result.answer).toMatch(/\breview\b/iu)
-        expect(result.answer).toMatch(/(?:21:17|9:17\s*p\.?m\.?)\b/iu)
-        expect(result.answer).toContain('America/Denver')
         expect(result.answer).not.toContain(vaultRoot)
+        expect(result.answer).not.toContain(permissionConfig.codexHome)
         expect(result.answer).not.toMatch(
-          /(?:\.codex|\.runtime|bank\/|MCP|permission profile|read-only tools|workspace root)/iu,
+          /(?:\.codex|bank\/|MCP|permission profile|read-only tools|workspace root)/iu,
         )
         console.info(
           `[real-codex operator diagnostic] ${result.answer.replaceAll(/\s+/gu, ' ').trim()}`,
@@ -12877,8 +12919,12 @@ describeRealCodex('real Codex operator diagnostic read tools e2e', () => {
         ).rejects.toMatchObject({ code: 'ENOENT' })
         await expect(
           snapshotRealCodexCanonicalVault(vaultRoot),
-        ).resolves.toEqual(
-          canonicalVaultBefore,
+        ).resolves.toEqual(canonicalVaultBefore)
+        await expect(readFile(runtimeEvidencePath, 'utf8')).resolves.toBe(
+          runtimeEvidenceBefore,
+        )
+        await expect(readFile(sessionEvidencePath, 'utf8')).resolves.toBe(
+          sessionEvidenceBefore,
         )
       } finally {
         await removeRealCodexTemporaryPaths([

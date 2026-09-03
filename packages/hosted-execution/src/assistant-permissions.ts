@@ -1,4 +1,6 @@
 export const MURPH_GROUP_READ_PERMISSION_PROFILE = "murph-group-read" as const;
+export const MURPH_OPERATOR_DIAGNOSTIC_READ_PERMISSION_PROFILE =
+  "murph-operator-diagnostic-read" as const;
 export const MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE =
   "murph-group-room-model-maintenance" as const;
 export const MURPH_MEMBER_READ_PERMISSION_PROFILE =
@@ -23,6 +25,34 @@ export function buildMurphGroupReadPermissionProfileTomlLines(): readonly string
     '"**/.env.*" = "deny"',
     "",
     `[permissions.${MURPH_GROUP_READ_PERMISSION_PROFILE}.network]`,
+    "enabled = false",
+    "",
+  ];
+}
+
+export function buildMurphOperatorDiagnosticReadPermissionProfileTomlLines(): readonly string[] {
+  return [
+    "# Authenticated operator diagnostics inspect only exact host-bound read roots.",
+    `[permissions.${MURPH_OPERATOR_DIAGNOSTIC_READ_PERMISSION_PROFILE}.filesystem]`,
+    '":minimal" = "read"',
+    "glob_scan_max_depth = 64",
+    "",
+    `[permissions.${MURPH_OPERATOR_DIAGNOSTIC_READ_PERMISSION_PROFILE}.filesystem.":workspace_roots"]`,
+    '"." = "read"',
+    '".runtime/operations/assistant/secrets" = "deny"',
+    '".codex" = "deny"',
+    '".git" = "deny"',
+    '"**/.env" = "deny"',
+    '"**/.env.*" = "deny"',
+    '"**/.mcp.json" = "deny"',
+    '"**/auth.json" = "deny"',
+    '"**/config.toml" = "deny"',
+    '"**/credentials" = "deny"',
+    '"**/credentials.*" = "deny"',
+    '"**/*.key" = "deny"',
+    '"**/*.pem" = "deny"',
+    "",
+    `[permissions.${MURPH_OPERATOR_DIAGNOSTIC_READ_PERMISSION_PROFILE}.network]`,
     "enabled = false",
     "",
   ];
@@ -87,6 +117,7 @@ export function buildMurphMemberWorkspacePermissionProfileTomlLines(): readonly 
 export function buildMurphHostedPermissionProfileTomlLines(): readonly string[] {
   return [
     ...buildMurphGroupReadPermissionProfileTomlLines(),
+    ...buildMurphOperatorDiagnosticReadPermissionProfileTomlLines(),
     ...buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines(),
     ...buildMurphMemberReadPermissionProfileTomlLines(),
     ...buildMurphMemberWorkspacePermissionProfileTomlLines(),
