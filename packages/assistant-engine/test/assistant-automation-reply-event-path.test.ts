@@ -3335,7 +3335,7 @@ describe('assistant auto-reply event-first path', () => {
     expect(sendInput.prompt).toContain('What do I do for this reset?')
   })
 
-  it('preserves earlier referenced same-session context across a newer unrelated delivery', async () => {
+  it('preserves only the latest referenced context across a newer unrelated delivery', async () => {
     const vault = await createTempVault()
     replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
       created: false,
@@ -3345,6 +3345,17 @@ describe('assistant auto-reply event-first path', () => {
       },
     })
     replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        automationContextReferences: [{
+          entityId: 'evt_stale_workout',
+          entityKind: 'activity_session',
+        }],
+        channel: 'linq',
+        intentId: 'intent-stale-workout-question',
+        message: 'How did the older set go?',
+        sentAt: '2026-04-08T00:04:00.000Z',
+        sessionId: 'session-chat',
+      }),
       createOutboxMessage({
         automationContextReferences: [{
           entityId: 'evt_current_workout',
@@ -3357,6 +3368,7 @@ describe('assistant auto-reply event-first path', () => {
         sessionId: 'session-chat',
       }),
       createOutboxMessage({
+        automationContextReferences: null,
         channel: 'linq',
         intentId: 'intent-unrelated-answer',
         message: 'Your appointment is at noon.',
@@ -3388,10 +3400,85 @@ describe('assistant auto-reply event-first path', () => {
       entityKind: 'activity_session',
     }])
     expect(sendInput.turnContext).toContain('evt_current_workout')
+    expect(sendInput.turnContext).not.toContain('evt_stale_workout')
     expect(sendInput.turnContext).not.toContain('Your appointment is at noon.')
     expect(sendInput.receiptMetadata).toEqual(expect.objectContaining({
       [AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]:
         'intent-unrelated-answer',
+    }))
+  })
+
+  it.each([
+    {
+      automationContextReferences: [] as const,
+      kind: 'an explicit context clear',
+      visible: true,
+    },
+    {
+      automationContextReferences: undefined,
+      kind: 'legacy missing context metadata',
+      visible: false,
+    },
+  ])('honors $kind after an earlier referenced delivery', async ({
+    automationContextReferences,
+    visible,
+  }) => {
+    const vault = await createTempVault()
+    replyEventPathMocks.resolveAssistantSession.mockResolvedValue({
+      created: false,
+      session: {
+        lastTurnAt: '2026-04-08T00:02:00.000Z',
+        sessionId: 'session-chat',
+      },
+    })
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        automationContextReferences: [{
+          entityId: 'evt_finished_workout',
+          entityKind: 'activity_session',
+        }],
+        channel: 'linq',
+        intentId: 'intent-finished-workout-question',
+        message: 'How did that set go?',
+        sentAt: '2026-04-08T00:05:00.000Z',
+        sessionId: 'session-chat',
+      }),
+      createOutboxMessage({
+        automationContextReferences,
+        channel: 'linq',
+        intentId: 'intent-workout-context-cleared',
+        message: 'That workout is no longer active.',
+        sentAt: '2026-04-08T00:06:00.000Z',
+        sessionId: 'session-chat',
+      }),
+    ])
+    await completeAutoReplyRouteMigration(vault)
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(createLinqGroupCandidate({
+        inputId: 'ain_33333333333333333333333333333333',
+        messageId: 'linq-msg-after-context-clear',
+        occurredAt: '2026-04-08T00:10:00.000Z',
+        text: 'Done — 12 reps.',
+        threadIsDirect: true,
+      })),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const sendInput = readSentInput()
+    expect(sendInput.trustedContextReferences).toEqual([])
+    expect(sendInput.turnContext ?? '').not.toContain('evt_finished_workout')
+    expect((sendInput.turnContext ?? '').includes(
+      'contextReferences: none supplied; do not guess a canonical record',
+    )).toBe(visible)
+    expect(sendInput.receiptMetadata).toEqual(expect.objectContaining({
+      [AUTO_REPLY_RECEIPT_CROSS_SESSION_CONTEXT_INTENT_ID_KEY]:
+        'intent-workout-context-cleared',
     }))
   })
 
@@ -3431,7 +3518,7 @@ describe('assistant auto-reply event-first path', () => {
                   entityId: referenceId,
                 }],
               }
-            : {}),
+            : { automationContextReferences: null }),
           channel: 'linq',
           intentId: 'intent-reminder-matrix',
           media: presentation === 'media-only'
@@ -6004,7 +6091,7 @@ function createOutboxMessage(input: {
   automationContextReferences?: readonly {
     entityId: string
     entityKind: string
-  }[]
+  }[] | null
   channel?: string
   deliveryIdempotencyKey?: string | null
   identityId?: string | null

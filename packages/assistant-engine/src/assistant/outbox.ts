@@ -405,11 +405,14 @@ export async function createAssistantOutboxIntent(
     const answeredMailboxItemIds = normalizeAssistantOutboxAnsweredMailboxItemIds(
       input.answeredMailboxItemIds ?? [],
     )
-    const automationContextReferences =
-      input.automationContextReferences?.map((reference) => ({
-        entityId: reference.entityId,
-        entityKind: reference.entityKind,
-      })) ?? []
+    const automationContextReferences = input.automationContextReferences === undefined
+      ? undefined
+      : input.automationContextReferences === null
+        ? null
+        : input.automationContextReferences.map((reference) => ({
+            entityId: reference.entityId,
+            entityKind: reference.entityKind,
+          }))
     const deliveryTransportIdempotent =
       operation
         ? resolveAssistantOutboxReactionTransportIdempotent({
@@ -527,7 +530,7 @@ export async function createAssistantOutboxIntent(
       targetFingerprint: hashAssistantOutboxTargetFingerprint(rawTargetIdentity),
       ...persistedTarget,
       automationAuthority: input.automationAuthority ?? null,
-      ...(automationContextReferences.length === 0
+      ...(automationContextReferences === undefined
         ? {}
         : { automationContextReferences }),
       plannedOccurrenceAt: input.plannedOccurrenceAt ?? null,
@@ -1670,9 +1673,9 @@ export async function deliverAssistantOutboxMessage(input: {
     reviewedAssistantAskCompletionExpiresAt:
       input.reviewedAssistantAskCompletionExpiresAt ?? null,
     automationAuthority: input.automationAuthority ?? null,
-    ...(input.automationContextReferences?.length
-      ? { automationContextReferences: input.automationContextReferences }
-      : {}),
+    ...(input.automationContextReferences === undefined
+      ? {}
+      : { automationContextReferences: input.automationContextReferences }),
     plannedOccurrenceAt: input.plannedOccurrenceAt ?? null,
     scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
     bindingDelivery: input.bindingDelivery,

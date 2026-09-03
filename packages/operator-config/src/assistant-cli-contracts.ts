@@ -1029,8 +1029,9 @@ export const assistantOutboxIntentSchema = z
     automationAuthority: assistantOutboxAutomationAuthoritySchema
       .nullable()
       .optional(),
-    // Persisted delivery context only. These exact canonical references grant
-    // no mutation authority; later turns must use ordinary domain tools.
+    // Persisted delivery context only: null means no context decision, [] is
+    // an explicit clear, and omission is legacy-ambiguous. Exact references
+    // grant no mutation authority; later turns must use ordinary domain tools.
     automationContextReferences: automationContextReferencesSchema
       .nullable()
       .optional(),

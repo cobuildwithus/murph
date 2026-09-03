@@ -431,7 +431,10 @@ describe('assistant tracked workout table skill', () => {
       'A visible transcript marker, conversational recency, and the previously logged set never identify the owner.',
     )
     expect(skill).toContain(
-      'An unrelated assistant delivery, a missing reference, multiple session references, or a conflicting result ends implicit continuation',
+      'A later unrelated assistant delivery that makes no workout-context decision is transparent',
+    )
+    expect(skill).toContain(
+      'An explicit clear, missing or multiple session identities, a mismatched result, or a conflict ends implicit continuation',
     )
   })
 

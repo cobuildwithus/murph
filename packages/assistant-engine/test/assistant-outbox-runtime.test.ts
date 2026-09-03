@@ -290,12 +290,15 @@ describe('assistant outbox runtime', () => {
     )
   })
 
-  it('omits absent or empty context references from persisted outbox intents', async () => {
+  it('distinguishes legacy absence, no decision, and an explicit clear', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-empty-context-references-',
     )
 
     const absent = await createIntent(vaultRoot)
+    const noDecision = await createIntent(vaultRoot, {
+      automationContextReferences: null,
+    })
     const empty = await createIntent(vaultRoot, {
       automationContextReferences: [],
     })
@@ -303,12 +306,18 @@ describe('assistant outbox runtime', () => {
       vaultRoot,
       absent.intentId,
     )
+    const persistedNoDecision = await readRawOutboxIntent(
+      vaultRoot,
+      noDecision.intentId,
+    )
     const persistedEmpty = await readRawOutboxIntent(vaultRoot, empty.intentId)
 
     expect(absent).not.toHaveProperty('automationContextReferences')
-    expect(empty).not.toHaveProperty('automationContextReferences')
+    expect(noDecision.automationContextReferences).toBeNull()
+    expect(empty.automationContextReferences).toEqual([])
     expect(persistedAbsent).not.toHaveProperty('automationContextReferences')
-    expect(persistedEmpty).not.toHaveProperty('automationContextReferences')
+    expect(persistedNoDecision.automationContextReferences).toBeNull()
+    expect(persistedEmpty.automationContextReferences).toEqual([])
   })
 
   it('retires claimed export packs only after confirmed delivery', async () => {
