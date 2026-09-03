@@ -93,6 +93,43 @@ describe("RunnerContainer internal runtime dispatch", () => {
     expect(destroy).toHaveBeenCalledOnce();
   });
 
+  it("preserves a shell when foreground readiness follows a queued completion notification", async () => {
+    const invocationResponse = createDeferred<Response>();
+    const { container, containerFetch, destroy } = createActivityExpiryContainerDouble({
+      invocationResponse: invocationResponse.promise,
+    });
+    const invocation = container.invoke({
+      job: createWorkspaceRunnerJob("member_123"),
+      timeoutMs: 5_000,
+      userId: "member_123",
+    });
+    await vi.waitFor(() => {
+      expect(containerFetch).toHaveBeenCalled();
+    });
+
+    const completionNotification = container.onRuntimeCompletionRecorded({
+      attemptId: "attempt_member_123",
+      leaseGeneration: "11",
+      userId: "member_123",
+    });
+    const readiness = container.ensureReadyForProcessing({
+      timeoutMs: 5_000,
+      userId: "member_123",
+    });
+    invocationResponse.resolve(new Response(
+      JSON.stringify(createRunnerResult()),
+      {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      },
+    ));
+
+    await expect(invocation).resolves.toMatchObject({ status: "idle" });
+    await expect(completionNotification).resolves.toBeUndefined();
+    await expect(readiness).resolves.toMatchObject({ kind: "ready" });
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
   it.each([
     {
       name: "an immediate recheck",

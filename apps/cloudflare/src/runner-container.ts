@@ -789,12 +789,13 @@ export class RunnerContainer extends Container {
   async onRuntimeCompletionRecorded(
     input: RunnerContainerRuntimeCompletionRecordedInput,
   ): Promise<void> {
+    const expectedInteractionGeneration = this.containerInteractionGeneration;
     await this.withLifecycleLock(async () => {
       const pending = this.pendingCompletionCleanup;
       if (!pending || !runnerCompletionCleanupMatches(pending, input)) {
         this.recordedCompletionCleanup = {
           ...input,
-          expectedInteractionGeneration: this.containerInteractionGeneration,
+          expectedInteractionGeneration,
         };
         return;
       }
