@@ -12,28 +12,39 @@ import {
 const SECTION_HEADING =
   "font-serif text-[clamp(1.65rem,3vw,2.35rem)] font-semibold leading-[1.05] tracking-[-0.025em]";
 
-const INTEGRATION_LABELS: Record<
-  NonNullable<ComparisonEntry["integration"]>,
-  string
-> = {
-  "apple-health": "Syncs to Murph through Apple Health",
-  dexcom: "CGM data connects to Murph through Dexcom",
-  direct: "Connects to Murph",
-  import: "Results can be added to Murph",
-};
+function integrationLabel(
+  comparison: ComparisonEntry & {
+    integration: NonNullable<ComparisonEntry["integration"]>;
+  },
+): string {
+  switch (comparison.integration) {
+    case "direct":
+      return `${comparison.name} connects to Murph`;
+    case "apple-health":
+      return `${comparison.name} syncs to Murph through Apple Health`;
+    case "dexcom":
+      return "CGM data connects to Murph through Dexcom";
+    case "import":
+      return `Add your ${comparison.name} ${
+        comparison.category === "health-data" ? "records" : "results"
+      } to Murph`;
+  }
+}
 
 function IntegrationPill({
-  integration,
+  comparison,
 }: {
-  integration: NonNullable<ComparisonEntry["integration"]>;
+  comparison: ComparisonEntry & {
+    integration: NonNullable<ComparisonEntry["integration"]>;
+  };
 }) {
   return (
     <span
-      className="mt-6 inline-flex min-h-8 items-center gap-2 rounded-full border border-[#c4a882]/40 px-3.5 text-[0.76rem] font-medium text-[#f5f0e8]/85"
-      data-comparison-integration={integration}
+      className="mt-6 inline-flex min-h-8 items-center gap-2 rounded-full border border-[#c4a882]/40 px-3.5 py-1 text-[0.76rem] font-medium leading-tight text-[#f5f0e8]/85"
+      data-comparison-integration={comparison.integration}
     >
-      <span aria-hidden="true" className="size-1.5 rounded-full bg-[#9db07f]" />
-      {INTEGRATION_LABELS[integration]}
+      <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[#9db07f]" />
+      {integrationLabel(comparison)}
     </span>
   );
 }
@@ -122,7 +133,9 @@ export function ComparisonArticle({
                 {comparison.headline}
               </p>
               {comparison.integration ? (
-                <IntegrationPill integration={comparison.integration} />
+                <IntegrationPill
+                  comparison={{ ...comparison, integration: comparison.integration }}
+                />
               ) : null}
             </div>
             <HeroLockup comparison={comparison} />
