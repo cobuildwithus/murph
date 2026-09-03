@@ -126,16 +126,22 @@ fallback identity before provider entry.
 Seven-day wearable trends also use a dedicated attachment tool, but for a
 different trust boundary: the model supplies only ordered method-specific
 metric keys or one exact saved-view id. Trusted host code reads the fixed
-calendar query and constructs the immutable V7 card. Linq sends that card with
-`interactive: false`, omits the native app URL, and supplies only its bounded
-caption, authority-free static `image_url`, and value-free `fallback_text`.
-The card preserves exactly seven chronological day slots, including missing
-values, and one to five metric rows. Its complete deterministic text recovery
-uses the ordinary capability and definitive pre-acceptance fallback path. An
-image-fetch failure after provider acceptance has no retry signal, and the
-raster's VoiceOver behavior is provider/native-extension owned; both remain
-physical rollout gates rather than reasons to put private values in preview
-text.
+calendar query and constructs the immutable V7 card. Linq sends that card the
+same way as the other native kinds: `interactive: true` with the V7 Base64URL
+fragment as the native app URL so the shipping Messages extension renders its
+SwiftUI seven-day health balloon, plus the bounded caption, authority-free
+static `image_url`, and value-free `fallback_text` that recipients without the
+extension, including Messages on macOS, see instead. The native view and the
+static image share one deterministic formatter set, so both show the same
+averages, day values, and neutral direction words. The card preserves exactly
+seven chronological day slots, including missing values, and one to five
+metric rows. Its complete deterministic text recovery uses the ordinary
+capability and definitive pre-acceptance fallback path. An image-fetch failure
+after provider acceptance has no retry signal, and VoiceOver behavior is
+provider/native-extension owned; both remain physical rollout gates rather
+than reasons to put private values in preview text. The interactive send also
+requires the extension release that decodes schema 7 to ship first; an older
+extension shows its compact unavailable-card view for a V7 URL.
 Keep production card generation disabled unless the platform-owned
 `MURPH_WEARABLE_TREND_CARDS_ENABLED` value is exactly `1`. Enable it only after
 installed-app, app-absent, macOS, image-failure, and VoiceOver checks pass;

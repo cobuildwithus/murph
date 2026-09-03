@@ -452,9 +452,7 @@ export function buildLinqIMessageAppCardUrl(
     case 'challenge_standings':
       return encodeChallengeStandingsAppCardUrl(parsed)
     case 'wearable_trend':
-      throw new TypeError(
-        'Wearable trend response cards use a static iMessage layout.',
-      )
+      return encodeWearableTrendAppCardUrl(parsed)
     case 'exercise_routine':
       throw new TypeError(
         'Exercise routine response cards do not have a native iMessage app URL.',
@@ -571,6 +569,12 @@ function encodeChallengeStandingsAppCardPayload(
     card: parsed,
   }
   return encodeAppCardEnvelopePayload(envelope)
+}
+
+export function encodeWearableTrendAppCardUrl(
+  card: WearableTrendResponseCardV1,
+): string {
+  return encodeAppCardEnvelopeUrl(encodeWearableTrendAppCardPayload(card))
 }
 
 function encodeWearableTrendAppCardPayload(

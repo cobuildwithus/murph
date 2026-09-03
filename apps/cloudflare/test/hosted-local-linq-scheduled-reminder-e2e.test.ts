@@ -621,13 +621,13 @@ describe("hosted local Linq scheduled reminder e2e", () => {
       .readObservedMessageAppCard(scheduledCardSend);
     expect(scheduledCard).toMatchObject({
       fallback_text: "Your health trend.",
-      interactive: false,
+      interactive: true,
       layout: {
         caption: "7-day health",
       },
       type: "imessage_app",
+      url: expect.stringMatching(/^https:\/\/www\.withmurph\.ai\/#murph-card=[A-Za-z0-9_-]+$/u),
     });
-    expect(scheduledCard).not.toHaveProperty("url");
     const scheduledCardEnvelope = readWearableCardImageEnvelope(scheduledCard);
     expect(scheduledCardEnvelope).toMatchObject({
       card: {

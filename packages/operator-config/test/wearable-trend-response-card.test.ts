@@ -103,7 +103,7 @@ describe('wearable trend response cards', () => {
     expect(encoded).not.toMatch(/hview_|provider|source|timeZone|entityId/iu)
   })
 
-  it('keeps provider chrome value-free and has no interactive app URL', () => {
+  it('keeps provider chrome value-free and exposes the native schema-seven URL', () => {
     expect(buildLinqIMessageAppFallbackText(CARD)).toBe('Your health trend.')
     expect(buildLinqIMessageAppLayout(CARD)).toEqual({
       caption: '7-day health',
@@ -115,9 +115,16 @@ describe('wearable trend response cards', () => {
       fallback: buildLinqIMessageAppFallbackText(CARD),
       layout: buildLinqIMessageAppLayout(CARD),
     })).not.toMatch(/6,?800|10,?200|RMSSD|2026-08/iu)
-    expect(() => buildLinqIMessageAppCardUrl(CARD)).toThrow(
-      /static iMessage layout/iu,
-    )
+    const nativeUrl = buildLinqIMessageAppCardUrl(CARD)
+    const nativePrefix = 'https://www.withmurph.ai/#murph-card='
+    expect(nativeUrl.startsWith(nativePrefix)).toBe(true)
+    expect(nativeUrl.length).toBeLessThan(2_048)
+    expect(
+      JSON.parse(
+        Buffer.from(nativeUrl.slice(nativePrefix.length), 'base64url')
+          .toString('utf8'),
+      ),
+    ).toEqual({ schemaVersion: 7, card: CARD })
   })
 
   it('provides the same complete block to Telegram without generic authoring', () => {

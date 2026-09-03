@@ -5,6 +5,7 @@ import {
   type LinqFetch,
 } from '../src/linq-runtime.js'
 import {
+  buildLinqIMessageAppCardUrl,
   buildLinqIMessageAppLayout,
   type WearableTrendResponseCardV1,
 } from '../src/assistant-response-cards.js'
@@ -29,7 +30,7 @@ const CARD: WearableTrendResponseCardV1 = {
 }
 
 describe('Linq wearable trend app cards', () => {
-  it('sends a static app layout without an interactive native URL', async () => {
+  it('sends an interactive native card with the schema-seven fragment and a static fallback layout', async () => {
     const requests: Array<{ body: unknown; url: string }> = []
     const fetchImplementation: LinqFetch = async (url, init) => {
       requests.push({
@@ -68,10 +69,18 @@ describe('Linq wearable trend app cards', () => {
         team_id: 'G9DJH2XUMK',
       },
       fallback_text: 'Your health trend.',
-      interactive: false,
+      interactive: true,
       layout: buildLinqIMessageAppLayout(CARD),
       type: 'imessage_app',
+      url: buildLinqIMessageAppCardUrl(CARD),
     })
-    expect(part).not.toHaveProperty('url')
+    const url = part.url as string
+    expect(url.startsWith('https://www.withmurph.ai/#murph-card=')).toBe(true)
+    expect(url.length).toBeLessThan(2_048)
+    const encoded = url.slice('https://www.withmurph.ai/#murph-card='.length)
+    expect(JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'))).toEqual({
+      schemaVersion: 7,
+      card: CARD,
+    })
   })
 })
