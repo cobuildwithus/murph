@@ -1,6 +1,6 @@
 # Keep device follow-up wakes visible
 
-Status: active
+Status: completed
 Created: 2026-09-03
 Updated: 2026-09-03
 
@@ -134,3 +134,4 @@ Updated: 2026-09-03
 - Changelog: attribute PR #2770 to the existing
   `background-work-recovers-in-order` outcome instead of publishing a duplicate
   connected-health recovery item.
+Completed: 2026-09-03
