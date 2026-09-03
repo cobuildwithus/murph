@@ -1427,7 +1427,7 @@ Core execution tuning:
 - `CF_ALLOWED_RUNNER_SECRET_KEYS` to seed `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` in the rendered worker config
 - `HOSTED_EXECUTION_CONTAINER_ROLLOUT` controls the one-off Wrangler container rollout flag during deploy. While the vault-share selector-scope migration is active, production deploy helpers default to `immediate` and production preflight rejects explicit `gradual`; use `gradual` only for non-production deploys or after the selector-scope rollout guard is removed.
 - `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant` baseline; deploy automation defaults to `exa,hosted-email,linq,mapbox,telegram`. Hosted device-sync runtime config is resolved from worker env directly rather than a runtime-env profile.
-- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000` (production sets `600000`) and controls the post-completion warm lease minted only by observed conversation activity. Reducing production from 20 minutes to 10 minutes means a follow-up in the former 11–20 minute warm window can take the existing cold-start path instead. `HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS` defaults to the idle TTL when absent for rollback compatibility. Leave it unset for the additive code deploy and one legacy-TTL observation window, drain old containers, then set it to `60000` for a canary before widening the rollout. Device sync, system maintenance, replay, and generic runner activity do not extend conversation warmth. RunnerContainer derives the lease directly from the resident child process's private health watermark on every expiry, re-arms the platform timeout while the lease or active work remains, yields on uncertain cleanup state, and otherwise destroys the idle shell. An inactive old child without the watermark is cleanup-eligible; active old-child work remains protected by its independent active-work count. A replacement child starts without inheriting the old process's warmth. Dirty foreground runtime state is checkpointed by the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` path before the invocation returns; RunnerContainer never records pending checkpoint intent.
+- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000` (production sets `600000`) and controls the post-completion warm lease minted only by observed conversation activity. Reducing production from 20 minutes to 10 minutes means a follow-up in the former 11–20 minute warm window can take the existing cold-start path instead. `HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS` defaults to the idle TTL when absent for rollback compatibility. Leave it unset for the additive code deploy and one legacy-TTL observation window, drain old containers, then set it to `60000` for a canary before widening the rollout. Device sync, system maintenance, replay, and generic runner activity do not extend conversation warmth. RunnerContainer derives the lease directly from the resident child process's private health watermark on every expiry, re-arms the platform timeout while the lease or active work remains, yields on uncertain cleanup state, and otherwise destroys the idle shell. An old child without the watermark remains protected and re-arms the lifecycle timer; its active-work count independently protects active work. A replacement child starts without inheriting the old process's warmth. Dirty foreground runtime state is checkpointed by the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` path before the invocation returns; RunnerContainer never records pending checkpoint intent.
 - `HOSTED_EXECUTION_STANDBY_MODE` defaults to `off`. `shadow` maintains one
   release-scoped ENAM standby and measures readiness without allocating it;
   `allocate` lets only a fence-free, authenticated Web-direct `default` request
@@ -1439,7 +1439,16 @@ Core execution tuning:
   `allocate` mode the standby coordinator is the sole shell-prewarm owner; the
   exact-user prewarm hint is skipped so it cannot reserve a competing target
   before the claim. An unsuccessful claim still uses the ordinary exact-user
-  fallback.
+  fallback. Accepted fresh starts persist the bounded allocation outcome,
+  reason, and elapsed milliseconds in the existing latency phase breakdown;
+  the Worker selection log emits the same metadata before fence and readiness
+  work. Deploy Web first so its strict telemetry parser accepts these additive
+  leaves, then deploy Cloudflare. Reversing that order affects diagnostics only:
+  old Web drops the unknown phase breakdown while retaining core milestones.
+  The fields remain in Worker-owned orchestration and do not change the
+  Worker/container invocation job, so this diagnostic itself needs no special
+  container rollout mode; obey any independently active production rollout
+  requirement.
   Invalid values fail deploy/runtime parsing closed.
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production` for
   direct/local artifact rendering. The manual deploy workflow derives it from
@@ -2067,6 +2076,17 @@ reports busy. The ordinary outer result remains the normal completion path,
 stale or duplicate receipts are no-ops, and structured receipt outcomes are
 `recorded` or `not_recorded`. The one-second best-effort receipt cannot change
 the completed result and adds no poller or recovery queue.
+
+After the exact compare-and-swap wins, `UserRunner` also best-effort notifies
+the exact existing runner-container name with attempt, generation, and user
+identity only. The container accepts either notification/result arrival order
+in memory. The successful result is the sole owner of an interaction generation
+captured at invocation admission; the notification carries identity only. The
+container rechecks that generation and the existing warm-lifecycle guards, and
+may stop a terminal idle shell immediately. Missing mixed-version RPC support,
+activation reset, mismatch, uncertainty, retained warmth, active work, or a
+near wake falls back to the unchanged `sleepAfter` timer. This additive RPC has
+no deployment variable, durable queue, or second completion owner.
 
 The first deployment that introduces the container-process sender must use
 `container_rollout=immediate`. Worker code is available before its new container

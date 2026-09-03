@@ -421,6 +421,11 @@ test("VercelTelemetry aggregates public dynamic routes without sending identifie
       route: "/biomarkers/results/[metricKey]",
     },
     {
+      expected: "/compare/[competitor]",
+      pathname: "/compare/murph-vs-whoop",
+      route: "/compare/[competitor]",
+    },
+    {
       expected: "/experiments/[experiment]",
       pathname: "/experiments/sleep-consistency",
       route: "/experiments/[experimentId]",
@@ -501,6 +506,10 @@ test("redactPrivateAnalyticsUrl canonicalizes allowlisted routes", () => {
   assert.equal(
     redactPrivateAnalyticsUrl("/home?clinicalRecords=failed#clinicalRecordsIntent=not-a-claim"),
     "/home",
+  );
+  assert.equal(
+    redactPrivateAnalyticsUrl("/food?query=private-product#comparison"),
+    "/food",
   );
 });
 

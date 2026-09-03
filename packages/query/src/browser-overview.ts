@@ -47,6 +47,7 @@ export type {
   PersonalPatternClassification,
   PersonalPatternFactor,
   PersonalPatternGrade,
+  PersonalPatternIcon,
   PersonalPatternOutcome,
   PersonalPatternReport,
   PersonalPatternStage,

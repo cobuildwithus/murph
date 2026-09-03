@@ -5,6 +5,7 @@ import {
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionMemberActivatedWake,
+  buildHostedMemberSignupWelcomeInstructions,
   type HostedExecutionMemberActivationSignupWelcome,
   type HostedExecutionMemberActivatedWake,
   type HostedExecutionAssistantNotificationRoute,
@@ -757,14 +758,6 @@ function buildHostedMemberSignupWelcomeNotificationWake(input: {
 
 function buildHostedMemberSignupWelcomeDeliveryIdentity(memberId: string): string {
   return `signup-welcome:${memberId}`;
-}
-
-function buildHostedMemberSignupWelcomeInstructions(text: string): string {
-  return [
-    "Prepare the first in-chat onboarding reply.",
-    "Use this user-facing reply only:",
-    text,
-  ].join("\n\n");
 }
 
 function buildHostedMemberSignupWelcomeNotificationEventId(

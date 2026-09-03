@@ -759,13 +759,17 @@ The hard-cut architecture is accepted when:
   serialized fixture data, derives the live Current and traffic-bearing Ramping
   readers, automatically includes the exact dispatched private candidate and,
   while the standby guard remains, the active legacy worker's exact live deploy
-  revision, then runs every reader. Final protected attestation re-reads the
-  complete reader set and fails on identity or routing drift before returning
-  one producer-and-reader proof digest. The public controller resolves private
-  `main` before dispatch, binds the returned first-attempt run to that exact
-  commit, and re-reads private `main` before success. Public code stores no
-  private revision pointer or reader policy. Missing, stale, skipped, canceled,
-  duplicated, malformed, or failed proof remains red or pending.
+  revision and bounded `active` or `suspended` state, then runs every reader.
+  Final protected attestation re-reads the complete reader set and legacy state
+  and fails on identity or routing drift through a separate private lifecycle
+  digest before returning one cross-repository proof digest. The public
+  verifier hashes only the sorted immutable reader SHA set, so private
+  lifecycle evidence never enters the public wire format and the public
+  repository does not own or duplicate live reader policy. The public controller resolves
+  private `main` before dispatch, binds the returned first-attempt run to that
+  exact commit, and re-reads private `main` before success. Public code stores
+  no private revision pointer or reader policy. Missing, stale, skipped,
+  canceled, duplicated, malformed, or failed proof remains red or pending.
 - Focused tests prove that wake acceptance is not completion and that Temporal
   idles only after reconciliation facts are idle.
 - The hosted-local E2E harness includes a non-manual Temporal orchestration

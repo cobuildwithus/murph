@@ -1276,6 +1276,16 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   content. Ordinary browser technical metadata still reaches incident.io and
   is disclosed in the public subprocessor register.
 
+  The public Food comparison may search for brand logos directly through
+  Brandfetch when its optional client identifier is configured. The browser
+  sends only a bounded brand name plus a broad food category to the fixed search
+  origin with no referrer or credentials. It sends no user search term, UPC,
+  nutrition, test, account, or health data. The client accepts only matching
+  brand names and fixed Brandfetch CDN image URLs. A missing or failed logo uses
+  local category art. Hosted Web stores no logo copy and runs no proxy. Results
+  are deduplicated in page memory. CSP admits only the fixed Brandfetch API and
+  image origins.
+
   Nullable hosted-member model and reasoning preferences are web-owned,
   billing-gated control facts. Active personal members may select Luna or
   Terra; only an active paid Edge personal member may select Sol. The common
@@ -1903,17 +1913,44 @@ supplement generic search and the public projection retain their pre-existing
 ranking and candidate contracts. Existing labels databases must receive the
 foods name-rank and exact-name-rank indexes before this private-food query shape
 is deployed. The public
-projection of that database is Murph Safe at `/search` and the
+projection of that database is Murph Safe at `/search` and the branded-food
+comparison at `/food`, plus the
 read-only Murph Product Data API under `/api/public/v1`. Wire contracts belong
 to `@murphai/contracts`; one web-owned service maps bounded database records to
 those contracts. Browser search posts to the public route, while the
 server-rendered detail page calls the same service directly. The public catalog
 excludes generic food origins, never returns raw labels wholesale, and links
 tests only by the selected row's exact foreign key. Public search uses bounded
-SQL candidate sets; detail reads cap stored label transfer and aggregate DTO
-size. One Vercel-aware singleton pool is shared by public and private label
+SQL candidate sets. Its optional food evidence order checks indexed exact test
+links only inside the 250-row public candidate bound. The food comparison also
+has an optional category-popularity order. It matches a dated US Google Shopping
+brand snapshot against at most 10,000 indexed text candidates. Soda searches
+may add at most 900 rows through bounded probes of the existing `foods(brand)`
+index. The query then retains 250 rows, spreads early results across brands, and
+applies indexed exact test counts as a secondary signal. Comparison-ready
+search also rejects empty, zero-only, and physically impossible per-100-gram
+nutrition. Queries without a matching snapshot keep the stable relevance
+fallback. Detail reads cap stored label transfer and aggregate DTO size.
+One Vercel-aware singleton pool is shared by public and private label
 readers. Vercel custom firewall rules sit in front of public search and detail,
 and the production build verifies their exact active configuration.
+
+`/food` keeps temporary comparison state in the browser and derives six
+nutrition comparisons plus a separate exact-evidence summary from existing
+public DTOs. Its share URL contains only public product references and the
+nutrition basis; the raw search query stays out of the URL. It derives
+related-search categories from its existing local food
+taxonomy and does not persist them as product truth. A nutrition winner exists only when every compared product has the
+metric. Evidence keeps the DTO's returned, total, and truncated observation
+scope. The evidence meter and drawer statuses derive only from DTO fields
+(nutrition rows, serving mass, ingredients, returned observations and their
+screening results), and the drawer renders the DTO-owned unknown entries. Compatible browsers receive four page-scoped
+WebMCP tools through
+`document.modelContext.registerTool`. These tools call the same bounded page
+actions as manual controls. Their comparison result carries the same four
+metric values, completeness, ties, and winners as the visible table, plus the
+per-product row-win counts behind its rows-led caption. The tools disappear when the page unmounts. They do not
+create a remote MCP service, a second data owner, or an authenticated path.
 
 Each product-test observation may preserve evidence and sampling context,
 sample or lot identity, result bounds and qualifiers, analytical limits, and
@@ -3067,7 +3104,22 @@ adds no durable image job, mailbox kind, scheduler, reservation, allowance
 implementation, or image-specific usage lifecycle; unfinished provider work
 may be lost with the runner invocation.
 
-Reconciliation evaluates engagement and AI-usage authorization for runnable model work even when deterministic system lag is present. Authorized conversation/default work owns the foreground pass and imports system items before the assistant phase without letting a retryable system item starve fresh conversation. When model work is blocked, or system lag is the only work, the existing `system_mailbox` mode imports only the system lane and returns before assistant execution. It adds no queue, scheduler, cursor, or durable state owner.
+Reconciliation evaluates engagement and AI-usage authorization for runnable
+model work even when deterministic system lag is present. Authorized
+conversation/default work owns the foreground pass and imports system items
+before the assistant phase without letting a retryable system item starve fresh
+conversation. An established conversation-first pass reuses the one
+post-restore conversation and system mailbox snapshot for that first system
+page. A workspace whose system watermark is still zero refreshes the system
+lane once to preserve the first-activation race boundary. A pass whose initial
+import already fetched the system lane also refreshes it before assistant
+execution; `system_mailbox` uses that post-import check as an ordering barrier
+for newly arrived asks. Later system rows behind the conversation-first
+snapshot remain durable work for their normal wake or a later pass. System-only
+mailbox reads do not query the optional group sponsorship presentation bit.
+When model work is blocked, or system lag is the only work, the existing
+`system_mailbox` mode imports only the system lane and returns before assistant
+execution. It adds no queue, scheduler, cursor, or durable state owner.
 
 Linq group-avatar mutation is the one private-image provider boundary that
 requires a fetchable URL. After the group tool preflights current chat
@@ -3257,12 +3309,12 @@ contact evidence, while overflow remains operation-local.
 
 The assistant-runtime Linq presentation adapter owns the compound operation
 memo and one bounded private file cache at
-`vault/.runtime/cache/assistant-runtime/group-participant-display-names.json`.
+`vault/.runtime/operations/assistant/state/group-participant-display-names.json`.
 Initial prompt preparation reads unresolved unique handles in one batch; later
 live admissions reuse operation-local positive, negative, and fail-soft entries
-and read only new handles. Across ordinary turns that reuse the same local
-workspace, validated profile and owner-shared contact labels have a fixed
-14-day TTL. Web separately returns `nameMissSenderHandles` only for exact
+and read only new handles. Across ordinary turns and encrypted hosted workspace
+restore, validated profile and owner-shared contact labels have a fixed 14-day
+TTL. Web separately returns `nameMissSenderHandles` only for exact
 requested handles where every applicable authorized profile/contact source was
 successfully checked and no safe label exists; only that explicit evidence has
 a fixed six-hour TTL. An omitted handle without this evidence remains
@@ -3278,11 +3330,12 @@ timeouts, rollout skew, policy-limited contact reads, malformed or ambiguous
 responses, suspension, and authorization loss remain operation-local and are
 never written. There is no second resident
 cross-operation cache, single-flight owner, mutation invalidation, lock manager,
-or distributed coordination. `.runtime/cache/**` is excluded from hosted
-workspace checkpoints, so the file can bridge fresh reader or process instances
-only while the same local workspace survives; a cold restore or replacement
-re-reads Web. Neither the operation memo nor the cache becomes profile or
-contact truth. Profile and owner-contact labels remain presentation only, and
+or distributed coordination. The file is explicitly portable, rebuildable
+assistant operational state and therefore travels inside the encrypted hosted
+workspace snapshot. A restored label can remain visible until its existing TTL
+after a profile rename or authorization change, but neither the operation memo
+nor the cache becomes profile or contact truth. Profile and owner-contact labels
+remain presentation only, and
 the name read returns no member or participant identifier. For
 participant-scoped effects, the opaque `Message ref` plus trusted server
 derivation remains the sole path; display labels and handles are never

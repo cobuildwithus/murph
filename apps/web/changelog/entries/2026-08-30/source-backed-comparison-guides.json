@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-08-30",
+  "order": 200,
+  "item": {
+    "id": "source-backed-comparison-guides",
+    "kind": "feature",
+    "priority": 4,
+    "title": "Compare Murph with 100+ health products",
+    "summary": "A new comparison library explains when Murph replaces, complements, or differs from the health products people already use.",
+    "details": "Each guide leads with a practical relationship, then shows fit, tradeoffs, FAQs, current official-source links, and a verification date. The guides are non-affiliate desk research, not hands-on reviews or medical rankings.",
+    "relevanceTags": ["comparison", "research", "health-products"],
+    "sourcePullRequests": [2619],
+    "tryIt": {
+      "label": "Explore comparisons",
+      "href": "/compare"
+    }
+  }
+}

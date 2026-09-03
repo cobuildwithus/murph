@@ -208,6 +208,23 @@ test("unknown provider values use the neutral fallback illustration", () => {
   assert.equal(INTERVENTION_FALLBACK_ICON, ACTIVITY_FALLBACK_ICON);
 });
 
+test("validated presentation categories select a stable illustration", () => {
+  assert.match(
+    resolvePatternFactorIcon({
+      ...factor("Provider-specific movement", "activity"),
+      icon: "dance",
+    }),
+    /performance\.svg$/u,
+  );
+  assert.match(
+    resolvePatternFactorIcon({
+      ...factor("Provider-specific glasses", "intervention"),
+      icon: "red-light",
+    }),
+    /redlight\.svg$/u,
+  );
+});
+
 test("every resolved local SVG asset exists", async () => {
   const factors = [
     ...WHOOP_SPORTS.map((label) => factor(label, "activity")),

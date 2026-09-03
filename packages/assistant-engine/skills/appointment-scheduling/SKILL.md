@@ -359,6 +359,11 @@ unverified booking is not enough. Create the reminder before the appointment
 workflow's final report or stop, without separate confirmation unless the user
 opts out.
 
+The timing defaults below apply only when the member supplied neither an exact
+clock time nor a broad time window for the reminder. Member-specified exact or
+broad-window timing follows the shared one-shot reminder policy; never replace
+an exact member time with an appointment default.
+
 Use the appointment's stated timezone, otherwise the vault timezone. For an
 appointment before noon local, schedule the prior evening at a known pre-bed
 reminder time or 8:00 PM. For noon or later, schedule 8:00 AM local that day.

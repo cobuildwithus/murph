@@ -23,7 +23,6 @@ const MAX_CHANGED_FILES = 3_000;
 const MAX_PRODUCER_FIXTURE_BYTES = 32 * 1024;
 const MAX_PRODUCER_FIXTURES = 16;
 const PAGE_SIZE = 100;
-
 const RELEVANT_PREFIXES = [
   "apps/cloudflare/",
   "apps/web/",
@@ -299,8 +298,11 @@ export function supportedReaderDigest(readerShas) {
     throw new Error("Supported-reader set contains a duplicate SHA.");
   }
   // Cross-repository wire format: sorted lowercase SHAs, one per line, with a
-  // trailing newline. The private attestation must compute this exact digest.
-  return createHash("sha256").update(`${normalized.join("\n")}\n`).digest("hex");
+  // trailing newline. Private CI binds lifecycle state separately so public
+  // verification does not duplicate private routing policy.
+  return createHash("sha256")
+    .update(`${normalized.join("\n")}\n`)
+    .digest("hex");
 }
 
 export function compatibilityProofDigest({ producerDigest, publicSha, readersDigest, requestId }) {

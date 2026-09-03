@@ -35,8 +35,18 @@ import {
 } from "./product-ref";
 
 export interface PublicProductsDataSource {
-  searchFoods(input: { limit: number; q: string }): Promise<PublicProductLabelSearchItem[]>;
-  searchSupplements(input: { limit: number; q: string }): Promise<PublicProductLabelSearchItem[]>;
+  searchFoods(input: {
+    comparisonReadyOnly: boolean;
+    foodSearchOrder: "relevance" | "evidence" | "popular";
+    limit: number;
+    offset: number;
+    q: string;
+  }): Promise<PublicProductLabelSearchItem[]>;
+  searchSupplements(input: {
+    limit: number;
+    offset: number;
+    q: string;
+  }): Promise<PublicProductLabelSearchItem[]>;
   getFoodRecord(input: { id: string }): Promise<PublicProductLabelRecord | null>;
   getSupplementRecord(input: { id: string }): Promise<PublicProductLabelRecord | null>;
   getFoodEvidence(input: {
@@ -72,12 +82,16 @@ export function createPublicProductsService(
         includeSupplements
           ? readProductData(() => dataSource.searchSupplements({
               limit: input.limitPerKind,
+              offset: input.offsetPerKind,
               q: input.query,
             }))
           : Promise.resolve([]),
         includeFoods
           ? readProductData(() => dataSource.searchFoods({
+              comparisonReadyOnly: input.foodComparisonReadyOnly,
+              foodSearchOrder: input.foodSearchOrder,
               limit: input.limitPerKind,
+              offset: input.offsetPerKind,
               q: input.query,
             }))
           : Promise.resolve([]),
@@ -183,9 +197,8 @@ function toPublicProductSearchHit(
   kind: PublicProductKind,
   item: PublicProductLabelSearchItem,
 ): PublicProductSearchHit {
-  return {
+  const common = {
     productRef: encodePublicProductRef(kind, item.id),
-    kind,
     name: boundedRequiredText(item.name, 512),
     brand: boundedText(item.brand, 512),
     upc: normalizeUpc(item.upc),
@@ -198,6 +211,9 @@ function toPublicProductSearchHit(
       total: item.testing.observationCount,
     },
   };
+  return kind === "food"
+    ? { ...common, kind, servingGrams: item.servingGrams ?? null }
+    : { ...common, kind };
 }
 
 function toPublicProductTests(
