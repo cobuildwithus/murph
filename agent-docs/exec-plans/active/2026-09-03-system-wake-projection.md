@@ -125,3 +125,9 @@ Updated: 2026-09-03
   three-minute device follow-up with the already-due assistant timestamp.
 - Current proof: six focused runtime files pass (246 tests), and the
   assistant-runtime package typecheck passes.
+- Rebased proof: after the adjacent model-free-frontier change landed on the
+  base, the same six focused files pass (247 tests), the package typecheck
+  passes, and the changed runtime file adds no cyclomatic-complexity debt.
+- Changelog: attribute PR #2770 to the existing
+  `background-work-recovers-in-order` outcome instead of publishing a duplicate
+  connected-health recovery item.
