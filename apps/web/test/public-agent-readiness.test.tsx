@@ -154,6 +154,8 @@ describe("public trust pages", () => {
     assert.match(markup, /href="\/about"/u);
     assert.match(markup, /href="\/contact"/u);
     assert.match(markup, /href="\/compare"/u);
+    assert.doesNotMatch(markup, /href="mailto:[^"]+"/u);
+    assert.doesNotMatch(markup, />Support</u);
   });
 
   it("links each Contact journey to its owned inbox", () => {

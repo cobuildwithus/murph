@@ -74,7 +74,7 @@ import {
 import { HOSTED_PHONE_COUNTRY_OPTIONS } from "@/src/components/hosted-onboarding/hosted-phone-country-options";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import { PublicTrustPageContent } from "@/src/components/public/public-trust-page";
-import { ABOUT_MURPH_CONTENT } from "@/src/lib/public-trust-pages";
+import { CONTACT_MURPH_CONTENT } from "@/src/lib/public-trust-pages";
 import { MURPH_CONTACT_EMAIL } from "@/src/lib/murph-contact-routing";
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
@@ -687,11 +687,10 @@ export function ComponentsContent() {
         <div data-design-component="public-trust-page" id="public-trust-page">
           <Section title="Public trust page">
             <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              Production About-page content and responsive editorial hierarchy.
-              The Contact page uses the same component with support-specific copy.
+              Production Contact-page content with its compact responsive hierarchy.
             </p>
             <div className="overflow-hidden border border-[#c4a882]/35">
-              <PublicTrustPageContent content={ABOUT_MURPH_CONTENT} />
+              <PublicTrustPageContent content={CONTACT_MURPH_CONTENT} />
             </div>
           </Section>
         </div>
