@@ -14,6 +14,9 @@ provider-free completion-fence runtime.
 
 - Successful device-sync work checkpoints its exact completion record before
   advancing Web-owned provider cadence.
+- Full local control-plane reconciliation is accepted before that record can
+  authorize same-admission completion; one version conflict rehydrates and
+  retries the full update without losing local credential progress.
 - The same runtime admission then publishes cadence, removes the mailbox item,
   and durably checkpoints that removal.
 - Checkpoint, cadence-publication, and final-checkpoint failures remain
@@ -62,15 +65,19 @@ provider-free completion-fence runtime.
 - Evidence: the production-shaped workspace test preserves the same eight
   provider requests and final 06:05 cadence while clearing the durable mailbox
   item between the completion-record and removal checkpoints in one admission.
-- Recovery: cadence version conflict retains the committed record; replay
-  observes an already-published cadence and clears it without provider work.
+- Recovery: a full-reconciliation version conflict rehydrates and retries once
+  before completion is exposed. A restored completion record returns to that
+  ordinary full-reconciliation path instead of carrying independent deletion
+  authority.
 - Recovery: a completion-origin wake with a reconstructed provider retry keeps
   the exact mailbox item, and an epoch-less legacy or terminal completion drains
   without writing cadence.
-- Difference from plan: final ReviewGPT exposed that completion reason alone was
-  insufficient authority. Eligibility now derives from the empty retained-job
-  set and exact active connection epoch, with no new state owner. No
-  member-visible result, provider input, or cadence policy changes.
+- Difference from plan: final ReviewGPT first exposed that completion reason
+  alone was insufficient authority, then exposed that cadence-only completion
+  could outlive a rejected full update and lose a locally rotated credential.
+  Eligibility now requires accepted full reconciliation in the same admission,
+  an empty retained-job set, and the exact active connection epoch. Restored
+  records use the full path. No persisted proof or new state owner was added.
 - Verdict: Ready.
 
 ## Risks and mitigations
@@ -87,6 +94,11 @@ provider-free completion-fence runtime.
 4. Risk: a completion-origin wake is later reconstructed with retryable jobs.
    Mitigation: direct completion requires zero normalized retained jobs, so the
    mailbox item remains the exact retry owner regardless of its reason label.
+5. Risk: a concurrent canonical heartbeat rejects the full update while local
+   provider work has rotated credentials.
+   Mitigation: fetch and hydrate the fresh canonical snapshot, compare local
+   progress against that canonical baseline, and retry the full update once;
+   another mismatch fails without exposing completion.
 
 ## Tasks
 
@@ -106,6 +118,9 @@ provider-free completion-fence runtime.
   outbox; do not introduce another state owner.
 - Derive completion authority from zero retained jobs plus the exact current
   active connection epoch; the reason label is classification, not authority.
+- Require accepted full reconciliation in the current admission. Keep that
+  proof transient so restored or yielded records fall back to the existing
+  full-reconciliation admission rather than gaining a second durable owner.
 - Keep PR #2741 separate because its container-lifecycle change has a distinct
   owner and does not remove the completion runtime admission.
 - Changelog is not applicable because this removes an internal redundant

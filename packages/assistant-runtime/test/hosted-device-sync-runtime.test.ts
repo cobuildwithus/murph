@@ -11575,6 +11575,179 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
+  test("reconciliation preserves a provider token refresh through a version retry and cold hydration", async () => {
+    const firstWorkspace = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-token-version-retry-first-",
+    );
+    const coldWorkspace = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-token-version-retry-cold-",
+    );
+    const connectionId = "hosted_conn_token_version_retry";
+    const externalAccountId = "demo-token-version-retry";
+    const initialUpdatedAt = "2026-04-02T12:30:00.000Z";
+    const heartbeatUpdatedAt = "2026-04-02T12:31:00.000Z";
+    const appliedUpdatedAt = "2026-04-02T12:32:00.000Z";
+    const provider = createFakeProvider({
+      jobExecutor: {
+        async executeJob(context) {
+          await context.refreshAccountTokens();
+          return {};
+        },
+      },
+    });
+    const firstService = createDeviceSyncServiceForVault(firstWorkspace.vaultRoot, [provider]);
+    const coldService = createDeviceSyncServiceForVault(coldWorkspace.vaultRoot, [provider]);
+    let hostedSnapshot = buildRuntimeSnapshot({
+      connectionId,
+      externalAccountId,
+      hostedUpdatedAt: initialUpdatedAt,
+      tokenBundle: {
+        accessToken: "hosted-access-v7",
+        accessTokenExpiresAt: "2026-04-03T00:00:00.000Z",
+        refreshToken: "hosted-refresh-v7",
+        tokenVersion: 7,
+      },
+    });
+    const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      async applyUpdates(input): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
+        const observedUpdatedAt = hostedSnapshot.connections[0]?.connection.updatedAt ?? null;
+        return {
+          appliedAt: appliedUpdatedAt,
+          updates: input.updates.map((update) => {
+            const accepted = update.observedUpdatedAt === observedUpdatedAt;
+            if (
+              accepted
+              && update.credential?.kind === "oauth_tokens"
+              && "tokenBundle" in update.credential
+            ) {
+              hostedSnapshot = buildRuntimeSnapshot({
+                connectionId,
+                externalAccountId,
+                hostedUpdatedAt: appliedUpdatedAt,
+                tokenBundle: {
+                  accessToken: update.credential.tokenBundle.accessToken,
+                  accessTokenExpiresAt: update.credential.tokenBundle.accessTokenExpiresAt,
+                  refreshToken: update.credential.tokenBundle.refreshToken,
+                  tokenVersion: 8,
+                },
+              });
+            }
+            return {
+              connection: null,
+              connectionId: update.connectionId,
+              status: "updated",
+              tokenUpdate: accepted ? "applied" : "skipped_version_mismatch",
+              writeUpdate: accepted ? "applied" : "skipped_version_mismatch",
+            };
+          }),
+          userId: "member_123",
+        };
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called during reconciliation");
+      },
+      async fetchSnapshot() {
+        return hostedSnapshot;
+      },
+    };
+    const readAccessToken = (service: DeviceSyncService, accountId: string) => {
+      const account = getStore(service).getAccountById(accountId);
+      const credential = requireStoredOAuthCredential(account);
+      assert.ok(account);
+      return createSecretCodec(DEVICE_SYNC_SECRET).decrypt(
+        credential.accessTokenEncrypted,
+        buildDeviceSyncTokenCipherOptions({
+          externalAccountId: account.externalAccountId,
+          provider: account.provider,
+          purpose: "device-sync-access-token",
+        }),
+      );
+    };
+
+    try {
+      const wake = buildCronWake("2026-04-02T12:30:30.000Z");
+      const initialState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        secret: DEVICE_SYNC_SECRET,
+        service: firstService,
+        wake,
+      });
+      const accountId = initialState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(accountId);
+      getStore(firstService).enqueueJob({
+        accountId,
+        availableAt: "2026-04-02T12:30:30.000Z",
+        dedupeKey: "refresh-before-version-conflict",
+        kind: "reconcile",
+        payload: {},
+        priority: 25,
+        provider: "demo",
+      });
+      assert.equal((await firstService.runWorkerOnce(accountId))?.kind, "reconcile");
+      assert.equal(readAccessToken(firstService, accountId), "provider-access-token-2");
+
+      hostedSnapshot = buildRuntimeSnapshot({
+        connectionId,
+        externalAccountId,
+        hostedUpdatedAt: heartbeatUpdatedAt,
+        tokenBundle: {
+          accessToken: "hosted-access-v7",
+          accessTokenExpiresAt: "2026-04-03T00:00:00.000Z",
+          refreshToken: "hosted-refresh-v7",
+          tokenVersion: 7,
+        },
+      });
+
+      assert.equal(await reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        secret: DEVICE_SYNC_SECRET,
+        service: firstService,
+        state: initialState,
+        wake,
+      }), false);
+      assert.equal(
+        hostedSnapshot.connections[0]?.credential.kind === "oauth_tokens"
+          ? hostedSnapshot.connections[0].credential.tokenBundle.accessToken
+          : null,
+        "hosted-access-v7",
+      );
+
+      const retrySnapshot = hostedSnapshot;
+      const refreshedState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        secret: DEVICE_SYNC_SECRET,
+        service: firstService,
+        snapshot: retrySnapshot,
+        wake,
+      });
+      assert.equal(readAccessToken(firstService, accountId), "provider-access-token-2");
+      refreshedState.snapshot = retrySnapshot;
+      assert.equal(await reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        secret: DEVICE_SYNC_SECRET,
+        service: firstService,
+        state: refreshedState,
+        wake,
+      }), true);
+
+      const coldState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        secret: DEVICE_SYNC_SECRET,
+        service: coldService,
+        wake,
+      });
+      const coldAccountId = coldState.hostedToLocalAccountIds.get(connectionId);
+      assert.ok(coldAccountId);
+      assert.equal(readAccessToken(coldService, coldAccountId), "provider-access-token-2");
+    } finally {
+      closeHostedRuntimeDeviceSyncService(firstService);
+      closeHostedRuntimeDeviceSyncService(coldService);
+      await firstWorkspace.cleanup();
+      await coldWorkspace.cleanup();
+    }
+  });
+
   test("reconciliation publishes earlier empty-backfill retry wakes before hosted hydration and scheduling", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",

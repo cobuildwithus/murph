@@ -868,7 +868,22 @@ function upsertHostedSystemMailboxPendingItem(
   return next;
 }
 
+export function resolveHostedDeviceSyncCompletionRecordInput(input: {
+  item: HostedSystemMailboxPendingItem;
+  preparation: HostedSystemMailboxCheckpointPreparation | null;
+}): { deviceSyncCompletionAcceptedInCurrentAdmission?: true } {
+  if (
+    input.preparation?.status !== "processed"
+    || input.preparation.item.itemId !== input.item.itemId
+    || input.item.routeAction !== "run-device-sync-wake"
+  ) {
+    return {};
+  }
+  return { deviceSyncCompletionAcceptedInCurrentAdmission: true };
+}
+
 export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
+  deviceSyncCompletionAcceptedInCurrentAdmission?: boolean;
   item: HostedSystemMailboxPendingItem;
   operatorHomeRoot?: string | null;
   runtime: HostedSystemMailboxRuntime;
@@ -909,6 +924,8 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       vaultRoot: input.vaultRoot,
     });
     const completion = await finalizeHostedDeviceSyncMailboxAfterCheckpoint({
+      acceptedInCurrentAdmission:
+        input.deviceSyncCompletionAcceptedInCurrentAdmission === true,
       item: input.item,
       runtime: input.runtime,
       signal: input.signal,
@@ -1025,6 +1042,7 @@ function resolveHostedDeviceSyncCompletionFenceWake(
 }
 
 async function finalizeHostedDeviceSyncMailboxAfterCheckpoint(input: {
+  acceptedInCurrentAdmission: boolean;
   item: HostedSystemMailboxPendingItem;
   runtime: HostedSystemMailboxRuntime;
   signal?: AbortSignal | null;
@@ -1035,7 +1053,7 @@ async function finalizeHostedDeviceSyncMailboxAfterCheckpoint(input: {
 }> {
   const retainUntil = resolveHostedDeviceSyncMailboxRetentionAt(input.item);
   const completionWake = resolveHostedDeviceSyncCompletionFenceWake(input.item);
-  if (!completionWake || input.stillDirty) {
+  if (!input.acceptedInCurrentAdmission || !completionWake || input.stillDirty) {
     return { nextWakeAt: null, retainUntil };
   }
 

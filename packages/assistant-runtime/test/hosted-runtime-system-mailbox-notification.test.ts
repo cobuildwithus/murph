@@ -3594,6 +3594,7 @@ describe("hosted system mailbox notification execution context", () => {
       assert.equal(prepared?.status, "processed");
 
       await expect(recordHostedSystemMailboxItemAfterCheckpoint({
+        deviceSyncCompletionAcceptedInCurrentAdmission: true,
         item: prepared.item,
         runtime,
         vaultRoot: workspace.vaultRoot,
@@ -3623,11 +3624,10 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
-  it("replays a published device-sync completion idempotently after checkpoint loss", async () => {
+  it("retains a restored device-sync completion for the full reconciliation path", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const connectionId = "dsc_completion_checkpoint_replay";
     const connectedAt = "2026-04-01T00:00:00.000Z";
-    const updatedAt = "2026-04-26T00:00:00.000Z";
     const retryAt = "2026-04-27T00:00:30.000Z";
     const nextReconcileAt = "2026-04-27T06:00:00.000Z";
     const retainedWake = buildHostedExecutionDeviceSyncWake({
@@ -3644,21 +3644,13 @@ describe("hosted system mailbox notification execution context", () => {
       reason: "reconcile_due",
       userId: "member_123",
     });
-    const applyUpdates = vi.fn(async () => {
-      throw new Error("An already-published completion must not write again.");
-    });
+    const applyUpdates = vi.fn();
+    const fetchSnapshot = vi.fn();
     const runtime = createRuntime({
       deviceSyncPort: {
         ...createDeviceSyncPortStub(),
         applyUpdates,
-        async fetchSnapshot() {
-          return createDeviceSyncCompletionSnapshot({
-            connectedAt,
-            connectionId,
-            nextReconcileAt,
-            updatedAt,
-          });
-        },
+        fetchSnapshot,
       },
     });
     const item = createDeviceSyncCompletionRecordingItem({
@@ -3681,18 +3673,27 @@ describe("hosted system mailbox notification execution context", () => {
         vaultRoot: workspace.vaultRoot,
       })).resolves.toEqual({
         failed: 0,
-        nextWakeAt: nextReconcileAt,
+        nextWakeAt: retryAt,
         nextWakeReason: "device-sync.reconcile",
         recorded: 0,
       });
+      expect(fetchSnapshot).not.toHaveBeenCalled();
       expect(applyUpdates).not.toHaveBeenCalled();
-      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending).toEqual([]);
+      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending).toEqual([
+        expect.objectContaining({
+          itemId: item.itemId,
+          nextAttemptAt: retryAt,
+          postCheckpointRecord: null,
+          status: "pending",
+          wake: retainedWake,
+        }),
+      ]);
     } finally {
       await workspace.cleanup();
     }
   });
 
-  it("retains a device-sync completion when its cadence version fence moves", async () => {
+  it("retains a freshly accepted device-sync completion when its cadence version fence moves", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const connectionId = "dsc_completion_version_retry";
     const connectedAt = "2026-04-01T00:00:00.000Z";
@@ -3759,6 +3760,7 @@ describe("hosted system mailbox notification execution context", () => {
       assert.ok(restoredItem);
 
       const failed = await recordHostedSystemMailboxItemAfterCheckpoint({
+        deviceSyncCompletionAcceptedInCurrentAdmission: true,
         item: restoredItem,
         runtime,
         vaultRoot: workspace.vaultRoot,
@@ -3773,6 +3775,7 @@ describe("hosted system mailbox notification execution context", () => {
       });
 
       await expect(recordHostedSystemMailboxItemAfterCheckpoint({
+        deviceSyncCompletionAcceptedInCurrentAdmission: true,
         item: retryItem,
         runtime,
         vaultRoot: workspace.vaultRoot,
@@ -3841,6 +3844,7 @@ describe("hosted system mailbox notification execution context", () => {
       assert.ok(restoredItem);
 
       await expect(recordHostedSystemMailboxItemAfterCheckpoint({
+        deviceSyncCompletionAcceptedInCurrentAdmission: true,
         item: restoredItem,
         runtime,
         vaultRoot: workspace.vaultRoot,
@@ -3944,6 +3948,7 @@ describe("hosted system mailbox notification execution context", () => {
       assert.ok(restoredItem);
 
       await expect(recordHostedSystemMailboxItemAfterCheckpoint({
+        deviceSyncCompletionAcceptedInCurrentAdmission: true,
         item: restoredItem,
         runtime,
         vaultRoot: workspace.vaultRoot,

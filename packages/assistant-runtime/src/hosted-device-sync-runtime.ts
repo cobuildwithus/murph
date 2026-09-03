@@ -728,9 +728,9 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
   service: DeviceSyncService;
   state: HostedDeviceSyncRuntimeSyncState;
   wake: HostedRuntimeEvent;
-}): Promise<void> {
+}): Promise<boolean> {
   if (!input.state.snapshot) {
-    return;
+    return true;
   }
 
   const client = resolveHostedDeviceSyncRuntimeClientForUser(input.deviceSyncPort);
@@ -775,17 +775,36 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
   }
 
   let offset = 0;
+  let accepted = true;
   do {
-    await client.applyUpdates({
+    const updatesBatch = updates.slice(
+      offset,
+      offset + HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
+    );
+    const response = await client.applyUpdates({
       occurredAt: input.wake.occurredAt,
       ...(input.signal ? { signal: input.signal } : {}),
-      updates: updates.slice(
-        offset,
-        offset + HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
-      ),
+      updates: updatesBatch,
     });
+    for (const update of updatesBatch) {
+      const applied = findHostedExecutionDeviceSyncRuntimeApplyEntry(
+        response,
+        update.connectionId,
+      );
+      if (!applied) {
+        accepted = false;
+        continue;
+      }
+      if (
+        applied.writeUpdate === "skipped_version_mismatch"
+        || applied.tokenUpdate === "skipped_version_mismatch"
+      ) {
+        accepted = false;
+      }
+    }
     offset += HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT;
   } while (offset < updates.length);
+  return accepted;
 }
 
 function createEmptyHostedDeviceSyncRuntimeSyncState(

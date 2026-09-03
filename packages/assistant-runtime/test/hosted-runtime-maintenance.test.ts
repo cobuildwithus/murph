@@ -102,6 +102,12 @@ vi.mock("../src/hosted-device-sync-runtime.ts", () => ({
     mocks.applyHostedPendingDirtyDeviceSyncStateForWake,
   fetchCompleteHostedDeviceSyncRuntimeSnapshot:
     mocks.fetchCompleteHostedDeviceSyncRuntimeSnapshot,
+  isHostedDeviceSyncCompletionFenceWake: (wake: {
+    hint?: { jobs?: unknown[]; reason?: string | null };
+    kind: string;
+  }) => wake.kind === "device-sync.wake"
+    && wake.hint?.reason === "retained_completion_fence"
+    && (wake.hint.jobs?.length ?? 0) === 0,
   promoteHostedCompletedDirtyPayloadAcks:
     mocks.promoteHostedCompletedDirtyPayloadAcks,
   reconcileHostedDeviceSyncControlPlaneState:
@@ -391,7 +397,7 @@ beforeEach(async () => {
     pendingDirtyPayloadJobs: [],
     snapshot: null,
   });
-  mocks.reconcileHostedDeviceSyncControlPlaneState.mockResolvedValue(undefined);
+  mocks.reconcileHostedDeviceSyncControlPlaneState.mockResolvedValue(true);
 });
 
 describe("runHostedAssistantAutomation", () => {
@@ -1876,6 +1882,132 @@ describe("runHostedDeviceSyncPass", () => {
         ],
       }),
     );
+  });
+
+  it("rehydrates and repeats full reconciliation before exposing completion after a version conflict", async () => {
+    const service = {
+      close: vi.fn(),
+      drainWorker: vi.fn(async () => 0),
+      getNextJobWakeAt: () => null,
+      getNextWakeAt: () => null,
+      listAccounts: vi.fn(() => []),
+      listJobFailureDiagnostics: vi.fn(() => []),
+      runSchedulerOnce: vi.fn(async () => undefined),
+    };
+    const completionWake = {
+      connectionId: "hosted_connection_version_retry",
+      eventId: "device-sync.wake:version-retry",
+      expectedConnectedAt: "2026-04-08T00:00:00.000Z",
+      hint: {
+        jobs: [],
+        nextReconcileAt: "2026-04-08T06:00:00.000Z",
+        reason: "retained_completion_fence",
+      },
+      kind: "device-sync.wake" as const,
+      occurredAt: "2026-04-08T00:01:00.000Z",
+      provider: "oura",
+      reason: "reconcile_due" as const,
+      userId: "member_123",
+    };
+    const initialState = {
+      hostedToLocalAccountIds: new Map([[completionWake.connectionId, "local_account"]]),
+      localToHostedAccountIds: new Map([["local_account", completionWake.connectionId]]),
+      observedTokenVersions: new Map([[completionWake.connectionId, 3]]),
+      pendingDirtyAcks: [],
+      pendingDirtyPayloadJobs: [],
+      snapshot: { connections: [] },
+    };
+    const refreshedState = {
+      ...initialState,
+      observedTokenVersions: new Map([[completionWake.connectionId, 4]]),
+    };
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
+    mocks.syncHostedDeviceSyncControlPlaneState
+      .mockResolvedValueOnce(initialState)
+      .mockResolvedValueOnce(refreshedState);
+    mocks.resolveHostedDeviceSyncWakeRecovery.mockReturnValue({
+      retryAt: "2026-04-08T00:01:30.000Z",
+      wake: completionWake,
+    });
+    mocks.reconcileHostedDeviceSyncControlPlaneState
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+
+    const result = await runHostedDeviceSyncPass(
+      completionWake,
+      FIXED_MAINTENANCE_VAULT_ROOT,
+      DEVICE_SYNC_CONFIG,
+      createMaintenanceDeviceSyncPortStub(),
+      45_000,
+    );
+
+    expect(mocks.syncHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(2);
+    expect(mocks.reconcileHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.reconcileHostedDeviceSyncControlPlaneState.mock.calls[1]?.[0].state,
+    ).toBe(refreshedState);
+    expect(result.postCheckpointRecord).toEqual(expect.objectContaining({
+      kind: "device-sync.dirty-processed-batch",
+      retainedWake: completionWake,
+    }));
+  });
+
+  it("keeps a yielded completion wake outside same-admission completion", async () => {
+    let yielded = false;
+    const service = {
+      close: vi.fn(),
+      drainWorker: vi.fn(async () => {
+        yielded = true;
+        return 0;
+      }),
+      getNextJobWakeAt: () => null,
+      getNextWakeAt: () => "2026-04-08T06:00:00.000Z",
+      listAccounts: vi.fn(() => []),
+      listJobFailureDiagnostics: vi.fn(() => []),
+      runSchedulerOnce: vi.fn(async () => undefined),
+    };
+    const completionWake = {
+      connectionId: "hosted_connection_yielded_completion",
+      eventId: "device-sync.wake:yielded-completion",
+      expectedConnectedAt: "2026-04-08T00:00:00.000Z",
+      hint: {
+        jobs: [],
+        nextReconcileAt: "2026-04-08T06:00:00.000Z",
+        reason: "retained_completion_fence",
+      },
+      kind: "device-sync.wake" as const,
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      provider: "oura",
+      reason: "reconcile_due" as const,
+      userId: "member_123",
+    };
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
+    mocks.resolveHostedDeviceSyncSchedulerAccountId.mockReturnValue(null);
+    mocks.resolveHostedDeviceSyncWakeRecovery.mockReturnValue({
+      retryAt: "2026-04-08T00:00:30.000Z",
+      wake: completionWake,
+    });
+
+    const result = await withHostedMaintenanceNow(
+      "2026-04-08T00:00:00.000Z",
+      () => runHostedDeviceSyncPass(
+        completionWake,
+        FIXED_MAINTENANCE_VAULT_ROOT,
+        DEVICE_SYNC_CONFIG,
+        createMaintenanceDeviceSyncPortStub(),
+        45_000,
+        { shouldYield: () => yielded },
+      ),
+    );
+
+    expect(result.postCheckpointRecord).toEqual(expect.objectContaining({
+      retainedWake: expect.objectContaining({
+        hint: expect.objectContaining({
+          reason: "yielded_before_reconciliation",
+        }),
+      }),
+    }));
+    expect(mocks.reconcileHostedDeviceSyncControlPlaneState).not.toHaveBeenCalled();
   });
 
   it("completes a ready active Fitbit cutover only after scheduled imports are drained and published", async () => {
@@ -3417,7 +3549,7 @@ describe("runHostedDeviceSyncPass", () => {
       pendingDirtyPayloadJobs: [],
       snapshot: null,
     });
-    mocks.resolveHostedDeviceSyncWakeRecovery.mockReturnValueOnce({
+    mocks.resolveHostedDeviceSyncWakeRecovery.mockReturnValue({
       retryAt,
       wake: {
         connectionId: "hosted_retry_connection",
@@ -4366,6 +4498,7 @@ describe("runHostedDeviceSyncPass", () => {
     });
     mocks.reconcileHostedDeviceSyncControlPlaneState.mockImplementationOnce(async () => {
       operationOrder.push("reconcile");
+      return true;
     });
 
     const result = await runHostedDeviceSyncPass(

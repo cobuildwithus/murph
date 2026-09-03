@@ -9,10 +9,11 @@ Current responsibilities:
 - run bounded hosted workspace invocations for assistant, inbox, and device-sync work behind an explicit runtime context object
 - publish a device-sync completion record's retained provider cadence and
   checkpoint mailbox removal inside the same runtime admission after the exact
-  completion record is durable, without another provider-free completion wake;
-  direct completion requires zero retained jobs plus an exact active connection
-  epoch, while authorityless legacy or terminal records drain without a cadence
-  write
+  completion record is durable, without another provider-free completion wake
+  on the normal path; direct completion requires an accepted full
+  reconciliation in that admission, zero retained jobs, and an exact active
+  connection epoch, while restored records repeat the full reconciliation and
+  authorityless legacy or terminal records drain without a cadence write
 - drain each hosted device-sync pass through one bounded worker call so
   canonical imports can safely reuse a pass-local event identity index, while
   cumulative progress remains observable and the service-owned foreground
