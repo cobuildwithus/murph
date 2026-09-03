@@ -493,11 +493,6 @@ interface RunnerContainerPendingCompletionCleanup
   result: HostedExecutionRunnerJobResult;
 }
 
-interface RunnerContainerRecordedCompletionCleanup
-  extends RunnerContainerRuntimeCompletionRecordedInput {
-  expectedInteractionGeneration: number;
-}
-
 type RunnerContainerLifecycleEvaluationInput =
   | {
       expectedInteractionGeneration: number;
@@ -677,7 +672,7 @@ export class RunnerContainer extends Container {
   private warmShellInvalidatedByUnsettledDestroy = false;
   private pointerlessWakeBlockingLifecycleCount = 0;
   private pendingCompletionCleanup: RunnerContainerPendingCompletionCleanup | null = null;
-  private recordedCompletionCleanup: RunnerContainerRecordedCompletionCleanup | null = null;
+  private recordedCompletionCleanup: RunnerContainerRuntimeCompletionRecordedInput | null = null;
   private workspaceInvocationOperations: RunnerWorkspaceInvocationOperation[] = [];
   private workspaceInvocationNoPointerAbort:
     RunnerWorkspaceInvocationNoPointerAbort | null = null;
@@ -696,6 +691,7 @@ export class RunnerContainer extends Container {
     payload: HostedExecutionContainerInvokeRequest,
   ): Promise<HostedExecutionRunnerJobResult> {
     this.noteContainerInteraction();
+    const invocationInteractionGeneration = this.containerInteractionGeneration;
     const input = parseHostedExecutionContainerInvokeInput(payload);
     const routeUserId = readHostedExecutionRunnerJobUserId(input.job);
     if (
@@ -754,11 +750,10 @@ export class RunnerContainer extends Container {
     operation.result = result;
     this.workspaceInvocationOperations.push(operation);
     const completedResult = await result;
-    const expectedInteractionGeneration = this.containerInteractionGeneration;
     if (this.readWorkspaceInvocationOperation() !== operation) {
       const pending: RunnerContainerPendingCompletionCleanup = {
         attemptId: input.job.request.attemptId,
-        expectedInteractionGeneration,
+        expectedInteractionGeneration: invocationInteractionGeneration,
         leaseGeneration: input.job.request.leaseGeneration,
         result: completedResult,
         userId: routeUserId,
@@ -772,8 +767,7 @@ export class RunnerContainer extends Container {
           this.pendingCompletionCleanup = null;
           this.recordedCompletionCleanup = null;
           await this.evaluateWarmContainerLifecycle({
-            expectedInteractionGeneration:
-              recorded.expectedInteractionGeneration,
+            expectedInteractionGeneration: pending.expectedInteractionGeneration,
             result: pending.result,
             trigger: "invoke-completed",
             userId: pending.userId,
@@ -789,14 +783,10 @@ export class RunnerContainer extends Container {
   async onRuntimeCompletionRecorded(
     input: RunnerContainerRuntimeCompletionRecordedInput,
   ): Promise<void> {
-    const expectedInteractionGeneration = this.containerInteractionGeneration;
     await this.withLifecycleLock(async () => {
       const pending = this.pendingCompletionCleanup;
       if (!pending || !runnerCompletionCleanupMatches(pending, input)) {
-        this.recordedCompletionCleanup = {
-          ...input,
-          expectedInteractionGeneration,
-        };
+        this.recordedCompletionCleanup = { ...input };
         return;
       }
       this.pendingCompletionCleanup = null;

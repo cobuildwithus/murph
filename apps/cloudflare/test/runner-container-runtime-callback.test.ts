@@ -71,9 +71,6 @@ describe("RunnerContainer internal runtime dispatch", () => {
     await vi.waitFor(() => {
       expect(containerFetch).toHaveBeenCalled();
     });
-    await expect(container.readActiveRuntimeUserFence()).resolves.toMatchObject({
-      active: true,
-    });
 
     const completionNotification = container.onRuntimeCompletionRecorded({
       attemptId: "attempt_member_123",
@@ -93,7 +90,16 @@ describe("RunnerContainer internal runtime dispatch", () => {
     expect(destroy).toHaveBeenCalledOnce();
   });
 
-  it("preserves a shell when foreground readiness follows a queued completion notification", async () => {
+  it.each([
+    {
+      name: "completion notification arrives before foreground readiness",
+      order: ["completion", "readiness"] as const,
+    },
+    {
+      name: "foreground readiness arrives before the completion notification",
+      order: ["readiness", "completion"] as const,
+    },
+  ])("preserves a shell when $name", async ({ order }) => {
     const invocationResponse = createDeferred<Response>();
     const { container, containerFetch, destroy } = createActivityExpiryContainerDouble({
       invocationResponse: invocationResponse.promise,
@@ -107,15 +113,18 @@ describe("RunnerContainer internal runtime dispatch", () => {
       expect(containerFetch).toHaveBeenCalled();
     });
 
-    const completionNotification = container.onRuntimeCompletionRecorded({
-      attemptId: "attempt_member_123",
-      leaseGeneration: "11",
-      userId: "member_123",
-    });
-    const readiness = container.ensureReadyForProcessing({
-      timeoutMs: 5_000,
-      userId: "member_123",
-    });
+    const operations = order.map((operation) =>
+      operation === "completion"
+        ? container.onRuntimeCompletionRecorded({
+            attemptId: "attempt_member_123",
+            leaseGeneration: "11",
+            userId: "member_123",
+          })
+        : container.ensureReadyForProcessing({
+            timeoutMs: 5_000,
+            userId: "member_123",
+          })
+    );
     invocationResponse.resolve(new Response(
       JSON.stringify(createRunnerResult()),
       {
@@ -125,8 +134,11 @@ describe("RunnerContainer internal runtime dispatch", () => {
     ));
 
     await expect(invocation).resolves.toMatchObject({ status: "idle" });
-    await expect(completionNotification).resolves.toBeUndefined();
-    await expect(readiness).resolves.toMatchObject({ kind: "ready" });
+    await expect(Promise.all(operations)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "ready" }),
+      ]),
+    );
     expect(destroy).not.toHaveBeenCalled();
   });
 

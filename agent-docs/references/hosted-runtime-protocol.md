@@ -2924,13 +2924,14 @@ After that exact compare-and-swap succeeds, `UserRunner` may also make one
 best-effort metadata-only RPC to the token's exact runner-container name. The
 RPC carries only attempt, generation, and user identity. It is lifecycle advice,
 not completion authority: `RunnerContainer` must match it to the successful
-outer result retained in memory and to the interaction generation observed at
-completion before it can run the existing warm-shell lifecycle decision. The
-two in-memory halves accept either arrival order. A mismatch, newer interaction,
-Durable Object activation reset, RPC failure, active child, retained warmth,
-near wake, or uncertain status/health leaves the ordinary `sleepAfter` timer as
-the cleanup owner. No durable notification, retry loop, queue, scheduler, or
-second lifecycle owner is added.
+outer result retained in memory before it can run the existing warm-shell
+lifecycle decision. That result is the sole owner of the interaction generation,
+captured when its invocation enters the container; the notification carries
+identity only. The two in-memory halves accept either arrival order. A mismatch,
+newer interaction, Durable Object activation reset, RPC failure, active child,
+retained warmth, near wake, or uncertain status/health leaves the ordinary
+`sleepAfter` timer as the cleanup owner. No durable notification, retry loop,
+queue, scheduler, or second lifecycle owner is added.
 When the outer RunnerContainer active-operation pointer is missing, a container
 wake response must carry explicit identity-checked wake metadata before an
 accepted wake is trusted; identity-blind accepted responses from deploy-skewed

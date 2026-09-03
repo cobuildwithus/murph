@@ -2071,8 +2071,10 @@ the completed result and adds no poller or recovery queue.
 After the exact compare-and-swap wins, `UserRunner` also best-effort notifies
 the exact existing runner-container name with attempt, generation, and user
 identity only. The container accepts either notification/result arrival order
-in memory, rechecks the existing interaction and warm-lifecycle guards, and may
-stop a terminal idle shell immediately. Missing mixed-version RPC support,
+in memory. The successful result is the sole owner of an interaction generation
+captured at invocation admission; the notification carries identity only. The
+container rechecks that generation and the existing warm-lifecycle guards, and
+may stop a terminal idle shell immediately. Missing mixed-version RPC support,
 activation reset, mismatch, uncertainty, retained warmth, active work, or a
 near wake falls back to the unchanged `sleepAfter` timer. This additive RPC has
 no deployment variable, durable queue, or second completion owner.

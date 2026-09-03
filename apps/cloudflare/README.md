@@ -654,14 +654,15 @@ write-fence compare-and-swap, it best-effort notifies the exact existing
 only. `RunnerContainer` matches that notification to its in-memory successful
 result in either arrival order and then runs the same lifecycle decision used by
 `sleepAfter` expiry. That decision remains fenced by the lifecycle lock and the
-interaction generation observed at completion, and retains the shell for an
-active or replacement invocation, active child work, recent conversation
-warmth, an undefined legacy warmth field, or uncertain status, health, or
-cleanup. A missing or mismatched notification, activation reset, retained
-shell, or failed immediate cleanup leaves the ordinary activity timer armed as
-the fallback. When Cloudflare later reports `sleepAfter` expiry, that shared
-decision either renews the shell or tears it down; a shell already stopped by
-invocation completion is not destroyed again.
+single interaction generation captured when that invocation enters the
+container. Any later interaction changes the generation and retains the shell,
+as do an active or replacement invocation, active child work, recent
+conversation warmth, an undefined legacy warmth field, or uncertain status,
+health, or cleanup. A missing or mismatched notification, activation reset,
+retained shell, or failed immediate cleanup leaves the ordinary activity timer
+armed as the fallback. When Cloudflare later reports `sleepAfter` expiry, that
+shared decision either renews the shell or tears it down; a shell already
+stopped by invocation completion is not destroyed again.
 Each invocation runs in-process through `packages/assistant-runtime` with
 per-user warm workspace roots and invocation-local cache/temp roots. Runtime
 effects use internal virtual hosts and write-fence headers instead of
