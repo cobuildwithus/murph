@@ -20,6 +20,9 @@ import {
   getGoalCategory,
   GOAL_CATEGORIES,
 } from "../src/lib/goals/goal-categories";
+import { GOAL_DIRECTORY_SECTION_DEFINITIONS } from "../src/lib/goals/goal-directory-sections";
+import { GOAL_ILLUSTRATION_ROUTE_IDS } from "../src/lib/goals/goal-illustrations.generated";
+import { resolveGoalIllustrationSrc } from "../src/lib/goals/goal-illustrations";
 import type { GoalOutcomeKind } from "../src/lib/goals/goal-models";
 import { listHealthCommonsGoalEntries } from "../src/lib/health-commons/goal-projections";
 
@@ -73,13 +76,41 @@ describe("Goal visual system", () => {
     assert.doesNotMatch(fallback, /data-goal-hero-visual/u);
   });
 
-  it("covers every generated Goal with known category and outcome metadata", () => {
+  it("gives every public goal a checked-in goal-specific illustration", () => {
     const goals = listHealthCommonsGoalEntries();
+    const routeIds = goals.map((goal) => goal.routeId).sort();
 
-    expect(goals.length).toBeGreaterThanOrEqual(250);
+    expect(goals).toHaveLength(252);
+    expect([...GOAL_ILLUSTRATION_ROUTE_IDS].sort()).toEqual(routeIds);
     for (const goal of goals) {
+      const illustration = resolveGoalIllustrationSrc(goal.routeId);
+
       expect(() => getGoalCategoryVisual(goal.category)).not.toThrow();
       expect(OUTCOME_KINDS).toContain(goal.outcomeKind);
+      expect(illustration).toBe(`/design-assets/goals/${goal.routeId}.svg`);
+      expect(existsSync(new URL(`../public${illustration}`, import.meta.url))).toBe(
+        true,
+      );
+    }
+  });
+
+  it("assigns every public goal exactly once to a section of at most 12 cards", () => {
+    const goals = listHealthCommonsGoalEntries();
+
+    for (const category of GOAL_CATEGORIES) {
+      const categoryRouteIds = goals
+        .filter((goal) => goal.category === category.slug)
+        .map((goal) => goal.routeId)
+        .sort();
+      const sections = GOAL_DIRECTORY_SECTION_DEFINITIONS[category.slug];
+      const assignedRouteIds = sections
+        .flatMap((section) => section.routeIds)
+        .sort();
+
+      expect(sections.every((section) => section.routeIds.length > 0)).toBe(true);
+      expect(sections.every((section) => section.routeIds.length <= 12)).toBe(true);
+      expect(new Set(assignedRouteIds).size).toBe(assignedRouteIds.length);
+      expect(assignedRouteIds).toEqual(categoryRouteIds);
     }
   });
 
