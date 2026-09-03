@@ -1,0 +1,80 @@
+# Retired device-sync wake frontier remediation
+
+Status: active
+Created: 2026-09-03
+Updated: 2026-09-03
+
+## Goal
+
+- Correct PR #2779 so only the exact first unhandled, runtime-imported scheduled
+  device-sync wake can reuse its existing runtime retry after payload
+  retention, then complete review, CI, and merge.
+
+## Success criteria
+
+- A retired scheduled wake is accepted only when its lane sequence equals the
+  canonical handled frontier plus one and the existing import/high-water,
+  structural, and privacy checks also pass.
+- A skipped retired wake behind an earlier pending blocker remains a visible
+  dedupe conflict even when a later live item advanced the imported watermark.
+- Positive and negative PostgreSQL proofs, focused suites, lint, typecheck,
+  ReviewGPT, and required GitHub checks pass before merge.
+- The merged PR leaves no active task worktree.
+
+## Scope
+
+- In scope: the accepted ReviewGPT frontier finding, focused regression proof,
+  protocol wording, PR evidence, exact-head review/CI, merge, and worktree
+  retirement.
+- Out of scope: new persisted state, per-item import receipts, retention timing,
+  generic mailbox dedupe, runtime scheduling, and unrelated device-sync work.
+
+## Constraints
+
+- Technical constraints: reuse the existing contiguous handled frontier; add no
+  schema, queue, state owner, background process, or compatibility layer.
+- Product/process constraints: preserve content deletion, fail closed when
+  per-item runtime ownership is not provable, keep foreground replies
+  unaffected, and preserve the immutable first-reviewed head.
+
+## Risks and mitigations
+
+1. Risk: lane-wide import progress can be misattributed to a skipped retired
+   item.
+   Mitigation: require the target to be exactly `consumed_seq + 1` and cover
+   the three-item blocker/target/successor shape.
+2. Risk: a corrective predicate could reject a legitimate imported target when
+   later items were also imported.
+   Mitigation: cover target sequence two with consumed sequence one and
+   imported sequence three as a positive case.
+
+## Tasks
+
+1. Completed: validate ReviewGPT's finding against projection fast-forward,
+   runtime pending-state, and checkpoint behavior.
+2. Completed: replace the broad pending-range inference with the contiguous
+   frontier relation and add direct regression coverage and protocol wording.
+3. Completed: rerun focused PostgreSQL/unit/recovery/changelog checks, ESLint,
+   typecheck, complexity, diff, and privacy checks.
+4. In progress: commit and push the corrected candidate, update PR evidence, and
+   run ReviewGPT round 2 concurrently with required CI.
+5. Pending: merge only after resolved review and green required checks, then
+   retire the task worktree.
+
+## Decisions
+
+- Accept the ReviewGPT finding: import and handled watermarks describe different
+  facts, so only their exact contiguous frontier relation proves this target.
+- Prefer one stricter SQL equality and focused tests over new per-item state or
+  another recovery owner.
+
+## Verification
+
+- Passed locally: 12-case scheduled-retention PostgreSQL proof; 278 surrounding
+  Web device-sync, mailbox, and recovery tests; 69 runtime import, checkpoint,
+  and pending-state tests; 59 changelog tests; focused ESLint; Web typecheck;
+  `pnpm complexity:diff`; `git diff --check`; and the privacy scan.
+- Pending: exact-head ReviewGPT round 2 and required GitHub checks.
+- Expected outcomes: the safe contiguous case is accepted without another
+  signal; the skipped-middle case stays a conflict; every completion gate is
+  green on the merge candidate.
