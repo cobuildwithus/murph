@@ -265,7 +265,6 @@ import {
   HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
   HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
   createHostedRuntimeWakeCandidate,
-  hostedRuntimeWakeCandidateIsDue,
   hostedRuntimeWakeReasonUsesAssistantPhase,
   selectHostedRuntimeOwnerWakeCandidate,
   selectHostedRuntimeWakeCandidate,
@@ -1119,6 +1118,28 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
     ? modelFreeWake.nextWakeAt
       ? modelFreeWake
       : assistantWake
+    : deviceSyncWake.nextWakeAt
+    ? selectEarliestHostedRuntimeWake([
+        {
+          at: deviceSyncWake.nextWakeAt,
+          reason: deviceSyncWake.nextWakeReason,
+        },
+        ...(input.extraCandidates ?? []).filter((candidate) =>
+          !hostedRuntimeWakeReasonUsesAssistantPhase(candidate.reason)
+        ),
+        {
+          at: systemMailboxWake.executionClass === "model_free"
+            ? systemMailboxWake.at
+            : null,
+          reason: systemMailboxWake.executionClass === "model_free"
+            ? systemMailboxWake.reason
+            : null,
+        },
+        createHostedRuntimeWakeCandidate(
+          input.mailboxImportRetryAt ?? null,
+          "mailbox",
+        ),
+      ])
     : (() => {
         const foregroundCandidates = [
           outboxWake,
@@ -1127,33 +1148,6 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
             HOSTED_ASSISTANT_WAKE_REASON,
           ),
         ];
-        const foregroundWake = selectHostedRuntimeWakeCandidate(
-          foregroundCandidates,
-        );
-        if (
-          !hostedRuntimeWakeCandidateIsDue(foregroundWake, input.nowMs)
-          && (
-            systemMailboxWake.executionClass === null
-            || systemMailboxWake.reason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
-          )
-          && deviceSyncWake.nextWakeAt
-        ) {
-          // Default processing has its own additive projection. Keep the
-          // device owner among the canonical model-free candidates.
-          return selectEarliestHostedRuntimeWake([
-            {
-              at: deviceSyncWake.nextWakeAt,
-              reason: deviceSyncWake.nextWakeReason,
-            },
-            ...(input.extraCandidates ?? []).filter((candidate) =>
-              !hostedRuntimeWakeReasonUsesAssistantPhase(candidate.reason)
-            ),
-            createHostedRuntimeWakeCandidate(
-              input.mailboxImportRetryAt ?? null,
-              "mailbox",
-            ),
-          ]);
-        }
         const selected = selectHostedRuntimeOwnerWakeCandidate({
           backgroundCandidates: [
             {
@@ -3506,7 +3500,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                   ? null
                   : preparationWake,
               ]);
-              rememberSystemMailboxPostRecordWake(recordWake);
+              rememberSystemMailboxPostRecordWake(
+                recordResult.deviceSyncWake ?? recordWake,
+              );
               await checkpointSystemMailboxMode(
                 `${inputItem.stagePrefix}.checkpoint.record`,
                 recordWake.at ? [recordWake] : [],
