@@ -1932,6 +1932,81 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("refreshes an established shared prefetch after an initial system import", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const events: string[] = [];
+    const items: HostedMailboxItem[] = [];
+    const { mailboxPort } = createMailboxPort({ fetchRequests, items });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const state = createEmptyHostedMailboxImportState();
+    state.watermarks.system = "1";
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await writeHostedMailboxImportState({ state, vaultRoot });
+      const initialMailboxPrefetch = prefetchHostedMailboxPrefix({
+        lanes: ["system"],
+        limitPerLane: 10,
+        mailboxPort,
+        requestId: "request_synthetic_runner_established_system_prefetch",
+        state,
+      });
+      await initialMailboxPrefetch.response;
+      items.push(createMailboxItem({
+        id: "mailbox_item_runner_established_system_prefetch_later_ask",
+        kind: "assistant.ask.requested",
+        lane: "system",
+        laneSeq: "2",
+      }));
+
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_established_system_prefetch",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          events.push(`import:${item.item.lane}`);
+          return { status: "imported" };
+        },
+        initialMailboxImportLanes: ["system"],
+        initialMailboxPrefetch,
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_established_system_prefetch",
+        async runAssistantPhase(input) {
+          events.push("assistant");
+          assert.equal(input.initialMailboxImport.state.watermarks.system, "2");
+          return { progressed: false };
+        },
+        vaultRoot,
+        workspace: null,
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(fetchRequests.map((request) => request.lanes), [
+        [{ importedSeq: "1", lane: "system" }],
+        [{ importedSeq: "1", lane: "system" }],
+      ]);
+      assert.deepEqual(events, ["import:system", "assistant"]);
+      assert.equal(result.latestMailboxImport.state.watermarks.system, "2");
+      assert.deepEqual(checkpointRequests, []);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("imports paged member preference system work before a fresh conversation assistant phase", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const fetchRequests: HostedMailboxFetchRequest[] = [];

@@ -878,6 +878,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         async () => await importHostedPreAssistantSystemMailboxForWorkspaceRunner({
           checkpointRequestBuilder: checkpointRequestSession,
           importItemContext: input.initialMailboxImportContext ?? null,
+          initialMailboxImport,
           input,
           requestId: input.requestId,
           signal: input.signal ?? null,
@@ -905,6 +906,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       async () => await importHostedPreAssistantSystemMailboxForWorkspaceRunner({
         checkpointRequestBuilder: checkpointRequestSession,
         importItemContext: input.initialMailboxImportContext ?? null,
+        initialMailboxImport,
         input,
         requestId: input.requestId,
         signal: input.signal ?? null,
@@ -1998,13 +2000,15 @@ async function importHostedPreAssistantSystemMailboxForWorkspaceRunner(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
   checkpointCanonicalMailboxImportProgress: HostedCanonicalMailboxImportProgressCheckpoint;
   importItemContext: HostedWorkspaceRunnerMailboxImportContext | null;
+  initialMailboxImport: HostedMailboxImportCheckpointResult;
   input: HostedWorkspaceRunnerInput;
   requestId: string;
   signal: AbortSignal | null;
 }): Promise<HostedMailboxImportCheckpointResult | null> {
   const initialMailboxPrefetch = input.input.initialMailboxPrefetch ?? null;
   const establishedInitialMailboxPrefetch =
-    initialMailboxPrefetch?.importedSeqByLane.system !== undefined
+    !hostedMailboxImportFetchedSystemLane(input.initialMailboxImport)
+    && initialMailboxPrefetch?.importedSeqByLane.system !== undefined
     && initialMailboxPrefetch.importedSeqByLane.system !== "0"
       ? initialMailboxPrefetch
       : null;
@@ -2018,10 +2022,10 @@ async function importHostedPreAssistantSystemMailboxForWorkspaceRunner(input: {
       importItemContext: input.importItemContext,
       input: input.input,
       lanes: ["system"],
-      // A zero system watermark can still be the first-owner activation race:
-      // activation may arrive while the prefetched conversation is importing.
-      // Established runtimes have already crossed that boundary, so reuse the
-      // shared snapshot and let later system work keep its durable next pass.
+      // A zero system watermark can still be the first-owner activation race.
+      // A preceding system import also keeps its fresh post-import barrier so
+      // newly arriving asks cannot bypass system-mailbox owner ordering. Only
+      // an established conversation-first pass reuses the shared snapshot.
       prefetch: importPage === 1 ? establishedInitialMailboxPrefetch : null,
       requestId: `${input.requestId}:pre-assistant-system:${importPage}`,
       signal: input.signal,

@@ -3075,15 +3075,18 @@ Reconciliation evaluates engagement and AI-usage authorization for runnable
 model work even when deterministic system lag is present. Authorized
 conversation/default work owns the foreground pass and imports system items
 before the assistant phase without letting a retryable system item starve fresh
-conversation. An established workspace reuses the one post-restore conversation
-and system mailbox snapshot for that first system page; a workspace whose
-system watermark is still zero refreshes the system lane once to preserve the
-first-activation race boundary. Later system rows remain durable work for their
-normal wake or a later pass. System-only mailbox reads do not query the optional
-group sponsorship presentation bit. When model work is blocked, or system lag
-is the only work, the existing `system_mailbox` mode imports only the system
-lane and returns before assistant execution. It adds no queue, scheduler,
-cursor, or durable state owner.
+conversation. An established conversation-first pass reuses the one
+post-restore conversation and system mailbox snapshot for that first system
+page. A workspace whose system watermark is still zero refreshes the system
+lane once to preserve the first-activation race boundary. A pass whose initial
+import already fetched the system lane also refreshes it before assistant
+execution; `system_mailbox` uses that post-import check as an ordering barrier
+for newly arrived asks. Later system rows behind the conversation-first
+snapshot remain durable work for their normal wake or a later pass. System-only
+mailbox reads do not query the optional group sponsorship presentation bit.
+When model work is blocked, or system lag is the only work, the existing
+`system_mailbox` mode imports only the system lane and returns before assistant
+execution. It adds no queue, scheduler, cursor, or durable state owner.
 
 Linq group-avatar mutation is the one private-image provider boundary that
 requires a fetchable URL. After the group tool preflights current chat
