@@ -7,10 +7,7 @@ import {
   GoalSearchExperience,
   type GoalCategoryDirectoryEntry,
 } from "@/src/components/goals/goal-search-experience";
-import {
-  GoalCategoryArtwork,
-  getGoalCategoryVisual,
-} from "@/src/components/goals/goal-visual";
+import { GoalCategoryArtwork } from "@/src/components/goals/goal-visual";
 import { GOAL_CATEGORIES } from "@/src/lib/goals/goal-categories";
 import type { GoalIndexEntryModel } from "@/src/lib/goals/goal-models";
 import { createGoalSearchItem } from "@/src/lib/goals/goal-search";
@@ -22,7 +19,6 @@ import {
   createMurphPageMetadata,
   MURPH_INDEXABLE_PAGE_ROBOTS,
 } from "@/src/lib/site-metadata";
-import { cn } from "@/src/lib/utils";
 
 const GOALS_DESCRIPTION =
   "Clear, research-backed guides for the health and fitness goals people care about most.";
@@ -65,8 +61,6 @@ export default function GoalsPage() {
     <GoalSearchExperience categories={directory} goals={searchGoals}>
       <div className="flex flex-col gap-14 sm:gap-16">
         {sections.map(({ category, featuredGoals, goals: categoryGoals }) => {
-          const visual = getGoalCategoryVisual(category.slug);
-
           return (
             <section
               className="flex scroll-mt-28 flex-col gap-5 sm:gap-6"
@@ -111,7 +105,7 @@ export default function GoalsPage() {
                 {featuredGoals.map((goal) => (
                   <li className="min-w-0" key={goal.key}>
                     <GoalBrowseCard
-                      className={cn("h-full", visual.hoverSurfaceClassName)}
+                      className="h-full"
                       href={`/goals/${goal.routeId}`}
                       title={goal.title}
                     />

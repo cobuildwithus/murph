@@ -3,12 +3,10 @@ import Link from "next/link";
 
 import { GoalBrowseCard } from "@/src/components/goals/goal-browse-card";
 import { GoalContactAction } from "@/src/components/goals/goal-contact-action";
-import {
-  GoalCategoryArtwork,
-  getGoalCategoryVisual,
-} from "@/src/components/goals/goal-visual";
+import { GoalCategoryArtwork } from "@/src/components/goals/goal-visual";
 import { MarkdownView } from "@/src/components/ui/markdown-view";
 import type { GoalCategory } from "@/src/lib/goals/goal-categories";
+import { describeGoalSourcePublisher } from "@/src/lib/goals/goal-source-labels";
 import {
   isGoalGuideSafetySection,
   isGoalGuideSourcesSection,
@@ -53,7 +51,6 @@ export function GoalGuide({
     ...articleSections.map(({ id, title }) => ({ id, title })),
     ...(showSources ? [{ id: GOAL_SOURCES_SECTION_ID, title: "Sources" }] : []),
   ];
-  const visual = getGoalCategoryVisual(category.slug);
 
   return (
     <article className="mx-auto w-full max-w-5xl pb-12">
@@ -150,7 +147,6 @@ export function GoalGuide({
       {related && related.goals.length > 0 ? (
         <GoalRelatedGoals
           category={category}
-          hoverClassName={visual.hoverSurfaceClassName}
           related={related}
         />
       ) : null}
@@ -229,34 +225,36 @@ function GoalSources({
   return (
     <section
       aria-labelledby={headingId}
-      className="mt-12 scroll-mt-28 rounded-2xl border border-black/[0.06] bg-[#fffdf8] p-5 sm:p-6"
+      className="mt-12 scroll-mt-28"
       data-goal-sources
       id={GOAL_SOURCES_SECTION_ID}
     >
       <h2
-        className="font-serif text-xl font-semibold tracking-tight text-foreground"
+        className="font-serif text-2xl font-semibold tracking-tight text-foreground"
         id={headingId}
       >
         Sources
       </h2>
       {sources.length > 0 ? (
-        <ul className="mt-2 divide-y divide-border/70">
+        <ol className="mt-4 border-t border-[#c4a882]/30">
           {sources.map((source) => (
-            <li className="min-w-0 py-3" key={source.url}>
+            <li className="border-b border-[#c4a882]/30" key={source.url}>
               <a
                 href={source.url}
-                className="font-medium text-foreground underline decoration-border underline-offset-4 transition-colors hover:decoration-foreground"
+                className="group grid gap-1.5 py-4 text-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:grid-cols-[11rem_minmax(0,1fr)] sm:items-baseline sm:gap-6"
                 rel="noopener noreferrer"
                 target="_blank"
               >
-                {source.label}
+                <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                  {describeGoalSourcePublisher(source.url)}
+                </span>
+                <span className="font-serif text-lg font-semibold leading-snug tracking-[-0.015em] text-balance">
+                  {source.label}
+                </span>
               </a>
-              <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                {describeSourceHost(source.url)}
-              </span>
             </li>
           ))}
-        </ul>
+        </ol>
       ) : fallbackBody ? (
         <MarkdownView
           className={cn(GOAL_PROSE_CLASS_NAME, "mt-3")}
@@ -269,11 +267,9 @@ function GoalSources({
 
 function GoalRelatedGoals({
   category,
-  hoverClassName,
   related,
 }: {
   category: GoalCategory;
-  hoverClassName: string;
   related: GoalGuideRelatedGoals;
 }) {
   return (
@@ -304,7 +300,7 @@ function GoalRelatedGoals({
         {related.goals.map((relatedGoal) => (
           <li className="min-w-0" key={relatedGoal.key}>
             <GoalBrowseCard
-              className={cn("h-full", hoverClassName)}
+              className="h-full"
               href={`/goals/${relatedGoal.routeId}`}
               title={relatedGoal.title}
             />
@@ -313,12 +309,4 @@ function GoalRelatedGoals({
       </ul>
     </section>
   );
-}
-
-function describeSourceHost(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./u, "");
-  } catch {
-    return url;
-  }
 }

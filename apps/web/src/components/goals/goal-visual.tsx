@@ -7,7 +7,6 @@ interface GoalCategoryVisual {
   accentClassName: string;
   artwork: string;
   borderClassName: string;
-  hoverSurfaceClassName: string;
   surfaceClassName: string;
 }
 
@@ -16,49 +15,42 @@ const CATEGORY_VISUALS: Record<GoalCategorySlug, GoalCategoryVisual> = {
     accentClassName: "text-[#38566f]",
     artwork: "/design-assets/habitat/bed.svg",
     borderClassName: "border-[#38566f]/15",
-    hoverSurfaceClassName: "hover:border-[#38566f]/30 hover:bg-[#e8eef4]",
     surfaceClassName: "bg-[#e8eef4]",
   },
   nutrition: {
     accentClassName: "text-[#516237]",
     artwork: "/design-assets/patterns/meal.svg",
     borderClassName: "border-[#516237]/15",
-    hoverSurfaceClassName: "hover:border-[#516237]/30 hover:bg-[#edf0e4]",
     surfaceClassName: "bg-[#edf0e4]",
   },
   cardio: {
     accentClassName: "text-[#944e37]",
     artwork: "/design-assets/patterns/running.svg",
     borderClassName: "border-[#944e37]/15",
-    hoverSurfaceClassName: "hover:border-[#944e37]/30 hover:bg-[#f4e8df]",
     surfaceClassName: "bg-[#f4e8df]",
   },
   strength: {
     accentClassName: "text-[#355747]",
     artwork: "/design-assets/patterns/strength.svg",
     borderClassName: "border-[#355747]/15",
-    hoverSurfaceClassName: "hover:border-[#355747]/30 hover:bg-[#e7eee9]",
     surfaceClassName: "bg-[#e7eee9]",
   },
   mind: {
     accentClassName: "text-[#67546f]",
     artwork: "/design-assets/patterns/mind-body.svg",
     borderClassName: "border-[#67546f]/15",
-    hoverSurfaceClassName: "hover:border-[#67546f]/30 hover:bg-[#eee8f0]",
     surfaceClassName: "bg-[#eee8f0]",
   },
   biomarkers: {
     accentClassName: "text-[#275a50]",
     artwork: "/design-assets/patterns/performance.svg",
     borderClassName: "border-[#275a50]/15",
-    hoverSurfaceClassName: "hover:border-[#275a50]/30 hover:bg-[#e4eeeb]",
     surfaceClassName: "bg-[#e4eeeb]",
   },
   "life-stages": {
     accentClassName: "text-[#84563e]",
     artwork: "/design-assets/patterns/parenting.svg",
     borderClassName: "border-[#84563e]/15",
-    hoverSurfaceClassName: "hover:border-[#84563e]/30 hover:bg-[#f2e9e2]",
     surfaceClassName: "bg-[#f2e9e2]",
   },
 };

@@ -2,16 +2,12 @@ import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 
 import { GoalBrowseCard } from "@/src/components/goals/goal-browse-card";
-import {
-  GoalCategoryArtwork,
-  getGoalCategoryVisual,
-} from "@/src/components/goals/goal-visual";
+import { GoalCategoryArtwork } from "@/src/components/goals/goal-visual";
 import {
   GOAL_CATEGORIES,
   type GoalCategory,
 } from "@/src/lib/goals/goal-categories";
 import type { GoalIndexEntryModel } from "@/src/lib/goals/goal-models";
-import { cn } from "@/src/lib/utils";
 
 interface GoalBrowseNode {
   children: GoalBrowseNode[];
@@ -41,10 +37,7 @@ export function GoalCategoryBrowse({
   const standalone = roots
     .filter((node) => node.children.length === 0)
     .map((node) => node.goal);
-  const cardClassName = cn(
-    "h-full",
-    getGoalCategoryVisual(category.slug).hoverSurfaceClassName,
-  );
+  const cardClassName = "h-full";
 
   return (
     <div
