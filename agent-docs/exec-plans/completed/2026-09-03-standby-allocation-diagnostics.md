@@ -1,6 +1,6 @@
 # Preserve standby allocation diagnostics
 
-Status: active
+Status: completed
 Created: 2026-09-03
 Updated: 2026-09-03
 
@@ -72,9 +72,16 @@ Updated: 2026-09-03
 
 ## Verification
 
-- Run focused hosted-execution contract/parser tests and Cloudflare standby
-  allocation tests.
-- Run `pnpm --dir packages/hosted-execution typecheck` and
-  `pnpm --dir apps/cloudflare typecheck`.
-- Run `pnpm complexity:diff` and `git diff --check`.
-- Let exact-head required CI own broad repository proof.
+- Cloudflare standby allocation tests: 32 passed.
+- Hosted-execution package tests: 54 files and 577 tests passed.
+- Cloudflare and hosted-execution typechecks passed.
+- `pnpm complexity:diff` and `git diff --check` passed.
+- Final ReviewGPT round 1 returned `ROUND_OUTCOME: PASS` with no findings for
+  exact head `74068d11015bb58fe2dd8c1eb542dcf10d7ce82d`.
+- Exact-head required CI owns broad repository proof after plan closure.
+
+## Changelog
+
+- Not applicable: this is internal operator diagnostic attribution with no
+  member-visible behavior change.
+Completed: 2026-09-03
