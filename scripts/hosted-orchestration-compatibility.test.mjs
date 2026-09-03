@@ -95,14 +95,14 @@ function privateRun(overrides = {}) {
   };
 }
 
-function proofJobs({ legacyReaderState = "none", proofDigest = compatibilityProofDigest({
+function proofJobs({ proofDigest = compatibilityProofDigest({
   producerDigest: PRODUCER_DIGEST,
   publicSha: PUBLIC_SHA,
   readersDigest: supportedReaderDigest([
     PRIVATE_SHA,
     CURRENT_READER_SHA,
     RAMPING_READER_SHA,
-  ], legacyReaderState),
+  ]),
   requestId: REQUEST_ID,
 }) } = {}) {
   return [
@@ -423,7 +423,11 @@ test("private run proof binds repository, workflow, main SHA, event, and first a
   }
 });
 
-test("supported-reader digest is deterministic and rejects duplicates", () => {
+test("supported-reader digest matches the SHA-only wire vector and rejects duplicates", () => {
+  assert.equal(
+    supportedReaderDigest([CURRENT_READER_SHA, RAMPING_READER_SHA]),
+    "76c0b5059fc6aef721085df3183c4184f236d4c6f7cac2d006d74ee0b8189b4b",
+  );
   assert.equal(
     supportedReaderDigest([CURRENT_READER_SHA, RAMPING_READER_SHA]),
     supportedReaderDigest([RAMPING_READER_SHA, CURRENT_READER_SHA]),
@@ -432,36 +436,26 @@ test("supported-reader digest is deterministic and rejects duplicates", () => {
     () => supportedReaderDigest([CURRENT_READER_SHA, CURRENT_READER_SHA]),
     /duplicate SHA/u,
   );
-  assert.notEqual(
-    supportedReaderDigest([CURRENT_READER_SHA], "active"),
-    supportedReaderDigest([CURRENT_READER_SHA], "suspended"),
-  );
-  assert.throws(
-    () => supportedReaderDigest([CURRENT_READER_SHA], "unknown"),
-    /Legacy reader state is invalid/u,
-  );
 });
 
-test("attestation accepts every bounded private legacy-reader state", () => {
-  for (const legacyReaderState of ["none", "active", "suspended"]) {
-    const readersDigest = supportedReaderDigest([
-      PRIVATE_SHA,
-      CURRENT_READER_SHA,
-      RAMPING_READER_SHA,
-    ], legacyReaderState);
-    assert.deepEqual(inspectAttestationJobs(proofJobs({ legacyReaderState }), {
-      ...proofInspectionArgs(),
-    }), {
-      digest: readersDigest,
-      proofDigest: compatibilityProofDigest({
-        producerDigest: PRODUCER_DIGEST,
-        publicSha: PUBLIC_SHA,
-        readersDigest,
-        requestId: REQUEST_ID,
-      }),
-      readerCount: 3,
-    });
-  }
+test("attestation accepts the exact SHA-only private reader proof", () => {
+  const readersDigest = supportedReaderDigest([
+    PRIVATE_SHA,
+    CURRENT_READER_SHA,
+    RAMPING_READER_SHA,
+  ]);
+  assert.deepEqual(inspectAttestationJobs(proofJobs(), {
+    ...proofInspectionArgs(),
+  }), {
+    digest: readersDigest,
+    proofDigest: compatibilityProofDigest({
+      producerDigest: PRODUCER_DIGEST,
+      publicSha: PUBLIC_SHA,
+      readersDigest,
+      requestId: REQUEST_ID,
+    }),
+    readerCount: 3,
+  });
 });
 
 test("attestation rejects omission of the dispatched private candidate", () => {

@@ -753,10 +753,11 @@ The hard-cut architecture is accepted when:
   while the standby guard remains, the active legacy worker's exact live deploy
   revision and bounded `active` or `suspended` state, then runs every reader.
   Final protected attestation re-reads the complete reader set and legacy state
-  and fails on identity or routing drift before returning one proof digest. The
-  public verifier recomputes that digest across the closed `none`, `active`, and
-  `suspended` state set, so it validates the private state binding without
-  owning or duplicating live reader policy. The public controller resolves
+  and fails on identity or routing drift through a separate private lifecycle
+  digest before returning one cross-repository proof digest. The public
+  verifier hashes only the sorted immutable reader SHA set, so private
+  lifecycle evidence never enters the public wire format and the public
+  repository does not own or duplicate live reader policy. The public controller resolves
   private `main` before dispatch, binds the returned first-attempt run to that
   exact commit, and re-reads private `main` before success. Public code stores
   no private revision pointer or reader policy. Missing, stale, skipped,
