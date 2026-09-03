@@ -1439,7 +1439,16 @@ Core execution tuning:
   `allocate` mode the standby coordinator is the sole shell-prewarm owner; the
   exact-user prewarm hint is skipped so it cannot reserve a competing target
   before the claim. An unsuccessful claim still uses the ordinary exact-user
-  fallback.
+  fallback. Accepted fresh starts persist the bounded allocation outcome,
+  reason, and elapsed milliseconds in the existing latency phase breakdown;
+  the Worker selection log emits the same metadata before fence and readiness
+  work. Deploy Web first so its strict telemetry parser accepts these additive
+  leaves, then deploy Cloudflare. Reversing that order affects diagnostics only:
+  old Web drops the unknown phase breakdown while retaining core milestones.
+  The fields remain in Worker-owned orchestration and do not change the
+  Worker/container invocation job, so this diagnostic itself needs no special
+  container rollout mode; obey any independently active production rollout
+  requirement.
   Invalid values fail deploy/runtime parsing closed.
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production` for
   direct/local artifact rendering. The manual deploy workflow derives it from
