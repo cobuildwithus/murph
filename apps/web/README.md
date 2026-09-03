@@ -723,6 +723,7 @@ Optional but recommended:
 - `HOSTED_WEB_BASE_URL`
 - `MURPH_LABELS_DB_URL` for the shared product labels Postgres database required by `/api/foods` and `/api/supplements`
 - `MURPH_DATA_API_KEY` for server-to-server data API auth on `/api/foods` and `/api/supplements`; hosted Cloudflare owns the same secret for Worker-side injection and the key must not be exposed to browsers or runner env
+- `BRANDFETCH_CLIENT_ID` enables brand logos on the public `/food` page. It is a browser-safe Brandfetch client identifier, not server authority. The page searches Brandfetch with a bounded brand and broad food category, accepts only matching brand names from the fixed Brandfetch CDN, falls back to local category art, and keeps results only in page memory.
 - `CRON_SECRET`
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK`
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`
@@ -793,10 +794,15 @@ product-threshold application rows.
 Attribution lives under `sql/product-tests/`.
 
 The current search path uses built-in Postgres full-text search plus the
-`pg_trgm` extension for indexed name similarity. Public food searches retain
-their existing 250-candidate SQL bound, and supplement searches retain their
-existing ranking path. Private food-name search uses a separate bounded
-retrieval contract for the roughly two-million-row foods corpus: it admits at
+`pg_trgm` extension for indexed name similarity. Public and private food-name
+searches share the bounded retrieval path for the roughly two-million-row foods
+corpus. Public search keeps at most 250 deduplicated candidates before its
+optional comparison-readiness filter and bounded page selection. Food callers
+can request an evidence-first order for related comparison choices. That order
+checks exact indexed `product_tests.food_id` links inside the bounded candidate
+set, then prefers records with a reported package size, then keeps the existing
+relevance order. It does not claim sales or usage popularity. Supplement
+searches retain their existing ranking path. Food retrieval admits at
 most 250 literal exact-name rows and 10,000 GIN full-text matches before
 similarity scoring, canonical-key deduplication, and window sorting. When the
 GIN set reaches that cap and may be truncated, one GiST branch admits up to
@@ -853,18 +859,40 @@ fields; an older importer requires an explicit constraint rollback first.
 
 ## Murph Safe public product data
 
-`/search` exposes the public Murph Safe product-evidence experience. Its browser
-search calls `POST /api/public/v1/products/search`; server-rendered product
-details use the same service as
+`/search` exposes the public Murph Safe product-evidence experience. `/food`
+uses the same records for a conclusion-first comparison of up to ten branded
+foods. Browser searches call `POST /api/public/v1/products/search`;
+server-rendered product details use the same service as
 `GET /api/public/v1/products/[productRef]`. The generated OpenAPI 3.1 document
 is available at `/api/public/v1/openapi.json`, and the current schema id is
 `murph.public-products.v1`.
+
+On `/food`, autocomplete keeps relevance order. Category comparisons and the
+related-product grid use a dated US Google Shopping brand snapshot for 342 food
+queries. The database keeps category relevance and usable nutrition as gates,
+spreads results across brands, then uses exact-linked test count as a secondary
+signal. It rejects empty, zero-only, and physically impossible nutrition rows.
+A single exact food derives a peer category when the local food taxonomy can
+identify one, so a branded soda can lead to other sodas.
+Share URLs contain only public product references and the nutrition basis. They
+never contain the typed search query.
 
 The public catalog includes current supplement and branded-food sources and
 excludes generic food origins. Search and detail DTOs are bounded normalized
 projections; product tests join only through the selected row's exact
 `food_id` or `supplement_id`. Search terms stay in POST bodies and are not
 echoed, persisted, analyzed, or logged.
+
+Compatible browsers expose four page-scoped, read-only WebMCP tools while
+`/food` is open: `search_food_products`, `compare_food_products`,
+`get_food_comparison`, and `show_food_evidence`. The tools use exact public
+product references and update the same visible page state as manual controls.
+Comparison results carry returned, total, and truncated observation scope so a
+bounded evidence response cannot look complete to an agent. They also include
+the same four nutrition values, complete-row winners, ties, and the row-win
+counts behind the visible rows-led caption.
+One abort signal removes every registration when the page unmounts. This is a
+browser surface, not a remote MCP server, and it adds no account or vault access.
 
 Before a production build, configure these Production-scoped server values:
 

@@ -537,13 +537,15 @@ describe("hosted account settings snapshot", () => {
   it("adds a server-approved Privy Telegram username only when it matches the stored Telegram id", () => {
     expect(withServerApprovedPrivyAccountHints({
       snapshot: makeAccountSettingsSnapshot({ telegramUserId: "456" }),
-      serverApprovedPrivyLinkedAccounts: [
-        {
-          id: 456,
-          type: "telegram",
-          username: "sample_user",
-        },
-      ],
+      serverApprovedPrivyUser: {
+        linkedAccounts: [
+          {
+            id: 456,
+            type: "telegram",
+            username: "sample_user",
+          },
+        ],
+      },
     })).toMatchObject({
       telegram: {
         telegramUserId: "456",
@@ -555,13 +557,15 @@ describe("hosted account settings snapshot", () => {
   it("does not add a server-approved Privy Telegram username from a different Telegram id", () => {
     expect(withServerApprovedPrivyAccountHints({
       snapshot: makeAccountSettingsSnapshot({ telegramUserId: "456" }),
-      serverApprovedPrivyLinkedAccounts: [
-        {
-          id: 789,
-          type: "telegram",
-          username: "sample_user",
-        },
-      ],
+      serverApprovedPrivyUser: {
+        linkedAccounts: [
+          {
+            id: 789,
+            type: "telegram",
+            username: "sample_user",
+          },
+        ],
+      },
     })).toMatchObject({
       telegram: {
         telegramUserId: "456",
@@ -570,37 +574,269 @@ describe("hosted account settings snapshot", () => {
     });
   });
 
-  it("marks whether the server-approved Privy session has an email linked", () => {
+  it("derives one provider agreement state for each sign-in method", () => {
     expect(withServerApprovedPrivyAccountHints({
       snapshot: makeAccountSettingsSnapshot({ telegramUserId: null }),
-      serverApprovedPrivyLinkedAccounts: [
-        {
+      serverApprovedPrivyUser: {
+        linkedAccounts: [
+          {
+            address: "member@example.com",
+            type: "email",
+          },
+        ],
+      },
+    })).toMatchObject({
+      privySignInStates: {
+        email: { removable: false, status: "mismatched" },
+        phone: { removable: false, status: "absent" },
+        telegram: { removable: false, status: "absent" },
+      },
+    });
+
+    expect(withServerApprovedPrivyAccountHints({
+      snapshot: makeAccountSettingsSnapshot({ telegramUserId: null }),
+      serverApprovedPrivyUser: { linkedAccounts: [] },
+    })).toMatchObject({
+      email: {
+        address: null,
+        verifiedAt: null,
+      },
+      phone: {
+        number: null,
+        verifiedAt: null,
+      },
+      telegram: {
+        telegramUserId: null,
+      },
+      privySignInStates: {
+        email: { removable: false, status: "absent" },
+        phone: { removable: false, status: "absent" },
+        telegram: { removable: false, status: "absent" },
+      },
+    });
+
+    expect(withServerApprovedPrivyAccountHints({
+      snapshot: makeAccountSettingsSnapshot({ telegramUserId: null }),
+      serverApprovedPrivyUser: null,
+    }).privySignInStates).toBeNull();
+  });
+
+  it("allows removing a linked identity only when another verified sign-in remains", () => {
+    const snapshot: HostedAccountSettingsSnapshot = {
+      ...makeAccountSettingsSnapshot({ telegramUserId: "456" }),
+      email: {
+        address: "member@example.com",
+        verifiedAt: "2026-05-02T00:00:00.000Z",
+      },
+    };
+
+    expect(withServerApprovedPrivyAccountHints({
+      snapshot,
+      serverApprovedPrivyUser: {
+        linkedAccounts: [
+          {
+            id: 456,
+            type: "telegram",
+          },
+          {
+            address: "member@example.com",
+            latest_verified_at: 1_777_680_000,
+            type: "email",
+          },
+        ],
+      },
+    }).privySignInStates).toMatchObject({
+      email: { removable: true, status: "matched" },
+      telegram: { removable: true, status: "matched" },
+    });
+
+    expect(withServerApprovedPrivyAccountHints({
+      snapshot,
+      serverApprovedPrivyUser: {
+        linkedAccounts: [
+          {
+            id: 456,
+            type: "telegram",
+          },
+          {
+            address: "unverified@example.com",
+            type: "email",
+          },
+        ],
+      },
+    }).privySignInStates).toMatchObject({
+      email: { removable: false, status: "mismatched" },
+      telegram: { removable: false, status: "matched" },
+    });
+
+    expect(withServerApprovedPrivyAccountHints({
+      snapshot,
+      serverApprovedPrivyUser: {
+        linkedAccounts: [
+          {
+            id: 456,
+            type: "telegram",
+          },
+        ],
+      },
+    }).privySignInStates).toMatchObject({
+      email: { removable: false, status: "absent" },
+      telegram: { removable: false, status: "matched" },
+    });
+  });
+
+  it("uses top-level Telegram for matching and as an alternative sign-in", () => {
+    const result = withServerApprovedPrivyAccountHints({
+      snapshot: {
+        email: {
           address: "member@example.com",
-          type: "email",
+          verifiedAt: "2026-05-02T00:00:00.000Z",
         },
-      ],
-    })).toMatchObject({
-      email: {
-        privyEmailLinked: true,
+        phone: {
+          number: null,
+          verifiedAt: null,
+        },
+        telegram: {
+          telegramUserId: "456",
+        },
+      },
+      serverApprovedPrivyUser: {
+        linkedAccounts: [
+          {
+            address: "member@example.com",
+            latest_verified_at: 1_777_680_000,
+            type: "email",
+          },
+        ],
+        telegram: {
+          id: 456,
+          username: "sample_user",
+        },
       },
     });
 
-    expect(withServerApprovedPrivyAccountHints({
-      snapshot: makeAccountSettingsSnapshot({ telegramUserId: null }),
-      serverApprovedPrivyLinkedAccounts: [],
-    })).toMatchObject({
-      email: {
-        privyEmailLinked: false,
+    expect(result.privySignInStates).toMatchObject({
+      email: { removable: true, status: "matched" },
+      telegram: { removable: true, status: "matched" },
+    });
+    expect(result.telegram.username).toBe("sample_user");
+  });
+
+  it("fails closed when direct and linked Telegram accounts disagree", () => {
+    const result = withServerApprovedPrivyAccountHints({
+      snapshot: makeAccountSettingsSnapshot({ telegramUserId: "456" }),
+      serverApprovedPrivyUser: {
+        linkedAccounts: [{ id: 789, type: "telegram" }],
+        telegram: { id: 456 },
       },
     });
 
+    expect(result.privySignInStates?.telegram).toEqual({
+      removable: false,
+      status: "ambiguous",
+    });
+    expect(result.telegram.username).toBeNull();
+  });
+
+  it("keeps stale canonical projections visible as durable cleanup actions", () => {
     expect(withServerApprovedPrivyAccountHints({
-      snapshot: makeAccountSettingsSnapshot({ telegramUserId: null }),
-      serverApprovedPrivyLinkedAccounts: null,
+      snapshot: {
+        email: {
+          address: "member@example.com",
+          murphEmailAddress: "reply@example.test",
+          verifiedAt: "2026-05-02T00:00:00.000Z",
+        },
+        phone: {
+          number: "+14045550123",
+          verifiedAt: "2026-05-02T00:00:00.000Z",
+        },
+        telegram: {
+          telegramUserId: "456",
+          username: "sample_user",
+        },
+      },
+      serverApprovedPrivyUser: {
+        linkedAccounts: [
+          {
+            address: "other@example.com",
+            latest_verified_at: 1_777_680_000,
+            type: "email",
+          },
+        ],
+      },
     })).toMatchObject({
       email: {
-        privyEmailLinked: null,
+        address: "member@example.com",
+        murphEmailAddress: "reply@example.test",
+        verifiedAt: "2026-05-02T00:00:00.000Z",
       },
+      phone: {
+        number: "+14045550123",
+        verifiedAt: "2026-05-02T00:00:00.000Z",
+      },
+      privySignInStates: {
+        email: { removable: false, status: "mismatched" },
+        phone: { removable: false, status: "absent" },
+        telegram: { removable: false, status: "absent" },
+      },
+      telegram: {
+        telegramUserId: "456",
+        username: null,
+      },
+    });
+  });
+
+  it("derives email cleanup when Privy has no email account", () => {
+    expect(withServerApprovedPrivyAccountHints({
+      snapshot: {
+        email: {
+          address: "member@example.com",
+          murphEmailAddress: "reply@example.test",
+          verifiedAt: "2026-05-02T00:00:00.000Z",
+        },
+        phone: {
+          number: "+14045550123",
+          verifiedAt: "2026-05-02T00:00:00.000Z",
+        },
+        telegram: {
+          telegramUserId: null,
+        },
+      },
+      serverApprovedPrivyUser: {
+        linkedAccounts: [
+          {
+            phoneNumber: "+14045550123",
+            latest_verified_at: 1_777_680_000,
+            type: "phone",
+          },
+        ],
+      },
+    }).privySignInStates).toMatchObject({
+      email: { removable: false, status: "absent" },
+      phone: { removable: false, status: "matched" },
+    });
+  });
+
+  it("does not treat an unverified checkout email as pending sign-in cleanup", () => {
+    expect(withServerApprovedPrivyAccountHints({
+      snapshot: {
+        email: {
+          address: "payer@example.com",
+          murphEmailAddress: null,
+          verifiedAt: null,
+        },
+        phone: {
+          number: null,
+          verifiedAt: null,
+        },
+        telegram: {
+          telegramUserId: null,
+        },
+      },
+      serverApprovedPrivyUser: { linkedAccounts: [] },
+    }).privySignInStates?.email).toEqual({
+      removable: false,
+      status: "absent",
     });
   });
 });

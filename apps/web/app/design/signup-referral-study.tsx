@@ -24,10 +24,27 @@ const DESIGN_ACCOUNT: HostedAccountSettingsSnapshot = {
     number: "+15555550100",
     verifiedAt: "2026-08-01T00:00:00.000Z",
   },
+  privySignInStates: {
+    email: { removable: true, status: "matched" },
+    phone: { removable: true, status: "matched" },
+    telegram: { removable: true, status: "matched" },
+  },
   referralIdentityKey: "design-referral-member",
   telegram: {
     telegramUserId: "design-telegram-user",
     username: "preview_member",
+  },
+};
+const DESIGN_ACCOUNT_AFTER_EMAIL_REMOVAL: HostedAccountSettingsSnapshot = {
+  ...DESIGN_ACCOUNT,
+  email: {
+    address: "billing@example.test",
+    verifiedAt: null,
+  },
+  privySignInStates: {
+    email: { removable: false, status: "absent" },
+    phone: { removable: true, status: "matched" },
+    telegram: { removable: true, status: "matched" },
   },
 };
 
@@ -96,6 +113,17 @@ export function SignupReferralFlowStudy() {
         <div inert>
           <HostedAccountSettingsCards
             account={DESIGN_ACCOUNT}
+            murphPhoneNumber="+15555550101"
+            privySessionMatchesAppSession
+            signupReferralUrl={DESIGN_REFERRAL_URL}
+          />
+        </div>
+        <p className="mb-4 mt-8 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Settings · After email removal
+        </p>
+        <div inert>
+          <HostedAccountSettingsCards
+            account={DESIGN_ACCOUNT_AFTER_EMAIL_REMOVAL}
             murphPhoneNumber="+15555550101"
             privySessionMatchesAppSession
             signupReferralUrl={DESIGN_REFERRAL_URL}

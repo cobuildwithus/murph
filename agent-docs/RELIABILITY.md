@@ -66,16 +66,29 @@ Last verified: 2026-09-02
   lifecycle. See
   `agent-docs/operations/native-android-hosted-e2e.md`.
 - Required Temporal compatibility is one public commit status backed by a
-  trusted default-branch controller and the private owner's immutable
-  supported-reader manifest. Irrelevant changes complete without private work;
-  relevant changes require the same current public head throughout selection
-  and dispatch. The exact candidate producer runs in unprivileged public CI;
-  the trusted controller sends only its bounded canonical fixture JSON and
-  digest to private CI. The private proof digest binds public SHA, request id,
-  supported-reader digest, and producer digest. Missing artifacts or dispatch
+  trusted default-branch controller and the private owner's live Current and
+  Ramping reader attestation over the bounded reconciliation fixture corpus.
+  While the private standby guard remains, the reader set also includes the
+  active legacy worker's exact live deploy revision. Final protected
+  attestation re-reads the complete set and fails on identity or routing drift.
+  Private CI never checks out or imports public pull-request candidate code.
+  Irrelevant changes complete without private work; relevant changes require
+  the same current public head throughout selection and dispatch. The exact
+  candidate producer runs in unprivileged public CI; the trusted controller
+  sends only its bounded canonical fixture JSON and digest to private CI. Using
+  the repository-scoped GitHub App token, it resolves private `main` to an exact
+  commit, validates the fixed private workflow identity, revalidates the exact
+  public PR head, and dispatches that workflow at `main` with returned run
+  details. It accepts only the returned first-attempt run whose workflow and
+  `head_sha` match the pre-resolved private commit. The private proof digest
+  binds public SHA, request id, the private-derived supported-reader digest,
+  and producer digest; the public repository owns no private reader policy.
+  Missing artifacts or dispatch
   identity, stale heads, incomplete pagination, duplicate or failed readers,
   skipped proof jobs, a mismatched digest, cancellation, or private failure
-  cannot publish success. Once dispatch returns a run id, the controller allows
+  cannot publish success. After successful run and job attestation, the
+  controller re-reads private `main` and fails closed if it moved. Once dispatch
+  returns a run id, the controller allows
   five exact-id reads over at most 60 seconds for GitHub to make that newly
   accepted run visible; only `404` is retryable, and the controller never
   searches for or guesses a run. After the exact run is visible, uncertain
@@ -185,6 +198,16 @@ Last verified: 2026-09-02
   invite, routing, or email authority. Cross-member phone conflict suppression
   reads only the blind-index owner id, so it neither decrypts the other
   member's private identity nor needs that member's root in the transaction.
+- Settings linked-account removal treats the provider unlink as the first
+  irreversible step. The browser retries only the bounded live-provider lag
+  check; once Privy confirms absence, Murph's member-locked projection cleanup
+  is idempotent and an interrupted attempt can resume without unlinking again.
+  The same transaction appends the existing channel-update mailbox item when
+  state changed. Its post-commit runtime signal is best-effort because durable
+  runtime reconciliation remains the recovery owner. A refreshed Settings page
+  derives provider absence against the still-canonical identity from existing
+  state and exposes the same idempotent cleanup action without repeating the unlink. No
+  retry job, timer, or additional persisted state owns this recovery.
 - Connected-app email sends have no durable provider idempotency key or send ledger. Admit them only from current accepted user input in a private direct turn; scheduled, group, maintenance, system-notification, and output-only turns fail before provider egress. After an ambiguous dispatch, never replay the send. Reconcile only against a narrow recent Sent-mail window matching the primary recipient, subject, and substantive body, and leave the outcome unknown when that evidence is not decisive.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
 - Avoid hidden coupling between scripts, docs, and runtime code; document new dependencies in `ARCHITECTURE.md` and `agent-docs/references/testing-ci-map.md`.
@@ -417,6 +440,11 @@ Last verified: 2026-09-02
   coordinator is the only shell-prewarm owner; the exact-user prewarm hint is
   skipped so it cannot reserve a competing target before a fresh claim. The
   ordinary exact-user start remains the fallback after a claim miss.
+  Every accepted fresh start records the bounded standby allocation outcome,
+  exact reason, and elapsed milliseconds in the existing latency phase
+  breakdown. The same metadata-only fields are emitted immediately in the
+  Worker structured log, including starts that exhaust the caller response
+  budget before an accepted runtime invocation exists.
   A coordinator transaction admits at most one winner, then replacement
   provisioning runs under `waitUntil`; alarms re-prove readiness, retry failed
   retirement, expire unbound claim tombstones, and drain stale releases. The

@@ -1,11 +1,24 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+
 import type { MetricPoint } from "../metrics/index.ts";
 import { buildMetricProjection } from "../metrics/projection.ts";
 import { isDefaultProjectedQueryEntity } from "../query-visibility.ts";
 import { createVaultReadModel, type VaultReadModel } from "../read-model.ts";
 import { readVaultSourceStrict } from "../vault-source.ts";
+import {
+  DERIVED_KNOWLEDGE_PAGES_ROOT,
+  parseDerivedKnowledgeNodeMarkdown,
+} from "../knowledge-graph.ts";
+import {
+  parsePersonalPatternVocabulary,
+  PERSONAL_PATTERN_VOCABULARY_SLUG,
+  type PersonalPatternVocabulary,
+} from "../personal-patterns.ts";
 
 export interface BrowserVaultReplicaSource {
   metricPoints: MetricPoint[];
+  personalPatternVocabulary: PersonalPatternVocabulary | null;
   vault: VaultReadModel;
 }
 
@@ -21,13 +34,33 @@ export async function readBrowserVaultReplicaSource(
     metadata: snapshot.metadata,
     vaultRoot,
   });
+  const personalPatternVocabulary =
+    await readBrowserVaultPersonalPatternVocabulary(vaultRoot);
 
   await yieldToBrowserVaultSourceCancellation(options.signal);
   const metricPoints = buildMetricProjection(sourceVault).metricPoints;
   await yieldToBrowserVaultSourceCancellation(options.signal);
   const vault = createDefaultProjectedVault(sourceVault);
 
-  return { metricPoints, vault };
+  return { metricPoints, personalPatternVocabulary, vault };
+}
+
+export async function readBrowserVaultPersonalPatternVocabulary(
+  vaultRoot: string,
+): Promise<PersonalPatternVocabulary | null> {
+  const relativePath = path.posix.join(
+    DERIVED_KNOWLEDGE_PAGES_ROOT,
+    `${PERSONAL_PATTERN_VOCABULARY_SLUG}.md`,
+  );
+  try {
+    const markdown = await readFile(path.join(vaultRoot, relativePath), "utf8");
+    const page = parseDerivedKnowledgeNodeMarkdown(relativePath, markdown);
+    return page.slug === PERSONAL_PATTERN_VOCABULARY_SLUG
+      ? parsePersonalPatternVocabulary(page.body)
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function readBrowserVaultReplicaVault(

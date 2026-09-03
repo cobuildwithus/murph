@@ -779,11 +779,12 @@ selection as well as during idle maintenance, so restored content cannot begin a
 reply after its deadline.
 `system_mailbox` runs one bounded model-free item only when that item is the
 exact first live durable system frontier. The shared classifier admits
-device-sync, operator maintenance, browser-vault refresh, Environment
-completion, and the narrow exact-notification cases; an earlier default-owned
-row remains a hard ordering barrier. Already committed Web updates remain
-authoritative, while an interrupted or not-yet-checkpointed unit stays
-recoverable from the durable mailbox and its existing continuation contract.
+device-sync, member-channel reconciliation, operator maintenance, browser-vault
+refresh, Environment completion, and the narrow exact-notification cases; an
+earlier default-owned row remains a hard ordering barrier. Already committed
+Web updates remain authoritative, while an interrupted or not-yet-checkpointed
+unit stays recoverable from the durable mailbox and its existing continuation
+contract.
 
 Default and `system_mailbox` remain separate bounded owners over one ordered
 mailbox. When the runnable mailbox owner is model-free, the checkpoint
@@ -916,30 +917,29 @@ retry reuses that item and cannot resolve a different target. Once Temporal
 accepts that pointer-only signal, Web starts one payloadless, no-retry direct
 ensure so an active runtime does not wait for its routine idle checkpoint.
 
-The target runtime rechecks expiry, membership generation, runtime identity,
-and the active write fence before context assembly. It snapshots bounded
-committed conversation evidence in memory and seals it with the live restored
-group workspace; this is not a second durable snapshot or projection. A
-dedicated router keeps the request out of ordinary serial
-system-message execution and starts at most one `executeReadOnlyAssistantAsk`
-promise. That call launches a separate one-shot App Server process with the
-native `murph-group-read` profile, exact runtime workspace roots, `.runtime/**`,
-`.codex/**`, and environment-file denial, no tool network or inherited shell
-secrets, and no mutation or delivery authority. A joined-group child receives
-only the consent-aware lazy `murph.group/read_shared` dynamic tool; consented
-and operator candidates and disclosure reviewers receive no dynamic tools. The
-thread request supplies the exact profile, roots, disabled instruction sources,
-and approval policy. Every candidate and reviewer uses a sealed empty working
-directory; an authenticated operator diagnostic selected for read-tool inspection
-receives the exact target path as quoted host prompt data. Its response is not an authorization boundary;
-production-like Linux smoke proves the resulting filesystem, environment, and
-network enforcement. Further asks stay
-pending in the mailbox. The resident process remains the sole model-authored
-canonical-content writer and sender, and foreground start, steering, and
-delivery never await the child. The child also receives the server-bound
-requester membership `participantId`; first-person references map only to the
-`read_shared` member with that exact id. Display name, handle, or member order
-cannot substitute, and the opaque id cannot appear in the answer.
+The target runtime rechecks expiry, target identity, and the active write fence
+before starting at most one detached read-only promise. Group/member asks keep
+`executeReadOnlyAssistantAsk` and `murph-group-read`; authenticated
+`operator_task` asks branch directly to one `executeOperatorDiagnostic` call.
+Trusted runtime code supplies the bound workspace, including `.runtime`, and
+only the hosted Codex `sessions/` directory as an optional second root. The
+operator child uses `murph-operator-diagnostic-read`, always returns a concrete
+diagnostic, and skips the member disclosure reviewer. The existing authenticated,
+encrypted, expiring Ops completion owner receives the result.
+
+Every child starts in an empty temporary directory with approval policy `never`,
+no inherited model-run environment, and no write, network, project
+configuration, effect, or delivery authority. Joined-group asks alone receive
+`murph.group/read_shared`; member disclosure flows alone receive the separate
+reviewer.
+
+Further asks stay pending in the mailbox. The resident process remains the sole
+model-authored canonical-content writer and sender, and foreground start,
+steering, and delivery never await the child. A joined-group child also receives
+the server-bound requester membership `participantId`; first-person references
+map only to the `read_shared` member with that exact id. Display name, handle,
+or member order cannot substitute, and the opaque id cannot appear in the
+answer.
 
 When a joined-group request, accepted-input completion, or closed
 `member.action.requested` reaches a dirty warm runtime, the mailbox prefetch may
@@ -1388,6 +1388,11 @@ the durable retained frontier. For inactive access, Web emits `null` without a
 mailbox read so Temporal can retire its pointer projection while the durable
 mailbox remains canonical and can be re-read after reactivation. Deploy the
 tolerant Temporal consumer before Web begins emitting the classification.
+When an existing mailbox kind moves from `default_owned` to `model_free`, deploy
+the Cloudflare runtime allowlist before the Web classifier. Old Web remains
+compatible with the expanded runtime; new Web paired with an old runtime keeps
+the item durable but cannot make progress until the runtime is upgraded. Reverse
+that order for rollback.
 Because explicit-null retirement removes Temporal's last local reason to wake,
 every Web owner that restores active access must append a deterministic
 `runtime.maintenance-requested` mailbox item in the same transaction as the
@@ -1657,9 +1662,12 @@ retained only by that same member under the ordinary conversation idle
 lifecycle and is never returned to ready. Slot invocation,
 provider-credential minting, withdrawal, account deletion, and retirement all
 re-read the exact durable binding; a member mismatch fails closed. A successful
-fresh-start acceptance records its closed standby allocation outcome alongside
-the orchestration and workspace attempt identifiers in the existing structured
-log. Failed, retried, or superseded starts do not emit an accepted attribution.
+fresh-start acceptance records the closed standby allocation outcome, bounded
+reason, and elapsed milliseconds in the existing orchestration latency phase
+breakdown and structured log. The selection log records the same metadata
+before fence or readiness work so a later caller-budget exit remains
+diagnosable without adding member or container identifiers. Failed, retried, or
+superseded starts do not emit an accepted attribution.
 
 The active-member replan durably
 appends the original conversation item. For an exact model-approved instant
@@ -2804,9 +2812,10 @@ An expected managed AI usage denial observed by the workspace read is not a
 transport preparation failure. Cloudflare binds the denied allowance to the
 fresh write fence and narrows a default invocation to the existing
 `system_mailbox` path, which imports system work, may run one bounded
-model-free deterministic device-sync, operator-maintenance, or browser-vault
-refresh item, and exits before foreground assistant admission. Other system
-items retain their default owner and are not consumed by this recovery mode.
+model-free deterministic device-sync, member-channel reconciliation,
+operator-maintenance, browser-vault refresh, or reported-metric item, and exits
+before foreground assistant admission. Other system items retain their default
+owner and are not consumed by this recovery mode.
 It binds that effective processing mode into the same fence so controller
 priority, preemption, and the container job
 cannot diverge; the fence also rejects all metered provider egress if the runtime

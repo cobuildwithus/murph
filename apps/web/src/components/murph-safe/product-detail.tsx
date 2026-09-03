@@ -1,6 +1,14 @@
 import type { PublicProductDetail } from "@murphai/contracts";
 import Link from "next/link";
 
+import {
+  formatEvidenceBasis,
+  formatNormalizedProductTestResult,
+  formatProductTestNumber,
+  formatProductTestResult,
+  hasDistinctNormalizedProductTestResult,
+} from "./product-test-presentation";
+
 type Ingredient = PublicProductDetail["ingredients"]["active"][number];
 type NutritionRow = PublicProductDetail["nutrition"]["rows"][number];
 type ProductTestObservation = PublicProductDetail["productTests"]["observations"][number];
@@ -158,14 +166,14 @@ function ProductTestObservationRow(input: { observation: ProductTestObservation 
           {observation.analyte.name}
         </h3>
         <p className="mt-3 text-lg text-foreground">
-          {formatTestResult(observation.result)}
+          {formatProductTestResult(observation.result)}
         </p>
         <p className="mt-1 break-words text-sm leading-6 text-muted-foreground">
           Basis: {formatEvidenceBasis(observation.result.basis)}
         </p>
-        {observation.normalizedResult && hasDistinctNormalizedResult(observation) ? (
+        {observation.normalizedResult && hasDistinctNormalizedProductTestResult(observation) ? (
           <p className="mt-3 text-sm leading-6 text-muted-foreground">
-            Normalized result: {formatNormalizedTestResult(observation)}. Basis: {formatEvidenceBasis(observation.normalizedResult.basis)}
+            Normalized result: {formatNormalizedProductTestResult(observation)}. Basis: {formatEvidenceBasis(observation.normalizedResult.basis)}
           </p>
         ) : null}
         {observation.screening ? (
@@ -219,7 +227,7 @@ function ObservationScreening(input: {
       <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
         <DefinitionFact
           label="Threshold"
-          value={`${formatNumber(screening.threshold.value)} ${screening.threshold.unit}. Basis: ${formatEvidenceBasis(screening.threshold.basis)}`}
+          value={`${formatProductTestNumber(screening.threshold.value)} ${screening.threshold.unit}. Basis: ${formatEvidenceBasis(screening.threshold.basis)}`}
         />
         <DefinitionFact
           label="Authority"
@@ -228,7 +236,7 @@ function ObservationScreening(input: {
         {screening.screeningPolicy ? (
           <DefinitionFact
             label="Screening policy"
-            value={`Assumes ${formatNumber(screening.screeningPolicy.assumedBodyWeightKg)} kg body weight and ${formatNumber(screening.screeningPolicy.assumedServingsPerDay)} ${screening.screeningPolicy.assumedServingsPerDay === 1 ? "serving" : "servings"} per day`}
+            value={`Assumes ${formatProductTestNumber(screening.screeningPolicy.assumedBodyWeightKg)} kg body weight and ${formatProductTestNumber(screening.screeningPolicy.assumedServingsPerDay)} ${screening.screeningPolicy.assumedServingsPerDay === 1 ? "serving" : "servings"} per day`}
           />
         ) : null}
         {thresholdUrl ? (
@@ -596,99 +604,8 @@ function formatMeasuredValue(value: Ingredient["amount"] | NutritionRow["amount"
   return "Not reported";
 }
 
-function formatTestResult(result: ProductTestObservation["result"]): string {
-  switch (result.operator) {
-    case "not_detected":
-      return `Not detected (reported in ${result.unit})`;
-    case "detected":
-      return `Detected (reported in ${result.unit})`;
-    case "trace":
-      return `Trace (reported in ${result.unit})`;
-    case "lt":
-      return `Less than ${formatNullableNumber(result.value)} ${result.unit}`.trim();
-    case "lte":
-      return `Less than or equal to ${formatNullableNumber(result.value)} ${result.unit}`.trim();
-    case "gt":
-      return `Greater than ${formatNullableNumber(result.value)} ${result.unit}`.trim();
-    case "gte":
-      return `Greater than or equal to ${formatNullableNumber(result.value)} ${result.unit}`.trim();
-    case "range":
-      return formatTestResultRange(result);
-    case "eq":
-      return `${formatNullableNumber(result.value)} ${result.unit}`.trim();
-  }
-}
-
-function formatTestResultRange(
-  result: ProductTestObservation["result"],
-): string {
-  if (result.value !== null && result.upperValue != null) {
-    return `${formatNumber(result.value)}–${formatNumber(result.upperValue)} ${result.unit}`.trim();
-  }
-
-  if (result.value !== null) {
-    return `From ${formatNumber(result.value)} ${result.unit} (upper bound not reported)`.trim();
-  }
-
-  if (result.upperValue != null) {
-    return `Up to ${formatNumber(result.upperValue)} ${result.unit} (lower bound not reported)`.trim();
-  }
-
-  return result.unit ? `Range not reported (${result.unit})` : "Range not reported";
-}
-
-function formatNullableNumber(value: number | null): string {
-  return value === null ? "Value not reported" : formatNumber(value);
-}
-
-function formatNormalizedTestResult(
-  observation: ProductTestObservation,
-): string {
-  const normalized = observation.normalizedResult;
-  if (!normalized) {
-    return "Value not reported";
-  }
-
-  if (observation.result.operator === "range") {
-    if (normalized.upperValue != null) {
-      return `${formatNumber(normalized.value)}–${formatNumber(normalized.upperValue)} ${normalized.unit}`.trim();
-    }
-
-    return `From ${formatNumber(normalized.value)} ${normalized.unit} (upper bound not reported)`.trim();
-  }
-
-  return `${formatNumber(normalized.value)} ${normalized.unit}`.trim();
-}
-
 function formatNumber(value: number): string {
   return new Intl.NumberFormat("en-US", { maximumSignificantDigits: 15 }).format(value);
-}
-
-function hasDistinctNormalizedResult(observation: ProductTestObservation): boolean {
-  const normalized = observation.normalizedResult;
-  if (!normalized) {
-    return false;
-  }
-
-  if (observation.result.operator !== "eq" && observation.result.operator !== "range") {
-    return true;
-  }
-
-  return observation.result.value !== normalized.value
-    || (observation.result.upperValue ?? null) !== (normalized.upperValue ?? null)
-    || observation.result.unit !== normalized.unit
-    || observation.result.basis !== normalized.basis;
-}
-
-function formatEvidenceBasis(value: string): string {
-  switch (value) {
-    case "product_mass":
-      return "per unit of product mass";
-    case "oral_total_dietary_exposure":
-      return "total daily oral exposure";
-    default:
-      return value.replaceAll("_", " ");
-  }
 }
 
 function includesGramAmount(description: string, grams: number): boolean {
