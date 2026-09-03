@@ -1,8 +1,8 @@
 # Simplify operator diagnostics to one direct read-only turn
 
-Status: active
+Status: completed
 Created: 2026-09-02
-Updated: 2026-09-02
+Updated: 2026-09-03
 
 ## Goal
 
@@ -105,5 +105,14 @@ Updated: 2026-09-02
 - The focused real-Codex journey is authored and selected correctly, but the
   local subscription refresh token was revoked. It failed before a provider
   request or file access, so no live behavioral claim is made from that run.
-- Remaining: exact-head PR CI and final ReviewGPT. Rerun the focused live
-  journey after local Codex authentication is restored.
+- Final ReviewGPT's proposed mailbox-identity machinery was rejected after
+  parent review as disproportionate to the resident runtime's existing bound
+  workspace authority. The direct operator path remains intentionally simple.
+- The only failing release shard was a secret-scanner false positive on a
+  literal credential deny rule. Collapsing two equivalent globs into one
+  `credential*` deny preserves the boundary; the permission suite, affected
+  typecheck/build, secret-guard suite, and compiled-artifact scan pass. The
+  full local tarball fixture exceeded its existing 240-second harness timeout.
+- Post-commit exact-head CI and merge remain release gates. Rerun the focused
+  live journey after local Codex authentication is restored.
+Completed: 2026-09-03
