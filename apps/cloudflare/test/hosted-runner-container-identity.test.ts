@@ -1232,7 +1232,7 @@ describe("hosted runner container identity", () => {
       userId: TEST_USER_ID,
     });
     await vi.waitFor(() =>
-      expect(standby.readStandbySlotBinding).toHaveBeenCalledOnce()
+      expect(standby.resolveRetainedStandbySlot).toHaveBeenCalledOnce()
     );
     await vi.advanceTimersByTimeAsync(300);
     await expect(retained).resolves.toMatchObject({
@@ -1244,6 +1244,89 @@ describe("hosted runner container identity", () => {
     await expect(stateStore.readState()).resolves.toMatchObject({
       writeFence: { runnerContainerName: slotName },
     });
+  });
+
+  it("retires a stopped standby before claiming a fresh one", async () => {
+    const durable = createRunnerDurableState();
+    const stateStore = new RunnerStateStore(durable.state);
+    const stoppedSlotName =
+      "standby--v-release_1--11111111111111111111111111111111";
+    const freshSlotName =
+      "standby--v-release_1--22222222222222222222222222222222";
+    await stateStore.reserveRunnerContainerStopTarget({
+      runnerContainerName: stoppedSlotName,
+      userId: TEST_USER_ID,
+    });
+    const resolveStopped = vi.fn(async () => ({
+      claimId: null,
+      releaseId: "release_1",
+      region: HOSTED_STANDBY_REGION,
+      slotName: stoppedSlotName,
+      state: "retired" as const,
+      userId: null,
+    }));
+    const stopped = createStandbyNamespace({
+      resolveRetainedStandbySlot: resolveStopped,
+      slotName: stoppedSlotName,
+      userId: TEST_USER_ID,
+    });
+    const fresh = createAllocatingStandbyHarness({
+      slotName: freshSlotName,
+      stateStore,
+    });
+    const standbyContainerNamespace: HostedStandbyRunnerContainerNamespaceLike = {
+      getByName(name, options) {
+        if (name === stoppedSlotName) {
+          return stopped.getByName(name, options);
+        }
+        return fresh.namespace.getByName(name, options);
+      },
+    };
+    const claimReadyStandby = vi.fn(async () => {
+      expect((await stateStore.readState()).pendingRunnerContainerName).toBeNull();
+      return { outcome: "claimed" as const, slotName: freshSlotName };
+    });
+    const invocationService = new RecordingRuntimeInvocationService();
+    const controller = new RuntimeProcessingController({
+      env: createHostedExecutionEnvironment(),
+      invocationService,
+      runnerContainerNamespace: createHostedRunnerContainerNamespaceRouter({
+        exactUser: createRunnerContainerNamespace({}),
+        standby: standbyContainerNamespace,
+      }),
+      runnerRuntimeEnvSource: {
+        CF_VERSION_METADATA: { id: "release_1" },
+        HOSTED_EXECUTION_STANDBY_MODE: "allocate",
+      },
+      standbyContainerNamespace,
+      standbyCoordinatorNamespace: {
+        getByName() {
+          return {
+            claimReadyStandby,
+            async ensureReadyStandby() {
+              return { accepted: true } as const;
+            },
+          };
+        },
+      },
+      stateStore,
+    });
+
+    await expect(controller.ensureForUser({
+      orchestration: { triggeredByWebDirect: true },
+      orchestrationAttemptId:
+        "web-ingress-88888888-8888-4888-8888-888888888888",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+
+    expect(resolveStopped).toHaveBeenCalledOnce();
+    expect(claimReadyStandby).toHaveBeenCalledOnce();
+    expect(fresh.bindStandbySlot).toHaveBeenCalledOnce();
+    expect(invocationService.prepareTokens[0]?.runnerContainerName)
+      .toBe(freshSlotName);
   });
 
   it("accepts an opaque standby target only after its durable binding proves the exact member", async () => {
@@ -1517,6 +1600,9 @@ function createRuntimeInvocationService(input: {
 
 function createStandbyNamespace(input: {
   readStandbySlotBinding?: HostedStandbyRunnerContainerStubLike["readStandbySlotBinding"];
+  resolveRetainedStandbySlot?: HostedStandbyRunnerContainerStubLike[
+    "resolveRetainedStandbySlot"
+  ];
   slotName: string;
   userId: string;
 }): HostedStandbyRunnerContainerNamespaceLike {
@@ -1554,6 +1640,19 @@ function createStandbyNamespace(input: {
             state: "bound" as const,
           };
         },
+        async resolveRetainedStandbySlot(resolution) {
+          if (input.resolveRetainedStandbySlot) {
+            return await input.resolveRetainedStandbySlot(resolution);
+          }
+          return {
+            claimId: "standby-claim-12345678-1234-4123-8123-123456789abc",
+            releaseId: resolution.currentReleaseId,
+            region: resolution.region,
+            slotName: resolution.slotName,
+            state: "bound" as const,
+            userId: resolution.userId,
+          };
+        },
         async retireStandbySlot() {
           return { retired: true } as const;
         },
@@ -1579,6 +1678,7 @@ function createAllocatingStandbyHarness(input: {
   bindStandbySlot: ReturnType<typeof vi.fn>;
   namespace: HostedStandbyRunnerContainerNamespaceLike;
   readStandbySlotBinding: ReturnType<typeof vi.fn>;
+  resolveRetainedStandbySlot: ReturnType<typeof vi.fn>;
 } {
   let binding: HostedStandbySlotBinding = {
     claimId: null,
@@ -1619,6 +1719,12 @@ function createAllocatingStandbyHarness(input: {
     }
     return binding;
   });
+  const resolveRetainedStandbySlot = vi.fn(async () => {
+    if (input.readDelayMs) {
+      await new Promise((resolve) => setTimeout(resolve, input.readDelayMs));
+    }
+    return binding;
+  });
   return {
     bindStandbySlot,
     namespace: {
@@ -1636,6 +1742,7 @@ function createAllocatingStandbyHarness(input: {
             return { prepared: true as const, ...preparation };
           },
           readStandbySlotBinding,
+          resolveRetainedStandbySlot,
           async readStandbySlotCoordinatorState() {
             return {
               coordinatorOwned: binding.userId === null,
@@ -1659,6 +1766,7 @@ function createAllocatingStandbyHarness(input: {
       },
     },
     readStandbySlotBinding,
+    resolveRetainedStandbySlot,
   };
 }
 

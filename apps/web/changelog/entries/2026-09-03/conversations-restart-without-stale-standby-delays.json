@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-03",
+  "order": 100,
+  "item": {
+    "id": "conversations-restart-without-stale-standby-delays",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Conversations restart without stale standby delays",
+    "summary": "When an assistant standby has gone idle, Murph now replaces its stopped assignment instead of treating it as still warm.",
+    "details": "A standby that is still warm remains reusable for the same member across conversations and groups. Murph replaces it only after proving that it stopped; uncertain or mismatched ownership continues to retry safely.",
+    "relevanceTags": ["assistant", "messaging", "reliability"],
+    "sourcePullRequests": []
+  }
+}

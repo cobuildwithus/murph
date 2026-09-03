@@ -399,14 +399,22 @@ Last verified: 2026-09-01
   ordinary exact-user target. A miss before slot ownership uses that same
   fallback; an ambiguous bind after the per-member stop target is durably
   reserved retries that exact target instead of risking two live containers.
-  Pending and retained targets are reconciled before fresh-claim eligibility.
+  Pending targets are reconciled before fresh-claim eligibility. A claimed slot
+  counts as retained only when its existing container owner proves explicit
+  native warmth while validating the exact slot, release, and member in one
+  bounded RPC; a durable binding alone never authorizes reuse. The warm proof
+  renews the handoff window. Explicit stop or an exact prior-release binding
+  uses the same one-way transition (`unbound` to `bound` to `retiring` to
+  `retired`), and `UserRunner` clears the exact stop target only after retirement
+  settles. Only then may the same eligible trusted foreground request attempt
+  one fresh claim. Unknown liveness, foreign or contradictory identity, and
+  failed retirement keep the old target assigned and start no second container.
   A coordinator transaction admits at most one winner, then replacement
   provisioning runs under `waitUntil`; alarms re-prove readiness, retry failed
-  retirement, expire unbound claim tombstones, and drain stale releases. The
-  slot transition is one-way (`unbound` to `bound` to `retiring` to `retired`),
-  and ambiguous bind/cleanup state stays assigned to its exact `UserRunner`
-  stop target until reconciliation succeeds. Mode `off` retires only
-  coordinator-owned slots and never interrupts bound member work.
+  retirement, expire unbound claim tombstones, and drain stale releases. A
+  claimed slot is never rebound or returned to ready; group conversations are
+  not lifecycle owners because allocation remains per member. Mode `off` retires
+  only coordinator-owned slots and never interrupts bound member work.
 - Initial onboarding has one Postgres completion owner across website and
   native clients. Existing members are backfilled complete. During the
   migration-first rolling deploy, a temporary database default also completes

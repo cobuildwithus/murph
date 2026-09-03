@@ -1108,6 +1108,9 @@ describe("HostedUserRunner execution coordination", () => {
               state: "bound" as const,
             };
           },
+          async resolveRetainedStandbySlot() {
+            throw new Error("Retained standby resolution was not expected.");
+          },
           retireStandbySlot,
           async smokeHealth() {
             return {

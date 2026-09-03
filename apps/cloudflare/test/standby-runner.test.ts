@@ -149,6 +149,81 @@ describe("StandbyRunnerContainer", () => {
     });
   });
 
+  it("reuses a claimed slot while warm and retires it after native stop", async () => {
+    const harness = createStandbyContainerHarness();
+    const slotName = createHostedStandbySlotName(RELEASE_ID);
+    await harness.container.prepareStandbySlot({
+      releaseId: RELEASE_ID,
+      region: HOSTED_STANDBY_REGION,
+      slotName,
+      timeoutMs: 75_000,
+    });
+    const claimId = createHostedStandbyClaimId();
+    await harness.container.bindStandbySlot({
+      claimId,
+      releaseId: RELEASE_ID,
+      region: HOSTED_STANDBY_REGION,
+      slotName,
+      userId: "member_123",
+    });
+    harness.renewActivityTimeout.mockClear();
+
+    const resolution = {
+      currentReleaseId: RELEASE_ID,
+      region: HOSTED_STANDBY_REGION,
+      slotName,
+      userId: "member_123",
+    } as const;
+    await expect(harness.container.resolveRetainedStandbySlot(resolution))
+      .resolves.toMatchObject({ claimId, state: "bound", userId: "member_123" });
+    await expect(harness.container.resolveRetainedStandbySlot(resolution))
+      .resolves.toMatchObject({ claimId, state: "bound", userId: "member_123" });
+    expect(harness.renewActivityTimeout).toHaveBeenCalledTimes(2);
+
+    harness.setNativeStatus("stopped");
+    await expect(harness.container.resolveRetainedStandbySlot(resolution))
+      .resolves.toMatchObject({ claimId: null, state: "retired", userId: null });
+    await expect(harness.container.readStandbySlotBinding()).resolves
+      .toMatchObject({ claimId: null, state: "retired", userId: null });
+  });
+
+  it("keeps a claimed slot assigned for foreign users or ambiguous liveness", async () => {
+    const harness = createStandbyContainerHarness();
+    const slotName = createHostedStandbySlotName(RELEASE_ID);
+    await harness.container.prepareStandbySlot({
+      releaseId: RELEASE_ID,
+      region: HOSTED_STANDBY_REGION,
+      slotName,
+      timeoutMs: 75_000,
+    });
+    const claimId = createHostedStandbyClaimId();
+    await harness.container.bindStandbySlot({
+      claimId,
+      releaseId: RELEASE_ID,
+      region: HOSTED_STANDBY_REGION,
+      slotName,
+      userId: "member_123",
+    });
+
+    await expect(harness.container.resolveRetainedStandbySlot({
+      currentReleaseId: RELEASE_ID,
+      region: HOSTED_STANDBY_REGION,
+      slotName,
+      userId: "member_456",
+    })).rejects.toThrow("belongs to another member");
+    harness.setNativeStatus("stopping");
+
+    await expect(harness.container.resolveRetainedStandbySlot({
+      currentReleaseId: RELEASE_ID,
+      region: HOSTED_STANDBY_REGION,
+      slotName,
+      userId: "member_123",
+    })).rejects.toThrow("native liveness is unsettled");
+    await expect(harness.container.readStandbySlotBinding()).resolves
+      .toMatchObject({ claimId, state: "bound", userId: "member_123" });
+    expect(harness.destroy).not.toHaveBeenCalled();
+  });
+
   it("keeps an unbound ready slot alive at ordinary activity expiry", async () => {
     const harness = createStandbyContainerHarness({ preflightReady: true });
     const slotName = createHostedStandbySlotName(RELEASE_ID);
@@ -653,12 +728,13 @@ async function createClaimedCoordinatorHarness(claimedAtMs: number) {
 
 function createStandbyContainerHarness(input: {
   destroy?: () => Promise<void>;
+  nativeStatus?: string;
   preflightReady?: boolean;
 } = {}) {
   const db = new DatabaseSync(":memory:");
   const state = createDurableObjectState(db, []);
   let preflightReady = input.preflightReady ?? false;
-  let running = true;
+  let nativeStatus = input.nativeStatus ?? "running";
   const codexPreflight = vi.fn(async () => {
     preflightReady = true;
     return new Response(JSON.stringify({ ok: true }), { status: 200 });
@@ -671,10 +747,10 @@ function createStandbyContainerHarness(input: {
   const platformDestroy = input.destroy;
   const destroy = vi.fn(async () => {
     await platformDestroy?.();
-    running = false;
+    nativeStatus = "stopped";
   });
   const startAndWaitForPorts = vi.fn(async () => {
-    running = true;
+    nativeStatus = "running";
   });
   const renewActivityTimeout = vi.fn();
   Object.assign(container, {
@@ -693,7 +769,7 @@ function createStandbyContainerHarness(input: {
     destroy,
     getState: vi.fn(async () => ({
       lastChange: Date.now(),
-      status: running ? "running" : "stopped",
+      status: nativeStatus,
     })),
     renewActivityTimeout,
     startAndWaitForPorts,
@@ -703,6 +779,9 @@ function createStandbyContainerHarness(input: {
     container,
     destroy,
     renewActivityTimeout,
+    setNativeStatus(status: string) {
+      nativeStatus = status;
+    },
     startAndWaitForPorts,
   };
 }
@@ -776,6 +855,9 @@ function createSlotStub(slotName: string): HostedStandbyRunnerContainerStubLike 
         slotName: binding.slotName,
         state: binding.state,
       };
+    },
+    async resolveRetainedStandbySlot() {
+      return binding;
     },
     async retireStandbySlot() {
       binding = {

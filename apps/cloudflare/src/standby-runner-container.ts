@@ -20,6 +20,7 @@ import {
   isHostedStandbyClaimId,
   isHostedStandbySlotName,
   readHostedStandbyReleaseId,
+  readHostedStandbySlotReleaseId,
   type HostedStandbySlotCoordinatorState,
   type HostedStandbySlotBinding,
 } from "./standby-runner-contract.js";
@@ -149,6 +150,46 @@ export class StandbyRunnerContainer extends RunnerContainer {
       slotName: binding.slotName,
       state: binding.state,
     };
+  }
+
+  async resolveRetainedStandbySlot(input: {
+    currentReleaseId: string;
+    region: typeof HOSTED_STANDBY_REGION;
+    slotName: string;
+    userId: string;
+  }): Promise<HostedStandbySlotBinding> {
+    const binding = this.standbyStore.read();
+    const request = requireRetainedStandbyRequest(
+      this.environment,
+      binding,
+      input,
+    );
+
+    if (
+      binding.state === "bound"
+      && binding.releaseId === request.currentReleaseId
+    ) {
+      const liveness = await this.retainNativeContainerIfWarm(
+        "standby-retained-handoff",
+      );
+      if (liveness === "unsettled") {
+        throw new Error("Hosted standby retained-slot native liveness is unsettled.");
+      }
+      if (liveness === "warm") {
+        const retained = this.standbyStore.read();
+        assertRetainedStandbyBinding(retained, binding, request);
+        return retained;
+      }
+    }
+
+    if (binding.state !== "retired") {
+      await this.retireStandbySlot(
+        binding.claimId === null ? {} : { claimId: binding.claimId },
+      );
+    }
+    const retired = this.standbyStore.read();
+    assertRetiredStandbyBinding(retired, request);
+    return retired;
   }
 
   async retireStandbySlot(input: {
@@ -489,6 +530,88 @@ function projectBinding(row: StandbySlotRow): HostedStandbySlotBinding {
     };
   }
   throw new Error("Hosted standby slot state is invalid.");
+}
+
+interface RetainedStandbyRequest {
+  currentReleaseId: string;
+  region: typeof HOSTED_STANDBY_REGION;
+  slotName: string;
+  targetReleaseId: string;
+  userId: string;
+}
+
+function requireRetainedStandbyRequest(
+  environment: Readonly<Record<string, unknown>>,
+  binding: HostedStandbySlotBinding,
+  input: {
+    currentReleaseId: string;
+    region: typeof HOSTED_STANDBY_REGION;
+    slotName: string;
+    userId: string;
+  },
+): RetainedStandbyRequest {
+  const currentReleaseId = readHostedStandbyReleaseId(environment);
+  if (!currentReleaseId || input.currentReleaseId !== currentReleaseId) {
+    throw new Error("Hosted standby retained-slot release authority is stale.");
+  }
+  const targetReleaseId = readHostedStandbySlotReleaseId(input.slotName);
+  if (
+    !targetReleaseId
+    || input.region !== HOSTED_STANDBY_REGION
+    || binding.slotName !== input.slotName
+    || binding.releaseId !== targetReleaseId
+    || binding.region !== input.region
+  ) {
+    throw new Error("Hosted standby retained-slot identity did not match exactly.");
+  }
+  const userId = requireUserId(input.userId);
+  if (
+    (binding.state === "bound" || binding.state === "retiring")
+    && binding.userId !== null
+    && binding.userId !== userId
+  ) {
+    throw new Error("Hosted standby retained slot belongs to another member.");
+  }
+  return {
+    currentReleaseId,
+    region: input.region,
+    slotName: input.slotName,
+    targetReleaseId,
+    userId,
+  };
+}
+
+function assertRetainedStandbyBinding(
+  retained: HostedStandbySlotBinding,
+  before: Extract<HostedStandbySlotBinding, { state: "bound" }>,
+  request: RetainedStandbyRequest,
+): void {
+  if (
+    retained.state !== "bound"
+    || retained.claimId !== before.claimId
+    || retained.releaseId !== request.currentReleaseId
+    || retained.region !== request.region
+    || retained.slotName !== request.slotName
+    || retained.userId !== request.userId
+  ) {
+    throw new Error(
+      "Hosted standby retained-slot binding changed during native liveness proof.",
+    );
+  }
+}
+
+function assertRetiredStandbyBinding(
+  retired: HostedStandbySlotBinding,
+  request: RetainedStandbyRequest,
+): asserts retired is Extract<HostedStandbySlotBinding, { state: "retired" }> {
+  if (
+    retired.state !== "retired"
+    || retired.releaseId !== request.targetReleaseId
+    || retired.region !== request.region
+    || retired.slotName !== request.slotName
+  ) {
+    throw new Error("Hosted standby retained-slot retirement did not settle exactly.");
+  }
 }
 
 function assertSameSlot(

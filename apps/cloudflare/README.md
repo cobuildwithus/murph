@@ -96,11 +96,18 @@ identity and home are member-specific.
 The coordinator receives no member id. `UserRunner` first persists the opaque
 slot as its exact stop target, then binds the slot once to that member and
 claim, opens the normal write fence, restores the workspace, and invokes the
-ordinary runner path. A claimed slot may remain warm only for that same member
-under the existing conversation idle lifecycle; it is retired and scrubbed,
-never returned to the standby for another member. Pending and retained standby
-targets are resolved before fresh-claim eligibility, so a later Temporal retry
-continues the same reserved target rather than creating a second container.
+ordinary runner path. "Retained" means the standby-container owner validated
+the exact slot, release, and member and proved in the same bounded RPC that the
+native container is still warm; a durable `bound` row alone is not retention
+proof. A warm proof renews the handoff idle window and the same member may reuse
+the slot repeatedly. A stopped or prior-release slot instead follows the
+existing one-way retirement and scrub path. Only after retirement settles does
+`UserRunner` clear that exact stop target, allowing the same eligible trusted
+foreground request to try the ordinary fresh-claim path. Unknown liveness,
+foreign identity, contradictory release authority, or unsettled retirement
+keeps the exact target pending for retry and starts no second container. A
+claimed slot is never rebound or returned to the shared pool, and a group chat
+never owns it; allocation remains attached to the member's `UserRunner`.
 
 Hosted assistant delivery recovery comes from the encrypted local runtime outbox state inside the workspace checkpoint plus web-owned hosted-runtime logs/status.
 The runner container sends runtime internal Worker requests to normal virtual hosts such as `results.worker` and `web-control.worker`. Cloudflare Container outbound interception routes those requests back into Worker-owned handlers, using the runtime write-fence headers as authority.

@@ -1497,6 +1497,26 @@ export class RunnerContainer extends Container {
     }
   }
 
+  protected async retainNativeContainerIfWarm(
+    stage: string,
+  ): Promise<"stopped" | "unsettled" | "warm"> {
+    // Keep the native status proof and activity renewal under one lifecycle
+    // lock so idle expiry cannot stop the container between them.
+    return await this.withLifecycleLock(async () => {
+      const status = await readRunnerContainerStatus(this);
+      if (isRunnerContainerStopped(status)) {
+        return "stopped";
+      }
+      if (
+        this.warmShellInvalidatedByUnsettledDestroy
+        || (status !== "running" && status !== "healthy")
+      ) {
+        return "unsettled";
+      }
+      return this.noteRunnerActivity(stage) ? "warm" : "unsettled";
+    });
+  }
+
   private isPlatformContainerDefinitelyStopped(): boolean {
     return this.ctx.container?.running === false;
   }
