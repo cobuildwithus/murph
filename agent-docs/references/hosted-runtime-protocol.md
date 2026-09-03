@@ -779,11 +779,12 @@ selection as well as during idle maintenance, so restored content cannot begin a
 reply after its deadline.
 `system_mailbox` runs one bounded model-free item only when that item is the
 exact first live durable system frontier. The shared classifier admits
-device-sync, operator maintenance, browser-vault refresh, Environment
-completion, and the narrow exact-notification cases; an earlier default-owned
-row remains a hard ordering barrier. Already committed Web updates remain
-authoritative, while an interrupted or not-yet-checkpointed unit stays
-recoverable from the durable mailbox and its existing continuation contract.
+device-sync, member-channel reconciliation, operator maintenance, browser-vault
+refresh, Environment completion, and the narrow exact-notification cases; an
+earlier default-owned row remains a hard ordering barrier. Already committed
+Web updates remain authoritative, while an interrupted or not-yet-checkpointed
+unit stays recoverable from the durable mailbox and its existing continuation
+contract.
 
 Default and `system_mailbox` remain separate bounded owners over one ordered
 mailbox. When the runnable mailbox owner is model-free, the checkpoint
@@ -1388,6 +1389,11 @@ the durable retained frontier. For inactive access, Web emits `null` without a
 mailbox read so Temporal can retire its pointer projection while the durable
 mailbox remains canonical and can be re-read after reactivation. Deploy the
 tolerant Temporal consumer before Web begins emitting the classification.
+When an existing mailbox kind moves from `default_owned` to `model_free`, deploy
+the Cloudflare runtime allowlist before the Web classifier. Old Web remains
+compatible with the expanded runtime; new Web paired with an old runtime keeps
+the item durable but cannot make progress until the runtime is upgraded. Reverse
+that order for rollback.
 Because explicit-null retirement removes Temporal's last local reason to wake,
 every Web owner that restores active access must append a deterministic
 `runtime.maintenance-requested` mailbox item in the same transaction as the
@@ -2796,9 +2802,10 @@ An expected managed AI usage denial observed by the workspace read is not a
 transport preparation failure. Cloudflare binds the denied allowance to the
 fresh write fence and narrows a default invocation to the existing
 `system_mailbox` path, which imports system work, may run one bounded
-model-free deterministic device-sync, operator-maintenance, or browser-vault
-refresh item, and exits before foreground assistant admission. Other system
-items retain their default owner and are not consumed by this recovery mode.
+model-free deterministic device-sync, member-channel reconciliation,
+operator-maintenance, browser-vault refresh, or reported-metric item, and exits
+before foreground assistant admission. Other system items retain their default
+owner and are not consumed by this recovery mode.
 It binds that effective processing mode into the same fence so controller
 priority, preemption, and the container job
 cannot diverge; the fence also rejects all metered provider egress if the runtime
