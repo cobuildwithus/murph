@@ -1,6 +1,6 @@
 # Shorten Vercel database pool idle tail
 
-Status: active
+Status: completed
 Created: 2026-09-02
 Updated: 2026-09-02
 
@@ -69,7 +69,7 @@ rendered evidence adds no proof. Result: Ready.
 2. [x] Add the required member-facing changelog fragment with public-safe claims.
 3. [x] Run focused pool and address-book tests, Web typecheck, changelog proof,
    and complexity/diff checks.
-4. [ ] Commit, push, open the draft PR, and complete exact-head CI and final
+4. [x] Commit, push, open the draft PR, and complete candidate-head CI and final
    ReviewGPT before merge.
 
 ## Decisions
@@ -89,5 +89,11 @@ rendered evidence adds no proof. Result: Ready.
   tests); `pnpm --dir apps/web test -- changelog-page.test.tsx` (1 file, 9
   tests); `pnpm --dir apps/web typecheck`; `pnpm complexity:diff`; and `git diff
   --check`.
-- Pending: exact-head GitHub Actions, final ReviewGPT, parent final review, and
-  current-base merge-tree proof.
+- Passed: required GitHub Actions and the pull-request evidence workflow on the
+  code candidate; final ReviewGPT returned `ROUND_OUTCOME: PASS` with no
+  findings for candidate `a561509e9605c439dd82601fc04fd739071d501a`; parent
+  final review found no remaining code, test, documentation, or deployment
+  concern.
+- Merge admission: after this plan-only archival commit, require green checks on
+  the final PR head and a clean current-base merge-tree proof before merge.
+Completed: 2026-09-02
