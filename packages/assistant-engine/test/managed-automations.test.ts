@@ -1410,6 +1410,12 @@ describe('applyMurphManagedAutomations', () => {
       'Merge clear synonyms into one concept',
     )
     expect(patternsUpdateRecord?.instructions).toContain(
+      'revise an existing label when it can be clearer or shorter',
+    )
+    expect(patternsUpdateRecord?.instructions).toContain(
+      'Use one to three plain words for each member-facing label',
+    )
+    expect(patternsUpdateRecord?.instructions).toContain(
       'Derived detail ids containing `--` do not need concepts',
     )
     expect(patternsUpdateRecord?.instructions).toContain(
@@ -1524,6 +1530,12 @@ describe('applyMurphManagedAutomations', () => {
     expect(insightRecord?.instructions).toContain('Food capture')
     expect(insightRecord?.instructions).toContain('Easy missing measurement')
     expect(insightRecord?.instructions).toContain('Supplement and pill routines')
+    expect(insightRecord?.instructions).toContain(
+      'canonical food, supplement, medication, and event records behind Journal',
+    )
+    expect(insightRecord?.instructions).toContain(
+      'Do not turn a generic rule into a personal finding',
+    )
     expect(insightRecord?.instructions).toContain('Food planning')
     expect(insightRecord?.instructions).toContain('Goal progress')
     expect(insightRecord?.instructions).toContain('A goal plus missing or messy logs is not enough')

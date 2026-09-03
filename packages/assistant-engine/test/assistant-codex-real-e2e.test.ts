@@ -11111,6 +11111,15 @@ describeRealCodex('real Codex Personal Patterns vocabulary normalization e2e', (
       expect(vocabularyWrite).toMatch(/pt/iu)
       const parsedVocabulary = parsePersonalPatternVocabulary(vocabularyWrite)
       expect(parsedVocabulary).not.toBeNull()
+      const breathingConcept = parsedVocabulary?.concepts.find((concept) =>
+        [concept.id, ...concept.aliases].includes(
+          'evening-breathing-practice',
+        ),
+      )
+      expect(breathingConcept).toBeDefined()
+      expect(
+        breathingConcept?.label.trim().split(/\s+/u).length,
+      ).toBeLessThanOrEqual(3)
       expect(
         parsedVocabulary?.concepts.some((concept) =>
           [concept.id, ...concept.aliases].some((token) => token.includes('--')),
@@ -11805,6 +11814,84 @@ describeRealCodex(
     },
     720_000,
   )
+})
+
+describeRealCodex('real Codex weekly health insight Journal evidence e2e', () => {
+  it('uses canonical Journal-backed timing evidence without overclaiming', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const automation = MURPH_MANAGED_AUTOMATIONS.find(
+      (candidate) =>
+        candidate.automationId === MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+    )
+    if (!automation) {
+      throw new Error('Expected the managed weekly health insight automation.')
+    }
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-weekly-health-insight-journal-e2e-'),
+    )
+
+    try {
+      const binDirectory = path.join(workingDirectory, 'bin')
+      await materializeWeeklyHealthInsightVaultCli({
+        binDirectory,
+        patternResult: 'journal-timing',
+      })
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: true,
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand:
+          normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildWeeklyHealthInsightDeveloperInstructions(),
+        dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+        env: {
+          ...config.env,
+          PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+        },
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          automation.instructions,
+          'Scheduled occurrence context:',
+          '- Current local date: 2026-08-09.',
+          '- This controlled canonical fixture contains a specific repeated timing candidate.',
+          '- Complete the normal evidence pass and terminal scheduled decision.',
+        ].join('\n\n'),
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      expect(
+        actions.some(
+          (action) =>
+            action.kind === 'command'
+            && action.command.includes('vault-cli wearables patterns'),
+        ),
+      ).toBe(true)
+      expect(
+        actions.filter(
+          (action) =>
+            action.kind === 'command'
+            && action.command.includes(
+              'vault-cli knowledge append-section weekly-health-insights',
+            ),
+        ),
+      ).toHaveLength(1)
+      expect(result.finalMessage).toMatch(/nausea|queasy|stomach/iu)
+      expect(result.finalMessage).toMatch(/timing|before breakfast|with food/iu)
+      expect(result.finalMessage).toMatch(/lined up|associated|suggests|may/iu)
+      expect(result.finalMessage).toMatch(/pharmacist|clinician/iu)
+      expect(result.finalMessage).not.toMatch(
+        /definitely|diagnos|stop taking/iu,
+      )
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 720_000)
 })
 
 describeRealCodex('real Codex Journal and Patterns help e2e', () => {
@@ -27958,12 +28045,18 @@ async function materializePersonalPatternsVocabularyVaultCli(input: {
         personalPatternFixtureCell('cardio-dance'),
         personalPatternFixtureCell('dancing'),
         personalPatternFixtureCell('pt'),
+        personalPatternFixtureCell('evening-breathing-practice'),
         personalPatternFixtureCell('coffee--amount-high'),
       ],
       factors: [
         personalPatternFixtureFactor('cardio-dance', 'Cardio dance'),
         personalPatternFixtureFactor('dancing', 'Dancing'),
         personalPatternFixtureFactor('pt', 'Pt', 'intervention'),
+        personalPatternFixtureFactor(
+          'evening-breathing-practice',
+          'Relaxing evening breathing practice',
+          'intervention',
+        ),
         personalPatternFixtureFactor(
           'coffee--amount-high',
           'Coffee · amount high',
@@ -27981,6 +28074,7 @@ async function materializePersonalPatternsVocabularyVaultCli(input: {
       cells: [
         personalPatternFixtureCell('dance'),
         personalPatternFixtureCell('physical-therapy'),
+        personalPatternFixtureCell('breathing'),
         personalPatternFixtureCell('coffee--amount-high'),
       ],
       factors: [
@@ -27990,6 +28084,7 @@ async function materializePersonalPatternsVocabularyVaultCli(input: {
           'Physical therapy',
           'intervention',
         ),
+        personalPatternFixtureFactor('breathing', 'Breathing', 'intervention'),
         personalPatternFixtureFactor(
           'coffee--amount-high',
           'Coffee · amount high',
@@ -28032,8 +28127,17 @@ async function materializePersonalPatternsVocabularyVaultCli(input: {
       },
       {
         comparisonBasis: 'matched_weekday',
-        factorId: 'coffee--amount-high',
+        factorId: 'evening-breathing-practice',
         firstSharedDate: '2026-08-23',
+        lagDays: 1,
+        lastSeenGrade: 'D',
+        muted: false,
+        outcomeId: 'hrv',
+      },
+      {
+        comparisonBasis: 'matched_weekday',
+        factorId: 'coffee--amount-high',
+        firstSharedDate: '2026-08-24',
         lagDays: 1,
         lastSeenGrade: 'D',
         muted: false,
@@ -28058,8 +28162,29 @@ async function materializePersonalPatternsVocabularyVaultCli(input: {
       "    printf '%s\\n' '{\"sources\":[{\"provider\":\"fixture\",\"status\":\"healthy\",\"firstDate\":\"2026-05-05\",\"lastDate\":\"2026-09-02\",\"stalenessVsNewestDays\":0}]}'",
       '    ;;',
       '  *"knowledge show journal-pattern-vocabulary"*)',
-      "    printf '%s\\n' 'knowledge page not found' >&2",
-      '    exit 1',
+      `    printf '%s\\n' '${JSON.stringify({
+        version: 1,
+        concepts: [
+          {
+            id: 'breathing',
+            label: 'Relaxing evening breathing practice',
+            icon: 'mind-body',
+            aliases: ['evening-breathing-practice'],
+          },
+          {
+            id: 'dance',
+            label: 'Dance',
+            icon: 'dance',
+            aliases: ['cardio-dance', 'dancing'],
+          },
+          {
+            id: 'physical-therapy',
+            label: 'Physical therapy',
+            icon: 'wellness',
+            aliases: ['pt'],
+          },
+        ],
+      })}'`,
       '    ;;',
       '  *"knowledge show personal-pattern-notifications"*)',
       `    printf '%s\\n' '${ledger}'`,
@@ -28167,7 +28292,7 @@ async function materializeJournalConnectedContextVaultCli(input: {
 
 async function materializeWeeklyHealthInsightVaultCli(input: {
   binDirectory: string
-  patternResult: 'no-clear' | 'unavailable'
+  patternResult: 'journal-timing' | 'no-clear' | 'unavailable'
 }): Promise<void> {
   await mkdir(input.binDirectory, { recursive: true })
   const executablePath = path.join(input.binDirectory, 'vault-cli')
@@ -28220,6 +28345,9 @@ async function materializeWeeklyHealthInsightVaultCli(input: {
         `    printf '%s\\n' '${personalPatternResult}'`,
         '    exit 0',
       ]
+  const canonicalSummary = input.patternResult === 'journal-timing'
+    ? 'Across four recent dates, a mineral supplement before breakfast was followed by a member-recorded nausea note within one hour. On four similar dates when the same supplement was recorded with breakfast, nausea was not recorded. The product directions saved in the canonical supplement record say to take it with food. This is an association, not proof of cause.'
+    : 'No material change in the available canonical period.'
 
   await writeFile(
     executablePath,
@@ -28233,11 +28361,14 @@ async function materializeWeeklyHealthInsightVaultCli(input: {
       '    printf \'%s\\n\' \'knowledge page not found\' >&2',
       '    exit 1',
       '    ;;',
+      '  *"knowledge append-section weekly-health-insights"*)',
+      '    printf \'%s\\n\' \'{"ok":true,"status":"appended"}\'',
+      '    ;;',
       '  *"wearables sources list"*)',
       '    printf \'%s\\n\' \'{"sources":[{"provider":"fixture","status":"healthy","lastDate":"2026-08-09","stalenessVsNewestDays":0}]}\'',
       '    ;;',
       '  *"wearables"*|*"experiment"*|*"goal"*|*"list"*|*"search"*|*"meal"*)',
-      '    printf \'%s\\n\' \'{"data":[],"summary":"No material change in the available canonical period."}\'',
+      `    printf '%s\\n' '${JSON.stringify({ data: [], summary: canonicalSummary })}'`,
       '    ;;',
       '  *)',
       '    printf \'%s\\n\' \'{"data":[],"ok":true}\'',

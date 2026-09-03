@@ -591,6 +591,7 @@ test("Personal Patterns comparison controls use plain result language", () => {
   assert.match(markup, />Sleep duration</u);
   assert.match(markup, />Sleep quality</u);
   assert.match(markup, /aria-label="Sort by Sleep quality/u);
+  assert.doesNotMatch(markup, /lucide-arrow-up-down/u);
   assert.match(markup, /aria-label="About Sleep quality"/u);
   assert.match(markup, />SpO₂</u);
   assert.equal(
