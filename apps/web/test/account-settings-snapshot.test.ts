@@ -592,7 +592,6 @@ describe("hosted account settings snapshot", () => {
       email: {
         privyEmailLinked: false,
         address: null,
-        murphEmailAddress: null,
         verifiedAt: null,
       },
       phone: {
@@ -657,7 +656,7 @@ describe("hosted account settings snapshot", () => {
     }).removableSignInMethods).toEqual([]);
   });
 
-  it("hides stale canonical contact projections after Privy removes them", () => {
+  it("keeps stale canonical projections visible as durable cleanup actions", () => {
     expect(withServerApprovedPrivyAccountHints({
       snapshot: {
         email: {
@@ -682,15 +681,68 @@ describe("hosted account settings snapshot", () => {
         },
       ],
     })).toMatchObject({
+      email: {
+        address: "member@example.com",
+        murphEmailAddress: "reply@example.test",
+        privyEmailLinked: true,
+        verifiedAt: "2026-05-02T00:00:00.000Z",
+      },
+      pendingSignInRemovals: ["phone", "telegram"],
       phone: {
-        number: null,
-        verifiedAt: null,
+        number: "+14045550123",
+        verifiedAt: "2026-05-02T00:00:00.000Z",
       },
       telegram: {
-        telegramUserId: null,
+        telegramUserId: "456",
         username: null,
       },
     });
+  });
+
+  it("derives email cleanup when Privy has no email account", () => {
+    expect(withServerApprovedPrivyAccountHints({
+      snapshot: {
+        email: {
+          address: "member@example.com",
+          murphEmailAddress: "reply@example.test",
+          verifiedAt: "2026-05-02T00:00:00.000Z",
+        },
+        phone: {
+          number: "+14045550123",
+          verifiedAt: "2026-05-02T00:00:00.000Z",
+        },
+        telegram: {
+          telegramUserId: null,
+        },
+      },
+      serverApprovedPrivyLinkedAccounts: [
+        {
+          phoneNumber: "+14045550123",
+          latest_verified_at: 1_777_680_000,
+          type: "phone",
+        },
+      ],
+    }).pendingSignInRemovals).toEqual(["email"]);
+  });
+
+  it("does not treat an unverified checkout email as pending sign-in cleanup", () => {
+    expect(withServerApprovedPrivyAccountHints({
+      snapshot: {
+        email: {
+          address: "payer@example.com",
+          murphEmailAddress: null,
+          verifiedAt: null,
+        },
+        phone: {
+          number: null,
+          verifiedAt: null,
+        },
+        telegram: {
+          telegramUserId: null,
+        },
+      },
+      serverApprovedPrivyLinkedAccounts: [],
+    }).pendingSignInRemovals).toEqual([]);
   });
 });
 

@@ -807,7 +807,7 @@ describe("HostedSettingsIdentityLinkDialog", () => {
       expect(container.textContent).toContain("provider removed: sync unavailable");
 
       const finishButton = Array.from(container.querySelectorAll("button")).find(
-        (candidate) => candidate.textContent === "Finish removing",
+        (candidate) => candidate.textContent === "Finish disconnecting",
       );
       await act(async () => {
         finishButton?.dispatchEvent(new Event("click", { bubbles: true }));
@@ -817,6 +817,60 @@ describe("HostedSettingsIdentityLinkDialog", () => {
       expect(mocks.unlinkEmail).toHaveBeenCalledTimes(1);
       expect(mocks.finishHostedLinkedAccountRemovalWithRetry).toHaveBeenCalledTimes(2);
       expect(mocks.onOpenChange).toHaveBeenCalledWith(false);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("finishes canonical cleanup after a refresh without unlinking the provider again", async () => {
+    mocks.useUser.mockReturnValue({
+      user: {
+        id: "privy-user-a",
+        linkedAccounts: [
+          {
+            phoneNumber: "+14045550123",
+            latestVerifiedAt: 1_777_680_000,
+            type: "phone",
+          },
+        ],
+      },
+    });
+    const { HostedSettingsIdentityLinkDialog } = await import(
+      "@/src/components/settings/hosted-settings-identity-link-dialog"
+    );
+    const { cleanup, container } = await renderClientComponent(
+      createElement(HostedSettingsIdentityLinkDialog, {
+        account: {
+          ...makeAccountSnapshot(),
+          pendingSignInRemovals: ["telegram"],
+          removableSignInMethods: ["phone"],
+        },
+        expectedPrivyUserId: "privy-user-a",
+        initialMode: "telegram",
+        intent: "finish",
+        onOpenChange: mocks.onOpenChange,
+        privySessionMatchesAppSession: true,
+      }),
+    );
+
+    try {
+      expect(container.textContent).toContain("Finish disconnecting Telegram?");
+      const finishButton = Array.from(container.querySelectorAll("button")).find(
+        (candidate) => candidate.textContent === "Finish disconnecting",
+      );
+
+      await act(async () => {
+        finishButton?.dispatchEvent(new Event("click", { bubbles: true }));
+        await Promise.resolve();
+      });
+
+      expect(mocks.unlinkTelegram).not.toHaveBeenCalled();
+      expect(mocks.finishHostedLinkedAccountRemovalWithRetry).toHaveBeenCalledWith({
+        expectedIdentity: "12345",
+        method: "telegram",
+      });
+      expect(mocks.onOpenChange).toHaveBeenCalledWith(false);
+      expect(mocks.refresh).toHaveBeenCalledTimes(1);
     } finally {
       await cleanup();
     }

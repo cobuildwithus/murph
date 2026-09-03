@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   },
   readHostedPrivyUserById: vi.fn(),
   removeHostedMemberLinkedAccountProjectionTx: vi.fn(),
-  requireFreshActivePrivyMemberAuthForHostedAppSession: vi.fn(),
+  requireFreshPrivyMemberAuthForHostedAppSession: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
 }));
 
@@ -17,8 +17,8 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requireFreshActivePrivyMemberAuthForHostedAppSession:
-    mocks.requireFreshActivePrivyMemberAuthForHostedAppSession,
+  requireFreshPrivyMemberAuthForHostedAppSession:
+    mocks.requireFreshPrivyMemberAuthForHostedAppSession,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
@@ -62,7 +62,7 @@ describe("settings linked-account removal route", () => {
       async (callback: (tx: unknown) => Promise<unknown>) =>
         callback(mocks.prismaClient),
     );
-    mocks.requireFreshActivePrivyMemberAuthForHostedAppSession.mockResolvedValue({
+    mocks.requireFreshPrivyMemberAuthForHostedAppSession.mockResolvedValue({
       appSession: {
         member: { id: "member_123" },
         privyUserId: "did:privy:user_123",
@@ -138,6 +138,30 @@ describe("settings linked-account removal route", () => {
       ok: true,
       runTriggered: true,
     });
+  });
+
+  it("allows an authenticated past-due member to finish authority-reducing cleanup", async () => {
+    mocks.requireFreshPrivyMemberAuthForHostedAppSession.mockResolvedValueOnce({
+      appSession: {
+        member: { id: "member_123" },
+        privyUserId: "did:privy:user_123",
+      },
+      freshPrivy: {
+        member: {
+          billingStatus: "past_due",
+          id: "member_123",
+          suspendedAt: null,
+        },
+      },
+    });
+
+    const response = await route.DELETE(makeRequest({
+      expectedIdentity: "456",
+      method: "telegram",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.removeHostedMemberLinkedAccountProjectionTx).toHaveBeenCalledOnce();
   });
 
   it("waits while Privy still reports the account being removed", async () => {

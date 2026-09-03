@@ -42,7 +42,11 @@ import { formatMaskedPhoneNumber } from "./hosted-settings-utils";
 import { HostedTelegramCardSettings } from "./hosted-telegram-card-settings";
 
 type HostedSettingsIdentityLinkMode = "phone" | "email" | "telegram";
-export type HostedSettingsIdentityDialogIntent = "manage" | "remove" | "replace";
+export type HostedSettingsIdentityDialogIntent =
+  | "finish"
+  | "manage"
+  | "remove"
+  | "replace";
 
 export function HostedSettingsIdentityLinkDialog({
   account,
@@ -62,7 +66,9 @@ export function HostedSettingsIdentityLinkDialog({
   const router = useRouter();
   const { openAuthDialog } = useAuth();
   const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID?.trim();
-  const [providerAccountRemoved, setProviderAccountRemoved] = useState(false);
+  const [providerAccountRemoved, setProviderAccountRemoved] = useState(
+    intent === "finish",
+  );
   const [telegramReplacementReady, setTelegramReplacementReady] = useState(false);
   const effectiveAccount = telegramReplacementReady
     ? {
@@ -174,12 +180,6 @@ function HostedSettingsIdentityMutationContent({
     showLinkForm: initialMode === "phone",
     surface: "settings",
   });
-  const hasExisting = initialMode === "phone"
-    ? Boolean(account.phone.number)
-    : initialMode === "email"
-      ? Boolean(account.email.address)
-      : Boolean(account.telegram.telegramUserId);
-
   async function handleClientAuthRequired() {
     if (reauthPending) {
       return;
@@ -222,7 +222,49 @@ function HostedSettingsIdentityMutationContent({
     );
   }
 
-  if (intent === "remove" || intent === "replace") {
+  return (
+    <HostedSettingsIdentityAuthorizedContent
+      account={account}
+      createPhoneDiagnosticReporter={createPhoneDiagnosticReporter}
+      intent={intent}
+      initialMode={initialMode}
+      onClientAuthRequired={onClientAuthRequired}
+      onOpenChange={onOpenChange}
+      onProviderAccountRemoved={onProviderAccountRemoved}
+      onRemoved={onRemoved}
+      onSynced={onSynced}
+    />
+  );
+}
+
+function HostedSettingsIdentityAuthorizedContent({
+  account,
+  createPhoneDiagnosticReporter,
+  intent,
+  initialMode,
+  onClientAuthRequired,
+  onOpenChange,
+  onProviderAccountRemoved,
+  onRemoved,
+  onSynced,
+}: {
+  account: HostedAccountSettingsSnapshot;
+  createPhoneDiagnosticReporter: ReturnType<typeof useHostedPhoneLinkDiagnostics>;
+  intent: HostedSettingsIdentityDialogIntent;
+  initialMode: HostedSettingsIdentityLinkMode;
+  onClientAuthRequired: () => void;
+  onOpenChange: (open: boolean) => void;
+  onProviderAccountRemoved: () => void;
+  onRemoved: () => void;
+  onSynced: () => void;
+}) {
+  const hasExisting = initialMode === "phone"
+    ? Boolean(account.phone.number)
+    : initialMode === "email"
+      ? Boolean(account.email.address)
+      : Boolean(account.telegram.telegramUserId);
+
+  if (intent !== "manage") {
     return (
       <HostedSettingsIdentityDialogFrame
         account={account}
@@ -396,10 +438,12 @@ function getSettingsIdentityLinkCopy(
   description: string;
   title: string;
 } {
-  if (intent === "remove") {
+  if (intent === "remove" || intent === "finish") {
     return {
       description: getSettingsIdentityRemovalConsequence(mode),
-      title: `Remove ${getSettingsIdentityLabel(mode)}?`,
+      title: intent === "finish"
+        ? `Finish disconnecting ${getSettingsIdentityLabel(mode)}?`
+        : `Remove ${getSettingsIdentityLabel(mode)}?`,
     };
   }
 
@@ -477,7 +521,7 @@ function HostedSettingsIdentityRemoval({
   onRemoved,
 }: {
   account: HostedAccountSettingsSnapshot;
-  intent: "remove" | "replace";
+  intent: Exclude<HostedSettingsIdentityDialogIntent, "manage">;
   method: HostedPrivyAuthMethod;
   onCancel: () => void;
   onProviderAccountRemoved: () => void;
@@ -489,10 +533,16 @@ function HostedSettingsIdentityRemoval({
   const { unlink: unlinkTelegram } = useUnlinkTelegram();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const [providerAccountRemoved, setProviderAccountRemoved] = useState(false);
-  const removable = account.removableSignInMethods?.includes(method) === true;
+  const initialProviderAccountRemoved = intent === "finish";
+  const [providerAccountRemoved, setProviderAccountRemoved] = useState(
+    initialProviderAccountRemoved,
+  );
+  const removable = initialProviderAccountRemoved
+    || account.removableSignInMethods?.includes(method) === true;
   const [expectedIdentity] = useState(() =>
-    resolveSettingsIdentityProviderValue(method, user)
+    initialProviderAccountRemoved
+      ? resolveSettingsIdentitySnapshotValue(method, account)
+      : resolveSettingsIdentityProviderValue(method, user),
   );
   const displayValue = resolveSettingsIdentityDisplayValue(method, account);
   const label = getSettingsIdentityLabel(method);
@@ -572,7 +622,7 @@ export function HostedSettingsIdentityRemovalView({
 }: {
   displayValue: string;
   errorMessage: string | null;
-  intent: "remove" | "replace";
+  intent: Exclude<HostedSettingsIdentityDialogIntent, "manage">;
   label: string;
   onCancel: () => void;
   onRemove: () => void;
@@ -602,7 +652,7 @@ export function HostedSettingsIdentityRemovalView({
         </Button>
         <Button
           type="button"
-          variant={intent === "remove" ? "destructive" : "default"}
+          variant={intent === "replace" ? "default" : "destructive"}
           disabled={pending || !removable}
           onClick={onRemove}
         >
@@ -611,7 +661,7 @@ export function HostedSettingsIdentityRemovalView({
               ? "Finishing…"
               : "Removing…"
             : providerAccountRemoved
-              ? "Finish removing"
+              ? "Finish disconnecting"
               : intent === "replace"
                 ? "Disconnect and continue"
                 : `Remove ${label}`}
@@ -641,6 +691,19 @@ function resolveSettingsIdentityProviderValue(
   }
 
   return extractHostedPrivyTelegramAccount(user)?.telegramUserId ?? null;
+}
+
+function resolveSettingsIdentitySnapshotValue(
+  method: HostedPrivyAuthMethod,
+  account: HostedAccountSettingsSnapshot,
+): string | null {
+  if (method === "phone") {
+    return account.phone.number;
+  }
+  if (method === "email") {
+    return account.email.address;
+  }
+  return account.telegram.telegramUserId;
 }
 
 function resolveSettingsIdentityDisplayValue(

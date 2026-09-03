@@ -11,6 +11,31 @@ import type { HostedPrivyAuthMethod } from "./types";
 
 const MAX_REPLY_ALIAS_GENERATION = 2_147_483_647;
 
+const hostedLinkedAccountRoutingSelect = {
+  linqChatIdEncrypted: true,
+  linqChatLookupKey: true,
+  linqHomeLineAssignedAt: true,
+  linqParticipantContactKind: true,
+  linqParticipantContactLookupKey: true,
+  linqRecipientPhoneEncrypted: true,
+  linqRecipientPhoneLookupKey: true,
+  pendingLinqChatIdEncrypted: true,
+  pendingLinqChatLookupKey: true,
+  pendingLinqParticipantContactEncrypted: true,
+  pendingLinqParticipantContactKind: true,
+  pendingLinqParticipantContactLookupKey: true,
+  pendingLinqParticipantContactObservedAt: true,
+  pendingLinqRecipientPhoneEncrypted: true,
+  pendingLinqRecipientPhoneLookupKey: true,
+  replyAliasGeneration: true,
+  replyAliasLookupKey: true,
+} satisfies Prisma.HostedMemberRoutingSelect;
+
+type HostedLinkedAccountRoutingSnapshot =
+  Prisma.HostedMemberRoutingGetPayload<{
+    select: typeof hostedLinkedAccountRoutingSelect;
+  }>;
+
 export async function removeHostedMemberLinkedAccountProjectionTx(input: {
   expectedIdentity: string;
   memberId: string;
@@ -58,33 +83,20 @@ async function removeHostedMemberPhoneProjectionTx(input: {
 
   const routing = await input.prisma.hostedMemberRouting.findUnique({
     where: { memberId: input.memberId },
-    select: {
-      linqChatIdEncrypted: true,
-      linqChatLookupKey: true,
-      linqHomeLineAssignedAt: true,
-      linqParticipantContactKind: true,
-      linqParticipantContactLookupKey: true,
-      linqRecipientPhoneEncrypted: true,
-      linqRecipientPhoneLookupKey: true,
-      pendingLinqChatIdEncrypted: true,
-      pendingLinqChatLookupKey: true,
-      pendingLinqParticipantContactEncrypted: true,
-      pendingLinqParticipantContactKind: true,
-      pendingLinqParticipantContactLookupKey: true,
-      pendingLinqParticipantContactObservedAt: true,
-      pendingLinqRecipientPhoneEncrypted: true,
-      pendingLinqRecipientPhoneLookupKey: true,
-    },
+    select: hostedLinkedAccountRoutingSelect,
+  });
+
+  const ownedLinqRoutes = resolveOwnedLinqRoutes({
+    expectedLookupKeys,
+    method: "phone",
+    routing,
   });
 
   const identityChanged = Boolean(
     identity
     && Object.values(identity).some((value) => value !== null),
   );
-  const routingChanged = Boolean(
-    routing
-    && Object.values(routing).some((value) => value !== null),
-  );
+  const routingChanged = hasOwnedLinqRouteChanges(ownedLinqRoutes);
 
   if (identityChanged) {
     await input.prisma.hostedMemberIdentity.update({
@@ -105,23 +117,7 @@ async function removeHostedMemberPhoneProjectionTx(input: {
   if (routingChanged) {
     await input.prisma.hostedMemberRouting.update({
       where: { memberId: input.memberId },
-      data: {
-        linqChatIdEncrypted: null,
-        linqChatLookupKey: null,
-        linqHomeLineAssignedAt: null,
-        linqParticipantContactKind: null,
-        linqParticipantContactLookupKey: null,
-        linqRecipientPhoneEncrypted: null,
-        linqRecipientPhoneLookupKey: null,
-        pendingLinqChatIdEncrypted: null,
-        pendingLinqChatLookupKey: null,
-        pendingLinqParticipantContactEncrypted: null,
-        pendingLinqParticipantContactKind: null,
-        pendingLinqParticipantContactLookupKey: null,
-        pendingLinqParticipantContactObservedAt: null,
-        pendingLinqRecipientPhoneEncrypted: null,
-        pendingLinqRecipientPhoneLookupKey: null,
-      },
+      data: buildOwnedLinqRouteClearData(ownedLinqRoutes),
     });
   }
 
@@ -155,16 +151,20 @@ async function removeHostedMemberEmailProjectionTx(input: {
 
   const routing = await input.prisma.hostedMemberRouting.findUnique({
     where: { memberId: input.memberId },
-    select: {
-      replyAliasGeneration: true,
-      replyAliasLookupKey: true,
-    },
+    select: hostedLinkedAccountRoutingSelect,
+  });
+  const ownedLinqRoutes = resolveOwnedLinqRoutes({
+    expectedLookupKeys,
+    method: "email",
+    routing,
   });
   const authorizationChanged = Boolean(
     authorization
     && Object.values(authorization).some((value) => value !== null),
   );
-  const routingChanged = Boolean(routing?.replyAliasLookupKey);
+  const replyAliasChanged = Boolean(routing?.replyAliasLookupKey);
+  const routingChanged = replyAliasChanged
+    || hasOwnedLinqRouteChanges(ownedLinqRoutes);
 
   if (authorizationChanged) {
     await input.prisma.hostedMemberEmailAuthorization.update({
@@ -181,19 +181,13 @@ async function removeHostedMemberEmailProjectionTx(input: {
   }
 
   if (routingChanged) {
-    const currentGeneration = routing?.replyAliasGeneration ?? 0;
-    if (
-      !Number.isSafeInteger(currentGeneration)
-      || currentGeneration < 0
-      || currentGeneration >= MAX_REPLY_ALIAS_GENERATION
-    ) {
-      throw new RangeError("Hosted member reply alias generation cannot be rotated.");
-    }
     await input.prisma.hostedMemberRouting.update({
       where: { memberId: input.memberId },
       data: {
-        replyAliasGeneration: currentGeneration + 1,
-        replyAliasLookupKey: null,
+        ...buildOwnedLinqRouteClearData(ownedLinqRoutes),
+        ...(replyAliasChanged
+          ? buildRotatedReplyAliasData(routing?.replyAliasGeneration)
+          : {}),
       },
     });
   }
@@ -252,4 +246,150 @@ function assertExpectedLookupKey(input: {
       httpStatus: 409,
     });
   }
+}
+
+interface OwnedLinqRouteChanges {
+  clearHomeBinding: boolean;
+  clearHomeLine: boolean;
+  clearPendingBinding: boolean;
+}
+
+function resolveOwnedLinqRoutes(input: {
+  expectedLookupKeys: readonly string[];
+  method: "email" | "phone";
+  routing: HostedLinkedAccountRoutingSnapshot | null;
+}): OwnedLinqRouteChanges {
+  if (!input.routing) {
+    return {
+      clearHomeBinding: false,
+      clearHomeLine: false,
+      clearPendingBinding: false,
+    };
+  }
+
+  const hasHomeBinding = [
+    input.routing.linqChatIdEncrypted,
+    input.routing.linqChatLookupKey,
+    input.routing.linqParticipantContactKind,
+    input.routing.linqParticipantContactLookupKey,
+  ].some((value) => value !== null);
+  const hasHomeLine = [
+    input.routing.linqHomeLineAssignedAt,
+    input.routing.linqRecipientPhoneEncrypted,
+    input.routing.linqRecipientPhoneLookupKey,
+  ].some((value) => value !== null);
+  const hasPendingBinding = [
+    input.routing.pendingLinqChatIdEncrypted,
+    input.routing.pendingLinqChatLookupKey,
+    input.routing.pendingLinqParticipantContactEncrypted,
+    input.routing.pendingLinqParticipantContactKind,
+    input.routing.pendingLinqParticipantContactLookupKey,
+    input.routing.pendingLinqParticipantContactObservedAt,
+    input.routing.pendingLinqRecipientPhoneEncrypted,
+    input.routing.pendingLinqRecipientPhoneLookupKey,
+  ].some((value) => value !== null);
+  const clearHomeBinding = hasHomeBinding && isOwnedLinqParticipant({
+    expectedLookupKeys: input.expectedLookupKeys,
+    kind: input.routing.linqParticipantContactKind,
+    lookupKey: input.routing.linqParticipantContactLookupKey,
+    method: input.method,
+  });
+  const clearPendingBinding = hasPendingBinding && isOwnedLinqParticipant({
+    expectedLookupKeys: input.expectedLookupKeys,
+    kind: input.routing.pendingLinqParticipantContactKind,
+    lookupKey: input.routing.pendingLinqParticipantContactLookupKey,
+    method: input.method,
+  });
+
+  return {
+    clearHomeBinding,
+    clearHomeLine: clearHomeBinding
+      || (clearPendingBinding && !hasHomeBinding)
+      || (
+        input.method === "phone"
+        && hasHomeLine
+        && !hasHomeBinding
+        && !hasPendingBinding
+      ),
+    clearPendingBinding,
+  };
+}
+
+function isOwnedLinqParticipant(input: {
+  expectedLookupKeys: readonly string[];
+  kind: string | null;
+  lookupKey: string | null;
+  method: "email" | "phone";
+}): boolean {
+  if (input.method === "email") {
+    return input.kind === "email"
+      && input.lookupKey !== null
+      && input.expectedLookupKeys.includes(input.lookupKey);
+  }
+
+  if (input.kind === null) {
+    return true;
+  }
+
+  return input.kind === "phone"
+    && input.lookupKey !== null
+    && input.expectedLookupKeys.includes(input.lookupKey);
+}
+
+function hasOwnedLinqRouteChanges(input: OwnedLinqRouteChanges): boolean {
+  return input.clearHomeBinding
+    || input.clearHomeLine
+    || input.clearPendingBinding;
+}
+
+function buildOwnedLinqRouteClearData(
+  input: OwnedLinqRouteChanges,
+): Prisma.HostedMemberRoutingUncheckedUpdateInput {
+  return {
+    ...(input.clearHomeBinding
+      ? {
+          linqChatIdEncrypted: null,
+          linqChatLookupKey: null,
+          linqParticipantContactKind: null,
+          linqParticipantContactLookupKey: null,
+        }
+      : {}),
+    ...(input.clearHomeLine
+      ? {
+          linqHomeLineAssignedAt: null,
+          linqRecipientPhoneEncrypted: null,
+          linqRecipientPhoneLookupKey: null,
+        }
+      : {}),
+    ...(input.clearPendingBinding
+      ? {
+          pendingLinqChatIdEncrypted: null,
+          pendingLinqChatLookupKey: null,
+          pendingLinqParticipantContactEncrypted: null,
+          pendingLinqParticipantContactKind: null,
+          pendingLinqParticipantContactLookupKey: null,
+          pendingLinqParticipantContactObservedAt: null,
+          pendingLinqRecipientPhoneEncrypted: null,
+          pendingLinqRecipientPhoneLookupKey: null,
+        }
+      : {}),
+  };
+}
+
+function buildRotatedReplyAliasData(
+  replyAliasGeneration: number | null | undefined,
+): Prisma.HostedMemberRoutingUncheckedUpdateInput {
+  const currentGeneration = replyAliasGeneration ?? 0;
+  if (
+    !Number.isSafeInteger(currentGeneration)
+    || currentGeneration < 0
+    || currentGeneration >= MAX_REPLY_ALIAS_GENERATION
+  ) {
+    throw new RangeError("Hosted member reply alias generation cannot be rotated.");
+  }
+
+  return {
+    replyAliasGeneration: currentGeneration + 1,
+    replyAliasLookupKey: null,
+  };
 }

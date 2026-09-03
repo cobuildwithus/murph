@@ -67,23 +67,18 @@ describe("linked account projection removal", () => {
         linqHomeLineAssignedAt: null,
         linqParticipantContactLookupKey: null,
         linqRecipientPhoneEncrypted: null,
-        pendingLinqChatIdEncrypted: null,
-        pendingLinqParticipantContactLookupKey: null,
       }),
     });
   });
 
-  it("revokes verified email authority and rotates the reply alias without touching billing email", async () => {
+  it("revokes verified email authority, its Linq route, and its reply alias", async () => {
     const prisma = makePrisma({
-      authorization: {
-        directPublicSenderAddressEncrypted: "encrypted-sender",
-        directPublicSenderAuthorizedAt: new Date("2026-05-02T00:00:00.000Z"),
-        directPublicSenderLookupKey: "email-key",
-        verifiedEmailAddressEncrypted: "encrypted-email",
-        verifiedEmailLookupKey: "email-key",
-        verifiedEmailVerifiedAt: new Date("2026-05-02T00:00:00.000Z"),
-      },
+      authorization: makeEmailAuthorization(),
       routing: {
+        ...makeLinqRouting({
+          participantContactKind: "email",
+          participantContactLookupKey: "email-key",
+        }),
         replyAliasGeneration: 4,
         replyAliasLookupKey: "reply-key",
       },
@@ -109,10 +104,127 @@ describe("linked account projection removal", () => {
     });
     expect(prisma.hostedMemberRouting.update).toHaveBeenCalledWith({
       where: { memberId: "member_123" },
-      data: {
+      data: expect.objectContaining({
+        linqChatIdEncrypted: null,
+        linqChatLookupKey: null,
+        linqHomeLineAssignedAt: null,
+        linqParticipantContactKind: null,
+        linqParticipantContactLookupKey: null,
+        linqRecipientPhoneEncrypted: null,
+        linqRecipientPhoneLookupKey: null,
         replyAliasGeneration: 5,
         replyAliasLookupKey: null,
+      }),
+    });
+  });
+
+  it("clears an email-owned pending Linq route without touching the phone-owned home route", async () => {
+    const prisma = makePrisma({
+      authorization: makeEmailAuthorization(),
+      routing: makeLinqRouting({
+        participantContactKind: "phone",
+        participantContactLookupKey: "phone-key",
+        pendingParticipantContactKind: "email",
+        pendingParticipantContactLookupKey: "email-key",
+      }),
+    });
+
+    await expect(removeHostedMemberLinkedAccountProjectionTx({
+      expectedIdentity: "member@example.com",
+      memberId: "member_123",
+      method: "email",
+      prisma,
+    })).resolves.toBe(true);
+
+    expect(prisma.hostedMemberRouting.update).toHaveBeenCalledWith({
+      where: { memberId: "member_123" },
+      data: {
+        pendingLinqChatIdEncrypted: null,
+        pendingLinqChatLookupKey: null,
+        pendingLinqParticipantContactEncrypted: null,
+        pendingLinqParticipantContactKind: null,
+        pendingLinqParticipantContactLookupKey: null,
+        pendingLinqParticipantContactObservedAt: null,
+        pendingLinqRecipientPhoneEncrypted: null,
+        pendingLinqRecipientPhoneLookupKey: null,
       },
+    });
+  });
+
+  it("preserves an email-owned Linq route when removing phone sign-in", async () => {
+    const prisma = makePrisma({
+      identity: {
+        phoneLookupKey: "phone-key",
+        phoneNumberEncrypted: "encrypted-phone",
+      },
+      routing: makeLinqRouting({
+        participantContactKind: "email",
+        participantContactLookupKey: "email-key",
+      }),
+    });
+
+    await expect(removeHostedMemberLinkedAccountProjectionTx({
+      expectedIdentity: "+14045550123",
+      memberId: "member_123",
+      method: "phone",
+      prisma,
+    })).resolves.toBe(true);
+
+    expect(prisma.hostedMemberIdentity.update).toHaveBeenCalledOnce();
+    expect(prisma.hostedMemberRouting.update).not.toHaveBeenCalled();
+  });
+
+  it.each(["other-phone-key", null])(
+    "preserves an explicit phone route without exact ownership (%s)",
+    async (participantContactLookupKey) => {
+      const prisma = makePrisma({
+        identity: {
+          phoneLookupKey: "phone-key",
+          phoneNumberEncrypted: "encrypted-phone",
+        },
+        routing: makeLinqRouting({
+          participantContactKind: "phone",
+          participantContactLookupKey,
+        }),
+      });
+
+      await expect(removeHostedMemberLinkedAccountProjectionTx({
+        expectedIdentity: "+14045550123",
+        memberId: "member_123",
+        method: "phone",
+        prisma,
+      })).resolves.toBe(true);
+
+      expect(prisma.hostedMemberRouting.update).not.toHaveBeenCalled();
+    },
+  );
+
+  it("clears a legacy phone route without a participant kind", async () => {
+    const prisma = makePrisma({
+      identity: {
+        phoneLookupKey: "phone-key",
+        phoneNumberEncrypted: "encrypted-phone",
+      },
+      routing: makeLinqRouting({
+        participantContactKind: null,
+        participantContactLookupKey: null,
+      }),
+    });
+
+    await expect(removeHostedMemberLinkedAccountProjectionTx({
+      expectedIdentity: "+14045550123",
+      memberId: "member_123",
+      method: "phone",
+      prisma,
+    })).resolves.toBe(true);
+
+    expect(prisma.hostedMemberRouting.update).toHaveBeenCalledWith({
+      where: { memberId: "member_123" },
+      data: expect.objectContaining({
+        linqChatIdEncrypted: null,
+        linqHomeLineAssignedAt: null,
+        linqRecipientPhoneEncrypted: null,
+      }),
     });
   });
 
@@ -197,22 +309,55 @@ function makePrisma(input: {
   });
 }
 
-function makeLinqRouting(): Record<string, unknown> {
+function makeEmailAuthorization(): Record<string, unknown> {
+  return {
+    directPublicSenderAddressEncrypted: "encrypted-sender",
+    directPublicSenderAuthorizedAt: new Date("2026-05-02T00:00:00.000Z"),
+    directPublicSenderLookupKey: "email-key",
+    verifiedEmailAddressEncrypted: "encrypted-email",
+    verifiedEmailLookupKey: "email-key",
+    verifiedEmailVerifiedAt: new Date("2026-05-02T00:00:00.000Z"),
+  };
+}
+
+function makeLinqRouting(input: {
+  participantContactKind?: "email" | "phone" | null;
+  participantContactLookupKey?: string | null;
+  pendingParticipantContactKind?: "email" | "phone" | null;
+  pendingParticipantContactLookupKey?: string | null;
+} = {}): Record<string, unknown> {
+  const hasPendingRoute = input.pendingParticipantContactKind !== undefined
+    || input.pendingParticipantContactLookupKey !== undefined;
+
   return {
     linqChatIdEncrypted: "encrypted-chat",
     linqChatLookupKey: "chat-key",
     linqHomeLineAssignedAt: new Date("2026-05-02T00:00:00.000Z"),
-    linqParticipantContactKind: "phone",
-    linqParticipantContactLookupKey: "participant-key",
+    linqParticipantContactKind:
+      input.participantContactKind === undefined
+        ? "phone"
+        : input.participantContactKind,
+    linqParticipantContactLookupKey:
+      input.participantContactLookupKey === undefined
+        ? "phone-key"
+        : input.participantContactLookupKey,
     linqRecipientPhoneEncrypted: "encrypted-recipient",
     linqRecipientPhoneLookupKey: "recipient-key",
-    pendingLinqChatIdEncrypted: null,
-    pendingLinqChatLookupKey: null,
-    pendingLinqParticipantContactEncrypted: null,
-    pendingLinqParticipantContactKind: null,
-    pendingLinqParticipantContactLookupKey: null,
-    pendingLinqParticipantContactObservedAt: null,
-    pendingLinqRecipientPhoneEncrypted: null,
-    pendingLinqRecipientPhoneLookupKey: null,
+    pendingLinqChatIdEncrypted: hasPendingRoute ? "encrypted-pending-chat" : null,
+    pendingLinqChatLookupKey: hasPendingRoute ? "pending-chat-key" : null,
+    pendingLinqParticipantContactEncrypted:
+      hasPendingRoute ? "encrypted-pending-participant" : null,
+    pendingLinqParticipantContactKind:
+      input.pendingParticipantContactKind ?? null,
+    pendingLinqParticipantContactLookupKey:
+      input.pendingParticipantContactLookupKey ?? null,
+    pendingLinqParticipantContactObservedAt:
+      hasPendingRoute ? new Date("2026-05-03T00:00:00.000Z") : null,
+    pendingLinqRecipientPhoneEncrypted:
+      hasPendingRoute ? "encrypted-pending-recipient" : null,
+    pendingLinqRecipientPhoneLookupKey:
+      hasPendingRoute ? "pending-recipient-key" : null,
+    replyAliasGeneration: 0,
+    replyAliasLookupKey: null,
   };
 }

@@ -192,8 +192,9 @@ Last verified: 2026-09-01
   The same transaction appends the existing channel-update mailbox item when
   state changed. Its post-commit runtime signal is best-effort because durable
   runtime reconciliation remains the recovery owner. A refreshed Settings page
-  derives visible connection hints from live Privy state so a completed unlink
-  is not presented as connected while local cleanup is retried.
+  derives an exact provider/canonical disagreement from existing state and
+  exposes the same idempotent cleanup action without repeating the unlink. No
+  retry job, timer, or additional persisted state owns this recovery.
 - Connected-app email sends have no durable provider idempotency key or send ledger. Admit them only from current accepted user input in a private direct turn; scheduled, group, maintenance, system-notification, and output-only turns fail before provider egress. After an ambiguous dispatch, never replay the send. Reconcile only against a narrow recent Sent-mail window matching the primary recipient, subject, and substantive body, and leave the outcome unknown when that evidence is not decisive.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
 - Avoid hidden coupling between scripts, docs, and runtime code; document new dependencies in `ARCHITECTURE.md` and `agent-docs/references/testing-ci-map.md`.

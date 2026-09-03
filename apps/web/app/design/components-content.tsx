@@ -2284,6 +2284,19 @@ export function ComponentsContent() {
                 removable={false}
               />
             </div>
+            <div className="rounded-xl border border-border bg-card p-5">
+              <HostedSettingsIdentityRemovalView
+                displayValue="Connected"
+                errorMessage="Telegram is disconnected. Finish updating Murph."
+                intent="finish"
+                label="Telegram"
+                onCancel={() => {}}
+                onRemove={() => {}}
+                pending={false}
+                providerAccountRemoved
+                removable
+              />
+            </div>
           </div>
         </Section>
 

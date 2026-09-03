@@ -67,6 +67,12 @@ export interface HostedAccountSettingsSnapshot {
     verifiedAt: string | null;
   };
   /**
+   * Canonical Murph projections whose provider identity is already absent.
+   * Settings derives a durable cleanup action from this disagreement instead
+   * of relying on browser state that disappears after a refresh.
+   */
+  pendingSignInRemovals?: HostedPrivyAuthMethod[] | null;
+  /**
    * Provider-linked methods that may be removed without leaving the member
    * without a supported sign-in. Null when the Privy session could not be
    * confirmed server-side.
@@ -306,44 +312,53 @@ export function withServerApprovedPrivyAccountHints(input: {
 
   return {
     ...input.snapshot,
-    email: linkedAccounts
-      ? linkedEmail
-        ? {
-            ...input.snapshot.email,
-            privyEmailLinked: true,
-          }
-        : {
-            address: null,
-            murphEmailAddress: null,
-            privyEmailLinked: false,
-            verifiedAt: null,
-          }
-      : {
-          ...input.snapshot.email,
-          privyEmailLinked: null,
-        },
-    phone: linkedAccounts && !linkedPhone
-      ? {
-          number: null,
-          verifiedAt: null,
-        }
-      : input.snapshot.phone,
+    email: {
+      ...input.snapshot.email,
+      privyEmailLinked: linkedAccounts ? linkedEmail !== null : null,
+    },
+    pendingSignInRemovals: linkedAccounts
+      ? resolveHostedPendingSignInRemovals({
+          linkedEmail: linkedEmail !== null,
+          linkedPhone: linkedPhone !== null,
+          linkedTelegram: linkedTelegram !== null,
+          snapshot: input.snapshot,
+        })
+      : null,
+    phone: input.snapshot.phone,
     removableSignInMethods: linkedAccounts
       ? resolveHostedRemovablePrivySignInMethods(linkedAccounts)
       : null,
-    telegram: linkedAccounts && !linkedTelegram
-      ? {
-          telegramUserId: null,
-          username: null,
-        }
-      : {
-          ...input.snapshot.telegram,
-          username: resolveHostedAccountTelegramUsername({
-            serverApprovedPrivyLinkedAccounts: linkedAccounts,
-            telegramUserId: input.snapshot.telegram.telegramUserId,
-          }),
-        },
+    telegram: {
+      ...input.snapshot.telegram,
+      username: resolveHostedAccountTelegramUsername({
+        serverApprovedPrivyLinkedAccounts: linkedAccounts,
+        telegramUserId: input.snapshot.telegram.telegramUserId,
+      }),
+    },
   };
+}
+
+function resolveHostedPendingSignInRemovals(input: {
+  linkedEmail: boolean;
+  linkedPhone: boolean;
+  linkedTelegram: boolean;
+  snapshot: HostedAccountSettingsSnapshot;
+}): HostedPrivyAuthMethod[] {
+  return [
+    ...(!input.linkedPhone && input.snapshot.phone.number ? ["phone" as const] : []),
+    ...(
+      !input.linkedEmail
+      && input.snapshot.email.address
+      && input.snapshot.email.verifiedAt
+        ? ["email" as const]
+        : []
+    ),
+    ...(
+      !input.linkedTelegram && input.snapshot.telegram.telegramUserId
+        ? ["telegram" as const]
+        : []
+    ),
+  ];
 }
 
 export function resolveHostedRemovablePrivySignInMethods(

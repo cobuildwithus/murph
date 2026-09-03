@@ -209,6 +209,44 @@ describe("HostedAccountSettingsCards", () => {
     }
   });
 
+  test("offers durable cleanup after the provider identity disappears", async () => {
+    const rendered = await renderClientComponent(
+      React.createElement(HostedAccountSettingsCards, {
+        account: {
+          ...makeAccountSnapshot({ phoneNumber: "+14045550123" }),
+          pendingSignInRemovals: ["telegram"],
+          removableSignInMethods: ["phone"],
+          telegram: {
+            telegramUserId: "456",
+            username: null,
+          },
+        },
+      }),
+    );
+
+    try {
+      expect(rendered.container.textContent).toContain("Finish disconnecting");
+      expect(rendered.container.textContent).not.toContain("Message Murph");
+
+      const finishButton = Array.from(rendered.container.querySelectorAll("button")).find(
+        (candidate) => candidate.textContent === "Finish disconnecting",
+      );
+
+      await React.act(async () => {
+        finishButton?.click();
+      });
+
+      expect(
+        rendered.container.querySelector("[data-link-mode]")?.getAttribute("data-link-mode"),
+      ).toBe("telegram");
+      expect(
+        rendered.container.querySelector("[data-link-intent]")?.getAttribute("data-link-intent"),
+      ).toBe("finish");
+    } finally {
+      await rendered.cleanup();
+    }
+  });
+
   test("opens the email link dialog when the add-email deep link is present on first mount", async () => {
     const rendered = await renderClientComponent(
       React.createElement(HostedAccountSettingsCards, {

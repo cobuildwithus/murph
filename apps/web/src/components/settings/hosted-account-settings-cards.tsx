@@ -15,7 +15,7 @@ import { formatHostedTelegramDisplayValue } from "./hosted-telegram-settings-hel
 import { SettingsRow, SettingsRowList } from "./settings-row";
 
 type HostedSettingsIdentityLinkMode = "phone" | "email" | "telegram";
-type HostedSettingsIdentityDialogIntent = "manage" | "remove" | "replace";
+type HostedSettingsIdentityDialogIntent = "finish" | "manage" | "remove" | "replace";
 interface HostedSettingsIdentityDialogSelection {
   intent: HostedSettingsIdentityDialogIntent;
   mode: HostedSettingsIdentityLinkMode;
@@ -64,104 +64,21 @@ export function HostedAccountSettingsCards({
     }
   }, [openEmailLink]);
 
-  const phoneNumber = account.phone.number;
-  const phoneVerified = Boolean(account.phone.verifiedAt);
-  const telegramUserId = account.telegram.telegramUserId;
-  const telegramValue = formatHostedTelegramDisplayValue(account.telegram) ?? "Not connected";
-  const emailAddress = account.email.address;
-  const emailVerified = Boolean(account.email.verifiedAt);
-  const murphEmailAddress = account.email.murphEmailAddress;
-  const murphSmsHref = phoneNumber && murphPhoneNumber ? `sms:${murphPhoneNumber}` : null;
-  const canRemovePhone = account.removableSignInMethods?.includes("phone") === true;
-  const canRemoveEmail = account.removableSignInMethods?.includes("email") === true;
-  const canRemoveTelegram = account.removableSignInMethods?.includes("telegram") === true;
-
   return (
     <>
       <SettingsRowList>
-        <SettingsRow
-          icon={<Phone className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
-          label="Phone"
-          value={phoneNumber ? formatMaskedPhoneNumber(phoneNumber) : "Not connected"}
-          empty={!phoneNumber}
-          meta={murphSmsHref ? (
-            <SettingsContactLink href={murphSmsHref} label="Text Murph">
-              Text Murph
-            </SettingsContactLink>
-          ) : null}
-          action={
-            <div className="flex flex-wrap justify-end gap-1">
-              <Button type="button" size="sm" variant={phoneNumber ? "ghost" : "default"} onClick={() => setDialogSelection({ intent: "manage", mode: "phone" })}>
-                {phoneNumber ? (phoneVerified ? "Change" : "Verify") : "Link phone"}
-              </Button>
-              {phoneNumber && canRemovePhone ? (
-                <Button aria-label="Remove phone" type="button" size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setDialogSelection({ intent: "remove", mode: "phone" })}>
-                  Remove
-                </Button>
-              ) : null}
-            </div>
-          }
+        <HostedSettingsPhoneRow
+          account={account}
+          murphPhoneNumber={murphPhoneNumber}
+          onSelect={setDialogSelection}
         />
-        <SettingsRow
-          icon={<Send className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
-          label="Telegram"
-          value={telegramValue}
-          empty={!telegramUserId}
-          meta={telegramUserId ? (
-            <SettingsContactLink
-              href={MURPH_TELEGRAM_URL}
-              label="Message Murph on Telegram"
-              external
-            >
-              Message Murph
-            </SettingsContactLink>
-          ) : null}
-          action={
-            <div className="flex flex-wrap justify-end gap-1">
-              <Button
-                type="button"
-                size="sm"
-                variant={telegramUserId ? "ghost" : "secondary"}
-                onClick={() => setDialogSelection({
-                  intent: telegramUserId ? "replace" : "manage",
-                  mode: "telegram",
-                })}
-              >
-                {telegramUserId ? "Change" : "Connect"}
-              </Button>
-              {telegramUserId && canRemoveTelegram ? (
-                <Button aria-label="Remove Telegram" type="button" size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setDialogSelection({ intent: "remove", mode: "telegram" })}>
-                  Remove
-                </Button>
-              ) : null}
-            </div>
-          }
+        <HostedSettingsTelegramRow
+          account={account}
+          onSelect={setDialogSelection}
         />
-        <SettingsRow
-          icon={<Mail className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
-          label="Email"
-          value={emailAddress ?? "Not connected"}
-          empty={!emailAddress}
-          meta={emailAddress && murphEmailAddress ? (
-            <SettingsContactLink
-              href={`mailto:${murphEmailAddress}`}
-              label="Email Murph"
-            >
-              Email Murph
-            </SettingsContactLink>
-          ) : null}
-          action={
-            <div className="flex flex-wrap justify-end gap-1">
-              <Button type="button" size="sm" variant={emailAddress ? "ghost" : "default"} onClick={() => setDialogSelection({ intent: "manage", mode: "email" })}>
-                {emailAddress ? (emailVerified ? "Change" : "Verify") : "Link email"}
-              </Button>
-              {emailAddress && canRemoveEmail ? (
-                <Button aria-label="Remove email" type="button" size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setDialogSelection({ intent: "remove", mode: "email" })}>
-                  Remove
-                </Button>
-              ) : null}
-            </div>
-          }
+        <HostedSettingsEmailRow
+          account={account}
+          onSelect={setDialogSelection}
         />
         <SettingsRow
           action={(
@@ -193,4 +110,190 @@ export function HostedAccountSettingsCards({
       ) : null}
     </>
   );
+}
+
+function HostedSettingsPhoneRow({
+  account,
+  murphPhoneNumber,
+  onSelect,
+}: {
+  account: HostedAccountSettingsSnapshot;
+  murphPhoneNumber?: string | null;
+  onSelect: (selection: HostedSettingsIdentityDialogSelection) => void;
+}) {
+  const phoneNumber = account.phone.number;
+  const removalPending = account.pendingSignInRemovals?.includes("phone") === true;
+  const murphSmsHref = phoneNumber && murphPhoneNumber
+    ? `sms:${murphPhoneNumber}`
+    : null;
+
+  return (
+    <SettingsRow
+      icon={<Phone className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
+      label="Phone"
+      value={phoneNumber ? formatMaskedPhoneNumber(phoneNumber) : "Not connected"}
+      empty={!phoneNumber}
+      meta={murphSmsHref && !removalPending ? (
+        <SettingsContactLink href={murphSmsHref} label="Text Murph">
+          Text Murph
+        </SettingsContactLink>
+      ) : null}
+      action={(
+        <HostedSettingsIdentityActions
+          connected={Boolean(phoneNumber)}
+          method="phone"
+          onSelect={onSelect}
+          removable={account.removableSignInMethods?.includes("phone") === true}
+          removalPending={removalPending}
+          verified={Boolean(account.phone.verifiedAt)}
+        />
+      )}
+    />
+  );
+}
+
+function HostedSettingsTelegramRow({
+  account,
+  onSelect,
+}: {
+  account: HostedAccountSettingsSnapshot;
+  onSelect: (selection: HostedSettingsIdentityDialogSelection) => void;
+}) {
+  const telegramUserId = account.telegram.telegramUserId;
+  const removalPending =
+    account.pendingSignInRemovals?.includes("telegram") === true;
+
+  return (
+    <SettingsRow
+      icon={<Send className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
+      label="Telegram"
+      value={formatHostedTelegramDisplayValue(account.telegram) ?? "Not connected"}
+      empty={!telegramUserId}
+      meta={telegramUserId && !removalPending ? (
+        <SettingsContactLink
+          href={MURPH_TELEGRAM_URL}
+          label="Message Murph on Telegram"
+          external
+        >
+          Message Murph
+        </SettingsContactLink>
+      ) : null}
+      action={(
+        <HostedSettingsIdentityActions
+          connected={Boolean(telegramUserId)}
+          method="telegram"
+          onSelect={onSelect}
+          removable={account.removableSignInMethods?.includes("telegram") === true}
+          removalPending={removalPending}
+          verified={Boolean(telegramUserId)}
+        />
+      )}
+    />
+  );
+}
+
+function HostedSettingsEmailRow({
+  account,
+  onSelect,
+}: {
+  account: HostedAccountSettingsSnapshot;
+  onSelect: (selection: HostedSettingsIdentityDialogSelection) => void;
+}) {
+  const emailAddress = account.email.address;
+  const murphEmailAddress = account.email.murphEmailAddress;
+  const removalPending = account.pendingSignInRemovals?.includes("email") === true;
+
+  return (
+    <SettingsRow
+      icon={<Mail className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
+      label="Email"
+      value={emailAddress ?? "Not connected"}
+      empty={!emailAddress}
+      meta={emailAddress && murphEmailAddress && !removalPending ? (
+        <SettingsContactLink href={`mailto:${murphEmailAddress}`} label="Email Murph">
+          Email Murph
+        </SettingsContactLink>
+      ) : null}
+      action={(
+        <HostedSettingsIdentityActions
+          connected={Boolean(emailAddress)}
+          method="email"
+          onSelect={onSelect}
+          removable={account.removableSignInMethods?.includes("email") === true}
+          removalPending={removalPending}
+          verified={Boolean(account.email.verifiedAt)}
+        />
+      )}
+    />
+  );
+}
+
+function HostedSettingsIdentityActions({
+  connected,
+  method,
+  onSelect,
+  removable,
+  removalPending,
+  verified,
+}: {
+  connected: boolean;
+  method: HostedSettingsIdentityLinkMode;
+  onSelect: (selection: HostedSettingsIdentityDialogSelection) => void;
+  removable: boolean;
+  removalPending: boolean;
+  verified: boolean;
+}) {
+  const label = resolveIdentityActionLabel({
+    connected,
+    method,
+    removalPending,
+    verified,
+  });
+  const intent: HostedSettingsIdentityDialogIntent = removalPending
+    ? "finish"
+    : method === "telegram" && connected
+      ? "replace"
+      : "manage";
+  const accessibleMethod = method === "telegram" ? "Telegram" : method;
+
+  return (
+    <div className="flex flex-wrap justify-end gap-1">
+      <Button
+        aria-label={removalPending ? `${label} ${method}` : undefined}
+        type="button"
+        size="sm"
+        variant={method === "telegram" && !connected ? "secondary" : connected ? "ghost" : "default"}
+        onClick={() => onSelect({ intent, mode: method })}
+      >
+        {label}
+      </Button>
+      {connected && removable && !removalPending ? (
+        <Button
+          aria-label={`Remove ${accessibleMethod}`}
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="text-destructive hover:text-destructive"
+          onClick={() => onSelect({ intent: "remove", mode: method })}
+        >
+          Remove
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+function resolveIdentityActionLabel(input: {
+  connected: boolean;
+  method: HostedSettingsIdentityLinkMode;
+  removalPending: boolean;
+  verified: boolean;
+}): string {
+  if (input.removalPending) {
+    return "Finish disconnecting";
+  }
+  if (!input.connected) {
+    return input.method === "telegram" ? "Connect" : `Link ${input.method}`;
+  }
+  return input.verified ? "Change" : "Verify";
 }

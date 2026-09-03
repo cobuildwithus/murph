@@ -22,7 +22,7 @@ import {
   type PrivyLinkedAccountLike,
 } from "@/src/lib/hosted-onboarding/privy-shared";
 import {
-  requireFreshActivePrivyMemberAuthForHostedAppSession,
+  requireFreshPrivyMemberAuthForHostedAppSession,
 } from "@/src/lib/hosted-onboarding/request-auth";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -35,7 +35,7 @@ import {
 export const DELETE = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
   const { appSession, freshPrivy: auth } =
-    await requireFreshActivePrivyMemberAuthForHostedAppSession(request);
+    await requireFreshPrivyMemberAuthForHostedAppSession(request);
   const body = await readOptionalJsonObject(request, { limitBytes: 1_024 });
   const method = body.method;
   const expectedIdentity = normalizeExpectedIdentity(body.expectedIdentity);
