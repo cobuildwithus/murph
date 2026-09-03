@@ -2,7 +2,14 @@
 // Regenerate with research-artifacts/food-popularity/build_runtime_snapshot.py.
 export const FOOD_POPULARITY_SNAPSHOT_DATE = "2026-09-03";
 
-export const FOOD_POPULAR_BRANDS = {
+export type FoodPopularBrand = Readonly<{
+  key: string;
+  name: string;
+}>;
+
+export const FOOD_POPULAR_BRANDS: Readonly<
+  Record<string, readonly FoodPopularBrand[]>
+> = {
   "agave syrup": [
     {
       "key": "intheraw",
