@@ -35,6 +35,18 @@ const DESIGN_ACCOUNT: HostedAccountSettingsSnapshot = {
     username: "preview_member",
   },
 };
+const DESIGN_ACCOUNT_AFTER_EMAIL_REMOVAL: HostedAccountSettingsSnapshot = {
+  ...DESIGN_ACCOUNT,
+  email: {
+    address: "billing@example.test",
+    verifiedAt: null,
+  },
+  privySignInStates: {
+    email: { removable: false, status: "absent" },
+    phone: { removable: true, status: "matched" },
+    telegram: { removable: true, status: "matched" },
+  },
+};
 
 const BUTTON_STATES: Array<{
   label: string;
@@ -96,11 +108,22 @@ export function SignupReferralFlowStudy() {
     >
       <section className="rounded-3xl border border-border bg-background p-5 sm:p-8">
         <p className="mb-4 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-          Settings · Messaging
+          Settings · Connected sign-ins
         </p>
         <div inert>
           <HostedAccountSettingsCards
             account={DESIGN_ACCOUNT}
+            murphPhoneNumber="+15555550101"
+            privySessionMatchesAppSession
+            signupReferralUrl={DESIGN_REFERRAL_URL}
+          />
+        </div>
+        <p className="mb-4 mt-8 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Settings · After email removal
+        </p>
+        <div inert>
+          <HostedAccountSettingsCards
+            account={DESIGN_ACCOUNT_AFTER_EMAIL_REMOVAL}
             murphPhoneNumber="+15555550101"
             privySessionMatchesAppSession
             signupReferralUrl={DESIGN_REFERRAL_URL}
