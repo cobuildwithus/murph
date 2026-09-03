@@ -475,7 +475,7 @@ export function FoodLabelLab(input: {
   );
 
   const showEvidence = useCallback(
-    (productRef: string, view: "tests" | "gaps") => {
+    (productRef: string, view: FoodEvidencePanel) => {
       const product = products.find(
         (candidate) => candidate.productRef === productRef,
       );

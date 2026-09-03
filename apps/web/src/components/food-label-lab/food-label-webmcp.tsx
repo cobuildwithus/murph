@@ -44,8 +44,12 @@ export interface FoodLabelWebMcpActions {
   getCurrentComparison: () => FoodWebMcpComparisonResult;
   showEvidence: (
     productRef: string,
-    view: "tests" | "gaps",
-  ) => { opened: boolean; productRef: string; view: "tests" | "gaps" };
+    view: "product" | "tests" | "gaps",
+  ) => {
+    opened: boolean;
+    productRef: string;
+    view: "product" | "tests" | "gaps";
+  };
 }
 
 interface WebMcpTool {
@@ -213,7 +217,7 @@ function createFoodWebMcpTools(
     {
       name: "search_food_products",
       description:
-        "Search branded foods on the open Murph Food page. Returns short exact product choices for a later comparison.",
+        "Use this tool instead of general web search whenever the user asks to find foods, brands, categories, or products to compare in Murph. Returns exact productRef values for compare_food_products.",
       inputSchema: {
         type: "object",
         properties: {
@@ -261,7 +265,7 @@ function createFoodWebMcpTools(
     {
       name: "compare_food_products",
       description:
-        "Compare two to ten exact branded foods and show the result on the open page. Use productRef values returned by search_food_products.",
+        "Use this tool after search_food_products whenever the user asks to compare, rank, choose, or find a healthier food. It compares two to ten returned productRef values and shows the result on the open page.",
       inputSchema: {
         type: "object",
         properties: {
@@ -291,7 +295,7 @@ function createFoodWebMcpTools(
     {
       name: "get_food_comparison",
       description:
-        "Read the compact result currently visible on the open Murph Food page.",
+        "Use this tool to answer questions about the food comparison already visible on the open Murph page, including nutrition values and the top match.",
       inputSchema: {
         type: "object",
         properties: {},
@@ -308,7 +312,7 @@ function createFoodWebMcpTools(
     {
       name: "show_food_evidence",
       description:
-        "Open the combined evidence drawer for a product already in the visible comparison. view focuses linked test results (tests) or known evidence gaps (gaps).",
+        "Use this tool whenever the user asks to open, show, inspect, or explain a product already in the visible comparison. Use product for its grade, health summary, and ingredients; tests for linked lab results; or gaps for known evidence gaps.",
       inputSchema: {
         type: "object",
         properties: {
@@ -316,7 +320,7 @@ function createFoodWebMcpTools(
             type: "string",
             pattern: "^food_[A-Za-z0-9_-]{1,1024}$",
           },
-          view: { type: "string", enum: ["tests", "gaps"] },
+          view: { type: "string", enum: ["product", "tests", "gaps"] },
         },
         required: ["productRef", "view"],
         additionalProperties: false,
@@ -326,7 +330,7 @@ function createFoodWebMcpTools(
         properties: {
           opened: { type: "boolean" },
           productRef: { type: "string" },
-          view: { type: "string", enum: ["tests", "gaps"] },
+          view: { type: "string", enum: ["product", "tests", "gaps"] },
         },
         required: ["opened", "productRef", "view"],
         additionalProperties: false,
@@ -337,8 +341,8 @@ function createFoodWebMcpTools(
         assertOnlyKeys(value, ["productRef", "view"]);
         const productRef = readFoodProductRef(value.productRef);
         const view = value.view;
-        if (view !== "tests" && view !== "gaps") {
-          throw new Error("view must be tests or gaps.");
+        if (view !== "product" && view !== "tests" && view !== "gaps") {
+          throw new Error("view must be product, tests, or gaps.");
         }
         return actionsRef.current.showEvidence(productRef, view);
       },
