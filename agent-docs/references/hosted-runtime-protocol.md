@@ -791,6 +791,11 @@ mailbox. When the runnable mailbox owner is model-free, the checkpoint
 projection does not publish a second ordinary default wake behind it. Default
 rows remain eligible inside an already-running pass and become independently
 wake-eligible whenever the model-free frontier is backed off or advances.
+After a device item records a durable follow-up deadline, that
+`device-sync.reconcile` deadline remains in the canonical model-free
+`nextWakeAt` selection; an independently due or future assistant deadline
+remains available through `nextDefaultProcessingWakeAt` instead of replacing
+the device deadline.
 Current conversation work and explicitly approved continuations retain
 foreground priority. A non-direct default request behind
 `system_mailbox` wakes the exact active child, preserves its fence, and retries
@@ -1522,13 +1527,15 @@ conversation candidates above the effective floor must still have
 `consumed_at IS NULL`, while system-lane candidates retain their existing
 live-row semantics. A `device-sync.wake` system head covered by the workspace's
 canonical `hostedMailboxSystemImportedSeq` uses the later of its mailbox
-creation time and `nextWakeAt` as its progress origin. The workspace stores the
-earliest model-free or assistant candidate, so an earlier assistant wake can
-legitimately win while the device item remains retained. The first live system
-item above the imported frontier independently keeps its creation-time origin;
-an absent, malformed, behind-head, or beyond-high-water frontier fails closed
-to the head's creation time. Covered work is therefore not stalled before its
-next runtime opportunity, but becomes alertable 15 minutes after it is due.
+creation time and its canonical model-free `nextWakeAt` as its progress origin.
+The workspace stores an independent assistant deadline in
+`nextDefaultProcessingWakeAt`, so assistant work does not replace the device
+owner and both remain visible to orchestration. The first live system item
+above the imported frontier independently keeps its creation-time origin; an
+absent, malformed, behind-head, or beyond-high-water frontier fails closed to
+the head's creation time. Covered work is therefore not stalled before its
+next runtime opportunity, but becomes
+alertable 15 minutes after it is due.
 Non-device system heads continue to age from mailbox creation. The selected
 head and `COUNT(*) OVER()` come from that one lane-aware predicate. A stamped
 conversation row is terminal, not usage-resume evidence; only staging, provider

@@ -6379,6 +6379,10 @@ describe("hosted device-sync runtime", () => {
         runtime: createDeviceSyncPostCheckpointRuntime(port),
         vaultRoot: workspace.vaultRoot,
       }), {
+        deviceSyncWake: {
+          at: retryAt,
+          reason: "device-sync.reconcile",
+        },
         failed: 0,
         nextWakeAt: retryAt,
         nextWakeReason: "device-sync.reconcile",
