@@ -42,48 +42,48 @@ safety:
   cautionLevel: low
 ---
 
-A support system is not just a list of close friends. It is a network of people, communities, and services you can turn to for different kinds of help—and a set of relationships you also help maintain. One person may listen well, another may help with a ride, a group may provide belonging, and a professional may offer expertise that friends cannot.
+A support system is a network of people, communities, and services you can turn to for different kinds of help, plus the relationships you help maintain in return. Different people and places cover different needs.
 
-The goal is not total self-sufficiency or constant availability from others. It is to make support more diverse, specific, and reachable before a hard week turns into a crisis.
+What moves this goal is making support more diverse, specific, and reachable before a hard week turns into a crisis.
 
 ## What to do
 
-- **Map types of support.** Include emotional support, practical help, information or advice, companionship, accountability, professional care, and emergency help. Each serves a different purpose.
-- **List current and possible options.** Add friends, relatives, neighbors, coworkers, community groups, clinicians, peer groups, faith leaders, coaches, and formal services. A person can fill more than one role, but no one needs to fill every role.
-- **Find the empty columns.** If you have people to socialize with but no one to call when overwhelmed, or expert advice but no practical backup, focus the next action on that gap.
-- **Make specific requests.** Say what would help, when, and for how long: “Could you check in Thursday?” or “Could you drive me to the appointment?” Clear asks make an honest yes or no easier.
-- **Create recurring contact.** Standing calls, shared meals, group meetings, or regular activities keep relationships alive when there is no emergency.
-- **Offer support within your capacity.** Remember important events, follow up, share useful information, or help with a bounded task. Reciprocity builds trust, but it does not require keeping score or overextending yourself.
-- **Add professional support where appropriate.** Friends are not substitutes for medical care, therapy, legal help, financial advice, or crisis response. Save the right contact before you need it.
-- **Build backups.** Avoid a system that collapses when one person is traveling, ill, or busy. Two realistic options for an important need are better than one ideal option.
+- **Map the types of support.** Emotional support, practical help, information or advice, companionship, accountability, professional care, and emergency help each serve a different purpose.
+- **List current and possible options.** Friends, relatives, neighbors, coworkers, community groups, clinicians, peer groups, faith leaders, coaches, and formal services. One person can fill several roles; nobody fills all of them.
+- **Find the empty columns.** If you have people to socialize with but no one to call when overwhelmed, or expert advice but no practical backup, aim your next action at that gap.
+- **Make specific requests.** Say what would help, when, and for how long: “Could you check in Thursday?” or “Could you drive me to the appointment?”
+- **Create recurring contact.** Standing calls, shared meals, group meetings, or regular activities keep relationships alive when there’s no emergency.
+- **Offer support within your capacity.** Keep track of important events, follow up, pass on useful information, or help with a bounded task. Reciprocity builds trust without keeping score or overextending yourself.
+- **Add professional support where it fits.** Friends aren’t substitutes for medical care, therapy, legal help, financial advice, or crisis response. Save the right contact before you need it.
+- **Build backups.** Two realistic options for an important need beat one ideal option that collapses when that person is traveling, ill, or busy.
 
 ## A simple plan
 
 Draw a table with six rows: listen, practical help, advice, companionship, professional care, and urgent help. Put at least one current or possible resource in each row. Mark each connection as active, needs maintenance, or needs to be built.
 
-This week, take three actions. First, strengthen one active tie with a specific plan. Second, make one small, clear request instead of waiting for someone to guess. Third, join or revisit one recurring community where support could grow over time.
+This week, strengthen one active tie with a specific plan, make one small, clear request instead of waiting for someone to guess, and join or revisit one recurring community where support could grow.
 
-Create a short support card in your phone. Include two people you can contact, relevant clinicians or services, transportation or caregiving backups, and local urgent or crisis resources. Ask people before listing them for a major role, and agree on what they can realistically offer.
+Create a short support card in your phone: two people you can contact, relevant clinicians or services, transportation or caregiving backups, and local urgent or crisis resources. Ask people before listing them for a major role, and agree on what they can realistically offer.
 
-For the next month, schedule one connection action per week: a call, meal, group meeting, check-in, or act of help. At month’s end, review which relationships felt mutual and reliable and which support needs remain uncovered. Choose one gap for the next month rather than trying to build the whole network at once.
+For the next month, schedule one connection action per week: a call, meal, group meeting, check-in, or act of help. At month’s end, review which relationships felt mutual and reliable and which needs are still uncovered, then choose one gap for the next month.
 
 ## How to know it is working
 
-A stronger system is easier to use. You know whom to ask for a particular kind of help, can make a direct request, and have more than one option for important needs. People in the network also know enough about your life to notice changes and understand how to help.
+A stronger system is easier to use: you know whom to ask for a given kind of help, you can ask directly, and you have more than one option for important needs. People in the network know enough about your life to notice changes and understand how to help.
 
-Track the network quarterly, not every social interaction. Useful signals include recurring contact, requests made and answered, support you offered without resentment, and fewer situations where one unavailable person leaves you with no next step. Quality, fit, and reliability matter more than the number of names.
+Review quarterly, not after every social interaction. Useful signals include recurring contact, requests made and answered, support you offered without resentment, and fewer situations where one unavailable person leaves you with no next step. Quality, fit, and reliability matter more than the number of names.
 
 ## If you get stuck
 
-If asking feels like burdening people, begin with a small request that has a clear endpoint and explicitly allow a no. Notice whether you only reach out in emergencies; ordinary contact makes later support feel more natural.
+If asking feels like a burden on people, start with a small request that has a clear endpoint and say plainly that no is fine. If you only reach out in emergencies, add ordinary contact so later support feels natural.
 
-If the network is very small, build through repeated settings and defined roles: volunteering, peer support, a class, a neighborhood group, or a health program. If family or friends dismiss an important problem, add professional or peer support rather than arguing indefinitely for one person to become the right resource.
+If the network is very small, build it through repeated settings and defined roles: volunteering, peer support, a class, a neighborhood group, or a health program. If family or friends dismiss an important problem, add professional or peer support instead of arguing indefinitely with one person.
 
-If you always become the helper, practice stating your capacity and making your own needs visible. Mutual support does not require equal effort every week, but a system built on chronic self-sacrifice is not sustainable.
+If you always end up as the helper, practice stating your capacity and making your own needs visible. Mutual support doesn’t require equal effort every week, but chronic self-sacrifice won’t hold.
 
 ## A quick note
 
-Keep urgent contacts separate from ordinary support. If you are in immediate danger or considering harming yourself, use emergency or crisis services now; in the United States and Canada, call or text 988. If someone in your network is controlling, threatening, or abusive, seek specialized help and prioritize safety over maintaining the relationship.
+Keep urgent contacts separate from ordinary support. If you are in immediate danger or considering harming yourself, use emergency or crisis services now; in the United States and Canada, call or text 988. If someone in your network is controlling, threatening, or abusive, seek specialized help and put safety ahead of maintaining the relationship.
 
 ## Sources
 

@@ -43,44 +43,44 @@ safety:
   cautionLevel: moderate
 ---
 
-Stairs combine aerobic work with repeated single-leg force, so they can feel much harder than level walking. The fastest sustainable route to easier stairs is to improve general aerobic fitness, practice stairs or hills in small doses, and strengthen the legs—not to sprint the staircase until exhausted.
+Stairs combine aerobic work with repeated single-leg force, so they feel much harder than level walking. Better general fitness, small doses of stair or hill practice, and stronger legs make them easier. Sprinting the staircase until you're spent does not.
 
-Some heavier breathing on stairs is normal. The goal is that it matches the task, stays controlled, and settles promptly afterward.
+Heavier breathing on stairs is normal. It should fit the task, stay controlled, and settle soon after the top.
 
 ## What to do
 
 - Walk regularly on level ground to build a base you can recover from.
-- Practice stairs or a hill two or three times per week, beginning well below your maximum.
-- Start slower than instinct suggests. A steady first flight often produces a better total climb than rushing and stopping.
-- Use the handrail when needed; it is a safety tool, not a failed repetition.
-- Strengthen the main contributors with sit-to-stands, step-ups, calf raises, and a hip-focused exercise two days per week.
-- Avoid testing the maximum number of flights every session. Accumulate controlled repetitions instead.
+- Practice stairs or a hill two or three times a week, well below your maximum.
+- Start slower than instinct suggests. A steady first flight beats rushing and stopping.
+- Use the handrail when you need it; that's not a failed rep.
+- Strengthen the main movers with sit-to-stands, step-ups, calf raises, and a hip exercise two days a week.
+- Don't test your maximum every session. Build controlled reps instead.
 
 ## A simple plan
 
-For four weeks, pair two weekly stair sessions with two or three easy walks. Warm up with five to ten minutes of walking. Then climb one flight at a deliberate pace and walk or rest until you can speak comfortably. Repeat three to six times, stopping while your form is still steady.
+For four weeks, do two stair sessions and two or three easy walks a week. Warm up with five to ten minutes of walking, then climb one flight at a deliberate pace and walk or rest until you can speak comfortably. Repeat three to six times, stopping while your form is still steady.
 
-On the second weekly session, use a modest hill or low step-ups if repeated stairs irritate your knees. Add one repetition only after the current number feels controlled on two sessions. Alternatively, shorten the recovery slightly; do not increase repetitions, speed, and reduced rest at the same time.
+If repeated stairs irritate your knees, use a modest hill or low step-ups for the second session. Add a rep only after the current number has felt controlled in two sessions, or shorten the recovery slightly. Don't add reps, speed, and shorter rest at once.
 
-Twice per week, complete two sets of eight to twelve sit-to-stands, six to ten step-ups per leg, and ten to fifteen calf raises. Use a support and a step height that lets you move smoothly. Add resistance only when the current version is easy and stable.
+Twice a week, do two sets of eight to twelve sit-to-stands, six to ten step-ups per leg, and ten to fifteen calf raises, using a support and step height that let you move smoothly. Add resistance only once the current version is easy and stable.
 
-After four weeks, test the same staircase at a normal pace—not a race. Continue the plan or progress to longer continuous climbing if breathing and leg comfort are improving.
+After four weeks, retest the same staircase at a normal pace, not a race. If breathing and leg comfort are improving, keep going or progress to longer continuous climbing.
 
 ## How to know it is working
 
-Record the number of flights you can climb before choosing to pause, how hard the effort feels, and roughly how long breathing takes to settle. Improvement can mean the same flights feel easier, you need a shorter pause, or you can carry a light bag without losing control.
+Record flights climbed before you choose to pause, how hard it feels, and roughly how long breathing takes to settle. Improvement can mean easier flights, a shorter pause, or carrying a light bag without losing control.
 
-Keep the comparison honest: stair height, carried load, pace, heat, and whether you had already been walking all affect the result. A heart-rate number is optional. Everyday function is the primary outcome.
+Keep the comparison honest: stair height, carried load, pace, heat, and whether you'd already been walking all change the result. A heart-rate number is optional; everyday function is what counts.
 
 ## If you get stuck
 
-If your legs fail before your breathing, emphasize step-ups, sit-to-stands, and slower stair practice. If breathing is the limiter, add more comfortable walking or cycling rather than more all-out stair repeats. If knees become sore, reduce step height and total repetitions, use a gentler hill or bike temporarily, and build strength in a comfortable range.
+If your legs give out first, lean on step-ups, sit-to-stands, and slower stair practice. If breathing is the limiter, add comfortable walking or cycling rather than more all-out stair repeats. If your knees get sore, reduce step height and total reps, use a gentler hill or a bike for a while, and build strength in a comfortable range.
 
-If breathlessness has changed suddenly or seems far greater than the task, do not assume it is simply low fitness. Illness, anemia, heart or lung problems, and medication effects can also change exercise tolerance.
+If breathlessness changed suddenly or seems far out of proportion to the task, don't assume it's low fitness. Illness, anemia, heart or lung problems, and medication effects can all change exercise tolerance.
 
 ## A quick note
 
-Stop and seek care for chest pressure, fainting, blue lips, or severe breathlessness that does not settle. New or rapidly worsening shortness of breath deserves medical assessment.
+Stop and seek care for chest pressure, fainting, blue lips, or severe breathlessness that does not settle. New or rapidly worsening shortness of breath needs medical assessment.
 
 ## Sources
 

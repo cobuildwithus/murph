@@ -50,49 +50,49 @@ safety:
     - "Open-water training requires appropriate supervision, visibility, conditions, and local safety practices."
 ---
 
-A full-distance Ironman is a 2.4-mile swim, 112-mile bike, and 26.2-mile run completed in one event. Finishing it requires far more than marathon fitness. You need safe swim skill, hours of comfortable cycling, durable running, practiced fueling and hydration, equipment you trust, and the judgment to pace below your early excitement. For most first-time athletes, this is a many-month project built on an existing exercise base.
+A full-distance Ironman is a 2.4-mile swim, 112-mile bike, and 26.2-mile run in one event. Finishing takes far more than marathon fitness: safe swim skill, hours of comfortable cycling, durable running, practiced fueling and hydration, equipment you trust, and the judgment to pace below your early excitement. For most first-timers it's a many-month project on an existing exercise base.
 
 ## What to do
 
-Choose the race far enough away to build gradually. Nine to twelve months can be reasonable for someone who already trains consistently and is comfortable in all three sports; a true beginner may need longer and should first complete shorter triathlons. Work backward from the race, but let current capacity—not the entry fee—set the starting point.
+Choose a race far enough away to build gradually. Nine to twelve months can be reasonable if you already train consistently and are comfortable in all three sports. A true beginner may need longer and should finish shorter triathlons first. Start from current capacity, not the entry fee.
 
-Train each discipline at least twice per week. Swimming is technique-heavy, so coaching can save months of inefficient practice. Cycling usually supplies the largest share of training time because it is the longest race leg and creates less impact than running. Running needs patient progression because adding distance too fast raises overuse risk.
+Train each discipline at least twice a week. Swimming is technique-heavy, so coaching can save months. Cycling usually takes the most training time; it's the longest leg and lower-impact than running. Running needs patient progression; adding distance too fast raises overuse risk.
 
-Keep most endurance time easy. A 2025 network meta-analysis did not find one intensity distribution universally best for all endurance athletes, but successful approaches preserve substantial low-intensity volume and use hard work selectively. One focused interval session in a discipline may be enough early on. Strength train once or twice weekly to maintain force, tissue capacity, and position.
+Keep most endurance time easy. A 2025 network meta-analysis found no single intensity distribution best for all endurance athletes, but successful approaches keep substantial low-intensity volume and use hard work selectively. One focused interval session in a discipline may be enough early on. Strength train once or twice a week to maintain force, tissue capacity, and position.
 
 ## A simple plan
 
-Organize the project into phases rather than repeating one giant week:
+Work in phases:
 
-1. **Readiness, 4–8 weeks:** Establish that you can swim continuously with calm breathing, ride safely for 90 minutes, and run or run-walk for 45 minutes without symptoms. Learn bike handling, basic maintenance, sighting, and transitions. If open water is new, take instruction before distance.
-2. **Base, 8–16 weeks:** Build frequency and easy duration. A typical week might contain two or three swims, three bikes, three runs, one or two strength sessions, and one rest day. Several sessions will be short, and some can occur on the same day.
-3. **Build, 8–12 weeks:** Extend the long ride and long run gradually. Add race-specific intervals and occasional “brick” sessions—a bike followed by a short, easy run—to learn the transition. Do not make every weekend a test.
-4. **Race-specific, 6–10 weeks:** Practice long rides in the position, clothing, terrain, and likely weather of the race. Rehearse open-water starts and sighting in supervised conditions. Test fueling, fluids, sodium strategy, sunscreen, repair tools, and pacing.
-5. **Taper, 2–3 weeks:** Reduce volume while retaining some short race-specific efforts. Do not cram missed long sessions into the final weeks. Arriving healthy is more valuable than one more epic workout.
+1. **Readiness, 4–8 weeks:** Confirm you can swim continuously with calm breathing, ride safely for 90 minutes, and run or run-walk for 45 minutes without symptoms. Learn bike handling, basic maintenance, sighting, and transitions. If open water is new, get instruction before adding distance.
+2. **Base, 8–16 weeks:** Build frequency and easy duration. A typical week: two or three swims, three bikes, three runs, one or two strength sessions, one rest day. Some sessions can share a day.
+3. **Build, 8–12 weeks:** Extend the long ride and long run gradually. Add race-specific intervals and occasional "brick" sessions, a bike followed by a short easy run, to learn the transition. Don't make every weekend a test.
+4. **Race-specific, 6–10 weeks:** Do long rides in the race's position, clothing, terrain, and likely weather. Rehearse open-water starts and sighting under supervision. Test fueling, fluids, sodium strategy, sunscreen, repair tools, and pacing.
+5. **Taper, 2–3 weeks:** Reduce volume but keep some short race-specific efforts. Don't cram missed long sessions into the final weeks.
 
-Build the bike far enough that 112 miles is not a novel physical or logistical problem. Build the run through consistency rather than frequent marathon-length training runs; the goal is to run well after the bike, not to prove a standalone marathon in training. Schedule easier weeks every three or four weeks and after major race simulations.
+Build the bike until 112 miles is no longer a novel physical or logistical problem. Build the run through consistency rather than frequent marathon-length training runs. Schedule easier weeks every three or four weeks and after major race simulations.
 
-Practice fueling early. Long sessions require carbohydrate, fluid, and sometimes sodium, but needs vary with body size, intensity, climate, sweat rate, and gut tolerance. Start with established sports-nutrition ranges, then rehearse one product and schedule repeatedly. Both under-drinking and excessive plain-water intake can be dangerous, so avoid rigid “drink as much as possible” rules.
+Practice fueling early. Long sessions need carbohydrate, fluid, and sometimes sodium, but needs vary with body size, intensity, climate, sweat rate, and gut tolerance. Start from established sports-nutrition ranges, then rehearse one product and schedule until it's routine. Both under-drinking and excess plain water can be dangerous, so avoid rigid "drink as much as possible" rules.
 
 ## How to know it is working
 
-Track consistency, not only peak sessions. Useful monthly markers include relaxed swim pace with stable technique, cycling power or speed at conversational effort, run pace at the same perceived effort, and how well you recover 24 to 48 hours later.
+Track consistency, not just peak sessions. Useful monthly markers: relaxed swim pace with stable technique, cycling power or speed at conversational effort, run pace at the same perceived effort, and recovery 24 to 48 hours later.
 
-By the race-specific phase, you should be able to complete several long rides with the planned fuel, stay in the race position without escalating pain, swim confidently in conditions similar to the event, and run easily off the bike. Equipment, nutrition, and pacing should feel familiar. A shorter triathlon or organized long-course rehearsal can expose gaps with less consequence than race day.
+By the race-specific phase, you should finish several long rides on the planned fuel, hold the race position without escalating pain, swim confidently in event-like conditions, and run easily off the bike. A shorter triathlon or organized long-course rehearsal exposes gaps more cheaply than race day.
 
-Fitness is only one readiness dimension. A plan that repeatedly disrupts sleep, work, relationships, mood, or injury recovery is not sustainable. Adjusting the race date is a legitimate training decision.
+Fitness is only part of readiness. If the plan keeps disrupting sleep, work, relationships, mood, or injury recovery, moving the race date is a legitimate decision.
 
 ## If you get stuck
 
-If volume stops progressing, find the discipline creating the most fatigue. New triathletes often run too hard, ride without fueling, or spend swim sessions fighting poor technique. Lower intensity, shorten one session, and solve that bottleneck before adding hours.
+If volume stops progressing, find the discipline creating the most fatigue. New triathletes often run too hard, ride without fueling, or spend swim sessions fighting poor technique. Lower intensity, shorten one session, and fix that bottleneck before adding hours.
 
-Persistent pain needs early attention. Long-distance triathlon injuries are commonly overuse problems; altering gait to finish sessions usually deepens the issue. Replace painful running with appropriate low-impact work while getting the cause assessed.
+Persistent pain needs early attention. Long-distance triathlon injuries are usually overuse problems, and altering your gait to finish sessions tends to deepen them. Replace painful running with low-impact work while the cause is assessed.
 
-If long sessions fail from stomach problems, slow down and test one fueling variable at a time: concentration, dose, timing, fluid, or product. If open water triggers panic, return to supervised skill practice instead of forcing greater distance. If missed training accumulates, preserve frequency, remove optional intensity, and reassess whether the original race remains realistic.
+If long sessions fail on stomach problems, slow down and test one fueling variable at a time: concentration, dose, timing, fluid, or product. If open water triggers panic, return to supervised skill practice instead of forcing distance. If missed training piles up, keep the frequency, drop optional intensity, and reassess whether the race is still realistic.
 
 ## A quick note
 
-Never swim alone in open water; use appropriate supervision, visibility, conditions, and local safety rules. Seek prompt care for chest pain, fainting, confusion, severe breathlessness, a sustained irregular heartbeat, dark urine, or heat-illness symptoms. Medical review is sensible before this training load when you have relevant disease, unexplained symptoms, a long period of inactivity, or major cardiovascular concerns.
+Never swim alone in open water; use appropriate supervision, visibility, conditions, and local safety rules. Get prompt care for chest pain, fainting, confusion, severe breathlessness, a sustained irregular heartbeat, dark urine, or heat-illness symptoms. A medical review is sensible before this training load if you have relevant disease, unexplained symptoms, a long period of inactivity, or major cardiovascular concerns.
 
 ## Sources
 

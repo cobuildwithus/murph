@@ -46,38 +46,38 @@ safety:
     - Seek prompt care for severe pelvic pain, fever, sores, unusual discharge, possible pregnancy with pain, or more than light bleeding after sex.
 ---
 
-This guide covers pain at the vulva (the external tissue around the vaginal opening), inside the vagina, or deeper in the pelvis during wanted sexual activity. Penile, testicular, or anal pain needs a different evaluation. Improvement starts by making intimacy **safe and comfortable now** while finding the cause when pain persists. More pressure, forced stretching, or “relaxing harder” can reinforce guarding.
+This guide covers vulvar, vaginal, or deeper pelvic pain during wanted sexual activity. Penile, testicular, or anal pain needs a different evaluation. Make intimacy **safe and comfortable now**, and find the cause if pain persists. More pressure, forced stretching, or "relaxing harder" can reinforce guarding.
 
 ## What to do
 
-- **Stop before pain escalates.** Agree that penetration is optional and can stop at any point. Intimacy can include touch, oral sex, mutual stimulation, or other wanted activities that do not hurt. Removing the pass/fail test often reduces anticipatory tension.
-- **Locate the pain without repeatedly provoking it.** Is it at the opening, deeper in the pelvis, on one side, or mainly afterward? Is it burning, tightness, aching, or sharp pain? Does it vary with the menstrual cycle, postpartum recovery, menopause, a new partner, or a new product?
-- **Improve lubrication and arousal.** Allow more time before penetration and use a generous water- or silicone-based lubricant. Avoid oil with latex condoms. A vaginal moisturizer used regularly can help ongoing dryness; it is different from lubricant used during sex.
-- **Remove irritants.** Stop scented washes, douches, fragranced wipes, and products that burn. Wash the vulva gently with water or a mild unscented cleanser on external skin only.
-- **Choose control and low pressure.** Positions where the person with pain controls depth, speed, and angle can be easier. Start with shallow penetration or none and progress only when the body remains relaxed.
-- **Relax the pelvic floor.** Slow diaphragmatic breathing, unclenching the jaw and abdomen, and allowing the pelvic floor to lengthen can help. Repeated Kegels may worsen pain when the muscles are already overactive.
-- **Use pelvic-floor physical therapy when needed.** A trained therapist can assess muscle tone, coordination, scars, weakness, and pain and guide gradual exposure without forcing it.
-- **Treat the cause.** Dryness from menopause, breastfeeding, or medicines; infections; vulvar skin conditions; endometriosis; pelvic pain; scars; and relationship or trauma factors call for different care.
+- **Stop before pain escalates.** Agree that penetration is optional and can stop anytime. Intimacy can be touch, oral sex, mutual stimulation, or anything else wanted that doesn't hurt. Dropping the pass/fail test eases anticipatory tension.
+- **Locate the pain without repeatedly provoking it.** Note the location (opening, deeper pelvis, one side, or mainly afterward), the quality (burning, tightness, aching, sharp), and whether it tracks the menstrual cycle, postpartum recovery, menopause, a new partner, or a new product.
+- **Improve lubrication and arousal.** Allow more time before penetration and use plenty of water- or silicone-based lubricant (not oil with latex condoms). A vaginal moisturizer used regularly helps ongoing dryness; it's not the same as lubricant during sex.
+- **Remove irritants.** Stop scented washes, douches, fragranced wipes, and anything that burns. Wash the vulva gently with water or a mild unscented cleanser, external skin only.
+- **Choose control and low pressure.** Positions where the person in pain controls depth, speed, and angle are often easier. Start shallow or without penetration; progress only while the body stays relaxed.
+- **Relax the pelvic floor.** Slow diaphragmatic breathing, an unclenched jaw and abdomen, and letting the pelvic floor lengthen can help. Repeated Kegels can worsen pain when the muscles are already overactive.
+- **Use pelvic-floor physical therapy when needed.** A trained therapist assesses muscle tone, coordination, scars, weakness, and pain, and guides gradual exposure without forcing it.
+- **Treat the cause.** Dryness from menopause, breastfeeding, or medicines; infections; vulvar skin conditions; endometriosis; pelvic pain; scars; and relationship or trauma factors need different care.
 
 ## A simple plan
 
-For four weeks, make comfort, control, and no worse symptoms afterward the success criteria. Use lubricant whenever friction may occur, allow unrushed time for arousal, and choose activities that stay within a personally safe mild range. Practice five minutes of slow breathing and pelvic-floor release on most days, not only immediately before sex.
+For four weeks, success means comfort, control, and no worse symptoms afterward. Use lubricant whenever there may be friction, take unrushed time for arousal, and keep activity in a safe, mild range. Practice five minutes of slow breathing and pelvic-floor release most days, not just before sex.
 
-Keep a brief note after sexual activity: location and intensity of pain, what felt comfortable, and whether symptoms lingered. If pain is not clearly improving, arrange an evaluation and bring the pattern. Continue comfortable intimacy if wanted; there is no need to repeatedly test the painful activity.
+Afterward, note the pain's location and intensity, what felt comfortable, and whether symptoms lingered. If pain isn't clearly improving, arrange an evaluation and bring that record. Comfortable intimacy can continue; don't keep testing the painful activity.
 
 ## How to know it is working
 
-Look for less anticipatory fear, less involuntary tightening, more natural lubrication or effective use of lubricant, lower pain during and after activity, and a wider range of enjoyable choices. Progress may first appear as feeling able to stop or communicate without tension. Pain-free penetration is not the only valid endpoint.
+Look for less anticipatory fear, less involuntary tightening, better lubrication (natural or added), less pain during and after, and more enjoyable options. Early progress may just be feeling able to stop or speak up without tension. Pain-free penetration isn't the only valid endpoint.
 
 ## If you get stuck
 
-Check whether the plan is treating dryness when the actual problem is pelvic-floor guarding, or strengthening when relaxation is needed. Deep pain can come from pelvic conditions that no amount of lubricant will fix. Persistent bleeding, discharge, itching, sores, urinary symptoms, or cycle-linked pelvic pain makes an exam more useful.
+Check whether you're treating dryness when the real problem is pelvic-floor guarding, or strengthening when relaxation is needed. Deep pain can come from pelvic conditions that lubricant won't fix. Persistent bleeding, discharge, itching, sores, urinary symptoms, or cycle-linked pelvic pain makes an exam more useful.
 
-If fear, past trauma, or relationship pressure is part of the experience, trauma-informed therapy or sex therapy can work alongside physical treatment. Pain is real whether the driver is tissue, muscle, nervous-system sensitization, emotional context, or several at once.
+If fear, past trauma, or relationship pressure is involved, trauma-informed therapy or sex therapy can run alongside physical treatment. Pain is real whether the driver is tissue, muscle, nervous-system sensitization, emotional context, or several at once.
 
 ## A quick note
 
-Sex should not require enduring pain. Seek care for persistent or worsening symptoms and urgent help for severe pain, fever, significant bleeding, or possible pregnancy with pelvic pain.
+Sex should not require enduring pain. Seek care for persistent or worsening symptoms, and urgent help for severe pain, fever, significant bleeding, or possible pregnancy with pelvic pain.
 
 ## Sources
 

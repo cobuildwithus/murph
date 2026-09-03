@@ -40,28 +40,28 @@ safety:
     - Sudden face droop, arm weakness, speech trouble, vision loss, severe imbalance, or an abrupt severe headache needs emergency care immediately.
 ---
 
-Most first strokes are linked to risks that can be treated or reduced. High blood pressure is especially important, but tobacco, atrial fibrillation, diabetes, high atherogenic cholesterol, low activity, excess alcohol, sleep apnea, and some vascular conditions also matter. The best plan is therefore specific: control your biggest risks rather than collecting generic brain-health habits.
+Most first strokes are linked to risks that can be treated or reduced. High blood pressure is especially important, but tobacco, atrial fibrillation, diabetes, high atherogenic cholesterol, low activity, excess alcohol, sleep apnea, and some vascular conditions count too. The best plan is specific: control your biggest risks rather than collecting generic brain-health habits.
 
-Stroke prevention also includes knowing what not to do. Daily aspirin is not automatically appropriate for someone who has never had a stroke; bleeding risk can outweigh benefit. Atrial fibrillation may require an anticoagulant, which is different from aspirin. Those choices belong in a clinical risk discussion.
+Stroke prevention also means knowing what not to do. Daily aspirin is not automatically appropriate for someone who has never had a stroke; bleeding risk can outweigh benefit. Atrial fibrillation may call for an anticoagulant, which is different from aspirin. Those choices belong in a clinical risk discussion.
 
 ## What to do
 
-- **Control blood pressure.** Use a validated upper-arm cuff and compare multi-day averages. Follow a DASH-style eating pattern, reduce excess sodium and alcohol, stay active, and take prescribed medication consistently.
-- **Do not smoke.** Counseling, nicotine-replacement therapy, and prescription quit medicines can improve the chance of success. Avoid regular secondhand smoke exposure too.
-- **Find and treat atrial fibrillation when relevant.** An irregular pulse, palpitations, age, prior transient ischemic attack, or device alert can justify evaluation. Do not diagnose it from a smartwatch alone.
-- **Manage diabetes and lipids.** Improve blood sugar, LDL, and ApoB according to your risk. Medication may be important even when you feel well.
-- **Move and eat for vascular health.** Regular aerobic activity, strength work, vegetables, fruit, legumes, whole grains, nuts, fish, and unsaturated oils support several risk factors at once.
-- **Address sleep apnea.** Loud snoring, witnessed pauses, resistant high blood pressure, and significant daytime sleepiness are reasons to seek evaluation.
+- **Control blood pressure.** Use a validated upper-arm cuff and compare multi-day averages. Follow a DASH-style eating pattern, cut excess sodium and alcohol, stay active, and take prescribed medication consistently.
+- **Do not smoke.** Counseling, nicotine-replacement therapy, and prescription quit medicines improve the odds of success. Avoid regular secondhand smoke too.
+- **Find and treat atrial fibrillation when relevant.** An irregular pulse, palpitations, age, prior transient ischemic attack, or a device alert can justify evaluation. Do not diagnose it from a smartwatch alone.
+- **Manage diabetes and lipids.** Improve blood sugar, LDL, and ApoB according to your risk. Medication may matter even when you feel well.
+- **Move and eat for vascular health.** Regular aerobic activity, strength work, vegetables, fruit, legumes, whole grains, nuts, fish, and unsaturated oils help several risk factors at once.
+- **Address sleep apnea.** Loud snoring, witnessed pauses, resistant high blood pressure, and significant daytime sleepiness are reasons to get evaluated.
 - **Limit excess alcohol and avoid stimulant drugs.** Binge drinking and certain drugs can sharply raise risk.
-- **Use condition-specific prevention.** Carotid disease, sickle cell disease, pregnancy complications, migraine with aura, and prior TIA each require more tailored advice.
+- **Use condition-specific prevention.** Carotid disease, sickle cell disease, pregnancy complications, migraine with aura, and prior TIA each need more tailored advice.
 
 ## A simple plan
 
-Build a short stroke-risk inventory: home blood-pressure average, smoking status, LDL or ApoB, A1C or diabetes status, weekly activity, alcohol pattern, possible sleep-apnea symptoms, and any history of irregular rhythm or TIA. Add prescribed medication and how consistently it is taken.
+Build a short stroke-risk inventory: home blood-pressure average, smoking status, LDL or ApoB, A1C or diabetes status, weekly activity, alcohol pattern, possible sleep-apnea symptoms, and any history of irregular rhythm or TIA. Add prescribed medication and how consistently you take it.
 
-Choose the highest-impact two actions for eight weeks. Examples are supported smoking cessation plus blood-pressure monitoring, or medication adherence plus regular walking. Arrange any needed clinical review for atrial fibrillation, severe hypertension, a prior neurologic episode, or uncertainty about aspirin or anticoagulation.
+Pick the two highest-impact actions for eight weeks. Examples: supported smoking cessation plus blood-pressure monitoring, or medication adherence plus regular walking. Arrange any needed clinical review for atrial fibrillation, severe hypertension, a prior neurologic episode, or uncertainty about aspirin or anticoagulation.
 
-Practice recognizing stroke symptoms with the people around you. Prevention reduces probability; rapid emergency treatment reduces damage if a stroke still occurs.
+Practice recognizing stroke symptoms with the people around you. Prevention lowers the odds; fast emergency treatment limits the damage if a stroke happens anyway.
 
 ## How to know it is working
 
@@ -69,13 +69,13 @@ Track the underlying risks, not a consumer “brain score.” A controlled blood
 
 ## What to expect
 
-Blood pressure and behavior can improve within weeks, while the benefit accumulates for years. You usually will not feel vascular risk decreasing. That lack of sensation is not a reason to stop. Some nonmodifiable risk remains because of age, genetics, and prior disease, but it does not erase the value of treating modifiable factors.
+Blood pressure and behavior can improve within weeks; the benefit accumulates for years. You usually will not feel vascular risk falling, which is no reason to stop. Age, genetics, and prior disease leave some risk you cannot change, but treating the rest is still worth it.
 
-Make the emergency response part of the prevention plan. Save the local emergency number, teach household members to recognize sudden face, arm, speech, vision, and balance changes, and note the time symptoms began or the person was last known well. This preparation takes minutes and can preserve treatment options. It does not increase the chance of a stroke; it improves the response if prevention is not enough.
+Make the emergency response part of the prevention plan. Save the local emergency number, teach household members to recognize sudden face, arm, speech, vision, and balance changes, and note when symptoms began or when the person was last known well. This takes minutes, can preserve treatment options, and does not raise the chance of a stroke.
 
 ## If you get stuck
 
-Prioritize blood pressure and tobacco before low-impact optimization. Review missed medicines, alcohol binges, untreated apnea, and cost or side effects that make the plan hard to follow. Ask directly whether aspirin, anticoagulation, or carotid imaging is appropriate for your situation rather than adding them independently.
+Put blood pressure and tobacco ahead of low-impact fine-tuning. Review missed medicines, alcohol binges, untreated apnea, and cost or side effects that make the plan hard to follow. Ask directly whether aspirin, anticoagulation, or carotid imaging is appropriate for you rather than adding them on your own.
 
 ## A quick note
 

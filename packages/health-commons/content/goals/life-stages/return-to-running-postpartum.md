@@ -4,7 +4,7 @@ entityType: goal_template
 key: goal_template:return-to-running-postpartum
 slug: return-to-running-postpartum
 title: Return to Running Postpartum
-summary: "Rebuild impact tolerance and running gradually after birth, using recovery, capacity, and symptoms—not the calendar alone—to guide progress."
+summary: "Rebuild impact tolerance and running gradually after birth, letting recovery, capacity, and symptoms guide progress rather than the calendar alone."
 status: field-testing
 quality: usable
 aliases:
@@ -56,44 +56,44 @@ safety:
     - "Recovery after pregnancy and birth varies; a postpartum check is not by itself a running-readiness test."
 ---
 
-Returning to running after birth should be readiness-based, not calendar-only. Pregnancy, labor, birth, surgery, sleep disruption, feeding, and prior training all change the path. The right first run is one your tissues and whole life can recover from: brisk walking feels comfortable, basic strength and impact work are tolerated, bleeding and wounds are recovering as expected, and pelvic-floor or musculoskeletal symptoms are not escalating.
+Return to running based on readiness, not the calendar alone. Pregnancy, labor, birth, surgery, sleep disruption, feeding, and prior training all shape the path. The right first run is one your tissues and your whole life can recover from: brisk walking is comfortable, strength and impact work are tolerated, bleeding and wounds are healing as expected, and pelvic-floor or musculoskeletal symptoms aren't escalating.
 
 ## What to do
 
-Begin with recovery and ordinary movement. Short walks, comfortable breathing, mobility, and gentle strength can progress as symptoms and medical guidance allow. A cesarean birth is abdominal surgery; significant perineal trauma, hemorrhage, infection, anemia, high blood pressure, or other complications can also extend the timeline.
+Begin with recovery and ordinary movement: short walks, comfortable breathing, mobility, and gentle strength, progressing as symptoms and medical guidance allow. A cesarean birth is abdominal surgery, and significant perineal trauma, hemorrhage, infection, anemia, high blood pressure, or other complications can also extend the timeline.
 
-Before running, establish a base of brisk walking and lower-body strength. Squat-to-chair movements, calf raises, bridges or hip hinges, step-ups, rows, and carries can rebuild capacity. Pelvic-floor work is not only repeated squeezing: coordination, relaxation, pressure management, and how symptoms respond to impact matter. A pelvic-health physical therapist can assess this when symptoms or uncertainty are present.
+Before running, build a base of brisk walking and lower-body strength: squat-to-chair movements, calf raises, bridges or hip hinges, step-ups, rows, and carries. Pelvic-floor work means coordination, relaxation, pressure management, and how symptoms respond to impact, not just repeated squeezing. A pelvic-health physical therapist can assess this if you have symptoms or doubts.
 
-Use a practical readiness screen, not a pass/fail diagnosis. You should be able to walk briskly for about 30 minutes and manage stairs and daily activities without increased bleeding, pelvic heaviness, leakage, or pain. Controlled single-leg balance, repeated calf raises, shallow single-leg squats, marching, and a small dose of hopping should not create symptoms during the task or later that day.
+Use a practical readiness screen, not a pass/fail diagnosis. You should be able to walk briskly for about 30 minutes and manage stairs and daily activities without increased bleeding, pelvic heaviness, leakage, or pain. Controlled single-leg balance, repeated calf raises, shallow single-leg squats, marching, and a little hopping should not cause symptoms during the task or later that day.
 
 ## A simple plan
 
 Progress through these stages at your own pace:
 
-1. **Recovery and walking:** Keep at least the first three weeks after birth free of running. Accumulate comfortable walks in short bouts as healing and symptoms allow. Stop before fatigue changes posture or creates pressure, and add gentle strength when appropriate.
-2. **Strength and low-impact cardio:** Build toward 30 minutes of purposeful walking. Add a stationary bike, elliptical, or swimming only when wounds are healed, bleeding and infection risk are addressed, and the activity is appropriate for your recovery.
-3. **Impact preparation:** Twice weekly, try small doses of faster marching, step-ups, calf raises, and low hops. Begin with a few repetitions on two legs. Progress only if symptoms remain stable for the next 24 hours.
+1. **Recovery and walking:** No running for at least the first three weeks after birth. Accumulate comfortable walks in short bouts as healing and symptoms allow. Stop before fatigue changes your posture or creates pressure, and add gentle strength when appropriate.
+2. **Strength and low-impact cardio:** Build toward 30 minutes of purposeful walking. Add a stationary bike, elliptical, or swimming only when wounds are healed, bleeding and infection risk are addressed, and the activity fits your recovery.
+3. **Impact preparation:** Twice weekly, try small doses of faster marching, step-ups, calf raises, and low hops, starting with a few repetitions on two legs. Progress only if symptoms stay stable for 24 hours.
 4. **Run-walk:** On a flat, predictable surface, warm up by walking, then alternate 1 minute of easy running with 2 minutes of walking for 6 to 10 rounds. Keep at least one non-running day between sessions.
-5. **Build duration:** When two or three sessions are symptom-stable, add a small amount of running time while keeping the pace easy. Change only one variable—run interval, total time, frequency, hills, or speed—at once.
-6. **Return to normal training:** Establish three comfortable easy runs before adding hills, strides, intervals, a stroller, or a long run. Continue strength work and use easier weeks when sleep or caregiving load spikes.
+5. **Build duration:** When two or three sessions are symptom-stable, add a little running time and keep the pace easy. Change only one variable at a time: run interval, total time, frequency, hills, or speed.
+6. **Return to normal training:** Get three comfortable easy runs in before adding hills, strides, intervals, a stroller, or a long run. Keep up strength work and use easier weeks when sleep or caregiving load spikes.
 
-Use supportive shoes and a comfortable bra if breastfeeding. Feeding or pumping before a run may improve comfort, but it is optional. Eat and drink enough for recovery and milk production when lactating; this is not the time for an aggressive calorie deficit. A running stroller changes mechanics and should wait until both parent and infant meet the manufacturer’s and clinician’s safety guidance.
+Wear supportive shoes and, if breastfeeding, a comfortable bra. Feeding or pumping before a run may help comfort but is optional. If lactating, eat and drink enough for recovery and milk production; this is no time for an aggressive calorie deficit. A running stroller changes mechanics and should wait until parent and infant both meet the manufacturer's and clinician's safety guidance.
 
 ## How to know it is working
 
-Record only a few signals: run and walk minutes, effort, and symptoms during the session, later that day, and the next morning. Useful progress means you can repeat the session with stable bleeding, pelvic pressure, bladder and bowel control, scar comfort, joint or bone pain, and energy.
+Record just run and walk minutes, effort, and symptoms during the session, later that day, and the next morning. Progress means you can repeat the session with stable bleeding, pelvic pressure, bladder and bowel control, scar comfort, joint or bone pain, and energy.
 
-Mild general muscle soreness can be normal. Pelvic heaviness, bulging, leakage, sharp pain, increasing abdominal or perineal pain, bleeding that becomes heavier, or a limp are signals to pause and reassess. Symptoms are information, not personal failure.
+Mild general muscle soreness can be normal. Pelvic heaviness, bulging, leakage, sharp pain, increasing abdominal or perineal pain, heavier bleeding, or a limp mean pause and reassess. Symptoms are information, not failure.
 
-The 2024 international consensus emphasizes an individualized decision using medical and psychological screening, current capacity, prior training, support, and preferences. That means a former competitive runner is not automatically ready earlier, and a slower return is not evidence of poor fitness. Recovery may be nonlinear when sleep, feeding, illness, or childcare changes.
+The 2024 international consensus calls for an individualized decision based on medical and psychological screening, current capacity, prior training, support, and preferences. A former competitive runner isn't automatically ready earlier, and a slower return isn't evidence of poor fitness. Recovery may be nonlinear as sleep, feeding, illness, or childcare changes.
 
 ## If you get stuck
 
-If every attempt causes symptoms, return to the last comfortable level and seek pelvic-health or sports physical therapy. The problem may involve pelvic-floor coordination, calf or hip capacity, scar sensitivity, bone stress, running mechanics, fueling, or simply more recovery time.
+If every attempt causes symptoms, return to the last comfortable level and seek pelvic-health or sports physical therapy. Possible culprits: pelvic-floor coordination, calf or hip capacity, scar sensitivity, bone stress, running mechanics, fueling, or simply needing more recovery time.
 
-If fitness feels ready but life recovery is not, use short run-walk sessions and low-impact cardio instead of forcing long runs on severe sleep loss. If leakage or heaviness appears only after a certain duration, keep runs below that threshold while building strength and getting assessed.
+If fitness feels ready but life isn't, use short run-walk sessions and low-impact cardio rather than forcing long runs on severe sleep loss. If leakage or heaviness appears only past a certain duration, keep runs below that threshold while you build strength and get assessed.
 
-Pain in a focal bony area, pain that worsens with impact, night pain, or a history of low energy availability deserves prompt evaluation for bone stress injury. Persistent fatigue, breathlessness, palpitations, or poor exercise tolerance can also reflect anemia, thyroid problems, infection, cardiovascular complications, or other postpartum conditions rather than deconditioning alone.
+Pain in a focal bony area, pain that worsens with impact, night pain, or a history of low energy availability deserves prompt evaluation for bone stress injury. Persistent fatigue, breathlessness, palpitations, or poor exercise tolerance can also mean anemia, thyroid problems, infection, cardiovascular complications, or other postpartum conditions, not just deconditioning.
 
 ## A quick note
 

@@ -50,15 +50,15 @@ safety:
     - "Stress practices can support care but should not replace treatment or action on an unsafe situation."
 ---
 
-Reducing stress does not mean eliminating every demand or forcing yourself to feel calm. A useful plan does two jobs: it lowers avoidable stressors and improves how quickly your body and attention recover from the unavoidable ones. Breathing, mindfulness, and exercise can help, but they cannot compensate indefinitely for an impossible workload, an unsafe relationship, financial crisis, untreated illness, or too little sleep.
+A useful stress plan does two jobs. It lowers the stressors you can avoid, and it improves how fast your body and attention recover from the ones you cannot. Breathing, mindfulness, and exercise help with the second job, but they cannot make up indefinitely for an impossible workload, an unsafe relationship, a financial crisis, untreated illness, or too little sleep.
 
 ## What to do
 
-Start by separating the stressor from the stress response. Write down the three situations creating the most strain. Mark each one **change**, **influence**, or **accept for now**. For a changeable stressor, take one concrete step: renegotiate a deadline, cancel a low-value obligation, ask for help, automate a task, or set a boundary. For an unavoidable stressor, schedule recovery rather than waiting to feel like you have earned it.
+Start by separating the stressor from the stress response. Write down the three situations causing the most strain and mark each one **change**, **influence**, or **accept for now**. For a changeable stressor, take one concrete step: renegotiate a deadline, cancel a low-value obligation, ask for help, automate a task, or set a boundary. For an unavoidable one, schedule recovery instead of waiting to feel you have earned it.
 
-Choose one brief downshift you can repeat daily. Slow diaphragmatic breathing, progressive muscle relaxation, a guided mindfulness practice, or an easy walk can all work. The best choice is the one that reliably leaves you less activated. Five to ten minutes is enough to establish a practice.
+Pick one brief downshift you can repeat daily: slow diaphragmatic breathing, progressive muscle relaxation, a guided mindfulness practice, or an easy walk. Use whichever reliably leaves you less activated. Five to ten minutes is enough.
 
-Support the nervous system with ordinary foundations: regular movement, enough sleep opportunity, meals that prevent long energy crashes, less alcohol used for coping, and contact with people who feel safe. These are not glamorous, but they reduce the number of problems a relaxation exercise must solve.
+Back it up with the ordinary foundations: regular movement, enough sleep opportunity, meals that prevent long energy crashes, less alcohol used for coping, and contact with people who feel safe.
 
 ## A simple plan
 
@@ -66,31 +66,31 @@ Try this two-week reset:
 
 1. **Choose one controllable stressor.** Each day, take the smallest useful step: send the email, clarify the next task, close one notification channel, or ask a specific person for specific help.
 2. **Choose one downshift.** Practice it for five to ten minutes on most days. Use comfortable breathing, progressive relaxation, a guided mindfulness practice, or an easy walk.
-3. **Review once a week.** Keep what lowered stress or improved function. Shrink or replace anything that became another obligation.
+3. **Review once a week.** Keep what lowered stress or improved function. Shrink or replace anything that turned into another obligation.
 
-Sleep, movement, meals, and connection can support the plan, but do not turn all of them into new requirements at once. Add one only when the two-part core is manageable.
+Add sleep, movement, meals, or connection one at a time, and only when the two-part core feels manageable.
 
-Practice the downshift when stress is moderate, not only at the peak of a crisis. Repetition makes it easier to access under pressure. If silent meditation increases distress, use an eyes-open practice, walking, music, or a concrete sensory task instead.
+Practice the downshift when stress is moderate, not only in a crisis, so it is easier to reach for under pressure. If silent meditation raises your distress, use an eyes-open practice, walking, music, or a concrete sensory task instead.
 
 ## How to know it is working
 
-Once a week, rate overall stress and how much it interfered with sleep, focus, or relationships from 0 to 10. Also note whether you completed the one action under your control and whether the downshift helped you recover.
+Once a week, rate your overall stress and how much it interfered with sleep, focus, or relationships from 0 to 10. Note whether you took the one action under your control and whether the downshift helped you recover.
 
-Look for better function, not permanent calm. Useful changes include fewer stress-driven arguments, less evening rumination, easier task initiation, more restorative sleep, and returning to baseline sooner after a setback. A hard week can raise the rating even while your skills improve.
+Look for better function rather than permanent calm: fewer stress-driven arguments, less evening rumination, easier task starts, more restorative sleep, and a quicker return to baseline after a setback. A hard week can push the rating up even while your skills improve.
 
-Mindfulness programs can reduce perceived stress on average, but effects vary and usually build over weeks. Breathing or progressive relaxation may change state within minutes; changing a workload, relationship pattern, or financial stressor takes longer. HRV and cortisol are not necessary scorecards and are easily influenced by many other factors.
+Mindfulness programs can reduce perceived stress on average, but effects vary and usually build over weeks. Breathing or progressive relaxation can change your state within minutes; changing a workload, a relationship pattern, or a financial stressor takes longer. HRV and cortisol are not necessary scorecards, and many other factors move them.
 
 ## If you get stuck
 
-If the practice is happening but stress remains high, revisit the source. You may be trying to breathe your way around a problem that needs a decision, resources, advocacy, treatment, or an exit plan. Ask, “What would make this situation 10% less difficult?” and choose the next controllable step.
+If the practice is happening and stress stays high, the problem may need a decision, resources, advocacy, treatment, or an exit plan rather than more breathing. Ask what would make the situation 10% less difficult, and take that step.
 
-If you cannot stay consistent, shrink the practice to two minutes and attach it to an existing cue such as closing the laptop or brushing your teeth. If breathing makes you lightheaded, stop taking oversized breaths and return to normal breathing. If mindfulness increases panic, dissociation, or intrusive memories, stop and use a grounded, eyes-open activity.
+If you cannot stay consistent, shrink the practice to two minutes and attach it to an existing cue, such as closing the laptop or brushing your teeth. If breathing makes you lightheaded, stop taking oversized breaths and breathe normally. If mindfulness increases panic, dissociation, or intrusive memories, stop and use a grounded, eyes-open activity.
 
-Persistent stress with anxiety, depression, insomnia, pain, substance use, or impaired work and relationships deserves professional support. Therapy, medical care, workplace changes, social services, or practical financial and legal help may address the actual driver more directly.
+Persistent stress with anxiety, depression, insomnia, pain, substance use, or impaired work and relationships deserves professional support. Therapy, medical care, workplace changes, social services, or practical financial and legal help may get at the real driver more directly.
 
 ## A quick note
 
-Seek urgent local help if you feel unsafe, cannot care for yourself, or might harm yourself or someone else; in the United States, call or text [988](https://988lifeline.org/). Relaxation practices should not delay care for severe mental-health or physical symptoms, and they are not a substitute for leaving an unsafe situation.
+Get urgent local help if you feel unsafe, cannot care for yourself, or might harm yourself or someone else; in the United States, call or text [988](https://988lifeline.org/). Relaxation practices should not delay care for severe mental-health or physical symptoms, and they are no substitute for leaving an unsafe situation.
 
 ## Sources
 

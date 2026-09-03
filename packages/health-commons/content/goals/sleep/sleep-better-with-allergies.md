@@ -4,7 +4,7 @@ entityType: goal_template
 key: goal_template:sleep-better-with-allergies
 slug: sleep-better-with-allergies
 title: Sleep Better With Allergies
-summary: Reduce nighttime congestion and allergen exposure while using treatments that support rather than disrupt sleep.
+summary: Reduce nighttime congestion and allergen exposure, and use treatments that help sleep instead of disrupting it.
 status: field-testing
 quality: usable
 aliases:
@@ -43,43 +43,43 @@ safety:
   cautionLevel: moderate
 ---
 
-Allergic rhinitis can make sleep harder through congestion, sneezing, itching, and mouth breathing. Better sleep usually comes from reducing relevant exposure and treating nasal inflammation consistently—not from using a sedating antihistamine solely because it makes you drowsy.
+Allergic rhinitis disrupts sleep through congestion, sneezing, itching, and mouth breathing. Better sleep usually comes from cutting the exposure that matters and treating nasal inflammation consistently, not from a sedating antihistamine taken because it makes you drowsy.
 
 ## What to do
 
-- Identify the likely allergen and season. Pollen, dust mites, pets, and mold call for different exposure changes.
-- For pollen, keep bedroom windows closed during high-pollen periods, shower or wash hair after heavy outdoor exposure, and change clothes before bed.
-- For dust mites, wash bedding regularly and consider allergen-proof mattress and pillow covers. Reduce humidity when the home is damp.
-- Keep pets out of the bedroom if symptoms reliably worsen there. Cleaning only after symptoms peak is less useful than a consistent boundary.
-- Use saline spray or an appropriate rinse to clear the nose. Use sterile, distilled, or properly boiled and cooled water for nasal irrigation.
-- Ask a clinician or pharmacist about evidence-based treatment such as an intranasal corticosteroid. These work best with correct technique and regular use.
-- Review whether an antihistamine is sedating the next day or whether a decongestant is keeping you awake.
+- Work out the likely allergen and season; pollen, dust mites, pets, and mold each need different changes.
+- For pollen, keep bedroom windows closed in high-pollen periods, shower or wash your hair after heavy outdoor exposure, and change clothes before bed.
+- For dust mites, wash bedding regularly, consider allergen-proof mattress and pillow covers, and lower humidity if the home is damp.
+- Keep pets out of the bedroom if symptoms reliably worsen there. A consistent boundary beats cleaning after symptoms peak.
+- Clear your nose with saline spray or a rinse, using only sterile, distilled, or properly boiled and cooled water for irrigation.
+- Ask a clinician or pharmacist about evidence-based treatment such as an intranasal corticosteroid.
+- Check whether an antihistamine leaves you groggy the next day or a decongestant keeps you awake.
 
 ## A simple plan
 
-For two weeks, rate bedtime congestion and morning dry mouth from 0 to 10. Note the likely exposure—high pollen, pet in room, dusty cleaning, or damp conditions—without trying to catalog everything.
+For two weeks, rate bedtime congestion and morning dry mouth from 0 to 10, and note the likely exposure: high pollen, a pet in the room, dusty cleaning, or damp conditions.
 
-Choose one exposure change and one treatment step. For example, keep the bedroom closed to pollen, shower after evening outdoor time, use saline, and take the clinician- or label-directed allergy treatment consistently. Give an intranasal treatment enough time to work rather than judging it after one dose.
+Pick one exposure change and one treatment step. For example, keep the bedroom closed to pollen, shower after evening time outdoors, use saline, and take the clinician- or label-directed treatment every day. Give an intranasal treatment time to work instead of judging it after one dose.
 
-Check spray technique: aim slightly outward toward the ear, not toward the nasal septum, and avoid forceful sniffing that sends medicine into the throat. If using a rinse, clean and dry the device after use.
+Check spray technique: aim slightly outward toward the ear, not at the septum, and don't sniff hard enough to send the medicine into your throat. Clean and dry any rinse device after use.
 
-Match the plan to the exposure. A pollen plan may emphasize outdoor timing and changing clothes; a dust-mite plan emphasizes bedding and humidity; a pet plan needs a consistent bedroom boundary. Expensive air filters help only when sized for the room and run consistently, and they do not replace source control. Review progress after comparable exposure days.
+Expensive air filters help only when sized for the room and run consistently, and they don't replace source control. Review progress after days with comparable exposure.
 
 ## How to know it is working
 
-Look for less bedtime blockage, fewer sneezing or itching episodes, less mouth breathing, fewer awakenings, and better morning function. A partner may notice less congestion-related snoring, but reduced snoring does not rule out sleep apnea.
+Look for less blockage at bedtime, fewer sneezing or itching episodes, less mouth breathing, fewer awakenings, and better mornings. A partner may notice less congestion-related snoring, which doesn't rule out sleep apnea.
 
-Compare similar exposure days. Seasonal changes can improve symptoms independently, so a single good week at the end of pollen season does not prove every new product helped.
+Compare days with similar exposure; one good week at the end of pollen season doesn't prove a new product helped.
 
 ## If you get stuck
 
-Confirm that the problem is allergic. A cold, sinus infection, structural blockage, medication rebound, nonallergic rhinitis, and sleep apnea can all cause nighttime congestion. Decongestant nasal sprays used too many days can create rebound congestion; follow the label and seek advice.
+Not all nighttime congestion is allergic: a cold, sinus infection, structural blockage, medication rebound, nonallergic rhinitis, and sleep apnea can all cause it. Decongestant nasal sprays used too many days can cause rebound congestion; follow the label and get advice.
 
-If symptoms remain significant despite correct treatment, an allergist can test likely triggers and discuss immunotherapy. Persistent one-sided blockage, frequent nosebleeds, loss of smell, or recurrent sinus symptoms deserves clinical assessment.
+If symptoms stay significant despite correct treatment, an allergist can test likely triggers and discuss immunotherapy. Persistent one-sided blockage, frequent nosebleeds, loss of smell, or recurrent sinus symptoms deserve clinical assessment.
 
 ## A quick note
 
-Seek urgent care for trouble breathing, throat swelling, wheezing, or signs of anaphylaxis. Review allergy medicines in pregnancy, glaucoma, prostate or urinary problems, high blood pressure, and when combining them with other sedatives.
+Seek urgent care for trouble breathing, throat swelling, wheezing, or signs of anaphylaxis. Review allergy medicines in pregnancy, glaucoma, prostate or urinary problems, and high blood pressure, and when combining them with other sedatives.
 
 ## Sources
 

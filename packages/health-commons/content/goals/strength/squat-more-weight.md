@@ -41,40 +41,40 @@ safety:
   cautionLevel: low
 ---
 
-A stronger squat is built by repeating a squat you can standardize, training the legs and trunk around it, and adding load slowly enough that the movement remains recognizable. There is no single correct stance or bar position for every body. The useful standard is one that fits your goal, lets you reach a consistent depth, and can be trained without persistent pain.
+A stronger squat comes from repeating a squat you can standardize, training the legs and trunk around it, and adding load slowly enough that the movement stays recognizable. No stance or bar position is right for every body. A useful standard fits your goal, lets you hit a consistent depth, and can be trained without persistent pain.
 
-If your goal is a powerlifting back squat, practice that lift. If the goal is general leg strength, a front squat, safety-bar squat, goblet squat, hack squat, or leg press may be equally useful. Do not let loyalty to one variation block months of productive training.
+If you want a bigger powerlifting back squat, practice that lift. If you want general leg strength, a front squat, safety-bar squat, goblet squat, hack squat, or leg press may serve just as well. Don't let loyalty to one variation cost you months of productive training.
 
 ## What to do
 
-- Squat one to three times per week, with at least one session using the exact variation you want to improve.
-- Keep stance, footwear, bar position, depth, and equipment consistent enough to compare performance.
+- Squat one to three times a week, at least once on the exact variation you want to improve.
+- Keep stance, footwear, bar position, depth, and equipment consistent enough to compare sessions.
 - Use heavier sets for specific strength and moderate-load sets for practice and muscle-building volume.
 - Train related patterns such as split squats, leg presses, hinges, and trunk bracing without burying recovery.
-- Rest long enough between hard sets that breathlessness does not decide the result.
-- Add the smallest practical amount of weight only after the current load is repeatable.
+- Rest long enough between hard sets that breathlessness doesn't decide the result.
+- Add the smallest practical amount of weight, and only once the current load is repeatable.
 
-Heavier resistance tends to produce larger gains in maximal strength, while many loading ranges can build useful muscle. A good squat plan uses both: enough heavier practice to learn force under load, and enough submaximal work to accumulate clean repetitions.
+Heavier resistance tends to produce bigger gains in maximal strength, while many loading ranges build useful muscle. A good squat plan uses both: enough heavy practice to learn force under load, and enough submaximal work to pile up clean reps.
 
 ## A simple plan
 
-Squat twice per week. On day one, perform three sets of 4 to 6 repetitions at a load that leaves about two good repetitions available. On day two, use a lighter load for three sets of 6 to 10, or use a closely related squat variation that addresses a clear need.
+Squat twice a week. Day one: three sets of 4 to 6 reps at a load that leaves about two good reps in the tank. Day two: a lighter load for three sets of 6 to 10, or a closely related variation that addresses a clear need.
 
-When every day-one set reaches six repetitions at the same depth and speed standard, add the smallest available load and return to four. Progress the lighter day the same way within its range. Add two sets of a hinge and two sets of a single-leg movement across the week, not necessarily in both sessions.
+When every day-one set reaches six reps at the same depth and speed standard, add the smallest available load and drop back to four. Progress the lighter day the same way within its range. Across the week, add two sets of a hinge and two sets of a single-leg movement, not necessarily in both sessions.
 
-Film an occasional working set from a stable angle. Check depth, balance over the foot, and whether the last repetitions change dramatically. Use the video to confirm a standard, not to search for microscopic flaws. If the squat is safe, controlled, and improving, it does not need to imitate another lifter's proportions.
+Film an occasional working set from a stable angle. Check depth, balance over the foot, and whether the last reps change dramatically. Use the video to confirm a standard, not to hunt for microscopic flaws. A squat that is safe, controlled, and improving doesn't need to imitate another lifter's proportions.
 
 ## How to know it is working
 
-Track a repeatable set of three to six repetitions and record the variation, load, repetitions, and perceived difficulty. More weight at the same repetition count, more repetitions at the same weight, or the same performance with more control indicates progress.
+Track a repeatable set of three to six reps and record the variation, load, reps, and perceived difficulty. More weight at the same reps, more reps at the same weight, or the same performance with more control all count as progress.
 
-Test under comparable conditions every four to eight weeks. A belt, sleeves, different depth, or different bar position changes the lift, so note them. Do not use estimated one-repetition maximums from very high-repetition sets as exact predictions; they are rough trend tools.
+Test under comparable conditions every four to eight weeks. A belt, sleeves, a different depth, or a different bar position changes the lift, so note them. Estimated one-rep maxes from very high-rep sets are rough trend tools, not exact predictions.
 
 ## If you get stuck
 
-If technique breaks before the legs are truly challenged, reduce the load and practice more submaximal repetitions. If the bottom position is unstable, a pause squat or tempo descent can build control. If the torso collapses, strengthen the trunk and upper back while choosing a load you can brace.
+If technique breaks down before the legs are truly challenged, reduce the load and practice more submaximal reps. If the bottom position is unstable, try a pause squat or tempo descent. If the torso collapses, strengthen the trunk and upper back and pick a load you can brace.
 
-Check recovery before adding work. Hard running, jumping, deadlifting, and high-volume leg training all compete with squat recovery. Move demanding sessions, reduce overlapping sets, or take a lighter week. If one squat style repeatedly irritates a joint, adjust stance, depth, or variation rather than treating pain as a character test.
+Check recovery before adding work. Hard running, jumping, deadlifting, and high-volume leg training all compete with squat recovery. Move demanding sessions, trim overlapping sets, or take a lighter week. If one squat style keeps irritating a joint, adjust stance, depth, or variation rather than treating pain as a character test.
 
 ## A quick note
 

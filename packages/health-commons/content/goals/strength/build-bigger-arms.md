@@ -41,44 +41,44 @@ safety:
   cautionLevel: low
 ---
 
-Bigger arms come from growing the elbow flexors—most visibly the biceps—and the elbow extensors, especially the triceps. Rows, pull-ups, presses, and push-ups already train them, but direct curls and extensions make it easier to give the arms enough focused work without turning every compound lift into an arm test.
+Bigger arms mean growing the elbow flexors, mostly the biceps, and the extensors, mainly the triceps. Rows, pull-ups, presses, and push-ups already train them. Direct curls and extensions add focused work without turning every compound lift into an arm test.
 
-The plan does not need a dozen curl variations. Pick exercises that feel stable, train through a comfortable range, and can be progressed. The triceps make up a large share of upper-arm mass, so a program built entirely around curls leaves much of the opportunity untouched.
+Pick exercises that feel stable, work through a comfortable range, and can be progressed. The triceps make up a large share of upper-arm mass, so a curls-only program leaves much of the opportunity untouched.
 
 ## What to do
 
-- Train both biceps and triceps two or three times per week.
-- Count hard pulling and pressing sets as some arm work, then add direct sets according to recovery.
-- Begin with roughly 6 to 10 challenging weekly sets for each muscle group, including indirect work.
+- Train biceps and triceps two or three times a week.
+- Count hard pulling and pressing sets as some arm work, then add direct sets as recovery allows.
+- Start with about 6 to 10 hard weekly sets per muscle group, including indirect work.
 - Use at least one curl and one triceps movement that feels comfortable at the wrist and elbow.
-- Keep the upper arm reasonably stable and make the target muscle move the load rather than swinging it.
-- Add repetitions within a range before adding weight.
+- Keep the upper arm fairly still so the target muscle moves the load instead of momentum.
+- Add reps within a range before adding weight.
 
-Different arm positions can make exercises feel different, but you do not need to chase a perfect angle. A standing curl and a cable or dumbbell curl with the arm slightly behind the body can cover the biceps well. A pressdown and an overhead extension can train the triceps in different positions. Consistency matters more than collecting variations.
+Don't chase a perfect angle. A standing curl plus a cable or dumbbell curl with the arm slightly behind the body covers the biceps. A pressdown and an overhead extension cover the triceps in two positions. Consistency beats collecting variations.
 
 ## A simple plan
 
-Add arm work to two upper-body or full-body sessions. On day one, perform a dumbbell or cable curl and a pressdown for two or three sets of 8 to 15 repetitions. On day two, perform a hammer curl and an overhead cable or dumbbell extension for the same range. Keep one to three good repetitions in reserve on most sets.
+Add arm work to two upper-body or full-body sessions. On day one, do a dumbbell or cable curl and a pressdown for two or three sets of 8 to 15 reps. On day two, do a hammer curl and an overhead cable or dumbbell extension in the same range. Keep one to three good reps in reserve on most sets.
 
-When every set reaches 15 clean repetitions, add the smallest amount of resistance and return to 8 to 10. If the next available dumbbell jump is large, add repetitions more slowly, use a cable stack, or make the lowering phase more controlled. Do not turn the exercise into a full-body swing simply to claim a heavier load.
+When every set reaches 15 clean reps, add the smallest resistance you can and return to 8 to 10. If the next dumbbell jump is large, add reps more slowly, use a cable stack, or slow the lowering phase. Don't turn the exercise into a full-body swing to claim a heavier load.
 
-Run the plan for eight weeks. If arm performance is improving and elbows feel normal, keep it. If the arms recover easily but nothing progresses for several weeks, add one set per muscle on each training day. If elbows stay sore or pressing and pulling performance falls, remove sets before adding anything.
+Run the plan for eight weeks. If performance is improving and your elbows feel normal, keep it. If the arms recover easily but nothing moves for several weeks, add one set per muscle each training day. If elbows stay sore or pressing and pulling numbers fall, remove sets first.
 
 ## How to know it is working
 
-Track the same curl and extension under similar conditions. Increasing controlled repetitions or resistance is a useful leading sign. If size is the outcome, measure the same point on the relaxed or flexed arm every four weeks at a similar time of day, or use photos with the same lighting and position.
+Track the same curl and extension under similar conditions. More controlled reps or more resistance is an early sign. For size, measure the same point on the relaxed or flexed arm every four weeks at a similar time of day, or take photos with the same lighting and position.
 
-Arm circumference changes with hydration, carbohydrate intake, inflammation, and the temporary pump from training. Do not measure immediately after a workout and call that growth. Look for a trend across two or three months. Visual change often arrives more slowly than strength progress.
+Arm circumference shifts with hydration, carbs, inflammation, and the pump from training, so don't measure right after a workout and call it growth. Look for a trend over two or three months. Visible change usually lags strength.
 
 ## If you get stuck
 
-Make sure the direct sets are actually hard enough. Small isolation exercises can feel uncomfortable before the target muscle is close to its limit, so use controlled technique and a resistance that makes the last repetitions demanding. At the same time, avoid failure on every set; it adds fatigue and may irritate elbows without adding much productive work.
+Make sure the direct sets are actually hard. Isolation exercises can feel uncomfortable before the muscle is near its limit, so use controlled technique and a load that makes the last reps demanding. Don't go to failure every set, though; it adds fatigue and may irritate the elbows without adding much.
 
-If biceps lag, move curls earlier in one weekly session. If triceps lag, prioritize an extension before pressing on another day. Check whether a calorie deficit, inconsistent protein intake, or poor sleep is limiting overall muscle gain. Finally, accept that arm size is influenced by frame and genetics; training changes what you build, not bone structure or muscle attachment points.
+If biceps lag, move curls earlier in one session. If triceps lag, put an extension before pressing on another day. Check whether a calorie deficit, inconsistent protein, or poor sleep is limiting muscle gain overall. Arm size also depends on frame and genetics; training changes what you build, not bone structure or where the muscle attaches.
 
 ## A quick note
 
-Persistent pain at the front or back of the elbow, sudden bruising, or a pop followed by weakness is not normal training soreness. Reduce the provoking work and get an assessment when symptoms are significant or do not settle. Avoid unregulated products marketed as fast muscle builders.
+Persistent pain at the front or back of the elbow, sudden bruising, or a pop followed by weakness is not normal training soreness. Reduce the work that provokes it and get an assessment when symptoms are significant or don't settle. Avoid unregulated products marketed as fast muscle builders.
 
 ## Sources
 

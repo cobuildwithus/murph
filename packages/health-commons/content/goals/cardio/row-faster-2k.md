@@ -45,45 +45,45 @@ safety:
   cautionLevel: moderate
 ---
 
-A faster 2K row requires aerobic capacity, the ability to sustain a high fraction of that capacity, efficient technique, and disciplined pacing. Repeating all-out 2K tests is a poor training plan. Build most fitness with easier rowing, use focused intervals to practice the demand, and test after a complete block.
+A faster 2K takes aerobic capacity, the ability to hold a high fraction of it, efficient technique, and disciplined pacing. Repeating all-out 2K tests is a poor plan. Build most of your fitness with easier rowing, practice the demand with focused intervals, and test after a complete block.
 
-Use the same machine type, drag setup, and test conditions when comparing results. A higher damper does not automatically create a better score and can make technique harder to maintain.
+Compare results only on the same machine type, drag setup, and conditions. A higher damper doesn't automatically mean a better score and can make technique harder to hold.
 
 ## What to do
 
-- Row two to four times per week according to your current training base.
-- Keep at least one longer easy session to support aerobic capacity.
-- Practice one interval session near 2K pace and one sustained strong session if recovery allows.
+- Row two to four times a week, depending on your base.
+- Keep at least one longer easy session for aerobic capacity.
+- Do one interval session near 2K pace, plus one sustained strong session if recovery allows.
 - Learn the stroke sequence: legs, body swing, arms on the drive; arms, body, legs on the recovery.
-- Use a drag factor or damper setting that permits strong, repeatable technique rather than maximum heaviness.
-- Strengthen legs, posterior chain, trunk, and upper back once or twice weekly.
+- Set drag or damper for strong, repeatable technique, not maximum heaviness.
+- Strengthen legs, posterior chain, trunk, and upper back once or twice a week.
 - Plan the test by 500-meter segments instead of sprinting from the first stroke.
 
 ## A simple plan
 
-Use an eight-week block with three rowing sessions. Make one session 30 to 50 minutes easy, broken into manageable blocks if needed. Make one session sustained work such as three ten-minute pieces at a comfortably hard effort with three minutes easy. Make the third 2K-specific.
+Use an eight-week block with three rowing sessions: one of 30 to 50 minutes easy, split into blocks if needed; one of sustained work, such as three ten-minute pieces at a comfortably hard effort with three minutes easy; and one 2K-specific.
 
-Begin the specific session with six 500-meter repeats around current 2K pace plus a few seconds per 500, resting two to three minutes. Progress toward four 750s, three 1,000s, or a mixed set such as 1,000-750-500-250 while keeping splits controlled. The final piece may be faster, but the early pieces should not create a collapse.
+Start the specific session with six 500-meter repeats at current 2K pace plus a few seconds per 500, resting two to three minutes. Progress toward four 750s, three 1,000s, or a mixed set such as 1,000-750-500-250, keeping splits controlled. The last piece can be faster, but the early ones shouldn't cause a collapse.
 
-Every third or fourth week, reduce interval volume. In the final week, lower total work, keep a few short race-pace pieces, and avoid a maximal strength session near the test.
+Every third or fourth week, cut interval volume. In the final week, lower total work, keep a few short race-pace pieces, and avoid a maximal strength session near the test.
 
-For the 2K, start the first 10 strokes assertively, settle quickly to the planned split, keep the middle 1,000 meters controlled, then increase through the final 500 if the plan remains intact.
+For the 2K itself, take the first 10 strokes assertively, settle quickly onto the planned split, keep the middle 1,000 meters controlled, then build through the final 500 if the plan is intact.
 
 ## How to know it is working
 
-Race-pace repetitions become more even, the same split requires a lower perceived effort, and technique holds together later in the set. A 1,000-meter or four-minute benchmark can provide useful evidence without the full recovery cost of a 2K.
+Race-pace repeats get more even, the same split feels easier, and technique holds later into the set. A 1,000-meter or four-minute benchmark gives useful evidence without the recovery cost of a full 2K.
 
 Compare tests on the same machine model and settings. Record total time, average split, stroke rate, and the pattern by 500 meters. A faster result with a smaller late fade is especially strong evidence.
 
 ## If you get stuck
 
-If the opening intervals are much faster than the finish, lower the target and improve pacing. If the legs are strong but breathing fails, restore easy volume. If the back or arms fatigue first, review stroke order and avoid pulling early with the upper body.
+If the opening intervals are much faster than the finish, lower the target and fix the pacing. If the legs are strong but breathing gives out, rebuild easy volume. If the back or arms tire first, review the stroke order and stop pulling early with the upper body.
 
-If every session is hard, remove one quality day. If the score will not move despite consistent training, check sleep, fueling, accumulated strength fatigue, and machine calibration before adding more tests.
+If every session is hard, drop one quality day. If the score won't move despite consistent training, check sleep, fueling, accumulated strength fatigue, and machine calibration before testing again.
 
 ## A quick note
 
-Hard rowing can produce high cardiovascular and trunk demand. Stop for chest pain, fainting, severe unusual breathlessness, or back pain that worsens with each stroke.
+Hard rowing puts a high demand on the heart and trunk. Stop for chest pain, fainting, severe unusual breathlessness, or back pain that worsens with each stroke.
 
 ## Sources
 

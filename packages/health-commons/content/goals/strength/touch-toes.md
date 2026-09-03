@@ -43,44 +43,44 @@ safety:
   cautionLevel: low
 ---
 
-Touching the toes is a simple flexibility skill influenced by the hamstrings, hips, spine, calf tissues, arm length, and the technique used to fold. It can improve with regular stretching and full-range strength work. It is not a universal test of back health, and being unable to touch the toes does not mean something is wrong.
+Touching your toes is a simple flexibility skill shaped by the hamstrings, hips, spine, calf tissues, arm length, and how you fold. It improves with regular stretching and full-range strength work. It isn't a universal test of back health, and not being able to do it doesn't mean something is wrong.
 
-Decide on a standard: feet together, knees straight but not forced backward, and a slow forward fold. If the goal is simply to reach the toes, a small amount of spinal rounding is part of the movement. If the goal is a hip hinge for lifting, that is a different skill and should be trained separately.
+Pick a standard: feet together, knees straight but not pushed backward, and a slow forward fold. If you just want to reach your toes, a little spinal rounding is part of the movement. If you want a hip hinge for lifting, that's a different skill and needs separate training.
 
 ## What to do
 
-- Practice three to five days per week after a short warm-up.
-- Stretch the hamstrings in a position where the back can stay comfortable.
-- Use controlled hinges or Romanian deadlifts to build strength through range.
-- Include calf work if ankle position clearly limits the fold.
-- Breathe normally and stop at strong tension rather than pain.
-- Retest only occasionally; spend most time training rather than checking.
+- Practice three to five days a week after a short warm-up.
+- Stretch the hamstrings in a position where your back stays comfortable.
+- Use controlled hinges or Romanian deadlifts to build strength through the range.
+- Add calf work if ankle position clearly limits the fold.
+- Breathe normally and stop at strong tension, not pain.
+- Retest only now and then; spend most of the time training, not checking.
 
-Research shows that chronic stretching increases range of motion, and resistance training can also improve it. A combination is practical: static stretching improves tolerance to the range, while loaded hinges teach control and strength within it.
+Research shows chronic stretching increases range of motion, and resistance training can improve it too. Combining them is practical: static stretching raises your tolerance to the range, and loaded hinges teach control and strength inside it.
 
 ## A simple plan
 
-Four days per week, warm up with two minutes of walking. Perform two 30-second hamstring stretches per side using a supine strap stretch or a heel on a low surface. Then do two sets of eight slow hip hinges or light Romanian deadlifts, keeping the load close and stopping at a comfortable range.
+Four days a week, warm up with two minutes of walking. Do two 30-second hamstring stretches per side, using a supine strap stretch or a heel on a low surface. Then do two sets of eight slow hip hinges or light Romanian deadlifts, keeping the load close and stopping at a comfortable range.
 
-Finish with three relaxed forward folds. Bend the knees slightly, place the hands on the thighs or shins, and slowly straighten only until tension is strong but tolerable. Hold for ten seconds, come up, and repeat. Over time, use less knee bend.
+Finish with three relaxed forward folds. Bend the knees slightly, put your hands on your thighs or shins, and slowly straighten only until the tension is strong but tolerable. Hold for ten seconds, come up, and repeat. Use less knee bend over time.
 
-Every two weeks, measure fingertip distance from the floor before the routine and after the same warm-up. Progress the stretch by a small increase in range or add a light load to the hinge—not by bouncing harder toward the feet.
+Every two weeks, measure fingertip distance from the floor before the routine and after the same warm-up. Progress by adding a little range to the stretch or a light load to the hinge, not by bouncing harder toward your feet.
 
 ## How to know it is working
 
-Use a ruler or a stable visual reference and record fingertip-to-floor distance under the same conditions. The measure reflects global forward-bend reach, not isolated lumbar-spine mobility. Also note whether the movement feels calmer and whether the range remains available without a long warm-up.
+Use a ruler or a fixed visual reference and record fingertip-to-floor distance under the same conditions. It measures overall forward-bend reach, not lumbar-spine mobility on its own. Also note whether the movement feels calmer and whether the range is there without a long warm-up.
 
-Day-to-day reach changes with temperature, recent exercise, and time of day. Review the trend every two to four weeks. Reaching the toes with slightly bent knees can be an intermediate milestone before the chosen final standard.
+Daily reach shifts with temperature, recent exercise, and time of day, so review the trend every two to four weeks. Reaching the toes with slightly bent knees is a fair intermediate milestone before your chosen final standard.
 
 ## If you get stuck
 
-If the stretch is felt mainly behind the knee with tingling or burning, reduce intensity and change position; neural sensitivity may be involved. If the low back is irritated, use a supine hamstring stretch and train the hinge separately. If progress is temporary, add strength in the new range rather than only longer holds.
+If you feel the stretch mainly behind the knee, with tingling or burning, reduce intensity and change position; neural sensitivity may be involved. If the low back gets irritated, use a supine hamstring stretch and train the hinge separately. If gains keep fading, add strength in the new range instead of only holding longer.
 
-Body proportions affect how easy the task is. Someone with relatively long legs and short arms may need more range than someone built differently. The goal is personal progress, not comparison with another person's geometry.
+Body proportions matter. Someone with relatively long legs and short arms needs more range than someone built differently. Measure your own progress, not someone else's geometry.
 
 ## A quick note
 
-Stop for sharp pain, numbness, or symptoms that travel down a leg. Do not force a forward fold soon after an acute back or hamstring injury. Touching the toes is optional; improved movement and comfort can be valuable even if the fingertips never reach the same landmark as someone else's.
+Stop for sharp pain, numbness, or symptoms that travel down a leg. Don't force a forward fold soon after an acute back or hamstring injury. Touching your toes is optional; better movement and comfort are worth having even if your fingertips never reach the same landmark as someone else's.
 
 ## Sources
 

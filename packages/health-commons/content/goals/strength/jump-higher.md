@@ -41,44 +41,44 @@ safety:
   cautionLevel: moderate
 ---
 
-Jump height comes from producing force quickly and directing it well. That means building lower-body strength, practicing high-quality jumps, and learning to use the ankles, knees, hips, arms, and approach together. Jumping until exhausted is rarely the answer because power falls as fatigue rises.
+Jump height comes from producing force fast and aiming it well. That takes lower-body strength, practice at high-quality jumps, and learning to use the ankles, knees, hips, arms, and approach together. Jumping until you're exhausted rarely helps, because power drops as fatigue rises.
 
-The best program depends on the starting point. Someone new to strength training may gain from basic squats and hinges. A strong athlete may need more specific plyometrics and approach practice. Most people benefit from a small dose of both, with enough recovery between hard landings.
+The right program depends on where you start. New lifters may gain from basic squats and hinges; strong athletes may need more specific plyometrics and approach practice. Most people do best with a small dose of both and enough recovery between hard landings.
 
 ## What to do
 
-- Strength-train the legs two days per week with a squat, hinge, and single-leg movement.
-- Practice maximal or near-maximal jumps one or two days per week while fresh.
-- Keep jump sets small—often three to five repetitions—with full rest.
-- Include lower-intensity hops or skips only in an amount your ankles and knees tolerate.
+- Strength-train the legs two days a week with a squat, hinge, and single-leg movement.
+- Practice maximal or near-maximal jumps one or two days a week while fresh.
+- Keep jump sets small, often three to five reps, with full rest.
+- Add lower-intensity hops or skips only in amounts your ankles and knees tolerate.
 - Practice the exact jump that matters: standing, approach, one-foot, or two-foot.
-- Land quietly with control and stop when jump height or coordination clearly declines.
+- Land quietly and in control. Stop when height or coordination clearly drops.
 
-Research syntheses generally find that plyometric and resistance training can improve jumping, and combined approaches are often useful. The exact response varies with training history. There is no credible promise that a particular program adds a fixed number of inches.
+Research syntheses find that plyometric and resistance training both improve jumping, and combining them often works well. Response varies with training history, and no program can credibly promise a fixed number of inches.
 
 ## A simple plan
 
-On day one, after a warm-up, perform four sets of three countermovement jumps with two minutes of rest. Then do squats for three sets of 4 to 6, Romanian deadlifts for three sets of 6 to 8, and calf raises. On day two, perform four sets of two to three approach jumps, then split squats, a hip-extension exercise, and a low-volume hop or bound drill.
+Day one, after a warm-up: four sets of three countermovement jumps with two minutes of rest, then squats for three sets of 4 to 6, Romanian deadlifts for three sets of 6 to 8, and calf raises. Day two: four sets of two to three approach jumps, then split squats, a hip-extension exercise, and a low-volume hop or bound drill.
 
-Keep at least 48 hours between hard jump days. Begin with 20 or fewer high-effort ground contacts per session. Add contacts only if landings remain controlled and the knees, shins, Achilles tendons, and feet feel normal the next day.
+Leave at least 48 hours between hard jump days. Start with 20 or fewer high-effort ground contacts per session, and add contacts only if landings stay controlled and your knees, shins, Achilles tendons, and feet feel normal the next day.
 
-Progress strength when repetitions are clean. Progress jumping through better intent, approach rhythm, and takeoff—not by adding a weighted vest to every drill. Reassess the program after six to eight weeks and use an easier week if jump quality or leg freshness is declining.
+Add load to the lifts when reps are clean. Improve the jumps through intent, approach rhythm, and takeoff, not a weighted vest on every drill. Reassess after six to eight weeks, and take an easier week if jump quality or leg freshness is falling.
 
 ## How to know it is working
 
-Use the same test, surface, shoes, reach method, and warm-up. Measure a standing vertical or an approach touch once every two to four weeks. Smartphone video against a known reference can help, but the method should stay consistent.
+Use the same test, surface, shoes, reach method, and warm-up every time. Measure a standing vertical or approach touch every two to four weeks. Smartphone video against a known reference works if the method stays consistent.
 
-Track strength and jump quality alongside height. A stronger squat, faster-feeling takeoff, and more controlled landing are useful leading signs. Day-to-day jump height changes with fatigue, motivation, and measurement error, so use the best of several rested attempts and look at the trend.
+Track strength and jump quality too. A stronger squat, faster-feeling takeoff, and more controlled landing are good leading signs. Daily jump height moves with fatigue, motivation, and measurement error, so use the best of several rested attempts and watch the trend.
 
 ## If you get stuck
 
-If strength is low, keep jump volume modest and prioritize progressive lower-body lifting. If strength is solid but the jump is slow, add low-volume explosive work and longer rests. If approach jumps vary widely, spend more time on rhythm and takeoff position rather than adding gym exercises.
+If strength is low, keep jump volume modest and focus on progressive lower-body lifting. If strength is solid but the jump feels slow, add low-volume explosive work with longer rests. If approach jumps vary a lot, work on rhythm and takeoff position rather than adding gym exercises.
 
-If the knees, shins, or Achilles stay sore, reduce ground contacts and remove depth jumps or other high-impact drills. Hard court play, sprinting, and running all count toward plyometric load. The body sees total landings, not the name of the workout.
+If your knees, shins, or Achilles stay sore, cut ground contacts and drop depth jumps and other high-impact drills. Hard court play, sprinting, and running all count toward plyometric load; the body sees total landings, not workout names.
 
 ## A quick note
 
-Jump on a clear, nonslip surface with enough overhead space. Stop after an acute lower-leg injury, significant swelling, or pain that changes takeoff or landing. Beginners do not need high boxes or depth jumps; simple jumps performed well are enough to start.
+Jump on a clear, nonslip surface with enough overhead space. Stop after an acute lower-leg injury, significant swelling, or pain that changes your takeoff or landing. Beginners don't need high boxes or depth jumps; simple jumps done well are enough to start.
 
 ## Sources
 

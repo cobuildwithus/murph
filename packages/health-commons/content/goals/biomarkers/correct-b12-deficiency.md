@@ -42,45 +42,45 @@ safety:
     - New weakness, trouble walking, rapidly worsening numbness, confusion, or vision changes deserves prompt medical assessment.
 ---
 
-Vitamin B12 is needed for normal blood formation and nervous-system function. Deficiency can cause anemia, numbness, balance problems, cognitive changes, a sore tongue, or fatigue—but it can also be found before symptoms appear. Neurologic injury can occur without obvious anemia, so meaningful symptoms deserve timely treatment.
+Vitamin B12 is needed to make blood cells and keep nerves working. Deficiency can cause anemia, numbness, balance problems, cognitive changes, a sore tongue, or fatigue, and it is sometimes found before symptoms appear. Nerve damage can happen without obvious anemia, so real symptoms deserve prompt treatment.
 
-The long-term plan depends on why B12 is low. A vegan diet without reliable supplementation may need oral replacement and a permanent food or supplement routine. Pernicious anemia, gastric or intestinal surgery, celiac or Crohn’s disease, and other absorption problems may require high-dose oral therapy or injections for life. Metformin and acid-suppressing medicines can also contribute.
+The long-term plan depends on why B12 is low. A vegan diet without reliable supplementation may need oral replacement plus a permanent food or supplement routine. Pernicious anemia, stomach or intestinal surgery, celiac or Crohn’s disease, and other absorption problems may need high-dose oral therapy or injections for life. Metformin and acid-suppressing medicines can also contribute.
 
 ## What to do
 
-- **Confirm the diagnosis in context.** Serum B12 is useful but imperfect. Methylmalonic acid can help when the result is borderline, although kidney dysfunction affects it. Review the blood count and folate rather than relying on one number.
-- **Treat promptly when neurologic signs are present.** Do not wait months for dietary changes alone if numbness, weakness, balance, cognition, or vision is changing.
+- **Confirm the diagnosis in context.** Serum B12 is useful but imperfect. Methylmalonic acid can help with a borderline result, though kidney dysfunction affects it. Check the blood count and folate too.
+- **Treat promptly when neurologic signs are present.** If numbness, weakness, balance, cognition, or vision is changing, don’t wait months on diet alone.
 - **Choose a route that fits the cause.** High-dose oral B12 works for many people because a small amount is absorbed passively. Injections may be preferred for severe symptoms, very low levels, uncertain adherence, or significant malabsorption.
-- **Use dependable food sources.** Meat, fish, eggs, dairy, and fortified foods provide B12. Unfortified plant foods are not reliable sources.
-- **Review medicines thoughtfully.** Metformin and proton-pump inhibitors can be clinically important. Do not stop them on your own; decide whether monitoring or replacement solves the problem.
+- **Use dependable food sources.** Meat, fish, eggs, dairy, and fortified foods provide B12; unfortified plant foods don’t reliably.
+- **Review your medicines.** Metformin and proton-pump inhibitors can matter clinically. Don’t stop them on your own; decide whether monitoring or replacement solves the problem.
 - **Find the reason for recurrence.** Ask about pernicious anemia, prior stomach or bowel surgery, autoimmune disease, celiac disease, inflammatory bowel disease, and restrictive eating.
-- **Plan maintenance.** Correcting the level once is not enough when the cause remains. A lifelong replacement schedule can be simple and effective.
+- **Plan maintenance.** Correcting the level once is not enough if the cause remains. A lifelong replacement schedule can be simple and effective.
 
 ## A simple plan
 
-Record baseline B12, methylmalonic acid if measured, blood count, neurologic symptoms, diet, medicines, surgery, digestive conditions, and the suspected cause. Agree on oral versus injected replacement and the follow-up interval.
+Write down baseline B12, methylmalonic acid if measured, blood count, neurologic symptoms, diet, medicines, surgeries, digestive conditions, and the suspected cause. Agree on oral or injected replacement and when to follow up.
 
-For six to eight weeks, take the prescribed replacement consistently. If diet is the cause, choose a permanent daily or weekly supplement routine or reliable fortified foods. Once a week, note numbness, balance, energy, cognition, and mouth symptoms rather than checking them constantly.
+For six to eight weeks, take the prescribed replacement every time. If diet is the cause, settle on a permanent daily or weekly supplement or reliable fortified foods. Once a week, not constantly, note numbness, balance, energy, cognition, and mouth symptoms.
 
-Repeat the laboratory or clinical assessment at the planned time. Do not stop maintenance simply because the serum B12 becomes high after supplementation; interpretation should reflect dose and clinical response.
+Repeat the labs or clinical assessment at the planned time. A high serum B12 after supplementation is not a reason to stop maintenance; read it against the dose and your clinical response.
 
 ## How to know it is working
 
-The blood count and metabolic markers should normalize when they were abnormal. Energy and mouth symptoms may improve relatively quickly. Neurologic symptoms often take longer and may not fully reverse if deficiency was prolonged. Stable walking, sensation, and cognition with no new deficits can be an important early success.
+Abnormal blood counts and metabolic markers should normalize. Energy and mouth symptoms may improve fairly quickly; neurologic symptoms often take longer and may not fully reverse after a long deficiency. Stable walking, sensation, and cognition with no new deficits is an important early win.
 
 ## What to expect
 
-New blood-cell production can improve within days to weeks, while nerve recovery may take months. Serum B12 rises rapidly after treatment and does not by itself prove tissue recovery. The cause determines whether therapy can stop or must continue indefinitely.
+Blood-cell production can pick up within days to weeks; nerve recovery may take months. Serum B12 rises quickly after treatment, and that alone does not prove tissue recovery. The cause decides whether therapy can stop or must continue indefinitely.
 
-Do not compare your maintenance dose with another person’s without comparing causes. Someone replacing a dietary gap may need a modest dependable oral routine, while someone with pernicious anemia or major malabsorption may need lifelong high-dose oral therapy or injections. Both plans can be correct. The useful question is whether the route and schedule reliably prevent recurrence for your situation. If injections are chosen, arrange the next dose before leaving the current appointment so an administrative gap does not become a medical relapse.
+Don’t compare your maintenance dose with someone else’s without comparing causes. Filling a dietary gap may take a modest, dependable oral routine; pernicious anemia or major malabsorption may need lifelong high-dose oral therapy or injections. What matters is whether your route and schedule reliably prevent recurrence. If you get injections, book the next dose before leaving the appointment, so a scheduling gap doesn’t become a relapse.
 
 ## If you get stuck
 
-Check adherence, dose, diagnosis, and absorption. Folate, iron, thyroid disease, kidney disease, and other neurologic conditions can produce overlapping symptoms. If the blood markers improve but numbness or balance worsens, seek reevaluation rather than escalating supplements alone.
+Check adherence, dose, diagnosis, and absorption. Folate, iron, thyroid disease, kidney disease, and other neurologic conditions can cause overlapping symptoms. If blood markers improve but numbness or balance worsens, get reevaluated instead of taking more supplements.
 
 ## A quick note
 
-Folic acid can improve anemia while allowing B12-related neurologic injury to continue, so do not treat unexplained macrocytic anemia with folate alone. Severe or progressive neurologic symptoms deserve prompt medical care.
+Folic acid can improve the anemia while B12-related nerve injury continues, so never treat unexplained macrocytic anemia with folate alone. Severe or progressive neurologic symptoms need prompt medical care.
 
 ## Sources
 

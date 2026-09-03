@@ -44,7 +44,7 @@ safety:
   cautionLevel: moderate
 ---
 
-A faster 5K comes from improving both aerobic endurance and the speed you can sustain without fading. Most runners do best with a large share of easy running, one controlled threshold-style workout, one shorter interval or hill session when they can recover from it, and enough easy days between them.
+A faster 5K comes from improving both aerobic endurance and the speed you can hold without fading. Most runners do best with a large share of easy running, one controlled threshold-style workout, one shorter interval or hill session when they can recover from it, and enough easy days between.
 
 The exact balance depends on your running history. Adding quality to an inconsistent base usually produces fatigue before fitness.
 
@@ -53,36 +53,36 @@ The exact balance depends on your running history. Adding quality to an inconsis
 - Establish at least three stable running days before adding a second hard day.
 - Keep easy runs truly conversational so the quality session can be high quality.
 - Practice sustained strong running in repeatable blocks rather than racing every workout.
-- Use shorter intervals to develop speed and running economy without making every repetition maximal.
-- Include one longer easy run that gradually exceeds your expected 5K duration.
-- Strength-train once or twice weekly and avoid placing a demanding leg session immediately before key running.
+- Use shorter intervals for speed and running economy without making every rep maximal.
+- Include one longer easy run that gradually grows past your expected 5K duration.
+- Strength-train once or twice a week, and don't put a demanding leg session right before key running.
 - Practice an even or slightly negative race split.
 
 ## A simple plan
 
-Use an eight-week block with four running days if your current training supports it. A basic week includes two easy runs of 30 to 50 minutes, one longer easy run of 50 to 80 minutes, and one quality session.
+Use an eight-week block with four running days if your current training supports it: two easy runs of 30 to 50 minutes, one longer easy run of 50 to 80 minutes, and one quality session.
 
-Alternate the purpose of the quality session. One week, run three to five blocks of five minutes at a comfortably hard effort with two minutes easy. The next week, run six to eight repetitions of two minutes around current 5K effort with two minutes easy. Finish with the sense that one more repeat was possible.
+Alternate the purpose of the quality session. One week, run three to five blocks of five minutes at a comfortably hard effort with two minutes easy. The next, run six to eight repeats of two minutes around current 5K effort with two minutes easy. Finish feeling one more rep was possible.
 
-Experienced runners who already tolerate four days can add four to six relaxed strides after an easy run. Do not add a second exhausting workout by default. Increase weekly running by small increments and use every third or fourth week to hold or reduce volume.
+Experienced runners who already handle four days can add four to six relaxed strides after an easy run. Don't add a second exhausting workout by default. Increase weekly running in small increments, and use every third or fourth week to hold or reduce volume.
 
-Ten to fourteen days before the target 5K, complete a controlled workout such as three one-kilometer repetitions near goal pace with generous easy recovery. In race week, reduce total volume, keep a few short faster efforts, and arrive with rested legs.
+Ten to fourteen days before the target 5K, do a controlled workout such as three one-kilometer repeats near goal pace with generous easy recovery. In race week, cut volume, keep a few short faster efforts, and arrive with rested legs.
 
 ## How to know it is working
 
-Useful leading signals are a faster pace at the same easy effort, more stable pace across strong five-minute blocks, and less slowdown in the final repetitions. A 20-minute controlled time trial or shorter race can offer evidence without repeating a full 5K constantly.
+Useful leading signs: a faster pace at the same easy effort, steadier pace across strong five-minute blocks, and less slowdown in the final reps. A 20-minute controlled time trial or a shorter race gives evidence without constantly repeating a full 5K.
 
-Test or race a 5K after six to eight weeks under comparable conditions. Weather, hills, crowding, and course measurement can move the result. Review the splits: a faster time with an even effort is stronger evidence than an early sprint followed by a large fade.
+Test or race a 5K after six to eight weeks under comparable conditions. Weather, hills, crowding, and course measurement can move the result. Look at the splits: a faster time with even effort is stronger evidence than an early sprint and a big fade.
 
 ## If you get stuck
 
-If hard sessions go well but race times do not, pacing may be the issue. Start closer to sustainable effort and save the hardest running for the final third. If intervals deteriorate, reduce their pace or number and restore easy volume.
+If hard sessions go well but race times don't, pacing may be the issue. Start closer to a sustainable effort and save the hardest running for the final third. If intervals deteriorate, reduce their pace or number and rebuild easy volume.
 
-If you are training consistently but chronically tired, examine sleep, fueling, iron-risk context, and the number of hard days before adding more work. A plateau is often solved by several stable weeks, not a more dramatic workout.
+If you're training consistently but always tired, look at sleep, fueling, iron-risk context, and the number of hard days before adding work. A plateau is often fixed by several stable weeks, not a more dramatic workout.
 
 ## A quick note
 
-Fast training should stop for chest pain, fainting, severe unusual breathlessness, or pain that changes your stride. Persistent fatigue, recurrent injury, or menstrual disruption can signal inadequate recovery or energy availability.
+Stop fast training for chest pain, fainting, severe unusual breathlessness, or pain that changes your stride. Persistent fatigue, recurring injury, or menstrual disruption can signal inadequate recovery or energy availability.
 
 ## Sources
 

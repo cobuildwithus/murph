@@ -43,42 +43,42 @@ safety:
   cautionLevel: moderate
 ---
 
-Nighttime reflux often improves when there is more time between the last meal and lying down, the upper body is elevated correctly, and persistent gastroesophageal reflux disease is treated. Start with the pattern—meal timing, position, and symptoms—rather than eliminating a long list of foods without evidence that they bother you.
+Nighttime reflux usually improves with a longer gap between your last meal and lying down, correct upper-body elevation, and treatment of persistent gastroesophageal reflux disease. Start with meal timing, position, and symptoms rather than cutting a long list of foods without evidence they bother you.
 
 ## What to do
 
-- Finish the last substantial meal at least three hours before lying down when nighttime symptoms are common.
-- Elevate the head and upper torso by about 6 to 8 inches using a wedge or bed risers. A pile of pillows may bend the body and be less effective.
-- Try left-side sleeping if it is comfortable; anatomy can make reflux less likely in that position for some people.
-- Identify personal triggers from repeated experience. Common possibilities include alcohol, high-fat meals, chocolate, mint, coffee, acidic foods, and spicy foods, but universal restriction is unnecessary.
-- If weight is a relevant contributor, gradual weight loss can reduce GERD symptoms. Avoid crash diets that worsen sleep or nutrition.
-- Stop smoking and review medicines that may affect reflux with a clinician or pharmacist.
+- When nighttime symptoms are common, finish your last substantial meal at least three hours before lying down.
+- Raise your head and upper torso about 6 to 8 inches with a wedge or bed risers. A pile of pillows may bend the body and work less well.
+- Try left-side sleeping if it's comfortable. For some people, anatomy makes reflux less likely there.
+- Learn your triggers from experience. Alcohol, high-fat meals, chocolate, mint, coffee, acidic foods, and spicy foods are common, but you needn't restrict them all.
+- If weight is contributing, gradual weight loss can reduce GERD symptoms. Avoid crash diets that hurt sleep or nutrition.
+- Stop smoking, and review medicines that may affect reflux with a clinician or pharmacist.
 
 ## A simple plan
 
-For two weeks, record the final meal time, time you lay down, nighttime reflux severity, and awakenings. Choose one change first: a three-hour meal-to-bed gap. Keep dinner otherwise normal so the result is interpretable.
+For two weeks, record last meal time, when you lay down, reflux severity, and awakenings. Make one change first: a three-hour gap between dinner and bed, with dinner otherwise unchanged.
 
-If symptoms continue, add proper head-of-bed elevation for the next week. If position matters, compare comfortable left-side and usual nights. Do not change meal timing, food list, pillows, and medication all at once.
+If symptoms continue, add proper head-of-bed elevation the next week, and if position seems to matter, compare comfortable left-side nights with usual nights. Don't change everything at once.
 
-Keep dinner nutritionally adequate while changing its timing. Skipping food all evening can create hunger and is not required. If the schedule forces a late meal, test a smaller portion with less of your known trigger foods and keep the more substantial meal earlier. The aim is a sustainable pattern, not fear of eating after an arbitrary clock time.
+Dinner should still be a full meal, just earlier. If your schedule forces a late meal, make it smaller with fewer known triggers and eat the larger meal earlier.
 
-If you use an over-the-counter antacid or acid-reducing medicine, follow the label and discuss frequent use with a clinician. Prescription proton-pump inhibitors work best when taken at the instructed time; do not improvise dose changes based on one night.
+If you use an over-the-counter antacid or acid reducer, follow the label and discuss frequent use with a clinician. Prescription proton-pump inhibitors work best taken at the instructed time, so don't improvise dose changes after one bad night.
 
 ## How to know it is working
 
-Count nights with burning, sour taste, cough, or reflux-related waking. Also track sleep disruption and next-day throat symptoms. Improvement should be apparent across similar meals and schedules, not only on nights when you ate very little.
+Count nights with burning, a sour taste, cough, or reflux-related waking, plus sleep disruption and next-day throat symptoms. Improvement should show across similar meals and schedules, not only on nights when you ate very little.
 
-Wearable sleep data cannot identify reflux. A lower heart rate or better sleep score does not prove the esophagus is protected. Symptom improvement is useful, but persistent GERD may still need medical treatment to prevent complications.
+Wearable sleep data can't detect reflux, and a better sleep score doesn't prove your esophagus is protected. Fewer symptoms is a good sign, but persistent GERD may still need medical treatment to prevent complications.
 
 ## If you get stuck
 
-Check the mechanics. Extra pillows under only the head are not the same as elevating the torso. A late “small snack” may still trigger symptoms. Cough, throat clearing, asthma symptoms, and chest discomfort have other possible causes and should not automatically be labeled reflux.
+Check the mechanics: extra pillows under only the head don't elevate the torso, and a late "small snack" can still set off symptoms. Cough, throat clearing, asthma symptoms, and chest discomfort have other possible causes and shouldn't be labeled reflux by default.
 
-If symptoms occur more than occasionally, wake you regularly, or continue despite appropriate treatment, see a clinician. They can review diagnosis, medication timing, hiatal hernia, and whether testing or endoscopy is warranted.
+If symptoms happen more than occasionally, wake you regularly, or continue despite appropriate treatment, see a clinician. They can review the diagnosis, medication timing, hiatal hernia, and whether testing or endoscopy is warranted.
 
 ## A quick note
 
-Seek urgent care for chest pressure, shortness of breath, vomiting blood, black stools, fainting, or severe pain. Promptly discuss trouble swallowing, food sticking, unexplained weight loss, anemia, or persistent vomiting with a clinician.
+Seek urgent care for chest pressure, shortness of breath, vomiting blood, black stools, fainting, or severe pain. Bring trouble swallowing, food sticking, unexplained weight loss, anemia, or persistent vomiting to a clinician promptly.
 
 ## Sources
 

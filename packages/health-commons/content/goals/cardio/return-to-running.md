@@ -43,27 +43,27 @@ safety:
   cautionLevel: moderate
 ---
 
-After a break, your memory of running fitness returns faster than your tissues' tolerance for impact. Restart from what you can do comfortably now, use run-walk intervals if needed, and rebuild frequency and duration before trying to recover old pace.
+After a break, your memory of running fitness comes back faster than your tissues' tolerance for impact. Restart from what you can do comfortably now, use run-walk intervals if needed, and rebuild frequency and duration before chasing old pace.
 
-The reason for the break matters. A busy month calls for a different return than surgery, a bone stress injury, pregnancy, a heart or lung illness, or repeated post-exertional worsening. This page fits an uncomplicated break; clinician-led restrictions take priority.
+Why you stopped matters. A busy month calls for a different return than surgery, a bone stress injury, pregnancy, a heart or lung illness, or repeated post-exertional worsening. This page fits an uncomplicated break; your clinician's restrictions take priority.
 
 ## What to do
 
-- Begin after ordinary walking and daily activity are comfortable.
-- Use two or three nonconsecutive running days rather than returning immediately to the old schedule.
-- Start at roughly half or less of previous typical duration when the break was substantial.
-- Keep effort conversational and use planned walking before fatigue changes your stride.
+- Start once ordinary walking and daily activity are comfortable.
+- Run two or three nonconsecutive days, not the old schedule right away.
+- After a substantial break, start at half or less of your previous typical duration.
+- Keep effort conversational and take planned walks before fatigue changes your stride.
 - Progress duration first, then frequency, then speed.
-- Keep lower-impact cardio for additional fitness while running tolerance catches up.
-- Monitor the session, the hours afterward, and the next morning.
+- Keep lower-impact cardio for extra fitness while running tolerance catches up.
+- Watch the session, the hours after, and the next morning.
 
 ## A simple plan
 
-For the first week, complete two or three 20- to 30-minute sessions alternating two to four minutes of easy running with one to two minutes walking. If you have maintained fitness and the break was short, the running intervals may be longer; they should still feel deliberately easy.
+In the first week, do two or three 20- to 30-minute sessions alternating two to four minutes of easy running with one to two minutes of walking. If the break was short and fitness held, running intervals can be longer but should still feel deliberately easy.
 
-Repeat the week if soreness is more than mild or lingers. When response is normal, add five total running minutes to one or two sessions. After two stable weeks, join intervals into longer continuous blocks. Do not add a hard workout until you have several weeks of comfortable running.
+Repeat the week if soreness is more than mild or lingers. When your response is normal, add five total running minutes to one or two sessions. After two stable weeks, join the intervals into longer continuous blocks. Don't add a hard workout until you've had several weeks of comfortable running.
 
-A useful progression is:
+A useful progression:
 
 1. Restore a repeatable two- or three-day schedule.
 2. Restore comfortable session duration.
@@ -71,23 +71,23 @@ A useful progression is:
 4. Add strides or short controlled hills.
 5. Add event-specific speed only when the base is stable.
 
-If the break followed injury, use the criteria and limits from your rehabilitation professional rather than a calendar alone.
+If the break followed an injury, follow your rehabilitation professional's criteria and limits rather than the calendar alone.
 
 ## How to know it is working
 
-Running time rises while discomfort stays mild, stable, and short-lived. Normal muscle soreness should settle; focal pain should not intensify through the run or change your gait. Energy and sleep should remain normal, and the next session should not require several extra days.
+Running time goes up while discomfort stays mild, stable, and short-lived. Normal soreness should settle; focal pain should not build through the run or change your gait. Energy and sleep stay normal, and the next session shouldn't need several extra days.
 
-Old pace is not the first benchmark. A better early signal is that the same easy route feels smoother and you can finish with reserve. Once weekly duration has been stable for several weeks, compare pace if it still serves the goal.
+Old pace isn't the first benchmark; a better early sign is the same easy route feeling smoother with something in reserve. Once weekly duration has been stable for several weeks, compare pace if it still serves the goal.
 
 ## If you get stuck
 
-If every attempt recreates pain, stop repeating the same dose and get the problem assessed. If breathing and energy are unexpectedly poor after illness, reduce the plan and seek guidance when symptoms persist or worsen. If motivation is the barrier, use a ten-minute minimum and restore the routine before the distance.
+If every attempt brings the pain back, stop repeating the dose and get it assessed. If breathing and energy are unexpectedly poor after illness, scale back, and seek guidance if symptoms persist or worsen. If motivation is the barrier, set a ten-minute minimum and rebuild the routine before the distance.
 
-Do not make up missed training or test your old personal best to see where you stand. The fastest durable return is often the one that feels conservative for the first month.
+Don't make up missed training or test your old personal best to see where you stand. A return that feels conservative for the first month is usually the fastest durable one.
 
 ## A quick note
 
-Return after surgery, fracture, pregnancy complications, significant cardiopulmonary illness, or a bone stress injury should follow individualized clearance. Stop for chest pain, fainting, severe unusual breathlessness, swelling, or pain that changes your gait.
+Returning after surgery, a fracture, pregnancy complications, significant cardiopulmonary illness, or a bone stress injury should follow individualized clearance. Stop for chest pain, fainting, severe unusual breathlessness, swelling, or pain that changes your gait.
 
 ## Sources
 

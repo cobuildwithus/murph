@@ -43,45 +43,43 @@ safety:
   cautionLevel: low
 ---
 
-Making friends as an adult is less about finding the perfect stranger and more about creating enough repeated, low-pressure contact for trust to form. One exciting conversation can help, but friendship usually grows when people see each other again, share ordinary experiences, and begin to make plans outside the original setting.
-
-The practical goal is therefore a pipeline, not a popularity contest: choose places where compatible people recur, become a familiar face, make small bids for connection, and follow up with the few relationships that feel mutual.
+Adult friendship grows from repeated, low-pressure contact. One great conversation can help, but trust usually forms when people see each other again, share ordinary experiences, and start making plans outside the setting where they met. The work is mostly showing up where compatible people recur, then making small bids and following up.
 
 ## What to do
 
-- **Choose two recurring settings.** Look for a weekly class, club, volunteer role, recreational sport, professional group, faith community, or neighborhood activity. Favor repeated attendance and built-in interaction over large one-time events.
-- **Match the setting to your real interests.** You do not need a rare passion, but you do need a reason to return even before a friendship forms. That protects the plan from one disappointing evening.
-- **Attend enough times to become familiar.** Give a promising group several visits before evaluating it, unless it is clearly unsafe or hostile. Familiarity changes the quality of conversation.
-- **Start with small, specific questions.** Ask about the activity, remember one detail, and follow up next time. Curiosity is more useful than trying to perform an impressive version of yourself.
-- **Make a concrete invitation.** Suggest coffee after the group, a walk, working on the shared hobby, or attending the next event together. Include a day or two; “we should hang out” is easy to lose.
-- **Follow up once.** If someone is busy, offer another option. If interest remains vague or one-sided, stay friendly and invest elsewhere rather than making the relationship a referendum on your worth.
-- **Let some relationships stay light.** Acquaintances, activity friends, close friends, and practical allies all add connection. Not every promising person needs to become your closest confidant.
+- **Choose two recurring settings.** A weekly class, club, volunteer role, recreational sport, professional group, faith community, or neighborhood activity. Favor repeated attendance and built-in interaction over large one-time events.
+- **Match the setting to your real interests.** You don't need a rare passion, just a reason to return before a friendship forms, so one disappointing evening doesn't end the plan.
+- **Attend enough times to become familiar.** Give a promising group several visits before judging it, unless it is clearly unsafe or hostile.
+- **Start with small, specific questions.** Ask about the activity, remember one detail, and follow up next time. Curiosity beats performing.
+- **Make a concrete invitation.** Suggest coffee after the group, a walk, working on the shared hobby, or going to the next event together. Name a day or two; "we should hang out" is easy to lose.
+- **Follow up once.** If someone is busy, offer another option. If interest stays vague or one-sided, stay friendly and invest elsewhere rather than treating it as a referendum on your worth.
+- **Let some relationships stay light.** Acquaintances, activity friends, close friends, and practical allies all add connection.
 
 ## A simple plan
 
-For a short trial, pick one primary recurring activity and one backup. Put the available meetings on the calendar now. Choose a setting you can reach reliably and afford; an ideal group that you rarely attend cannot create repetition.
+For a short trial, pick one primary recurring activity and one backup, and put the meetings on the calendar now. Choose a setting you can reach reliably and afford; a group you rarely attend can't create repetition.
 
-At each visit, learn a name or continue one conversation beyond logistics. Write one detail afterward so you can ask about it next time. After a few visits, notice who seems warm, available, and compatible.
+At each visit, learn a name or take one conversation beyond logistics, and jot down one detail to ask about next time. After a few visits, notice who seems warm, available, and compatible.
 
-When a conversation feels promising, make one specific invitation rather than forcing a weekly quota. Keep it easy: “I’m grabbing coffee after this next Thursday—want to join?” or “Would you like to practice together Saturday morning?” If they accept, confirm the plan and follow up afterward with a brief message.
+When a conversation feels promising, make one specific invitation rather than forcing a weekly quota. Keep it easy: "I'm grabbing coffee after this next Thursday, want to join?" or "Would you like to practice together Saturday morning?" If they accept, confirm the plan and send a brief message afterward.
 
-Track visits, conversations, invitations, and plans outside the group. Do not score how charming you felt. At the end of the trial, keep the setting if it is producing familiarity or enjoyment. Change it if the structure prevents interaction, the schedule is unrealistic, or the culture is a poor fit.
+Track visits, conversations, invitations, and plans outside the group, not how charming you felt. At the end of the trial, keep the setting if it's producing familiarity or enjoyment; change it if the structure prevents interaction, the schedule is unrealistic, or the culture is a poor fit.
 
 ## How to know it is working
 
-Early progress is behavioral: you attend, recognize people, are greeted by name, and make invitations. The next stage is reciprocity: someone asks you a question, saves you a seat, follows up, or suggests a plan. A growing friendship begins to exist outside the setting where you met.
+Early progress is behavioral: you attend, recognize people, get greeted by name, and make invitations. Next comes reciprocity: someone asks you a question, saves you a seat, follows up, or suggests a plan. A growing friendship starts to exist outside the setting where you met.
 
-Count opportunities and mutual follow-through, not just new “friends.” There is normal randomness in who is available and compatible. A healthy process can include polite no’s and relationships that never deepen. Over several months, success means more people you enjoy, more routine social contact, and at least a few ties receiving mutual effort.
+Count opportunities and mutual follow-through, not just new "friends." Availability and compatibility are partly random; a healthy process includes polite no's and relationships that never deepen. Over several months, success means more people you enjoy, more routine social contact, and a few ties getting mutual effort.
 
 ## If you get stuck
 
-If you attend but never speak, choose smaller groups or roles with a task, partner rotation, or shared project. Arrive a little early and stay briefly afterward, when conversation is easier. If events exhaust you, schedule one manageable activity rather than stacking multiple social demands.
+If you attend but never speak, choose smaller groups or roles with a task, partner rotation, or shared project. Arrive a little early and stay briefly afterward, when conversation is easier. If events exhaust you, schedule one manageable activity rather than stacking several social demands.
 
-If invitations feel frightening, use a graded ladder: ask a question, talk again next week, exchange contact information, then suggest a short activity. If social anxiety consistently blocks action or causes severe distress, evidence-based therapy can help. If accessibility, language, cost, discrimination, or caregiving limits options, search for groups designed around that constraint rather than blaming motivation.
+If invitations feel frightening, use a graded ladder: ask a question, talk again next week, exchange contact details, then suggest a short activity. If social anxiety consistently blocks action or causes severe distress, evidence-based therapy can help. If accessibility, language, cost, discrimination, or caregiving limits your options, look for groups built around that constraint rather than blaming your motivation.
 
 ## A quick note
 
-Meet new contacts in public places, protect personal information, and tell someone where you are when appropriate. Respect a no or lack of response, and pay attention to pressure, manipulation, or boundary violations. Friendship should become more mutual and safe over time, not more coercive.
+Meet new contacts in public places, protect personal information, and tell someone where you are when appropriate. Respect a no or a lack of response, and watch for pressure, manipulation, or boundary violations. Friendship should become more mutual and safe over time, not more coercive.
 
 ## Sources
 

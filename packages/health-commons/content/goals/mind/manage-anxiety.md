@@ -42,42 +42,42 @@ safety:
   cautionLevel: moderate
 ---
 
-Managing anxiety does not mean eliminating every anxious feeling. Anxiety is a normal alarm system, and trying to force it to zero can make it feel even more important. A more useful goal is to make anxiety **less frequent, less intense, or less controlling**—and to get better at doing what matters even when some anxiety is present.
+Anxiety is a normal alarm system, and trying to force it to zero can make it feel even more important. A better goal is to make anxiety **less frequent, less intense, or less controlling**, and to get better at doing what matters while some anxiety is present.
 
-Start by choosing the part of anxiety that is actually getting in your way. It might be avoiding calls, lying awake with worry, repeatedly seeking reassurance, feeling panicky in meetings, or losing an hour to “what if” thoughts. A specific problem gives you something workable; “never feel anxious” does not.
+Pick the part that actually gets in your way: avoiding calls, lying awake worrying, seeking reassurance, feeling panicky in meetings, or losing an hour to "what if" thoughts. A specific problem is workable; "never feel anxious" is not.
 
 ## What to do
 
-- **Track interference, not every sensation.** Once a day, rate how much anxiety got in the way from 0 to 10 and note one activity you did or avoided. This is usually more useful than monitoring your body all day.
-- **Reduce avoidable amplifiers.** Inconsistent sleep, large or late caffeine doses, heavy alcohol use, missed meals, and constant stressful media can all make the alarm system louder. Change one obvious amplifier rather than rebuilding your entire life at once.
-- **Practice one settling skill while reasonably calm.** Slow, comfortable breathing, progressive muscle relaxation, or a brief grounding exercise can help lower arousal. A skill rehearsed daily is easier to use when anxiety rises.
-- **Approach mild, everyday avoidance gradually.** Use this only for a situation you already know is safe, such as a routine call or low-stakes meeting. Break the activity into manageable steps and repeat each step until it becomes more ordinary.
-- **Give worry a container.** Write worries down and set a short daily time to review them. For each one, choose a next action, a date to revisit it, or an explicit decision to let it remain uncertain.
-- **Keep doing meaningful things.** Exercise, time with other people, regular meals, and purposeful activities are not cures, but they protect the rest of life from shrinking around anxiety.
+- **Track interference, not every sensation.** Once a day, rate how much anxiety got in the way from 0 to 10 and note one activity you did or avoided.
+- **Reduce avoidable amplifiers.** Inconsistent sleep, large or late caffeine doses, heavy alcohol use, missed meals, and constant stressful media all make the alarm louder. Change one obvious amplifier at a time.
+- **Practice one settling skill while reasonably calm.** Slow, comfortable breathing, progressive muscle relaxation, or a brief grounding exercise can lower arousal. Daily rehearsal makes it easier to use when anxiety rises.
+- **Approach mild, everyday avoidance gradually.** Only for situations you already know are safe, such as a routine call or low-stakes meeting. Break it into manageable steps and repeat each until it feels ordinary.
+- **Give worry a container.** Write worries down and set a short daily time to review them. For each one, choose a next action, a date to revisit it, or an explicit decision to leave it uncertain.
+- **Keep doing meaningful things.** Exercise, time with other people, regular meals, and purposeful activities aren't cures, but they stop the rest of life shrinking around anxiety.
 
-Evidence-based care for an anxiety disorder often uses cognitive behavioral therapy, applied relaxation, guided self-help, medication, or a combination chosen with a clinician. A self-management plan can use compatible ideas—practice, gradual approach, and regular review—without pretending to provide a diagnosis or a course of therapy.
+Evidence-based care for an anxiety disorder often uses cognitive behavioral therapy, applied relaxation, guided self-help, medication, or a combination chosen with a clinician. This plan borrows compatible ideas (practice, gradual approach, regular review); it is not a diagnosis or a course of therapy.
 
 ## A simple plan
 
-For the next four weeks, pick one safe, everyday situation in which anxiety is limiting you. Write a five-step ladder from “uncomfortable but manageable” to the full activity. If phone calls are the problem, the steps might be drafting what to say, making a low-stakes call, calling someone familiar, completing one necessary call, and eventually making the harder call.
+For four weeks, pick one safe, everyday situation where anxiety limits you. Write a five-step ladder from "uncomfortable but manageable" to the full activity. For phone calls, the steps might be drafting what to say, a low-stakes call, calling someone familiar, one necessary call, and eventually the harder call.
 
-On at least four days each week, practice your chosen settling skill for five to ten minutes. Two or three times a week, complete one step on the ladder without rushing to escape or repeatedly checking whether you feel calm. Stay long enough to learn that discomfort can rise and fall while you remain capable.
+On at least four days each week, practice your settling skill for five to ten minutes. Two or three times a week, complete one step on the ladder without rushing to escape or repeatedly checking whether you feel calm. Stay long enough to learn that discomfort can rise and fall while you remain capable.
 
-At the end of each day, record only three things: anxiety interference from 0 to 10, the step you attempted, and what helped you continue. Review the week once. If a step is consistently overwhelming, make it smaller. If it has become routine, move up. The plan should stretch your range, not flood you.
+Each evening, record anxiety interference from 0 to 10, the step you attempted, and what helped you continue. Review once a week: if a step is consistently overwhelming, make it smaller; if it has become routine, move up. The plan should stretch you, not flood you.
 
 ## How to know it is working
 
-Progress may show up before anxiety scores fall. You might make the call while nervous, recover from a tense meeting in 20 minutes instead of two hours, sleep without checking the clock repeatedly, or need less reassurance. Those are meaningful improvements in function.
+Progress may show up before anxiety scores fall. You might make the call while nervous, recover from a tense meeting in 20 minutes instead of two hours, sleep without checking the clock repeatedly, or need less reassurance.
 
-Look at two- to four-week trends rather than one difficult day. A useful direction is less avoidance, shorter recovery, and more participation in ordinary life. If tracking makes you more watchful, stop the daily score and use a single weekly question: “What did anxiety stop me from doing this week?”
+Look at two- to four-week trends rather than one hard day. You want less avoidance, shorter recovery, and more participation in ordinary life. If tracking makes you more watchful, drop the daily score and ask one weekly question: "What did anxiety stop me from doing this week?"
 
 ## If you get stuck
 
-Check whether the goal is too broad, the step is too large, or an amplifier is still dominating. Also ask whether you are using the coping skill to make all discomfort disappear before acting. The aim is to make action possible, not to pass a calmness test.
+Check whether the goal is too broad, the step too large, or an amplifier still dominating. Also ask whether you're using the coping skill to erase all discomfort before acting. The aim is action, not a calmness test.
 
-Do not use this generic ladder for trauma memories, compulsions, eating-disorder fears, panic attacks or feared body sensations, health anxiety, or a situation whose safety is uncertain. Those need a condition-specific or professionally guided plan.
+Don't use this generic ladder for trauma memories, compulsions, eating-disorder fears, panic attacks or feared body sensations, health anxiety, or a situation whose safety is uncertain. Those need a condition-specific or professionally guided plan.
 
-If anxiety is persistent, escalating, causing major avoidance, or repeatedly disrupting sleep, work, school, eating, or relationships, professional support can make the plan safer and more effective. A clinician can also check medication effects, thyroid problems, substance effects, and other conditions that may feel like anxiety.
+If anxiety is persistent, escalating, causing major avoidance, or repeatedly disrupting sleep, work, school, eating, or relationships, professional support can make the plan safer and more effective. A clinician can also check medication effects, thyroid problems, substance effects, and other conditions that can feel like anxiety.
 
 ## A quick note
 

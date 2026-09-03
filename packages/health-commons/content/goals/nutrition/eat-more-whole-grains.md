@@ -36,7 +36,7 @@ safety:
     - Choose certified gluten-free grains if medically required.
 ---
 
-Whole grains retain more of the grain’s fiber and nutrient-rich structure than refined grains. You do not need to replace every carbohydrate. Start with one meal where a whole-grain option tastes good and is easy to repeat.
+Whole grains keep more of the grain's fiber and nutrient-rich structure than refined grains. You don't need to replace every carbohydrate. Start with one meal where a whole-grain option tastes good and is easy to repeat.
 
 ## What to do
 
@@ -45,45 +45,45 @@ Choose two swaps for the next month:
 - oats or a whole-grain cereal at breakfast;
 - whole-grain bread or tortillas for a regular lunch;
 - brown rice, quinoa, barley, farro, bulgur, corn, or another intact grain at dinner;
-- whole-grain pasta when its texture works for the dish.
+- whole-grain pasta when its texture suits the dish.
 
-Read the ingredient list: “whole” grain near the beginning is more useful than brown coloring or marketing words such as multigrain. Mix whole and refined versions at first if that makes the change more enjoyable.
+Read the ingredient list: "whole" grain near the top means more than brown coloring or words like multigrain. Mix whole and refined versions at first if that makes the change easier to enjoy.
 
 ## A simple plan
 
-Start with a four-week substitution plan.
+Run a four-week substitution plan.
 
-In week one, inspect the grains you eat most often. Pick one daily or near-daily food—bread, cereal, rice, pasta, or tortillas—and compare options. For packaged foods, look for a whole grain listed first and compare fiber, sodium, price, and taste within the category. A product does not need an impressive front label.
+In week one, look at the grains you eat most often. Pick one daily or near-daily food, such as bread, cereal, rice, pasta, or tortillas, and compare options. For packaged foods, look for a whole grain listed first, then compare fiber, sodium, price, and taste within that category.
 
-In week two, test one breakfast or lunch swap five times. Try oats, whole-grain toast, a whole-grain wrap, or a higher-fiber cereal. Keep the toppings and meal size similar so you can judge the grain rather than an entirely different meal.
+In week two, test one breakfast or lunch swap five times. Try oats, whole-grain toast, a whole-grain wrap, or a higher-fiber cereal. Keep toppings and meal size similar so you're judging the grain, not a whole new meal.
 
-In week three, cook one intact grain for dinner. Make extra and freeze individual portions. Brown rice, quinoa, barley, bulgur, farro, buckwheat, millet, sorghum, and corn are all options; cultural staples matter more than a narrow “wellness” list. Mix the new grain with the familiar one if that improves acceptance.
+In week three, cook one intact grain for dinner and freeze extra portions. Brown rice, quinoa, barley, bulgur, farro, buckwheat, millet, sorghum, and corn all work, and cultural staples matter more than a narrow "wellness" list. Mix the new grain with a familiar one if that helps.
 
-In week four, decide which two changes are worth keeping. A reasonable long-term pattern can contain both whole and refined grains. Refined rice, pasta, or bread may be more comfortable around hard training, during digestive flares, or simply in a favorite dish. The goal is more whole grain, not a purity rule.
+In week four, decide which two changes are worth keeping. A reasonable long-term pattern can include both whole and refined grains; refined rice, pasta, or bread may sit better around hard training, during digestive flares, or simply in a favorite dish. You're after more whole grain, not a purity rule.
 
-If fiber rises significantly, increase gradually and keep fluid adequate. Anyone with celiac disease should use grains and oats that are appropriately labeled gluten-free.
+If fiber rises a lot, increase gradually and drink enough fluid. Anyone with celiac disease should use grains and oats that are appropriately labeled gluten-free.
 
 ## How to know it is working
 
-Track the number of whole-grain eating occasions per week or the proportion of your usual grain choices that are whole. Digestion, fullness, taste, cost, and preparation time determine whether the swap will last.
+Track whole-grain eating occasions per week, or the share of your usual grain choices that are whole. Digestion, fullness, taste, cost, and prep time decide whether a swap lasts.
 
 ## What to expect
 
-The main early changes may be greater fullness and a gradual change in bowel habits. Cardiometabolic benefits are associated with the overall long-term pattern and should not be attributed to one serving.
+The first changes you notice may be more fullness and a gradual shift in bowel habits. Cardiometabolic benefits are associated with the overall long-term pattern, not any one serving.
 
 ## If you get stuck
 
-Try a different grain or cooking method instead of forcing one you dislike. Batch-cook and freeze intact grains, use quick-cooking oats, or choose bread as the simplest entry point. Increase gradually if the extra fiber causes gas.
+Try a different grain or cooking method instead of forcing one you dislike. Batch-cook and freeze intact grains, use quick-cooking oats, or start with bread as the simplest entry point. Increase gradually if the extra fiber causes gas.
 
 ## Make it last
 
-Keep the winning grains on the shopping list and learn one storage method for each. Bread can be frozen by the slice, cooked grains can be frozen in portions, and oats or quick-cooking grains can cover rushed meals. Use whole-grain versions where they improve the meal and keep refined versions where texture, digestion, culture, or performance needs make them useful.
+Keep the winning grains on the shopping list and learn one storage method for each: bread freezes by the slice, cooked grains freeze in portions, and oats or quick-cooking grains cover rushed meals.
 
-Rotate rather than escalate. Once whole-grain bread and oats are regular, there is no need to buy an expensive ancient grain unless you enjoy it. Corn, brown rice, buckwheat, millet, sorghum, and other staples can broaden variety. If family members resist the change, mix grains or change one meal at a time. A lasting habit may be “whole grain at breakfast and lunch most days,” not “every grain must be whole.” Review digestion and satisfaction as well as labels; a higher-fiber product that no one eats is not the better choice in practice.
+Rotate rather than escalate. Once whole-grain bread and oats are routine, there's no need to buy an expensive ancient grain unless you enjoy it. Corn, brown rice, buckwheat, millet, sorghum, and other staples add variety. If family members push back, mix grains or change one meal at a time. Judge digestion and satisfaction as well as labels; a higher-fiber product that no one eats isn't the better choice.
 
 ## A quick note
 
-Celiac disease requires gluten-free choices such as certified gluten-free oats, brown rice, corn, quinoa, buckwheat, or sorghum. Wheat-free is not automatically gluten-free.
+Celiac disease requires gluten-free choices such as certified gluten-free oats, brown rice, corn, quinoa, buckwheat, or sorghum. Wheat-free isn't automatically gluten-free.
 
 ## Sources
 

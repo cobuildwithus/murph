@@ -45,18 +45,18 @@ safety:
     - New severe pain, inability to bear weight after a fall, or sudden back pain with height loss needs prompt assessment.
 ---
 
-Fractures happen when bone strength and the force of a fall or impact meet. That means prevention has two equally important sides: strengthen and treat the skeleton, and reduce the chance or severity of falls. A DXA scan helps estimate bone density, but age, prior fractures, steroid exposure, falls, family history, and other conditions can matter just as much.
+Fractures happen when weak bone meets the force of a fall, so prevention has two equally important sides: strengthen and treat the skeleton, and reduce the chance or severity of falls. A DXA scan helps estimate bone density, but age, prior fractures, steroid exposure, falls, family history, and other conditions can matter just as much.
 
-A prior hip or vertebral fragility fracture is a major warning even if a bone-density report is not in the osteoporosis range. In people at high risk, medication is often the most powerful way to reduce fracture probability. Exercise, calcium, vitamin D, and home safety support that treatment rather than replace it.
+A prior hip or vertebral fragility fracture is a major warning even if the bone-density report is not in the osteoporosis range. For people at high risk, medication is often the most powerful way to reduce fracture probability. Exercise, calcium, vitamin D, and home safety back up that treatment rather than replace it.
 
 ## What to do
 
-- **Get screened when appropriate.** Current U.S. guidance recommends osteoporosis screening for women 65 and older and for younger postmenopausal women at increased risk. Other people may need evaluation based on fractures, steroids, low weight, or medical conditions.
+- **Get screened when appropriate.** Current U.S. guidance recommends osteoporosis screening for women 65 and older and for younger postmenopausal women at increased risk. Others may need evaluation because of fractures, steroids, low weight, or medical conditions.
 - **Treat osteoporosis when benefit is meaningful.** Bisphosphonates, denosumab, bone-building medicines, and other options fit different risk levels. Administration, duration, and transitions matter; some medicines should not be stopped without a follow-on plan.
-- **Strength train.** Focus on legs, hips, back, and grip two or three times weekly. Stronger muscles improve both loading and the ability to catch or control a stumble.
+- **Strength train.** Work legs, hips, back, and grip two or three times a week. Stronger muscles improve both bone loading and your ability to catch or control a stumble.
 - **Practice balance.** Tai chi, single-leg work near support, step drills, and physical therapy can reduce fall risk when progressed appropriately.
-- **Make the home easier to navigate.** Improve lighting, secure loose rugs and cords, add stair rails or grab bars where needed, and keep frequently used items accessible.
-- **Review vision, feet, and medicines.** Poor vision, neuropathy, sedatives, blood-pressure drops, and inappropriate footwear are common modifiable risks.
+- **Make the home easier to move through.** Improve lighting, secure loose rugs and cords, add stair rails or grab bars where needed, and keep frequently used items within reach.
+- **Review vision, feet, and medicines.** Poor vision, neuropathy, sedatives, blood-pressure drops, and unsuitable footwear are common modifiable risks.
 - **Meet calcium, vitamin D, protein, and energy needs.** Correct deficiencies without megadosing. Muscle loss from under-eating can increase falls even when the diet seems “clean.”
 - **Avoid smoking and heavy alcohol.** Both affect bone; alcohol and sedating substances also increase falls.
 
@@ -64,27 +64,27 @@ A prior hip or vertebral fragility fracture is a major warning even if a bone-de
 
 Build a risk snapshot: prior fractures and falls, DXA and fracture-risk estimate if available, medicines including steroids and sedatives, vision, balance, footwear, home hazards, calcium and protein intake, vitamin D status when relevant, and current bone medication.
 
-For 12 weeks, do two supervised or well-designed strength sessions, three five-minute balance sessions, and one home-safety pass. Book overdue vision or medication review. Make prescribed osteoporosis treatment and calcium-rich foods part of stable routines.
+For 12 weeks, do two supervised or well-designed strength sessions, three five-minute balance sessions, and one home-safety pass. Book any overdue vision or medication review. Make prescribed osteoporosis treatment and calcium-rich foods part of stable routines.
 
-If you fall, log where, why, footwear, dizziness, and injury. The point is to find a pattern, not to blame yourself.
+If you fall, log where, why, footwear, dizziness, and injury. The point is to find a pattern, not to assign blame.
 
 ## How to know it is working
 
-The ultimate signal is remaining free of fragility fractures. Nearer-term signs include fewer falls or near-falls, better chair-rise and stair ability, longer controlled balance, stronger lifts, corrected vision or medication issues, and consistent bone treatment. DXA is repeated only at intervals that can show meaningful change; stable density may be success.
+The ultimate signal is staying free of fragility fractures. Nearer-term signs include fewer falls or near-falls, better chair-rise and stair ability, longer controlled balance, stronger lifts, corrected vision or medication issues, and consistent bone treatment. DXA is repeated only at intervals that can show meaningful change; stable density may be success.
 
 ## What to expect
 
-Balance and strength can improve within weeks, while fracture reduction from bone treatment and remodeling develops over months. Risk never becomes zero. A person can fracture with a “better” DXA, and someone with low density may avoid fractures through treatment and fall prevention.
+Balance and strength can improve within weeks, while fracture reduction from bone treatment and remodeling develops over months. Risk never reaches zero. A person can fracture with a “better” DXA, and someone with low density may avoid fractures through treatment and fall prevention.
 
-Reassess after any fall, not only after a fracture. A near-fall may expose an unsafe step, a nighttime bathroom route, new dizziness, or declining foot sensation while there is still time to act. Also revisit the plan after a new sedating medicine, vision change, hospitalization, or long period of inactivity. Fracture risk is dynamic, so a once-completed checklist is less useful than a small review after meaningful changes.
+Reassess after any fall, not just after a fracture. A near-fall may expose an unsafe step, a nighttime bathroom route, new dizziness, or declining foot sensation while there is still time to act. Also revisit the plan after a new sedating medicine, vision change, hospitalization, or long stretch of inactivity. A short review after each of these beats a checklist completed once.
 
 ## If you get stuck
 
-If fear of falling is reducing activity, ask for physical therapy rather than becoming less mobile. Review dizziness on standing, neuropathy, hearing, vision, sedatives, alcohol, urgency at night, and home layout. If bone density worsens despite treatment, check adherence, administration, malabsorption, and secondary causes before assuming the medicine failed.
+If fear of falling is shrinking your activity, ask for physical therapy rather than becoming less mobile. Review dizziness on standing, neuropathy, hearing, vision, sedatives, alcohol, urgency at night, and home layout. If bone density worsens despite treatment, check adherence, administration, malabsorption, and secondary causes before assuming the medicine failed.
 
 ## A quick note
 
-After a fragility fracture, ask about coordinated fracture-liaison care so the cause and prevention plan do not get lost after the acute injury. Do not discontinue denosumab or another osteoporosis medicine without a clinician-directed transition.
+After a fragility fracture, ask about coordinated fracture-liaison care so the cause and prevention plan do not get lost after the acute injury. Do not stop denosumab or another osteoporosis medicine without a clinician-directed transition.
 
 ## Sources
 

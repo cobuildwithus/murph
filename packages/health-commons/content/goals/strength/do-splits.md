@@ -42,48 +42,48 @@ safety:
   cautionLevel: moderate
 ---
 
-The splits are a specific flexibility skill, not a general health requirement. A front split mainly asks for hamstring range in the front leg and hip-flexor range in the back leg. A middle split emphasizes hip abduction and adductor tolerance. Pick one version first because the training is not identical.
+The splits are a specific flexibility skill. A front split mainly needs hamstring range in the front leg and hip-flexor range in the back leg. A middle split leans on hip abduction and adductor tolerance. Pick one version first, because the training differs.
 
-Progress comes from repeated, tolerable exposure over months, plus enough strength to control the widening range. Forcing the body to the floor in one session creates pain more reliably than flexibility. Use blocks, chairs, or sliders so the range can be scaled precisely.
+Progress comes from repeated, tolerable exposure over months, plus enough strength to control the new range. Forcing yourself to the floor in one session produces pain more reliably than flexibility.
 
 ## What to do
 
-- Practice the chosen split three to five days per week after warming up.
+- Practice the chosen split three to five days a week after warming up.
 - Use static stretches for the main limiting muscle groups.
-- Add loaded or active exercises through range, such as split squats, Romanian deadlifts, or controlled lateral lunges.
-- Keep the hips and stance consistent enough to compare sessions.
-- Use supports under the hands or hips rather than hanging passively at the limit.
-- Increase depth gradually and avoid bouncing into end range.
+- Add loaded or active work through the range: split squats, Romanian deadlifts, or controlled lateral lunges.
+- Keep hips and stance consistent enough to compare sessions.
+- Put supports under the hands or hips instead of hanging passively at the limit.
+- Increase depth gradually and don't bounce into end range.
 
-Meta-analysis supports chronic stretching for increasing range of motion. Resistance training through full ranges can also help. The evidence does not justify a universal number of minutes or promise that every person will reach the same floor position; anatomy and starting range vary.
+Meta-analysis supports chronic stretching for range of motion, and full-range resistance training can help too. The evidence doesn't set a universal number of minutes or promise everyone the same floor position; anatomy and starting range vary.
 
 ## A simple plan
 
-For a front split, warm up for five minutes. Perform two 30- to 45-second hamstring stretches per side, two hip-flexor stretches, eight slow Romanian deadlifts, and six split squats per side. Then enter a supported front split for three 20-second holds per side.
+For a front split, warm up for five minutes. Do two 30- to 45-second hamstring stretches per side, two hip-flexor stretches, eight slow Romanian deadlifts, and six split squats per side. Then move into a supported front split for three 20-second holds per side.
 
-For a middle split, use two adductor stretches, eight controlled lateral lunges per side, and three supported wide-stance holds. Keep the feet and knees in a position that feels stable. Use yoga blocks or a chair so the hands can share weight.
+For a middle split, do two adductor stretches, eight controlled lateral lunges per side, and three supported wide-stance holds. Keep feet and knees where they feel stable, with yoga blocks or a chair so the hands can share the weight.
 
-Practice four days per week, with two sessions slightly easier. Every two weeks, measure the distance from the pelvis to a stable reference under the same warm-up. Lower the support by a small amount only when the current depth feels controlled.
+Practice four days a week, two of them slightly easier. Every two weeks, measure the distance from your pelvis to a fixed reference after the same warm-up. Lower the support a little only when the current depth feels controlled.
 
-Alternate harder and easier sessions. On a harder day, use the full sequence and a deeper supported position. On an easier day, shorten the holds and emphasize active leg lifts or gentle range. This keeps the habit without asking the same tissues for maximal end-range work every day. Do not place the hardest split practice immediately after exhausting sprint, kicking, or heavy leg training when coordination and force control are reduced.
+On a harder day, run the full sequence and use a deeper supported position. On an easier day, shorten the holds and focus on active leg lifts or gentle range. Don't schedule the hardest split work right after exhausting sprint, kicking, or heavy leg training, when coordination and force control drop.
 
-Front-split sides often differ. Train both, but let each side use its own appropriate support instead of forcing the stiffer side to match immediately.
+Front-split sides often differ; train both, but give each its own support height rather than forcing the stiffer side to catch up.
 
 ## How to know it is working
 
-Track support height, floor distance, comfort, and whether you can exit the position using your own strength. A photo from the side or front every two to four weeks can document range if the camera position remains the same.
+Track support height, distance to the floor, comfort, and whether you can exit the position under your own strength. A photo from the side or front every two to four weeks documents range if the camera stays in the same spot.
 
-Temporary post-warm-up range is expected. Long-term progress means the starting position improves and the deeper range feels less threatening. A full split reached only by collapsing onto blocks is not the same as controlled ownership.
+Extra range right after a warm-up is expected. Long-term progress means the starting position improves and the deeper range feels less threatening. A full split reached by collapsing onto blocks isn't a controlled one.
 
 ## If you get stuck
 
-If stretching produces no lasting change, add loaded strength in the relevant range and reduce the intensity of holds. If the front hip pinches, change stance and pelvic position rather than forcing deeper. If the back knee is uncomfortable, add padding or choose a standing variation.
+If stretching produces no lasting change, add loaded strength in the relevant range and reduce the intensity of holds. If the front hip pinches, change stance and pelvic position rather than pushing deeper. If the back knee is uncomfortable, add padding or use a standing variation.
 
-Progress often slows near end range. Do not respond by doubling volume. Use smaller increases, more recovery, and consistent technique. Bone structure can limit some middle-split positions, so a different hip rotation or an incomplete but comfortable range may be the appropriate endpoint.
+Progress often slows near end range. Don't respond by doubling volume; use smaller increases, more recovery, and consistent technique. Bone structure can limit some middle-split positions; a different hip rotation or a comfortable incomplete range may be the right endpoint.
 
 ## A quick note
 
-Stop for sharp pain, a pop, bruising, numbness, or pain that changes walking. Do not train deep splits on a fresh muscle strain or without a way to support and exit the position. The skill is optional; range gained safely still counts even if the pelvis never reaches the floor.
+Stop for sharp pain, a pop, bruising, numbness, or pain that changes how you walk. Don't train deep splits on a fresh muscle strain or without a way to support and exit the position. The skill is optional; range gained safely still counts even if the pelvis never reaches the floor.
 
 ## Sources
 

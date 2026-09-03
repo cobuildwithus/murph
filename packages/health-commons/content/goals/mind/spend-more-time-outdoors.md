@@ -43,45 +43,45 @@ safety:
   cautionLevel: low
 ---
 
-Outdoor time can combine several useful inputs at once: daylight, movement, a change of setting, contact with nature, and sometimes social connection. You do not need a wilderness trip. A neighborhood walk, park bench, garden, balcony, or outdoor meal can all count.
+Outdoor time bundles several useful things: daylight, movement, a change of setting, contact with nature, and sometimes company. You do not need a wilderness trip. A neighborhood walk, park bench, garden, balcony, or outdoor meal all count.
 
-Research links nature exposure with wellbeing and finds short-term benefits in some intervention studies, but it does not establish one universal dose. A widely repeated “120 minutes per week” finding came from an observational study, not a prescription. Use it as context, not a threshold that turns 119 minutes into failure.
+Research links nature exposure with wellbeing, and some intervention studies find short-term benefits, but there is no established universal dose. The widely repeated "120 minutes per week" figure came from an observational study, not a prescription.
 
 ## What to do
 
-- **Define what counts where you live.** Choose accessible settings you can use repeatedly: a tree-lined street, park, courtyard, trail, or outdoor workspace.
-- **Attach outdoors to something already happening.** Walk after lunch, take the first call outside, drink morning coffee by a window or outdoors, or add ten minutes after commuting.
-- **Start with frequency.** Ten to twenty minutes on several days may be easier to maintain than one large weekend target.
+- **Decide what counts where you live.** Pick accessible settings you can return to: a tree-lined street, park, courtyard, trail, or outdoor workspace.
+- **Attach outdoors to something already happening.** Walk after lunch, take the first call outside, drink morning coffee by a window or outdoors, or add ten minutes after the commute.
+- **Start with frequency.** Ten to twenty minutes on several days is easier to keep up than one big weekend target.
 - **Match the activity to your need.** Walk when restless, sit quietly when depleted, meet someone when isolated, or garden when you want a tangible task.
-- **Reduce phone competition.** Keep the phone available for safety but avoid spending the entire session inside the same feed you left the house to escape.
-- **Use daylight deliberately.** Earlier outdoor light can support alertness and circadian timing. It should complement adequate sleep, not become another rigid protocol.
-- **Plan for weather and access.** Identify shade, warm clothing, accessible routes, indoor conservatories, or covered spaces so the habit does not depend on perfect conditions.
+- **Reduce phone competition.** Keep the phone for safety, but do not spend the whole session inside the feed you left the house to escape.
+- **Use daylight deliberately.** Earlier outdoor light can help alertness and circadian timing, alongside enough sleep. Do not make it another rigid protocol.
+- **Plan for weather and access.** Know your shade, warm clothing, accessible routes, indoor conservatories, or covered spaces, so the habit does not depend on perfect conditions.
 
 ## A simple plan
 
-For two weeks, choose three recurring outdoor anchors. Example: ten minutes after lunch on workdays, a 30-minute park visit on Saturday, and one outdoor conversation or meal each week. Put them where they naturally fit rather than adding a separate “nature appointment” to an overloaded day.
+For two weeks, choose three recurring outdoor anchors, such as ten minutes after lunch on workdays, a 30-minute park visit on Saturday, and one outdoor conversation or meal each week. Put them where they already fit rather than adding a "nature appointment" to an overloaded day.
 
-Track days outdoors and a simple before-and-after state: more settled, unchanged, or more depleted. Also note the setting and activity. This helps distinguish whether you benefit more from nature, light, movement, quiet, or connection.
+Track days outdoors and a simple before-and-after state: more settled, unchanged, or more depleted. Note the setting and activity too, so you can tell whether you get more from nature, light, movement, quiet, or connection.
 
-After two weeks, keep the easiest anchor and expand only if it is useful. You might lengthen a walk, add another day, or choose a greener setting. If the habit fails because leaving home is difficult, begin at a doorway, stoop, courtyard, or open-air public place you can reach safely.
+After two weeks, keep the easiest anchor and expand only if it helps: lengthen a walk, add another day, or pick a greener setting. If the habit fails because leaving home is hard, start at a doorway, stoop, courtyard, or open-air public place you can reach safely.
 
-Pair outdoor time with another goal only when the pairing makes both easier. A walk can support activity and social connection; a hard training session outdoors may not provide the quiet recovery you were seeking.
+Pair outdoor time with another goal only when the pairing makes both easier. A hard training session outdoors may not give you the quiet recovery you wanted.
 
 ## How to know it is working
 
-The clearest measure is that outdoor time appears in ordinary weeks without a major planning burden. Secondary signs may include more daily movement, better daytime alertness, less screen time, improved mood after some sessions, and a stronger sense of connection to place.
+The clearest sign is outdoor time showing up in ordinary weeks without much planning. Secondary signs include more daily movement, better daytime alertness, less screen time, better mood after some sessions, and a stronger sense of connection to place.
 
-Do not require every outing to feel restorative. Weather, allergies, noise, crowds, and stress can change the experience. Review the monthly pattern and keep the settings that actually help.
+Not every outing has to feel restorative; weather, allergies, noise, crowds, and stress all change the experience. Look at the monthly pattern and keep the settings that help.
 
 ## If you get stuck
 
-If you work long hours, move one existing activity outside rather than adding time. If your neighborhood feels unsafe or inaccessible, use daylight near an open space, a public indoor garden, community program, or accessible route with another person.
+If you work long hours, move one existing activity outside rather than adding time. If your neighborhood feels unsafe or inaccessible, use daylight near an open space, a public indoor garden, a community program, or an accessible route with another person.
 
-If outdoor time consistently worsens symptoms, consider heat sensitivity, cold, air quality, pollen, migraines, mobility, medication effects, or trauma-related safety concerns. Adapt the setting and timing instead of forcing exposure.
+If outdoor time consistently makes symptoms worse, consider heat sensitivity, cold, air quality, pollen, migraines, mobility, medication effects, or trauma-related safety concerns. Change the setting and timing instead of forcing exposure.
 
 ## A quick note
 
-Check weather, air quality, hydration needs, sun protection, and local safety in proportion to the outing. Avoid staring at the sun. People with heat illness risk, severe allergies, light-sensitive conditions, or limited mobility may need a tailored plan.
+Check weather, air quality, hydration needs, sun protection, and local safety in proportion to the outing. Do not stare at the sun. People at risk of heat illness, or with severe allergies, light-sensitive conditions, or limited mobility, may need a tailored plan.
 
 ## Sources
 

@@ -4,7 +4,7 @@ entityType: goal_template
 key: goal_template:improve-balance-as-i-age
 slug: improve-balance-as-i-age
 title: Improve Balance as I Age
-summary: Improve steadiness and reduce fall risk with progressive balance practice, stronger legs, safer surroundings, and attention to vision, feet, medicines, and dizziness.
+summary: Get steadier and cut fall risk with progressive balance practice, stronger legs, a safer home, and attention to vision, feet, medicines, and dizziness.
 status: field-testing
 quality: usable
 aliases:
@@ -46,34 +46,34 @@ safety:
     - Practice beside a stable counter or rail; repeated falls, fainting, severe dizziness, new neurologic symptoms, or inability to stand safely needs professional assessment.
 ---
 
-Balance improves when it is challenged **often, progressively, and safely**. Stronger legs and feet matter, but so do vision, inner-ear function, sensation, blood pressure, medicines, footwear, and the home environment. The goal is steadier real-life movement and fewer falls, not a circus pose held far from support.
+Balance improves when you challenge it often, progressively, and safely. Stronger legs and feet matter, but so do vision, inner-ear function, sensation, blood pressure, medicines, footwear, and your home. The aim is steadier everyday movement and fewer falls, not a circus pose held far from support.
 
 ## What to do
 
-- **Practice near stable support.** Stand beside a kitchen counter or heavy table, not in the middle of the room. Use fingertip support as needed and reduce it only when you remain steady.
-- **Progress stance.** Begin with feet together, then semi-tandem (one foot about half a step ahead), tandem (heel directly in front of the other toes), and single-leg stance. A useful challenge creates small corrections without repeated loss of control.
+- **Practice near stable support.** Stand beside a kitchen counter or heavy table, not in the middle of the room. Use fingertip support as needed and reduce it only when you stay steady.
+- **Progress your stance.** Start with feet together, then semi-tandem (one foot about half a step ahead), tandem (heel directly in front of the other toes), and single-leg stance. A useful challenge produces small corrections without repeated loss of control.
 - **Practice movement, not only stillness.** Add weight shifts, marching, stepping in different directions, turning, reaching, and stepping over a low object. Falls happen during movement.
-- **Strengthen the legs.** Chair stands, step-ups, calf raises, hip hinges, and side steps improve the force needed to recover from a stumble.
-- **Train three or more days per week.** Five to ten minutes is enough for a focused session. Balance responds to frequent practice better than a single long weekly session.
-- **Use tai chi or a structured fall-prevention program.** These combine balance, controlled movement, attention, and progression. A class also provides supervision and social connection.
-- **Review non-exercise drivers.** Vision changes, numb feet, painful footwear, dizziness on standing, sedating medicines, and low blood pressure can raise fall risk. Exercise cannot cancel them out.
-- **Make the environment easier.** Improve lighting, secure loose rugs, clear walkways, install useful rails, and keep frequently used items within easy reach. Environmental support preserves activity rather than making someone “less independent.”
+- **Strengthen the legs.** Chair stands, step-ups, calf raises, hip hinges, and side steps build the force you need to recover from a stumble.
+- **Train three or more days per week.** Five to ten focused minutes per session is enough, and frequent practice beats one long weekly session.
+- **Use tai chi or a structured fall-prevention program.** These combine balance, controlled movement, attention, and progression, and a class adds supervision and company.
+- **Review the non-exercise drivers.** Vision changes, numb feet, painful footwear, dizziness on standing, sedating medicines, and low blood pressure can raise fall risk. Exercise can't cancel them out.
+- **Make the environment easier.** Improve lighting, secure loose rugs, clear walkways, install useful rails, and keep everyday items within easy reach. These changes preserve activity; they don't make you “less independent.”
 
 ## A simple plan
 
 For eight weeks, practice for eight minutes on four days per week beside a counter. Do two rounds of 20 seconds each with feet together, one foot half a step ahead (semi-tandem), and heel-to-toe (tandem); ten slow marches; five steps in each direction; and three controlled turns each way. Finish with eight chair stands and ten calf raises.
 
-When a position is easy for two sessions, reduce hand support, narrow the stance, add a gentle head turn, or practice on a slightly less predictable surface—but change only one variable. Once per week, practice a real task such as a curb, stairs, or uneven ground with appropriate support or another person nearby.
+When a position is easy for two sessions, reduce hand support, narrow the stance, add a gentle head turn, or practice on a slightly less predictable surface, changing only one variable at a time. Once a week, practice a real task such as a curb, stairs, or uneven ground with appropriate support or another person nearby.
 
 ## How to know it is working
 
-Look for less hand support, longer stable holds, smoother turns, easier curbs and stairs, fewer stumbles, and more confidence walking outside. Do not use confidence alone if falls continue; combine it with actual near-fall and fall frequency and functional tasks.
+Look for less hand support, longer stable holds, smoother turns, easier curbs and stairs, fewer stumbles, and more confidence walking outside. If falls continue, judge by near-fall and fall counts and everyday tasks, not confidence alone.
 
 ## If you get stuck
 
-If practice never feels challenging, it may be too easy. If you are repeatedly grabbing support, it is too hard. Adjust to the middle. If one side is much less steady, add a little extra practice but investigate new or pronounced asymmetry.
+If practice never feels challenging, it may be too easy. If you keep grabbing support, it's too hard. Adjust to the middle. If one side is much less steady, give it a little extra practice, but get a new or pronounced asymmetry investigated.
 
-Balance problems that come with spinning, faintness, hearing change, numbness, vision loss, or a medication change need cause-specific attention. After a fall, fear can lead to less movement and further weakness; a supervised program can rebuild safety and confidence together.
+Balance problems that come with spinning, faintness, hearing change, numbness, vision loss, or a medication change need cause-specific attention. After a fall, fear can lead to less movement and more weakness; a supervised program can rebuild safety and confidence together.
 
 ## A quick note
 

@@ -48,34 +48,34 @@ safety:
     - Stop and seek care for heavy or increasing bleeding, chest pain, fainting, unusual breathlessness, calf swelling or pain, fever, wound problems, or severe pelvic or abdominal pain.
 ---
 
-Returning to exercise postpartum works best as a **progression from healing and daily movement to strength and then higher impact**, not a jump from rest to the old program on a calendar date. Some people can begin easy movement within days; cesarean birth, tearing, blood loss, pain, infection, pelvic-floor symptoms, and sleep deprivation may require a slower route.
+Returning to exercise after birth works best as a **progression from healing and daily movement to strength and then higher impact**, not a calendar-date jump back to the old program. Some people can start easy movement within days; cesarean birth, tearing, blood loss, pain, infection, pelvic-floor symptoms, and sleep deprivation may mean a slower route.
 
 ## What to do
 
-- **Start with ordinary function.** Comfortable walking around the home, stairs, getting off the floor, carrying the baby, and basic self-care are the first load tests. Build these before adding a formal workout.
-- **Use symptoms as feedback.** Increasing bleeding, pelvic heaviness, urine or stool leakage, pain, incision pulling, abdominal bulging, or symptoms that remain worse the next day mean the current dose is too high or needs assessment.
-- **Reconnect breath, core, and pelvic floor.** Practice quiet 360-degree breathing, a gentle pelvic-floor contraction on the exhale, and full relaxation on the inhale. The goal is coordination, not constant bracing.
-- **Build walking gradually.** Begin with five to ten minutes at an easy pace and add a few minutes after several comfortable sessions. A stroller walk counts; so do several short indoor walks.
-- **Reintroduce strength before demanding impact.** Sit-to-stands, rows, wall or incline push-ups, light hinges, step-ups, and carries rebuild capacity for daily life. Start with one or two sets and progress load or repetitions slowly.
-- **Leave room for recovery.** Feeding, sleep loss, and caregiving change training tolerance. Two short sessions may be more realistic than one long session, and an easy week can be part of progression.
-- **Get pelvic-health help when useful.** Leaking, heaviness, pain, a feeling of vaginal bulging, difficulty emptying, or fear of loading are common reasons for pelvic-floor physical therapy.
-- **Treat a six-week visit as information, not a magic switch.** Medical clearance can rule out important problems, but readiness for a specific sport depends on healing, symptoms, strength, impact tolerance, and the demands of that activity.
+- **Start with ordinary function.** Walking around the home, stairs, getting off the floor, carrying the baby, and basic self-care are the first load tests. Build these before a formal workout.
+- **Use symptoms as feedback.** Increasing bleeding, pelvic heaviness, urine or stool leakage, pain, incision pulling, abdominal bulging, or symptoms still worse the next day mean the dose is too high or needs assessment.
+- **Reconnect breath, core, and pelvic floor.** Practice quiet 360-degree breathing, a gentle pelvic-floor contraction on the exhale, and full relaxation on the inhale. Aim for coordination, not constant bracing.
+- **Build walking gradually.** Start with five to ten minutes at an easy pace and add a few minutes after several comfortable sessions. Stroller walks and short indoor walks count.
+- **Reintroduce strength before demanding impact.** Sit-to-stands, rows, wall or incline push-ups, light hinges, step-ups, and carries rebuild everyday capacity. Start with one or two sets; progress load or repetitions slowly.
+- **Leave room for recovery.** Feeding, sleep loss, and caregiving change training tolerance. Two short sessions may beat one long one, and an easy week can be part of progression.
+- **Get pelvic-health help when useful.** Leaking, heaviness, pain, a sense of vaginal bulging, difficulty emptying, or fear of loading are all reasons for pelvic-floor physical therapy.
+- **A six-week visit is information, not a magic switch.** Medical clearance can rule out important problems, but readiness for a specific sport depends on healing, symptoms, strength, impact tolerance, and that sport's demands.
 
 ## A simple plan
 
-For the first two weeks of this plan, walk for 5 to 15 minutes on four days and complete two short sessions with sit-to-stands, band rows, incline push-ups, light hip hinges, and calf raises. Use one or two sets of 6 to 10 repetitions. Finish with energy left.
+For the first two weeks, walk 5 to 15 minutes on four days and do two short sessions of sit-to-stands, band rows, incline push-ups, light hip hinges, and calf raises: one or two sets of 6 to 10 repetitions. Finish with energy left.
 
-For weeks three and four, add five minutes to two walks and a small amount of load to two strength movements if symptoms remain stable during the session and the next day. For weeks five and six, add a third strength set or a low-impact interval such as one minute brisk and two minutes easy. Delay running and jumping until walking, strength, pelvic-floor function, and repeated small impact are comfortable.
+In weeks three and four, if symptoms stay stable during the session and the next day, add five minutes to two walks and a little load to two strength movements. In weeks five and six, add a third strength set or a low-impact interval such as one minute brisk, two minutes easy. Delay running and jumping until walking, strength, pelvic-floor function, and repeated small impact are all comfortable.
 
 ## How to know it is working
 
-Look for longer comfortable walks, easier stairs and carrying, more controlled core and pelvic-floor movement, and a routine that does not increase bleeding, heaviness, leaking, or pain. Fitness may return unevenly. Consistent symptom-stable training is more useful than one impressive session followed by several recovery days.
+Look for longer comfortable walks, easier stairs and carrying, more controlled core and pelvic-floor movement, and a routine that doesn't increase bleeding, heaviness, leaking, or pain. Fitness may return unevenly. Steady, symptom-stable training beats one impressive session and several recovery days.
 
 ## If you get stuck
 
-Reduce one variable: time, load, impact, or exercise complexity. If a 30-minute walk causes heaviness, try three ten-minute walks. If squats hurt, use a higher chair. If fatigue is overwhelming, check sleep support, food, hydration, anemia, thyroid symptoms, mood, and complications rather than assuming motivation is the issue.
+Reduce one variable: time, load, impact, or complexity. If a 30-minute walk causes heaviness, try three ten-minute walks. If squats hurt, use a higher chair. If fatigue is overwhelming, check sleep support, food, hydration, anemia, thyroid symptoms, mood, and complications before blaming motivation.
 
-Do not use abdominal appearance alone to decide readiness. Diastasis, scars, pelvic-floor symptoms, and core strength are best judged by function and pressure control. A physical therapist can bridge from rehabilitation to the sport or program you actually want to do.
+Don't judge readiness by how your abdomen looks. Diastasis, scars, pelvic-floor symptoms, and core strength are best judged by function and pressure control. A physical therapist can bridge from rehab to the sport or program you actually want.
 
 ## A quick note
 

@@ -43,47 +43,47 @@ safety:
   cautionLevel: low
 ---
 
-Rowing endurance improves when you can repeat an efficient stroke at a sustainable effort. Pulling harder is not the same as rowing better. Learn the sequence, keep most sessions conversational, and extend duration in small steps so your back, hips, hands, and aerobic system adapt together.
+Rowing endurance grows when you can repeat an efficient stroke at an effort you can hold; pulling harder isn't rowing better. Learn the sequence, keep most sessions conversational, and add duration in small steps so back, hips, hands, and aerobic system adapt together.
 
-This plan works for an indoor rower. On-water rowing also requires boat skill, water safety, crew coordination, and coaching that an erg plan cannot replace.
+This plan is for an indoor rower. On-water rowing also takes boat skill, water safety, crew coordination, and coaching an erg plan can't replace.
 
 ## What to do
 
-- Row two or three times per week with at least one easy day between harder sessions.
-- Use a relaxed stroke rate and let the legs create most of the drive.
-- Keep the recovery slower than the drive; rushing forward wastes energy.
-- Choose a moderate drag setting that lets technique remain smooth.
-- Extend one steady session while the others stay short.
-- Include occasional intervals only after steady rowing is repeatable.
+- Row two or three times a week with at least one easy day between harder sessions.
+- Use a relaxed stroke rate and let the legs do most of the drive.
+- Keep the recovery slower than the drive.
+- Choose a moderate drag setting that keeps technique smooth.
+- Extend one steady session and keep the others short.
+- Add intervals only once steady rowing is repeatable.
 - Strengthen legs, hips, trunk, and upper back without exhausting them before long rows.
 
 ## A simple plan
 
-Begin with three sessions. The first two are 20 to 30 minutes easy; if continuous rowing is uncomfortable, use four five-minute pieces with one minute easy. The third is a slightly longer session at the same controlled effort.
+Start with three sessions: two of 20 to 30 minutes easy and a third slightly longer at the same controlled effort. If continuous rowing is uncomfortable, row four five-minute pieces with one minute easy between.
 
-Add three to five minutes to the long row after a successful week. Keep the short rows unchanged until the long row is dependable. Every third or fourth week, hold or reduce duration.
+After a good week, add three to five minutes to the long row; leave the short rows alone until it's dependable. Every third or fourth week, hold or reduce duration.
 
-After two stable weeks, change one short session to six rounds of three minutes at a purposeful effort with two minutes easy. The stroke should remain recognizable from first repeat to last. Do not sprint the final minute simply to make the workout feel harder.
+After two stable weeks, swap one short session for six rounds of three minutes at a purposeful effort with two minutes easy. Keep the stroke the same from first repeat to last, and don't sprint the final minute.
 
-Over six to eight weeks, build toward 40 to 60 continuous minutes if that serves your goal. For longer sessions, stand, move, and adjust the plan if contact discomfort or technique deterioration becomes the limiter.
+Over six to eight weeks, build toward 40 to 60 continuous minutes if that serves your goal. On longer sessions, stand, move, and adjust the plan if contact discomfort or fading technique becomes the limiter.
 
 ## How to know it is working
 
-You can row longer at the same conversational effort, pace varies less through the session, and breathing settles sooner afterward. On a repeatable 20-minute row, distance may increase while stroke rate and perceived effort remain similar.
+You row longer at the same conversational effort, pace varies less, and breathing settles sooner afterward. On a repeatable 20-minute row, distance may rise while stroke rate and perceived effort stay about the same.
 
-Record time, average split or watts, stroke rate, and how the final five minutes felt. Use the same machine and drag context. The ability to finish with good sequence and normal next-day recovery matters more than one unusually fast piece.
+Record time, average split or watts, stroke rate, and how the last five minutes felt, on the same machine and drag setting. Good sequence at the finish and normal next-day recovery matter more than one fast piece.
 
 ## If you get stuck
 
-If the lower back tires, review the stroke order, sit tall through the hips, reduce drag, and shorten the session before adding volume. If forearms or hands fatigue, loosen the grip and avoid pulling early. If breathing is the limit, slow the pace and build total easy minutes.
+If your lower back tires, check the stroke order, sit tall through the hips, reduce drag, and shorten the session before adding volume. If forearms or hands fatigue, loosen your grip and stop pulling early. If breathing is the limit, slow down and build easy minutes.
 
-If boredom is the barrier, split the row into blocks with small pace changes while keeping overall effort controlled. If the same plan has been stable for weeks, add one small progression rather than changing every session.
+If boredom is the problem, split the row into blocks with small pace changes at a controlled overall effort. If the plan has been stable for weeks, add one small progression rather than changing every session.
 
-When technique starts to unravel late, take ten easy strokes to reset the sequence instead of fighting the split. A small temporary slowdown that restores efficient movement often produces a better full-session average and a more useful endurance stimulus.
+When technique falls apart late, take ten easy strokes to reset the sequence instead of fighting the split. A brief slowdown that restores efficient movement often gives a better session average.
 
 ## A quick note
 
-Stop for chest pain, fainting, severe unusual breathlessness, or back pain that grows with each stroke. On-water rowing requires a personal flotation and safety plan appropriate to the venue.
+Stop for chest pain, fainting, severe unusual breathlessness, or back pain that builds with each stroke. On-water rowing requires personal flotation and a safety plan appropriate to the venue.
 
 ## Sources
 

@@ -43,47 +43,47 @@ safety:
   cautionLevel: moderate
 ---
 
-Cycling speed improves when you can produce more sustainable power, waste less of it through pacing and position, and repeat quality training without accumulating too much fatigue. Average speed alone is noisy: wind, elevation, surface, stops, traffic, tires, and group drafting can change it more than fitness does.
+You get faster on a bike by producing more sustainable power, wasting less of it through pacing and position, and repeating quality training without piling up fatigue. Average speed alone is noisy: wind, elevation, surface, stops, traffic, tires, and group drafting can change it more than fitness does.
 
-Use a repeatable route, climb, indoor session, or time trial to judge progress. Then train the capacities that matter rather than chasing every fast-looking ride.
+Judge progress on a repeatable route, climb, indoor session, or time trial. Then train what matters instead of chasing every fast-looking ride.
 
 ## What to do
 
 - Keep most riding comfortable to build aerobic capacity and make hard work recoverable.
-- Do one focused session per week at first, using controlled sustained blocks or shorter hard intervals.
-- Maintain one longer easy ride for endurance.
-- Practice a steady cadence and smooth power instead of surging repeatedly.
-- Address large position or equipment problems, but do not mistake purchases for training.
-- Strength-train legs and trunk once or twice weekly, especially outside the peak riding period.
-- Choose a benchmark that matches the goal: flat speed, climbing, or sustained indoor power.
+- Do one focused session a week at first, using controlled sustained blocks or shorter hard intervals.
+- Keep one longer easy ride for endurance.
+- Practice a steady cadence and smooth power instead of surging.
+- Fix large position or equipment problems, but don't mistake purchases for training.
+- Strength-train legs and trunk once or twice a week, especially outside the peak riding period.
+- Pick a benchmark that matches the goal: flat speed, climbing, or sustained indoor power.
 
 ## A simple plan
 
-Use a six- to eight-week block with three rides per week. Complete one easy ride of 45 to 75 minutes, one longer easy ride, and one quality session. If you already ride more, keep additional days easy.
+Use a six- to eight-week block with three rides a week: one easy ride of 45 to 75 minutes, one longer easy ride, and one quality session. If you already ride more, keep the extra days easy.
 
-For sustained speed, begin with three eight-minute efforts at a comfortably hard intensity with four minutes easy. Progress toward two 15-minute efforts or three ten-minute efforts. On alternate weeks, use five four-minute hard-but-repeatable efforts with four minutes easy. Do not turn both formats into maximal tests.
+For sustained speed, start with three eight-minute efforts at a comfortably hard intensity with four minutes easy. Progress toward two 15-minute efforts or three ten-minute efforts. On alternate weeks, do five four-minute hard-but-repeatable efforts with four minutes easy. Don't turn either format into a maximal test.
 
-Increase long-ride time gradually and reduce total work every third or fourth week. Add short relaxed accelerations during an easy ride if handling and cadence at higher speed need practice.
+Increase long-ride time gradually and reduce total work every third or fourth week. If handling and cadence at higher speed need practice, add short relaxed accelerations to an easy ride.
 
-Test the same 20- to 40-minute route or indoor effort after the block. Outdoors, choose a safe time with similar conditions. Pace the opening third under control and aim to finish without a large fade.
+After the block, test the same 20- to 40-minute route or indoor effort. Outdoors, pick a safe time with similar conditions. Pace the opening third under control and aim to finish without a big fade.
 
 ## How to know it is working
 
-Look for more speed or power at the same perceived effort, more even output across sustained blocks, and a smaller decline late in a ride. On a hill, compare time and effort under similar wind and equipment. Indoors, compare the same trainer setup and calibration.
+Look for more speed or power at the same perceived effort, more even output across sustained blocks, and a smaller drop late in a ride. On a hill, compare time and effort under similar wind and equipment. Indoors, compare the same trainer setup and calibration.
 
-Do not read too much into one personal record with a tailwind or group. A cluster of improved workouts and a well-paced benchmark is better evidence.
+Don't read much into one personal record set with a tailwind or a group. A cluster of improved workouts plus a well-paced benchmark is better evidence.
 
 ## If you get stuck
 
-If quality intervals collapse, reduce the target or lengthen recovery. If you can ride hard but fade on longer efforts, restore easy volume. If power is improving but outdoor speed is not, examine pacing, position, cornering, stops, and route conditions.
+If quality intervals collapse, lower the target or lengthen the recovery. If you can ride hard but fade on longer efforts, restore easy volume. If power is improving but outdoor speed isn't, look at pacing, position, cornering, stops, and route conditions.
 
-Persistent knee, back, hand, or saddle pain can prevent useful training even when fitness is rising. Address fit and load rather than normalizing pain. If every ride feels medium-hard, create real separation between easy and focused days.
+Persistent knee, back, hand, or saddle pain can block useful training even while fitness rises. Fix fit and load instead of treating pain as normal. If every ride feels medium-hard, create real separation between easy and focused days.
 
-Cadence and aerodynamics can also change speed without a fitness change. Practice a position you can hold safely, not an extreme shape that closes breathing or control. Compare equipment only after training conditions and effort are reasonably stable.
+Cadence and aerodynamics can change speed without any fitness change. Practice a position you can hold safely, not an extreme shape that closes off breathing or control. Compare equipment only once training conditions and effort are reasonably stable.
 
 ## A quick note
 
-Choose safe roads or controlled indoor testing; do not chase speed through traffic or technical descents. Stop for chest pain, fainting, severe unusual breathlessness, or pain that compromises bike control.
+Choose safe roads or controlled indoor testing. Don't chase speed through traffic or technical descents. Stop for chest pain, fainting, severe unusual breathlessness, or pain that compromises bike control.
 
 ## Sources
 

@@ -40,44 +40,44 @@ safety:
   cautionLevel: low
 ---
 
-Upper-body strength is more than a bigger bench press. It includes pushing away from the body, pulling toward it, reaching overhead, keeping the shoulder blades and trunk organized, and carrying an object without losing control. Training all of those jobs produces a stronger, more capable upper body than repeating one favorite lift.
+Upper-body strength covers pushing away from the body, pulling toward it, reaching overhead, keeping the shoulder blades and trunk organized, and carrying something without losing control. Training all of those jobs builds a more capable upper body than repeating one favorite lift.
 
-Start with movements that fit your current shoulders, wrists, equipment, and experience. A machine chest press can be as legitimate a starting point as a barbell bench press. A cable row, resistance-band row, or supported dumbbell row can all build pulling strength. The useful exercise is the one you can repeat, measure, and gradually make harder.
+Start with movements that fit your shoulders, wrists, equipment, and experience. A machine chest press is as legitimate a start as a barbell bench, and a cable, band, or supported dumbbell row all build pulling strength. The useful exercise is the one you can repeat, measure, and gradually make harder.
 
 ## What to do
 
 - Train at least one horizontal push, one row, and one vertical pull or its beginner progression each week.
-- Add an overhead press if reaching overhead is comfortable, or use an angled press while building that range.
-- Include a carry, loaded hold, or controlled trunk exercise so the arms can transfer force through the body.
-- Aim for a roughly balanced amount of pushing and pulling rather than letting every session become chest and triceps work.
+- Add an overhead press if reaching overhead is comfortable, or an angled press while you build that range.
+- Include a carry, loaded hold, or controlled trunk exercise so the arms can pass force through the body.
+- Keep pushing and pulling roughly balanced instead of letting every session become chest and triceps work.
 - Use full, comfortable ranges of motion and a controlled lowering phase.
 - Leave enough time between hard sessions for elbows, shoulders, and muscles to recover.
 
-Strength improves fastest in the exact movements you practice, so choose anchor exercises that match what you want. If the goal is a pull-up, prioritize vertical pulling. If carrying a child or suitcase is the goal, include carries and rows. If general capability matters, use a simple mix and avoid specializing too early.
+Strength improves fastest in the movements you practice, so pick anchor exercises that match your goal. For a pull-up, prioritize vertical pulling. For carrying a child or suitcase, use carries and rows. For general capability, use a simple mix and don't specialize too early.
 
 ## A simple plan
 
-Train the upper body twice per week with at least two days between sessions. On day one, perform a horizontal press, a row, a pulldown or assisted pull-up, and a carry. On day two, perform an angled or overhead press, another row, a push-up variation, and a pulldown or assisted pull-up. Two working sets per exercise are enough to begin.
+Train the upper body twice a week with at least two days between sessions. Day one: a horizontal press, a row, a pulldown or assisted pull-up, and a carry. Day two: an angled or overhead press, another row, a push-up variation, and a pulldown or assisted pull-up. Two working sets per exercise is enough to start.
 
-Use a range of about 6 to 12 controlled repetitions for most movements. Stop with two or three good repetitions available during the first two weeks. When an exercise feels stable, let later sets become more challenging without grinding through visibly deteriorating form. Add repetitions until both sets reach the top of the range, then increase resistance slightly.
+Use about 6 to 12 controlled reps for most movements, stopping with two or three good reps in reserve for the first two weeks. Once an exercise feels stable, let later sets get harder without grinding through breaking form. Add reps until both sets reach the top of the range, then add a little resistance.
 
-Keep the plan for six weeks. If time is tight, pair a push and a pull and alternate their sets. Rest long enough that the second exercise is not limited by breathlessness. A 25-minute session completed twice per week is more valuable than a theoretical 75-minute session that rarely happens.
+Keep the plan for six weeks. If time is tight, pair a push and a pull and alternate their sets. Rest long enough that breathlessness doesn't limit the second exercise. A 25-minute session done twice a week is worth more than a theoretical 75-minute session that rarely happens.
 
 ## How to know it is working
 
-Track two pushes and two pulls. Progress may appear as more resistance, more repetitions, a lower level of machine assistance, or a harder bodyweight angle. Also notice daily function: lifting a bag to a shelf, pushing a heavy door, carrying luggage, or getting up from the floor may become easier.
+Track two pushes and two pulls. Progress shows up as more resistance, more reps, less machine assistance, or a harder bodyweight angle. Also notice daily function: lifting a bag to a shelf, pushing a heavy door, carrying luggage, or getting up from the floor may get easier.
 
-Do not use soreness as the score. A program can produce less soreness as you adapt while continuing to build strength. Likewise, a dramatic pump is temporary. Repeatable performance under similar conditions is the clearer signal.
+Don't use soreness as the score. Soreness often fades as you adapt while strength keeps building, and a dramatic pump is temporary. Repeatable performance under similar conditions is the clearer signal.
 
 ## If you get stuck
 
-If pressing improves but pulling does not, look at exercise order and effort. The pull may always come last, or grip may be ending the set before the back is challenged. Move the priority exercise earlier, use straps only when appropriate for a back-focused set, or choose a supported variation.
+If pressing improves but pulling doesn't, look at exercise order and effort. The pull may always come last, or grip may end the set before the back is challenged. Move the priority exercise earlier, use straps only when appropriate for a back-focused set, or pick a supported variation.
 
-If shoulders or elbows stay irritated, do not simply add mobility drills around the same painful volume. Reduce the provoking range or load, try a neutral grip, and rebuild gradually. A small change in exercise setup often works better than abandoning upper-body training entirely. If every movement is stalled, review total food, sleep, and weekly workload before adding more sets.
+If shoulders or elbows stay irritated, don't just add mobility drills around the same painful volume. Reduce the range or load that provokes it, try a neutral grip, and rebuild gradually. A small setup change often beats quitting upper-body training. If everything has stalled, review food, sleep, and weekly workload before adding sets.
 
 ## A quick note
 
-Stop for a sudden injury, a new deformity, marked weakness, numbness that persists, or pain accompanied by chest pressure or shortness of breath. Ordinary training fatigue should settle; symptoms that progressively worsen across sessions deserve assessment rather than a tougher warm-up.
+Stop for a sudden injury, a new deformity, marked weakness, numbness that persists, or pain with chest pressure or shortness of breath. Ordinary training fatigue should settle. Symptoms that keep worsening across sessions deserve assessment, not a tougher warm-up.
 
 ## Sources
 

@@ -40,48 +40,48 @@ safety:
   cautionLevel: moderate
 ---
 
-Most everyday neck pain improves through a combination of staying active, gradually restoring comfortable movement, strengthening the neck and shoulder region, and changing the work or sleep habits that repeatedly provoke it. The goal is not to hold the head in one perfect position. It is to make normal movement feel safe and capable again.
+Most everyday neck pain improves when you stay active, gradually restore comfortable movement, strengthen the neck and shoulder region, and change the work or sleep habits that keep setting it off. You're aiming for normal movement that feels safe and capable again, not a head held in one perfect position.
 
-Start by noticing the pattern: one-sided or central, linked to a screen, worse after sleep, triggered by turning, or accompanied by arm symptoms. A plan for uncomplicated local stiffness is different from one for pain traveling into the hand.
+Start by noticing the pattern: one-sided or central, linked to a screen, worse after sleep, triggered by turning, or paired with arm symptoms. Uncomplicated local stiffness needs a different plan from pain that travels into the hand.
 
 ## What to do
 
 - Keep moving within tolerable ranges rather than immobilizing the neck for days.
 - Take short breaks from sustained screen or reading positions.
 - Practice gentle rotation, side bending, and nodding without forcing the end range.
-- Strengthen rows, shoulder raises, presses, and neck endurance gradually.
+- Build up rows, shoulder raises, presses, and neck endurance gradually.
 - Adjust screen height, chair distance, and visual correction when the task drives symptoms.
-- Use heat, a comfortable pillow change, or brief hands-on care as support, not the entire long-term plan.
+- Use heat, a pillow change, or brief hands-on care as support, not as the whole long-term plan.
 
-Clinical practice guidelines generally support exercise matched to the presentation. No single drill is best for everyone. Choose movements that make function easier over time, and stop using a drill that consistently spreads or intensifies symptoms.
+Clinical practice guidelines generally back exercise matched to the presentation; no single drill is best for everyone. Pick movements that make function easier over time, and drop any drill that consistently spreads or intensifies symptoms.
 
 ## A simple plan
 
-Once or twice per day, perform five gentle neck rotations per side, five small nods, and five shoulder-blade squeezes. Stay within a range that feels like movement rather than a test. Then walk for five minutes or change the work position.
+Once or twice a day, do five gentle neck rotations per side, five small nods, and five shoulder-blade squeezes, staying in a range that feels like movement rather than a test. Then walk for five minutes or change your work position.
 
-Twice per week, perform two sets of rows, a light press, a carry, and an isometric neck exercise. For an isometric, place the hand against the forehead or side of the head and press gently for five to ten seconds without visible movement. Repeat three times in comfortable directions.
+Twice a week, do two sets of rows, a light press, a carry, and an isometric neck exercise. For the isometric, put a hand against your forehead or the side of your head and press gently for five to ten seconds without visible movement. Repeat three times in comfortable directions.
 
-For two weeks, take a two-minute break every 45 to 90 minutes of desk work. Move the screen and keyboard so you do not repeatedly crane toward them. Track which change actually reduces symptoms instead of buying multiple ergonomic products at once.
+For two weeks, take a two-minute break every 45 to 90 minutes of desk work. Move the screen and keyboard so you stop craning toward them. Track which change actually reduces symptoms instead of buying several ergonomic products at once.
 
-Keep the plan flexible on worse days. Reduce the range, use fewer repetitions, or substitute walking, but continue some comfortable movement when possible. On better days, return to ordinary activity rather than saving the neck for fear of another flare. A short symptom increase after a new exercise does not necessarily mean harm, but it should settle and should not progressively spread down the arm.
+Stay flexible on worse days. Reduce the range, do fewer reps, or swap in walking, but keep some comfortable movement going when you can. On better days, get back to ordinary activity rather than saving the neck for fear of another flare. A short symptom increase after a new exercise isn't necessarily harm, but it should settle and not spread progressively down the arm.
 
-Sleep position is individual. A pillow that keeps the neck reasonably comfortable is enough; there is no universally correct height. Change one sleep variable at a time and judge several nights rather than a single morning.
+Sleep position is individual. A pillow that keeps the neck reasonably comfortable is enough; there's no universally correct height. Change one sleep variable at a time and judge it over several nights, not one morning.
 
 ## How to know it is working
 
-Track the activities pain interferes with: turning to drive, working for an hour, sleeping, lifting, or exercising. Improvement means those tasks are easier, pain settles faster, or fewer adjustments are needed. A zero pain score is not required for meaningful progress.
+Track the activities pain interferes with: turning to drive, working for an hour, sleeping, lifting, or exercising. Improvement means those tasks get easier, pain settles faster, or you need fewer adjustments. A zero pain score isn't required for real progress.
 
-Check weekly rather than repeatedly throughout the day. Frequent monitoring can make normal fluctuations feel threatening. Note whether arm symptoms, headaches, or range are changing because they may alter the plan.
+Check weekly, not all day long. Frequent monitoring can make normal fluctuations feel threatening. Note whether arm symptoms, headaches, or range are changing, since they may alter the plan.
 
 ## If you get stuck
 
-If movement helps briefly but work brings symptoms straight back, change the exposure: shorter blocks, a closer screen, different input device, or more task variety. If strengthening causes a next-day flare, reduce resistance or sets and rebuild.
+If movement helps briefly but work brings symptoms straight back, change the exposure: shorter blocks, a closer screen, a different input device, or more task variety. If strengthening causes a next-day flare, cut resistance or sets and rebuild.
 
-Pain that travels down the arm, persistent tingling, hand weakness, severe headaches, or dizziness requires more careful assessment. Stress and poor sleep can amplify neck pain without making it imaginary; address them alongside movement rather than treating either as the sole cause.
+Pain down the arm, persistent tingling, hand weakness, severe headaches, or dizziness needs more careful assessment. Stress and poor sleep can amplify neck pain without making it imaginary; address them alongside movement rather than treating either as the sole cause.
 
 ## A quick note
 
-Seek urgent help after significant trauma, or for new severe weakness, problems walking, loss of coordination, fever with severe neck stiffness, or a sudden unusual headache. Otherwise, a calm, gradual return to normal movement is generally more useful than aggressive stretching or prolonged rest.
+Get urgent help after significant trauma, or for new severe weakness, trouble walking, loss of coordination, fever with severe neck stiffness, or a sudden unusual headache. Otherwise, a calm, gradual return to normal movement usually does more good than aggressive stretching or prolonged rest.
 
 ## Sources
 

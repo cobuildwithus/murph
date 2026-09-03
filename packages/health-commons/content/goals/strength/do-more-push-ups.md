@@ -40,44 +40,44 @@ safety:
   cautionLevel: low
 ---
 
-Doing more push-ups is an endurance goal built on a strength base. The common mistake is testing a maximum set every day. That creates fatigue but gives little room for productive practice. Most training should stop well before failure, allowing more high-quality repetitions across the week.
+Doing more push-ups is an endurance goal built on a strength base. Testing a max set every day builds fatigue and leaves little room for practice, so most training should stop well before failure and fit more good reps into the week.
 
-First define a repetition. Choose a hand position, body line, depth, and lockout you can repeat. If a test has a specific standard, practice that standard. Changing range or resting at the top may increase the number without improving the capacity you intended to build.
+Define a rep: hand position, body line, depth, and a lockout you can repeat. If a test has a specific standard, practice that standard. Shortening the range or resting at the top may raise the number without building the capacity you wanted.
 
 ## What to do
 
-- Practice push-ups two to four times per week, depending on current volume and recovery.
-- Keep most sets at roughly 40 to 70 percent of your current maximum.
-- Stop with several good repetitions available so technique stays consistent.
-- Build total weekly repetitions gradually rather than doubling them after one good day.
-- Add some harder pressing work—weighted push-ups, bench press, or a lower incline—to raise the strength ceiling.
-- Train rows or pulldowns and give wrists, elbows, and shoulders time to recover.
+- Practice two to four times a week, depending on volume and recovery.
+- Keep most sets at about 40 to 70 percent of your max.
+- Stop with several good reps left so technique stays consistent.
+- Build weekly reps gradually rather than doubling them after one good day.
+- Add harder pressing work (weighted push-ups, bench press, a lower incline) to raise the strength ceiling.
+- Train rows or pulldowns, and give wrists, elbows, and shoulders time to recover.
 
-If your maximum is low, focus first on strength with smaller sets and a scalable incline. If your maximum is already high, specific endurance practice matters more. The program should match the distance between current ability and the target.
+If your max is low, build strength first with smaller sets and a scalable incline. If it's already high, specific endurance practice matters more.
 
 ## A simple plan
 
-Test one standardized maximum set after a warm-up, then wait at least two days. Take about half that number for your training sets. If your maximum is 20, begin with sets of 8 to 10. Three days per week, perform five sets with 60 to 90 seconds of rest. End a set early if the body line or depth changes.
+Warm up, test one standardized max set, then wait at least two days. Use about half that number for training sets: 8 to 10 for a max of 20. Three days a week, do five sets with 60 to 90 seconds of rest. End a set early if body line or depth changes.
 
-Add one repetition to one or two sets each session until all five sets reach the top of the planned range. Then increase each set slightly or add a harder push-up variation for two lower-repetition sets before the endurance work. Keep weekly increases modest enough that elbows and shoulders remain quiet.
+Each session, add one rep to one or two sets until all five reach the top of the planned range. Then bump each set slightly, or add two lower-rep sets of a harder variation before the endurance work. Keep weekly increases small enough that elbows and shoulders stay quiet.
 
-Retest after three or four weeks, not every workout. Take an easier day or two beforehand. Use the new maximum to reset training sets. If the goal is a timed test, add one weekly session that rehearses the time rule after a base of normal sets is established.
+Retest after three or four weeks, not every workout, after an easier day or two. Reset training sets from the new max. For a timed test, add one weekly session that rehearses the time rule once a base of normal sets exists.
 
 ## How to know it is working
 
-Track total clean repetitions across the same number of sets and the perceived difficulty of the last set. When 50 repetitions across five sets becomes easier, capacity is improving even before the maximum test changes.
+Track total clean reps across the same number of sets, and how hard the last set felt. When 50 reps across five sets gets easier, capacity is improving even before the max test moves.
 
-On test day, use the same surface, hand position, range, tempo rule, and rest beforehand. A large number gained through shorter repetitions is not the same result. Video can confirm the standard without turning training into a form competition.
+On test day, use the same surface, hand position, range, tempo rule, and rest beforehand. Video can confirm the standard.
 
 ## If you get stuck
 
-If every training set is near failure, reduce repetitions and spread the work across more sets. If the first few repetitions feel disproportionately hard, build maximal pressing strength with a harder variation. If the triceps fail first, add a small amount of direct work; if the trunk sags, include brief trunk-control practice.
+If every set is near failure, cut the reps and spread the work over more sets. If the first few reps feel disproportionately hard, build max pressing strength with a harder variation. If triceps fail first, add a little direct work; if the trunk sags, add brief trunk-control practice.
 
-Plateaus can also come from hidden pressing volume. Bench press, dips, overhead press, and sport all contribute fatigue. Reduce overlap before adding another push-up day. If wrists are irritated, use handles, dumbbells, or a different hand angle while keeping the movement goal intact.
+Hidden pressing volume from bench press, dips, overhead press, and sport also adds fatigue. Reduce the overlap before adding another push-up day. If wrists are irritated, switch to handles, dumbbells, or a different hand angle without changing the movement goal.
 
 ## A quick note
 
-Stop for sudden shoulder, elbow, or wrist pain, a new deformity, or marked weakness. Ordinary muscle fatigue should settle quickly. High-repetition challenges are optional; a lower number of controlled repetitions can still reflect excellent useful strength.
+Stop for sudden shoulder, elbow, or wrist pain, a new deformity, or marked weakness. Ordinary muscle fatigue should settle quickly. High-rep challenges are optional. A lower number of controlled reps can still reflect excellent useful strength.
 
 ## Sources
 

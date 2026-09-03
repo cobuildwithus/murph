@@ -43,43 +43,43 @@ safety:
   cautionLevel: moderate
 ---
 
-Swimming faster is unusually technique-dependent. More effort helps only when your body position, breathing, catch, and timing let that effort move you forward. The useful plan combines coached technical work, enough easy swimming to hold form, and focused repeats at the distance and pace you care about.
+Swimming faster depends unusually heavily on technique: more effort helps only when body position, breathing, catch, and timing turn it into forward motion. Combine coached technique work, enough easy swimming to hold form, and focused repeats at your target distance and pace.
 
-Choose a benchmark such as 50, 100, 200, 400, or 1,500 meters or yards. “Faster” means different training for a sprint than for a long open-water swim.
+Pick a benchmark such as 50, 100, 200, 400, or 1,500 meters or yards; "faster" means different training for a sprint than for a long open-water swim.
 
 ## What to do
 
-- Get periodic feedback from a qualified coach or video when possible.
+- Get periodic feedback from a qualified coach or video.
 - Warm up with relaxed swimming and a few technique-focused lengths.
-- Keep easy volume so speed sessions do not become your only water time.
-- Use repeats short enough to maintain the intended pace and form.
-- Take enough rest for quality; reduce rest only when endurance at speed is the goal.
+- Keep easy volume; speed sessions shouldn't be your only water time.
+- Use repeats short enough to hold the intended pace and form.
+- Rest enough for quality; cut rest only when endurance at speed is the goal.
 - Track split consistency, not just the fastest single length.
-- Strengthen shoulders and upper back without adding fatigue that ruins water quality.
+- Strengthen shoulders and upper back without fatigue that ruins water quality.
 
 ## A simple plan
 
-Swim two or three times per week. Make one session easy endurance and technique, one pace-focused, and the third—if available—a mix of both.
+Swim two or three times a week: one easy endurance and technique session, one pace session, and a third, if available, mixing both.
 
-For a 100- or 200-distance goal, begin the pace session with eight to twelve 25s or 50s at a fast but technically sound pace, resting enough to keep times close. Progress by adding a few repeats or joining them into longer distances. For a 400- to 1,500-distance goal, use sets such as eight 100s or four 200s at a strong sustainable pace with short controlled rest.
+For a 100 or 200 goal, start the pace session with eight to twelve 25s or 50s at a fast but technically sound pace, resting enough to keep times close. Progress by adding a few repeats or joining them into longer distances. For a 400 to 1,500 goal, use sets such as eight 100s or four 200s at a strong, sustainable pace with short controlled rest.
 
-Do not progress pace, repeat distance, repeat count, and shorter rest together. Change one variable. Include easy swimming between hard sets and finish before stroke mechanics collapse.
+Change one variable at a time rather than pace, repeat distance, repeat count, and rest together. Swim easy between hard sets and stop before stroke mechanics collapse.
 
-Re-test the chosen distance every four to eight weeks under the same pool length, start type, and equipment. In the final week before an event, reduce total volume but keep a few short race-pace efforts.
+Re-test the distance every four to eight weeks with the same pool length, start type, and equipment. In the final week before an event, cut total volume but keep a few short race-pace efforts.
 
 ## How to know it is working
 
-Repeat times become faster or more even without a large rise in stroke count or loss of control. You may hold the same pace with less rest, or maintain technique farther into a set. A personal best is useful, but one dive-start sprint does not describe sustainable swim speed.
+Repeat times get faster or more even without a big rise in stroke count or loss of control. You may hold pace with less rest or keep technique deeper into a set.
 
-Record whether the pool is yards or meters and whether the benchmark begins from a push or dive. Those details can dwarf small improvements. For open water, navigation and conditions belong in the result.
+Record whether the pool is yards or meters and whether the benchmark starts from a push or a dive. In open water, navigation and conditions are part of the result.
 
 ## If you get stuck
 
-If effort rises but speed does not, prioritize technique feedback. Common leaks include lifting the head to breathe, dropping the legs, crossing the hand entry, and rushing the catch. If the first repeat is much faster than the rest, pace the set more evenly.
+If effort rises but speed doesn't, put technique feedback first. Common leaks: lifting the head to breathe, dropping the legs, crossing the hand entry, and rushing the catch. If the first repeat is much faster than the rest, pace the set more evenly.
 
-Shoulder pain, growing fatigue, or deteriorating form calls for less volume and a mechanics review, not more paddles. If endurance limits speed, restore easy swimming; if turnover limits it, use short high-quality repeats with full recovery.
+Shoulder pain, mounting fatigue, or worsening form calls for less volume and a mechanics review, not more paddles. If endurance limits speed, restore easy swimming; if turnover limits it, use short high-quality repeats with full recovery.
 
-Video from above and underwater can make a plateau concrete. Review one or two features at a time—such as head position or hand entry—then retest. Trying to consciously fix six parts of the stroke during a fast set usually makes the movement less stable.
+Video from above and underwater can make a plateau concrete. Review one or two features at a time, such as head position or hand entry, then retest.
 
 ## A quick note
 

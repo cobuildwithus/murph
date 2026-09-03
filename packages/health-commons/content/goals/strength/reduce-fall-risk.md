@@ -41,48 +41,48 @@ safety:
   cautionLevel: moderate
 ---
 
-Fall risk is not one problem. It can reflect leg weakness, balance changes, medications, vision, blood-pressure drops, foot problems, unsafe surroundings, rushing, or a recent illness. Exercise is one of the most consistently supported ways to reduce falls, especially programs that challenge balance and build functional strength, but the strongest plan also addresses the risks that apply to the individual.
+Fall risk isn't one problem. Leg weakness, balance changes, medications, vision, blood-pressure drops, foot problems, unsafe surroundings, rushing, or a recent illness can all play a part. Exercise is one of the most consistently supported ways to reduce falls, especially programs that challenge balance and build functional strength, but the strongest plan also tackles the risks that apply to you.
 
-Do not wait for a serious fall before acting. A near fall, new fear of walking, or increasing reliance on furniture is useful information. The aim is not to restrict activity. It is to build the ability and environment that make activity safer.
+Don't wait for a serious fall. A near fall, a new fear of walking, or leaning on furniture more often is useful information. Don't respond by restricting activity; build the ability and surroundings that make activity safer.
 
 ## What to do
 
-- Practice progressively challenging balance and functional strength at least three days per week.
+- Practice progressively harder balance and functional strength at least three days a week.
 - Train chair rises, step-ups, calf strength, and safe walking.
-- Review medicines that can cause dizziness or sedation with a pharmacist or clinician; do not stop them on your own.
+- Have a pharmacist or clinician review medicines that can cause dizziness or sedation; don't stop them on your own.
 - Check vision, footwear, foot comfort, and any new dizziness.
 - Remove loose rugs and clutter, improve lighting, and add reliable hand support where needed.
-- Use a cane or walker as instructed rather than avoiding it because it feels like a setback.
+- Use a cane or walker as instructed, even if it feels like a setback.
 
-The most effective exercise programs are usually sustained and challenging enough to improve balance. Casual stretching alone is unlikely to address fall risk. Tai chi, the Otago Exercise Program, supervised group programs, and individualized strength-and-balance training are evidence-based options.
+The programs that work are sustained and hard enough to improve balance; casual stretching alone is unlikely to change fall risk. Tai chi, the Otago Exercise Program, supervised group programs, and individualized strength-and-balance training all have evidence behind them.
 
 ## A simple plan
 
-Start with a safety review of the rooms and routes used most often. Fix one obvious hazard this week. Schedule a medication or vision review if either is overdue or symptoms have changed.
+Start with a safety review of the rooms and routes you use most, and fix one obvious hazard this week. Book a medication or vision review if either is overdue or symptoms have changed.
 
-Three days per week, practice beside a counter: two 20-second semi-tandem or tandem holds per side, ten side steps each direction, five step-overs per side, and two sets of five chair rises. Walk on most days at a level that feels steady. Progress balance by using less hand support or a narrower stance—not by moving away from the counter.
+Three days a week, practice beside a counter: two 20-second semi-tandem or tandem holds per side, ten side steps in each direction, five step-overs per side, and two sets of five chair rises. Walk most days at a pace that feels steady. Progress by using less hand support or a narrower stance, not by moving away from the counter.
 
-If there has been a fall in the past year, repeated near falls, or clear walking difficulty, ask for a fall-risk assessment or physical-therapy referral. Bring a list of circumstances: time, surface, footwear, symptoms, and whether a trip, dizziness, or loss of consciousness occurred.
+After a fall in the past year, repeated near falls, or clear walking difficulty, ask for a fall-risk assessment or a physical-therapy referral. Bring the circumstances: time, surface, footwear, symptoms, and whether a trip, dizziness, or loss of consciousness was involved.
 
-Make the plan easy to continue. Put balance practice next to an existing daily routine, keep needed support in the same place, and choose an evidence-based class or program if exercising alone is unlikely to happen. A friend or family member can join without turning the work into a test. The best prevention plan is challenging enough to improve capacity and ordinary enough to last.
+Make the plan easy to keep. Attach balance practice to an existing daily routine, keep any support you need in the same place, and pick an evidence-based class or program if exercising alone won't happen. A friend or family member can join without turning it into a test.
 
-Revisit hazards after travel, illness, a move, or a medication change. Fall risk changes with context and should not be treated as a permanent personal score.
+Recheck hazards after travel, illness, a move, or a medication change. Fall risk shifts with context; it isn't a permanent personal score.
 
 ## How to know it is working
 
-Track completion of the exercise plan, chair-rise performance, balance support, near falls, and confidence on specific tasks. A month with no falls is encouraging but may simply contain fewer risky situations. Improved capacity and fewer near falls provide a better picture.
+Track plan completion, chair-rise performance, how much balance support you need, near falls, and confidence on specific tasks. A month with no falls is encouraging but may just have held fewer risky situations. Better capacity and fewer near falls tell you more.
 
-Review the home checklist and risk-factor actions monthly. Success can include a corrected prescription, a safer bathroom, better footwear, or consistent use of an assistive device—not only a balance-test score.
+Review the home checklist and risk-factor actions monthly. Success can be a corrected prescription, a safer bathroom, better footwear, or consistent use of an assistive device, not only a balance-test score.
 
 ## If you get stuck
 
-If fear prevents practice, start with supervised sessions and stable support. If dizziness or faintness occurs when standing, record the circumstances and seek evaluation rather than trying to train through it. If feet are numb, vision is limited, or a medicine causes sedation, balance drills alone are incomplete.
+If fear stops you practicing, start with supervised sessions and stable support. If you get dizzy or faint on standing, note the circumstances and get evaluated rather than training through it. If your feet are numb, your vision is limited, or a medicine sedates you, balance drills alone aren't enough.
 
-Repeated falls require a broader assessment. Ask about gait and balance, blood pressure when changing position, medications, vision, feet, heart rhythm, neurological symptoms, and home safety. The right intervention depends on what is found.
+Repeated falls need a broader assessment covering gait and balance, blood pressure when changing position, medications, vision, feet, heart rhythm, neurological symptoms, and home safety. The right intervention depends on what turns up.
 
 ## A quick note
 
-Do not practice challenging balance tasks alone when falling is likely. A fall with a head injury, severe pain, inability to bear weight, loss of consciousness, chest pain, or new neurological symptoms needs urgent help. If you fall and may be injured, call for assistance instead of forcing a floor transfer.
+Don't practice challenging balance tasks alone when a fall is likely. A fall with a head injury, severe pain, inability to bear weight, loss of consciousness, chest pain, or new neurological symptoms needs urgent help. If you fall and may be hurt, call for help instead of forcing yourself up off the floor.
 
 ## Sources
 

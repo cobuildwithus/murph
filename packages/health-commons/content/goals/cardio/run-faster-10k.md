@@ -44,45 +44,45 @@ safety:
   cautionLevel: moderate
 ---
 
-Running a faster 10K requires a strong aerobic base, the ability to sustain a comfortably hard pace, and enough durability that the final kilometers do not unravel. The most effective weeks are usually simple: easy running, one sustained quality workout, one longer run, and optional shorter speed work only when recovery supports it.
+A faster 10K needs a strong aerobic base, the ability to hold a comfortably hard pace, and enough durability that the last kilometers don't unravel. The best weeks are usually simple: easy running, one sustained quality workout, one longer run, and optional shorter speed work only when recovery allows.
 
-You should begin from a stable pattern of at least three running days and a comfortable 10K completion, not from a single recent race and a sudden jump in training.
+Start from a stable pattern of at least three running days and a comfortable 10K finish, not from one recent race and a sudden jump in training.
 
 ## What to do
 
-- Keep most mileage easy enough for conversation.
-- Build one weekly workout around longer controlled efforts near the pace you could sustain for roughly an hour.
-- Maintain a long easy run longer than the expected race duration.
-- Use shorter intervals or hills sparingly to improve speed and economy.
-- Strength-train once or twice weekly, with demanding leg work separated from key runs.
+- Keep most mileage easy enough to talk through.
+- Build one weekly workout around longer controlled efforts near the pace you could hold for about an hour.
+- Keep a long easy run longer than the expected race duration.
+- Use shorter intervals or hills sparingly for speed and economy.
+- Strength-train once or twice a week, with demanding leg work kept away from key runs.
 - Practice goal pace in pieces before expecting to hold it for ten kilometers.
-- Plan an even first half and a stronger final third rather than banking time early.
+- Plan an even first half and a stronger final third instead of banking time early.
 
 ## A simple plan
 
-Use an eight- to ten-week block with four or five running days if your baseline supports it. A four-day week can include two easy runs, one quality session, and one long run. Add a fifth easy day only when it improves consistency rather than fatigue.
+Use an eight- to ten-week block with four or five running days if your baseline supports it. A four-day week can be two easy runs, one quality session, and one long run; add a fifth easy day only if it improves consistency rather than adding fatigue.
 
-For the quality session, begin with three blocks of eight minutes at a controlled strong effort with three minutes easy. Progress toward two blocks of 15 minutes or three blocks of ten. On alternate weeks, use five or six repetitions of three minutes around current 5K effort with two minutes easy.
+For the quality session, start with three blocks of eight minutes at a controlled strong effort with three minutes easy. Progress toward two blocks of 15 minutes or three of ten. On alternate weeks, run five or six repeats of three minutes around current 5K effort with two minutes easy.
 
-Keep the long run at a conversational effort and progress it gradually toward 75 to 100 minutes. Every third or fourth week, reduce volume and quality. Two to three weeks before the target race, practice several two-kilometer blocks near goal 10K pace with generous easy recovery.
+Keep the long run conversational and build it gradually toward 75 to 100 minutes. Every third or fourth week, reduce volume and quality. Two to three weeks before the race, run several two-kilometer blocks near goal 10K pace with generous easy recovery.
 
-In race week, reduce total running, retain a few short brisk efforts, and prioritize sleep and routine. Begin the race just inside control, settle into goal effort, and make the last two to three kilometers the place where you spend your remaining capacity.
+In race week, cut total running, keep a few short brisk efforts, and protect sleep and routine. Start just inside control, settle into goal effort, and spend what's left in the last two to three kilometers.
 
 ## How to know it is working
 
-Strong intervals should become more even, and the same controlled effort should produce a little more pace. The final portion of long runs should feel more stable, and recovery should not consume several days.
+Strong intervals get more even, and the same controlled effort produces a little more pace. The end of long runs feels steadier, and recovery doesn't eat several days.
 
-A 5K race or 20- to 30-minute controlled time trial can help calibrate progress. Do not derive a rigid 10K prediction from one workout. Weather, terrain, course turns, and accumulated fatigue all matter. The best proof is a well-paced 10K after a complete block.
+A 5K race or a 20- to 30-minute controlled time trial can help calibrate progress. Don't build a rigid 10K prediction from one workout; weather, terrain, course turns, and accumulated fatigue all matter. The real proof is a well-paced 10K after a complete block.
 
 ## If you get stuck
 
-If you fade late, the problem may be early pacing or insufficient easy durability rather than a lack of hard intervals. If workouts go backward, reduce their volume and examine the total number of hard days. If the target pace feels impossible in training, reset it from recent evidence instead of forcing the original number.
+If you fade late, the problem may be early pacing or too little easy durability rather than a lack of hard intervals. If workouts go backward, reduce their volume and count the hard days. If the target pace feels impossible in training, reset it from recent evidence instead of forcing the original number.
 
-Persistent fatigue, recurrent illness, loss of normal menstrual function, or repeated injury can reflect inadequate energy availability or recovery. A faster race is not worth turning a temporary block into chronic depletion.
+Persistent fatigue, recurring illness, loss of normal menstrual function, or repeated injury can point to inadequate energy availability or recovery. A faster race isn't worth turning a temporary block into chronic depletion.
 
 ## A quick note
 
-Stop hard exercise for chest pain, fainting, severe unusual breathlessness, or pain that changes your stride. New performance collapse with systemic symptoms deserves evaluation rather than a harder workout.
+Stop hard exercise for chest pain, fainting, severe unusual breathlessness, or pain that changes your stride. A new performance collapse with systemic symptoms needs evaluation, not a harder workout.
 
 ## Sources
 

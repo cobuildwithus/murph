@@ -4,7 +4,7 @@ entityType: goal_template
 key: goal_template:keep-my-brain-healthy-as-i-age
 slug: keep-my-brain-healthy-as-i-age
 title: Keep My Brain Healthy as I Age
-summary: Support long-term brain health through physical activity, cardiovascular care, sleep, hearing, social connection, learning, and avoiding tobacco and heavy alcohol use.
+summary: Protect long-term brain health with activity, cardiovascular care, sleep, hearing, social connection, learning, and no tobacco or heavy drinking.
 status: field-testing
 quality: usable
 aliases:
@@ -46,37 +46,37 @@ safety:
     - New or rapidly worsening memory, getting lost, major personality change, or difficulty managing medicines, money, driving, or daily tasks deserves clinical evaluation.
 ---
 
-There is no proven supplement or brain game that guarantees dementia prevention. The strongest practical plan supports **blood-vessel health, physical activity, sleep, hearing and vision, social connection, learning, and freedom from tobacco and heavy alcohol use**. These actions improve health now and may help preserve cognitive function over time.
+No supplement or brain game has been proven to prevent dementia. The strongest practical plan looks after blood-vessel health, physical activity, sleep, hearing and vision, social connection, learning, and freedom from tobacco and heavy alcohol use. These steps improve health now and may help preserve cognitive function over time.
 
 ## What to do
 
-- **Move regularly.** Aim toward at least 150 minutes of moderate aerobic activity per week plus strength training twice per week, scaled to your ability. Walking is a strong starting point; dancing, cycling, swimming, gardening, and sports count too.
+- **Move regularly.** Aim toward at least 150 minutes of moderate aerobic activity per week plus strength training twice per week, scaled to your ability. Walking is a strong start; dancing, cycling, swimming, gardening, and sports count too.
 - **Manage cardiovascular risks.** High blood pressure, diabetes, abnormal cholesterol, smoking, and inactivity affect both heart and brain. Follow treatment plans and use home measurements only when they lead to useful action.
 - **Protect sleep.** Keep a consistent schedule and address chronic insomnia, loud snoring, breathing pauses, and daytime sleepiness. Sedating yourself is not the same as restorative sleep.
-- **Use hearing and vision support.** Untreated hearing loss can reduce communication and social participation. Wear prescribed hearing aids and glasses, maintain them, and adjust the environment so conversation remains easy.
-- **Stay socially connected.** Schedule recurring contact that has meaning: a walk, meal, class, volunteer shift, faith community, club, or call. Passive proximity is not the same as feeling connected.
-- **Learn things that matter.** Music, language, crafts, writing, games, teaching, and new technology can challenge attention and memory. Choose an activity you value rather than a commercial “brain score.”
-- **Eat a broadly healthy pattern.** A Mediterranean-style pattern rich in vegetables, fruit, legumes, whole grains, nuts, fish, and unsaturated fats supports cardiovascular health. Avoid turning one food into a cognitive medicine.
-- **Avoid tobacco and heavy alcohol use.** If quitting or cutting back is difficult, treatment and support are part of brain-health care.
-- **Review medicines and mood.** Some medicines can affect memory or alertness. Depression, anxiety, grief, and isolation can also impair concentration and are treatable.
+- **Use hearing and vision support.** Untreated hearing loss can cut down communication and social participation. Wear prescribed hearing aids and glasses, keep them maintained, and set up rooms so conversation stays easy.
+- **Stay socially connected.** Schedule recurring contact that means something: a walk, meal, class, volunteer shift, faith community, club, or call. Being near people is not the same as feeling connected.
+- **Learn things that matter to you.** Music, language, crafts, writing, games, teaching, and new technology can challenge attention and memory. Pick an activity you value rather than a commercial “brain score.”
+- **Eat a broadly healthy pattern.** A Mediterranean-style pattern rich in vegetables, fruit, legumes, whole grains, nuts, fish, and unsaturated fats helps cardiovascular health. Don't turn one food into a cognitive medicine.
+- **Avoid tobacco and heavy alcohol use.** If quitting or cutting back is hard, treatment and support are part of brain-health care.
+- **Review medicines and mood.** Some medicines can affect memory or alertness. Depression, anxiety, grief, and isolation can also impair concentration, and they are treatable.
 
 ## A simple plan
 
-For 12 weeks, choose one action from four areas. Move for 20 to 30 minutes on five days per week; complete two short strength sessions; schedule one recurring social activity; and spend two sessions per week learning or practicing a meaningful skill. Keep blood pressure, diabetes, lipid, sleep, hearing, and vision care on their existing clinical schedule.
+For 12 weeks, choose one action from each of four areas. Move for 20 to 30 minutes on five days per week; do two short strength sessions; schedule one recurring social activity; and spend two sessions per week learning or practicing a skill that matters to you. Keep blood pressure, diabetes, lipid, sleep, hearing, and vision care on their existing clinical schedule.
 
-At the end of each week, ask whether the plan created more movement, connection, and participation. Do not take repeated online cognitive tests. If you want a baseline, use an ordinary real-world function—following a recipe, managing a route, learning a song, or participating in a group—and notice whether it remains available.
+At the end of each week, ask whether the plan produced more movement, connection, and participation. Don't take repeated online cognitive tests. If you want a baseline, use an ordinary real-world task, such as following a recipe, managing a route, learning a song, or taking part in a group, and notice whether it stays within reach.
 
 ## How to know it is working
 
-Short-term signs include better fitness, sleep, mood, confidence, and social engagement. Long-term brain health cannot be proven from a wearable, supplement response, or a few memory games. Success is maintaining protective habits and daily abilities while treating risks that can be changed.
+Short-term signs include better fitness, sleep, mood, confidence, and social engagement. Long-term brain health can't be proven from a wearable, a supplement response, or a few memory games. Success means keeping protective habits and daily abilities while treating the risks that can be changed.
 
 ## If you get stuck
 
-Make the actions social or purposeful. Walk with someone, take a class, volunteer, or learn something needed for a trip. If hearing loss makes groups exhausting, address hearing first. If low mood or apathy blocks activity, treat that problem rather than adding reminders.
+Make the actions social or purposeful. Walk with someone, take a class, volunteer, or learn something you need for a trip. If hearing loss makes groups exhausting, address hearing first. If low mood or apathy blocks activity, treat that rather than adding reminders.
 
-Be skeptical of supplements, detoxes, and commercial tests that promise to prevent Alzheimer's disease. Correct a documented deficiency and use evidence-based medical care, but do not let speculative products crowd out movement, vascular care, sleep, and connection.
+Be skeptical of supplements, detoxes, and commercial tests that promise to prevent Alzheimer's disease. Correct a documented deficiency and use evidence-based medical care, but don't let speculative products crowd out movement, vascular care, sleep, and connection.
 
-Choose activities that require participation rather than passive exposure. Learning a song, language phrase, dance sequence, route, recipe, or volunteer role asks the brain to pay attention, recall, adapt, and connect with other people. Increase difficulty when the activity becomes automatic, but keep it enjoyable enough to repeat. Pair this with ordinary cardiovascular and strength training instead of replacing movement with puzzles. A weekly plan might include two strength sessions, several brisk walks, one social commitment, and one learning session. Track whether these actually happen and whether daily tasks feel manageable; no consumer game score can certify that dementia has been prevented.
+Choose activities that require participation rather than passive exposure. Learning a song, a language phrase, a dance sequence, a route, a recipe, or a volunteer role asks the brain to pay attention, recall, adapt, and connect with other people. Raise the difficulty when the activity becomes automatic, but keep it enjoyable enough to repeat. Pair this with ordinary cardiovascular and strength training instead of swapping movement for puzzles. Track whether the weekly plan actually happens and whether daily tasks feel manageable; no consumer game score can certify that dementia has been prevented.
 
 ## A quick note
 

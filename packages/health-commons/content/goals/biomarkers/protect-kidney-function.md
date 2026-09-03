@@ -40,38 +40,38 @@ safety:
     - A major drop in urine, new severe swelling or breathlessness, confusion, or persistent vomiting needs urgent assessment.
 ---
 
-Protecting kidney function usually means slowing or preventing decline rather than forcing an eGFR number upward. The most effective steps are controlling blood pressure and diabetes, using kidney-protective medicines when indicated, avoiding tobacco and kidney-toxic exposures, and following both filtration and urine albumin over time.
+Protecting kidney function usually means slowing or preventing decline, not pushing an eGFR number upward. The most effective steps are controlling blood pressure and diabetes, using kidney-protective medicines when indicated, avoiding tobacco and kidney-toxic exposures, and following both filtration and urine albumin over time.
 
-One creatinine-based eGFR can shift with hydration, illness, recent meat intake, supplements, and muscle mass. Chronic kidney disease is defined by persistent abnormalities, not an isolated mildly low result. Urine albumin can reveal kidney damage even when eGFR looks normal, so the two measures complement each other.
+A single creatinine-based eGFR can shift with hydration, illness, recent meat intake, supplements, and muscle mass. Chronic kidney disease is defined by persistent abnormalities, not one mildly low result. Urine albumin can show kidney damage even when eGFR looks normal, so the two measures belong together.
 
 ## What to do
 
-- **Control blood pressure.** Use accurate home averages and follow the treatment plan. ACE inhibitors or ARBs are particularly important in some people with albuminuria, but dosing and monitoring are clinician-owned.
+- **Control blood pressure.** Use accurate home averages and follow the treatment plan. ACE inhibitors or ARBs are particularly important for some people with albuminuria, but your clinician owns dosing and monitoring.
 - **Manage diabetes safely.** Glucose control reduces microvascular damage. SGLT2 inhibitors and other treatments can protect kidneys in eligible people beyond their glucose effect.
-- **Avoid routine excess NSAIDs.** Ibuprofen, naproxen, and similar drugs can worsen kidney function in susceptible people, especially during dehydration or when combined with certain medicines. Ask about safer pain options.
-- **Do not smoke.** Tobacco damages blood vessels and accelerates cardiovascular and kidney risk.
-- **Eat for cardiovascular and kidney health.** Emphasize minimally processed foods and avoid excessive sodium. Protein, potassium, phosphorus, and fluid targets depend on kidney stage; severe restrictions are not automatically helpful.
+- **Avoid routine excess NSAIDs.** Ibuprofen, naproxen, and similar drugs can worsen kidney function in susceptible people, especially during dehydration or alongside certain medicines. Ask about safer pain options.
+- **Do not smoke.** Tobacco damages blood vessels and speeds up cardiovascular and kidney risk.
+- **Eat for cardiovascular and kidney health.** Favor minimally processed foods and avoid excess sodium. Protein, potassium, phosphorus, and fluid targets depend on kidney stage; severe restrictions are not automatically helpful.
 - **Stay active and address excess weight if relevant.** Activity improves blood pressure, diabetes, function, and cardiovascular risk.
-- **Review medicines and supplements.** Dose adjustments may be needed as kidney function changes. Multi-ingredient “detox” or bodybuilding products can be risky or obscure the picture.
-- **Plan around illness.** Vomiting, diarrhea, fever, or poor intake can create dehydration and medication risk. Ask for a written sick-day plan rather than guessing which medicines to hold.
+- **Review medicines and supplements.** Doses may need adjusting as kidney function changes. Multi-ingredient “detox” or bodybuilding products can be risky or muddy the picture.
+- **Plan around illness.** Vomiting, diarrhea, fever, or poor intake can cause dehydration and medication risk. Ask for a written sick-day plan rather than guessing which medicines to hold.
 
 ## A simple plan
 
-Build a baseline with eGFR trend, urine albumin-to-creatinine ratio, home blood pressure, A1C if relevant, medication list, tobacco, and NSAID use. Ask what stage and cause are suspected, whether results have persisted for at least three months, and when they should be repeated.
+Build a baseline: eGFR trend, urine albumin-to-creatinine ratio, home blood pressure, A1C if relevant, medication list, tobacco, and NSAID use. Ask what stage and cause are suspected, whether results have persisted for at least three months, and when to repeat them.
 
-For eight weeks, take prescribed treatment consistently, measure blood pressure on a defined schedule, replace frequent high-sodium convenience foods, avoid unplanned NSAID use, and complete regular walking and strength activity at a safe level. If diabetes is present, work on the recurring glucose pattern with the largest impact.
+For eight weeks, take prescribed treatment consistently, measure blood pressure on a set schedule, replace frequent high-sodium convenience foods, avoid unplanned NSAID use, and keep up regular walking and strength activity at a safe level. If you have diabetes, work on the recurring glucose pattern with the biggest impact.
 
-Set reminders for laboratory monitoring required after certain medication starts or dose changes. Keep results in a trend rather than treating each one as a separate event.
+Set reminders for the lab monitoring required after certain medication starts or dose changes, and track results as a trend rather than as one-off events.
 
 ## How to know it is working
 
-Stable eGFR over time can be success, especially when decline was expected. A lower or stable urine albumin level, controlled blood pressure, appropriate glucose control, no tobacco, and consistent kidney-protective medication are strong signals. Small eGFR dips can occur after starting certain protective medicines and require clinical interpretation rather than automatic discontinuation.
+Stable eGFR over time can count as success, especially when decline was expected. Lower or stable urine albumin, controlled blood pressure, appropriate glucose control, no tobacco, and consistent kidney-protective medication are strong signals. Small eGFR dips can occur after starting certain protective medicines and need clinical interpretation, not automatic discontinuation.
 
 ## What to expect
 
 Kidney protection is a long game. Blood pressure may improve within weeks, urine albumin over months, and eGFR slope across longer follow-up. Some chronic loss cannot be reversed. The aim is to preserve function and reduce kidney failure and cardiovascular risk for as long as possible.
 
-Ask for a clear monitoring cadence rather than ordering extra tests whenever anxiety rises. That schedule may include eGFR, potassium, UACR, blood pressure, and diabetes measures at different intervals. Keep a copy of the trend and current medicine list for urgent visits, where kidney status can change choices about imaging contrast, pain treatment, and dosing.
+Ask for a clear monitoring schedule rather than ordering extra tests whenever worry spikes. It may include eGFR, potassium, UACR, blood pressure, and diabetes measures at different intervals. Keep a copy of the trend and your current medicine list for urgent visits, where kidney status can change choices about imaging contrast, pain treatment, and dosing.
 
 ## If you get stuck
 
@@ -79,7 +79,7 @@ Review measurement conditions, NSAIDs, dehydration, uncontrolled blood pressure 
 
 ## A quick note
 
-Do not force water, potassium, or protein restriction without a reason. The right kidney plan changes with stage, medicines, and laboratory values. Discuss creatine supplements and very high protein intake if kidney function is impaired or unclear.
+Do not force water, potassium, or protein restriction without a reason. The right kidney plan changes with stage, medicines, and lab values. Discuss creatine supplements and very high protein intake if kidney function is impaired or unclear.
 
 ## Sources
 

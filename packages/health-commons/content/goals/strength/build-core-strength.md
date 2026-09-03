@@ -40,44 +40,44 @@ safety:
   cautionLevel: low
 ---
 
-Your core is not one muscle and core strength is not one long plank. The trunk has to resist unwanted movement, create movement when needed, and transfer force between the hips and shoulders. A useful program trains bracing, side-to-side control, rotation, carrying, and sometimes flexion or extension—without pretending that any one drill is the secret to a healthy back.
+The trunk resists unwanted movement, creates movement when needed, and passes force between the hips and shoulders. No single muscle does all that, and no single plank trains it. A useful program covers bracing, side-to-side control, rotation, carrying, and sometimes flexion or extension. No one drill is the secret to a healthy back.
 
-Core work should serve a purpose. If you want a stronger squat or deadlift, practice bracing under gradually heavier loads. If carrying a child or suitcase is difficult, train carries. If you play a rotational sport, build control first and then add faster, sport-specific rotation. The exercise should match the job.
+Core work should serve a purpose. For a stronger squat or deadlift, practice bracing under gradually heavier loads. If carrying a child or suitcase is hard, train carries. For a rotational sport, build control first, then add faster, sport-specific rotation.
 
 ## What to do
 
-- Train the trunk two or three times per week, often at the end of a normal strength session.
-- Include one anti-extension exercise, one side-support or anti-lateral-flexion exercise, and one carry or anti-rotation exercise across the week.
-- Use short, high-quality sets. End a hold when position changes rather than competing with the clock.
-- Breathe behind the brace. You should be able to create tension without turning every set into a prolonged breath hold.
-- Progress leverage, resistance, distance, or control rather than adding minutes indefinitely.
-- Keep training the rest of the body. Squats, hinges, rows, presses, and carries already ask the trunk to work.
+- Train the trunk two or three times a week, often at the end of a strength session.
+- Across the week, include an anti-extension exercise, a side-support or anti-lateral-flexion exercise, and a carry or anti-rotation exercise.
+- Keep sets short and clean. End a hold when position slips, not when the clock says so.
+- Breathe behind the brace. Tension should not require a long breath hold every set.
+- Progress lever length, resistance, distance, or control instead of adding minutes forever.
+- Keep training the rest of the body; squats, hinges, rows, presses, and carries already work the trunk.
 
-Examples include dead bugs, bird dogs, side planks, front planks, Pallof presses, suitcase carries, farmer carries, cable lifts and chops, and controlled rollouts. None is mandatory. Choose a version that challenges the trunk while allowing a stable ribcage and pelvis.
+Dead bugs, bird dogs, side planks, front planks, Pallof presses, suitcase carries, farmer carries, cable lifts and chops, and controlled rollouts all work. Choose a version that challenges the trunk while your ribcage and pelvis stay put.
 
 ## A simple plan
 
-Twice per week, perform three exercises after your main lifts. On the first day, do a dead bug for 6 to 10 controlled repetitions per side, a side plank for 15 to 30 seconds per side, and a suitcase carry for 20 to 40 steps per side. On the second day, use a bird dog, Pallof press, and farmer carry.
+Twice a week, do three exercises after your main lifts. On the first day, do a dead bug for 6 to 10 controlled reps per side, a side plank for 15 to 30 seconds per side, and a suitcase carry for 20 to 40 steps per side. On the second day, use a bird dog, Pallof press, and farmer carry.
 
-Start with two sets. Make each repetition deliberate and stop before shaking turns into lost position. When you can complete the top of the range cleanly, use a slightly longer lever, a little more resistance, or a longer carry. For holds, adding load or making the position harder is often more productive than chasing a five-minute plank.
+Start with two sets. Make each rep deliberate and stop before shaking turns into lost position. When the top of the range is clean, use a slightly longer lever, a little more resistance, or a longer carry. For holds, add load or difficulty instead of chasing a five-minute plank.
 
-If core strength is meant to help a main lift, add specific practice. Before a squat or deadlift set, take one breath, expand the trunk in all directions, brace as if preparing for a firm bump, and keep that pressure through the hard part of the repetition. Use a load light enough to practice rather than prove yourself.
+If the point is a stronger main lift, practice there. Before a squat or deadlift set, take one breath, expand the trunk in all directions, brace as if for a firm bump, and hold that pressure through the hard part of the rep. Keep the load light enough to practice with.
 
 ## How to know it is working
 
-Progress should show up as better control in a harder variation, more load on a carry, a steadier unilateral exercise, or more confidence under a compound lift. Daily tasks may feel less wobbly, but do not promise that stronger abs will automatically eliminate pain.
+Progress shows up as better control in a harder variation, more load on a carry, a steadier single-side exercise, or more confidence under a compound lift. Daily tasks may feel less wobbly, but stronger abs won't automatically get rid of pain.
 
-Pick two anchor exercises and reassess monthly. A plank time can be useful if the position is standardized, but it measures endurance in that plank more than a universal quality called core strength. Use it alongside a carry or dynamic control task.
+Pick two anchor exercises and reassess monthly. A plank time is useful if the position is standardized, but it measures endurance in that plank, not some universal core strength. Pair it with a carry or a dynamic control task.
 
 ## If you get stuck
 
-If the hip flexors, shoulders, or low back always fatigue first, make the exercise easier and restore the intended position. Shorter levers, a raised plank, or a lighter carry can make the trunk work more effectively. If you can hold a basic position for a long time but see no transfer, stop extending the clock and increase the challenge more specifically.
+If the hip flexors, shoulders, or low back always tire first, make the exercise easier and restore the intended position. Shorter levers, a raised plank, or a lighter carry put the work back on the trunk. If long holds bring no carryover, stop extending the clock and make the challenge more specific.
 
-If back discomfort is the reason you started, remember that core exercise is one option within a broader approach. Walking, general strength, sleep, stress, and gradually returning to meaningful activity may matter too. Persistent or radiating symptoms should not be reduced to a weak-core story.
+If back discomfort is why you started, core exercise is one option within a broader approach. Walking, general strength, sleep, stress, and a gradual return to meaningful activity may matter too. Persistent or radiating symptoms should not be reduced to a weak-core story.
 
 ## A quick note
 
-Stop a drill that produces sharp pain, new numbness, weakness, or symptoms that travel down an arm or leg. Breath-holding under heavy load can sharply raise blood pressure; people with relevant cardiovascular or eye conditions may need individualized guidance on loading and breathing.
+Stop any drill that causes sharp pain, new numbness, weakness, or symptoms that travel down an arm or leg. Holding your breath under heavy load can sharply raise blood pressure. People with relevant cardiovascular or eye conditions may need individual guidance on loading and breathing.
 
 ## Sources
 

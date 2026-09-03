@@ -44,44 +44,44 @@ safety:
   cautionLevel: moderate
 ---
 
-Your first 5K is best approached as an endurance project, not a speed test. Build the ability to spend roughly 30 to 50 minutes moving forward, gradually increase the running inside that time, and learn a pace you can sustain. Walking during training—or during the event—is completely compatible with finishing a 5K.
+Your first 5K is an endurance project: keep moving for roughly 30 to 50 minutes, run more of that time as weeks pass, and learn a pace you can hold. Walking, in training or on the day, is fully compatible with finishing.
 
-Most healthy beginners benefit from at least six to ten weeks, but the correct timeline depends on current walking and running capacity rather than a fixed calendar.
+Most healthy beginners need at least six to ten weeks. The right timeline depends on your current walking and running, not a calendar.
 
 ## What to do
 
-- Run or run-walk three times per week on nonconsecutive days.
-- Keep most running conversational. If you cannot control the first few minutes, slow down.
-- Build total time before speed. A longer easy outing prepares you better than repeated short races.
-- Use planned walk breaks while they keep form and breathing steady.
+- Run or run-walk three times a week on nonconsecutive days.
+- Keep most running conversational; if you can't control the first few minutes, slow down.
+- Build total time before speed. One longer easy outing beats repeated short races.
+- Take planned walk breaks as long as they keep form and breathing steady.
 - Add one or two short strength sessions for calves, hips, and legs.
-- If you have an event date, leave the final week lighter instead of trying to gain fitness at the last moment.
+- With an event date, make the final week lighter instead of chasing last-minute fitness.
 
 ## A simple plan
 
-Begin with three 25- to 35-minute sessions. In week one, alternate two minutes easy running with two minutes walking. If that is too much, use one-minute runs; if it is already easy, begin with three to four minutes running.
+Start with three sessions of 25 to 35 minutes. In week one, alternate two minutes of easy running with two of walking. If that's too much, run one minute at a time; if it's already easy, start at three to four minutes.
 
-Each week, lengthen one or two running intervals while keeping the session duration similar. When you can run for ten minutes at a time, make one weekly outing longer by five minutes. The other two stay shorter and easy.
+Each week, lengthen one or two running intervals and keep the session about the same length. Once you can run ten minutes at a stretch, add five minutes to one outing a week. The other two stay short and easy.
 
-By the middle of the plan, a week might include a 25-minute easy run-walk, a 30-minute session with several five-minute runs, and a 40-minute easy outing. Later, work toward 20 to 30 continuous minutes, but do not require a continuous 5K in training. Completing four to five kilometers through a mix of easy running and walking is enough evidence that the distance is within reach.
+Mid-plan, a week might hold a 25-minute easy run-walk, a 30-minute session with several five-minute runs, and a 40-minute easy outing. Later, work toward 20 to 30 continuous minutes. You don't need a continuous 5K in training; four to five kilometers of mixed easy running and walking shows the distance is within reach.
 
-In the final week, reduce the volume, keep two short easy runs, and rest or walk the day before. Start the 5K slower than the pace your excitement suggests. If you feel strong after halfway, gradually increase the effort.
+In the final week, cut volume, keep two short easy runs, and rest or walk the day before. Start the 5K slower than excitement suggests, and build the effort after halfway if you still feel strong.
 
 ## How to know it is working
 
-Look for more running within the same session, a longer comfortable outing, and quicker recovery after hills. Your easy pace may improve, but it does not need to. The primary marker is that 5K-sized time on your feet becomes normal.
+Look for more running in the same session, a longer comfortable outing, and quicker recovery after hills. Easy pace may improve but doesn't have to. The main marker is that 5K-sized time on your feet feels normal.
 
-If the goal is an organized event, success is reaching the start healthy enough to participate and completing the course in a way that makes you willing to run again. Time can become a later goal.
+For an organized event, success is starting healthy enough to take part and finishing willing to run again. Time can be a later goal.
 
 ## If you get stuck
 
-If you cannot extend the running intervals, slow them down or keep the walk breaks longer. If the legs are sore after every run, hold the volume for a week, replace one run with cycling or walking, and check that hard surfaces and hills have not increased at the same time.
+If you can't extend the running intervals, slow them down or lengthen the walk breaks. If your legs are sore after every run, hold volume for a week, swap one run for cycling or walking, and check whether hard surfaces and hills crept in together.
 
-If consistency is the problem, fix three specific days and make the minimum session ten minutes. If you miss a week, repeat the last successful week rather than skipping ahead to match a template.
+If consistency is the problem, fix three days and make the minimum session ten minutes. After a missed week, repeat the last good week instead of skipping ahead.
 
 ## A quick note
 
-Pain that changes your stride, swelling, or worsening focal bone pain should not be trained through. Stop for chest pain, fainting, or severe unusual breathlessness.
+Don't train through pain that changes your stride, swelling, or worsening focal bone pain. Stop for chest pain, fainting, or severe unusual breathlessness.
 
 ## Sources
 

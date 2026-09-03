@@ -42,48 +42,48 @@ safety:
   cautionLevel: low
 ---
 
-Shoulder mobility is a partnership between the ball-and-socket joint, the shoulder blade, the upper back, and the strength to control the arm. The right goal is not maximal range in every direction. It is enough comfortable range for reaching a shelf, dressing, pressing overhead, swimming, throwing, or another meaningful task.
+Shoulder range comes from the ball-and-socket joint, the shoulder blade, the upper back, and the strength to control the arm. You need enough comfortable range for reaching a shelf, dressing, pressing overhead, swimming, throwing, or whatever task matters to you, not maximal range in every direction.
 
-Start with the movement that is limited. Overhead reach, reaching behind the back, and rotating the arm are different. A generic doorway stretch cannot solve every one, and some range changes should come from the upper back or shoulder blade rather than forcing the shoulder joint.
+Start with the movement that's limited. Overhead reach, behind-the-back reach, and rotation are different problems. A generic doorway stretch won't fix them all, and some range should come from the upper back or shoulder blade rather than forcing the joint.
 
 ## What to do
 
-- Practice the target range three to five days per week in short sessions.
-- Use gentle stretches only in directions that feel restricted, not unstable.
+- Practice the target range three to five days a week in short sessions.
+- Stretch gently, and only in directions that feel restricted, not unstable.
 - Strengthen rows, presses, external rotation, and overhead control within comfortable range.
-- Let the shoulder blade rotate naturally during overhead reach rather than pinning it down.
+- Let the shoulder blade rotate naturally on overhead reach; don't pin it down.
 - Train the upper back and trunk positions that support the task.
 - Rehearse the actual reach or sport movement after mobility work.
 
-Research shows both chronic stretching and resistance training through range can improve mobility. Light overhead presses, wall slides, pulldowns, and controlled rotation can therefore be mobility work as well as strength work when the range is appropriate.
+Research shows both chronic stretching and resistance training through range improve mobility. So light overhead presses, wall slides, pulldowns, and controlled rotation count as mobility work as well as strength work when the range is appropriate.
 
 ## A simple plan
 
-Four days per week, perform two rounds of five wall slides, eight light band or cable rows, and eight controlled external rotations per side. Add one 20- to 30-second stretch matched to the limitation, such as a gentle chest or lat stretch.
+Four days a week, do two rounds of five wall slides, eight light band or cable rows, and eight controlled external rotations per side. Add one 20- to 30-second stretch matched to your limitation, such as a gentle chest or lat stretch.
 
-Twice per week, perform two sets of a comfortable press and pull. If overhead range is limited, use a landmine press or angled dumbbell press and gradually increase the angle. Finish with three slow repetitions of the actual task: reaching the shelf, placing the hand behind the head, or moving through a swim or throw position without speed.
+Twice a week, do two sets of a comfortable press and pull. If overhead range is limited, use a landmine or angled dumbbell press and raise the angle over time. Finish with three slow reps of the real task: reaching the shelf, hand behind the head, or a swim or throw position without speed.
 
-Progress by adding a little reach or resistance while keeping the motion smooth. Do not use another person or a heavy weight to force the arm farther than you can control.
+Progress by adding a little reach or resistance while keeping the motion smooth. Never let a partner or a heavy weight push the arm past what you can control.
 
-For an overhead goal, include the upper back. A supported upper-back extension over a chair or foam roller followed by a wall slide may make the movement easier without forcing the shoulder. For throwing or swimming, restore slow range first, then add speed and volume gradually; passive flexibility alone does not prepare the shoulder for repeated high-force motion.
+For an overhead goal, include the upper back: a supported upper-back extension over a chair or foam roller, then a wall slide, may ease the movement without forcing the shoulder. For throwing or swimming, restore slow range first, then add speed and volume gradually; passive flexibility alone doesn't prepare the shoulder for repeated high-force motion.
 
-Keep pressing and pulling volume visible. A new mobility routine layered onto a sudden increase in swimming, climbing, or lifting can irritate the same tissues. When symptoms appear, adjust the total workload rather than assuming the shoulder simply needs more stretching.
+Watch total pressing and pulling volume. A new mobility routine on top of a sudden jump in swimming, climbing, or lifting can irritate the same tissues. When symptoms appear, adjust the workload rather than assuming the shoulder needs more stretching.
 
 ## How to know it is working
 
-Choose one repeatable task and record range, comfort, and control. For overhead reach, use a side photo with the ribs relaxed. For behind-the-back reach, note the landmark reached without wrenching the arm. Test every two to four weeks.
+Pick one repeatable task and record range, comfort, and control: a side photo with the ribs relaxed for overhead reach, or the landmark you reach without wrenching the arm for behind-the-back reach. Test every two to four weeks.
 
-Look for transfer: easier dressing, a more comfortable press, less compensation during a reach, or a smoother sport movement. A larger passive range that cannot be controlled is not the whole result.
+Look for transfer: easier dressing, a more comfortable press, less compensation during a reach, or a smoother sport movement. More passive range you can't control is only part of the result.
 
 ## If you get stuck
 
-If the ribs flare or back arches to create overhead reach, reduce the range and strengthen the shoulder and trunk there. If the front of the shoulder pinches, try a slightly different arm angle or neutral grip. If the shoulder feels loose or unstable, stretching may be the wrong emphasis; control and strength may matter more.
+If your ribs flare or back arches to reach overhead, reduce the range and strengthen the shoulder and trunk there. If the front of the shoulder pinches, try a slightly different arm angle or a neutral grip. If the shoulder feels loose or unstable, control and strength probably matter more than stretching.
 
-Night pain, a sudden loss of range, significant weakness, or inability to raise the arm after injury needs assessment. A stiff shoulder after surgery or dislocation should follow condition-specific guidance rather than a generic mobility plan.
+Night pain, sudden loss of range, significant weakness, or inability to raise the arm after an injury needs assessment. A stiff shoulder after surgery or dislocation should follow condition-specific guidance, not a generic mobility plan.
 
 ## A quick note
 
-Stop for sharp pain, new numbness, a feeling that the joint is slipping, or sudden weakness. Do not force behind-the-back or overhead range. Comfortable progress is more useful than matching a flexibility photo.
+Stop for sharp pain, new numbness, a feeling that the joint is slipping, or sudden weakness. Don't force behind-the-back or overhead range. Comfortable progress is worth more than matching a flexibility photo.
 
 ## Sources
 

@@ -40,46 +40,46 @@ safety:
     - Blood in stool, persistent change in bowel habits, unexplained iron-deficiency anemia, weight loss, or ongoing abdominal pain needs evaluation rather than routine screening alone.
 ---
 
-Colorectal cancer risk can be lowered, and screening is unusually valuable because some tests can find and remove precancerous polyps before cancer develops. For average-risk U.S. adults, screening generally begins at age 45 and continues through 75, with individualized decisions later. Family history, inflammatory bowel disease, prior polyps, or an inherited syndrome can require earlier or more frequent testing.
+You can lower colorectal cancer risk, and screening is unusually valuable because some tests find and remove precancerous polyps before cancer develops. For average-risk U.S. adults, screening generally starts at 45 and continues through 75, with individualized decisions after that. Family history, inflammatory bowel disease, prior polyps, or an inherited syndrome can call for earlier or more frequent testing.
 
-Screening is not the only lever. Regular activity, avoiding tobacco, limiting alcohol, maintaining a healthy weight when possible, and a food pattern rich in fiber-containing plant foods all support lower risk. None guarantees prevention, so symptoms still deserve attention.
+Screening is one lever among several. Regular activity, no tobacco, limited alcohol, a healthy weight when possible, and a food pattern rich in fiber-containing plant foods all help lower risk. None guarantees prevention, so symptoms still deserve attention.
 
 ## What to do
 
-- **Choose a screening test you will complete.** Options include annual fecal immunochemical testing, stool DNA–FIT at a longer interval, colonoscopy, CT colonography, and other strategies. The best test is one appropriate for your risk that is completed correctly.
-- **Finish the follow-up.** A positive stool test is not a diagnosis, but it requires timely colonoscopy. Repeating the stool test instead can miss the point of screening.
+- **Choose a screening test you will complete.** Options include annual fecal immunochemical testing, stool DNA–FIT at a longer interval, colonoscopy, CT colonography, and other strategies. The best test is one that fits your risk and actually gets done correctly.
+- **Finish the follow-up.** A positive stool test is not a diagnosis, but it requires timely colonoscopy. Repeating the stool test instead defeats the purpose of screening.
 - **Know your family history.** Ask about colorectal cancer, advanced polyps, age at diagnosis, and multiple related cancers. A first-degree relative affected young can change your starting age and test.
-- **Move regularly.** Build toward at least 150 minutes of moderate aerobic activity weekly and add strength training.
-- **Eat more fiber-containing foods.** Vegetables, fruit, beans, lentils, and whole grains support a healthier pattern. Increase fiber gradually and use food as the foundation.
-- **Limit processed meat and moderate red meat.** Reduce the repeated defaults—bacon, sausage, hot dogs, and deli meat—without making the plan unnecessarily rigid.
-- **Avoid tobacco and limit alcohol.** Both contribute to cancer risk; less alcohol is generally lower risk.
-- **Address excess body fat if relevant.** Use a gradual, sustainable approach that preserves muscle and adequate nutrition.
+- **Move regularly.** Build toward at least 150 minutes of moderate aerobic activity a week and add strength training.
+- **Eat more fiber-containing foods.** Vegetables, fruit, beans, lentils, and whole grains build a healthier pattern. Increase fiber gradually and make food the foundation.
+- **Limit processed meat and moderate red meat.** Cut back on the repeated defaults, such as bacon, sausage, hot dogs, and deli meat, without making the plan needlessly rigid.
+- **Avoid tobacco and limit alcohol.** Both add to cancer risk; less alcohol generally means lower risk.
+- **Address excess body fat if relevant.** Use a gradual approach that preserves muscle and enough nutrition.
 
 ## A simple plan
 
-First determine whether you are average risk. Record age, prior tests and polyps, family history, inflammatory bowel disease, inherited syndromes, and any current symptoms. Choose the screening option and arrange it now, including the likely colonoscopy follow-up if a stool test is positive.
+First work out whether you are average risk: record age, prior tests and polyps, family history, inflammatory bowel disease, inherited syndromes, and any current symptoms. Then choose a screening option and arrange it now, including colonoscopy follow-up if a stool test comes back positive.
 
-For the next eight weeks, schedule five brisk 30-minute walks, replace two processed-meat meals each week with beans, fish, poultry, or another option, and put a fruit, vegetable, legume, or whole grain in most meals. Set a clear weekly alcohol boundary and use cessation support if you smoke.
+For the next eight weeks, schedule five brisk 30-minute walks, replace two processed-meat meals a week with beans, fish, poultry, or another option, and put a fruit, vegetable, legume, or whole grain in most meals. Set a clear weekly alcohol limit and use cessation support if you smoke.
 
-Put the next screening date and result in one place that will survive a phone or clinician change.
+Put the next screening date and result somewhere that will survive a change of phone or clinician.
 
 ## How to know it is working
 
-The most concrete milestones are completing the appropriate screening, completing colonoscopy after an abnormal noninvasive test, and following the recommended interval after polyps. Behavior signals include more weekly activity, more high-fiber plant foods, less processed meat, no tobacco, and less alcohol. There is no consumer biomarker that can prove your personal cancer risk has been eliminated.
+The most concrete milestones: completing the appropriate screening, completing colonoscopy after an abnormal noninvasive test, and keeping the recommended interval after polyps. Behavior signals include more weekly activity, more high-fiber plant foods, less processed meat, no tobacco, and less alcohol. No consumer biomarker can prove your personal cancer risk is gone.
 
 ## What to expect
 
-Lifestyle benefits build over years. Screening can prevent cancer through polyp removal or find it at an earlier stage, but each test has limitations and intervals. A negative result is reassuring for that strategy and time window, not lifetime clearance.
+Lifestyle benefits build over years. Screening can prevent cancer through polyp removal or find it at an earlier stage, but each test has limits and intervals. A negative result is reassuring for that strategy and time window, not lifetime clearance.
 
-Make the follow-up pathway part of the initial choice. Before using a home stool test, know who will receive the result and arrange colonoscopy if it is positive. Before colonoscopy, confirm transportation, preparation instructions, and medication guidance. A test kit that expires in a drawer or a positive result without colonoscopy provides little protection. If a polyp is removed, record its pathology and the recommended next interval; the interval depends on what was found, not simply the date of the procedure.
+Decide the follow-up pathway when you choose the test. Before a home stool test, know who will receive the result and arrange colonoscopy if it is positive. Before colonoscopy, confirm transportation, preparation instructions, and medication guidance. A kit that expires in a drawer or a positive result without colonoscopy protects very little. If a polyp is removed, record its pathology and the recommended next interval, which depends on what was found, not just the procedure date.
 
 ## If you get stuck
 
-If bowel preparation, cost, time off, or fear blocks colonoscopy, ask about stool-based screening or navigation support if you are average risk. If fiber causes discomfort, increase slowly and vary sources. If family history is vague, gather relatives’ approximate ages and diagnoses rather than waiting for perfect records.
+If bowel preparation, cost, time off, or fear blocks colonoscopy and you are average risk, ask about stool-based screening or navigation support. If fiber causes discomfort, increase slowly and vary sources. If family history is vague, gather relatives’ approximate ages and diagnoses rather than waiting for perfect records.
 
 ## A quick note
 
-Aspirin is not a universal colorectal-cancer prevention supplement; bleeding risk and cardiovascular context matter. Symptoms require diagnostic evaluation even when you are younger than the screening age or recently had a negative screening test.
+Aspirin is not a universal colorectal-cancer prevention supplement; bleeding risk and cardiovascular context matter. Symptoms need diagnostic evaluation even if you are younger than the screening age or recently had a negative screening test.
 
 ## Sources
 

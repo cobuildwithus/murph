@@ -44,45 +44,45 @@ safety:
   cautionLevel: moderate
 ---
 
-A 100-mile century is a long-duration pacing, fueling, and comfort challenge. Build it through consistent weekly riding and a gradually longer ride rather than one enormous test. Your bike position, hands, feet, saddle contact, food, hydration, and ability to stay calm early can matter as much as peak fitness.
+A century is a long test of pacing, fueling, and comfort. Build up with consistent weekly riding and one gradually longer ride, not a single enormous test. Bike position, hands, feet, saddle contact, food, hydration, and staying calm early can matter as much as peak fitness.
 
-Choose the route or event first. Elevation, surface, aid stations, group riding, weather, and cutoff times determine how demanding “100 miles” will be.
+Choose the route or event first; elevation, surface, aid stations, group riding, weather, and cutoff times decide how demanding “100 miles” will be.
 
 ## What to do
 
-- Begin a specific block after you can ride two or three times per week and complete roughly 40 to 50 miles comfortably.
-- Keep most riding easy to moderate and extend one weekly long ride.
-- Practice riding the terrain and elevation the event contains.
+- Start a specific block once you ride two or three times a week and can do about 40 to 50 miles comfortably.
+- Keep most riding easy to moderate and extend one long ride each week.
+- Practice the terrain and elevation the event includes.
 - Test bike fit, shorts, shoes, gloves, lights, repair kit, and carrying setup well before the event.
-- Eat and drink during long rides using products and foods you have already tolerated.
+- Eat and drink on long rides using foods and products you've already tolerated.
 - Learn group-riding signals and drafting rules if the event involves a pack.
-- Include a recovery week every few weeks instead of increasing continuously.
+- Take a recovery week every few weeks instead of building continuously.
 
 ## A simple plan
 
-Use a 10- to 16-week specific block, longer if the current longest ride is well below 40 miles. A representative week has one easy recovery ride, one moderate ride with several controlled hills or efforts, and one long ride. Optional strength work can remain once or twice weekly early in the block.
+Use a 10- to 16-week block, longer if your longest ride is well under 40 miles. A typical week: one easy recovery ride, one moderate ride with several controlled hills or efforts, one long ride, and optional strength work once or twice a week early in the block.
 
-Increase the long ride by roughly five to ten miles after successful weeks. Every third or fourth week, shorten it. Build through 50, 60, 70, and 80-mile territory without requiring a training century. Many riders peak with an 80- to 90-mile ride or a similar duration before tapering.
+Add about five to ten miles to the long ride after successful weeks, and shorten it every third or fourth week. Work up through 50, 60, 70, and 80 miles without needing a training century; many riders peak with an 80- to 90-mile ride, or a similar duration, before tapering.
 
-Use long rides as rehearsals. Begin fueling within the first hour, practice the timing you plan to use, and notice which foods remain tolerable later. Stop to adjust a hot spot or mechanical problem before it becomes severe.
+Treat long rides as rehearsals: start fueling within the first hour, practice the timing you plan to use, and note which foods still go down late. Stop to fix a hot spot or mechanical problem before it gets severe.
 
-Reduce volume during the final one to two weeks. Check the bike, weather, course, aid locations, and transport. On event day, ride the opening hours below the effort that feels exciting. Save strength for the final quarter.
+Cut volume in the final one to two weeks and check the bike, weather, course, aid locations, and transport. On the day, ride the opening hours below the effort that feels exciting and save strength for the final quarter.
 
 ## How to know it is working
 
-Long rides should create less late fade and less next-day disruption. You should know what you can eat, how often you need to refill, and which contact points need adjustment. The same route may become faster at a similar effort, but readiness is better shown by a series of durable long rides.
+Long rides should leave less late fade and less next-day disruption. You should know what you can eat, how often to refill, and which contact points need adjusting. The same route may get faster at a similar effort, but a series of durable long rides is the better sign of readiness.
 
-Completing 100 miles in training is not required. Consistent weeks, a successful peak ride, practiced logistics, and a realistic event pace form a stronger readiness picture.
+Readiness comes from consistent weeks, a good peak ride, practiced logistics, and a realistic event pace, not from a training century.
 
 ## If you get stuck
 
-If energy collapses, start slower and fuel earlier. If pain at the saddle, hands, feet, neck, or knees limits the ride, address fit and equipment before adding miles. If the long ride absorbs all recovery, trim it and strengthen the shorter weekly foundation.
+If energy collapses, start slower and fuel earlier. If saddle, hand, foot, neck, or knee pain limits the ride, sort out fit and equipment before adding miles. If the long ride eats all your recovery, trim it and build the shorter weekly foundation.
 
-If weather cancels a ride, use indoor time rather than trying to double the next week. If illness or injury removes a substantial part of the peak block, revise the event goal rather than compressing missed miles.
+If weather cancels a ride, ride indoors rather than doubling up the next week. If illness or injury takes out a big chunk of the peak block, revise the event goal instead of cramming in missed miles.
 
 ## A quick note
 
-Wear a helmet, use visible equipment, follow road rules, and carry repair and communication essentials. Stop for chest pain, fainting, confusion, severe unusual breathlessness, or inability to ride safely.
+Wear a helmet, use visible equipment, follow road rules, and carry repair and communication essentials. Stop for chest pain, fainting, confusion, severe unusual breathlessness, or any inability to ride safely.
 
 ## Sources
 

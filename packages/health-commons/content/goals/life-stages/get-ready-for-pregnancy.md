@@ -4,7 +4,7 @@ entityType: goal_template
 key: goal_template:get-ready-for-pregnancy
 slug: get-ready-for-pregnancy
 title: Get Ready for Pregnancy
-summary: Build a practical preconception foundation around folic acid, current health conditions, medicines, vaccinations, and sustainable daily habits.
+summary: Put folic acid, a medicine and health review, no tobacco or alcohol, and steady daily habits in place before you conceive.
 status: field-testing
 quality: usable
 aliases:
@@ -45,32 +45,32 @@ safety:
     - People with a prior neural-tube-defect-affected pregnancy or certain medicines or conditions may need a clinician-prescribed folic acid dose rather than the standard amount.
 ---
 
-Getting ready for pregnancy is mostly about putting a few high-value basics in place before conception. The priorities are **folic acid, a review of medicines and health conditions, avoiding tobacco and alcohol, and a sustainable foundation of food, movement, sleep, and support**. You do not need a detox, a perfect body, or a cabinet of fertility supplements.
+Getting ready for pregnancy mostly means putting a few basics in place before conception. The priorities are folic acid, a review of medicines and health conditions, no tobacco or alcohol, and food, movement, sleep, and support you can keep up. You don't need a detox, a perfect body, or a cabinet of fertility supplements.
 
 ## What to do
 
-- **Start folic acid now.** Most people who could become pregnant should take a daily supplement containing 400 micrograms of folic acid beginning at least one month before conception. Continue through early pregnancy. Some people need a different dose based on history or medicines, so confirm when that applies.
-- **Review medicines and supplements.** Include prescriptions, over-the-counter pain relievers, skin treatments, herbs, and performance supplements. The right move may be to continue, change, or monitor a medicine—not simply stop it.
-- **Bring chronic conditions into the plan.** Diabetes, high blood pressure, thyroid disease, epilepsy, mental health conditions, and other diagnoses may benefit from tighter control or treatment adjustment before pregnancy.
-- **Check vaccination and infection prevention.** Some vaccines are best completed before pregnancy, while others are recommended during it. Review STI risk and dental care as ordinary parts of preconception health.
-- **Stop tobacco and nicotine, and avoid alcohol while trying.** Ask for treatment support rather than relying on willpower alone. Avoid recreational drugs, and discuss cannabis use as part of the plan.
-- **Eat regularly and include variety.** Build meals from vegetables and fruit, whole grains or other carbohydrate sources, protein foods, and calcium-rich foods. A prenatal vitamin complements food; it does not replace it.
-- **Move consistently.** Work toward regular aerobic activity plus strength work if that is appropriate for you. A routine you already tolerate is more useful than an intense last-minute program.
-- **Understand timing without turning sex into a spreadsheet.** Pregnancy is most likely in the several days before ovulation and the day of ovulation. Sex every one to two days during the fertile window is sufficient for many couples; exact daily timing is not required.
+- **Start folic acid now.** Most people who could become pregnant should take 400 micrograms of folic acid daily, starting at least one month before conception and continuing through early pregnancy. History or certain medicines can call for a different dose, so check whether that applies to you.
+- **Review medicines and supplements.** Include prescriptions, over-the-counter pain relievers, skin treatments, herbs, and performance supplements. The right move may be to continue, change, or monitor a medicine, not simply stop it.
+- **Plan for chronic conditions.** Diabetes, high blood pressure, thyroid disease, epilepsy, mental health conditions, and other diagnoses may benefit from tighter control or a treatment adjustment before pregnancy.
+- **Check vaccines and infection prevention.** Some vaccines are best completed before pregnancy; others are recommended during it. Treat STI risk and dental care as ordinary parts of preconception health.
+- **Stop tobacco and nicotine, and avoid alcohol while trying.** Get treatment support rather than relying on willpower. Avoid recreational drugs, and discuss any cannabis use as part of the plan.
+- **Eat regular, varied meals.** Build them from vegetables and fruit, whole grains or other carbohydrates, protein foods, and calcium-rich foods. A prenatal vitamin adds to food; it doesn't replace it.
+- **Move consistently.** Work toward regular aerobic activity, plus strength work if it suits you. A routine you already tolerate beats a last-minute intense program.
+- **Know the fertile window.** Pregnancy is most likely in the several days before ovulation and on the day itself. Sex every one to two days during that window is enough for many couples; exact daily timing isn't required.
 
 ## A simple plan
 
-Over the next four weeks, put folic acid beside an existing daily habit. Make one complete list of medicines and supplements and arrange a preconception review if you have ongoing conditions, use potentially pregnancy-relevant medicines, or have a complicated pregnancy history. Choose one reliable breakfast or lunch, two enjoyable weekly movement sessions, and a realistic sleep window.
+Over the next four weeks, put folic acid beside an existing daily habit. List every medicine and supplement, and arrange a preconception review if you have ongoing conditions, take medicines that could matter in pregnancy, or had a complicated pregnancy before. Pick one reliable breakfast or lunch, two weekly movement sessions you enjoy, and a realistic sleep window.
 
-If tobacco, nicotine, alcohol, or another substance is part of ordinary life, choose the support route now—clinician, quitline, therapy, medication when appropriate, or a trusted person—instead of waiting for a positive pregnancy test. If a partner is involved, make healthy changes together where that reduces the burden.
+If tobacco, nicotine, alcohol, or another substance is part of ordinary life, choose your support now (clinician, quitline, therapy, medication when appropriate, or a trusted person) instead of waiting for a positive test. If you have a partner, make changes together where that lightens the load.
 
 ## How to know it is working
 
-You are ready when the important pieces are no longer vague: folic acid is happening, medicines and conditions have a plan, preventable exposures are addressed, and your daily routine can continue without perfection. Success is preparation, not a guarantee of immediate conception or a complication-free pregnancy.
+You're ready when the important pieces are no longer vague: folic acid is happening, medicines and conditions have a plan, preventable exposures are handled, and your routine can carry on without perfection. That is preparation, not a guarantee of quick conception or a complication-free pregnancy.
 
 ## If you get stuck
 
-Prioritize the decisions that can materially change pregnancy health. A standard prenatal vitamin, a medication review, and substance support are usually more valuable than expensive fertility foods, wearable-derived ovulation guesses, or broad supplement panels. If cycles are irregular, use cycle tracking to identify the pattern, but do not assume an app can confirm ovulation.
+Focus on what can materially change pregnancy health. A standard prenatal vitamin, a medication review, and substance support usually matter more than expensive fertility foods, wearable ovulation guesses, or broad supplement panels. If cycles are irregular, track them to find the pattern, but don't assume an app can confirm ovulation.
 
 Fertility declines with age and varies widely. Seek an evaluation after 12 months of trying if the person trying to become pregnant is under 35, after 6 months from age 35 through 40, and discuss evaluation now if they are over 40. Seek help sooner at any age with very irregular periods, known reproductive conditions, prior cancer treatment, or a known male-factor concern.
 

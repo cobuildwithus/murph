@@ -39,47 +39,47 @@ safety:
     - Food guidance and prescription omega-3 treatment are different use cases.
 ---
 
-Omega-3 fats come in different forms. Fatty fish provide EPA and DHA directly; flax, chia, walnuts, soy, and canola provide ALA, only some of which the body converts to EPA and DHA. For most people, a food-first routine is simpler than guessing at supplement doses.
+Omega-3 fats come in different forms. Fatty fish provide EPA and DHA directly. Flax, chia, walnuts, soy, and canola provide ALA, and the body converts only some of it to EPA and DHA. For most people, a food-first routine is simpler than guessing at supplement doses.
 
 ## What to do
 
-If you eat seafood, plan roughly two fish meals per week and rotate choices such as salmon, sardines, trout, herring, or Atlantic mackerel. Use current local advice for lower-mercury choices, especially during pregnancy.
+If you eat seafood, plan about two fish meals a week and rotate among salmon, sardines, trout, herring, and Atlantic mackerel. Follow current local advice on lower-mercury choices, especially during pregnancy.
 
-If you do not eat fish, include ALA-rich foods most days—for example ground flax or chia in breakfast, walnuts as a snack, or soy foods in meals. People who avoid all animal foods can discuss an algae-derived DHA/EPA supplement with a clinician or dietitian if needed.
+If you don't eat fish, include ALA-rich foods most days: ground flax or chia at breakfast, walnuts as a snack, or soy foods in meals. If you avoid all animal foods, you can discuss an algae-derived DHA/EPA supplement with a clinician or dietitian.
 
 ## A simple plan
 
 Choose the version that matches how you eat.
 
-**If you eat fish:** list the fish you already like and choose two meals for the next week. Fatty fish such as salmon, sardines, trout, herring, and Atlantic mackerel provide more EPA and DHA than many lean fish. Use fresh, frozen, or canned forms. Rotate species and follow current mercury advice rather than eating the same fish every day.
+**If you eat fish:** list the fish you already like and pick two meals for the coming week. Fatty fish provide more EPA and DHA than many lean fish, and fresh, frozen, and canned all work. Rotate species rather than eating the same fish every day.
 
-**If you do not eat fish:** choose a daily ALA anchor. Add one to two tablespoons of ground flax or chia to oats or yogurt, use walnuts as a snack, and include soy foods or canola oil when they fit. Whole flax often passes through undigested, so ground flax is more useful.
+**If you don't eat fish:** choose a daily ALA anchor. Add one to two tablespoons of ground flax or chia to oats or yogurt, snack on walnuts, and use soy foods or canola oil when they fit. Whole flax often passes through undigested, so ground flax is more useful.
 
-**If you are considering a supplement:** first identify the reason. A general dietary gap, pregnancy, very high triglycerides, and a clinician-prescribed cardiovascular treatment are different situations. Read the EPA and DHA amounts rather than the total “fish oil” weight. Check product testing and discuss dose, interactions, and alternatives with a clinician or pharmacist. Algae oil provides a non-fish option.
+**If you're considering a supplement:** identify the reason first. A general dietary gap, pregnancy, very high triglycerides, and a clinician-prescribed cardiovascular treatment are different situations. Read the EPA and DHA amounts, not the total "fish oil" weight. Check product testing and discuss dose, interactions, and alternatives with a clinician or pharmacist. Algae oil is a non-fish option.
 
-Try the food plan for four weeks and make it repeatable through a shopping-list default, canned backup, or recurring meal. Do not expect a subjective sensation that proves it works. The main success is the pattern itself; clinical treatment of high triglycerides uses doses and products that should be supervised.
+Try the food plan for four weeks and make it repeatable with a shopping-list default, a canned backup, or a recurring meal.
 
 ## How to know it is working
 
-Count fish meals per week or ALA-rich eating occasions. A commercial omega-3 blood score is usually unnecessary for a general food goal and does not replace a review of the actual diet.
+Count fish meals per week or ALA-rich eating occasions. A commercial omega-3 blood score is usually unnecessary for a general food goal and doesn't replace reviewing what you actually eat.
 
 ## What to expect
 
-This is a long-term dietary pattern, not a feeling you should notice after a week. Prescription-dose omega-3 can lower high triglycerides, but that is medical treatment and should not be inferred from ordinary food intake.
+This is a long-term dietary pattern, not something you'll feel after a week. Prescription-dose omega-3 can lower high triglycerides, but that is supervised medical treatment and shouldn't be assumed from ordinary food intake.
 
 ## If you get stuck
 
-Use convenient options: canned salmon or sardines, frozen fish, chia or ground flax added to foods you already eat, or walnuts kept visible. If taste is the barrier, start with milder fish or mix a small portion into a familiar dish.
+Use convenient options: canned salmon or sardines, frozen fish, chia or ground flax stirred into foods you already eat, or walnuts kept in sight. If taste is the problem, start with milder fish or mix a small portion into a familiar dish.
 
 ## Make it last
 
-Attach omega-3 foods to meals that already happen. Put one fish dinner on a recurring weekly slot, keep canned fish as a backup, or add ground flax to the same breakfast. Store ground flax or chia appropriately and replace old products that smell rancid. For children or household members with different preferences, use separate sources rather than making one meal carry the entire plan.
+Attach omega-3 foods to meals that already happen, such as a fixed weekly fish dinner or ground flax in the same breakfast, with canned fish as backup. Store ground flax and chia properly and discard anything that smells rancid. If household members eat differently, use separate sources rather than making one meal carry the whole plan.
 
-Review seafood choices periodically because price, sustainability, availability, and advisories change. A mix of frozen, canned, and fresh fish can reduce cost. If using a supplement, record the product, EPA and DHA amount, and reason for taking it; do not stack multiple oils without noticing the total. Revisit the need during medication changes, pregnancy, or before surgery. The durable goal is a consistent and safe source pattern. It is not a race to the highest omega-3 index or a reason to ignore the rest of the diet.
+Review seafood choices periodically, since price, sustainability, availability, and advisories change. Mixing frozen, canned, and fresh fish can cut cost. If you take a supplement, record the product, the EPA and DHA amounts, and the reason, and don't stack several oils without noticing the total. Revisit the need when medications change, in pregnancy, or before surgery. A steady, safe source pattern is the goal; don't chase the highest omega-3 index or ignore the rest of the diet.
 
 ## A quick note
 
-Check fish advisories during pregnancy and for young children. Supplements vary in dose and quality and can interact with treatment; more is not automatically better.
+Check fish advisories during pregnancy and for young children. Supplements vary in dose and quality and can interact with treatment; more isn't automatically better.
 
 ## Sources
 

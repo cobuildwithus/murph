@@ -41,44 +41,44 @@ safety:
   cautionLevel: low
 ---
 
-Strong legs make ordinary life less demanding. They help you stand, climb, carry, change direction, absorb a landing, and keep doing the activities you enjoy. Building them does not require a particular barbell lift. It requires training the main jobs of the lower body with enough challenge and gradually increasing capacity.
+Strong legs make ordinary life easier: standing, climbing, carrying, changing direction, absorbing a landing, and keeping up the activities you enjoy. No particular barbell lift is required. Train the main jobs of the lower body with enough challenge and build up gradually.
 
-A balanced plan includes a knee-dominant movement such as a squat or step-up, a hip-dominant movement such as a hinge or bridge, some single-leg work, and an ankle or calf movement. The exact version can change with equipment and comfort. A chair squat is not an inferior exercise if it is the right challenge today; it is a starting point that can progress.
+A balanced plan has a knee-dominant movement like a squat or step-up, a hip-dominant movement like a hinge or bridge, some single-leg work, and an ankle or calf movement. Versions vary with equipment and comfort. A chair squat is a fine starting point if it is the right challenge today.
 
 ## What to do
 
-- Train the legs twice per week on nonconsecutive days.
-- Include a squat or leg press, a hinge or hip extension, and a step or split-stance movement across the week.
-- Add calf raises or another ankle-strength exercise, especially if walking, running, or jumping matters to you.
-- Use support for balance when that lets the target muscles work harder and more safely.
-- Progress one element at a time: range, repetitions, resistance, or exercise difficulty.
-- Keep at least one exercise closely connected to the real task you want to improve.
+- Train the legs twice a week on nonconsecutive days.
+- Across the week, include a squat or leg press, a hinge or hip extension, and a step or split-stance movement.
+- Add calf raises or another ankle exercise, especially if you walk, run, or jump a lot.
+- Use support for balance when it lets the target muscles work harder and more safely.
+- Progress one thing at a time: range, reps, resistance, or difficulty.
+- Keep at least one exercise closely tied to the real task you want to improve.
 
-Resistance training improves strength and physical function across many formats. Machines can be useful because they remove balance as a limiting factor; free weights and single-leg work can make stabilization part of the task. You do not have to choose a side. Use the combination that makes training repeatable and relevant.
+Resistance training improves strength and function in many formats. Machines remove balance as a limiting factor; free weights and single-leg work make stabilizing part of the task. Use whatever combination is repeatable and relevant.
 
 ## A simple plan
 
-On day one, perform a squat or leg press, a hip hinge, and a calf raise. On day two, perform a step-up or split squat, a hip bridge or hamstring curl, and another squat variation. Begin with two working sets of 6 to 12 repetitions for the larger exercises and 10 to 20 for calf or hamstring work.
+On day one, do a squat or leg press, a hip hinge, and a calf raise. On day two, do a step-up or split squat, a hip bridge or hamstring curl, and another squat variation. Start with two working sets of 6 to 12 reps for the larger exercises and 10 to 20 for calf or hamstring work.
 
-Choose a starting level that allows smooth repetitions and leaves about three good repetitions available. When both sets reach the top of the range with the same depth and control, add a small amount of resistance. For a bodyweight movement, lower the support, add range, slow the lowering phase, or hold a light load.
+Start at a level that allows smooth reps with about three good reps in reserve. When both sets reach the top of the range with the same depth and control, add a little resistance. For a bodyweight movement, lower the support, add range, slow the descent, or hold a light load.
 
-If the goal is everyday function, include one weekly practice of the actual task: several controlled chair rises, a short flight of stairs, or carrying groceries. Treat it as practice, not a test to exhaustion. For sport, keep the strength plan alongside gradual sport-specific work rather than assuming gym strength automatically becomes speed or skill.
+For everyday function, practice the actual task once a week: several controlled chair rises, a short flight of stairs, or carrying groceries. Treat it as practice, not a test to exhaustion. For sport, keep the strength plan alongside gradual sport-specific work, since gym strength doesn't automatically become speed or skill.
 
 ## How to know it is working
 
-Track a squat or leg press, a hinge or bridge, and one functional task. Useful progress includes more weight, more repetitions at the same weight, a deeper comfortable range, less hand support, or better control on one leg. Stairs, hills, and getting up from low seats may also feel easier.
+Track a squat or leg press, a hinge or bridge, and one functional task. Progress means more weight, more reps at the same weight, a deeper comfortable range, less hand support, or better control on one leg. Stairs, hills, and low seats may also feel easier.
 
-Test under similar conditions every four weeks. A single hard day may reflect poor sleep, a recent run, or normal variation. The trend matters. Muscle soreness is not required and should not be so intense that it repeatedly disrupts walking or the next session.
+Test under similar conditions every four weeks. One hard day may reflect poor sleep, a recent run, or normal variation; the trend matters. Soreness isn't required and shouldn't keep disrupting walking or the next session.
 
 ## If you get stuck
 
-Check whether balance, grip, or breathlessness is ending the set before the legs are challenged. A machine, support rail, lifting straps, or longer rest may reveal that the legs can do more. If one movement repeatedly hurts, choose a different pattern or range while keeping the rest of the plan active.
+Check whether balance, grip, or breathlessness ends the set before the legs are challenged. A machine, support rail, lifting straps, or longer rest may show the legs can do more. If one movement keeps hurting, switch pattern or range and keep the rest of the plan going.
 
-Progress can also stall because hard running, field sports, or long hikes already create substantial lower-body fatigue. Put demanding sessions on separate days when possible and reduce lifting volume during heavy sport weeks. More work is useful only when you can recover from it.
+Progress can also stall when hard running, field sports, or long hikes already leave the legs fatigued. Put demanding sessions on separate days when possible and cut lifting volume in heavy sport weeks. More work only helps when you can recover from it.
 
 ## A quick note
 
-New swelling, an inability to bear weight, a knee that locks or repeatedly gives way, or calf swelling with warmth and shortness of breath needs appropriate evaluation. Otherwise, gradual loading is often more useful than avoiding the legs because they feel temporarily deconditioned.
+New swelling, an inability to bear weight, a knee that locks or repeatedly gives way, or calf swelling with warmth and shortness of breath needs proper evaluation. Otherwise, gradual loading usually beats avoiding the legs because they feel temporarily out of shape.
 
 ## Sources
 

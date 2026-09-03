@@ -44,45 +44,45 @@ safety:
   cautionLevel: moderate
 ---
 
-A first 10K is mainly an endurance and pacing goal. If you can already complete a 5K comfortably and run two or three times per week, extend one easy run gradually while keeping the rest of the week stable. You do not need to run 10K in training before the event, and you do not need a large amount of speed work to finish well.
+A first 10K is mostly an endurance and pacing goal. If you can already run a 5K comfortably and run two or three times a week, extend one easy run gradually and keep the rest of the week stable. You don't need to run 10K in training before the event, and you don't need much speed work to finish well.
 
-Give yourself roughly eight to twelve weeks from a stable 5K base, or longer if running is still new.
+Give yourself about eight to twelve weeks from a stable 5K base, or longer if running is still new.
 
 ## What to do
 
-- Run three days per week at first; add a fourth only when the current pattern is easy to recover from.
+- Run three days a week at first; add a fourth only when the current pattern is easy to recover from.
 - Make one run progressively longer while the others stay easy and familiar.
-- Use a conversational pace for most work. The long run is not a weekly race.
-- Include brief walk breaks if they help you keep moving and recover well.
-- Add one controlled session with hills or moderate pickups only after the weekly rhythm is stable.
-- Practice water, clothing, and breakfast choices on training days rather than improvising at the event.
-- Strengthen calves, hips, and legs once or twice weekly.
+- Run most of it at a conversational pace; the long run isn't a weekly race.
+- Take brief walk breaks if they help you keep moving and recover well.
+- Add one controlled session with hills or moderate pickups only once the weekly rhythm is stable.
+- Test water, clothing, and breakfast on training days instead of improvising at the event.
+- Strengthen calves, hips, and legs once or twice a week.
 
 ## A simple plan
 
-Begin with two easy runs of 25 to 40 minutes and one long run of 40 to 50 minutes. Add five to ten minutes to the long run after a week that feels manageable. Hold the same duration when soreness or life stress is elevated, and reduce it every third or fourth week.
+Start with two easy runs of 25 to 40 minutes and one long run of 40 to 50 minutes. Add five to ten minutes to the long run after a week that felt manageable. Hold the same duration when soreness or life stress is high, and reduce it every third or fourth week.
 
-After three stable weeks, one shorter run may include six rounds of two minutes at a purposeful but controlled effort with two minutes easy. This is optional for completion. Keep at least one easy day after it.
+After three stable weeks, one shorter run can include six rounds of two minutes at a purposeful but controlled effort with two minutes easy. This is optional for completion; keep at least one easy day after it.
 
-Build the long run toward 70 to 85 minutes or roughly eight to nine kilometers, depending on your likely event duration and current pace. Time on feet is often more useful than forcing an exact distance. In the final seven to ten days, reduce the total and keep only short easy running.
+Build the long run toward 70 to 85 minutes, or about eight to nine kilometers, depending on your likely event duration and current pace. Time on feet is often more useful than forcing an exact distance. In the final seven to ten days, cut the total and keep only short easy running.
 
-On event day, begin at a pace that feels almost conservative. Settle through the first half, reassess around seven kilometers, and increase only if breathing and legs remain controlled.
+On event day, start at a pace that feels almost conservative. Settle through the first half, reassess around seven kilometers, and pick it up only if breathing and legs are still controlled.
 
 ## How to know it is working
 
-The long run should become less disruptive: you finish in control, eat and sleep normally, and can move comfortably the following day. Your ordinary 5K may also feel easier, but there is no need to test it repeatedly.
+The long run should become less disruptive: you finish in control, eat and sleep normally, and move comfortably the next day. Your usual 5K may feel easier too, but there's no need to keep testing it.
 
-You are prepared to attempt the event when the weekly pattern has been stable and you can spend most of the expected 10K duration moving comfortably. Completing eight kilometers in training is useful evidence; completing ten is optional.
+You're ready when the weekly pattern has been stable and you can spend most of the expected 10K duration moving comfortably. An eight-kilometer training run is useful evidence; a ten-kilometer one is optional.
 
 ## If you get stuck
 
-If the long run overwhelms the week, reduce its increase, add planned walk breaks, or trim another session. If a specific joint or tissue becomes steadily more painful, stop adding distance and use lower-impact aerobic work while you address it.
+If the long run overwhelms the week, make smaller increases, add planned walk breaks, or trim another session. If a joint or tissue gets steadily more painful, stop adding distance and use lower-impact aerobic work while you sort it out.
 
-If motivation is fading, choose a route with a destination, run with someone, or train by time instead of constantly watching kilometers. If illness or travel interrupts the plan, return to the last comfortable long run rather than trying to make up missed distance.
+If motivation is fading, pick a route with a destination, run with someone, or train by time instead of watching kilometers. If illness or travel interrupts the plan, go back to the last comfortable long run rather than making up missed distance.
 
 ## A quick note
 
-Do not train through pain that changes your stride, swelling, or focal pain that worsens with impact. Stop for chest pain, fainting, or severe unusual breathlessness.
+Don't train through pain that changes your stride, swelling, or focal pain that worsens with impact. Stop for chest pain, fainting, or severe unusual breathlessness.
 
 ## Sources
 

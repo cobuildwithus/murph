@@ -44,45 +44,45 @@ safety:
   cautionLevel: moderate
 ---
 
-Basketball fitness is the ability to repeat short accelerations, stops, cuts, jumps, shuffles, and skill actions across a game. Long steady cardio helps recovery, but it is not enough by itself. Build an aerobic base, then add court-specific intervals, strength, and actual basketball while keeping jump and cutting volume recoverable.
+Basketball shape means repeating short accelerations, stops, cuts, jumps, shuffles, and skill actions across a whole game. Long steady cardio helps recovery but isn't enough. Build an aerobic base, then add court-specific intervals, strength, and actual basketball while keeping jump and cutting volume recoverable.
 
-If you have not played recently, begin with movement and skill at submaximal speed before using full-court games as conditioning.
+If you haven't played recently, start with movement and skill work at submaximal speed before using full-court games as conditioning.
 
 ## What to do
 
-- Build two or three weekly aerobic sessions or active practices at manageable effort.
-- Strengthen calves, quads, hamstrings, hips, and trunk twice weekly.
+- Build two or three aerobic sessions or active practices a week at a manageable effort.
+- Strengthen calves, quads, hamstrings, hips, and trunk twice a week.
 - Use progressive accelerations, decelerations, lateral shuffles, and landing practice.
-- Add repeated short court efforts only after basic running and jumping are tolerated.
-- Condition with the ball when possible so fitness supports actual skill and decisions.
-- Separate the hardest court session and hardest leg-strength session.
-- Count games as demanding work; do not stack extra punishment conditioning automatically.
+- Add repeated short court efforts only after basic running and jumping feel fine.
+- Condition with the ball when you can, so fitness carries over to skill and decisions.
+- Keep the hardest court session and hardest leg-strength session on separate days.
+- Count games as demanding work rather than stacking extra punishment conditioning on top.
 
 ## A simple plan
 
-Use six to eight weeks. In the first two weeks, complete two easy aerobic sessions of 25 to 40 minutes, two strength sessions, and one or two light skill practices. Add low-volume movement work: four to six controlled accelerations, shuffles, and jump landings with full recovery.
+Use six to eight weeks. In the first two, do two easy aerobic sessions of 25 to 40 minutes, two strength sessions, and one or two light skill practices. Add low-volume movement work: four to six controlled accelerations, shuffles, and jump landings with full recovery.
 
-In weeks three and four, add one court-conditioning session. After warming up, complete two sets of six rounds: 15 seconds of purposeful court movement and 45 seconds easy. Include forward running, controlled changes of direction, and defensive slides without making every turn maximal.
+In weeks three and four, add one court-conditioning session. After a warm-up, do two sets of six rounds: 15 seconds of purposeful court movement and 45 seconds easy. Include forward running, controlled changes of direction, and defensive slides without making every turn maximal.
 
-In later weeks, progress to 20 to 30 seconds of game-like work with 30 to 60 seconds recovery, or use short-sided games that naturally repeat efforts. Keep one easy aerobic session for recovery capacity and continue strength.
+In later weeks, progress to 20 to 30 seconds of game-like work with 30 to 60 seconds of recovery, or use small-sided games, which repeat efforts naturally. Keep one easy aerobic session for recovery capacity and continue strength.
 
-Before a league or tryout, practice full-court sequences and several longer scrimmage blocks. Reduce extra conditioning as game minutes rise.
+Before a league or tryout, practice full-court sequences and several longer scrimmage blocks. Cut back extra conditioning as game minutes go up.
 
 ## How to know it is working
 
-Breathing settles sooner between possessions, sprint speed drops less across repeated efforts, and movement quality holds up later in practice. Track shooting and decision quality separately: conditioning can support skill practice, but basketball studies report inconsistent effects on shooting accuracy and passing.
+Breathing settles sooner between possessions, sprint speed drops less across repeated efforts, and movement quality holds up later in practice. Track shooting and decision quality separately. Conditioning can support skill practice, but basketball studies report inconsistent effects on shooting accuracy and passing.
 
-Use a simple repeatable circuit—such as six court lengths with fixed rest—every few weeks, but do not test it weekly. Real success is being able to play the intended minutes with useful movement and skill.
+Use a simple repeatable circuit, such as six court lengths with fixed rest, every few weeks rather than weekly. Real success is playing the minutes you intend with useful movement and skill.
 
 ## If you get stuck
 
-If legs feel dead before breathing, reduce jump and cutting volume and improve strength. If breathing is the limiter, keep the easy aerobic work. If knees or Achilles tendons become sore, lower the number of hard landings, change-of-direction reps, and back-to-back court days.
+If your legs die before your breathing, reduce jump and cutting volume and build strength. If breathing is the limiter, keep the easy aerobic work. If knees or Achilles tendons get sore, lower the number of hard landings, change-of-direction reps, and back-to-back court days.
 
-If conditioning improves but games still feel chaotic, spend more time in skill-based small-sided play. Basketball shape includes reading and moving efficiently, not only running harder.
+If conditioning improves but games still feel chaotic, spend more time in skill-based small-sided play. Reading the game and moving efficiently are part of basketball shape too.
 
-Match the conditioning to how you actually play. A recreational half-court player, a full-court guard, and someone returning for a tournament face different work-to-rest patterns. Use practice minutes and late-session skill quality to adjust the plan instead of copying a professional workout volume.
+Match the conditioning to how you actually play. A recreational half-court player, a full-court guard, and someone returning for a tournament face different work-to-rest patterns. Adjust from practice minutes and late-session skill quality, not a professional's workout volume.
 
-Retest in the same court format so a smaller court or shorter game does not masquerade as better conditioning.
+Retest in the same court format so a smaller court or shorter game doesn't pass for better conditioning.
 
 ## A quick note
 

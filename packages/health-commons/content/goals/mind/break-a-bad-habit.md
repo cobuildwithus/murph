@@ -42,45 +42,45 @@ safety:
   cautionLevel: low
 ---
 
-An unwanted habit usually persists because it is easy, cued by a familiar situation, and useful in the short term. It may provide relief, stimulation, escape, comfort, or social connection even when its long-term cost is obvious. Breaking it is easier when you redesign the pattern than when you simply demand more resistance at the moment of temptation.
+An unwanted habit persists because it’s easy, cued by a familiar situation, and useful in the short term. It may bring relief, stimulation, escape, comfort, or social connection even when the long-term cost is obvious. Redesigning the pattern works better than demanding more willpower at the moment of temptation.
 
-Start with one behavior you can observe. “Stop being unhealthy” is too broad. “Stop opening social media in bed” or “stop buying snacks at the gas station” gives you a cue, context, and countable outcome.
+Start with one behavior you can observe. “Stop being unhealthy” is too broad. “Stop opening social media in bed” gives you a cue, a context, and a countable outcome.
 
 ## What to do
 
-- **Map the pattern.** For several days, note what happened immediately before the behavior, where you were, who was present, how you felt, and what changed afterward.
-- **Identify the short-term payoff.** The habit may reduce boredom, postpone a hard task, create a break, or soothe stress. A replacement must address at least part of that payoff.
-- **Change the cue where possible.** Take a different route, move the app, keep the food out of the house, or leave the device outside the room. Avoiding a cue is not weakness when the environment can be designed.
-- **Add useful friction.** Log out, remove stored payment information, store the item farther away, or require a ten-minute delay. Friction creates a decision point where the old sequence was automatic.
-- **Install a specific replacement.** “Do not do it” leaves an empty space. Decide what happens instead: drink water, walk for two minutes, message a friend, or begin the first task action.
-- **Practice at the real trigger.** A replacement planned in the abstract becomes useful through repetition in the same setting.
-- **Treat lapses as pattern data.** Ask which cue, need, or setup was missed. Shame consumes attention without improving the next response.
+- **Map the pattern.** For several days, note what happened right before the behavior, where you were, who was there, how you felt, and what changed afterward.
+- **Identify the short-term payoff.** The habit may relieve boredom, postpone a hard task, create a break, or soothe stress. A replacement has to cover at least part of that.
+- **Change the cue where you can.** Take a different route, move the app, keep the food out of the house, or leave the device outside the room.
+- **Add useful friction.** Log out, remove stored payment details, store the item farther away, or require a ten-minute delay.
+- **Install a specific replacement.** Decide what happens instead: drink water, walk for two minutes, message a friend, or start the first step of the task.
+- **Practice at the real trigger.** A replacement becomes useful through repetition in the same setting.
+- **Treat lapses as data.** Ask which cue, need, or setup was missed.
 
 ## A simple plan
 
-For one week, observe the habit without trying to win every time. Record only meaningful episodes: cue, behavior, immediate payoff, and later cost. At the end, choose the most common trigger and one replacement that fits the same moment.
+For one week, observe the habit without trying to win every time. Record only the meaningful episodes: cue, behavior, immediate payoff, and later cost. Then pick the most common trigger and one replacement that fits the same moment.
 
-Write an if-then plan: “If **trigger** happens, then I will **replacement** before deciding what to do next.” Add one environmental change. For example: “If I reach for social media in bed, I will put the phone on the charger outside the room and read one page.”
+Write an if-then plan: “If **trigger** happens, then I will **replacement** before deciding what to do next.” Add one change to the environment. For example: “If I reach for social media in bed, I will put the phone on the charger outside the room and read one page.”
 
-For the next two weeks, track three outcomes: trigger occurred, replacement attempted, unwanted behavior occurred. Success is not only abstinence. A trigger followed by the replacement before a lapse is evidence that the sequence is changing.
+For the next two weeks, track three things: trigger occurred, replacement attempted, unwanted behavior occurred. A trigger followed by the replacement before a lapse is evidence the sequence is changing, even without full abstinence.
 
-If the behavior still happens nearly every time, make the replacement easier or the old behavior harder. If it happens in several unrelated settings, tackle one context at a time. If the payoff is emotional relief, add a second plan for the underlying stress rather than asking a substitute behavior to carry everything.
+If the behavior still happens nearly every time, make the replacement easier or the old behavior harder. If it shows up in several unrelated settings, tackle one context at a time. If the payoff is emotional relief, add a second plan for the underlying stress rather than leaning on a substitute behavior.
 
 ## How to know it is working
 
-Look for lower frequency, longer delay, smaller intensity, and more triggers that lead to a choice. The first improvement may be noticing halfway through instead of afterward. Later, the cue loses some of its pull and the replacement becomes familiar.
+Look for lower frequency, longer delay, smaller intensity, and more triggers that end in a choice. The first improvement may be noticing halfway through instead of afterward.
 
-Use weekly totals or context-specific rates, not a perfect streak. If a behavior drops from daily to twice a week, that is real progress even before it disappears. Decide whether reduction or complete cessation is the right outcome for this particular habit.
+Use weekly totals or rates in a specific context, not a perfect streak. Dropping from daily to twice a week is real progress. Decide whether reduction or complete stopping is the right outcome for this habit.
 
 ## If you get stuck
 
-If the habit concerns alcohol, nicotine, drugs, eating-disorder behavior, self-harm, gambling, or another behavior with dependence or serious risk, generic habit design is not enough. Evidence-based treatment, medication, peer support, or clinical monitoring may be appropriate.
+If the habit involves alcohol, nicotine, drugs, eating-disorder behavior, self-harm, gambling, or another behavior with dependence or serious risk, generic habit design isn’t enough. Evidence-based treatment, medication, peer support, or clinical monitoring may be appropriate.
 
-If you repeatedly replace one compulsive behavior with another, focus on the need and context rather than the object. Chronic stress, loneliness, pain, trauma, ADHD, anxiety, and depression can all make high-reward habits harder to change.
+If you keep swapping one compulsive behavior for another, focus on the need and the context rather than the object. Chronic stress, loneliness, pain, trauma, ADHD, anxiety, and depression can all make high-reward habits harder to change.
 
 ## A quick note
 
-“Bad habit” is everyday language, not a diagnosis. Choose a neutral description of the behavior and build the next choice. For substances or behaviors that can cause dangerous withdrawal or immediate harm, use the dedicated goal and appropriate professional support.
+“Bad habit” is everyday language, not a diagnosis. Describe the behavior in neutral terms and build the next choice. For substances or behaviors that can cause dangerous withdrawal or immediate harm, use the dedicated goal and get professional support.
 
 ## Sources
 

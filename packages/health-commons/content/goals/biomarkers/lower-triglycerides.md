@@ -41,45 +41,45 @@ safety:
     - Triglycerides around 500 mg/dL or higher need timely clinical review because pancreatitis risk becomes a treatment priority.
 ---
 
-Triglycerides are a form of fat carried in the blood. They often rise with excess alcohol, refined carbohydrates, poorly controlled diabetes, excess energy intake, some medicines, and genetic conditions. Unlike a vague “clean eating” goal, lowering them works best when you identify which of those drivers is actually present.
+Triglycerides are a form of fat carried in the blood. They often rise with excess alcohol, refined carbohydrates, poorly controlled diabetes, excess energy intake, some medicines, and genetic conditions. Lowering them works best when you find out which of those drivers you actually have, rather than settling for a vague “clean eating” goal.
 
-The urgency also matters. Mild or moderate elevation is usually approached as part of overall cardiovascular and metabolic risk. Very high triglycerides require prompt clinical management because preventing pancreatitis becomes important, and lifestyle alone may not lower them quickly enough.
+Urgency matters too. Mild or moderate elevation is usually handled as part of overall cardiovascular and metabolic risk. Very high triglycerides need prompt clinical management, because preventing pancreatitis becomes the priority and lifestyle alone may not bring them down fast enough.
 
 ## What to do
 
-- **Address alcohol directly.** For some people, alcohol is the largest reversible driver. A defined alcohol-free period can show whether it matters more clearly than simply promising to “drink less.”
-- **Replace refined carbohydrates and sugary drinks.** Cut the repeated sources—soda, sweet coffee, candy, pastries, and large portions of refined starch—while keeping satisfying meals built from vegetables, beans, whole grains, protein, and unsaturated fats.
+- **Deal with alcohol directly.** For some people it is the largest reversible driver. A defined alcohol-free period shows whether it matters far more clearly than a promise to “drink less.”
+- **Replace refined carbohydrates and sugary drinks.** Cut the repeat sources: soda, sweet coffee, candy, pastries, and large portions of refined starch. Keep meals satisfying with vegetables, beans, whole grains, protein, and unsaturated fats.
 - **Improve blood-sugar control.** High glucose can drive triglyceride production. If you have diabetes, medication adherence and a coordinated glucose plan may matter more than a narrow fat restriction.
-- **Move regularly.** Aerobic activity can lower triglycerides and improves insulin sensitivity. Begin at your current capacity and build toward a repeatable weekly total.
-- **Lose excess body fat gradually if relevant.** Even a modest, maintained loss can help. Crash diets create fast changes that are hard to interpret or sustain.
-- **Review medicines and secondary causes.** Thyroid disease, kidney or liver problems, pregnancy, and certain drugs can contribute. Do not discontinue a prescription on your own.
+- **Move regularly.** Aerobic activity can lower triglycerides and improves insulin sensitivity. Start at your current capacity and build toward a weekly total you can repeat.
+- **Lose excess body fat gradually if it applies.** Even a modest, maintained loss can help. Crash diets produce fast changes that are hard to interpret or hold.
+- **Review medicines and secondary causes.** Thyroid disease, kidney or liver problems, pregnancy, and certain drugs can contribute. Don’t stop a prescription on your own.
 - **Use medication when indicated.** Statins are often chosen for cardiovascular risk; fibrates or prescription omega-3 products may be used in specific high-triglyceride situations. Over-the-counter fish oil is not an interchangeable dose or product.
 
 ## A simple plan
 
-Confirm whether the test was fasting and whether the level is high enough to need immediate clinician input. Record alcohol, sugary drinks, diabetes control, recent weight change, medication changes, and illness around the test.
+Confirm whether the test was fasting and whether the level is high enough to need a clinician’s input right away. Note alcohol, sugary drinks, diabetes control, recent weight change, medication changes, and illness around the test.
 
-For four weeks, choose the highest-yield actions. A practical plan might be no alcohol, water or unsweetened drinks instead of sugary beverages, a 20- to 30-minute walk on five days, and consistent diabetes or lipid medication. Build each meal around protein and fiber so the plan is not simply a list of forbidden foods.
+For four weeks, go after the highest-yield actions. A practical plan: no alcohol, water or unsweetened drinks instead of sugary ones, a 20- to 30-minute walk on five days, and diabetes or lipid medication taken every time. Build each meal around protein and fiber so the plan is more than a list of banned foods.
 
-Retest under similar conditions at the interval your clinician recommends. If the decline is large, reintroduce or modify only one factor at a time when appropriate; that helps reveal what your long-term boundary needs to be.
+Retest under similar conditions at the interval your clinician recommends. If the drop is large, bring back or change only one factor at a time when appropriate; that shows where your long-term line needs to be.
 
 ## How to know it is working
 
-Compare fasting with fasting when possible and look at the trend, not tiny differences. Track the actions most likely to matter: drinks per week, sugary drinks, activity minutes, medication adherence, glucose trends, and weight or waist only if useful. Also follow non-HDL cholesterol or ApoB when cardiovascular risk is the main concern, because triglycerides do not tell the entire particle story.
+Compare fasting with fasting when you can and watch the trend, not small differences. Track the actions most likely to matter: drinks per week, sugary drinks, activity minutes, medication adherence, glucose trends, and weight or waist only if useful. When cardiovascular risk is the main concern, follow non-HDL cholesterol or ApoB as well, because triglycerides don’t tell the whole particle story.
 
 ## What to expect
 
-Triglycerides can change substantially over days to weeks, which is useful but also means one result can be noisy. Alcohol cessation and better glucose control can have a pronounced effect when those are the main drivers. Genetics may limit how far habits alone can move the result. The durable goal is a safer level on a plan you can continue.
+Triglycerides can change a lot over days to weeks, which is useful but also means one result can be noisy. Stopping alcohol and better glucose control can have a pronounced effect when those are the main drivers. Genetics may limit how far habits alone can move the number. The lasting goal is a safer level on a plan you can continue.
 
-When the first repeat is better, do not reintroduce every old habit at once. Keep the high-value changes stable, then test one sustainable adjustment if needed. This makes it easier to distinguish a true personal trigger from ordinary laboratory variation and helps turn a short intervention into a realistic maintenance plan.
+When the first repeat is better, don’t bring back every old habit at once. Keep the high-value changes in place, then test one adjustment you could live with if needed. That makes it easier to tell a true personal trigger from ordinary lab variation and turns a short intervention into a realistic maintenance plan.
 
 ## If you get stuck
 
-Check for hidden alcohol, sweetened drinks, “healthy” snacks rich in added sugar, and inconsistent prescriptions. Ask whether diabetes, hypothyroidism, kidney disease, liver disease, or a medication contributes. If levels remain severe, do not keep changing the plan alone; a clinician can prioritize pancreatitis prevention and evaluate inherited disorders.
+Check for hidden alcohol, sweetened drinks, “healthy” snacks full of added sugar, and prescriptions taken inconsistently. Ask whether diabetes, hypothyroidism, kidney disease, liver disease, or a medication is contributing. If levels stay severe, stop tinkering on your own; a clinician can put pancreatitis prevention first and check for inherited disorders.
 
 ## A quick note
 
-Severe upper-abdominal pain with vomiting needs urgent assessment, especially with very high triglycerides. Do not use fasting, supplements, or an extreme low-fat diet as a substitute for timely care when the value is severe.
+Severe upper-abdominal pain with vomiting needs urgent assessment, especially with very high triglycerides. When the value is severe, fasting, supplements, or an extreme low-fat diet are no substitute for timely care.
 
 ## Sources
 

@@ -43,45 +43,45 @@ safety:
   cautionLevel: low
 ---
 
-A useful morning routine is not a two-hour sequence copied from someone else. It is a small set of actions that helps you wake, meet basic needs, and enter the day with less rushing and fewer decisions. The best routine fits your work, children, health, chronotype, and available time.
+A useful morning routine is a small set of actions that helps you wake up, meet basic needs, and start the day with less rushing and fewer decisions. The best one fits your work, children, health, chronotype, and available time, not a two-hour sequence copied from someone else.
 
-Start with the outcome your mornings need. You might want to leave on time, take medication, eat breakfast, move, get daylight, or begin focused work before messages take over. Pick two or three anchors; everything else is optional.
+Start with what your mornings need: leaving on time, taking medication, eating breakfast, moving, getting daylight, or starting focused work before messages take over. Pick two or three anchors.
 
 ## What to do
 
-- **Anchor the wake window.** A reasonably consistent wake time can support circadian regularity, but it should not come at the cost of chronic sleep deprivation. Build bedtime around enough sleep.
-- **Use light and movement.** Getting outside after waking can support daytime alertness and the body clock. A short walk or gentle movement is enough; a hard workout is not required.
-- **Meet non-negotiable care first.** Medication, hydration if thirsty, food if needed, glucose checks, or another clinician-directed task should not depend on finishing an aspirational routine.
-- **Delay optional input.** If messages or feeds immediately scatter attention, keep them closed until the core routine is complete. This is a boundary, not a universal rule against phones.
-- **Prepare the night before.** Lay out clothes, pack food, charge devices outside the sleep space, or place needed items where the sequence occurs.
-- **Use a fixed order.** A repeatable sequence reduces decisions: bathroom, medication, daylight, breakfast, first task. The exact order matters less than stability.
-- **Create a short version.** Define a five-minute routine for overslept or chaotic mornings. It protects the essentials without turning one disruption into abandonment.
+- **Anchor the wake window.** A reasonably consistent wake time can help circadian regularity, but not at the cost of chronic sleep deprivation. Build bedtime around getting enough sleep.
+- **Use light and movement.** Getting outside soon after waking can help daytime alertness and the body clock. A short walk or gentle movement is enough.
+- **Handle non-negotiable care first.** Medication, water if you’re thirsty, food if you need it, glucose checks, or any other clinician-directed task shouldn’t wait on an aspirational routine.
+- **Delay optional input.** If messages or feeds scatter your attention, keep them closed until the core routine is done.
+- **Prepare the night before.** Lay out clothes, pack food, charge devices outside the sleep space, or put needed items where you’ll use them.
+- **Use a fixed order.** A repeatable sequence cuts decisions: bathroom, medication, daylight, breakfast, first task.
+- **Create a short version.** Define a five-minute routine for overslept or chaotic mornings so one disruption doesn’t become abandonment.
 
 ## A simple plan
 
-Choose a core routine of no more than three actions and write the sequence. Example: “After getting dressed, I take medication, step outside for five minutes, and start breakfast before opening work messages.” Estimate the real time required and leave a small buffer.
+Choose a core routine of no more than three actions and write out the sequence. Example: “After getting dressed, I take medication, step outside for five minutes, and start breakfast before opening work messages.” Estimate how long it really takes and leave a small buffer.
 
-For two weeks, prepare one thing the night before and complete the routine in the same order. Track only whether the full or short version happened and what blocked it. If mornings differ across the week, design a workday version and a weekend version that share at least one anchor.
+For two weeks, prepare one thing the night before and do the routine in the same order. Track only whether the full or short version happened and what got in the way. If your mornings differ across the week, design a workday version and a weekend version that share at least one anchor.
 
-Do not add new steps during the first week. At the end of week one, remove anything that regularly causes delay without serving the main outcome. At the end of week two, add at most one behavior if the core sequence is reliable.
+Don’t add steps during the first week. At the end of week one, drop anything that regularly causes delay without serving the main outcome. At the end of week two, add at most one behavior if the core sequence is reliable.
 
-If waking is consistently difficult, review sleep opportunity, sleep quality, shift schedule, alcohol, sedating medication, and alarm timing. A morning routine cannot compensate for insufficient or disrupted sleep.
+If waking is consistently hard, look at sleep opportunity, sleep quality, shift schedule, alcohol, sedating medication, and alarm timing. A morning routine can’t make up for too little or disrupted sleep.
 
 ## How to know it is working
 
-Useful signs are less rushing, fewer forgotten essentials, less immediate scrolling, and a more reliable start to the first priority. The routine should make mornings simpler, not more impressive.
+Useful signs are less rushing, fewer forgotten essentials, less immediate scrolling, and a more reliable start on the first priority.
 
-Evaluate it across two ordinary weeks. If the routine works only when you wake early, feel motivated, and have no interruptions, it is too fragile. A good routine has a full version, a short version, and an easy restart.
+Judge it across two ordinary weeks. If it only works when you wake early, feel motivated, and have no interruptions, it’s too fragile.
 
 ## If you get stuck
 
-If you repeatedly snooze through the available time, move the problem upstream to sleep rather than making the alarm more punishing. If caregiving creates unpredictable mornings, define the routine around one personal anchor that can move in time. If medication or food requirements are complex, follow clinical instructions rather than a generic sequence.
+If you keep snoozing through the available time, move the problem upstream to sleep instead of making the alarm more punishing. If caregiving makes mornings unpredictable, build around one personal anchor that can shift in time. If medication or food requirements are complex, follow clinical instructions rather than a generic sequence.
 
-People vary in morning alertness. You do not need to journal, meditate, train, read, and eat a perfect breakfast before sunrise. Choose the few actions that improve your actual day.
+People vary in morning alertness. You don’t need to journal, meditate, train, read, and eat a perfect breakfast before sunrise.
 
 ## A quick note
 
-Morning outdoor light is generally useful, but do not stare at the sun. People with light-sensitive eye conditions, mania risk, or medications that increase light sensitivity should follow individualized clinical advice.
+Morning outdoor light is generally useful, but don’t stare at the sun. If you have a light-sensitive eye condition, a risk of mania, or take medication that increases light sensitivity, follow individualized clinical advice.
 
 ## Sources
 

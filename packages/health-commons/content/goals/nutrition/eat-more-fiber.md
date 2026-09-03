@@ -38,55 +38,53 @@ safety:
     - Increase fiber gradually and pair it with adequate fluid.
 ---
 
-The easiest way to eat more fiber is to add one dependable fiber-rich food at a time. Beans, lentils, oats, whole grains, fruit, vegetables, nuts, and seeds bring fiber along with other nutrients; you do not need a collection of specialty products.
+The easiest way to eat more fiber is to add one dependable fiber-rich food at a time. Beans, lentils, oats, whole grains, fruit, vegetables, nuts, and seeds bring fiber along with other nutrients, so you don't need a shelf of specialty products.
 
 ## What to do
 
-Start with your current intake rather than jumping straight to a number.
+Start from what you eat now rather than jumping to a number.
 
-1. For the first week, add one serving each day: fruit at breakfast, beans at lunch, or vegetables at dinner.
-2. In week two, add a second serving and swap one refined grain for a whole-grain option.
-3. Keep fluids steady. Increase more slowly if gas or bloating becomes uncomfortable.
+1. For the first week, add one serving a day: fruit at breakfast, beans at lunch, or vegetables at dinner.
+2. In week two, add a second serving and swap one refined grain for a whole-grain version.
+3. Keep fluids steady, and slow down if gas or bloating gets uncomfortable.
 
-A simple daily pattern might be oats or whole-grain toast, one piece of fruit, a bean or lentil dish, and two vegetables. Rotate sources instead of forcing large amounts of one food.
+A simple daily pattern: oats or whole-grain toast, a piece of fruit, a bean or lentil dish, and two vegetables. Rotate sources instead of forcing large amounts of one food.
 
 ## A simple plan
 
 Take four weeks to build a higher-fiber pattern without turning digestion into a daily emergency.
 
-**Week one:** keep your usual diet and add one fruit or vegetable every day. Choose a food you already like, such as berries in yogurt, an apple with lunch, frozen vegetables at dinner, or carrots with a sandwich. Drink normally and note bowel comfort.
+**Week one:** keep your usual diet and add one fruit or vegetable every day. Pick something you already like: berries in yogurt, an apple with lunch, frozen vegetables at dinner, or carrots with a sandwich. Drink normally and note bowel comfort.
 
-**Week two:** make one grain choice whole grain. Try oats, whole-grain bread, brown rice, quinoa, barley, corn, or whole-grain pasta. If the flavor or texture is unfamiliar, mix the whole and refined versions while you adapt.
+**Week two:** make one grain choice whole grain. Try oats, whole-grain bread, brown rice, quinoa, barley, corn, or whole-grain pasta. If the flavor or texture is new, mix whole and refined versions while you adjust.
 
-**Week three:** add beans or lentils to two meals. Begin with a small portion if they are new. Rinsed canned legumes and red lentils are convenient. A bean taco, lentil soup, hummus sandwich, or chickpeas added to a grain bowl all count.
+**Week three:** add beans or lentils to two meals, starting small if they're new. Rinsed canned legumes and red lentils are convenient. A bean taco, lentil soup, hummus sandwich, or chickpeas in a grain bowl all count.
 
-**Week four:** review the pattern rather than chasing a supplement. If food intake remains low or constipation persists, consider psyllium with guidance and enough fluid. Start at the lower end of the product instructions. Do not add multiple fiber powders at once.
+**Week four:** review the pattern before reaching for a supplement. If food intake is still low or constipation persists, consider psyllium with guidance and enough fluid, starting at the low end of the product instructions. Don't add several fiber powders at once.
 
-A representative day might include oats and berries at breakfast, whole-grain bread and vegetables at lunch, fruit or nuts as a snack, and beans with rice and vegetables at dinner. It does not have to look like this every day. The goal is several sources and a pace your gut tolerates.
-
-If symptoms worsen after each increase, return to the last comfortable level for several days. A slower build is still progress.
+If symptoms worsen after an increase, drop back to the last comfortable level for several days. A slower build is still progress.
 
 ## How to know it is working
 
-You can log grams if that is useful, but a food-based check is often easier: count how many meals contained a whole grain, legume, fruit, vegetable, nut, or seed. Also notice stool comfort and regularity.
+Log grams if that helps, but a food-based check is usually easier: count how many meals included a whole grain, legume, fruit, vegetable, nut, or seed. Notice stool comfort and regularity too.
 
 ## What to expect
 
-Digestion may change within days. Gas can increase temporarily when fiber rises quickly; gradual increases are usually easier to tolerate. Benefits related to cholesterol or blood sugar depend on the type of fiber and the rest of the diet and are better judged over weeks to months.
+Digestion may change within days. Gas can rise for a while when fiber goes up quickly; gradual increases are usually easier to tolerate. Benefits for cholesterol or blood sugar depend on the type of fiber and the rest of your diet, and are better judged over weeks to months.
 
 ## If you get stuck
 
-Use convenience foods: canned beans, frozen berries, microwave grains, high-fiber cereal, or pre-cut vegetables. If beans cause discomfort, begin with small portions of well-rinsed canned lentils or chickpeas. If “healthy” high-fiber products crowd out enjoyable meals, return to ordinary foods.
+Use convenience foods: canned beans, frozen berries, microwave grains, high-fiber cereal, or pre-cut vegetables. If beans bother you, start with small portions of well-rinsed canned lentils or chickpeas. If "healthy" high-fiber products are crowding out meals you enjoy, go back to ordinary foods.
 
 ## Make it last
 
-Keep several kinds of fiber in the rotation rather than relying on one supplement. Soluble and fermentable fibers from oats, barley, fruit, beans, and psyllium behave differently from the mostly insoluble fiber in some brans and vegetables. A varied pattern is more likely to cover nutrition and remain enjoyable. Buy frozen fruit and vegetables, canned legumes, and whole-grain staples so travel or a busy week does not reset intake to zero.
+Keep several kinds of fiber in rotation rather than leaning on one supplement. Soluble and fermentable fibers from oats, barley, fruit, beans, and psyllium behave differently from the mostly insoluble fiber in some brans and vegetables, so variety is more likely to cover your nutrition and stay enjoyable. Stock frozen produce, canned legumes, and whole-grain staples so travel or a busy week doesn't reset intake to zero.
 
-If you stop the habit for a while, increase again gradually rather than returning immediately to the previous high amount. Adjust with life stage, medications, and digestive conditions. A person training for an event may prefer lower fiber near competition while maintaining it across the rest of the week. Someone with IBS may need careful source and portion choices. The sustainable target is the highest comfortable, nourishing pattern—not a number that produces persistent gas, pain, diarrhea, or a daily dependence on fortified snack products.
+After a break, build back up gradually instead of jumping to the old amount. Adjust for life stage, medications, and digestive conditions: someone training for an event may want less fiber only near competition, and someone with IBS may need careful choices of source and portion. Aim for the highest comfortable, nourishing pattern, not a number that brings persistent gas, pain, diarrhea, or daily reliance on fortified snack products.
 
 ## A quick note
 
-New severe constipation, vomiting, blood in stool, unexplained weight loss, or significant abdominal pain needs medical attention. People with a bowel narrowing or a prescribed low-fiber diet should follow their clinical plan.
+New severe constipation, vomiting, blood in stool, unexplained weight loss, or significant abdominal pain needs medical attention. If you have a bowel narrowing or a prescribed low-fiber diet, follow your clinical plan.
 
 ## Sources
 

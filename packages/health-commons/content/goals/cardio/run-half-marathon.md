@@ -44,45 +44,45 @@ safety:
   cautionLevel: moderate
 ---
 
-A half marathon rewards consistency more than dramatic workouts. Build a stable running week, lengthen one easy run gradually, practice the pace and fueling you expect to use, and reduce training before the event. If your aim is simply to finish, run-walk pacing is a valid and often effective strategy.
+A half marathon rewards consistency over dramatic workouts. Build a stable week, lengthen one easy run gradually, practice your planned pace and fueling, and cut back before the event. If finishing is the aim, run-walk pacing is sound and often effective.
 
-Before a dedicated block, it helps to run comfortably three times per week and complete roughly five to six miles or 60 minutes without a large recovery cost. Starting below that is possible, but it calls for more time.
+Before a dedicated block, it helps to run comfortably three times a week and cover roughly five to six miles or 60 minutes without much recovery cost.
 
 ## What to do
 
-- Choose an event far enough away for gradual progression—often 10 to 16 weeks from a stable base.
-- Run three to five days per week according to your history, with most running easy.
-- Progress one long run while keeping shorter days consistent.
-- Add one controlled workout at half-marathon effort or a little faster after the base is stable.
-- Practice drinking and carbohydrate intake during longer sessions if your expected duration makes them useful.
-- Use the shoes, socks, clothing, and breakfast you expect on race day.
-- Reduce volume in the final one to two weeks while keeping a little normal rhythm.
+- Pick an event far enough out to progress gradually, often 10 to 16 weeks from a stable base.
+- Run three to five days a week depending on your history, mostly easy.
+- Progress one long run; keep shorter days consistent.
+- Once the base is stable, add one controlled workout at half-marathon effort or slightly faster.
+- Practice drinking and carbohydrate intake on longer sessions if your expected duration warrants it.
+- Train in your race-day shoes, socks, clothing, and breakfast.
+- Cut volume in the final one to two weeks but keep a little normal rhythm.
 
 ## A simple plan
 
-A basic four-day week includes two easy runs of 30 to 50 minutes, one quality session, and one long run. Begin the long run from your comfortable baseline and add roughly five to ten minutes after successful weeks. Every third or fourth week, hold or shorten it.
+A basic four-day week: two easy runs of 30 to 50 minutes, one quality session, and one long run. Start the long run from your comfortable baseline and add roughly five to ten minutes after good weeks. Every third or fourth week, hold or shorten it.
 
-For quality, alternate a sustained workout such as three ten-minute blocks at a comfortably hard effort with a lighter session of six two-minute brisk repetitions. Completion-focused runners can replace this with easy hills or omit it when long-run recovery is demanding.
+For quality, alternate a sustained workout, such as three ten-minute blocks at a comfortably hard effort, with a lighter session of six two-minute brisk repetitions. Finishers can swap in easy hills or skip it when long-run recovery is demanding.
 
-Build the long run toward 90 to 120 minutes or roughly ten to twelve miles, depending on pace, experience, and injury history. You do not need to complete 13.1 miles before race day. Use selected long runs to practice water and carbohydrates, changing only one item at a time.
+Build the long run toward 90 to 120 minutes, or roughly ten to twelve miles, depending on pace, experience, and injury history. You don't need 13.1 miles before race day. Practice water and carbohydrates on a few long runs, one change at a time.
 
-During race week, reduce the load, sleep normally, and avoid trying to gain fitness. Start slower than goal average for the first few miles, settle, and reassess after halfway.
+In race week, cut the load, sleep normally, and don't chase fitness. Run the first few miles slower than goal average, settle, and reassess after halfway.
 
 ## How to know it is working
 
-The most important sign is that long runs become normal parts of the week rather than events that disrupt several days. You should recover, eat, sleep, and move normally afterward. Goal-pace segments may become smoother, and heart rate or effort may stay more stable late in a run.
+The best sign is long runs becoming a normal part of the week rather than events that disrupt several days of eating, sleeping, and moving. Goal-pace segments may smooth out, and heart rate or effort may hold steadier late in a run.
 
-Preparedness is not one magic mileage number. It is a pattern: consistent weeks, several successful long runs, practiced fueling, and no unresolved injury. Event completion and how you recover afterward are stronger outcomes than a watch prediction.
+Readiness isn't one magic mileage number but a pattern: consistent weeks, several good long runs, practiced fueling, and no unresolved injury.
 
 ## If you get stuck
 
-If long runs dominate recovery, reduce their increase, add walk breaks, or shorten another session. If pacing work is too hard, use current fitness rather than aspirational race pace. If fueling causes stomach trouble, practice smaller amounts, different products, or more time between intake rather than experimenting on race morning.
+If long runs dominate recovery, shrink the increases, add walk breaks, or shorten another session. If pace work is too hard, train at current fitness, not aspirational race pace. If fueling upsets your stomach, practice smaller amounts, different products, or longer gaps between intakes in training rather than on race morning.
 
-When training is interrupted, do not make up missed miles. Resume from a recent successful week and adjust the event goal if needed.
+If training is interrupted, don't make up missed miles. Resume from a recent good week and adjust the goal if needed.
 
 ## A quick note
 
-Stop for chest pain, fainting, severe unusual breathlessness, or pain that changes your stride. Persistent fatigue, recurrent injury, or menstrual disruption can indicate inadequate recovery or energy availability.
+Stop for chest pain, fainting, severe unusual breathlessness, or pain that changes your stride. Persistent fatigue, recurring injury, or menstrual disruption can signal inadequate recovery or energy availability.
 
 ## Sources
 

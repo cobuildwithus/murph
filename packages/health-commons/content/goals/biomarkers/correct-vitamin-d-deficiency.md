@@ -42,46 +42,46 @@ safety:
     - Avoid prolonged high-dose vitamin D without monitoring; excess can cause dangerous high calcium and kidney injury.
 ---
 
-Correcting vitamin D deficiency means restoring 25-hydroxyvitamin D enough to support bone and mineral health, then using a maintenance plan that fits the cause. It does not mean pushing the laboratory value as high as possible. Professional groups differ on exact thresholds for otherwise healthy people, and routine screening is not recommended for every asymptomatic adult.
+Correcting vitamin D deficiency means raising 25-hydroxyvitamin D enough for bone and mineral health, then settling on maintenance that fits the cause. Pushing the lab value as high as possible is not the aim. Professional groups disagree on exact thresholds for otherwise healthy people, and routine screening is not recommended for every asymptomatic adult.
 
-Deficiency is more likely with little sun exposure, darker skin, malabsorption, bariatric surgery, obesity, kidney or liver disease, and certain medicines. A confirmed low result should therefore lead to two questions: what replacement is appropriate, and why did the level become low?
+Deficiency is more likely with little sun exposure, darker skin, malabsorption, bariatric surgery, obesity, kidney or liver disease, and certain medicines. A confirmed low result raises two questions: what replacement is appropriate, and why did the level drop?
 
 ## What to do
 
-- **Confirm the right test and context.** The standard status test is serum 25-hydroxyvitamin D. The active hormone, 1,25-dihydroxyvitamin D, is not the routine deficiency test. Interpret the result with calcium, kidney health, symptoms, and risk factors.
-- **Use a clinician-recommended replacement dose.** The dose and duration depend on severity, body size, absorption, and medical conditions. Vitamin D3 and D2 can both work; consistency and total dose matter.
-- **Transition to maintenance.** A short repletion course is not a lifelong megadose. Once corrected, use the lowest practical intake that maintains status for your risk.
-- **Get adequate calcium from food.** Dairy, fortified alternatives, canned fish with bones, tofu made with calcium, and some greens support bone mineralization. Vitamin D cannot compensate for chronically inadequate calcium.
-- **Include weight-bearing and resistance exercise.** Restoring a lab value without loading bone and preserving muscle misses much of the functional goal.
-- **Use food sources as support.** Fatty fish, egg yolks, and fortified milk or alternatives provide vitamin D, though food alone may not correct a marked deficiency.
-- **Treat malabsorption or other causes.** Celiac disease, inflammatory bowel disease, bariatric surgery, and some medicines may require a different formulation, dose, or follow-up.
-- **Use sunlight cautiously.** UV exposure can make vitamin D but also causes skin cancer. Sunburns and tanning beds are not a treatment plan.
+- **Confirm the right test and context.** The status test is serum 25-hydroxyvitamin D; the active hormone, 1,25-dihydroxyvitamin D, is not the routine deficiency test. Read the result with calcium, kidney health, symptoms, and risk factors.
+- **Use a clinician-recommended replacement dose.** Dose and duration depend on severity, body size, absorption, and medical conditions. D3 and D2 can both work; consistency and total dose matter.
+- **Move to maintenance.** A short repletion course is not a lifelong megadose. Once corrected, use the lowest practical intake that holds your level for your risk.
+- **Get enough calcium from food.** Dairy, fortified alternatives, canned fish with bones, calcium-set tofu, and some greens help bone mineralization. Vitamin D cannot make up for chronically low calcium.
+- **Do weight-bearing and resistance exercise.** Fixing a lab value without loading bone and keeping muscle misses much of the functional goal.
+- **Let food help.** Fatty fish, egg yolks, and fortified milk or alternatives provide vitamin D, though food alone may not correct a marked deficiency.
+- **Treat malabsorption or other causes.** Celiac disease, inflammatory bowel disease, bariatric surgery, and some medicines may call for a different formulation, dose, or follow-up.
+- **Be careful with sunlight.** UV exposure makes vitamin D but also causes skin cancer. Sunburns and tanning beds are not a treatment plan.
 
 ## A simple plan
 
-Record the 25-hydroxyvitamin D value, calcium, kidney status, relevant digestive or surgical history, medicines, current supplement dose, and dietary calcium. Agree on a repletion dose, duration, and whether repeat testing is needed.
+Write down the 25-hydroxyvitamin D value, calcium, kidney status, relevant digestive or surgical history, medicines, current supplement dose, and dietary calcium. Agree on a repletion dose, its duration, and whether you need repeat testing.
 
-For the prescribed period, take vitamin D with a stable meal or routine. Build two calcium-rich foods into most days and perform weight-bearing or resistance activity two to three times weekly. Avoid stacking a multivitamin, vitamin D drops, calcium product, and high-dose capsule without adding the totals.
+For the prescribed period, take vitamin D with the same meal or routine. Build two calcium-rich foods into most days and do weight-bearing or resistance activity two to three times a week. Don’t stack a multivitamin, vitamin D drops, a calcium product, and a high-dose capsule without adding up the totals.
 
-At follow-up, decide whether the result and cause support a lower maintenance dose, continued treatment, or more evaluation.
+At follow-up, decide whether the result and cause point to a lower maintenance dose, continued treatment, or more evaluation.
 
 ## How to know it is working
 
-The main biomarker is a 25-hydroxyvitamin D level in the clinically appropriate range after enough time on a stable dose. Normal calcium and an appropriate parathyroid-hormone response can add context in selected cases. Muscle or bone symptoms may improve if deficiency caused them, but fatigue and pain are too nonspecific to prove success.
+The main marker is a 25-hydroxyvitamin D level in the clinically appropriate range after enough time on a stable dose. Normal calcium and an appropriate parathyroid-hormone response add context in selected cases. Muscle or bone symptoms may improve if deficiency caused them, but fatigue and pain are too nonspecific to prove success.
 
 ## What to expect
 
-The level generally changes over weeks to months. Severe deficiency, obesity, malabsorption, and inconsistent dosing can slow correction. Raising vitamin D above an adequate range has not been shown to turn it into a general cure for energy, immunity, or longevity.
+The level usually changes over weeks to months. Severe deficiency, obesity, malabsorption, and inconsistent dosing can slow correction. Pushing vitamin D above an adequate range has not been shown to make it a general cure for energy, immunity, or longevity.
 
-Units and formulations can create avoidable mistakes. Confirm whether the label is in international units or micrograms, whether the product is taken daily or weekly, and whether a prescribed loading course has an end date. Put that end date on the calendar. Once the course is complete, recalculate the vitamin D coming from every product before choosing maintenance.
+Units and formulations cause avoidable mistakes. Check whether the label is in international units or micrograms, whether the product is daily or weekly, and whether a prescribed loading course has an end date. Put that date on the calendar. When the course ends, add up the vitamin D from every product before choosing maintenance.
 
 ## If you get stuck
 
-Check the actual dose, adherence, duplicate products, lab timing, and whether malabsorption or kidney/liver disease is present. If the level remains low despite a verified regimen, seek clinical review rather than escalating indefinitely. If the baseline test was only mildly low in an otherwise healthy person, clarify whether repeated testing changes care.
+Check the actual dose, adherence, duplicate products, lab timing, and whether malabsorption or kidney or liver disease is present. If the level stays low on a verified regimen, get clinical review instead of raising the dose indefinitely. If the baseline was only mildly low and you are otherwise healthy, ask whether repeat testing would change your care.
 
 ## A quick note
 
-Nausea, vomiting, constipation, confusion, marked thirst, or frequent urination during high-dose use can signal high calcium and needs assessment. People with kidney stones, granulomatous disease, hyperparathyroidism, or significant kidney disease need individualized guidance.
+Nausea, vomiting, constipation, confusion, marked thirst, or frequent urination during high-dose use can signal high calcium and needs assessment. Kidney stones, granulomatous disease, hyperparathyroidism, or significant kidney disease call for individualized guidance.
 
 ## Sources
 

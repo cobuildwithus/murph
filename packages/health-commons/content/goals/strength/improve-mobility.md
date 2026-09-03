@@ -42,44 +42,44 @@ safety:
   cautionLevel: low
 ---
 
-Mobility is the ability to use a range of motion, not simply to be moved into it. Improving it usually combines repeated exposure to the desired range, strength and control within that range, and practice of the actual movement. You do not need every joint to become as flexible as possible. You need enough range for the life and activities you want.
+Mobility is range of motion you can actually use, not just range someone can push you into. It grows from time spent in that range, strength and control inside it, and practice of the real movement. You don't need every joint at maximum flexibility, just enough range for the life you want.
 
-Begin with a concrete restriction: reaching overhead, sitting in a squat, looking over the shoulder, stepping onto a high surface, or touching the toes. A general stretching routine may feel good, but a specific target makes it possible to choose the right work and notice progress.
+Start with one concrete restriction: reaching overhead, sitting in a squat, looking over your shoulder, stepping onto a high surface, or touching your toes. General stretching may feel good, but a specific target lets you choose the right work and see progress.
 
 ## What to do
 
-- Pick one to three movements that matter rather than stretching every joint equally.
-- Practice the target range three to five days per week in short sessions.
-- Use static stretching when tolerance and passive range are limiting.
-- Use controlled full-range strength exercises to build active ownership of the new range.
-- Rehearse the real movement after mobility work while the range is available.
-- Increase range gradually and avoid forcing pain, numbness, or a feeling of joint instability.
+- Pick one to three movements that matter; don't stretch every joint equally.
+- Practice the target range three to five days a week, in short sessions.
+- Use static stretching when tolerance and passive range are the limit.
+- Use controlled full-range strength exercises to own the new range.
+- Rehearse the real movement right after, while the range is there.
+- Add range gradually; never force through pain, numbness, or a feeling of joint instability.
 
-Meta-analyses show that chronic stretching increases range of motion and that resistance training through useful ranges can also improve it. This means mobility work can be integrated into strength training. A deep split squat, controlled overhead press, or loaded calf raise may build range and strength together when appropriate.
+Meta-analyses show chronic stretching increases range of motion, and resistance training through useful ranges can too. So where appropriate, a deep split squat, controlled overhead press, or loaded calf raise can do mobility and strength work in one exercise.
 
 ## A simple plan
 
-Choose two target movements and record a repeatable starting position. For each, select one gentle stretch and one strength-through-range exercise. For example, an ankle goal might pair a calf stretch with a slow split squat; a shoulder goal might pair a lat or chest stretch with a light overhead reach or press.
+Choose two target movements and record a repeatable starting position. Pair each with one gentle stretch and one strength exercise through the range: a calf stretch and slow split squat for an ankle, a lat or chest stretch and a light overhead reach or press for a shoulder.
 
-Four days per week, perform two rounds. Hold the stretch for 20 to 45 seconds at a strong but tolerable sensation, then perform 6 to 10 controlled repetitions of the strength movement. Finish with two or three repetitions of the actual task. The session can take ten minutes.
+Four days a week, do two rounds: hold the stretch 20 to 45 seconds at a strong but tolerable sensation, then do 6 to 10 controlled reps of the strength movement. Finish with two or three reps of the real task. Ten minutes is enough.
 
-Every two weeks, increase the range slightly, add a small load, or make the movement more independent. Do not add all three. Keep ordinary strength training in the week because newly available range is more useful when it can produce and absorb force.
+Every two weeks, change one thing: slightly more range, a small load, or a more independent version of the movement. Keep normal strength training in the week; new range is more useful when it can produce and absorb force.
 
 ## How to know it is working
 
-Measure the exact movement. Use the same stance, footwear, warm-up, and reference point. A photo or video can show reach, depth, or arm position, but pair it with how the movement feels and whether it transfers to the real task.
+Measure the exact movement with the same stance, footwear, warm-up, and reference point every time. Photos or video show reach, depth, or arm position; pair them with how the movement feels and whether it transfers to the real task.
 
-Range often increases temporarily after warming up. That is not fake, but long-term progress means more of that range is available before an elaborate routine and can be controlled. Reassess every two to four weeks rather than testing every day.
+Range often rises for a while after a warm-up. That's real, but lasting progress means more range available before any elaborate routine, and under your control. Reassess every two to four weeks, not daily.
 
 ## If you get stuck
 
-If passive range improves but the movement still feels inaccessible, add strength and skill practice in the new range. If neither changes, check whether the drill actually targets the limiting joint or whether balance, fear, pain, or technique is the real barrier.
+If passive range improves but the movement still feels out of reach, add strength and skill work in the new range. If nothing changes, the drill may not target the limiting joint, or balance, fear, pain, or technique may be the real barrier.
 
-More intensity is not necessarily better. Stretching so hard that the body guards or the joint aches may slow consistency. Use a different position, shorter duration, or loaded movement. Some anatomical limits will not change, and a useful alternative technique may be better than forcing a universal shape.
+Stretching until your body guards or the joint aches tends to cost consistency, so try a different position, shorter hold, or loaded movement instead. Some anatomical limits won't change, and a good alternative technique beats forcing a one-size-fits-all shape.
 
 ## A quick note
 
-Stretch sensation should be tolerable and should settle after the session. Stop for sharp pain, numbness, joint giving way, or symptoms that radiate down an arm or leg. New or rapidly changing limitations after injury deserve an appropriate assessment rather than aggressive self-stretching.
+A stretch should feel tolerable and settle after the session. Stop for sharp pain, numbness, a joint giving way, or symptoms that radiate down an arm or leg. New or rapidly changing limitations after an injury need proper assessment, not aggressive self-stretching.
 
 ## Sources
 

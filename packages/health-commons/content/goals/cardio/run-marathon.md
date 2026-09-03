@@ -44,45 +44,45 @@ safety:
   cautionLevel: moderate
 ---
 
-A marathon is primarily a durability, fueling, and pacing project. The safest useful shortcut is not one spectacular long run; it is arriving with months of consistent training and no urgent fitness debt. Most of the work should feel easy, long runs should progress gradually, and race-day choices should be rehearsed.
+A marathon is mostly a durability, fueling, and pacing project. The safest shortcut is months of consistent training with no urgent fitness debt, not one spectacular long run.
 
-Ideally, begin a marathon-specific block after several months of regular running and a comfortable long run of roughly eight to ten miles. Newer runners may need a longer foundation phase before a 14- to 20-week event block.
+Ideally, start a marathon-specific block after several months of regular running and a comfortable long run of roughly eight to ten miles. Newer runners may need a longer foundation before a 14- to 20-week event block.
 
 ## What to do
 
-- Choose an event and work backward from its date, allowing time for base building and interruptions.
-- Run four or more days only if your body already tolerates that frequency; three well-built days plus cross-training can suit some first-time finishers.
-- Keep most miles conversational and progress weekly load conservatively.
-- Make the long run specific but not maximal. Its purpose is adaptation and rehearsal, not proof that you can suffer.
-- Practice carbohydrates, fluid, sodium context, shoes, clothing, and bathroom timing during training.
+- Choose an event and work backward from its date, leaving time for base building and interruptions.
+- Run four or more days only if your body already tolerates it. Three well-built days plus cross-training suits some first-time finishers.
+- Keep most miles conversational and increase weekly load conservatively.
+- Make the long run specific, not maximal.
+- Practice carbohydrates, fluid, sodium, shoes, clothing, and bathroom timing in training.
 - Include strength work, then reduce its fatigue as peak running demands rise.
-- Taper by reducing volume while keeping some familiar movement before race day.
+- Taper by cutting volume while keeping some familiar movement.
 
 ## A simple plan
 
-A common four- or five-day structure includes two or three easy runs, one controlled quality session, and one long run. Build the long run from your baseline, adding roughly one to two miles or ten to 20 minutes after successful weeks. Every third or fourth week, shorten it.
+A common four- or five-day structure: two or three easy runs, one controlled quality session, and one long run. Build the long run from your baseline, adding roughly one to two miles or ten to 20 minutes after good weeks. Every third or fourth week, shorten it.
 
-Early quality can be hills or comfortably hard blocks. Later, include sections at realistic marathon effort within a medium or long run. Avoid making both the quality session and long run maximal in the same week.
+Early quality can be hills or comfortably hard blocks. Later, put sections at realistic marathon effort inside a medium or long run. Don't make the quality session and the long run both maximal in the same week.
 
-Peak long runs often reach 18 to 22 miles or about two and a half to three and a half hours, but the right cap depends on pace, experience, and recovery. Longer is not automatically better. Practice fueling from the early part of these sessions instead of waiting until depleted.
+Peak long runs often reach 18 to 22 miles, or about two and a half to three and a half hours, but the right cap depends on pace, experience, and recovery. Fuel from early in these runs instead of waiting until depleted.
 
-In the final two to three weeks, reduce total volume progressively. Keep a few short marathon-effort segments, sleep consistently, and resist last-minute tests. Race the first half with restraint. A pace that feels almost too easy early can be the pace that remains possible late.
+Reduce total volume step by step over the final two to three weeks. Keep a few short marathon-effort segments, sleep consistently, and resist last-minute tests. Run the first half with restraint.
 
 ## How to know it is working
 
-Look for stable weeks, long runs that no longer damage the next several days, and a fueling routine that supports consistent energy without repeated stomach problems. Marathon-effort segments should become more controlled at the same terrain and conditions.
+Look for stable weeks, long runs that no longer wreck the next several days, and fueling that keeps energy steady without repeated stomach trouble. Marathon-effort segments should feel more controlled on the same terrain and conditions.
 
-No training run guarantees the finish. Readiness is the combined evidence of your base, peak block, health, recovery, and conditions. A completion goal and a time goal should be separated; when the day is hot, windy, hilly, or illness-affected, adjust the time goal first.
+Readiness is the combined evidence of your base, peak block, health, recovery, and conditions. Keep a completion goal separate from a time goal, and on a hot, windy, or hilly day, or when you're unwell, adjust the time goal first.
 
 ## If you get stuck
 
-If the long run consumes the week, reduce its length or pace and improve the consistency around it. If you miss training through illness or injury, do not compress the lost work. Revise the goal or event when necessary.
+If the long run eats the week, shorten or slow it and improve the consistency around it. If illness or injury costs you training, don't compress the lost work. Revise the goal or the event when needed.
 
-If energy, mood, sleep, libido, menstrual function, or injury frequency deteriorates, examine fueling and total load. Marathon training can magnify small recovery problems. A qualified coach, sports dietitian, or clinician can be useful when the event demands exceed what a generic plan can safely resolve.
+If energy, mood, sleep, libido, menstrual function, or injury frequency worsens, examine fueling and total load. Marathon training magnifies small recovery problems. A qualified coach, sports dietitian, or clinician can help when the event's demands exceed what a generic plan can safely handle.
 
 ## A quick note
 
-Do not start or continue a marathon with chest pain, fainting, severe illness, or unresolved injury that changes your stride. Learn the event's heat, hydration, and medical guidance, and never force fluids beyond thirst and the plan you practiced.
+Don't start or continue a marathon with chest pain, fainting, severe illness, or an unresolved injury that changes your stride. Learn the event's heat, hydration, and medical guidance, and never force fluids beyond thirst and the plan you practiced.
 
 ## Sources
 

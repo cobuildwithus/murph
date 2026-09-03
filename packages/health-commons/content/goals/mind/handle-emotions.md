@@ -42,49 +42,49 @@ safety:
   cautionLevel: low
 ---
 
-Handling emotions well does not mean staying calm all the time. Sadness, fear, anger, excitement, guilt, and grief all carry information. Emotional regulation is the ability to notice what is happening, make room for the feeling, and choose a response that fits the facts and the person you want to be.
+Handling emotions well means noticing what’s happening, making room for the feeling, and choosing a response that fits the facts and the person you want to be. Staying calm all the time isn’t the target. Sadness, fear, anger, excitement, guilt, and grief all carry information.
 
-Two common traps sit at opposite ends. One is acting on every feeling as if it were an instruction. The other is treating emotions as failures that must be suppressed. A better middle path is: **feel it, understand it, and decide what to do with it**.
+Two common traps sit at opposite ends: acting on every feeling as if it were an instruction, and treating emotions as failures to suppress. The middle path: **feel it, understand it, and decide what to do with it**.
 
 ## What to do
 
-- **Name the emotion precisely.** “Bad” gives you little information. Try irritated, disappointed, lonely, ashamed, worried, overwhelmed, or excited. Several emotions can be present together.
-- **Find the body signal.** Notice breathing, jaw tension, stomach sensations, temperature, posture, or energy. Body cues often appear before the story becomes loud.
-- **Separate facts from interpretations.** “They have not replied for two hours” is a fact. “They do not care about me” is an interpretation. The interpretation may be right, but treating it as a hypothesis restores choice.
-- **Ask what the emotion is protecting.** Fear may point toward risk; anger toward a boundary; guilt toward repair; sadness toward loss. Then ask whether the intensity fits the current situation or is being amplified by history, exhaustion, pain, or substances.
-- **Choose a response by purpose.** If danger is real, protect yourself. If a problem is solvable, act. If the situation cannot be changed now, settle the body and make room for discomfort without adding impulsive damage.
-- **Delay high-cost actions.** When intensity is high, postpone sending the message, making the purchase, quitting the job, driving, or using a substance. A delay is not avoidance when you set a time to revisit the decision.
-- **Return and repair.** Regulation includes what happens after the peak. Clarify what you meant, apologize for harmful behavior, or make the request you could not make clearly earlier.
+- **Name the emotion precisely.** “Bad” tells you little. Try irritated, disappointed, lonely, ashamed, worried, overwhelmed, or excited.
+- **Find the body signal.** Notice breathing, jaw tension, stomach sensations, temperature, posture, or energy. Body cues often show up before the story gets loud.
+- **Separate facts from interpretations.** “They haven’t replied for two hours” is a fact. “They don’t care about me” is an interpretation. It may be right, but treating it as a hypothesis gives you back a choice.
+- **Ask what the emotion is protecting.** Fear may point to risk, anger to a boundary, guilt to repair, sadness to loss. Then ask whether the intensity fits the situation or is being amplified by history, exhaustion, pain, or substances.
+- **Choose a response by purpose.** If danger is real, protect yourself. If a problem is solvable, act. If the situation can’t be changed right now, settle the body and sit with the discomfort without adding impulsive damage.
+- **Delay high-cost actions.** When intensity is high, postpone sending the message, making the purchase, quitting the job, driving, or using a substance. A delay isn’t avoidance when you set a time to revisit the decision.
+- **Return and repair.** Clarify what you meant, apologize for harmful behavior, or make the request you couldn’t make clearly earlier.
 
 ## A simple plan
 
-Choose one recurring situation where emotions tend to take over. For two weeks, use a short “notice, check, choose” note after the situation—not constantly throughout the day.
+Choose one recurring situation where emotions tend to take over. For two weeks, write a short “notice, check, choose” note after the situation, not constantly through the day.
 
 1. **Notice:** What emotion was present, and where did you feel it first?
 2. **Check:** What were the facts, what story did your mind add, and what need or value was involved?
-3. **Choose:** What did you do, and what would a response aligned with your longer-term values look like next time?
+3. **Choose:** What did you do, and what would a response in line with your longer-term values look like next time?
 
-Add one body-based practice for five minutes on most days: comfortable paced breathing, progressive muscle relaxation, stretching, or a quiet walk without your phone. This is rehearsal, not a test. The purpose is to become familiar with shifting arousal before you are at your limit.
+Add one body-based practice for five minutes on most days: comfortable paced breathing, progressive muscle relaxation, stretching, or a quiet walk without your phone. This is rehearsal for shifting arousal before you’re at your limit, not a test.
 
-Make a short list of actions that are expensive when emotional—such as texting an ex, drinking, arguing in front of children, online shopping, or resigning. Pick a delay that is realistic for each. During the delay, write the decision you are considering and the outcome you want. Revisit it when you can think in complete sentences and consider alternatives.
+List the actions that are expensive when you’re emotional, such as texting an ex, drinking, arguing in front of children, online shopping, or resigning. Pick a realistic delay for each. During the delay, write down the decision and the outcome you want. Revisit it when you can think in complete sentences and weigh alternatives.
 
-Once a week, review one episode that went better than usual. Identify the exact moment where choice became possible. Building on successful exceptions is often more useful than analyzing only failures.
+Once a week, review one episode that went better than usual and find the exact moment where choice became possible. Building on successful exceptions is often more useful than analyzing only failures.
 
 ## How to know it is working
 
-Look for more space between feeling and action. You may still cry, feel angry, or get anxious, but notice it earlier, ask for what you need more directly, avoid a regretted action, or return to baseline sooner. That is regulation.
+Look for more space between feeling and action. You may still cry, feel angry, or get anxious, but you notice it earlier, ask for what you need more directly, avoid a regretted action, or return to baseline sooner.
 
-Useful measures are the number of high-cost reactions, average recovery time, and how often you made a deliberate choice. Avoid turning emotions into a daily performance score. The aim is responsiveness and flexibility, not emotional flatness.
+Useful measures are the number of high-cost reactions, average recovery time, and how often you made a deliberate choice. The aim is responsiveness and flexibility, not emotional flatness or a daily performance score.
 
 ## If you get stuck
 
-If naming emotions feels impossible, start with body state and broad categories: pleasant or unpleasant, high or low energy, urge to move toward or away. If practices make you feel more activated, use externally focused grounding—describe the room, walk, or speak with someone safe—rather than prolonged inward attention.
+If naming emotions feels impossible, start with body state and broad categories: pleasant or unpleasant, high or low energy, an urge to move toward or away. If practices leave you more activated, use externally focused grounding (describe the room, walk, or talk with someone safe) rather than prolonged inward attention.
 
-Strong emotional shifts can also be affected by trauma, ADHD, mood disorders, hormonal changes, sleep deprivation, medication, pain, or substance use. When emotions are extreme, rapidly changing, or repeatedly damaging safety, work, or relationships, a qualified professional can help tailor the approach.
+Strong emotional shifts can also be shaped by trauma, ADHD, mood disorders, hormonal changes, sleep deprivation, medication, pain, or substance use. When emotions are extreme, rapidly changing, or repeatedly damaging safety, work, or relationships, a qualified professional can help tailor the approach.
 
 ## A quick note
 
-Seek urgent help if an emotional state comes with an immediate risk of harming yourself or someone else, losing touch with reality, or being unable to stay safe. For everything else, start with one recurring situation and one better response—not a demand to master every feeling.
+Seek urgent help if an emotional state comes with an immediate risk of harming yourself or someone else, losing touch with reality, or being unable to stay safe. For everything else, start with one recurring situation and one better response, not a demand to master every feeling.
 
 ## Sources
 

@@ -42,44 +42,44 @@ safety:
   cautionLevel: low
 ---
 
-Improving posture is less about finding one perfect position and more about making useful positions comfortable, changing them before they become tiring, and having enough strength and mobility for the task. People naturally differ in spinal curves, shoulder position, and stance. Appearance alone does not diagnose a problem.
+Good posture means positions you can hold comfortably, change before they tire you, and support with enough strength and mobility for the task. No single position is perfect for everyone. Spinal curves, shoulder position, and stance vary, and appearance alone doesn't diagnose a problem.
 
-Start with the outcome behind the word posture. Do you want to sit at a desk with less fatigue, stand taller for a presentation, keep the upper back from tiring, or lift with more control? That target determines whether the plan needs workspace changes, strength, mobility, movement breaks, or all four.
+Start with what you actually want: less fatigue at a desk, standing taller for a presentation, an upper back that doesn't tire, or more control when lifting. That target decides whether you need workspace changes, strength, mobility, movement breaks, or all four.
 
 ## What to do
 
-- Change position regularly instead of trying to hold a rigid pose all day.
+- Change position often instead of holding one rigid pose all day.
 - Adjust the screen, chair, keyboard, and work surface so the task comes to you.
-- Strengthen the upper back, shoulders, trunk, hips, and legs two or three times per week.
+- Strengthen the upper back, shoulders, trunk, hips, and legs two or three times a week.
 - Practice the specific sitting, standing, or lifting position in short doses.
-- Work on a limited range only when it clearly blocks the desired position.
-- Use a cue that feels helpful—such as “grow tall” or “ribs over pelvis”—without bracing constantly.
+- Work on limited range only when it clearly blocks the position you want.
+- Use a cue that helps, like "grow tall" or "ribs over pelvis", without bracing constantly.
 
-Strength and endurance allow a position to feel less effortful. Rows, carries, hinges, split squats, and overhead work can all contribute. Stretching may change range, but research does not support promising that one hamstring or chest stretch permanently corrects a universal posture fault.
+Strength and endurance make a position feel easier. Rows, carries, hinges, split squats, and overhead work all help. Stretching may change range, but research doesn't support the claim that one hamstring or chest stretch permanently fixes a universal posture fault.
 
 ## A simple plan
 
-For two weeks, choose one daily context. At a desk, set the screen near eye level, bring the keyboard close, support the feet, and allow the back to contact the chair. Every 45 to 90 minutes, stand, walk, or change position for two minutes.
+For two weeks, pick one daily context. At a desk: screen near eye level, keyboard close, feet supported, back resting against the chair. Every 45 to 90 minutes, stand, walk, or change position for two minutes.
 
-Twice per week, perform two sets each of rows, a press, a hip hinge, a split squat, and a loaded carry. Three days per week, add a five-minute posture practice: five wall reaches, five upper-back rotations per side, a 20-second chest or lat stretch if restricted, and one minute standing in a relaxed tall position.
+Twice a week, do two sets each of rows, a press, a hip hinge, a split squat, and a loaded carry. Three days a week, add five minutes of posture practice: five wall reaches, five upper-back rotations per side, a 20-second chest or lat stretch if you're restricted, and one minute standing relaxed and tall.
 
-Do not force the shoulders down and back all day. Use the desired posture for the task, then move. If the goal is visual, take one relaxed photo every four weeks under similar conditions rather than checking the mirror repeatedly.
+Don't force your shoulders down and back all day. Use the posture the task needs, then move. If the goal is visual, take one relaxed photo every four weeks under similar conditions instead of checking the mirror.
 
 ## How to know it is working
 
-Track comfort and endurance in the chosen context. Can you work longer before fatigue, stand for a conversation without constant adjustment, or maintain a stable lifting position with less thought? Those outcomes matter more than matching an ideal silhouette.
+Track comfort and endurance in your chosen context. Can you work longer before fatigue, stand through a conversation without shifting, or hold a lifting position with less thought? That matters more than matching an ideal silhouette.
 
-Photos can show a change, but lighting, camera angle, mood, and deliberate posing strongly affect them. Pair any image with function and symptoms. A postural change that increases discomfort is not an improvement simply because it looks straighter.
+Photos can show change, but lighting, angle, mood, and posing skew them. Pair any image with function and symptoms. A change that looks straighter but hurts more is not an improvement.
 
 ## If you get stuck
 
-If cues work for minutes but fatigue returns, build strength and take more breaks. If the workspace forces the head or arms forward, change the setup. If a joint truly lacks range, use targeted mobility and strength rather than a generic whole-body routine.
+If cues work for minutes before fatigue returns, build strength and take more breaks. If the workspace pushes your head or arms forward, change the setup. If a joint truly lacks range, use targeted mobility and strength, not a generic whole-body routine.
 
-Persistent discomfort may not be caused by posture. Sleep, stress, workload, vision, and a painful condition can change how the body is held. Avoid blaming a normal body shape for every symptom. A clinician or physical therapist can help when pain, weakness, or a structural condition changes the plan.
+Persistent discomfort may not be a posture problem at all. Sleep, stress, workload, vision, and painful conditions all change how you hold yourself, so don't blame a normal body shape for every symptom. See a clinician or physical therapist when pain, weakness, or a structural condition changes the plan.
 
 ## A quick note
 
-New weakness, numbness, severe pain after injury, or problems with balance and walking need appropriate evaluation. Otherwise, vary positions and build capacity gradually. Posture should become easier and less consuming, not another health score to monitor all day.
+New weakness, numbness, severe pain after an injury, or trouble with balance and walking need proper evaluation. Otherwise, vary your positions and build capacity gradually. Posture should get easier and take less attention, not become one more score to watch all day.
 
 ## Sources
 

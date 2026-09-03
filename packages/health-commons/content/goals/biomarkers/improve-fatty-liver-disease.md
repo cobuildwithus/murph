@@ -40,43 +40,43 @@ safety:
     - Yellow skin or eyes, vomiting blood, black stool, new abdominal swelling, or confusion needs urgent medical care.
 ---
 
-Fatty liver disease linked to metabolic dysfunction is now commonly called MASLD. The useful outcome is not simply a lower liver enzyme on one test. It is less liver fat, lower inflammation and fibrosis risk, and better control of the diabetes, weight, lipids, blood pressure, and alcohol exposure that shape long-term liver and cardiovascular health.
+Fatty liver disease linked to metabolic dysfunction is now usually called MASLD. The outcome worth chasing is less liver fat, lower inflammation and fibrosis risk, and better control of the diabetes, weight, lipids, blood pressure, and alcohol exposure that shape long-term liver and heart health. A lower enzyme on one test is a small part of that.
 
-Most people with early MASLD can improve it substantially. The first clinical priority is to identify who may already have significant fibrosis, because fibrosis—not the amount of fat alone—is the strongest liver-related risk marker. Simple blood-based scores and elastography can help; a normal ALT does not reliably rule fibrosis out.
+Most people with early MASLD can improve it substantially. The first clinical priority is finding out who already has significant fibrosis, because fibrosis, more than the amount of fat, is the strongest liver-related risk marker. Simple blood-based scores and elastography can help. A normal ALT does not reliably rule fibrosis out.
 
 ## What to do
 
-- **Pursue sustainable weight loss if excess weight is a driver.** Even modest loss can reduce liver fat, while larger maintained losses are more likely to improve inflammation and fibrosis. The appropriate amount and method are individual.
-- **Choose a durable food pattern.** A Mediterranean-style pattern rich in vegetables, legumes, whole grains, fish, nuts, and unsaturated oils is a sound default. Reduce sugary drinks, excess refined carbohydrate, and repeated ultra-processed foods.
-- **Move every week.** Aerobic and resistance exercise can reduce liver fat even without major weight loss. Start from your capacity and build toward regular moderate activity plus two strength sessions.
-- **Address alcohol honestly.** MASLD can coexist with alcohol-related injury. The safest amount depends on liver status and other risk; advanced fibrosis or cirrhosis usually warrants abstinence.
-- **Treat diabetes, lipids, and blood pressure.** Cardiovascular disease is a major risk for people with MASLD. Evidence-based metabolic treatment is part of liver care, not a distraction from it.
-- **Review medicines and other liver causes.** Viral hepatitis, autoimmune disease, iron overload, and some medicines can produce or worsen abnormal liver findings. Do not assume all liver fat or enzyme elevation has one cause.
-- **Use disease-directed care when eligible.** Selected people with more advanced inflammatory disease may qualify for medication or specialist care. Treatment depends on confirmed stage and current approvals.
+- **Lose weight at a pace you can keep if excess weight is a driver.** Even modest loss can reduce liver fat; larger, maintained losses are more likely to improve inflammation and fibrosis. The right amount and method are individual.
+- **Pick a food pattern you can stay on.** A Mediterranean-style pattern rich in vegetables, legumes, whole grains, fish, nuts, and unsaturated oils is a sound default. Cut sugary drinks, excess refined carbohydrate, and the ultra-processed foods you eat on repeat.
+- **Move every week.** Aerobic and resistance exercise can reduce liver fat even without major weight loss. Start where you are and build toward regular moderate activity plus two strength sessions.
+- **Be honest about alcohol.** MASLD can coexist with alcohol-related injury. The safest amount depends on liver status and other risks; advanced fibrosis or cirrhosis usually calls for abstinence.
+- **Treat diabetes, lipids, and blood pressure.** Cardiovascular disease is a major risk for people with MASLD. Evidence-based metabolic treatment is part of liver care.
+- **Review medicines and other liver causes.** Viral hepatitis, autoimmune disease, iron overload, and some medicines can cause or worsen abnormal liver findings. Don’t assume all the fat or enzyme elevation has one cause.
+- **Use disease-directed care when eligible.** Some people with more advanced inflammatory disease qualify for medication or specialist care, depending on confirmed stage and current approvals.
 
 ## A simple plan
 
-Start with the diagnosis and risk stage you actually have: imaging, ALT and AST, platelet count, diabetes status, lipids, blood pressure, alcohol pattern, weight trajectory, and any fibrosis score or elastography. Ask whether hepatology follow-up is needed.
+Start from the diagnosis and risk stage you actually have: imaging, ALT and AST, platelet count, diabetes status, lipids, blood pressure, alcohol pattern, weight trend, and any fibrosis score or elastography. Ask whether you need hepatology follow-up.
 
-For 12 weeks, choose a repeatable plan: replace sugary drinks, prepare two plant-forward dinners weekly, walk briskly for 30 minutes on five days, and strength train twice. If weight loss is appropriate, aim for a steady trend rather than a crash. Set a clear alcohol boundary.
+For 12 weeks, run a plan you can repeat: replace sugary drinks, cook two plant-forward dinners a week, walk briskly for 30 minutes on five days, and strength train twice. If weight loss is appropriate, aim for a steady trend, not a crash. Set a clear alcohol limit.
 
-Schedule reassessment around the marker that can answer the question—metabolic labs and weight sooner, liver imaging or fibrosis assessment at a clinically meaningful interval.
+Schedule reassessment around the marker that can answer the question: metabolic labs and weight sooner, liver imaging or fibrosis assessment at a clinically meaningful interval.
 
 ## How to know it is working
 
-Useful signals include a sustained reduction in weight or waist when appropriate, better glucose and triglycerides, improved fitness, lower liver fat on comparable imaging, and improving ALT or AST in context. Fibrosis measures change more slowly and can be noisy. A lower enzyme value is encouraging but does not prove the disease or fibrosis is gone.
+Useful signals: a sustained drop in weight or waist when appropriate, better glucose and triglycerides, improved fitness, lower liver fat on comparable imaging, and improving ALT or AST in context. Fibrosis measures move more slowly and can be noisy. A lower enzyme value is encouraging but does not prove the disease or fibrosis is gone.
 
 ## What to expect
 
-Liver fat can fall within weeks of an effective energy deficit and regular activity. Inflammation and fibrosis take longer. People respond differently, and the plan must be maintained to preserve gains. Even if liver markers change modestly, improvements in blood pressure, diabetes, fitness, and ApoB can substantially lower the cardiovascular risk that accompanies MASLD.
+Liver fat can fall within weeks of an effective energy deficit and regular activity. Inflammation and fibrosis take longer. People respond differently, and you keep the gains only as long as you keep the plan. Even if liver markers change modestly, better blood pressure, diabetes control, fitness, and ApoB can substantially lower the cardiovascular risk that comes with MASLD.
 
 ## If you get stuck
 
-Check liquid calories, alcohol, weekend patterns, sleep apnea, medication adherence, and whether the plan is too restrictive. If enzymes remain elevated, ask whether another liver condition has been excluded. A dietitian, obesity-medicine clinician, diabetes clinician, or hepatologist can help when meaningful weight loss or fibrosis risk requires more than self-directed habits.
+Check liquid calories, alcohol, weekend patterns, sleep apnea, medication adherence, and whether the plan is too restrictive. If enzymes stay elevated, ask whether another liver condition has been ruled out. When meaningful weight loss or fibrosis risk needs more than self-directed habits, a dietitian, obesity-medicine clinician, diabetes clinician, or hepatologist can help.
 
 ## A quick note
 
-Do not use “liver detox” products. Some supplements can injure the liver, and product contents may be uncertain. Advanced fibrosis, cirrhosis, pregnancy, or rapidly changing liver tests needs an individualized clinical plan.
+Don’t use “liver detox” products. Some supplements can injure the liver, and product contents may be uncertain. Advanced fibrosis, cirrhosis, pregnancy, or rapidly changing liver tests need an individualized clinical plan.
 
 ## Sources
 

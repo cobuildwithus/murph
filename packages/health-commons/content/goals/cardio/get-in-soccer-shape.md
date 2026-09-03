@@ -45,47 +45,47 @@ safety:
   cautionLevel: moderate
 ---
 
-Soccer fitness combines a large aerobic base with repeated accelerations, high-speed runs, stops, cuts, and technical actions. The goal is not to win a continuous-distance test; it is to keep making useful runs and sound decisions late in a match. Build easy running capacity first, then add soccer-specific intervals, speed exposure, strength, and ball work.
+Soccer fitness combines a large aerobic base with repeated accelerations, high-speed runs, stops, cuts, and technical actions. The aim is useful runs and sound decisions late in a match, not a good continuous-distance test score. Build easy running capacity first, then add soccer-specific intervals, speed exposure, strength, and ball work.
 
-The exact demand depends on position, match length, level, substitution rules, and current training history.
+The exact demand depends on position, match length, level, substitution rules, and training history.
 
 ## What to do
 
-- Accumulate two or three aerobic sessions or practices each week.
-- Add high-speed running gradually; sprint exposure should not first appear in a match.
-- Strengthen calves, hamstrings, quads, hips, groin, and trunk twice weekly.
+- Get two or three aerobic sessions or practices a week.
+- Add high-speed running gradually; your first sprint should not happen in a match.
+- Strengthen calves, hamstrings, quads, hips, groin, and trunk twice a week.
 - Use a structured neuromuscular warm-up before practices and matches.
-- Build repeated-effort conditioning with adequate recovery and good running mechanics.
-- Use small-sided games and ball drills so conditioning transfers to decisions and skill.
-- Treat matches and hard practices as high-load sessions when planning the week.
+- Build repeated-effort conditioning with enough recovery and good running mechanics.
+- Use small-sided games and ball drills so conditioning carries over to decisions and skill.
+- Treat matches and hard practices as high-load sessions when you plan the week.
 
 ## A simple plan
 
-Use six to ten weeks. In the first two weeks, complete two easy aerobic sessions of 25 to 45 minutes, two strength sessions, and one or two technical practices. Add four to six relaxed accelerations with full walking recovery.
+Use six to ten weeks. In the first two, do two easy aerobic sessions of 25 to 45 minutes, two strength sessions, and one or two technical practices. Add four to six relaxed accelerations with full walking recovery.
 
-In weeks three and four, add one interval session: two sets of six one-minute strong runs with one minute easy, resting three minutes between sets. This should be repeatable, not all-out. Continue several short accelerations on a separate day.
+In weeks three and four, add one interval session: two sets of six one-minute strong runs with one minute easy, and three minutes of rest between sets. This should be repeatable, not all-out. Keep doing several short accelerations on a separate day.
 
-In later weeks, make one conditioning session more soccer-specific: 15- to 30-second runs, shuttles, and changes of direction with enough recovery to keep speed and form. Small-sided games can replace part of this work. Progress the total number of high-speed efforts gradually.
+In later weeks, make one conditioning session more soccer-specific: 15- to 30-second runs, shuttles, and changes of direction with enough recovery to keep speed and form. Small-sided games can replace part of this work. Increase the total number of high-speed efforts gradually.
 
-As match play begins, reduce separate conditioning. Keep one easy aerobic session, one brief speed exposure, strength, and the structured warm-up around practices and games.
+Once match play starts, reduce separate conditioning. Keep one easy aerobic session, one brief speed exposure, strength, and the structured warm-up around practices and games.
 
 ## How to know it is working
 
-You cover the intended practice or match duration with less late-game fade, recover faster after sprints, and maintain ball control and decision quality. Repeated runs become more even rather than beginning fast and collapsing.
+You cover the intended practice or match duration with less late-game fade, recover faster after sprints, and keep ball control and decision quality. Repeated runs become more even instead of starting fast and collapsing.
 
-A fixed shuttle or interval set can show progress every three to six weeks, but match function is the main outcome. GPS distance or high-speed totals are useful only when collected consistently and interpreted by position and session.
+A fixed shuttle or interval set can show progress every three to six weeks, but match function is the main outcome. GPS distance or high-speed totals help only when collected consistently and read by position and session.
 
 ## If you get stuck
 
-If breathing is the limiter, keep the easy aerobic work. If hamstrings, calves, or groin become tight or painful as speed rises, reduce high-speed volume and strengthen those tissues instead of adding conditioning. If you are fit in straight lines but struggle in games, add ball-based and change-of-direction practice.
+If breathing is the limiter, keep the easy aerobic work. If hamstrings, calves, or groin get tight or painful as speed rises, cut high-speed volume and strengthen those tissues instead of adding conditioning. If you're fit in straight lines but struggle in games, add ball-based and change-of-direction practice.
 
-If fatigue accumulates, count the true load of matches and practices. Extra running is not automatically the solution. Recovery and consistent participation create more fitness than repeated boom-and-bust weeks.
+If fatigue builds up, count the true load of matches and practices. Extra running isn't automatically the answer. Recovery and consistent participation build more fitness than repeated boom-and-bust weeks.
 
-During a competitive season, the match schedule should organize the week. Put the hardest additional conditioning far enough from matches to recover, and reduce it when minutes rise. During an off-season, rebuild easy volume and strength before increasing sprint and cutting exposure.
+In season, let the match schedule organize the week. Put the hardest extra conditioning far enough from matches to recover, and reduce it when minutes rise. In the off-season, rebuild easy volume and strength before increasing sprint and cutting exposure.
 
 ## A quick note
 
-Warm up before sprinting and cutting, and do not train through pain that changes stride or kicking. Stop for chest pain, fainting, or severe unusual breathlessness.
+Warm up before sprinting and cutting, and don't train through pain that changes your stride or kicking. Stop for chest pain, fainting, or severe unusual breathlessness.
 
 ## Sources
 

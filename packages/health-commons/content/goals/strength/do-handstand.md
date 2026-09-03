@@ -41,40 +41,40 @@ safety:
   cautionLevel: moderate
 ---
 
-A handstand is a balance skill supported by overhead strength, wrist tolerance, and the ability to keep the body organized upside down. Long exhausting holds are not the best teacher. Short, frequent practices with a safe exit build better awareness and more useful repetitions.
+A handstand is a balance skill built on overhead strength, wrist tolerance, and keeping the body organized upside down. Long, exhausting holds teach less than short, frequent practice with a safe exit, which builds better awareness and more useful reps.
 
-The wall is a learning tool, not a separate lesser skill. A chest-to-wall handstand teaches a straighter line and active shoulders. A back-to-wall setup makes entry easier but can encourage an arched position. Use both intentionally and practice coming down before spending much time away from the wall.
+The wall is a learning tool, not a lesser skill. Chest-to-wall teaches a straighter line and active shoulders. Back-to-wall makes entry easier but can encourage an arch. Use both on purpose, and practice coming down before spending much time away from the wall.
 
 ## What to do
 
-- Practice three to five short sessions per week while fresh.
+- Practice three to five short sessions a week while fresh.
 - Warm the wrists gradually with rocking, palm lifts, and easy loading.
 - Build overhead pushing strength and stable shoulder elevation.
 - Learn a safe cartwheel or step-down exit on both sides.
 - Use chest-to-wall holds to practice line and toe pulls to explore balance.
-- Keep attempts short enough that the shoulders and wrists remain controlled.
+- Keep attempts short enough that the shoulders and wrists stay controlled.
 
-Hands should press firmly into the floor with fingers spread. Think about pushing the floor away, reaching tall through the shoulders, and using the fingers to correct a small overbalance. A perfectly straight line is not required for the first freestanding hold; balance and a safe exit come first.
+Press the hands firmly into the floor with fingers spread. Push the floor away, reach tall through the shoulders, and use the fingers to correct a small overbalance. A perfectly straight line isn't required for the first freestanding hold; balance and a safe exit come first.
 
 ## A simple plan
 
-Three times per week, start with two sets of wrist preparation and two sets of 6 to 10 pike or overhead presses. Then perform five chest-to-wall holds of 15 to 30 seconds, resting at least as long as you hold. Stop each set before the shoulders collapse.
+Three times a week, start with two sets of wrist prep and two sets of 6 to 10 pike or overhead presses. Then do five chest-to-wall holds of 15 to 30 seconds, resting at least as long as you hold. Stop each set before the shoulders collapse.
 
-After the wall holds, practice five to ten toe pulls. Stand chest to wall, move the feet a small distance away, shift the shoulders and fingers until the toes float briefly, then return them to the wall. Once you can use the practiced exit reliably, finish with up to five controlled kick-ups into a clear space. Until then, keep entries wall-assisted.
+After the wall holds, do five to ten toe pulls: in a chest-to-wall handstand, move the feet a little away from the wall, shift the shoulders and fingers until the toes float briefly, then return them. Once your practiced exit is reliable, finish with up to five controlled kick-ups into a clear space. Until then, keep entries wall-assisted.
 
-When 30-second wall holds feel easy, do not chase several minutes. Walk the hands slightly closer, improve the body line, add shoulder taps at an easier angle, or devote more time to brief balance drills. Film only a few attempts so the session remains practice rather than production.
+When 30-second wall holds feel easy, don't chase several minutes. Walk the hands slightly closer, improve the line, add shoulder taps at an easier angle, or spend more time on brief balance drills. Film only a few attempts so the session stays practice, not production.
 
 ## How to know it is working
 
-Track comfortable wall-hold time, distance from the wall, number of controlled toe floats, and the best freestanding hold. Also note entry consistency and whether exits feel automatic. A shorter hold that begins and ends under control may be better progress than a long accidental save.
+Track comfortable wall-hold time, distance from the wall, number of controlled toe floats, and best freestanding hold. Also note entry consistency and whether exits feel automatic. A short hold that starts and ends under control may be better progress than a long accidental save.
 
-Handstand progress is variable. Balance may improve in bursts while strength rises steadily. Review video monthly under similar conditions rather than judging every attempt. The goal is more repeatable control, not one lucky clip.
+Progress is uneven. Balance may improve in bursts while strength rises steadily. Review video monthly under similar conditions instead of judging every attempt. You want repeatable control, not one lucky clip.
 
 ## If you get stuck
 
-If you cannot keep the shoulders active, build pike holds, overhead presses, and shorter wall sets. If the back arches heavily, move the hands farther from the wall, tuck the ribs gently, and practice chest-to-wall alignment. If every kick-up flies over, use smaller kicks and let the fingers brake the fall.
+If you can't keep the shoulders active, build pike holds, overhead presses, and shorter wall sets. If the back arches heavily, move the hands farther from the wall, tuck the ribs gently, and practice chest-to-wall alignment. If every kick-up flies over, kick smaller and let the fingers brake.
 
-Wrist discomfort often reflects too much volume too soon. Reduce attempts, use parallettes if comfortable, and rebuild loading gradually. Fear is a skill constraint too: spend more time on exits and low-risk wall drills rather than forcing freestanding attempts.
+Wrist discomfort usually means too much volume too soon. Reduce attempts, use parallettes if comfortable, and rebuild gradually. Fear is a skill constraint too: spend more time on exits and low-risk wall drills instead of forcing freestanding attempts.
 
 ## A quick note
 

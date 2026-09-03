@@ -40,44 +40,44 @@ safety:
   cautionLevel: moderate
 ---
 
-A muscle-up is not simply a powerful pull-up. It combines a high pull, a transition over the bar or rings, and a stable dip to support. Build those pieces separately, then practice connecting them with enough assistance to keep the movement clean.
+A muscle-up chains a high pull, a transition over the bar or rings, and a stable dip to support. Build each piece separately, then connect them with enough assistance to keep the movement clean.
 
-Choose bar or rings. Ring muscle-ups require a false grip and independent-ring control; bar muscle-ups use a different path and often more swing. Progress on one does not transfer perfectly to the other. This guide uses the bar as the default, but the same principle applies: strength first, transition practice second, full attempts sparingly.
+Choose bar or rings. Rings need a false grip and control of two independent rings; the bar uses a different path and often more swing, and progress on one doesn't transfer perfectly. This guide defaults to the bar, but the order holds for both: strength first, transition second, full attempts sparingly.
 
 ## What to do
 
-- Build several controlled pull-ups and parallel-bar or straight-bar dips before emphasizing full attempts.
-- Train high pulls toward the lower chest, not only chin-over-bar repetitions.
-- Practice the transition with a low bar, feet on the ground, a band, or an assisted machine.
-- Use controlled swings only if the chosen skill allows them; do not let every attempt become an uncontrolled kick.
-- Train two or three focused sessions per week and stop before technique deteriorates.
+- Build several controlled pull-ups and dips (parallel-bar or straight-bar) before full attempts.
+- Train high pulls toward the lower chest, not just chin-over-bar reps.
+- Practice the transition with a low bar and feet down, a band, or an assisted machine.
+- Use controlled swings only if the skill allows them, and never let attempts become uncontrolled kicks.
+- Train two or three focused sessions a week and stop before technique breaks down.
 - Keep pulling, pressing, grip, and trunk training in the program.
 
-There is no universal prerequisite number, but being able to perform multiple clean pull-ups and dips makes the skill safer and easier to practice. A person with one maximal pull-up usually benefits more from building that base than from repeated transition attempts.
+There's no universal prerequisite number, but several clean pull-ups and dips make the skill safer and easier to practice. With one max pull-up, build that base before chasing transitions.
 
 ## A simple plan
 
-On day one, perform four sets of 3 to 5 high pull-ups using assistance if needed, then three sets of 3 to 6 straight-bar dips and five minutes of low-bar transition practice. On day two, perform weighted or challenging pull-ups, parallel-bar dips, rows, and trunk work. On day three, use assisted full muscle-ups for several low-repetition sets.
+Day one: four sets of 3 to 5 high pull-ups (assisted if needed), three sets of 3 to 6 straight-bar dips, and five minutes of low-bar transition practice. Day two: weighted or challenging pull-ups, parallel-bar dips, rows, and trunk work. Day three: assisted full muscle-ups for several low-rep sets.
 
-Keep each full-skill set to one to three repetitions. Reduce band or foot assistance only when the pull stays high and both elbows pass over the bar without a large uneven “chicken wing.” Practice a few rested unassisted attempts every one or two weeks, not dozens at the end of every workout.
+Keep each full-skill set to one to three reps. Reduce band or foot assistance only when the pull stays high and both elbows clear the bar together, without a big uneven “chicken wing.” Take a few rested unassisted attempts every week or two, not dozens per workout.
 
-If using rings, learn a comfortable false grip, a deep ring pull, a low-ring transition with feet supported, and a stable ring dip. Lower the rings enough that a missed transition returns the feet to the floor.
+On rings, learn a comfortable false grip, a deep ring pull, a low-ring transition with feet supported, and a stable ring dip. Set the rings low enough that a missed transition puts your feet back on the floor.
 
 ## How to know it is working
 
-Track high-pull height, assistance used in the transition, dip strength, and the quality of assisted full repetitions. A higher pull or smoother two-arm transition is real progress even before the first full skill.
+Track pull height, transition assistance, dip strength, and the quality of assisted full reps. A higher pull or smoother two-arm transition counts as progress before the first full rep.
 
-Video occasional attempts from the side. Look for the body reaching the correct height before the transition and both arms moving together. Use the recording to choose the next drill, not to collect failed attempts.
+Film occasional attempts from the side to check that you reach the right height before the transition and that both arms move together, then use the footage to choose the next drill.
 
 ## If you get stuck
 
-If the chest never reaches the bar, prioritize pulling strength and speed. If you pull high enough but cannot get over, spend more time on low-bar transitions and straight-bar dips. If one elbow always goes over first, increase assistance until the pattern can be symmetrical.
+If your chest never reaches the bar, work on pulling strength and speed. If you pull high enough but can't get over, spend more time on low-bar transitions and straight-bar dips. If one elbow always leads, add assistance until both go together.
 
-If elbows or shoulders become irritated, reduce explosive and transition volume. Muscle-ups layer high forces onto end-range positions, and fatigue changes timing. More attempts are not the answer when prerequisite strength or tissue tolerance is the limiter.
+If elbows or shoulders get irritated, cut explosive and transition volume; muscle-ups load end-range positions hard, and fatigue changes timing. More attempts won't fix a limit set by prerequisite strength or tissue tolerance.
 
 ## A quick note
 
-Use a secure bar or correctly set rings with enough clear space and a safe way down. Avoid practicing above hard obstacles. Stop after a sudden shoulder, elbow, or wrist injury, or after a fall. Coaching is valuable when you cannot see why the transition keeps failing.
+Use a secure bar or correctly set rings, clear space, a safe way down, and no hard obstacles below. Stop after a sudden shoulder, elbow, or wrist injury, or after a fall. Get coaching if you can't see why the transition keeps failing.
 
 ## Sources
 

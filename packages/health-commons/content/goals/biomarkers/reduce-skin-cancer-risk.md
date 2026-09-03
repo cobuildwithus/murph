@@ -44,15 +44,15 @@ safety:
     - A new, changing, bleeding, or nonhealing skin lesion deserves timely clinical assessment.
 ---
 
-Ultraviolet radiation from the sun and indoor tanning damages DNA and raises skin-cancer risk. The goal is not to avoid daylight or make outdoor life stressful. It is to prevent sunburns and reduce repeated high-intensity UV exposure using layers of protection that fit the activity.
+Ultraviolet radiation from the sun and indoor tanning damages DNA and raises skin-cancer risk. You do not need to avoid daylight or make outdoor life stressful. The aim is to prevent sunburns and cut repeated high-intensity UV exposure with layers of protection that fit the activity.
 
 Risk varies with skin type, age, number and type of moles, prior sunburns, immune suppression, personal and family history, latitude, altitude, and exposure pattern. People with darker skin have lower average risk but can still develop skin cancer and may be diagnosed later. Everyone benefits from noticing a changing lesion.
 
 ## What to do
 
-- **Avoid indoor UV tanning.** Tanning beds and sunlamps emit carcinogenic ultraviolet radiation. A “base tan” does not provide meaningful protection.
-- **Use shade and timing first.** When practical, move prolonged outdoor activity away from the strongest midday sun, use an umbrella or covered area, and check the UV index.
-- **Wear physical protection.** A brimmed hat, sunglasses, long sleeves, and tightly woven or UPF-rated clothing provide consistent coverage without needing reapplication.
+- **Avoid indoor UV tanning.** Tanning beds and sunlamps emit carcinogenic ultraviolet radiation. A “base tan” gives no meaningful protection.
+- **Use shade and timing first.** When practical, move long outdoor activity away from the strongest midday sun, use an umbrella or covered area, and check the UV index.
+- **Wear physical protection.** A brimmed hat, sunglasses, long sleeves, and tightly woven or UPF-rated clothing give consistent coverage with no reapplication.
 - **Use broad-spectrum sunscreen on exposed skin.** Choose SPF 30 or higher, apply enough before exposure, and reapply about every two hours and after swimming, sweating, or toweling. Sunscreen is one layer, not permission for unlimited exposure.
 - **Protect easy-to-miss areas.** Ears, scalp or part line, neck, hands, tops of feet, and lips are commonly overlooked.
 - **Make the plan activity-specific.** Keep sunscreen by the door, in sports gear, and with travel supplies. Use water-resistant products for swimming and sweat.
@@ -65,25 +65,25 @@ Audit one ordinary week: driving, commuting, walking, sports, yard work, beach t
 
 Build a three-layer default for the next month: shade or timing, clothing, and sunscreen on exposed skin. Put a hat and sunscreen where the activity begins. Check the UV index when planning long outdoor sessions, not every few minutes. Stop indoor tanning completely and use a sunless product if appearance is the goal.
 
-If you are high risk, clarify the appropriate skin-exam schedule with a clinician and take a simple reference photo of hard-to-remember lesions only if it helps follow change.
+If you are high risk, agree on a skin-exam schedule with a clinician, and take a reference photo of hard-to-remember lesions only if it helps you follow change.
 
 ## How to know it is working
 
-Useful signals are no sunburns, more outdoor time covered by shade or clothing, sunscreen reapplied during long exposure, and no indoor tanning. Completing high-risk follow-up and promptly assessing a changing lesion are meaningful milestones. A tan is evidence of UV response, not a sign that the skin has become protected.
+Useful signals are no sunburns, more outdoor time covered by shade or clothing, sunscreen reapplied during long exposure, and no indoor tanning. Completing high-risk follow-up and promptly assessing a changing lesion are meaningful milestones. A tan is evidence of UV response, not a sign the skin has become protected.
 
 ## What to expect
 
-Protection reduces future exposure immediately, while cancer risk reflects a lifetime of accumulated damage. You cannot erase childhood sunburns, but reducing exposure now still matters. Vitamin D needs can be met through food and supplements when necessary without intentionally burning or tanning.
+Protection cuts future exposure immediately, while cancer risk reflects a lifetime of accumulated damage. You cannot erase childhood sunburns, but reducing exposure now still matters. Vitamin D needs can be met through food and supplements when necessary, without deliberately burning or tanning.
 
-Adjust protection with the season and setting. Snow, water, sand, altitude, and travel toward the equator can make a familiar amount of time more intense, while clouds do not eliminate UV. Some antibiotics, acne treatments, diuretics, and other medicines can increase photosensitivity; review the label or ask a pharmacist. Make the stronger version of the plan automatic for long outdoor events instead of waiting until skin feels hot, because UV damage occurs before a burn is obvious.
+Adjust protection with the season and setting. Snow, water, sand, altitude, and travel toward the equator can make a familiar amount of time more intense, and clouds do not eliminate UV. Some antibiotics, acne treatments, diuretics, and other medicines increase photosensitivity; check the label or ask a pharmacist. Make the stronger version of the plan automatic for long outdoor events instead of waiting until skin feels hot, because UV damage happens before a burn is obvious.
 
 ## If you get stuck
 
-Choose products and clothing you will actually use. Gel or fluid sunscreen may feel better on the face; sticks can help around eyes; UPF clothing can simplify large areas. If irritation occurs, try fragrance-free mineral filters or ask a dermatologist. If reapplication is unrealistic, lean more heavily on shade and clothing.
+Choose products and clothing you will actually use. Gel or fluid sunscreen may feel better on the face; sticks help around the eyes; UPF clothing can cover large areas simply. If irritation occurs, try fragrance-free mineral filters or ask a dermatologist. If reapplication is unrealistic, lean harder on shade and clothing.
 
 ## A quick note
 
-Sunscreen does not make heat exposure safe; hydration, breaks, and heat-illness precautions are separate. Current evidence does not support using routine skin screening as a substitute for evaluating a specific suspicious lesion.
+Sunscreen does not make heat exposure safe; hydration, breaks, and heat-illness precautions are separate. Current evidence does not support routine skin screening as a substitute for evaluating a specific suspicious lesion.
 
 ## Sources
 

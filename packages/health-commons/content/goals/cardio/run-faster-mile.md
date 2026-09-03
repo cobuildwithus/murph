@@ -45,38 +45,38 @@ safety:
   cautionLevel: moderate
 ---
 
-A faster mile requires both aerobic fitness and the ability to run efficiently at a pace that is uncomfortable but controlled. The reliable approach is not to race a mile every week. Build a stable base, practice shorter repetitions near mile effort, develop speed without exhaustion, and test only after enough training has accumulated.
+A faster mile takes aerobic fitness plus the ability to run efficiently at a pace that's uncomfortable but controlled. Racing a mile every week won't get you there. Build a stable base, practice shorter repeats near mile effort, develop speed without exhausting yourself, and test only after enough training has accumulated.
 
-Before beginning a speed block, you should be able to run continuously for at least 20 to 30 minutes and tolerate three running days per week without worsening pain.
+Before a speed block, you should be able to run continuously for at least 20 to 30 minutes and handle three running days a week without worsening pain.
 
 ## What to do
 
-- Keep most weekly running easy. Faster work is effective because it sits inside a recoverable week.
-- Do one mile-focused workout per week at first, with complete enough recovery to keep form and pace consistent.
-- Add short relaxed strides—brief accelerations, not sprints—after one or two easy runs.
-- Maintain one longer easy run to support aerobic capacity.
-- Strength-train the legs and trunk once or twice weekly without exhausting them before the quality session.
-- Practice even pacing. A first lap that is far too fast usually costs more time than it gains.
+- Keep most weekly running easy so fast work sits inside a recoverable week.
+- Start with one mile-focused workout a week, with enough recovery to keep form and pace consistent.
+- Add short relaxed strides, brief accelerations rather than sprints, after one or two easy runs.
+- Keep one longer easy run to support aerobic capacity.
+- Strength-train legs and trunk once or twice a week without exhausting them before the quality session.
+- Practice even pacing; a first lap that's far too fast usually costs more time than it gains.
 
 ## A simple plan
 
-Use a six- to eight-week block with three or four running days. A representative week includes two easy runs of 25 to 45 minutes, one longer easy run of 40 to 70 minutes depending on your baseline, and one quality session.
+Use a six- to eight-week block with three or four running days: two easy runs of 25 to 45 minutes, one longer easy run of 40 to 70 minutes depending on your baseline, and one quality session.
 
-Begin the quality session with ten to 15 easy minutes and several short strides. In the first two weeks, run six to eight repetitions of one minute at a strong, smooth effort with 90 seconds to two minutes of easy jogging or walking. In later weeks, progress to four to six repetitions of two to three minutes near your current mile effort with two to three minutes easy.
+Start the quality session with ten to 15 easy minutes and several short strides. In the first two weeks, run six to eight repeats of one minute at a strong, smooth effort with 90 seconds to two minutes of easy jogging or walking. Later, progress to four to six repeats of two to three minutes near current mile effort with two to three minutes easy.
 
-Do not finish the workout with a sprint. Repetitions should be close enough in pace that the last one still looks like running, not survival. Every third or fourth week, reduce the number of repetitions.
+Don't finish with a sprint. Repeats should be close enough in pace that the last one still looks like running, not survival. Every third or fourth week, cut the number of repeats.
 
-In the final week before a mile attempt, reduce total running slightly, keep a few short fast strides, and avoid a hard workout in the final two days. On test day, warm up, run the first quarter under control, settle through the middle, and use what remains in the final quarter.
+In the final week before a mile attempt, reduce total running slightly, keep a few short fast strides, and skip hard workouts in the last two days. On test day, warm up, run the first quarter under control, settle through the middle, and use what's left in the final quarter.
 
 ## How to know it is working
 
-Track whether repeated efforts become faster at the same perceived effort, whether recovery between them improves, and whether easy pace remains easy. A shorter benchmark such as a controlled 400 or 800 meters can show progress without the fatigue of a full mile test.
+Watch whether repeats get faster at the same perceived effort, recovery between them improves, and easy pace stays easy. A shorter benchmark such as a controlled 400 or 800 meters can show progress without the fatigue of a full mile test.
 
-Test the mile no more often than every four to eight weeks during a focused block. Conditions matter: compare similar surfaces, weather, shoes, and timing. Improvement is not perfectly linear, and a poor test can reflect pacing or fatigue rather than lost fitness.
+Test the mile no more than every four to eight weeks during a focused block, on similar surfaces, weather, shoes, and timing. Improvement isn't perfectly linear, and a poor test can reflect pacing or fatigue rather than lost fitness.
 
 ## If you get stuck
 
-If every repetition slows sharply, the target is too aggressive or the recoveries are too short. If easy runs become hard, remove speed volume and restore the base. If you have plenty of endurance but cannot turn the legs over smoothly, add relaxed strides and short hill accelerations rather than another exhausting interval day.
+If every repeat slows sharply, the target is too aggressive or the recoveries too short. If easy runs turn hard, cut speed volume and rebuild the base. If you have plenty of endurance but can't turn your legs over smoothly, add relaxed strides and short hill accelerations rather than another exhausting interval day.
 
 Plateaus can also come from testing too often, inconsistent weeks, poor sleep, or underfueling. Change one variable at a time and give the block several weeks.
 

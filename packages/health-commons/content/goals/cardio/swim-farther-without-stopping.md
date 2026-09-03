@@ -43,47 +43,47 @@ safety:
   cautionLevel: moderate
 ---
 
-Swimming farther is often limited by technique and breathing before it is limited by general fitness. The answer is usually to slow down, exhale continuously into the water, reduce unnecessary effort, and accumulate repeatable lengths with short rests. Fighting harder can make you more breathless while moving no farther.
+Technique and breathing usually limit swimming distance before general fitness does. The fix is most often to slow down, exhale continuously into the water, drop wasted effort, and accumulate repeatable lengths with short rests.
 
-Train in a supervised pool first. Open-water endurance adds navigation, temperature, visibility, currents, and rescue considerations that a pool plan does not solve.
+Train in a supervised pool first; open water adds navigation, temperature, visibility, currents, and rescue considerations a pool plan doesn't cover.
 
 ## What to do
 
-- Swim two or three times per week so breathing and water feel familiar.
-- Begin each length slower than instinct suggests and keep the kick light enough to sustain.
-- Exhale into the water instead of holding your breath until the head turns.
-- Use short repeats with enough rest to preserve relaxed form.
+- Swim two or three times a week so breathing and the water stay familiar.
+- Start each length slower than instinct suggests and keep the kick light enough to sustain.
+- Exhale into the water instead of holding your breath until your head turns.
+- Use short repeats with enough rest to keep form relaxed.
 - Include simple technique practice for body position, catch, and breathing.
-- Progress total distance and longest repeat separately; do not increase both aggressively.
-- Seek a coach or capable observer if the same technical problem keeps ending every swim.
+- Progress total distance and longest repeat separately; don't push both hard at once.
+- Get a coach or capable observer if the same technical problem keeps ending every swim.
 
 ## A simple plan
 
-Start with a session of 12 to 20 lengths using a distance you can complete in control—often 25 or 50 meters or yards. Rest 20 to 40 seconds between repeats. Keep the first half deliberately easy.
+Start with 12 to 20 lengths at a distance you can complete in control, often 25 or 50 meters or yards. Rest 20 to 40 seconds between repeats. Keep the first half deliberately easy.
 
-On one weekly session, build total volume by adding two to four repeats. On the other, join repeats: move from 25s to 50s, then 75s or 100s, while keeping similar total distance. A useful set might be four 50s, four 75s, and four 50s with easy rest.
+In one weekly session, build total volume by adding two to four repeats. In the other, join repeats: move from 25s to 50s, then 75s or 100s, keeping total distance similar. A useful set is four 50s, four 75s, and four 50s with easy rest.
 
-Once you can repeat 100s without a large pace collapse, attempt one longer continuous swim at the end of an easy session. Add 50 to 100 meters after successful weeks. Keep one session focused on shorter relaxed repeats so endurance does not come at the expense of form.
+Once you can repeat 100s without your pace collapsing, try one longer continuous swim at the end of an easy session. Add 50 to 100 meters after good weeks. Keep one session of shorter relaxed repeats so endurance doesn't cost form.
 
-If freestyle breaks down, a few easy lengths of another stroke or with a kickboard can preserve time in the water, but do not use equipment to hide a persistent breathing problem.
+If freestyle breaks down, a few easy lengths of another stroke or with a kickboard keep you in the water, but don't use equipment to hide a persistent breathing problem.
 
 ## How to know it is working
 
-Your longest continuous distance grows while stroke rhythm and breathing remain controlled. You need less rest after familiar repeats, and pace varies less from the first to the last. Stroke count can be a rough efficiency clue, but forcing fewer strokes by gliding excessively is not automatically better.
+Your longest continuous distance grows while stroke rhythm and breathing stay controlled. You need less rest after familiar repeats, and pace varies less from first to last. Stroke count is a rough efficiency clue, but forcing fewer strokes by over-gliding isn't automatically better.
 
-Compare pool length correctly and note whether distances are yards or meters. A continuous milestone should be repeatable on more than one day before you make speed the priority.
+A continuous milestone should be repeatable on more than one day before speed becomes the priority.
 
 ## If you get stuck
 
-If you are breathless after one length despite good land fitness, slow down and work on exhalation and body position. If shoulders fatigue first, reduce volume, check the catch, and avoid pulling harder with poor mechanics. If progress stalls, a single coached session can reveal more than another month of unobserved effort.
+If you're breathless after one length despite good land fitness, slow down and work on exhaling and body position. If shoulders tire first, reduce volume, check the catch, and don't pull harder with poor mechanics. If progress stalls, one coached session can reveal more than another month unobserved.
 
-If open water is the goal, first build pool capacity, then practice with a supervised group, bright visibility, and conditions appropriate to your experience.
+If open water is the goal, build pool capacity first, then practice with a supervised group, good visibility, and conditions that suit your experience.
 
-Remember that 25-yard and 25-meter pools produce different distances and wall frequency. Compare the same pool when possible and label the units rather than treating every length count as equivalent.
+A 25-yard pool and a 25-meter pool give different distances and wall frequency; compare the same pool when you can and label the units.
 
 ## A quick note
 
-Never swim alone in open water, and do not hyperventilate or practice prolonged breath-holding challenges. Stop for chest pain, faintness, severe unusual breathlessness, or loss of safe stroke control.
+Never swim alone in open water, and don't hyperventilate or practice prolonged breath-holding challenges. Stop for chest pain, faintness, severe unusual breathlessness, or loss of safe stroke control.
 
 ## Sources
 

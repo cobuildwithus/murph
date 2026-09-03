@@ -43,50 +43,50 @@ safety:
   cautionLevel: low
 ---
 
-Work-life balance is not an equal split of hours, and it is not a perfectly calm calendar. It means work is compatible with the rest of your life over time: sleep, health, relationships, caregiving, household responsibilities, interests, and genuine recovery still have enough room.
+Work-life balance means work stays compatible with the rest of your life over time: sleep, health, relationships, caregiving, household responsibilities, interests, and real recovery still get enough room.
 
-Balance can fail because of personal habits, but it often fails because workload, staffing, schedule, money, job control, or workplace expectations are mismatched with available capacity. A useful plan changes the system where possible and uses personal boundaries where they can actually hold.
+Habits matter, but balance often fails because workload, staffing, schedule, money, job control, or workplace expectations outrun your capacity. Change the system where you can and use personal boundaries where they will hold.
 
 ## What to do
 
-- **Define what is being crowded out.** “More balance” is vague. Name the missing outcome: dinner with family, seven hours available for sleep, three workouts, caregiving without multitasking, or one protected day off.
-- **Measure actual work expansion.** For one week, note start time, stop time, after-hours checking, and the reason work crossed the boundary. The pattern may be meetings, unrealistic scope, perfectionism, unclear priorities, or habitual availability.
-- **Choose a boundary with an operating rule.** “Check email less” becomes “No routine email between dinner and the next workday; urgent issues come by phone from a defined person.”
-- **Clarify tradeoffs.** Ask which work takes priority and what can move. Quietly absorbing unlimited demand makes the true capacity problem invisible.
+- **Define what is being crowded out.** Name the missing outcome instead of "more balance": dinner with family, seven hours available for sleep, three workouts, caregiving without multitasking, or one protected day off.
+- **Measure how work actually expands.** For one week, note start and stop times, after-hours checking, and why work crossed the line. Common causes: meetings, unrealistic scope, perfectionism, unclear priorities, or habitual availability.
+- **Give each boundary an operating rule.** "Check email less" becomes "No routine email between dinner and the next workday; urgent issues come by phone from a defined person."
+- **Clarify tradeoffs.** Ask which work takes priority and what can move. Absorbing unlimited demand hides the capacity problem.
 - **Protect high-value personal commitments first.** Put health care, sleep opportunity, caregiving, and important relationships on the calendar before leftover time disappears.
-- **Create a shutdown step.** Record unfinished work, identify tomorrow’s first task, and close work surfaces. A trusted list helps the brain stop rehearsing reminders.
-- **Use flexibility intentionally.** Some weeks require more work. Pair a known surge with lighter expectations or recovery afterward rather than treating permanent overextension as flexibility.
+- **Create a shutdown step.** Record unfinished work, pick tomorrow's first task, and close work surfaces.
+- **Use flexibility on purpose.** Some weeks need more work; pair a known surge with lighter expectations or recovery afterward. Permanent overextension is not flexibility.
 
 ## A simple plan
 
-Run a one-week boundary audit. Each day, record planned and actual stop time, minutes spent checking work after stopping, what personal activity was displaced, and why the boundary failed. Keep the note factual.
+Run a one-week boundary audit: each day, record planned and actual stop time, minutes checking work after stopping, which personal activity got displaced, and why the boundary failed.
 
 Then choose one protected outcome and one work change. For example:
 
-- Protected outcome: three dinners each week without work.
-- Work change: a 20-minute planning block at 4:30 p.m. to close loops and identify what will wait.
+- Protected outcome: three dinners a week without work.
+- Work change: a 20-minute planning block at 4:30 p.m. to close loops and decide what will wait.
 - Communication: tell colleagues when you will be unavailable and how a real emergency reaches you.
-- Tradeoff: if a late request arrives, ask what existing priority should move.
+- Tradeoff: when a late request arrives, ask which existing priority should move.
 
-Keep the plan for three weeks. Track only whether the protected outcome happened and why it did not. If the barrier is your own checking habit, add friction by logging out or moving work apps. If the barrier is external expectation, have the explicit workload or availability conversation. If finances or job insecurity make the boundary impossible, the goal may require longer-term job, benefits, or support planning—not better calendar discipline.
+Keep the plan for three weeks and track only whether the protected outcome happened and, if not, why. Your own checking habit: add friction by logging out or moving work apps. External expectation: have the explicit workload or availability conversation. Money or job insecurity: the goal may need longer-term job, benefits, or support planning rather than better calendar discipline.
 
-Add one transition after work: change clothes, walk, shower, commute without work audio, or spend ten minutes finishing a shutdown list. The transition should be simple enough to use on the hardest day.
+Add one transition after work: change clothes, walk, shower, commute without work audio, or spend ten minutes on a shutdown list. Keep it simple enough for the hardest day.
 
 ## How to know it is working
 
-Look for protected life, not a prettier calendar. You finish closer to the planned time, check less after hours, attend to people without monitoring work, and have enough energy for an ordinary evening. Work quality may improve because priorities are clearer and recovery is real.
+Look for protected life, not a prettier calendar. You finish closer to the planned time, check less after hours, attend to people without monitoring work, and have energy left for an ordinary evening. Work quality may improve too.
 
-Review monthly. Which personal commitments survived? How many days expanded unexpectedly? Did the cause change? A single intense week can be compatible with balance; a “temporary” pattern that never ends is not.
+Review monthly: which personal commitments survived, how many days expanded unexpectedly, and whether the cause changed. One intense week is fine; a "temporary" pattern that never ends is not.
 
 ## If you get stuck
 
-If personal time keeps losing to low-value work, identify who can make the tradeoff decision. If perfectionism expands tasks, agree on the required quality before starting. If meetings consume the workday and actual work moves into evenings, protect execution blocks or question attendance.
+If personal time keeps losing to low-value work, find out who can make the tradeoff call. If perfectionism expands tasks, agree the required quality before starting. If meetings eat the workday and real work slides into evenings, protect execution blocks or question attendance.
 
-Some roles have little schedule control. In that case, focus on predictable recovery, shift swaps, leave, commute boundaries, occupational support, and longer-term options. Do not present an organizational problem as a failure to optimize yourself.
+If your role gives you little schedule control, focus on predictable recovery, shift swaps, leave, commute boundaries, occupational support, and longer-term options. An organizational problem is not a personal failure.
 
 ## A quick note
 
-If work is causing persistent exhaustion, panic, depression, dangerous fatigue, or an inability to meet basic needs, seek appropriate medical, mental health, or workplace support. Balance is a health issue when the mismatch becomes chronic.
+If work is causing persistent exhaustion, panic, depression, dangerous fatigue, or an inability to meet basic needs, seek appropriate medical, mental health, or workplace support. Balance is a health issue once the mismatch becomes chronic.
 
 ## Sources
 

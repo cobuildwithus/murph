@@ -4,7 +4,7 @@ entityType: goal_template
 key: goal_template:rebuild-core-strength-after-birth
 slug: rebuild-core-strength-after-birth
 title: Rebuild Core Strength After Birth
-summary: Rebuild postpartum trunk strength and pressure control through breathing, progressive whole-body exercise, and movement that restores real-life function.
+summary: Rebuild trunk strength and pressure control after birth through breathing, progressive whole-body exercise, and real-life movement.
 status: field-testing
 quality: usable
 aliases:
@@ -46,34 +46,34 @@ safety:
     - Cesarean wound problems, significant pelvic heaviness, pain, a new bulge, or loss of bladder or bowel control requires assessment before increasing load.
 ---
 
-Postpartum core recovery is not about flattening the abdomen or closing every diastasis gap. The goal is **a trunk that can create and release pressure for breathing, rolling, lifting, carrying, and exercise without pain or pelvic symptoms**. Breathing and low-load control are a starting point; progressive whole-body strength is what restores capacity.
+Core recovery after birth means rebuilding a trunk that can create and release pressure for breathing, rolling, lifting, carrying, and exercise without pain or pelvic symptoms. A flat abdomen or a fully closed diastasis gap is not the target. Breathing and low-load control are the starting point; progressive whole-body strength is what restores capacity.
 
 ## What to do
 
-- **Start with 360-degree breathing.** Inhale into the lower ribs, back, and abdomen without forcing expansion. Exhale and gently tension the lower abdomen as if preparing to lift a light object. Let the tension go on the next inhale.
-- **Coordinate the pelvic floor.** A gentle pelvic-floor lift can accompany the exhale and effort, followed by full relaxation. Constant gripping is not core control.
-- **Practice functional transitions.** Roll to the side to get out of bed early after birth, then gradually retrain sit-ups, floor transfers, and loaded carries as healing allows. The final goal is normal movement, not permanent avoidance.
-- **Use low-load core exercises.** Heel slides, bent-knee fallouts, marching, bridges, bird-dog variations, side planks from the knees, and anti-rotation presses can build control. Choose versions that do not cause pain, marked midline bulging, breath-holding, or pelvic pressure.
-- **Strengthen the whole body.** Squats, hinges, rows, presses, step-ups, and carries train the trunk in the context where it is used. Core recovery is not a separate 30-minute ritual.
-- **Progress pressure gradually.** Increase lever length, repetitions, resistance, or speed one at a time. A small amount of visible midline movement is not automatically harmful; judge whether you can control it and remain symptom-free.
-- **Treat scars and pain.** Once a cesarean incision is healed and the care team agrees, gentle desensitization and mobility may help. Persistent scar pain or pulling warrants physical therapy.
-- **Use diastasis as context, not identity.** Width, depth, tension, symptoms, and function all matter. Many separations improve naturally, and exercise can help function even when a gap remains.
+- **Start with 360-degree breathing.** Inhale into the lower ribs, back, and abdomen without forcing the expansion. Exhale and gently tension the lower abdomen as if getting ready to lift something light. Let the tension go on the next inhale.
+- **Coordinate the pelvic floor.** A gentle pelvic-floor lift can go with the exhale and the effort, followed by full relaxation. Constant gripping is not core control.
+- **Practice functional transitions.** Roll to your side to get out of bed early after birth, then gradually retrain sit-ups, floor transfers, and loaded carries as healing allows. The end goal is normal movement, not permanent avoidance.
+- **Use low-load core exercises.** Heel slides, bent-knee fallouts, marching, bridges, bird-dog variations, side planks from the knees, and anti-rotation presses can build control. Choose versions that don't cause pain, marked midline bulging, breath-holding, or pelvic pressure.
+- **Strengthen the whole body.** Squats, hinges, rows, presses, step-ups, and carries train the trunk where it's actually used. Core recovery is not a separate 30-minute ritual.
+- **Progress pressure gradually.** Increase lever length, repetitions, resistance, or speed one at a time. A little visible midline movement is not automatically harmful; judge whether you can control it and stay symptom-free.
+- **Treat scars and pain.** Once a cesarean incision has healed and the care team agrees, gentle desensitization and mobility work may help. Persistent scar pain or pulling warrants physical therapy.
+- **Use diastasis as context, not identity.** Width, depth, tension, symptoms, and function all matter. Many separations improve on their own, and exercise can help function even when a gap remains.
 
 ## A simple plan
 
-One starter template—not a uniquely validated sequence—is to practice five slow breaths with gentle exhale tension once daily for eight weeks. Three days per week, complete two sets of heel slides, bridges, bird-dog arms or legs, and a supported side plank, using 6 to 10 controlled repetitions. Twice weekly, add sit-to-stands, rows, light hinges, and carries.
+One starter template, not a uniquely validated sequence, is to practice five slow breaths with gentle exhale tension once daily for eight weeks. Three days per week, do two sets of heel slides, bridges, bird-dog arms or legs, and a supported side plank, using 6 to 10 controlled repetitions. Twice weekly, add sit-to-stands, rows, light hinges, and carries.
 
-Every two weeks, progress one exercise: longer lever, one or two repetitions, a small load, or a more upright position. Keep the change if pain, bleeding, pelvic heaviness, leaking, and abdominal symptoms remain stable during the session and the next day. Reduce one level when they do not.
+Every two weeks, progress one exercise: a longer lever, one or two more repetitions, a small load, or a more upright position. Keep the change if pain, bleeding, pelvic heaviness, leaking, and abdominal symptoms stay stable during the session and the next day. Drop back one level when they don't.
 
 ## How to know it is working
 
-Look for easier bed mobility, floor transfers, lifting and carrying, steadier breathing under effort, less back fatigue, and confidence increasing load. A flatter abdomen is not required. The best marker is doing more of ordinary life and exercise without pain, pressure, leaking, or fear.
+Look for easier bed mobility, floor transfers, lifting and carrying, steadier breathing under effort, less back fatigue, and growing confidence adding load. A flatter abdomen is not required. The best marker is doing more of ordinary life and exercise without pain, pressure, leaking, or fear.
 
 ## If you get stuck
 
-Stop repeatedly checking the gap and ask what function is limited. If every exercise produces bulging, reduce the lever or load and exhale through effort. If the pelvic floor feels heavy or painful, coordinate the core plan with pelvic-floor assessment. If back pain dominates, add hip and upper-back strength rather than only more abdominal work.
+Stop checking the gap over and over and ask what function is limited. If every exercise produces bulging, shorten the lever or reduce the load and exhale through the effort. If the pelvic floor feels heavy or painful, coordinate the core plan with a pelvic-floor assessment. If back pain dominates, add hip and upper-back strength rather than only more abdominal work.
 
-Avoid programs that promise to “heal” everyone with one forbidden-exercise list. Crunches, planks, and heavier lifting can be reintroduced progressively when they are controlled and symptom-tolerant. The exercise name matters less than the dose and response.
+Avoid programs that promise to “heal” everyone with one forbidden-exercise list. Crunches, planks, and heavier lifting can come back progressively once they're controlled and symptom-tolerant. The name of the exercise matters less than the dose and the response.
 
 ## A quick note
 

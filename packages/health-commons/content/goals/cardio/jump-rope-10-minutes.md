@@ -43,47 +43,47 @@ safety:
   cautionLevel: moderate
 ---
 
-Ten minutes of jump rope requires rhythm and lower-leg tolerance as much as cardio fitness. Learn small efficient jumps, use short intervals, and let the calves, Achilles tendons, and feet adapt before trying to stay airborne continuously. A tangled rope is a skill error, not lost fitness.
+Ten minutes of jump rope takes rhythm and lower-leg tolerance as much as cardio fitness. Learn small, efficient jumps, use short intervals, and let calves, Achilles tendons, and feet adapt before trying to stay airborne continuously. A tangled rope is a skill error, not lost fitness.
 
-Decide whether the goal means ten continuous minutes or ten total minutes with brief resets. Both are useful; continuous jumping simply requires a later stage of progression.
+Decide whether the goal is ten continuous minutes or ten total minutes with brief resets; continuous jumping is just a later stage.
 
 ## What to do
 
-- Choose a rope that reaches roughly the armpits when you stand on its middle, then adjust from feel.
-- Jump only high enough for the rope to pass and turn it mainly from the wrists.
-- Use a forgiving flat surface and supportive footwear while learning.
-- Practice two or three times per week with a day between impact sessions.
+- Pick a rope that reaches about your armpits when you stand on its middle, then adjust by feel.
+- Jump only high enough for the rope to pass, and turn it mostly from the wrists.
+- Learn on a forgiving flat surface in supportive shoes.
+- Practice two or three times a week with a day between impact sessions.
 - Build total jumping contacts before continuous duration.
 - Strengthen calves and feet with calf raises and controlled single-leg balance.
-- Keep an alternative low-impact cardio activity so fitness can grow without all the impact coming from rope work.
+- Keep a low-impact cardio option so not all your fitness work is impact.
 
 ## A simple plan
 
-Start with ten rounds of 20 seconds jumping and 40 seconds rest. Focus on quiet landings, relaxed shoulders, and a steady basic bounce. Repeat for two or three sessions.
+Start with ten rounds of 20 seconds jumping and 40 seconds rest, focusing on quiet landings, relaxed shoulders, and a steady basic bounce. Repeat for two or three sessions.
 
-Progress to 30:30 intervals, then 45 seconds jumping with 30 seconds rest. Once you can accumulate ten minutes of jumping with stable calves and technique, join intervals: two minutes on and one minute off, then three minutes on and one minute off, then five minutes twice.
+Move to 30:30 intervals, then 45 seconds jumping with 30 seconds rest. Once you can accumulate ten minutes of jumping with stable calves and technique, join the intervals up: two minutes on and one off, then three on and one off, then five minutes twice.
 
-Attempt ten continuous minutes only after five minutes feels controlled on separate days. Begin slower than your natural sprint rhythm. If you trip, reset calmly; for the strict continuous goal, record the longest clean interval and continue training rather than restarting repeatedly while exhausted.
+Attempt ten continuous minutes only after five minutes feels controlled on separate days, and start slower than your natural sprint rhythm. If you trip, reset calmly. For the strict continuous goal, record your longest clean interval and keep training rather than restarting repeatedly while exhausted.
 
-Increase one variable at a time. Do not add double-unders, speed, hard surfaces, and duration in the same week.
+Don't add double-unders, speed, hard surfaces, and duration in the same week.
 
 ## How to know it is working
 
-Jumping intervals lengthen while trip frequency, calf tightness, and breathing stay manageable. Landings become quieter, the rope turns with less arm motion, and you can resume quickly after an error.
+Intervals get longer while trips, calf tightness, and breathing stay manageable. Landings get quieter, the rope turns with less arm motion, and you recover quickly after a mistake.
 
-Track total jump time, longest continuous interval, and next-day lower-leg response. Counting every jump is optional and can distract from rhythm. The goal is controlled repeatability, not an enormous contact number.
+Track total jump time, longest continuous interval, and how your lower legs feel the next day. Counting every jump is optional and can distract from rhythm.
 
 ## If you get stuck
 
-If you trip frequently, slow the rope and practice single bounces rather than jumping higher. If calves burn immediately, shorten intervals and add calf strength. If the Achilles tendon or foot develops focal pain, stop increasing impact and use cycling or rowing while it settles.
+If you trip a lot, slow the rope and practice single bounces instead of jumping higher. If your calves burn right away, shorten the intervals and add calf strength. If the Achilles tendon or foot develops focal pain, stop adding impact and use cycling or rowing while it settles.
 
-If breathing is the limiter but technique is sound, add general aerobic work. If coordination is the limiter, practice several fresh five-minute skill sessions rather than one exhausted long session.
+If breathing is the limiter but technique is sound, add general aerobic work. If coordination is the limiter, do several fresh five-minute skill sessions instead of one exhausted long one.
 
-Keep the basic bounce until it is automatic. Alternating feet can reduce monotony and may feel smoother at longer durations, but crosses, double-unders, and speed steps are separate skills. Add them only if they serve the goal and do not disrupt the simple endurance progression.
+Stick with the basic bounce until it's automatic. Alternating feet can break the monotony and may feel smoother at longer durations, but crosses, double-unders, and speed steps are separate skills; add them only if they serve the goal without disrupting the endurance progression.
 
 ## A quick note
 
-Jump rope is repetitive impact. Stop for worsening Achilles, foot, shin, or knee pain, and stop exercise for chest pain, fainting, or severe unusual breathlessness.
+Jump rope is repetitive impact. Stop for worsening Achilles, foot, shin, or knee pain, and stop exercising for chest pain, fainting, or severe unusual breathlessness.
 
 ## Sources
 

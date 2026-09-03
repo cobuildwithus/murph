@@ -43,43 +43,43 @@ safety:
   cautionLevel: moderate
 ---
 
-Hiking endurance comes from more than general cardio. Trails add climbing, descending, uneven footing, carried weight, heat or cold, and hours on your feet. Build regular walking first, progress one longer hike, strengthen the legs, and practice the terrain and pack you actually plan to use.
+Hiking endurance takes more than general cardio. Trails add climbing, descending, uneven footing, carried weight, heat or cold, and hours on your feet. Build regular walking first, progress one longer hike, strengthen your legs, and practice with the terrain and pack you actually plan to use.
 
-“Without getting tired” should mean manageable fatigue, not finishing with no effort. A good hike leaves enough control to make safe decisions all the way back.
+"Without getting tired" means manageable fatigue, not finishing with no effort. A good hike leaves you enough control to make safe decisions all the way back.
 
 ## What to do
 
-- Walk or hike three or more days per week, with one gradually longer outing.
+- Walk or hike three or more days a week, with one gradually longer outing.
 - Keep most effort conversational and slow down early on climbs.
-- Practice both uphill and downhill; descents can stress the legs even when breathing is easy.
-- Strengthen step-ups, split squats, calf raises, hips, and trunk once or twice weekly.
+- Practice uphill and downhill. Descents can stress the legs even when breathing is easy.
+- Do step-ups, split squats, calf raises, hip work, and trunk work once or twice a week.
 - Add pack weight only after body-weight hiking is comfortable.
 - Practice shoes, socks, food, fluids, layers, poles, and blister care on ordinary outings.
 - Learn the route, weather, daylight, water access, and turnaround options.
 
 ## A simple plan
 
-Use six to eight weeks. During the week, complete two walks or easy cardio sessions of 30 to 50 minutes and one strength session. On the weekend, begin with a hike you can finish comfortably.
+Use six to eight weeks. During the week, do two walks or easy cardio sessions of 30 to 50 minutes and one strength session. On the weekend, start with a hike you can finish comfortably.
 
-Add 15 to 30 minutes to the long hike after a successful week. Alternate progression when possible: one week add time, another add modest elevation, then hold. Every third or fourth week, choose an easier and shorter route.
+Add 15 to 30 minutes to the long hike after a successful week. Alternate when you can: add time one week, modest elevation another, then hold. Every third or fourth week, choose an easier, shorter route.
 
-For climbing, include four to six repeats of a two- to five-minute hill at a steady hiking effort. Walk down under control. For downhill tolerance, use shorter steps and progress total descent gradually rather than charging steep trails.
+For climbing, do four to six repeats of a two- to five-minute hill at a steady hiking effort and walk down under control. For downhill tolerance, use shorter steps and build total descent gradually rather than charging steep trails.
 
-When the long hike passes two hours, practice the food, fluids, and pack you intend to use. Keep the pack light at first. The final training hikes should resemble the goal in terrain and duration without needing to match its full difficulty.
+When the long hike passes two hours, practice the food, fluids, and pack you intend to use. Keep the pack light at first. The final training hikes should resemble the goal in terrain and duration without matching its full difficulty.
 
 ## How to know it is working
 
-You can spend longer on your feet with steadier energy, fewer stops, and more controlled breathing on familiar climbs. Legs remain more stable on descents, and normal soreness resolves without undermining the next several days.
+You can stay on your feet longer with steadier energy, fewer stops, and more controlled breathing on familiar climbs. Your legs stay more stable on descents, and normal soreness clears without undermining the next several days.
 
-Track time, distance, elevation, pack weight, and effort. Compare similar routes; five miles on a steep technical trail is not equivalent to five flat miles. The ability to finish with a safety margin is the key outcome.
+Track time, distance, elevation, pack weight, and effort. Compare like with like; five miles on a steep technical trail is not five flat miles. Finishing with a safety margin is what matters.
 
 ## If you get stuck
 
-If climbs cause early breathlessness, slow down and add comfortable aerobic minutes during the week. If descents create severe soreness, reduce their volume and strengthen the quads. If feet or pack contact end the hike, address socks, fit, lacing, hot spots, and carried weight before adding distance.
+If climbs leave you breathless early, slow down and add comfortable aerobic minutes during the week. If descents cause severe soreness, reduce descent volume and strengthen the quads. If your feet or the pack end the hike, sort out socks, fit, lacing, hot spots, and carried weight before adding distance.
 
-If you cannot reach trails often, use stairs, hills, treadmill incline, step-ups, and long walks, then schedule some real terrain before the goal. Do not use a single extreme weekend hike to replace weekly preparation.
+If you can't get to trails often, use stairs, hills, treadmill incline, step-ups, and long walks, then schedule some real terrain before the goal. Don't substitute one extreme weekend hike for weekly preparation.
 
-For hikes that last several hours, comfort becomes part of endurance. Practice a sustainable stop rhythm and resume before breaks become long enough to cool or stiffen you. A slightly slower steady pace often finishes sooner than repeated surges followed by long stops.
+On hikes of several hours, comfort becomes part of endurance. Keep a steady stop rhythm and get moving again before breaks cool or stiffen you. A slightly slower steady pace often finishes sooner than surges followed by long stops.
 
 ## A quick note
 

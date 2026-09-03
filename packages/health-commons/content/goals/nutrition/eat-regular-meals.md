@@ -4,7 +4,7 @@ entityType: goal_template
 key: goal_template:eat-regular-meals
 slug: eat-regular-meals
 title: Eat Regular Meals
-summary: Create a dependable meal rhythm that supports energy, appetite, and real-world schedules.
+summary: Build a dependable meal rhythm that fits your real schedule and keeps energy and appetite steady.
 status: field-testing
 quality: usable
 aliases:
@@ -37,31 +37,29 @@ safety:
     - There is no universally correct meal frequency; regular means planned enough to meet your needs.
 ---
 
-Regular meals do not have to mean eating at exact clock times. The goal is a predictable rhythm that prevents accidental under-eating, extreme hunger, or relying on whatever is available at the last minute. Some people do well with three meals; others prefer smaller meals and snacks.
+Regular meals don't have to land at exact clock times. You want a predictable rhythm that prevents accidental under-eating, extreme hunger, and last-minute reliance on whatever is around. Some people do well on three meals; others prefer smaller meals and snacks.
 
 ## What to do
 
-Choose three daily “food windows” tied to your schedule—for example after waking, during a work break, and after work. Decide the minimum viable meal for each:
+Pick three daily "food windows" tied to your schedule, for example after waking, during a work break, and after work. Decide the minimum viable meal for each:
 
 - yogurt, fruit, and oats;
 - a sandwich plus vegetables or fruit;
 - leftovers, a frozen meal improved with produce, or a grain-protein-vegetable bowl.
 
-Keep one shelf-stable or frozen backup at work, in a bag, or at home. On unusually busy days, use the backup rather than waiting until the plan is impossible.
+Keep one shelf-stable or frozen backup at work, in a bag, or at home. On unusually busy days, eat the backup instead of waiting until the plan is impossible.
 
 ## A simple plan
 
-Create a two-level meal plan for the next four weeks: the intended meal and the minimum viable version.
+Plan two levels for the next four weeks: the intended meal and the minimum viable version.
 
-In week one, place three eating windows on the actual calendar. They do not need exact times, but each needs a protected opportunity. Write what usually prevents it: no morning appetite, meetings through lunch, a long commute, childcare, or forgetting to shop.
+In week one, put three eating windows on your actual calendar. Each needs a protected opportunity, not an exact time. Write down what usually gets in the way: no morning appetite, meetings through lunch, a long commute, childcare, or forgetting to shop.
 
-In week two, assign an intended meal to each window. Breakfast could be oats, yogurt, and fruit; lunch could be leftovers or a sandwich with produce; dinner could be a grain, protein, and vegetable. Then write a five-minute backup for each: fortified cereal and milk, a shelf-stable tuna or bean packet with crackers, a frozen meal, or a peanut-butter sandwich and fruit.
+In week two, assign an intended meal to each window, such as oats, yogurt, and fruit; leftovers or a sandwich with produce; or a grain, protein, and vegetable. Then write a five-minute backup for each: fortified cereal and milk, a shelf-stable tuna or bean packet with crackers, a frozen meal, or a peanut-butter sandwich and fruit.
 
-In week three, put the backups where the missed meal occurs. Keep food at work, in a bag, or in the freezer. Use calendar reminders temporarily if internal hunger cues or a busy schedule do not prompt eating.
+In week three, put the backups where the missed meal happens: at work, in a bag, or in the freezer. Use calendar reminders for now if hunger cues or a busy schedule don't prompt you to eat.
 
-In week four, review spacing and portions. If you are ravenous at night, lunch or the afternoon snack may need more protein, carbohydrate, or total energy. If meals feel forced, smaller portions and a planned snack may work better. There is no need to eat breakfast purely because it is called breakfast; the first meal should serve your energy and health needs.
-
-Keep social and shift-work variation in the plan. Regular means predictable enough to meet needs, not identical every day.
+In week four, review spacing and portions. If you're ravenous at night, lunch or the afternoon snack may need more protein, carbohydrate, or total energy. If meals feel forced, smaller portions and a planned snack may work better. You don't have to eat breakfast just because it's called breakfast, as long as the first meal serves your energy and health needs.
 
 ## How to know it is working
 
@@ -69,21 +67,21 @@ Track unplanned skipped meals and the number of days your intended rhythm happen
 
 ## What to expect
 
-The logistics can improve within a week. Appetite cues may take longer to become predictable, especially after prolonged irregular eating or appetite-suppressing medication.
+The logistics can improve within a week. Appetite cues may take longer to settle, especially after a long stretch of irregular eating or appetite-suppressing medication.
 
 ## If you get stuck
 
-The plan may require too much cooking or happen at times you cannot protect. Move one meal, simplify its contents, or use prepared food. If morning appetite is low, a smaller first meal can be more realistic than forcing a large breakfast.
+The plan may need too much cooking, or land at times you can't protect. Move one meal, simplify what's in it, or use prepared food. If morning appetite is low, a smaller first meal can be more realistic than forcing a big breakfast.
 
 ## Make it last
 
-Use a routine that survives schedule changes. Keep a weekday structure, a weekend version, and an emergency version rather than expecting one timetable to cover everything. Put recurring food windows on the calendar until the environment reliably cues them. Refill work, car, or travel backups on a set day.
+Use a routine that survives schedule changes: a weekday version, a weekend version, and an emergency version rather than one timetable for everything. Refill work, car, or travel backups on a set day.
 
-Review the plan when activity, appetite, medication, or shift work changes. Someone beginning morning training may need an earlier eating opportunity; someone starting a GLP-1 may need smaller, more frequent food; a night-shift worker may need meals anchored to wake time rather than the conventional clock. Do not force meals solely to preserve a streak. Regular eating is serving its purpose when it supports adequate nutrition and reduces avoidable chaos. If a missed meal happens, use the next planned eating opportunity instead of swinging between overeating and compensation. Over time, the routine should require fewer reminders and less negotiation.
+Review the plan when activity, appetite, medication, or shift work changes. Someone starting morning training may need an earlier chance to eat; someone starting a GLP-1 may need smaller, more frequent food; a night-shift worker may need meals anchored to wake time rather than the clock. Don't force meals just to keep a streak alive. If you miss a meal, eat at the next planned opportunity instead of swinging between overeating and compensating.
 
 ## A quick note
 
-Frequent dizziness, faintness, unintended weight loss, vomiting, difficulty swallowing, or inability to eat enough deserves medical evaluation. Diabetes medicines may require a meal plan coordinated with dosing.
+Frequent dizziness, faintness, unintended weight loss, vomiting, difficulty swallowing, or being unable to eat enough deserves medical evaluation. Diabetes medicines may need a meal plan coordinated with dosing.
 
 ## Sources
 

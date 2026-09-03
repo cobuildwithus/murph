@@ -43,45 +43,45 @@ safety:
   cautionLevel: moderate
 ---
 
-The best way to start running is to run more slowly and for less time than your enthusiasm suggests. Short run-walk sessions let your heart, muscles, bones, and tendons adapt while you learn what an easy effort feels like. Walking breaks are part of the plan, not evidence that you failed to run.
+Start running by running more slowly, and for less time, than your enthusiasm suggests. Short run-walk sessions let your heart, muscles, bones, and tendons adapt while you learn what easy effort feels like. Walk breaks are part of the plan, not a sign you failed.
 
-You do not need special fitness before beginning. You do need a starting dose that matches your present walking tolerance and enough recovery to repeat it.
+You don't need special fitness to begin, just a starting dose that matches your current walking tolerance and enough recovery to repeat it.
 
 ## What to do
 
-- Begin with two or three nonconsecutive running days each week.
-- Run at a pace that feels almost too easy. You should be able to speak a short sentence.
-- Use planned walk breaks before your form falls apart or your breathing spikes.
+- Begin with two or three nonconsecutive running days a week.
+- Run at a pace that feels almost too easy, one where you can say a short sentence.
+- Take planned walk breaks before your form falls apart or your breathing spikes.
 - Keep the route flat and predictable for the first few weeks.
-- Wear comfortable shoes that fit; there is no single correct shoe style for everyone.
-- Add basic calf, hip, and leg strength twice weekly with calf raises, sit-to-stands, split squats, or step-ups.
-- Judge each session partly by the next day. Mild unfamiliar soreness can be normal; escalating or movement-changing pain is not a progression signal.
+- Wear comfortable shoes that fit; no single style suits everyone.
+- Twice a week, add basic calf, hip, and leg strength: calf raises, sit-to-stands, split squats, or step-ups.
+- Judge each session partly by the next day. Mild unfamiliar soreness can be normal; escalating or movement-changing pain is not a signal to progress.
 
 ## A simple plan
 
-Start each session with five minutes of brisk walking. Then alternate one minute of easy running with two minutes of walking for eight rounds. Finish with another five easy minutes. Repeat this session two or three times in the first week.
+Walk briskly for five minutes, then alternate one minute of easy running with two minutes of walking for eight rounds, and finish with five easy minutes. Do this two or three times in the first week.
 
-When two sessions feel controlled and the following day is normal, lengthen some running intervals by 30 to 60 seconds. A simple progression is 1:2, then 2:2, then 3:2, then 4:1 run-to-walk intervals. You do not need to advance every week, and you can repeat or step back whenever life or recovery demands it.
+When two sessions feel controlled and the next day is normal, lengthen some running intervals by 30 to 60 seconds. A simple progression is 1:2, then 2:2, then 3:2, then 4:1 run-to-walk. You don't have to advance every week; repeat or step back whenever life or recovery demands it.
 
-Keep the total session near 25 to 35 minutes at first. Progress the amount of running inside that window before adding another day or a much longer session. After you can run easily for ten minutes at a time, gradually join the intervals into one continuous run if that is appealing.
+Keep the whole session near 25 to 35 minutes at first, and increase the running inside that window before adding another day or a much longer session. Once you can run easily for ten minutes at a time, gradually join the intervals into one continuous run if that appeals.
 
-On non-running days, comfortable walking, cycling, or strength work can support fitness. At least one day should be genuinely easy.
+On other days, easy walking, cycling, or strength work is fine; keep at least one day genuinely easy.
 
 ## How to know it is working
 
-The first success is repetition: you are running twice or three times per week without dread or accumulating pain. Next, running intervals become longer at the same conversational effort, and your breathing settles more quickly during the walks.
+The first success is repetition: two or three runs a week without dread or accumulating pain. Next, intervals get longer at the same conversational effort, and breathing settles faster during walks.
 
-Do not use pace as the main score during the first month. New runners often become faster naturally as movement economy and confidence improve. A calm 20-minute run you can repeat is more valuable than a fast effort that costs the rest of the week.
+Don't use pace as the main score in the first month; new runners often get faster on their own as economy and confidence improve. A calm, repeatable 20-minute run beats a fast effort that costs the rest of the week.
 
 ## If you get stuck
 
-If breathing is the limiter, slow down or shorten the run interval before adding fitness work. If calves, shins, knees, or feet are the limiter, reduce impact volume, use flatter terrain, and keep strength work comfortable. Do not stack new running, hills, speed, and a shoe change in the same week.
+If breathing is the limiter, slow down or shorten the run interval before adding fitness work. If calves, shins, knees, or feet are the limiter, cut impact volume, use flatter terrain, and keep strength work comfortable. Don't stack new running, hills, speed, and a shoe change in one week.
 
-If the habit disappears, shrink the minimum session to ten minutes and attach it to fixed days. If progress feels slow, remember that connective tissue adapts more slowly than motivation. Consistency over months is the outcome.
+If the habit slips, shrink the minimum session to ten minutes and tie it to fixed days. If progress feels slow, connective tissue adapts more slowly than motivation.
 
 ## A quick note
 
-Stop for chest pain, fainting, or severe unusual breathlessness. Pain that changes your stride, swelling, or pain that worsens from run to run deserves assessment before you keep increasing impact.
+Stop for chest pain, fainting, or severe unusual breathlessness. Pain that changes your stride, swelling, or pain that worsens from run to run needs assessment before you keep adding impact.
 
 ## Sources
 

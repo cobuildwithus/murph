@@ -45,37 +45,37 @@ safety:
     - New drenching sweats with fever, unexplained weight loss, or other systemic symptoms may not be menopause-related.
 ---
 
-Hot flashes can often be made **less frequent, less intense, or easier to recover from**, but lifestyle changes are not the only legitimate option. Cooling can improve comfort and shorten disruption, but it is not established treatment for how often flashes occur. Evidence for avoiding common food and drink “triggers” as a general treatment is uncertain. Cognitive behavioral therapy can reduce how bothersome symptoms feel. Hormone therapy is the most effective treatment for many eligible people, and several evidence-based nonhormonal medicines are available.
+Hot flashes can often be made **less frequent, less intense, or easier to recover from**, and lifestyle changes aren't your only option. Cooling helps comfort but is not an established treatment for how often flashes happen, and evidence for avoiding common food and drink "triggers" is uncertain. Cognitive behavioral therapy can make symptoms less bothersome. Hormone therapy is the most effective treatment for many eligible people, and several evidence-based nonhormonal medicines exist.
 
 ## What to do
 
-- **Track the pattern for one week.** Count hot flashes in broad blocks—morning, afternoon, evening, overnight—and note only likely triggers such as a hot room, alcohol, spicy food, a hot drink, stress, or exercise. Do not build a minute-by-minute surveillance project.
-- **Make cooling effortless.** Wear removable layers, use a fan, keep cold water nearby, and choose breathable bedding and clothing. These are comfort tools: the aim is to shorten recovery and preserve the activity you were doing, not to claim treatment of the underlying flashes.
-- **Test a suspected trigger only when the pattern is repeatable.** Evidence for avoiding alcohol, caffeine, spicy foods, or hot drinks as a general hot-flash treatment is uncertain. If one factor repeatedly precedes your episodes, change only that factor for two weeks and keep the change only if the difference is meaningful.
-- **Exercise for health and resilience.** Regular aerobic and strength activity supports heart, bone, mood, sleep, and weight health during midlife. It is worthwhile even though exercise alone is not a reliably effective hot-flash treatment.
-- **Use behavioral treatment for distress.** Menopause-specific cognitive behavioral therapy does not necessarily eliminate every flash, but it can reduce symptom bother, improve coping, and support sleep. Clinical hypnosis also has evidence for some people.
+- **Track the pattern for one week.** Count flashes in broad blocks (morning, afternoon, evening, overnight) and note only likely triggers: a hot room, alcohol, spicy food, a hot drink, stress, or exercise. Skip minute-by-minute logging.
+- **Make cooling effortless.** Removable layers, a fan, cold water nearby, breathable bedding and clothing. These shorten recovery and keep you in the activity; they don't treat the flashes.
+- **Test a suspected trigger only when the pattern repeats.** Evidence for avoiding alcohol, caffeine, spicy foods, or hot drinks as a general treatment is uncertain. If one factor repeatedly precedes your episodes, change only that for two weeks and keep it only if the difference is meaningful.
+- **Exercise for health and resilience.** Regular aerobic and strength activity helps heart, bone, mood, sleep, and weight in midlife, though exercise alone is not a reliably effective hot-flash treatment.
+- **Use behavioral treatment for distress.** Menopause-specific cognitive behavioral therapy may not remove every flash, but it can reduce symptom bother, improve coping, and help sleep. Clinical hypnosis also has evidence for some people.
 - **Discuss effective medical options.** Systemic hormone therapy is highly effective for vasomotor symptoms in appropriately selected patients. Nonhormonal options include certain antidepressants, gabapentin, fezolinetant, and oxybutynin. Fezolinetant carries an FDA boxed warning for rare serious liver injury; its label calls for liver testing before treatment, monthly for the first three months, and again at months 6 and 9. Choice depends on symptoms, medical history, side effects, interactions, and preferences.
 - **Skip unsupported shortcuts.** The 2023 Menopause Society statement does not recommend many marketed remedies, including most supplements and herbal products, because evidence is limited, inconsistent, or insufficient.
 
 ## A simple plan
 
-For two weeks, keep a rough baseline count while making the environment easier with layers, a fan, cold water, and a cooler sleep setup. Use those changes for comfort, not as a test of whether the flashes have been treated. If one trigger has a repeatable pattern, test that one factor during the second week. Keep regular movement and a steady sleep schedule without treating them as proof that symptoms are “natural enough” to manage alone.
+For two weeks, keep a rough daily count and make your environment easier with layers, a fan, cold water, and a cooler sleep setup. Those are for comfort, not a test of whether the flashes are treated. If one trigger shows a repeatable pattern, test that single factor in the second week. Keep moving and sleeping on a steady schedule; neither proves your symptoms are "natural enough" to handle alone.
 
-At day 14, ask two questions: Are hot flashes less frequent or intense? Are they less disruptive? If neither has improved and symptoms bother you, arrange a treatment discussion. Bring the rough daily count, the effect on sleep and life, and your priorities about hormones, side effects, and contraception if perimenopausal.
+At day 14, ask: are the flashes less frequent or intense, and less disruptive? If neither improved and symptoms bother you, arrange a treatment discussion. Bring the count, the effect on sleep and life, and your priorities about hormones, side effects, and contraception if perimenopausal.
 
 ## How to know it is working
 
-Useful change includes fewer moderate or severe flashes, faster recovery, fewer clothing or meeting disruptions, less avoidance of exercise or social plans, and better sleep. A medical treatment can be successful even if occasional flashes remain. Evaluate benefit against side effects and quality of life, not against a demand for zero symptoms.
+Useful change means fewer moderate or severe flashes, faster recovery, fewer interrupted meetings or clothing changes, less avoidance of exercise or social plans, and better sleep. Treatment can succeed even if occasional flashes remain; judge it against side effects and quality of life, not zero symptoms.
 
 ## If you get stuck
 
-Confirm that the symptom fits a hot flash: a sudden wave of heat, flushing, sweating, and sometimes chills or palpitations. Thyroid disease, infection, medication effects, low blood sugar, anxiety, and other conditions can also cause sweating or heat sensations. New symptoms that do not fit the usual pattern deserve review.
+Confirm it is a hot flash: a sudden wave of heat, flushing, sweating, sometimes chills or palpitations. Thyroid disease, infection, medication effects, low blood sugar, anxiety, and other conditions can also cause sweating or heat sensations. New symptoms that don't fit the usual pattern deserve review.
 
-If you tried one treatment and disliked it, that does not mean all options will fail. Dose, route, symptom pattern, and individual contraindications matter. Avoid compounded “bioidentical” products presented as safer or more natural than regulated therapy; approved treatments have clearer dosing and safety information.
+Disliking one treatment doesn't mean every option will fail; dose, route, symptom pattern, and individual contraindications matter. Avoid compounded "bioidentical" products sold as safer or more natural than regulated therapy; approved treatments have clearer dosing and safety information.
 
 ## A quick note
 
-Seek care sooner for drenching sweats with fever, unexplained weight loss, chest symptoms, fainting, or a major new health change. Otherwise, treatment choice can be guided by how much symptoms affect your life.
+Seek care sooner for drenching sweats with fever, unexplained weight loss, chest symptoms, fainting, or a major new health change. Otherwise, let the effect on your life guide treatment.
 
 ## Sources
 

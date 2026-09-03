@@ -4,7 +4,7 @@ entityType: goal_template
 key: goal_template:build-muscle-after-50
 slug: build-muscle-after-50
 title: Build Muscle After 50
-summary: Build and preserve muscle with progressive training, adequate nutrition, and recovery that fits your life.
+summary: Build and keep muscle after 50 with progressive training, enough food, and recovery that fits your life.
 status: field-testing
 quality: usable
 aliases:
@@ -42,46 +42,46 @@ safety:
   cautionLevel: low
 ---
 
-People can build muscle and strength well beyond 50. The pace, recovery needs, and starting point may differ from earlier decades, but the basic signal still works: challenge the muscles, repeat the work, eat enough to support adaptation, and gradually progress. The goal is not to train as if age does not exist. It is to train in a way that makes capability last.
+You can build muscle and strength well beyond 50. Pace, recovery, and starting point may differ from earlier decades, but the basic signal still works: challenge the muscles, repeat the work, eat enough, and progress gradually, so capability lasts.
 
-Resistance training also supports functions that matter more than a body-composition number: getting out of a chair, climbing stairs, carrying groceries, protecting balance, and keeping up with hobbies. A program should improve those abilities rather than create so much soreness that normal life shrinks around it.
+Resistance training also helps with what matters more than a body-composition number: getting out of a chair, climbing stairs, carrying groceries, balance, and hobbies. A program should improve those abilities, not leave you so sore that normal life shrinks around it.
 
 ## What to do
 
-- Train all major muscle groups at least twice per week.
-- Use machines, free weights, bands, or bodyweight movements according to access and confidence; all can create useful resistance.
+- Train all major muscle groups at least twice a week.
+- Use machines, free weights, bands, or bodyweight, depending on access and confidence. All provide useful resistance.
 - Start with two working sets per exercise and earn more volume through consistent recovery.
-- Include squatting or standing, hinging, pushing, pulling, carrying, and calf or ankle work across the week.
-- Make protein-rich foods a regular part of meals and avoid chronic under-eating when muscle gain is the aim.
-- Keep some faster but controlled intent—such as standing up briskly or lifting a moderate load with purpose—when it is safe, because power matters for function.
+- Across the week, include squatting or standing, hinging, pushing, pulling, carrying, and calf or ankle work.
+- Eat protein-rich foods at most meals, and avoid chronic under-eating when muscle gain is the aim.
+- When safe, keep some faster but controlled intent, like standing up briskly or lifting a moderate load with purpose. Power matters for function.
 
-Age alone does not dictate tiny weights. The right load is one that is challenging for you and can be controlled. Heavier resistance often has an advantage for maximal strength, while a wide range of loads can build muscle. Begin conservatively, then progress according to performance rather than a stereotype.
+Age alone doesn't mean tiny weights. The right load challenges you and stays under control. Heavier resistance often has an edge for maximal strength, while a wide range of loads can build muscle. Start conservatively and progress on performance, not a stereotype.
 
 ## A simple plan
 
-On Monday and Thursday, perform five movements: a chair squat or leg press, a hip hinge or bridge, a chest press or push-up, a row or pulldown, and a carry or calf raise. Do two sets of 6 to 12 repetitions, stopping with about three good repetitions available for the first two weeks.
+On Monday and Thursday, do five movements: a chair squat or leg press, a hip hinge or bridge, a chest press or push-up, a row or pulldown, and a carry or calf raise. For the first two weeks, do two sets of 6 to 12 reps with about three good reps in reserve.
 
-When you can complete the top of the range with steady technique, add the smallest amount of resistance. If balance limits a leg exercise, use a rail or machine so the muscles can be trained without turning every set into a balance test. Add separate balance practice if that is also a goal.
+When you reach the top of the range with steady technique, add the smallest amount of resistance. If balance limits a leg exercise, use a rail or machine so every set isn't a balance test. Practice balance separately if that is also a goal.
 
-Walk and do enjoyable aerobic activity on other days, but leave at least one genuinely easy day each week. If recovery is good after four weeks, add one set to the exercises tied most closely to your goal. Keep the session under an hour unless a longer format is something you actually enjoy.
+Walk or do aerobic activity you enjoy on other days, but keep at least one genuinely easy day a week. After four weeks, if recovery is good, add one set to the exercises closest to your goal. Keep sessions under an hour unless you enjoy longer ones.
 
-Nutrition does not need to become a supplement project. Build meals around a useful protein source, include plants and adequate energy, and discuss major diet changes with a clinician or dietitian if kidney disease, unintentional weight loss, chewing trouble, or appetite loss is present.
+Nutrition doesn't need to become a supplement project. Build meals around a useful protein source, include plants and enough energy, and talk to a clinician or dietitian before major diet changes if you have kidney disease, unintentional weight loss, chewing trouble, or appetite loss.
 
 ## How to know it is working
 
-Track a lower-body movement, a push, and a pull. More repetitions, resistance, range, or control are clear signs. Also watch function: chair rises, stair climbing, walking with a load, and floor transfers may improve before a home body-composition device detects anything meaningful.
+Track a lower-body movement, a push, and a pull. More reps, resistance, range, or control are clear signs. Also watch function: chair rises, stair climbing, walking with a load, and floor transfers may improve before a home body-composition device notices anything.
 
-If muscle size is important, use circumference, standardized photos, or a professionally interpreted body-composition measure at sensible intervals. Daily smart-scale lean-mass changes mostly reflect water. Review the trend every eight to twelve weeks.
+If size matters to you, use circumference, standardized photos, or a professionally interpreted body-composition measure at sensible intervals. Daily smart-scale lean-mass changes mostly reflect water. Review the trend every eight to twelve weeks.
 
 ## If you get stuck
 
-The first suspect is often insufficient progression: the same comfortable weights repeated indefinitely. The second is too much too soon, which produces lingering soreness and missed sessions. Adjust in small steps. If performance declines across several weeks, reduce volume briefly and review sleep, food intake, illness, medication changes, and total activity.
+The first suspect is usually too little progression: the same comfortable weights, repeated indefinitely. The second is too much too soon, which brings lingering soreness and missed sessions. Adjust in small steps. If performance drops over several weeks, cut volume briefly and review sleep, food, illness, medication changes, and total activity.
 
-Joint limitations do not necessarily mean stopping. A machine, reduced range, different grip, or supported version may allow productive training. Persistent weakness, repeated falls, unexplained weight loss, or rapid loss of function deserves medical assessment rather than a harder program.
+Joint limitations don't necessarily mean stopping; a machine, reduced range, different grip, or supported version may still allow productive training. Persistent weakness, repeated falls, unexplained weight loss, or rapid loss of function deserves medical assessment, not a harder program.
 
 ## A quick note
 
-If you have known cardiovascular disease, uncontrolled blood pressure, advanced osteoporosis, or are returning after a major procedure, get individualized guidance on loading and breathing. Training should build confidence and reserve, not turn every health condition into a reason to avoid movement.
+If you have known cardiovascular disease, uncontrolled blood pressure, or advanced osteoporosis, or you are returning after a major procedure, get individual guidance on loading and breathing. Training should build confidence and reserve, not turn every health condition into a reason to avoid movement.
 
 ## Sources
 

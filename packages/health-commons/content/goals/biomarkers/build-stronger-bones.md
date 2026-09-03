@@ -44,46 +44,46 @@ safety:
     - Known osteoporosis, vertebral fractures, or recent fractures require an exercise plan adapted to fracture risk.
 ---
 
-Stronger bones come from the combination of bone tissue, muscle, balance, and the ability to tolerate everyday loads without fracture. Bone mineral density is useful, but it changes slowly and does not capture all of bone quality. The practical plan is to load the skeleton progressively, provide enough building material, avoid exposures that weaken bone, and use medication when fracture risk is high enough to justify it.
+Strong bones are a package: bone tissue, the muscle around it, balance, and the ability to handle everyday loads without a fracture. Bone density is useful but slow to change, and it misses part of bone quality. What moves this goal is progressive loading, enough building material, avoiding what weakens bone, and medication when fracture risk justifies it.
 
-Exercise should challenge bone and muscle more than ordinary daily movement. Walking is excellent for health and helps maintain function, but walking alone is usually not a complete bone-building program. Resistance training, impact activity when safe, and balance work cover different parts of the goal.
+Exercise has to challenge bone and muscle more than daily life does. Walking is excellent for health but rarely a complete bone-building program on its own. Resistance training, impact when safe, and balance work each cover a different part of the job.
 
 ## What to do
 
-- **Strength train two or three times weekly.** Squats or sit-to-stands, hinges, pushes, pulls, carries, and calf raises load major bones and muscles. Progress resistance gradually while maintaining good technique.
-- **Add impact if it is safe for you.** Brisk stair climbing, jogging, jumping, hopping, or court sports can provide a stronger bone stimulus. The right level depends on age, joints, balance, and existing osteoporosis or fractures.
-- **Train balance and posture.** Single-leg stands, step patterns, tai chi, and targeted physical therapy reduce fall risk. Back-extensor strength and safe movement technique matter when vertebral fracture risk is present.
-- **Get enough calcium from food.** Dairy or fortified alternatives, calcium-set tofu, canned fish with bones, and some greens are practical sources. Add a supplement only to fill a real gap.
-- **Get adequate protein and total nutrition.** Protein supports muscle and bone, while chronic under-eating can impair both. Distribute protein across meals and avoid aggressive weight loss.
-- **Correct vitamin D deficiency.** Vitamin D helps calcium absorption, but more is not better once sufficient. Use an appropriate replacement and maintenance dose.
-- **Avoid smoking and limit heavy alcohol.** Both can weaken bone and increase fall or fracture risk.
+- **Strength train two or three times weekly.** Squats or sit-to-stands, hinges, pushes, pulls, carries, and calf raises load the major bones and muscles. Add resistance gradually with good technique.
+- **Add impact if it is safe for you.** Brisk stair climbing, jogging, jumping, hopping, or court sports can give bone a stronger stimulus. The right level depends on age, joints, balance, and any existing osteoporosis or fractures.
+- **Train balance and posture.** Single-leg stands, step patterns, tai chi, and targeted physical therapy reduce fall risk. With vertebral fracture risk, back-extensor strength and safe movement technique matter.
+- **Get enough calcium from food.** Dairy or fortified alternatives, calcium-set tofu, canned fish with bones, and some greens are practical sources. Supplement only to fill a real gap.
+- **Get enough protein and total nutrition.** Muscle and bone both need protein, and chronic under-eating can impair both. Spread protein across meals and avoid aggressive weight loss.
+- **Correct vitamin D deficiency.** It helps you absorb calcium, but more is not better once you have enough. Use an appropriate replacement dose, then maintenance.
+- **Avoid smoking and limit heavy alcohol.** Both can weaken bone and raise fall and fracture risk.
 - **Review medicines and hormone-related risks.** Long-term steroids, some cancer treatments, early menopause, low sex hormones, eating disorders, and malabsorption can require clinical treatment.
 
 ## A simple plan
 
-Assess current strength, balance, calcium-rich foods, protein, vitamin D risk, smoking, alcohol, fractures, and medicines. If screening is appropriate, use a DXA scan and clinical fracture-risk assessment as the baseline—not an unvalidated consumer bone score.
+Take stock of strength, balance, calcium-rich foods, protein, vitamin D risk, smoking, alcohol, past fractures, and medicines. If screening is appropriate, the baseline is a DXA scan and clinical fracture-risk assessment, not an unvalidated consumer bone score.
 
-For 12 weeks, complete two full-body resistance sessions. Begin with loads you can control for 8 to 12 repetitions and progress when they become comfortably repeatable. Add two or three brief balance sessions and safe impact or stair work. Include two or three calcium-rich foods and protein at each main meal.
+For 12 weeks, do two full-body resistance sessions a week. Start with loads you can control for 8 to 12 repetitions and progress once they feel easy to repeat. Add two or three short balance sessions and whatever impact or stair work is safe. Include two or three calcium-rich foods, and protein at each main meal.
 
-If osteoporosis treatment is prescribed, make adherence part of the plan and follow the instructions for timing and administration.
+If osteoporosis treatment is prescribed, taking it as directed and on schedule is part of the plan.
 
 ## How to know it is working
 
-Near-term signals are more resistance lifted, easier stairs, better balance, improved confidence, and consistent nutrition. Bone density generally should not be rechecked after a few months; meaningful DXA change takes longer and must exceed measurement noise. Stable density can be a good outcome with aging or treatment. The patient-important result is avoiding fractures while staying active.
+Early signs: more weight lifted, easier stairs, better balance, more confidence, consistent nutrition. Don’t recheck bone density after a few months; meaningful DXA change takes longer and must exceed measurement noise. Stable density can be a good result with aging or treatment. What matters is staying active without a fracture.
 
 ## What to expect
 
-Strength and balance improve within weeks. Bone remodeling takes months to years, and large density gains are uncommon from lifestyle alone. Medication may reduce fracture risk even when the density number changes modestly. Consistency and progressive load matter more than novelty.
+Strength and balance improve within weeks. Bone remodeling takes months to years, and lifestyle alone rarely produces large density gains. Medication can reduce fracture risk even when the density number moves only modestly. Consistency and progressive load beat novelty.
 
-Bone responds to the loads it experiences, so progression should remain specific. If you only cycle or swim, keep those excellent cardiovascular activities but add land-based resistance or impact that your joints and fracture risk allow. If you already lift, check whether the program meaningfully loads the hips, spine, and upper body rather than repeating only light, comfortable movements.
+Bone adapts to the loads it receives. If you only cycle or swim, keep them, but add land-based resistance or impact that your joints and fracture risk allow. If you already lift, check that the program really loads the hips, spine, and upper body rather than repeating light, comfortable movements.
 
 ## If you get stuck
 
-If training never becomes harder, the skeleton gets little new stimulus. Increase load, range, speed, or impact gradually with professional help if needed. Review inadequate energy or protein, calcium and vitamin D deficiency, steroids, thyroid or parathyroid disease, low sex hormones, and malabsorption. A physical therapist can adapt loading after fractures or with severe osteoporosis.
+If training never gets harder, the skeleton gets little new stimulus. Increase load, range, speed, or impact gradually, with professional help if needed. Also check for too little food or protein, calcium or vitamin D deficiency, steroids, thyroid or parathyroid disease, low sex hormones, and malabsorption. After fractures or with severe osteoporosis, a physical therapist can adapt the loading.
 
 ## A quick note
 
-Sudden severe back pain, height loss, or pain after a minor fall can signal a fragility fracture. Avoid repeated loaded spinal flexion or twisting if vertebral fracture risk is high until you have individualized instruction.
+Sudden severe back pain, height loss, or pain after a minor fall can signal a fragility fracture. If vertebral fracture risk is high, avoid repeated loaded spinal flexion or twisting until you have individualized instruction.
 
 ## Sources
 

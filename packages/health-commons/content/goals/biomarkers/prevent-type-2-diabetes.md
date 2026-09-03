@@ -41,38 +41,38 @@ safety:
     - Prevention lowers risk; it cannot guarantee that diabetes will never develop.
 ---
 
-Type 2 diabetes often develops gradually, which creates a real opportunity to delay or prevent it. The strongest evidence supports a structured lifestyle plan that combines regular activity, improved food choices, and modest weight loss when excess weight is present. The Diabetes Prevention Program showed that this approach substantially reduced progression in high-risk adults, with benefit that persisted over long follow-up.
+Type 2 diabetes usually develops gradually, which gives you a real chance to delay or prevent it. The strongest evidence supports a structured lifestyle plan: regular activity, better food choices, and modest weight loss when excess weight is present. The Diabetes Prevention Program showed this approach substantially reduced progression in high-risk adults, with benefit that lasted over long follow-up.
 
-Prevention is not only about glucose. The same plan can improve blood pressure, triglycerides, liver fat, fitness, mobility, and sleep. Genetics, age, prior gestational diabetes, polycystic ovary syndrome, and some medicines still matter, so the aim is meaningful risk reduction rather than a promise.
+The same plan does more than lower glucose. It can improve blood pressure, triglycerides, liver fat, fitness, mobility, and sleep. Genetics, age, prior gestational diabetes, polycystic ovary syndrome, and some medicines still matter, so expect meaningful risk reduction, not a guarantee.
 
 ## What to do
 
-- **Know your starting risk.** Use validated A1C, fasting glucose, or oral glucose-tolerance testing when indicated. Family history, prior gestational diabetes, excess abdominal fat, and certain racial and ethnic backgrounds can increase risk.
-- **Build toward regular aerobic activity.** A practical evidence-based target is at least 150 minutes of moderate activity each week. Walking counts. Spread it across the week and break up prolonged sitting.
+- **Know your starting risk.** Use validated A1C, fasting glucose, or oral glucose-tolerance testing when indicated. Family history, prior gestational diabetes, excess abdominal fat, and certain racial and ethnic backgrounds raise risk.
+- **Build toward regular aerobic activity.** A practical, evidence-based target is at least 150 minutes of moderate activity a week. Walking counts. Spread it across the week and break up long sitting.
 - **Add strength training.** More active muscle improves glucose use and protects function during weight loss and aging.
 - **Lose a modest amount of weight when appropriate.** A 5% to 7% reduction can be meaningful for many high-risk adults, but weight loss is not required or appropriate for everyone.
-- **Choose a sustainable food pattern.** Emphasize vegetables, beans, whole grains, fruit, nuts, unsaturated fats, and adequate protein. Reduce sugary drinks and the refined, energy-dense foods that repeatedly crowd these out.
+- **Choose a food pattern you can keep.** Emphasize vegetables, beans, whole grains, fruit, nuts, unsaturated fats, and enough protein. Cut back on sugary drinks and the refined, energy-dense foods that keep crowding these out.
 - **Protect sleep.** Regular short sleep and untreated sleep apnea can worsen insulin resistance. Address loud snoring, gasping, and marked daytime sleepiness.
-- **Avoid tobacco and moderate alcohol.** These choices improve broader cardiovascular and metabolic risk.
+- **Avoid tobacco and moderate alcohol.** Both improve your wider cardiovascular and metabolic risk.
 - **Consider structured support or medication.** A CDC-recognized prevention program provides coaching and accountability. Metformin may be appropriate for selected people at particularly high risk.
 
 ## A simple plan
 
-Get a baseline that includes glucose status, blood pressure, lipids, activity, sleep, and weight or waist if useful. Then choose a 12-week target: 30 minutes of brisk walking on five days, two short strength sessions, no sugary drinks on ordinary days, and two default high-fiber meals.
+Get a baseline that includes glucose status, blood pressure, lipids, activity, sleep, and weight or waist if useful. Then set a 12-week target: 30 minutes of brisk walking on five days, two short strength sessions, no sugary drinks on ordinary days, and two default high-fiber meals.
 
-If weight loss is appropriate, aim for slow progress through portions and food quality rather than severe restriction. Put activity into the calendar and create a backup version for busy days—a ten-minute walk is better than an abandoned perfect session.
+If weight loss is appropriate, aim for slow progress through portions and food quality rather than severe restriction. Put activity on the calendar and keep a backup version for busy days. A ten-minute walk beats an abandoned perfect session.
 
-Set the next laboratory follow-up based on your starting risk. People with prediabetes or prior gestational diabetes often need more frequent screening than low-risk adults.
+Set your next lab follow-up based on your starting risk. People with prediabetes or prior gestational diabetes often need more frequent screening than low-risk adults.
 
 ## How to know it is working
 
-The long-term outcome is remaining below the diabetes diagnostic range. Nearer-term signals include improved fitness, more activity, modest weight or waist reduction where relevant, and favorable trends in A1C, fasting glucose, blood pressure, and triglycerides. Count participation in a prevention program or completion of screening as meaningful milestones too.
+The long-term outcome is staying below the diabetes diagnostic range. Nearer-term signals include better fitness, more activity, modest weight or waist reduction where relevant, and favorable trends in A1C, fasting glucose, blood pressure, and triglycerides. Joining a prevention program or completing screening counts as a milestone too.
 
 ## What to expect
 
-Risk changes over months and years, not after one perfect week. A normal test is encouraging but does not eliminate future risk. Some people develop diabetes despite strong habits because pancreatic function and genetics vary; early detection and treatment still improve the path forward. Prevention efforts are valuable even when they delay rather than permanently avoid diagnosis.
+Risk changes over months and years, not after one perfect week. A normal test is encouraging but does not remove future risk. Some people develop diabetes despite strong habits because pancreatic function and genetics vary; early detection and treatment still improve the path ahead. Prevention is worthwhile even when it delays rather than permanently avoids a diagnosis.
 
-Build a maintenance floor for difficult seasons: a minimum weekly walk total, one strength session, no routine sugary drinks, and a scheduled screening reminder. You can return to the full plan when capacity improves without letting the protective behaviors disappear completely.
+Build a maintenance floor for hard seasons: a minimum weekly walk total, one strength session, no routine sugary drinks, and a scheduled screening reminder. Return to the full plan when you have more capacity, without letting the protective habits disappear.
 
 ## If you get stuck
 
