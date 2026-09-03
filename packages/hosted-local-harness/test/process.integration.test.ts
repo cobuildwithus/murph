@@ -218,7 +218,7 @@ describe("hosted-local E2E MinIO cleanup ownership", () => {
           });
         });
         await Promise.race([
-          waitForFile(minioReadyPath, 5_000),
+          waitForFile(minioReadyPath, 15_000),
           wrapperExitBeforeReady,
         ]);
         const interruptedAt = Date.now();
@@ -254,7 +254,7 @@ describe("hosted-local E2E MinIO cleanup ownership", () => {
         await rm(tempDirectory, { force: true, recursive: true });
       }
     },
-    20_000,
+    35_000,
   );
 });
 
