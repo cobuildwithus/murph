@@ -1754,14 +1754,15 @@ function resolveAssistantCronOutboxAutomationAuthority(
 function resolveAssistantCronOutboxAutomationContextReferences(
   job: ResolvedAssistantCronJob,
   deviceActivityAuthority: DeviceActivityParentAuthority,
-): AssistantOutboxIntent['automationContextReferences'] | undefined {
-  if (job.kind === 'canonical' && job.source.kind === 'automation') {
-    return [...job.source.contextReferences]
-  }
+): AssistantOutboxIntent['automationContextReferences'] {
+  const contextReferences =
+    job.kind === 'canonical' && job.source.kind === 'automation'
+      ? job.source.contextReferences
+      : deviceActivityAuthority.automationId === null
+        ? []
+        : deviceActivityAuthority.contextReferences
 
-  return deviceActivityAuthority.automationId === null
-    ? undefined
-    : [...deviceActivityAuthority.contextReferences]
+  return contextReferences.length === 0 ? null : [...contextReferences]
 }
 
 function resolveAssistantCronOutboxPlannedOccurrenceAt(input: {
