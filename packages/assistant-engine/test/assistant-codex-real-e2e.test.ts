@@ -19705,6 +19705,245 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
     360_000,
   )
 
+  it(
+    'chooses one fixed time for a vague reminder window from private authorized context',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-vague-reminder-time-e2e-'),
+      )
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+      const connectedAppRequests: Array<{
+        input: Record<string, unknown>
+        operation: string
+      }> = []
+
+      try {
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'connected-apps',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildVagueReminderDeveloperInstructions(),
+          dynamicTools: [
+            MURPH_AUTOMATION_TOOL,
+            MURPH_CONNECTED_APPS_MANAGE_TOOL,
+            MURPH_CONNECTED_APPS_SEARCH_TOOL,
+            MURPH_CONNECTED_APPS_EXECUTE_TOOL,
+          ],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            automationTool: {
+              request: async (request) => {
+                if (request.action !== 'save' || request.schedule.kind !== 'at') {
+                  throw new Error('Expected one fixed one-shot reminder save.')
+                }
+                automationRequests.push(request)
+                return {
+                  action: 'save',
+                  automationId: 'automation-training-bag',
+                  created: true,
+                  effectiveTimeZone: 'America/New_York',
+                  lookupId: 'training-bag-reminder',
+                  occurrenceProjection: {
+                    nextOccurrenceAt: request.schedule.at,
+                    status: 'resolved' as const,
+                  },
+                  routeBinding: 'current_conversation',
+                  schedule: request.schedule,
+                  status: 'active',
+                  updatedAt: '2026-10-14T19:00:00.000Z',
+                }
+              },
+            },
+            computerToolsAvailable: false,
+            connectedApps: {
+              request: async (request) => {
+                connectedAppRequests.push({
+                  input: request.input,
+                  operation: request.operation,
+                })
+                if (request.operation === 'manage') {
+                  return {
+                    result: {
+                      accounts: [{
+                        alias: 'Synthetic calendar',
+                        connectedAt: '2026-09-01T12:00:00.000Z',
+                        id: 'calendar_vague_reminder',
+                        status: 'ACTIVE',
+                        toolkit: 'googlecalendar',
+                      }],
+                    },
+                  }
+                }
+                if (request.operation === 'search') {
+                  return {
+                    result: {
+                      success: true,
+                      tool_schemas: {
+                        GOOGLECALENDAR_LIST_EVENTS: {
+                          input_schema: {
+                            additionalProperties: false,
+                            properties: {
+                              timeMax: { type: 'string' },
+                              timeMin: { type: 'string' },
+                            },
+                            required: ['timeMin', 'timeMax'],
+                            type: 'object',
+                          },
+                        },
+                      },
+                    },
+                  }
+                }
+                if (request.operation === 'execute') {
+                  return {
+                    result: {
+                      items: [{
+                        end: { dateTime: '2026-10-15T09:00:00-04:00' },
+                        start: { dateTime: '2026-10-15T08:30:00-04:00' },
+                        summary: 'Confidential planning',
+                      }, {
+                        end: { dateTime: '2026-10-15T10:45:00-04:00' },
+                        start: { dateTime: '2026-10-15T10:00:00-04:00' },
+                        summary: 'Private focus session',
+                      }],
+                    },
+                  }
+                }
+                throw new Error('Unexpected connected-app operation.')
+              },
+            },
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'On October 15, remind me in the morning to pack my training bag.',
+            'Choose the time and save it now.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+
+        expect(connectedAppRequests.map((request) => request.operation)).toEqual([
+          'manage',
+          'search',
+          'execute',
+        ])
+        expect(connectedAppRequests[0]?.input).toEqual({ action: 'list' })
+        const executeRequest = connectedAppRequests[2]
+        expect(executeRequest?.input.account).toBe('calendar_vague_reminder')
+        expect(executeRequest?.input.toolSlug).toBe(
+          'GOOGLECALENDAR_LIST_EVENTS',
+        )
+        const calendarArguments = executeRequest?.input.arguments
+        if (
+          typeof calendarArguments !== 'object'
+          || calendarArguments === null
+          || Array.isArray(calendarArguments)
+        ) {
+          throw new Error('Expected bounded calendar arguments.')
+        }
+        const timeMin = readString(
+          (calendarArguments as Record<string, unknown>).timeMin,
+        )
+        const timeMax = readString(
+          (calendarArguments as Record<string, unknown>).timeMax,
+        )
+        if (!timeMin || !timeMax) {
+          throw new Error('Expected calendar bounds for the requested window.')
+        }
+        expect(timeMin).toContain('2026-10-15')
+        expect(timeMax).toContain('2026-10-15')
+        expect(Date.parse(timeMax) - Date.parse(timeMin)).toBeLessThanOrEqual(
+          24 * 60 * 60 * 1_000,
+        )
+
+        expect(automationRequests).toHaveLength(1)
+        const savedRequest = automationRequests[0]
+        if (savedRequest?.action !== 'save' || savedRequest.schedule.kind !== 'at') {
+          throw new Error('Expected one saved fixed reminder.')
+        }
+        const localParts = new Intl.DateTimeFormat('en-US', {
+          day: '2-digit',
+          hour: '2-digit',
+          hourCycle: 'h23',
+          minute: '2-digit',
+          month: '2-digit',
+          timeZone: 'America/New_York',
+          year: 'numeric',
+        }).formatToParts(new Date(savedRequest.schedule.at))
+        const localPart = (type: Intl.DateTimeFormatPartTypes) =>
+          Number(localParts.find((part) => part.type === type)?.value)
+        const localMinutes = localPart('hour') * 60 + localPart('minute')
+        expect({
+          day: localPart('day'),
+          month: localPart('month'),
+          year: localPart('year'),
+        }).toEqual({ day: 15, month: 10, year: 2026 })
+        expect(localMinutes).toBeGreaterThanOrEqual(6 * 60)
+        expect(localMinutes).toBeLessThan(12 * 60)
+        expect(
+          (localMinutes >= 8 * 60 + 30 && localMinutes < 9 * 60)
+          || (localMinutes >= 10 * 60 && localMinutes < 10 * 60 + 45),
+        ).toBe(false)
+        const serializedRequest = JSON.stringify(savedRequest)
+        expect(serializedRequest).toMatch(/pack.*training bag|training bag.*pack/iu)
+        expect(serializedRequest).not.toMatch(
+          /Confidential planning|Private focus session|Synthetic calendar|calendar_vague_reminder|skip-when-busy|dynamic reschedul/iu,
+        )
+        expect(savedRequest.contextReferences ?? []).toEqual([])
+        expect(result.finalMessage).toMatch(/training bag/iu)
+        expect(result.finalMessage).toMatch(
+          /\b(?:[6-9]|10|11)(?::[0-5][0-9])?\s*(?:a\.?m\.?|in the morning)\b/iu,
+        )
+        expect(result.finalMessage).toMatch(
+          /wake|morning|calendar|free|open|between|commitment/iu,
+        )
+        expect(result.finalMessage).toMatch(/adjust|change|move/iu)
+        expect(result.finalMessage).not.toMatch(
+          /Confidential planning|Private focus session|Synthetic calendar|calendar_vague_reminder|skip-when-busy|dynamically reschedul/iu,
+        )
+        expect(result.finalMessage).not.toMatch(
+          /may I (?:check|use)|can I (?:check|use)|which calendar/iu,
+        )
+        process.stdout.write(
+          `[vague-reminder-time-e2e] ${JSON.stringify({
+            localTime: `${String(localPart('hour')).padStart(2, '0')}:${String(localPart('minute')).padStart(2, '0')}`,
+            providerOperations: connectedAppRequests.map(
+              (request) => request.operation,
+            ),
+            reply: result.finalMessage.trim(),
+          })}\n`,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
   it.each([
     {
       expectedFinalMessage: [
@@ -29945,6 +30184,33 @@ function buildMidnightLinqReminderDeveloperInstructions(
     },
     conversationScope: 'direct',
     currentLocalDate: '2026-07-27',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: null,
+  })
+}
+
+function buildVagueReminderDeveloperInstructions(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: [
+      'Known member context:',
+      '- Valid recent sleep summaries place the usual wake window between 7:30 and 8:00 AM.',
+      '- Recent training normally begins after 11:00 AM, with no earlier routine conflict.',
+    ].join('\n'),
+    assistantHostedAutomationAvailable: true,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'direct',
+    currentLocalDate: '2026-10-14',
     currentTimeZone: 'America/New_York',
     hostedRuntime: true,
     modelBehaviorProfile: 'gpt5-agentic',
