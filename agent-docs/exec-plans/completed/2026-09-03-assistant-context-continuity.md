@@ -1,6 +1,6 @@
 # Preserve relevant assistant context across unrelated turns
 
-Status: active
+Status: completed
 Created: 2026-09-03
 Updated: 2026-09-03
 
@@ -60,11 +60,23 @@ Updated: 2026-09-03
 
 ## Verification
 
-- Focused assistant auto-reply event-path Vitest regression.
-- Focused real-Codex workout completion journey using the local subscription.
-- Assistant Engine typecheck, `pnpm complexity:diff`, `git diff --check`, and a
-  private-identifier scan.
-- Exact-head required CI and risk-routed final review.
+- The focused auto-reply regression passed, followed by the complete 107-test
+  event-path owner suite.
+- The focused real-Codex workout journey passed with one intended set write,
+  12 recorded reps, an 8/8 completion reply, and no workout clarification.
+- Assistant Engine and Web typechecks passed. The focused changelog page suite
+  passed all 9 tests.
+- `pnpm complexity:diff` passed; the changed production file's debt fell from
+  111 to 110 and its maximum stayed at 47. `git diff --check` and the private-
+  identifier scan passed.
+- A pinned real Codex App Server capture against the repository's local
+  Responses stub measured identical synthetic base/head fixtures with
+  `gpt-tokenizer` 3.4.0 `o200k_harmony`. The affected direct request moved from
+  28,330 tokens / 132,434 UTF-8 bytes to 28,515 / 133,243 (+185 / +809), and
+  the affected group request moved from 24,125 / 113,129 to 24,302 / 113,938
+  (+177 / +809). The delta is only the restored prior-delivery context;
+  assembled instructions and tool schemas are unchanged.
+- Exact-head required CI and the risk-routed final review remain merge gates.
 
 ## Product UX Walkthrough
 
@@ -79,3 +91,4 @@ Updated: 2026-09-03
   107-test auto-reply owner suite.
 - Differences from plan: none.
 - Verdict: Ready.
+Completed: 2026-09-03
