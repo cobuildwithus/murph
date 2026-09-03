@@ -23,6 +23,7 @@ const MAX_CHANGED_FILES = 3_000;
 const MAX_PRODUCER_FIXTURE_BYTES = 32 * 1024;
 const MAX_PRODUCER_FIXTURES = 16;
 const PAGE_SIZE = 100;
+const LEGACY_READER_STATES = ["none", "active", "suspended"];
 
 const RELEVANT_PREFIXES = [
   "apps/cloudflare/",
@@ -287,7 +288,7 @@ export function inspectPrivateRun(raw, { privateSha, runId, workflowId }) {
   };
 }
 
-export function supportedReaderDigest(readerShas) {
+export function supportedReaderDigest(readerShas, legacyReaderState = "none") {
   if (!Array.isArray(readerShas) || readerShas.length === 0) {
     throw new Error("Supported-reader set must not be empty.");
   }
@@ -298,9 +299,15 @@ export function supportedReaderDigest(readerShas) {
   if (new Set(normalized).size !== normalized.length) {
     throw new Error("Supported-reader set contains a duplicate SHA.");
   }
+  if (!LEGACY_READER_STATES.includes(legacyReaderState)) {
+    throw new Error("Legacy reader state is invalid.");
+  }
   // Cross-repository wire format: sorted lowercase SHAs, one per line, with a
-  // trailing newline. The private attestation must compute this exact digest.
-  return createHash("sha256").update(`${normalized.join("\n")}\n`).digest("hex");
+  // trailing bounded legacy-state line. The private attestation computes this
+  // exact digest from protected live routing and suspension evidence.
+  return createHash("sha256")
+    .update(`${normalized.join("\n")}\nlegacy-state:${legacyReaderState}\n`)
+    .digest("hex");
 }
 
 export function compatibilityProofDigest({ producerDigest, publicSha, readersDigest, requestId }) {
@@ -367,17 +374,22 @@ export function inspectAttestationJobs(jobs, {
   if (!readers.includes(privateSha)) {
     throw new Error("Supported-reader proof omitted the dispatched private candidate.");
   }
-  const digest = supportedReaderDigest(readers);
-  const proofDigest = compatibilityProofDigest({
-    producerDigest,
-    publicSha,
-    readersDigest: digest,
-    requestId,
-  });
-  if (attestations[0] !== proofDigest) {
+  const proof = LEGACY_READER_STATES.map((legacyReaderState) => {
+    const digest = supportedReaderDigest(readers, legacyReaderState);
+    return {
+      digest,
+      proofDigest: compatibilityProofDigest({
+        producerDigest,
+        publicSha,
+        readersDigest: digest,
+        requestId,
+      }),
+    };
+  }).find(({ proofDigest }) => attestations[0] === proofDigest);
+  if (!proof) {
     throw new Error("Private compatibility attestation does not bind the requested proof.");
   }
-  return { digest, proofDigest, readerCount: readers.length };
+  return { ...proof, readerCount: readers.length };
 }
 
 export function inspectJobPage(raw) {
