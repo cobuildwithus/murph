@@ -41,5 +41,6 @@ new abstraction.
 - Affected package typechecks.
 - Required exact-head CI and ReviewGPT gates.
 
-Status: active
+Status: completed
 Updated: 2026-09-02
+Completed: 2026-09-02
