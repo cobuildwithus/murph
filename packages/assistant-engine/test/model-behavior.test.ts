@@ -1501,6 +1501,40 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).not.toContain('23:00 through 04:59')
   })
 
+  it('buffers model-chosen completed wearable summaries without moving action-timed cues', () => {
+    const prompts = [
+      buildAssistantSystemPrompt(createCommonCodexPromptInput()),
+      buildAssistantSystemPrompt(createCommonCodexPromptInput({
+        assistantHostedAutomationAvailable: true,
+        conversationScope: 'group',
+        hostedRuntime: true,
+      })),
+    ]
+
+    for (const prompt of prompts) {
+      expect(prompt).toContain(
+        'Wearable freshness for scheduled summaries: imports can lag events by three to six hours.',
+      )
+      expect(prompt).toContain(
+        'prefer the next day after a several-hour buffer',
+      )
+      expect(prompt).toContain('use late morning local time')
+      expect(prompt).toContain('Honor an exact time')
+      expect(prompt).toContain(
+        'Do not shift action-timed cues such as bedtime reminders.',
+      )
+      expect(prompt).toContain(
+        'Stored instructions must name the completed period, check coverage and freshness each run',
+      )
+      expect(prompt).toContain(
+        'delayed, stale, or missing data as unknown or incomplete—not zero or failure',
+      )
+      expect([
+        ...prompt.matchAll(/Wearable freshness for scheduled summaries:/gu),
+      ]).toHaveLength(1)
+    }
+  })
+
   it('offers a weather check before saving outdoor reminder automations', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
@@ -1747,6 +1781,34 @@ describe('assistant local PDF evidence guidance', () => {
       expect(prompt).toContain('sign in, and connect Apple Health')
     },
   )
+
+  it('keeps stale Apple Health troubleshooting app-mediated', () => {
+    const directPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput(),
+    )
+    const groupPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({
+        conversationScope: 'group',
+        hostedRuntime: true,
+      }),
+    )
+
+    expect(directPrompt).toContain(
+      'ask the member to open Murph on their iPhone so its app-mediated import can run',
+    )
+    expect(directPrompt).toContain(
+      'then re-check the metric and date',
+    )
+    expect(directPrompt).toContain(
+      "Opening Apple's Health app does not refresh Murph.",
+    )
+    expect(directPrompt).toContain(
+      'Do not promise immediate sync or suggest reconnecting unless authentication or permission failed.',
+    )
+    expect(groupPrompt).not.toContain(
+      'If connected Apple Health data is stale or missing',
+    )
+  })
 
   it('teaches Codex to inspect local PDF artifacts with Poppler tools', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
@@ -2098,17 +2160,19 @@ describe('assistant system prompt cache stability', () => {
 
     expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(8_415)
     // This layer is resident on every turn for every member. Its ceiling is the
-    // prior 63,600-character ratchet plus 5%, rounded up, for reviewed cross-route
-    // guidance that cannot live in an owning skill. Capability-specific browser,
-    // connected-app, phone-call, and Family mechanics remain excluded.
+    // prior 66,780-character ratchet plus the reviewed 890-character wearable
+    // freshness addition, for cross-route guidance that cannot live in an owning
+    // skill. Capability-specific browser, connected-app, phone-call, and Family
+    // mechanics remain excluded.
     // The local automation delivery limitation, the established Apple
     // Health/WHOOP relay, cross-route repeated-set boundary, private
     // longitudinal recommendation, direct and group Journal capture policies,
     // narrowest-relevant-safety rule, response-card dietary/burn
     // target-authority boundary, explicit group-family tool routing, and the
     // cross-route CLI error-recovery contract, and shared exact-versus-vague
-    // one-shot reminder timing policy set this exact ceiling.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(66_780)
+    // one-shot reminder timing policy, Apple Health stale-data recovery, and
+    // wearable-summary freshness contract set this exact ceiling.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(67_670)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
