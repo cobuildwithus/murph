@@ -2492,6 +2492,24 @@ describe('monorepo release flow coverage audit', () => {
       'cobuild-review-gpt',
     )
     writeHarnessFile(harnessRoot, 'bin/mdfind', '#!/bin/sh\nexit 0\n', true)
+    writeHarnessFile(
+      harnessRoot,
+      'bin/pnpm',
+      [
+        '#!/usr/bin/env bash',
+        'set -euo pipefail',
+        'if [[ "$1" == "install" ]]; then',
+        '  [[ "$*" == "install --frozen-lockfile --filter . --ignore-scripts" ]]',
+        '  exit 0',
+        'fi',
+        '[[ "$1" == "exec" ]]',
+        '[[ "$2" == "cobuild-review-gpt" ]]',
+        'shift 2',
+        'exec "$MURPH_TEST_REVIEW_GPT_BIN" "$@"',
+        '',
+      ].join('\n'),
+      true,
+    )
     const dryArgs = [
       '--wait',
       '--response-marker',
@@ -2509,6 +2527,7 @@ describe('monorepo release flow coverage audit', () => {
       env: {
         ...withoutNodeV8Coverage(),
         HOME: harnessRoot,
+        MURPH_TEST_REVIEW_GPT_BIN: reviewGptBin,
         ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS: '1',
         PATH: [harnessBin, process.env.PATH].filter(Boolean).join(path.delimiter),
         REVIEW_GPT_BROWSER_LANE_COUNT: '1',
