@@ -1,6 +1,6 @@
 # Upgrade hosted video analysis to Gemini 3.8 Flash
 
-Status: active
+Status: completed
 Created: 2026-09-03
 Updated: 2026-09-03
 
@@ -79,8 +79,8 @@ Updated: 2026-09-03
 
 - Passed focused Vitest coverage for Gemini request construction, hosted usage
   records, Worker egress/interception, runner platform boundaries, Web
-  allowance pricing, and provider-request ownership: 680 assertions across the
-  selected files.
+  allowance pricing, provider-request ownership, and the public changelog:
+  689 assertions across the selected files.
 - Passed typechecks for `packages/assistant-engine`,
   `packages/hosted-execution`, `apps/cloudflare`, and `apps/web`; the assembled
   hosted-local build also completed before its deploy smoke prerequisite.
@@ -92,3 +92,10 @@ Updated: 2026-09-03
 - No ambient non-production `GEMINI_API_KEY` was available, so no live vendor
   call was attempted. Exact-head CI, ReviewGPT, and the documented consented
   post-deploy smoke remain the external verification boundaries.
+- ReviewGPT round 1 audited the full exact-head snapshot for about 16 minutes,
+  returned `ROUND_OUTCOME: PASS` with no qualifying findings, and bound the
+  captured response to the requested Sol lane and compatible
+  `gpt-5-6-pro` backend slug. Its rendered-evidence note is non-actionable under
+  the repository's content-only changelog proof exception; the production
+  archive server-render test passed.
+Completed: 2026-09-03
