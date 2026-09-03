@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   detectWearableStorageMigrationCandidates: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
   fetchCompleteHostedDeviceSyncRuntimeSnapshot: vi.fn(),
+  hydrateHostedDeviceSyncControlPlaneState: vi.fn(),
   applyHostedPendingDirtyDeviceSyncStateForWake: vi.fn(),
   initInboxRuntime: vi.fn(),
   persistHostedRuntimeStateAtCanonicalBoundary: vi.fn(),
@@ -102,6 +103,8 @@ vi.mock("../src/hosted-device-sync-runtime.ts", () => ({
     mocks.applyHostedPendingDirtyDeviceSyncStateForWake,
   fetchCompleteHostedDeviceSyncRuntimeSnapshot:
     mocks.fetchCompleteHostedDeviceSyncRuntimeSnapshot,
+  hydrateHostedDeviceSyncControlPlaneState:
+    mocks.hydrateHostedDeviceSyncControlPlaneState,
   isHostedDeviceSyncCompletionFenceWake: (wake: {
     hint?: { jobs?: unknown[]; reason?: string | null };
     kind: string;
@@ -1884,7 +1887,7 @@ describe("runHostedDeviceSyncPass", () => {
     );
   });
 
-  it("rehydrates and repeats full reconciliation before exposing completion after a version conflict", async () => {
+  it("rehydrates without readmitting work before retrying reconciliation after a version conflict", async () => {
     const service = {
       close: vi.fn(),
       drainWorker: vi.fn(async () => 0),
@@ -1909,22 +1912,39 @@ describe("runHostedDeviceSyncPass", () => {
       reason: "reconcile_due" as const,
       userId: "member_123",
     };
+    const pendingDirtyAcks = [{
+      completedImports: [{
+        dirtyPayloadId: "dirty_payload_completed",
+        importCompletedAt: "2026-04-08T00:00:30.000Z",
+        resource: "sleep",
+        sourceProviderSlug: "oura",
+      }],
+      connectionId: completionWake.connectionId,
+      nextWakeAt: null,
+      processedDirtyPayloadIds: ["dirty_payload_completed"],
+      processedRevision: "7",
+    }];
     const initialState = {
+      dirtyWorkRemaining: false,
       hostedToLocalAccountIds: new Map([[completionWake.connectionId, "local_account"]]),
       localToHostedAccountIds: new Map([["local_account", completionWake.connectionId]]),
       observedTokenVersions: new Map([[completionWake.connectionId, 3]]),
-      pendingDirtyAcks: [],
+      pendingDirtyAcks,
       pendingDirtyPayloadJobs: [],
       snapshot: { connections: [] },
     };
     const refreshedState = {
-      ...initialState,
+      dirtyWorkRemaining: false,
+      hostedToLocalAccountIds: initialState.hostedToLocalAccountIds,
+      localToHostedAccountIds: initialState.localToHostedAccountIds,
       observedTokenVersions: new Map([[completionWake.connectionId, 4]]),
+      pendingDirtyAcks: [],
+      pendingDirtyPayloadJobs: [],
+      snapshot: { connections: [] },
     };
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
-    mocks.syncHostedDeviceSyncControlPlaneState
-      .mockResolvedValueOnce(initialState)
-      .mockResolvedValueOnce(refreshedState);
+    mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValueOnce(initialState);
+    mocks.hydrateHostedDeviceSyncControlPlaneState.mockResolvedValueOnce(refreshedState);
     mocks.resolveHostedDeviceSyncWakeRecovery.mockReturnValue({
       retryAt: "2026-04-08T00:01:30.000Z",
       wake: completionWake,
@@ -1941,11 +1961,13 @@ describe("runHostedDeviceSyncPass", () => {
       45_000,
     );
 
-    expect(mocks.syncHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(2);
+    expect(mocks.syncHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(1);
+    expect(mocks.hydrateHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(1);
     expect(mocks.reconcileHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(2);
     expect(
       mocks.reconcileHostedDeviceSyncControlPlaneState.mock.calls[1]?.[0].state,
     ).toBe(refreshedState);
+    expect(refreshedState.pendingDirtyAcks).toBe(pendingDirtyAcks);
     expect(result.postCheckpointRecord).toEqual(expect.objectContaining({
       kind: "device-sync.dirty-processed-batch",
       retainedWake: completionWake,

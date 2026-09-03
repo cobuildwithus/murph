@@ -1251,8 +1251,10 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   a checkpointed post-record with zero retained jobs may publish the retained
   provider cadence and remove the item within that same runtime admission,
   followed by the existing removal checkpoint. A version conflict performs one
-  fresh canonical hydration and repeats the full reconciliation; another
-  conflict fails without clearing mailbox authority. Publication also requires
+  fresh canonical hydration without admitting wake hints or dirty work again,
+  carries the current pass's terminal evidence, and repeats the full
+  reconciliation; another conflict fails without clearing mailbox authority.
+  Publication also requires
   the wake's non-null connection epoch to match a current active connection.
   Restored records return to the ordinary full-reconciliation path, while
   legacy epoch-less, replaced, missing, or terminal connection records have no

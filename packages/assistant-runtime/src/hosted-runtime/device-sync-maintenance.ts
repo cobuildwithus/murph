@@ -43,6 +43,7 @@ import type {
 import {
   applyHostedPendingDirtyDeviceSyncStateForWake,
   fetchCompleteHostedDeviceSyncRuntimeSnapshot,
+  hydrateHostedDeviceSyncControlPlaneState,
   isHostedDeviceSyncCompletionFenceWake,
   reconcileHostedDeviceSyncControlPlaneState,
   promoteHostedCompletedDirtyPayloadAcks,
@@ -431,8 +432,6 @@ export async function runHostedDeviceSyncPass(
       secret,
       service,
       signal: options.signal ?? null,
-      skipDirtyPendingFetch: options.skipDirtyPendingFetch ?? false,
-      stagedDirtyAcks: options.stagedDirtyAcks ?? null,
       state: syncState,
       wake,
     });
@@ -542,8 +541,6 @@ async function reconcileHostedDeviceSyncPassControlPlane(input: {
   secret: string | null;
   service: DeviceSyncService;
   signal: AbortSignal | null;
-  skipDirtyPendingFetch: boolean;
-  stagedDirtyAcks: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null;
   state: HostedDeviceSyncRuntimeSyncState;
   wake: HostedRuntimeEvent;
 }): Promise<HostedDeviceSyncRuntimeSyncState> {
@@ -580,24 +577,26 @@ async function reconcileHostedDeviceSyncPassControlPlane(input: {
   };
 
   if (!await reconcile()) {
+    const currentPassState = state;
     const snapshot = await fetchCompleteHostedDeviceSyncRuntimeSnapshot({
       deviceSyncPort,
       includeCredentialMaterial: true,
       signal: input.signal,
     });
-    state = await syncHostedDeviceSyncControlPlaneState({
+    state = await hydrateHostedDeviceSyncControlPlaneState({
       deviceSyncPort,
       secret,
       service: input.service,
       signal: input.signal,
       snapshot,
-      skipDirtyPendingFetch: input.skipDirtyPendingFetch,
-      stagedDirtyAcks: input.stagedDirtyAcks,
       wake: input.wake,
     });
     if (state.wakeSuperseded === true) {
       return state;
     }
+    state.dirtyWorkRemaining = currentPassState.dirtyWorkRemaining;
+    state.pendingDirtyAcks = currentPassState.pendingDirtyAcks;
+    state.pendingDirtyPayloadJobs = currentPassState.pendingDirtyPayloadJobs;
     if (snapshot && state.snapshot) {
       state.snapshot = {
         ...snapshot,

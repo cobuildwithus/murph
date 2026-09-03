@@ -16,7 +16,8 @@ provider-free completion-fence runtime.
   advancing Web-owned provider cadence.
 - Full local control-plane reconciliation is accepted before that record can
   authorize same-admission completion; one version conflict rehydrates and
-  retries the full update without losing local credential progress.
+  retries the full update without losing local credential progress or
+  re-admitting completed work.
 - The same runtime admission then publishes cadence, removes the mailbox item,
   and durably checkpoints that removal.
 - Checkpoint, cadence-publication, and final-checkpoint failures remain
@@ -66,18 +67,22 @@ provider-free completion-fence runtime.
   provider requests and final 06:05 cadence while clearing the durable mailbox
   item between the completion-record and removal checkpoints in one admission.
 - Recovery: a full-reconciliation version conflict rehydrates and retries once
-  before completion is exposed. A restored completion record returns to that
-  ordinary full-reconciliation path instead of carrying independent deletion
-  authority.
+  without re-admitting wake hints or dirty work before completion is exposed.
+  A restored completion record returns to that ordinary full-reconciliation
+  path instead of carrying independent deletion authority.
 - Recovery: a completion-origin wake with a reconstructed provider retry keeps
   the exact mailbox item, and an epoch-less legacy or terminal completion drains
   without writing cadence.
 - Difference from plan: final ReviewGPT first exposed that completion reason
   alone was insufficient authority, then exposed that cadence-only completion
-  could outlive a rejected full update and lose a locally rotated credential.
-  Eligibility now requires accepted full reconciliation in the same admission,
-  an empty retained-job set, and the exact active connection epoch. Restored
-  records use the full path. No persisted proof or new state owner was added.
+  could outlive a rejected full update and lose a locally rotated credential,
+  then exposed that retrying through the broad sync path re-admitted already
+  completed retained and dirty work. Eligibility now requires accepted full
+  reconciliation in the same admission, an empty retained-job set, and the
+  exact active connection epoch. Conflict recovery now uses the existing
+  hydration phase alone and carries current-pass terminal evidence into the
+  refreshed state. Restored records use the full path. No persisted proof or
+  new state owner was added.
 - Verdict: Ready.
 
 ## Risks and mitigations
@@ -96,9 +101,15 @@ provider-free completion-fence runtime.
    mailbox item remains the exact retry owner regardless of its reason label.
 5. Risk: a concurrent canonical heartbeat rejects the full update while local
    provider work has rotated credentials.
-   Mitigation: fetch and hydrate the fresh canonical snapshot, compare local
-   progress against that canonical baseline, and retry the full update once;
-   another mismatch fails without exposing completion.
+   Mitigation: fetch and hydrate the fresh canonical snapshot without
+   re-admitting wake hints or dirty work, carry the current pass's terminal
+   evidence, compare local progress against that canonical baseline, and retry
+   the full update once; another mismatch fails without exposing completion.
+6. Risk: conflict recovery repeats completed provider work because local job
+   dedupe intentionally excludes succeeded rows.
+   Mitigation: keep hydration and work admission as explicit phases; retry only
+   hydration and reconciliation. Production-shaped retained-page and dirty-row
+   tests prove one provider execution across the conflict.
 
 ## Tasks
 
@@ -121,6 +132,8 @@ provider-free completion-fence runtime.
 - Require accepted full reconciliation in the current admission. Keep that
   proof transient so restored or yielded records fall back to the existing
   full-reconciliation admission rather than gaining a second durable owner.
+- Keep canonical hydration independently callable from work admission so a
+  version retry can refresh one baseline without replaying current-pass work.
 - Keep PR #2741 separate because its container-lifecycle change has a distinct
   owner and does not remove the completion runtime admission.
 - Changelog is not applicable because this removes an internal redundant
