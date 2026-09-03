@@ -137,16 +137,21 @@ describe("FoodLabelWebMcp", () => {
     cleanup = rendered.cleanup;
 
     const showEvidence = findTool(captured, "show_food_evidence");
-    const result = await Promise.resolve(showEvidence.execute({
-      productRef: "food_one",
-      view: "gaps",
-    }));
+    expect(showEvidence.inputSchema).toMatchObject({
+      properties: { view: { enum: ["product", "tests", "gaps"] } },
+    });
+    const result = await Promise.resolve(
+      showEvidence.execute({
+        productRef: "food_one",
+        view: "product",
+      }),
+    );
     expect(result).toEqual({
       opened: true,
       productRef: "food_one",
-      view: "gaps",
+      view: "product",
     });
-    expect(actions.showEvidence).toHaveBeenCalledWith("food_one", "gaps");
+    expect(actions.showEvidence).toHaveBeenCalledWith("food_one", "product");
   });
 
   test("returns the same bounded metric comparison that the page shows", async () => {
