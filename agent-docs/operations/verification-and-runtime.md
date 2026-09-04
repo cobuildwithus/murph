@@ -400,7 +400,13 @@ them. The credential-free setup must also install and smoke-check a
 checksum-pinned Kernel CLI plus checksum-pinned `websocat`, which the CLI uses
 for a reverse SSH tunnel from the Kernel browser VM to hosted-local Web. The
 unattended proof uses a headed remote stealth browser with telemetry disabled
-and a dedicated persistent Garmin canary profile. Headed Chromium is the narrow
+and a dedicated persistent Garmin canary profile. Automation browser creation
+sets `start_url: "about:blank"` to discard restored tabs while preserving saved
+login state: old tabs can point at retired hosted-local servers, and CDP
+attachment waits for every existing target to initialize. A failed attachment
+also runs a constant-return probe through Kernel's server-side transport and
+reports only responsive/unavailable before the existing owned cleanup.
+Headed Chromium is the narrow
 mitigation that cleared the provider challenge observed in headless automation;
 only a successful protected-main run proves the complete result. On Garmin's
 exact `/partner/oauthConfirm` route, the unattended runner requires exactly
