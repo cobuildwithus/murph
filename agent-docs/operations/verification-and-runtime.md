@@ -1,6 +1,13 @@
 # Verification And Runtime
 
-Last verified: 2026-08-31
+Last verified: 2026-09-04
+
+Read the delivery-path rules first, then only the changed owner's matrix row
+or runtime procedure. The detailed command descriptions below are reference
+material, not a checklist to execute. The delivery path controls whether broad
+proof runs locally or in CI. Do not add a second local acceptance run from a
+subsystem note when the PR rule already assigns that proof to required CI.
+
 ## Verification Ownership By Delivery Path
 
 The delivery path decides who owns broad verification:
@@ -766,11 +773,15 @@ product path for complete journey proof.
 
 ## Scoped Verification Mode
 
-Focused local proof is the default for PR-bound work and does not require a
-pre-existing red repo baseline. The scoped-verification exception below applies
-only when a non-PR task would otherwise require a broader local command. The
-text-only docs/process fast path remains the default for eligible Markdown-only
-docs work unless the change will be pushed directly to a shared default branch.
+Focused local proof is the ordinary PR route, including sensitive work; required
+CI owns the broad suite. Text-only docs use readback and references. Direct
+shared-default pushes keep their acceptance requirement. These routes do not
+require proving an unrelated red baseline first.
+
+For a blocked required check, report the exact command, failing target, why the
+change did not cause a pre-existing failure, and the best focused evidence.
+This does not turn a required red check green or permit bypassing CI. Do not run
+an unrelated broad command merely to establish that a baseline is already red.
 
 ## Hosted Temporal Replay Proof
 
@@ -798,29 +809,6 @@ checks out a public pull-request candidate. The public
 `hosted-temporal:guard` remains wired into `pnpm typecheck`; it prevents the
 worker implementation from returning here and retains the Web/Cloudflare
 architecture guards, while Murph Cloud owns patch-marker and replay gates.
-
-Scoped verification may replace the repo-wide baseline only when all of the following are true:
-
-1. The change is narrow and bounded to one subsystem or one docs/process lane rather than a broad refactor.
-2. `pnpm typecheck` or `pnpm verify:acceptance` are already credibly known red for unrelated reasons in the current branch or working session.
-3. You can name the exact failing command and failing target, and explain why your diff did not cause that failure.
-4. You run the highest-signal scoped checks available for the touched surface and record the evidence in handoff.
-
-Scoped verification is allowed for narrow changes such as:
-
-- low-risk repo-internal workflow/tooling changes where `pnpm test:diff <path ...>` plus direct touched-file checks fully exercise the changed surface
-- docs/process-only updates outside the text-only Markdown fast path when repo-wide checks are already known red and manual readback confirms the touched docs are internally consistent
-- package-local or app-local fixes with a focused test, typecheck, verify, or scenario command that exercises the changed surface directly; for agent/local iteration on repo code, prefer `pnpm test:diff` first so the scope expands from changed owners to their workspace dependents automatically
-- small config changes with a direct validation command or targeted test covering the changed contract
-
-Scoped verification is not allowed when the change is broad, cross-cutting, or high-risk, including schema/storage changes, billing/auth/trust-boundary changes, deploy/runtime entrypoint changes, or refactors that touch multiple subsystems. Those changes still need the full repo-wide baseline unless the user explicitly says otherwise.
-
-When using scoped verification, handoff must include:
-
-- that scoped verification mode was used
-- which repo-wide commands were omitted or left red
-- the prior unrelated failing command(s) and target(s)
-- the focused commands or direct scenario checks that were run instead
 
 ## Pnpm Guard
 
@@ -1116,7 +1104,7 @@ it is not permission to send unrelated messages, deploy, or change the webhook.
   origin used only as an inequality guard. An isolated Vercel preview
   database/crypto/control-plane boundary is a prerequisite; production Web or
   production stateful secrets are never a preview bootstrap fallback.
-- `Dockerfile.cloudflare-hosted-runner-base` is the checked-in scaffold for the stable native Cloudflare container base image. It installs the common Linux parser dependencies, creates the non-login runner user, and sets the default parser/runtime environment; hosted transcription has no in-image model and routes through the Worker-owned Workers AI binding. `Dockerfile.cloudflare-hosted-runner` is the small app-layer scaffold that starts from that base image, patches the native bundled Codex model catalog so `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` support the OpenAI flex service tier, validates those entries, copies the prebuilt `apps/cloudflare/.deploy/runner-bundle/` artifact into `/app`, and promotes the pinned native Codex binary plus adjacent sandbox resources into a compact final layer for lazy image loading; the production deploy smoke uses the same catalog for one real `gpt-5.6-terra` turn. The image starts the private `apps/cloudflare/src/container-entrypoint.ts` bridge inside the container, serves `GET /health` plus `POST /internal/workspace-invocation` on that internal bridge only, and delegates bounded hosted workspace invocation directly to `packages/assistant-runtime`. The entrypoint keeps admission, fencing, health, and fatal reporting in a small static boot kernel, starts one cached heavy-runtime hydration after listen, and overlaps that hydration with the accepted invocation's one-shot workspace restore preparation. The prepared restore remains bound to the exact request and warm vault root and is consumed by the existing runtime owner before mailbox/provider work. The default execution path runs one hosted job at a time in-process, builds runtime config from explicit supervisor env plus worker-supplied runtime fields, and uses per-user warm workspace roots plus invocation-local writable cache/temp roots. The present expectation is Node `>=24.14.1`, the preassembled runner bundle plus its materialized production dependencies, writable temp storage for restore/snapshot work, `PORT`, optional `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS`, and shared worker/container allowlist extension vars for encrypted per-user env overrides when additional key names must be permitted.
+- `Dockerfile.cloudflare-hosted-runner-base` is the checked-in scaffold for the stable native Cloudflare container base image. It installs the common Linux parser dependencies, creates the non-login runner user, and sets the default parser/runtime environment; hosted transcription has no in-image model and routes through the Worker-owned Workers AI binding. `Dockerfile.cloudflare-hosted-runner` is the small app-layer scaffold that starts from that base image, filters the native bundled Codex catalog to exactly `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`, adds OpenAI Flex support, forces mixed `tool_mode: code_mode`, and validates both properties for every entry. Mixed mode preserves the code executor while exposing native `tool_search`; dynamic-tool `deferLoading` remains the owner of which broad schemas stay out of the initial model-visible surface. The image then copies the prebuilt `apps/cloudflare/.deploy/runner-bundle/` artifact into `/app` and promotes the pinned native Codex binary plus adjacent sandbox resources into a compact final layer for lazy image loading; the production deploy smoke uses the same catalog for one real `gpt-5.6-terra` turn. The image starts the private `apps/cloudflare/src/container-entrypoint.ts` bridge inside the container, serves `GET /health` plus `POST /internal/workspace-invocation` on that internal bridge only, and delegates bounded hosted workspace invocation directly to `packages/assistant-runtime`. The entrypoint keeps admission, fencing, health, and fatal reporting in a small static boot kernel, starts one cached heavy-runtime hydration after listen, and overlaps that hydration with the accepted invocation's one-shot workspace restore preparation. The prepared restore remains bound to the exact request and warm vault root and is consumed by the existing runtime owner before mailbox/provider work. The default execution path runs one hosted job at a time in-process, builds runtime config from explicit supervisor env plus worker-supplied runtime fields, and uses per-user warm workspace roots plus invocation-local writable cache/temp roots. The present expectation is Node `>=24.14.1`, the preassembled runner bundle plus its materialized production dependencies, writable temp storage for restore/snapshot work, `PORT`, optional `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS`, and shared worker/container allowlist extension vars for encrypted per-user env overrides when additional key names must be permitted.
 - The local assistant daemon entrypoint lives under `packages/assistantd`; `murph-assistantd` binds to one vault, rejects non-loopback hosts, requires a bearer token on every route, sets `MURPH_ASSISTANTD_DISABLE_CLIENT=1` in its own process so daemon-local calls do not recurse back through HTTP, and now fronts the steady-state assistant session/message/options flows plus session/status/outbox/cron inspection and serializable automation control whenever the CLI invocation does not need local-only hooks such as live provider events, foreground inbox events, abort propagation, or local session/transcript snapshots.
 - The current runner scaffold now ships as a preassembled deploy bundle copied into the native image rather than rebuilding the workspace from repo source inside Docker. `apps/cloudflare/DEPLOY.md` is the durable guide for the current staged manual deploy path.
 - Before adding a runtime target, document entrypoints, environment assumptions, and operational guardrails here.

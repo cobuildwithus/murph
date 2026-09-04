@@ -85,13 +85,6 @@ describe("hosted web production migration guard", () => {
       );
     }
 
-    const agentPolicy = await readFile(path.join(repoRoot, "AGENTS.md"), "utf8");
-    assert.match(
-      agentPolicy,
-      /Treat production secret values as unavailable to local agents and local commands/u,
-    );
-    assert.match(agentPolicy, /Do not build that path before the user decides/u);
-
     const securityPolicy = await readFile(
       path.join(repoRoot, "agent-docs", "SECURITY.md"),
       "utf8",

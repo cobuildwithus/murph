@@ -432,6 +432,15 @@ context and raw wording; the group case remains tool-free.
 Routine CI compiles the live-provider scenario but skips it without an explicit
 supported provider credential.
 
+Deferred-tool routing coverage is split deliberately. The exact-Terra scripted
+App Server regression patches the same three-model catalog as the hosted image,
+proves native `tool_search` is model-visible through the ordinary or Responses
+Lite request representation, validates the returned automation schema down to
+required `contextReferences[].entityKind` and `entityId`, and admits one save
+only after a canonical condition read. The focused real-Codex companion repeats
+the member journey with synthetic health data and requires one condition read,
+one successful direct automation call, and one exact record reference.
+
 Assistant-behavior changes use
 `pnpm test:assistant:live -- --test "<unique test-name pattern>"` after their
 deterministic prompt/tool/effect proof. The guarded runner selects only

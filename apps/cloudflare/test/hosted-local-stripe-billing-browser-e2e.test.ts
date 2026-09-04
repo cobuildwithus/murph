@@ -62,6 +62,8 @@ describe("hosted-local Stripe billing browser matrix", () => {
     scenario = await startHostedLocalFullStackScenario({
       additionalEnv: {
         ...hostedEnvironment.additionalEnv,
+        // Starter activation needs a home line in the isolated fixture database.
+        HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS: "+12025550174",
         MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
         MURPH_DEV_TEMPORAL: "disabled",
         MURPH_DEV_WEB_HOST: "localhost",
