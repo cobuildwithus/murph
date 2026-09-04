@@ -42,7 +42,7 @@ This policy adds no scan, collection, or per-candidate awaited operation.
 - [x] Prove threshold, private routing, dedupe, recovery, and preference paths.
 - [x] Run focused tests, affected typechecks/builds, and real-Codex opt-out proof.
 - [x] Review Product UX, add changelog, commit, and open PR.
-- [ ] Run exact-head ReviewGPT concurrently with required CI and finish gates.
+- [x] Run exact-head ReviewGPT concurrently with required CI and finish gates.
 
 ## Validation and status
 
@@ -77,5 +77,19 @@ is unchanged. No production mutation or direct member message was performed.
 Deployment: upgrade Cloudflare runtime consumers and converge warm containers
 before Web emits the Apple Health three-day default. New consumers accept old
 responses; old consumers reject the new default (proven red/green). iOS PR #139
-uses an unchanged status contract and can ship independently. Review and CI are
-pending; this is not a production deployment claim.
+uses an unchanged status contract and can ship independently.
+
+Final review round 1 passed at `1005bcfb18faf8c2a28d440e8c6d394a1af8b551`
+with no qualifying findings and no accepted remediation. The configured current
+Pro alias selected 6Pro, and response metadata confirmed `gpt-6-pro`. The exact
+completed turn was recovered after an obsolete model-name comparison blocked
+ordinary capture; response identity, digest, head, and completion were verified.
+All required CI, including Release checks, passed on that implementation head.
+The independent iOS PR also passed its review, native proof, and hosted checks.
+Parent final review found no additional issue; both branches merged cleanly
+with their current bases in read-only merge-tree proof. This documentation-only
+closure still requires CI on its final pushed head. Neither PR was merged or
+deployed, and physical-device HealthKit delivery timing remains unverified.
+Status: completed
+Updated: 2026-09-04
+Completed: 2026-09-04
