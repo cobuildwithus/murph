@@ -394,10 +394,12 @@ describe("hosted runtime control contracts", () => {
       HOSTED_ASSISTANT_LUNA_MODEL,
       HOSTED_ASSISTANT_TERRA_MODEL,
       HOSTED_ASSISTANT_SOL_MODEL,
+      "gpt-6-astra",
     ]);
     expect(HOSTED_ASSISTANT_MODEL_OVERRIDES).toEqual([
       HOSTED_ASSISTANT_LUNA_MODEL,
       HOSTED_ASSISTANT_SOL_MODEL,
+      "gpt-6-astra",
     ]);
     expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_LUNA_MODEL)).toBe(true);
     expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_TERRA_MODEL)).toBe(true);

@@ -187,6 +187,7 @@ export type HostedRuntimeControlMailboxKind =
   (typeof HOSTED_RUNTIME_CONTROL_MAILBOX_KINDS)[number];
 
 export const HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS = [
+  "gpt-6-astra",
   "gpt-5.6-sol",
   "gpt-5.6-terra",
   "gpt-5.6-luna",
@@ -2241,7 +2242,7 @@ export type HostedRuntimeAssistantConfigurationToolResponse =
       action: "update";
       result: HostedRuntimeAssistantConfigurationSnapshot & {
         appliesAt: "next_turn";
-        requiredPlan: "edge" | null;
+        requiredPlan: "edge" | "max" | null;
         status: HostedRuntimeAssistantConfigurationUpdateStatus;
       };
     };

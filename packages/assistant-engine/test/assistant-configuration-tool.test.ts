@@ -442,13 +442,13 @@ describe("assistant configuration tool", () => {
     });
   });
 
-  it("returns the authoritative Edge upgrade requirement from the update", async () => {
+  it.each([[HOSTED_ASSISTANT_SOL_MODEL, "edge"], ["gpt-6-astra", "max"]] as const)("returns the authoritative %s upgrade requirement", async (model, requiredPlan) => {
     const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
           action: "update",
-          model: HOSTED_ASSISTANT_SOL_MODEL,
+          model,
         },
         namespace: "murph",
         tool: "assistant_configuration",
@@ -463,7 +463,7 @@ describe("assistant configuration tool", () => {
         reasoningEffort: "low",
       }),
       appliesAt: "next_turn" as const,
-      requiredPlan: "edge" as const,
+      requiredPlan,
       solAvailable: false,
       status: "upgrade_required" as const,
     };
@@ -492,7 +492,7 @@ describe("assistant configuration tool", () => {
     expect(assistantConfigurationTool.request).toHaveBeenCalledWith({
       action: "update",
       assistantInputId: `ain_${"e".repeat(32)}`,
-      model: HOSTED_ASSISTANT_SOL_MODEL,
+      model,
     });
     expect(readToolPayload(result)).toEqual({
       currentTurn: {

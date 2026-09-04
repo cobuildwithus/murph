@@ -1,8 +1,9 @@
 import { cn } from "@/src/lib/utils";
 
-type AssistantModelArtworkVariant = "luna" | "sol" | "terra";
+type AssistantModelArtworkVariant = "astra" | "luna" | "sol" | "terra";
 
 const ASSISTANT_MODEL_CHOICE_CARD_CLASSES = {
+  astra: "hover:border-primary/40 hover:bg-primary/5 has-data-checked:border-primary has-data-checked:bg-primary/10",
   luna:
     "hover:border-[#777b7d]/40 hover:bg-[#777b7d]/5 has-data-checked:border-[#777b7d] has-data-checked:bg-[#777b7d]/10 has-data-checked:ring-[#777b7d]/15 has-data-checked:hover:border-[#777b7d] has-data-checked:hover:bg-[#777b7d]/10 [&_[data-slot=radio-group-item][data-checked]]:border-[#777b7d] [&_[data-slot=radio-group-item][data-checked]]:bg-[#777b7d]",
   terra:
@@ -27,6 +28,14 @@ export function AssistantModelArtwork({
       focusable="false"
       viewBox="0 0 240 160"
     >
+      {variant === "astra" ? (
+        <g fill="currentColor" className="text-primary" opacity="0.25">
+          <path d="m183 35 12 42 42 12-42 12-12 42-12-42-42-12 42-12Z" />
+          <circle cx="128" cy="40" r="3" />
+          <circle cx="222" cy="132" r="4" />
+          <circle cx="117" cy="124" r="2" />
+        </g>
+      ) : null}
       {variant === "luna" ? <LunaArtwork /> : null}
       {variant === "terra" ? <TerraArtwork /> : null}
       {variant === "sol" ? <SolArtwork /> : null}

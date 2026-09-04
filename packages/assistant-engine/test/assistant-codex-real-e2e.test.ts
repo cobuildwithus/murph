@@ -94,6 +94,7 @@ import {
 } from '../src/assistant-ask.ts'
 import {
   MURPH_ANALYZE_VIDEO_TOOL,
+  MURPH_ASSISTANT_CONFIGURATION_TOOL,
   MURPH_ASSISTANT_STYLE_TOOL,
   MURPH_AUTOMATION_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
@@ -815,6 +816,70 @@ describeRealCodex('real Codex voice memo attachment evidence e2e', () => {
     },
     360_000,
   )
+})
+
+describeRealCodex('real Codex Astra configuration e2e', () => {
+  it('saves Astra exactly once for the next Max query', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-astra-selection-'))
+    const updates: unknown[] = []
+    const snapshot: import('@murphai/hosted-execution/runtime-control').HostedRuntimeAssistantConfigurationSnapshot = {
+      availableModels: ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-6-astra'],
+      availableProviders: ['openai'] as const,
+      availableReasoningEfforts: ['low', 'medium', 'high', 'xhigh'] as const,
+      configurationAvailable: true,
+      dormantSolPreference: false,
+      model: 'gpt-5.6-terra' as const,
+      provider: 'openai' as const,
+      reasoningEffort: 'low' as const,
+      solAvailable: true,
+    }
+    try {
+      await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildDirectConversationDeveloperInstructions(),
+        dynamicTools: [MURPH_ASSISTANT_CONFIGURATION_TOOL],
+        env: config.env,
+        excludeResumeTurns: true,
+        hostedToolContext: {
+          assistantConfigurationTool: {
+            async request(request) {
+              if (request.action === 'read') return { action: 'read', result: snapshot }
+              updates.push(request)
+              return { action: 'update', result: { ...snapshot, model: 'gpt-6-astra', appliesAt: 'next_turn', requiredPlan: null, status: 'updated' } }
+            },
+          },
+          computerToolsAvailable: false,
+          currentAssistantInputId: () => 'ain_00000000000000000000000000000061',
+          currentAssistantTarget: () => ({ model: 'gpt-5.6-terra', provider: 'openai', reasoningEffort: 'low' }),
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => ({ filename: 'unused', status: 'denied' }),
+          vaultFileSendAvailable: false,
+        },
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: 'Please use GPT-6 Astra for my future queries. Keep my provider and reasoning settings as they are.',
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        vaultRoot: workingDirectory,
+        workingDirectory,
+      })
+      expect(updates).toEqual([{ action: 'update', assistantInputId: 'ain_00000000000000000000000000000061', model: 'gpt-6-astra' }])
+      expect(result.finalMessage).toMatch(/Astra/iu)
+      expect(result.finalMessage).toMatch(/next|future|going forward/iu)
+      expect(result.finalMessage).not.toMatch(/upgrade|payment|cannot|unable/iu)
+      expect(readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'command')).toEqual([])
+      process.stdout.write(`[astra-selection-e2e] ${JSON.stringify({ reply: result.finalMessage, updates: updates.length })}\n`)
+    } finally {
+      await stopWarmCodexAppServer('astra-selection-e2e-complete')
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 180_000)
 })
 
 describeRealCodex('real Codex child model selection e2e', () => {

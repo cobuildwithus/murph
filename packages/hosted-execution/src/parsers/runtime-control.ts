@@ -6120,7 +6120,7 @@ export function parseHostedRuntimeAssistantConfigurationToolResponse(
           result.requiredPlan,
           "Hosted runtime assistant configuration tool requiredPlan",
         );
-  if (requiredPlan !== null && requiredPlan !== "edge") {
+  if (requiredPlan !== null && requiredPlan !== "edge" && requiredPlan !== "max") {
     throw new TypeError(
       "Hosted runtime assistant configuration tool requiredPlan is not supported.",
     );

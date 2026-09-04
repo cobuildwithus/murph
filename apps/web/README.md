@@ -1121,6 +1121,16 @@ Hosted managed crypto:
 Hosted AI usage metering:
 
 - Hosted AI usage rows are recorded locally for allowance, audit, and future billing analysis. The hosted app no longer attaches Stripe usage prices at checkout or posts Stripe meter events.
+- GPT-6 Astra is an optional managed OpenAI model for active paid individual Max
+  and active Family Max seats. The existing assistant preference owner enforces
+  eligibility on writes and runtime reads; losing Max access retains the preference
+  while using Terra until access returns. Group rooms retain Luna/Terra/Sol.
+  Astra uses $10 input, $1 cache reads, $12.50 cache writes, and $50 output per
+  million tokens; OpenAI Flex uses half those rates. Exact requests above 272K
+  input use twice the input/cache rates and 1.5 times the output rate. Hosted
+  Codex keeps Astra context at 272K, so cumulative turn/subagent usage is charged
+  at ordinary rates even when several requests together exceed that threshold.
+  Rates: https://developers.openai.com/api/docs/models/gpt-6-astra
 - Hosted AI included-allowance accounting is app-owned: web prices recorded `HostedAiUsage` rows by canonical model and recorded provider into allowance columns and maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state. OpenAI and Venice GPT-5.6 usage therefore use their respective documented input, cache-read, cache-write, and output rates. Settings discloses Venice's higher provider-rate capacity use both while it is selected as a pending choice and after it is saved. Subsequent usage-bearing work is blocked when included capacity and usage credit are both exhausted. The operation that crosses the boundary may finish; its accepted input is not discarded.
 - Retell phone calls use the same ledger through a web-internal deterministic row keyed by the Murph call id. Web records Retell's final provider-reported combined cost, including discounts and transfer-leg cost, and never accepts that cost field from the hosted-runtime usage callback. `transfer_ended` and the pre-armed phone-call reconciliation workflow prevent a provisional transfer cost or lost callback from becoming permanent undercounting.
 - Usage credit is separate from the included-allowance period. A beneficiary-serialized transaction consumes included capacity first, then purchase/referral grant entries with remaining capacity in FIFO order, while `HostedMember` carries the bounded balance/version hot-path projection. Unused credit carries across allowance periods and does not create subscription entitlement. Stripe refunds and disputes may reverse only purchase-backed entries; earned referral grants are final.

@@ -744,3 +744,13 @@ retry or result mutation.
 Deploy smoke pins the 100% Worker version, verifies the response-reported version metadata, and, when enabled by the workflow, runs a signed managed-container smoke that compares the live runner bundle/source fingerprints and public Murph release SHA with `.deploy/runner-bundle/.murph-runner-bundle-manifest.json`. The release SHA identifies the checked-out public base commit even when the protected private workflow composes its private runtime assets into that checkout; the source and bundle fingerprints identify the resulting composed artifact. A missing or malformed public release SHA is rejected. A Cloudflare version id or the private deployment-workflow commit is not release provenance. The same smoke can mint an actual R2 S3 presigned PUT URL, upload a payload larger than 150 MiB from the container, verify the object size through the Worker R2 binding, and delete the smoke object.
 
 See [DEPLOY.md](./DEPLOY.md) for the exact GitHub environment surface, lifecycle rules, and smoke workflow.
+
+### Astra model catalog
+
+The native runner catalog includes `gpt-6-astra` with OpenAI Flex support. Its
+Astra context window remains at most 272,000 tokens, verified while building the
+image. This bound lets allowance accounting price cumulative Codex turn and
+subagent usage without mistaking multiple requests for one long-context request.
+Changing this bound requires request-level long-context metering first. Astra
+selection remains owned by the Web Max-plan eligibility check. Venice mappings
+remain limited to Luna, Terra, and Sol.

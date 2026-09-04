@@ -79,7 +79,7 @@ const automationTagsSchema = z
 const hostedAutomationAssistantTargetOverrideSchema = z
   .object({
     model: z
-      .enum(HOSTED_ASSISTANT_PRODUCT_MODELS)
+      .enum(HOSTED_ASSISTANT_PRODUCT_MODELS.filter((model) => model !== 'gpt-6-astra'))
       .optional()
       .describe(
         'Optional model for this automation turn only. For a reminder, use Luna only when the complete future turn is a fixed, fully self-contained cue whose stored instructions already contain everything it needs to say. Use Terra for all reminders that do not meet that Luna exception; when unsure, use Terra. A Luna reminder must need no reads, tools, conversation-history interpretation, ambiguity resolution, personalization beyond the stored instructions, multi-step work, judgment, or safety reasoning. For a non-reminder automation, use Luna for similarly self-contained work with no reads or tools, Terra for bounded contextual judgment or a few targeted reads, and inherit the conversation model for broad context, research, complex or sensitive reasoning, or whenever that selected model materially matters.',

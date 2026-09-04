@@ -5,6 +5,7 @@ import {
   type Prisma,
 } from "@prisma/client";
 import {
+  HOSTED_ASSISTANT_ASTRA_MODEL,
   HOSTED_ASSISTANT_DEFAULT_PROVIDER,
   HOSTED_ASSISTANT_DEFAULT_REASONING_EFFORT,
   HOSTED_ASSISTANT_PRODUCT_MODELS,
@@ -272,13 +273,12 @@ export async function updateHostedMemberAssistantConfigurationTx(input: {
       message: "Venice is not available for this Murph deployment.",
     });
   }
-  if (input.model === HOSTED_ASSISTANT_SOL_MODEL && !current.solAvailable) {
-    throw hostedOnboardingError({
-      code: "ASSISTANT_MODEL_SOL_REQUIRES_EDGE",
-      httpStatus: 403,
-      message: "GPT-5.6 Sol requires an active paid Edge or Max plan.",
-    });
-  }
+  assertHostedAssistantModelSelection({
+    current,
+    member,
+    model: input.model,
+    provider: input.provider,
+  });
 
   const defaultModel = isThreadContainerMember
     ? HOSTED_ASSISTANT_SOL_MODEL
@@ -360,6 +360,74 @@ async function readHostedMemberAssistantModelState(input: {
   });
 }
 
+function assertHostedAssistantModelSelection(input: {
+  current: HostedMemberAssistantModelResolution;
+  member: HostedMemberAssistantModelState;
+  model: HostedAssistantProductModel | undefined;
+  provider: HostedAssistantProvider | undefined;
+}): void {
+  if (input.model === HOSTED_ASSISTANT_SOL_MODEL && !input.current.solAvailable) {
+    throw hostedOnboardingError({
+      code: "ASSISTANT_MODEL_SOL_REQUIRES_EDGE",
+      httpStatus: 403,
+      message: "GPT-5.6 Sol requires an active paid Edge or Max plan.",
+    });
+  }
+  if (input.model === HOSTED_ASSISTANT_ASTRA_MODEL
+      && !isHostedMemberAstraModelEligible(input.member)) {
+    throw hostedOnboardingError({
+      code: "ASSISTANT_MODEL_ASTRA_REQUIRES_MAX",
+      httpStatus: 403,
+      message: "GPT-6 Astra requires an active paid Max plan.",
+    });
+  }
+  if ((input.model ?? input.current.model) === HOSTED_ASSISTANT_ASTRA_MODEL
+      && (input.provider ?? input.current.provider) !== HOSTED_ASSISTANT_DEFAULT_PROVIDER) {
+    throw hostedOnboardingError({
+      code: "ASSISTANT_MODEL_ASTRA_REQUIRES_OPENAI",
+      httpStatus: 400,
+      message: "Choose OpenAI to use GPT-6 Astra.",
+    });
+  }
+}
+
+function resolveEffectiveHostedAssistantModel(input: {
+  astraAvailable: boolean;
+  isThreadContainerMember: boolean;
+  provider: HostedAssistantProvider;
+  solAvailable: boolean;
+  storedModel: HostedAssistantProductModel | null;
+}): HostedAssistantProductModel {
+  const defaultModel = input.isThreadContainerMember
+    ? HOSTED_ASSISTANT_SOL_MODEL : HOSTED_ASSISTANT_TERRA_MODEL;
+  if (input.storedModel === HOSTED_ASSISTANT_ASTRA_MODEL
+      && (!input.astraAvailable || input.provider !== HOSTED_ASSISTANT_DEFAULT_PROVIDER)) {
+    return defaultModel;
+  }
+  if (input.storedModel === HOSTED_ASSISTANT_SOL_MODEL && !input.solAvailable) {
+    return defaultModel;
+  }
+  return input.storedModel ?? defaultModel;
+}
+
+function isHostedMemberAstraModelEligible(
+  member: HostedMemberAssistantModelState,
+): boolean {
+  if (member.suspendedAt !== null || member.threadContainer !== null) {
+    return false;
+  }
+  return (
+    member.billingStatus === HostedBillingStatus.active
+    && parseHostedBillingPhase(member.billingRef?.currentBillingPhase) === "paid"
+    && parseHostedBillingPlanCode(member.billingRef?.currentBillingPlanCode) === "launch_max_monthly"
+  ) || member.accountGroupMemberships.some((membership) =>
+    membership.status === "active"
+    && parseHostedFamilyPlanCode(membership.planCode) === "max"
+    && membership.group.billingStatus === HostedBillingStatus.active
+    && membership.group.suspendedAt === null
+  );
+}
+
 export function resolveHostedMemberAssistantModel(
   member: HostedMemberAssistantModelState | null,
 ): HostedMemberAssistantModelResolution {
@@ -414,6 +482,7 @@ export function resolveHostedMemberAssistantModel(
     isThreadContainerMember,
     suspendedAt: member.suspendedAt,
   });
+  const astraAvailable = isHostedMemberAstraModelEligible(member);
   const storedModelPreference = configurationAvailable
     ? isThreadContainerMember
       ? isHostedAssistantProductModel(member.assistantModelPreference)
@@ -428,11 +497,14 @@ export function resolveHostedMemberAssistantModel(
     !isThreadContainerMember
     && storedModelPreference === HOSTED_ASSISTANT_SOL_MODEL
     && !solAvailable;
-  const model = isThreadContainerMember
-    ? storedModelPreference ?? HOSTED_ASSISTANT_SOL_MODEL
-    : dormantSolPreference
-      ? HOSTED_ASSISTANT_TERRA_MODEL
-      : storedModelPreference ?? HOSTED_ASSISTANT_TERRA_MODEL;
+  const provider = resolveAvailableHostedAssistantProvider(storedProviderOverride);
+  const model = resolveEffectiveHostedAssistantModel({
+    astraAvailable,
+    isThreadContainerMember,
+    provider,
+    solAvailable,
+    storedModel: storedModelPreference,
+  });
   const storedReasoningEffort = configurationAvailable &&
       !isThreadContainerMember &&
       isHostedAssistantReasoningEffort(member.assistantReasoningEffortPreference)
@@ -441,12 +513,12 @@ export function resolveHostedMemberAssistantModel(
   const reasoningEffortOverride = parseHostedAssistantReasoningEffortOverride(
     storedReasoningEffort,
   );
-  const provider = resolveAvailableHostedAssistantProvider(storedProviderOverride);
 
   return {
     availableModels: configurationAvailable
       ? HOSTED_ASSISTANT_PRODUCT_MODELS.filter(
-          (candidate) => candidate !== HOSTED_ASSISTANT_SOL_MODEL || solAvailable,
+          (candidate) => (candidate !== HOSTED_ASSISTANT_SOL_MODEL || solAvailable)
+            && (candidate !== HOSTED_ASSISTANT_ASTRA_MODEL || astraAvailable),
         )
       : [],
     availableProviders: configurationAvailable

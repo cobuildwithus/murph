@@ -237,7 +237,7 @@ export function SectionsContent({
         <>
           <Separator />
 
-          <StudySection title="Settings model choice with provider usage disclosure">
+          <StudySection title="Settings model choice for Max">
             <div
               id="settings-model-provider-save-controls"
               data-design-section="settings-compact-provider-control"
@@ -245,12 +245,13 @@ export function SectionsContent({
               inert
             >
               <HostedAssistantModelSettings
+                availableModels={["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-6-astra"]}
                 canUpgradeToEdge={false}
                 configurationAvailable
                 customInferenceAvailable
                 initialDormantSolPreference={false}
                 initialModel="gpt-5.6-terra"
-                initialProvider="venice"
+                initialProvider="openai"
                 solAvailable
                 veniceAvailable
               />
