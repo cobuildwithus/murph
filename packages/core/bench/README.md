@@ -87,3 +87,77 @@ restore, concurrent foreground work, full hydration, first provider start, and
 sync completion. Preserve the current two-vCPU configuration until those paths
 meet the existing latency expectations. Sync cadence, admission, mailbox,
 orchestration, and canonical-write durability are unchanged.
+
+## Required one-vCPU regression check
+
+The existing `Production runner bundle budget (ubuntu)` CI job also runs:
+
+```sh
+node --test candidate/scripts/check-container-latency-ci.test.mjs
+node candidate/scripts/check-container-latency-ci.mjs base candidate
+```
+
+Both arguments are independently installed checkouts with their complete
+production runner bundles already assembled. CI supplies the exact candidate
+and its proven first parent on native Linux AMD64; the job remains part of the
+required release aggregate. It uses each checkout's production Dockerfile and
+existing base-image preparation, without a separate service or dependency.
+
+Three fresh-container samples per revision run sequentially in alternating
+order. Every workload has a hard one-vCPU quota, 6 GiB memory with no swap, no
+network, and only a read-only synthetic benchmark mount. The container writable
+layer owns the synthetic vault. Exact created container IDs and unique task
+image tags own cleanup, including workload failures and timeouts.
+
+The candidate's identical harness is bundled against each revision's core code.
+Three paths are guarded: packaged Node startup through healthy heavy-runtime
+hydration, initial import of 8,000 alternating-timezone observations, and a
+12-event update against that history. Replay, correction, canonical readback,
+and matching semantic hashes remain prerequisites, even though only those
+three timings are budgeted. The boot probe does not accept work, restore a
+vault, invoke a provider, or measure image pulling or the outer init process.
+
+For each path, median CPU time must stay within the larger of 25% growth or
+100 ms; median wall time within the larger of 40% growth or 250 ms. One outlier
+does not dominate the median, and CPU plus wall checks distinguish added work
+from added waits. These deliberately coarse same-host budgets catch material
+individual regressions, not every small slowdown or gradual subthreshold
+accumulation. They are not production SLOs or authorization to downsize.
+Do not raise them to hide a regression: inspect the emitted measurements,
+profile the affected owner, and retain the correctness assertions.
+
+A local negative control injected five seconds of actual CPU work inside only
+the candidate's measured incremental import. Three fresh-container runs kept
+the same semantic hashes/readbacks, but the comparator correctly rejected
+incremental CPU (5.98 s against a 1.12 s allowance) and wall time. The injection
+is not part of production code or the committed benchmark.
+
+## Additional work elimination
+
+The follow-up removes two redundant copies of the read-only import identity
+baseline; mutating reconciliation still takes its own copy. Imports without a
+session no longer prepare an unused session fingerprint/index, and new external
+references only compute content fingerprints when historical owners exist.
+Ledger-change and overlapping-dependency invalidation remain unchanged.
+
+Three alternating one-vCPU mixed-zone Docker samples against the preceding
+timezone-cache revision had median CPU times of 7.28 s to 5.95 s for bulk import,
+3.35 s to 2.72 s for incremental import, and 0.80 s to 0.44 s for the disjoint
+session hit. All semantic hashes and canonical readbacks matched. Host/emulation
+variation changed absolute timings substantially from the earlier experiment;
+compare paired revisions within a run, not separate measurement rounds.
+
+The later final-packaged three-pair run passed every committed regression
+budget: median hydration wall time was 6.02 s baseline to 4.75 s candidate
+(CPU 6.50 s to 5.09 s). Bulk-import CPU was 2.45 s to 2.85 s, and incremental
+CPU 0.73 s to 0.90 s. Thus that rerun did **not** confirm the earlier additional
+import speedups. The eliminated work is explicit in the code, but the size of
+its latency benefit needs native-AMD64 confirmation. Neither the coarse budget
+nor these noisy emulated samples establish strict performance equivalence.
+
+Audio configuration also no longer eagerly loads the generated ElevenLabs SDK.
+The existing validated audio-request function loads it before starting its
+provider timeout. Configuration and non-audio hydration avoid that module graph;
+the first actual audio request still pays its load cost. Deterministic coverage
+proves both the unloaded and real-SDK request paths, including existing provider
+error, abort, and timeout behavior.
