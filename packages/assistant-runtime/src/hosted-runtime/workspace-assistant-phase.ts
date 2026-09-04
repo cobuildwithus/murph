@@ -1957,6 +1957,8 @@ async function buildHostedAutomationToolResponse(
     return {
       action: "inspect" as const,
       ...responseFields,
+      instructions: record.instructions,
+      title: record.title,
       routeBinding: "preserved" as const,
     };
   }

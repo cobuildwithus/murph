@@ -3257,6 +3257,211 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
   )
 
   it(
+    'recovers a reference-free workout reminder and preserves subsequent set identity',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-reminder-workout-recovery-e2e-'),
+      )
+      const automationDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-reminder-definition-e2e-'),
+      )
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      const commandLogPath = path.join(workingDirectory, 'workout-commands.log')
+      const inspections: string[] = []
+
+      try {
+        await initializeVault({
+          title: 'Synthetic reminder recovery proof',
+          timezone: 'UTC',
+          vaultRoot: workingDirectory,
+        })
+        await initializeVault({
+          title: 'Synthetic hosted reminder storage',
+          timezone: 'UTC',
+          vaultRoot: automationDirectory,
+        })
+        await Promise.all([
+          ...(['strength-training', 'tracked-table'] as const).map((slug) =>
+            materializeAssistantSkill({ skillsRoot, slug }),
+          ),
+          materializeAssistantSkillAsset({
+            relativePath: 'shared/exercise-catalog-runtime.md',
+            skillsRoot,
+          }),
+          materializeRealWorkoutVaultCli({
+            binDirectory,
+            commandLogPath,
+            vaultRoot: workingDirectory,
+          }),
+        ])
+        const older = await startLiveWorkout({
+          exercises: [{ mode: 'bodyweight', name: 'Calf raise', setCount: 2 }],
+          name: 'Earlier practice',
+          startedAt: new Date(Date.now() - 86_400_000).toISOString(),
+          vault: workingDirectory,
+        })
+        const olderBefore = await showWorkoutRecord(workingDirectory, older.eventId)
+        const saved = await upsertAutomation({
+          continuityPolicy: 'preserve',
+          instructions: [
+            'The member requested standalone live-workout logging for Afternoon movement:',
+            'three sets of Bodyweight squat spread across the day.',
+            'Send the second-set cue and ask them to reply with the completed set number and repetitions.',
+          ].join(' '),
+          now: new Date('2030-01-15T10:00:00.000Z'),
+          route: {
+            channel: 'linq', deliveryTarget: 'synthetic-workout-reminder',
+            identityId: null, participantId: null,
+            threadId: 'synthetic-workout-reminder', threadIsDirect: true,
+          },
+          schedule: { kind: 'dailyLocal', localTime: '14:00', timeZone: 'UTC' },
+          slug: 'synthetic-afternoon-movement',
+          status: 'active',
+          tags: [],
+          title: 'Afternoon movement',
+          vaultRoot: automationDirectory,
+        })
+        expect(saved.record.contextReferences).toEqual([])
+        const dynamicTools = [MURPH_AUTOMATION_TOOL, MURPH_ATTACH_RESPONSE_CARD_TOOL]
+        const commonInput: Omit<CodexAppServerTurnInput, 'prompt'> = {
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome,
+          configOverrides: WORKOUT_E2E_CODEX_CONFIG_OVERRIDES,
+          developerInstructions: buildAssistantSystemPrompt({
+            assistantCliContract: [
+              'vault-cli workout start [name] --exercise <spec> --format json',
+              'vault-cli workout show <event-id> --format json',
+              'vault-cli workout set log <exercise> --workout-id <event-id> --set-order <n> --reps <n>',
+            ].join('\n'),
+            assistantContextSnapshotPrompt: null,
+            assistantHostedDeviceConnectAvailable: false,
+            assistantHostedDeviceConnectProviders: [],
+            assistantKnowledgeToolsAvailable: false,
+            channel: 'linq',
+            cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+            conversationScope: 'direct',
+            currentLocalDate: '2030-01-15',
+            currentTimeZone: 'UTC',
+            hostedRuntime: true,
+            modelBehaviorProfile: 'gpt5-agentic',
+            onboardingGuidance: false,
+            turnTrigger: null,
+          }),
+          dynamicTools,
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          },
+          excludeResumeTurns: true,
+          groupConversation: false,
+          hostedToolContext: {
+            automationTool: {
+              async request(request) {
+                expect(request).toEqual({ action: 'inspect', lookup: saved.record.automationId })
+                if (request.action !== 'inspect') throw new Error('Reminder writes are forbidden.')
+                inspections.push(request.lookup)
+                const record = await showAutomation({
+                  automationId: request.lookup, vaultRoot: automationDirectory,
+                })
+                if (!record) throw new Error('Expected the saved reminder.')
+                return {
+                  action: 'inspect', automationId: record.automationId,
+                  contextReferences: record.contextReferences,
+                  instructions: record.instructions, title: record.title,
+                  effectiveTimeZone: 'UTC', lookupId: record.slug,
+                  occurrenceProjection: { nextOccurrenceAt: '2030-01-16T14:00:00.000Z', status: 'resolved' },
+                  routeBinding: 'preserved', schedule: record.schedule,
+                  status: record.status, updatedAt: record.updatedAt,
+                }
+              },
+            },
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => { throw new Error('File sends are forbidden.') },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        }
+        const recovered = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: resolveAssistantProviderPrompt({
+            dynamicTools,
+            prompt: 'Set 2 done, 11 reps.',
+            providerConfig: normalizeAssistantProviderConfig({ provider: 'codex-cli' }),
+            turnContextPrompt: [
+              'Conversation context:',
+              'The assistant previously sent this provider-accepted reminder in the same private conversation:',
+              `- automationId: ${saved.record.automationId}`,
+              '- providerAcceptedAt: 2030-01-15T14:00:00.000Z',
+              'Text: Bodyweight squat, set 2. Reply when done.',
+              'No workout context reference was supplied with this reminder.',
+              'Use this context to interpret the reply; it does not prove any workout exists or that any earlier set was completed.',
+            ].join('\n'),
+            workingDirectory,
+          }),
+        })
+        const references = recovered.responseContextReferences
+        const eventId = references?.[0]?.entityId
+        process.stdout.write(`[reminder-workout-recovery-e2e] ${JSON.stringify({
+          reply: recovered.finalMessage, inspectionCount: inspections.length,
+          referenceCount: references?.length ?? 0,
+          commands: (await readFile(commandLogPath, 'utf8')).trim().split('\n'),
+        })}\n`)
+        expect(inspections.length).toBeGreaterThan(0)
+        expect(new Set(inspections)).toEqual(new Set([saved.record.automationId]))
+        expect(references).toHaveLength(1)
+        expect(references?.[0]?.entityKind).toBe('activity_session')
+        if (!eventId) throw new Error('Expected one recovered workout identity.')
+        expect(eventId).not.toBe(older.eventId)
+        const first = workoutSessionSchema.parse(
+          (await showWorkoutRecord(workingDirectory, eventId)).entity.data.workout,
+        )
+        expect(first.exercises).toHaveLength(1)
+        expect(first.exercises[0]?.sets.map((set) => set.reps)).toEqual([undefined, 11, undefined])
+        expect(recovered.finalMessage).not.toMatch(/which workout|what workout|\?/iu)
+
+        const continued = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          trustedContextReferences: references,
+          prompt: `Host-preserved contextReferences: ${JSON.stringify(references)}\nCurrent member message: Set 3 done, 9 reps.`,
+        })
+        const final = workoutSessionSchema.parse(
+          (await showWorkoutRecord(workingDirectory, eventId)).entity.data.workout,
+        )
+        const commands = (await readFile(commandLogPath, 'utf8')).trim().split('\n')
+          .filter((command) => !/(?:^|\s)(?:--help|-h|--schema)(?:\s|$)/u.test(command))
+        process.stdout.write(`[reminder-workout-continuation-e2e] ${JSON.stringify({
+          reply: continued.finalMessage,
+          loggedSets: final.exercises[0]?.sets.map((set) => set.reps ?? null),
+        })}\n`)
+        expect(final.exercises[0]?.sets.map((set) => set.reps)).toEqual([undefined, 11, 9])
+        expect(commands.filter((command) => command.startsWith('workout start '))).toHaveLength(1)
+        const writes = commands.filter((command) => command.startsWith('workout set log '))
+        expect(writes).toHaveLength(2)
+        for (const command of writes) expect(command).toContain(eventId)
+        expect(continued.responseContextReferences).toEqual(references)
+        expect(continued.finalMessage).not.toMatch(/which workout|what workout|\?/iu)
+        expect(await showWorkoutRecord(workingDirectory, older.eventId)).toEqual(olderBefore)
+        expect(await showAutomation({ automationId: saved.record.automationId, vaultRoot: automationDirectory }))
+          .toEqual(saved.record)
+      } finally {
+        await removeRealCodexTemporaryPaths([workingDirectory, automationDirectory, ...config.temporaryPaths])
+      }
+    },
+    720_000,
+  )
+
+  it(
     'logs a referenced set completion after an unrelated assistant turn',
     async () => {
       const config = await resolveRealCodexE2eConfig()
