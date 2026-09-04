@@ -15,7 +15,7 @@ type LinkAccountCallbacks = {
 const mocks = vi.hoisted(() => ({
   openAuthDialog: vi.fn(),
   linkAccountCallbacks: null as LinkAccountCallbacks | null,
-  linkTelegram: vi.fn(),
+  linkOAuth: vi.fn(),
   refreshUser: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
   useLinkAccount: vi.fn(),
@@ -73,7 +73,7 @@ describe("ConnectTelegram", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.linkAccountCallbacks = null;
-    mocks.linkTelegram.mockReturnValue(undefined);
+    mocks.linkOAuth.mockReturnValue(undefined);
     mocks.refreshUser.mockResolvedValue({
       linkedAccounts: [],
     });
@@ -91,7 +91,7 @@ describe("ConnectTelegram", () => {
       mocks.linkAccountCallbacks = callbacks;
 
       return {
-        linkTelegram: mocks.linkTelegram,
+        linkOAuth: mocks.linkOAuth,
       };
     });
     mocks.useUser.mockReturnValue({
@@ -262,7 +262,7 @@ describe("ConnectTelegram", () => {
     });
 
     expect(mocks.openAuthDialog).toHaveBeenCalledTimes(1);
-    expect(mocks.linkTelegram).not.toHaveBeenCalled();
+    expect(mocks.linkOAuth).not.toHaveBeenCalled();
   });
 
   it("uses a sanitized initial Telegram account when Privy user state has not loaded", async () => {
@@ -383,7 +383,7 @@ describe("ConnectTelegram", () => {
       changeButton?.dispatchEvent(new Event("click", { bubbles: true }));
     });
 
-    expect(mocks.linkTelegram).toHaveBeenCalledTimes(1);
+    expect(mocks.linkOAuth).toHaveBeenCalledWith({ provider: "telegram" });
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
 
     await act(async () => {
@@ -506,7 +506,7 @@ describe("HostedTelegramCardSettings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.linkAccountCallbacks = null;
-    mocks.linkTelegram.mockReturnValue(undefined);
+    mocks.linkOAuth.mockReturnValue(undefined);
     mocks.refreshUser.mockResolvedValue({
       linkedAccounts: [
         {
@@ -530,7 +530,7 @@ describe("HostedTelegramCardSettings", () => {
       mocks.linkAccountCallbacks = callbacks;
 
       return {
-        linkTelegram: mocks.linkTelegram,
+        linkOAuth: mocks.linkOAuth,
       };
     });
     mocks.useUser.mockReturnValue({
@@ -686,7 +686,7 @@ describe("HostedTelegramCardSettings", () => {
       linkButton?.dispatchEvent(new Event("click", { bubbles: true }));
     });
 
-    expect(mocks.linkTelegram).toHaveBeenCalledTimes(1);
+    expect(mocks.linkOAuth).toHaveBeenCalledWith({ provider: "telegram" });
     expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
 
     await act(async () => {
@@ -748,7 +748,7 @@ describe("HostedTelegramCardSettings", () => {
     );
     expect(linkButton).toBeTruthy();
 
-    expect(mocks.linkTelegram).not.toHaveBeenCalled();
+    expect(mocks.linkOAuth).not.toHaveBeenCalled();
     expect(linkButton?.disabled).toBe(true);
     expect(container.textContent).toContain("Preparing Telegram linking");
   });
@@ -779,7 +779,7 @@ describe("HostedTelegramCardSettings", () => {
       linkButton?.dispatchEvent(new Event("click", { bubbles: true }));
     });
 
-    expect(mocks.linkTelegram).not.toHaveBeenCalled();
+    expect(mocks.linkOAuth).not.toHaveBeenCalled();
   });
 
   it("opens app auth from the card instead of launching Telegram link when the Privy client user is absent", async () => {
@@ -810,7 +810,7 @@ describe("HostedTelegramCardSettings", () => {
     });
 
     expect(mocks.openAuthDialog).toHaveBeenCalledTimes(1);
-    expect(mocks.linkTelegram).not.toHaveBeenCalled();
+    expect(mocks.linkOAuth).not.toHaveBeenCalled();
   });
 
   it("auto-links Telegram once Privy becomes ready and authenticated", async () => {
@@ -843,7 +843,7 @@ describe("HostedTelegramCardSettings", () => {
     const { cleanup, container } = await renderClientComponent(createElement(PrivyReadyHarness));
     cleanupRender = cleanup;
 
-    expect(mocks.linkTelegram).not.toHaveBeenCalled();
+    expect(mocks.linkOAuth).not.toHaveBeenCalled();
 
     await act(async () => {
       privyState.authenticated = true;
@@ -852,7 +852,7 @@ describe("HostedTelegramCardSettings", () => {
     });
 
     await vi.waitFor(() => {
-      expect(mocks.linkTelegram).toHaveBeenCalledTimes(1);
+      expect(mocks.linkOAuth).toHaveBeenCalledTimes(1);
     });
     expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
     expect(container.textContent).toContain("Opening Telegram");
@@ -900,7 +900,7 @@ describe("HostedTelegramCardSettings", () => {
       });
     });
 
-    expect(mocks.linkTelegram).not.toHaveBeenCalled();
+    expect(mocks.linkOAuth).not.toHaveBeenCalled();
 
     await act(async () => {
       autoLinkSync.resolveSync({
@@ -966,7 +966,7 @@ describe("HostedTelegramCardSettings", () => {
         url: "/api/settings/telegram/sync",
       });
     });
-    expect(mocks.linkTelegram).not.toHaveBeenCalled();
+    expect(mocks.linkOAuth).not.toHaveBeenCalled();
 
     await act(async () => {
       manualSync.resolveSync({
@@ -1026,7 +1026,7 @@ describe("HostedTelegramCardSettings", () => {
       const { cleanup } = await renderClientComponent(createElement(PrivyUserArrivalHarness));
       cleanupRender = cleanup;
 
-      expect(mocks.linkTelegram).not.toHaveBeenCalled();
+      expect(mocks.linkOAuth).not.toHaveBeenCalled();
 
       await act(async () => {
         privyUserState.linkedAccounts = [
@@ -1051,7 +1051,7 @@ describe("HostedTelegramCardSettings", () => {
           url: "/api/settings/telegram/sync",
         });
       });
-      expect(mocks.linkTelegram).not.toHaveBeenCalled();
+      expect(mocks.linkOAuth).not.toHaveBeenCalled();
 
       await act(async () => {
         autoLinkSync.resolveSync({

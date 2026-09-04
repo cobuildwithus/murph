@@ -788,11 +788,10 @@ export function ComponentsContent() {
                   </HostedInlineAuthButton>
                 </div>
               </DialogPreviewFrame>
-              <DialogPreviewFrame label="Telegram ready handoff">
+              <DialogPreviewFrame label="Telegram authorization available">
                 <HostedTelegramAuthButtonPresentation
                   active
                   onClick={() => {}}
-                  readyToContinue
                 />
               </DialogPreviewFrame>
             </div>
