@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-09-02
+Last verified: 2026-09-04
 
 ## Decision
 
@@ -2692,22 +2692,25 @@ still stale. That signal is recovery admission for the existing mailbox/event
 identity and must not mint another schedule-event or mailbox-item identity.
 After mailbox retention has removed a scheduled v3 wake's payload, Web accepts
 the stable duplicate without another signal only when the remaining row matches
-the schedule identity and the runtime checkpoint identifies its lane sequence
-as `hostedMailboxSystemFirstPendingSeq`. The same checkpoint's canonical system
-imported watermark must cover that sequence without exceeding the allocated
-high-water mark, and the lane counter must show no unhandled gap before it. The
-first-pending identity is independent from the handled frontier: a retained
-device retry remains the exact pending owner even after that local continuation
-permits the canonical handled watermark to advance past its sequence. The row
-must have no inline ciphertext, sidecar, payload reference, byte count, or hash.
-A missing or different first-pending
-sequence—including when supported legacy unsequenced work makes the frontier
-ambiguous—a never-imported row, malformed watermark, remaining payload surface,
-or structural mismatch stays a dedupe conflict and fails recovery closed.
+the schedule identity and the runtime checkpoint supplies one of two exact
+sequence proofs. A first-unhandled row must equal both the lane counter's next
+sequence and `hostedMailboxSystemFirstPendingSeq`. A row already at or behind
+the handled frontier must appear in
+`hostedMailboxSystemRetainedDeviceRetrySeqs`, the sorted set of up to 16 oldest
+sequenced device retries still retained by the runtime. The same checkpoint's
+canonical system imported watermark must cover the sequence without exceeding
+the allocated high-water mark. The row must have no inline ciphertext, sidecar,
+payload reference, byte count, or hash. A missing, malformed, or different
+owner proof—including when supported legacy unsequenced work makes the frontier
+ambiguous—a skipped-ahead or never-imported row, malformed watermark, remaining
+payload surface, or structural mismatch stays a dedupe conflict and fails
+recovery closed. A retained owner beyond the 16-item projection also fails
+closed until earlier retained retries leave the set.
 Runtime-owned retry state remains the sole continuation owner for an accepted
-retired duplicate. Deploy the corrected runtime checkpoint projection before
-Web accepts behind-frontier ownership; older runtime checkpoints do not identify
-that retained item and therefore fail closed.
+retired duplicate. Corrected runtimes overwrite the owner set on every
+checkpoint. Deploy and drain those runtime containers before Web accepts
+behind-frontier ownership. If rollback is required, roll Web back before the
+runtime so an older runtime cannot preserve a stale unknown owner-set field.
 It does not promise exactly-once provider execution. Dirty rows are not
 independently swept; due-reconcile candidates may include dirty or stuck rows
 when canonical `nextReconcileAt` is due. Dirty state remains the work source,

@@ -7,10 +7,11 @@ Last verified: 2026-09-04
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists only live architecture, product, verification, and package-boundary docs.
 
-Hosted system-mailbox checkpoints project the earliest real pending sequence
-independently from the earliest item that blocks the handled frontier. That
-split lets Web recognize one exact payload-retired device retry without making
-the retry pin canonical lane progress. The contract and failure boundaries are
+Hosted system-mailbox checkpoints preserve one blocking pending frontier and
+separately project a bounded set of exact retained device-retry sequences. That
+split lets Web recognize each projected payload-retired retry without making a
+retry pin canonical lane progress or mask another connection's blocking item.
+The contract and failure boundaries are
 specified by `agent-docs/RELIABILITY.md` and
 `agent-docs/references/hosted-runtime-protocol.md`.
 

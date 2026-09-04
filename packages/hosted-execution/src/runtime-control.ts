@@ -3758,6 +3758,7 @@ export type HostedRuntimeRedactedValue =
   | HostedRuntimeRedactedScalar[]
   | HostedRuntimeRedactedObject[];
 export type HostedRuntimeRedactedJson = Record<string, HostedRuntimeRedactedValue>;
+export const HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH = 16;
 
 export interface HostedRuntimeLogEntry {
   at: string;

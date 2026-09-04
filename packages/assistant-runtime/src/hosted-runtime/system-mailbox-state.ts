@@ -13,6 +13,7 @@ import {
 import {
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_EVENT_ID_PREFIX,
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS,
+  HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH,
 } from "@murphai/hosted-execution/runtime-control";
 import { parseMemberActionOutcomeV1 } from "@murphai/contracts";
 import {
@@ -153,6 +154,7 @@ export async function readHostedSystemMailboxProgress(input: {
 export interface HostedSystemMailboxProgress {
   firstPendingSeq: string | null;
   handledThroughSeq: string;
+  retainedDeviceRetrySeqs: string[];
 }
 
 export function resolveHostedSystemMailboxHandledThroughSeq(input: {
@@ -174,7 +176,7 @@ export function resolveHostedSystemMailboxProgress(input: {
 
   const importedSeq = BigInt(input.importedSeq);
   let earliestPendingSeq: bigint | null = null;
-  let earliestBlockingPendingSeq: bigint | null = null;
+  const retainedDeviceRetrySeqs = new Set<bigint>();
   const now = input.now ?? new Date().toISOString();
   for (const item of input.state.pending) {
     if (isHostedDeviceSyncDenseRawRetentionMailboxItem(item)) {
@@ -183,37 +185,40 @@ export function resolveHostedSystemMailboxProgress(input: {
     if (isExpiredHostedGroupContextHandoffSystemMailboxItem(item, now)) {
       continue;
     }
+
+    // Retained device retries are local continuations of handled mailbox
+    // items. Report their exact owners without holding back lane progress.
+    if (isHostedRetainedDeviceJobRetry(item)) {
+      if (item.mailboxLaneSeq !== null) {
+        retainedDeviceRetrySeqs.add(BigInt(item.mailboxLaneSeq));
+      }
+      continue;
+    }
     if (item.mailboxLaneSeq === null) {
       return {
         firstPendingSeq: null,
         handledThroughSeq: "0",
+        retainedDeviceRetrySeqs: [],
       };
     }
     const pendingSeq = BigInt(item.mailboxLaneSeq);
     if (earliestPendingSeq === null || pendingSeq < earliestPendingSeq) {
       earliestPendingSeq = pendingSeq;
     }
-
-    // A retained device retry still owns this exact mailbox item, but it is a
-    // local continuation of handled work and must not hold back lane progress.
-    if (isHostedRetainedDeviceJobRetry(item)) {
-      continue;
-    }
-    if (
-      earliestBlockingPendingSeq === null
-      || pendingSeq < earliestBlockingPendingSeq
-    ) {
-      earliestBlockingPendingSeq = pendingSeq;
-    }
   }
 
-  const handledBeforePending = earliestBlockingPendingSeq === null
+  const retainedSeqs = [...retainedDeviceRetrySeqs]
+    .sort((left, right) => left < right ? -1 : left > right ? 1 : 0)
+    .slice(0, HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH)
+    .map((seq) => seq.toString());
+  const handledBeforePending = earliestPendingSeq === null
     ? importedSeq
-    : earliestBlockingPendingSeq - 1n;
+    : earliestPendingSeq - 1n;
   return {
     firstPendingSeq: earliestPendingSeq?.toString() ?? null,
     handledThroughSeq:
       (handledBeforePending < importedSeq ? handledBeforePending : importedSeq).toString(),
+    retainedDeviceRetrySeqs: retainedSeqs,
   };
 }
 

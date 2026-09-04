@@ -330,60 +330,62 @@ describe("hosted runtime system mailbox state", () => {
     })).toEqual({
       firstPendingSeq: "4",
       handledThroughSeq: "3",
+      retainedDeviceRetrySeqs: [],
     });
   });
 
-  it("does not let a handled device item retained as a local retry pin the canonical prefix", () => {
+  it("reports retained device retries without letting one mask the blocking prefix", () => {
     const retryAt = "2026-04-28T00:00:00.000Z";
-    const base = buildPendingDeviceSyncMailboxItem({
+    const retainedDeviceRetry = buildRetainedDeviceSyncMailboxItem({
       itemId: "retained_device_retry",
       mailboxLaneSeq: "4",
+      retryAt,
     });
-    const retainedDeviceRetry: HostedSystemMailboxPendingItem = {
-      ...base,
-      attemptCount: 1,
-      lastAttemptAt: "2026-04-27T00:00:00.000Z",
-      nextAttemptAt: retryAt,
-      wake: buildHostedExecutionDeviceSyncWake({
-        connectionId: "dsc_retained_retry",
-        eventId: "device-sync.wake:retained_device_retry",
-        expectedConnectedAt: "2026-04-01T00:00:00.000Z",
-        hint: {
-          jobs: [{
-            availableAt: retryAt,
-            dedupeKey: "retained-weight-retry",
-            kind: "resource",
-            maxAttempts: 1,
-            payload: {},
-          }],
-        },
-        occurredAt: "2026-04-27T00:00:00.000Z",
-        provider: "junction",
-        reason: "reconcile_due",
-        userId: "member_123",
-      }),
-    };
     const pendingSuccessor = buildPendingSystemMailboxItem({
       itemId: "pending_successor",
       mailboxLaneSeq: "9",
+    });
+    const secondRetainedDeviceRetry = buildRetainedDeviceSyncMailboxItem({
+      itemId: "second_retained_device_retry",
+      mailboxLaneSeq: "6",
+      retryAt,
     });
 
     expect(resolveHostedSystemMailboxProgress({
       importedSeq: "9",
       now: "2026-04-27T00:00:00.000Z",
-      state: { pending: [retainedDeviceRetry, pendingSuccessor] },
+      state: {
+        pending: [pendingSuccessor, secondRetainedDeviceRetry, retainedDeviceRetry],
+      },
     })).toEqual({
-      firstPendingSeq: "4",
+      firstPendingSeq: "9",
       handledThroughSeq: "8",
+      retainedDeviceRetrySeqs: ["4", "6"],
     });
     expect(resolveHostedSystemMailboxProgress({
       importedSeq: "9",
       now: retryAt,
       state: { pending: [retainedDeviceRetry] },
     })).toEqual({
-      firstPendingSeq: "4",
+      firstPendingSeq: null,
       handledThroughSeq: "9",
+      retainedDeviceRetrySeqs: ["4"],
     });
+
+    const boundedRetained = Array.from({ length: 17 }, (_, index) =>
+      buildRetainedDeviceSyncMailboxItem({
+        itemId: `bounded_retained_${index + 1}`,
+        mailboxLaneSeq: String(index + 1),
+        retryAt,
+      })
+    );
+    expect(resolveHostedSystemMailboxProgress({
+      importedSeq: "17",
+      now: retryAt,
+      state: { pending: [...boundedRetained].reverse() },
+    }).retainedDeviceRetrySeqs).toEqual(
+      Array.from({ length: 16 }, (_, index) => String(index + 1)),
+    );
   });
 
   it("blocks legacy unsequenced work without letting synthetic retention wakes block the lane", async () => {
@@ -407,6 +409,7 @@ describe("hosted runtime system mailbox state", () => {
     })).toEqual({
       firstPendingSeq: null,
       handledThroughSeq: "0",
+      retainedDeviceRetrySeqs: [],
     });
 
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
@@ -1565,6 +1568,38 @@ function buildPendingDeviceSyncMailboxItem(input: {
       reason: "reconcile_due",
       userId: "member_123",
     },
+  };
+}
+
+function buildRetainedDeviceSyncMailboxItem(input: {
+  itemId: string;
+  mailboxLaneSeq: string;
+  retryAt: string;
+}): HostedSystemMailboxPendingItem {
+  const pending = buildPendingDeviceSyncMailboxItem(input);
+  return {
+    ...pending,
+    attemptCount: 1,
+    lastAttemptAt: "2026-04-27T00:00:00.000Z",
+    nextAttemptAt: input.retryAt,
+    wake: buildHostedExecutionDeviceSyncWake({
+      connectionId: `dsc_${input.itemId}`,
+      eventId: `device-sync.wake:${input.itemId}`,
+      expectedConnectedAt: "2026-04-01T00:00:00.000Z",
+      hint: {
+        jobs: [{
+          availableAt: input.retryAt,
+          dedupeKey: `retained-job:${input.itemId}`,
+          kind: "resource",
+          maxAttempts: 1,
+          payload: {},
+        }],
+      },
+      occurredAt: "2026-04-27T00:00:00.000Z",
+      provider: "junction",
+      reason: "reconcile_due",
+      userId: "member_123",
+    }),
   };
 }
 

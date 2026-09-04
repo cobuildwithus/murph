@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-09-02
+Last verified: 2026-09-04
 
 ## Current Guardrails
 
@@ -1354,11 +1354,12 @@ Last verified: 2026-09-02
   never projects local retry timing into `nextReconcileAt`. Per-connection
   mailbox ordering and scheduler scoping
   prevent a future retry for one connection from blocking or advancing due work
-  for another. Runtime checkpoint progress therefore reports the earliest real
-  pending mailbox sequence separately from the earliest item that blocks the
-  handled frontier. A retained device retry stays the exact pending owner for
-  payload-retired duplicate recovery even when its sequence is already covered
-  by the handled watermark. A later due webhook for that same connection may
+  for another. Runtime checkpoint progress therefore keeps the first pending
+  sequence as the handled-frontier blocker and separately publishes up to 16
+  oldest exact retained device-retry sequences. A payload-retired duplicate is
+  recoverable behind the handled frontier only when that bounded owner set names
+  its exact sequence; an omitted later owner fails closed until earlier retries
+  leave the set. A later due webhook for that same connection may
   admit the older exact retained mailbox item so newly dirty data can enter the
   local worker without waiting behind a historical retry. That webhook remains
   available for an exact continuation only when post-checkpoint
