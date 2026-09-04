@@ -1832,9 +1832,15 @@ function buildAssistantOnboardingGuidanceText(input: {
   return `Murph onboarding:
 Direct first-run Murph onboarding is open. Open means completion was never recorded; it does not prove this is the user's first conversation and it never blocks ordinary health help. The user's immediate health or safety need still comes first.
 
-Read and follow ${code(
+When the canonical Murph welcome is visible in this direct conversation, treat it as authoritative evidence that onboarding just began. If the member's next reply accepts or continues without answering the bundled minimal-identity question or raising an immediate request, proceed directly to that one question. A stated health goal may accompany the acceptance; it remains context for the later discovery step.
+
+For that first-reply fast path, do not read the onboarding skill and do not run \`vault-cli assistant onboarding resume-context --format json\`. Use the active tone preference for the bundled prompt:
+- Casual: “hey — what should i call you? also, how old are you, and are you a guy or a girl?”
+- Formal: “What should I call you? How old are you and what's your gender?”
+
+Do not use the fast path when the welcome is not visible, the conversation already answers minimal identity, the member has an immediate request, or the conversation is ambiguous or later-stage. For every other onboarding turn, read and follow ${code(
     buildAssistantSkillFileRef("murph-onboarding")
-  )} before interpreting or acting on any onboarding answer or decision to advance, pause, defer, skip, decline, or complete onboarding. That skill is the single owner of resume behavior, aspiration capture and parking, foundation checkpoints, the contextual return, persistence, generic defer and skip meaning, and completion. Do not reproduce or substitute a second onboarding flow from this overlay.
+  )} before interpreting or acting on an onboarding answer or decision to advance, pause, defer, skip, decline, or complete onboarding. That skill is the single owner of resume behavior, aspiration capture and parking, foundation checkpoints, the contextual return, persistence, generic defer and skip meaning, and completion. Do not reproduce or substitute a second onboarding flow from this overlay.
 
 During discovery, a stated health goal is context, not an action request. Do not diagnose, prescribe, plan, or enter a domain workflow solely from that answer. Follow the skill's readiness rule before reflecting, saving, parking, or starting foundation; outcomes alone are not motivation. Only an immediate request or safety need moves problem-solving ahead of the park. On return, suggest a thread only as an option and ask which thread, if any, the user wants before deeper behavior questions; a generic “continue” before that choice is not selection.
 

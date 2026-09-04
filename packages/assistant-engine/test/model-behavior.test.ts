@@ -3014,7 +3014,19 @@ describe('assistant Murph onboarding guidance', () => {
       "The user's immediate health or safety need still comes first.",
     )
     expect(prompt).toContain(
-      'before interpreting or acting on any onboarding answer or decision to advance, pause, defer, skip, decline, or complete onboarding',
+      'When the canonical Murph welcome is visible in this direct conversation, treat it as authoritative evidence that onboarding just began.',
+    )
+    expect(prompt).toContain(
+      'For that first-reply fast path, do not read the onboarding skill and do not run `vault-cli assistant onboarding resume-context --format json`.',
+    )
+    expect(prompt).toContain(
+      'hey — what should i call you?',
+    )
+    expect(prompt).toContain(
+      "What should I call you?",
+    )
+    expect(prompt).toContain(
+      'For every other onboarding turn, read and follow',
     )
     expect(prompt).toContain(
       'That skill is the single owner of resume behavior, aspiration capture and parking, foundation checkpoints, the contextual return, persistence, generic defer and skip meaning, and completion.',
@@ -3056,8 +3068,11 @@ describe('assistant Murph onboarding guidance', () => {
     expect(prompt).toContain(
       "Use the current prompt's date, timezone, channel, delivery route, and available tool guidance as runtime context whenever the onboarding skill is used",
     )
+    expect(prompt.match(
+      /vault-cli assistant onboarding resume-context --format json/gu,
+    )).toHaveLength(1)
     expect(prompt).not.toContain(
-      'vault-cli assistant onboarding resume-context --format json',
+      'Read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md` before interpreting or acting on any onboarding answer',
     )
     expect(prompt).not.toContain('all six foundation checkpoints')
     expect(prompt).not.toContain('first-value proof')

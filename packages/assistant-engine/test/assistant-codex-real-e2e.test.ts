@@ -340,7 +340,7 @@ const REAL_CODEX_ONBOARDING_ALLOWED_POLICY_PATHS = {
     ONBOARDING_POLICY_PATHS[1][1],
     ONBOARDING_POLICY_PATHS[2][1],
   ],
-  minimal_identity_prompt: [ONBOARDING_POLICY_PATHS[0][1]],
+  minimal_identity_prompt: [],
   wearable_connection_offer: [
     ONBOARDING_POLICY_PATHS[0][1],
     ONBOARDING_POLICY_PATHS[1][1],
@@ -956,8 +956,16 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           scenario: 'minimal_identity_prompt',
         })
         expect(
-          minimalIdentity.policyFiles.filter((file) => file !== 'SKILL.md'),
-          'minimal-identity prompt stage policy reads',
+          minimalIdentity.policyFiles,
+          'minimal-identity first-reply policy reads',
+        ).toEqual([])
+        expect(
+          readSuccessfulOnboardingResumeContexts(minimalIdentity.actions),
+          'minimal-identity first-reply resume-context evidence',
+        ).toEqual([])
+        expect(
+          minimalIdentity.actions,
+          'minimal-identity first-reply actions',
         ).toEqual([])
         expect(minimalIdentity.finalMessage.trim(), 'preferred-name question').toMatch(
           /what should i call you/iu,
@@ -1092,7 +1100,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
   )
 
   it(
-    'answers a fresh routine-goal onboarding turn without a progress update',
+    'uses the visible-welcome first-reply fast path without tools or a progress update',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const temporaryPaths = [...config.temporaryPaths]
@@ -1105,10 +1113,19 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           config,
           workingDirectory,
         })
-        const result = await executeRealCodexAppServerTurn({
+        const welcome = await executeRealCodexOnboardingProbe({
+          ...turnInput,
+          excludeResumeTurns: true,
+          prompt: 'Hey',
+          scenario: 'fresh_greeting',
+        })
+        expect(welcome.finalMessage.trim()).toBe(
+          ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
+        )
+
+        const result = await executeRealCodexOnboardingProbe({
           ...turnInput,
           dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
-          excludeResumeTurns: true,
           progressDelivery: {
             async send(text) {
               progressUpdates.push(text)
@@ -1116,11 +1133,13 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             },
           },
           prompt: [
-            "I've already seen your welcome and I'm ready to continue.",
+            "Yeah, I'm ready to continue.",
             "I'd like Murph's help building a steadier evening routine.",
           ].join(' '),
+          resumeSessionId: welcome.sessionId,
+          scenario: 'minimal_identity_prompt',
         })
-        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const actions = result.actions
         const progressCalls = actions.filter((action) =>
           action.kind === 'dynamic'
           && action.tool === MURPH_SEND_PROGRESS_UPDATE_TOOL.name
@@ -1134,6 +1153,17 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
 
         process.stdout.write(
           `[onboarding-fresh-routine-goal-e2e] ${JSON.stringify({
+            actions: actions.map((action) =>
+              action.kind === 'command'
+                ? {
+                    command: redactRealCodexDiagnosticText(action.command),
+                    kind: action.kind,
+                  }
+                : {
+                    kind: action.kind,
+                    tool: action.tool,
+                  }
+            ),
             policyFiles,
             progressUpdateCount: progressUpdates.length,
             reply,
@@ -1143,8 +1173,9 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
 
         expect(progressUpdates).toEqual([])
         expect(progressCalls).toEqual([])
-        expect(resumeContexts).toHaveLength(1)
-        expect(policyFiles).toContain('SKILL.md')
+        expect(actions).toEqual([])
+        expect(resumeContexts).toEqual([])
+        expect(policyFiles).toEqual([])
         expect(reply).toMatch(/what should i call you/iu)
         expect(reply).toMatch(/how old|age/iu)
         expect(reply).toMatch(/gender/iu)
