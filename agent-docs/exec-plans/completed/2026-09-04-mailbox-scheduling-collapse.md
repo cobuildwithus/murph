@@ -1,6 +1,6 @@
 # Mailbox scheduling: one bounded retry owner
 
-Status: active; implementation and direct proof underway.
+Status: completed
 
 ## Outcome and invariant
 
@@ -162,11 +162,17 @@ Use protected release workflows and their existing current/ramping reader admiss
 - [x] Establish an isolated task checkout and write this architecture-first plan.
 - [x] Ask latest ReviewGPT 0.5.145 with GPT-6 Pro to critique this plan and suggest
   a materially simpler architecture; validate the captured model identity.
-- [ ] Record accepted/rejected design advice, settle the monitoring evidence seam,
+- [x] Record accepted/rejected design advice, settle the monitoring evidence seam,
   and implement the smallest complete collapse across the existing owners.
-- [ ] Run direct proof, typechecks, replay, complexity and candidate review.
-- [ ] Commit/push scoped PRs, run required reviews alongside CI, and land them.
-- [ ] Close the plan and retire the task worktrees; report actual deployment state.
+- [x] Run focused direct proof, typechecks, replay, complexity and candidate review;
+  disclose the local maximum-cardinality fixture limitation below.
+- [x] Commit/push scoped PRs and finish required reviews alongside CI.
+- [x] Close the implementation plan with proof limits and release responsibilities.
+
+Landing gate: require green final-head CI, prove current-base mergeability, merge
+both authorized PRs, then retire clean inactive worktrees. PR records and the
+completion report carry the eventual merge/CI outcome; this closed plan records
+the reviewed implementation without claiming pending checks or deployment.
 
 ## Review questions
 
@@ -225,3 +231,53 @@ processing Activities (complete and legacy facts), with no new mailbox arrival
 and one simulated effect. This proves scheduler admission and settlement, not a
 new end-to-end UserRunner/device-provider claim. Full private verification and
 final exact-head reviews remain pending.
+
+## Implementation review and remediation
+
+Public PR 2831 passed final GPT-6 Pro review on `f7f4cc8d76fa696c72e22b593e75435a3a8f2260`:
+https://chatgpt.com/c/6a9b4544-8974-83ea-96db-41ce6e0fb1e4.
+The captured response and model-verification artifacts match that exact target
+and report zero findings. The 6-minute-36-second capture was accepted under the
+review runbook's near-threshold discretion: substantive full changed-file and
+caller/owner inspection, verified source hashes, exact model and completion
+marker. Required public CI passed. The existing operator panel also consumes the
+corrected age; it now reports acceptance time for the unhandled head. Its separate
+legacy/device remediation gates and authenticated actions remain unchanged.
+
+Private PR 113's one-time GPT-6 Pro specialist review found SP-001 (P2): losing
+complete progress capability facts discarded a future accepted deadline. Parent
+regressions reproduced readmission at zero seconds in one run and five seconds
+after rollover, instead of the accepted 90-second horizon. The correction hands
+that deadline to the existing finite fallback after canonical pointer resolution.
+Available handled/generation progress, retired pointers, and expired deadlines
+prevent stale transfer; earlier workspace wakes still trigger fresh facts.
+Restoring complete capabilities carries the same deadline back to the progress
+gate. This adds no durable shape, new owner, or public capability protocol.
+
+Private final round 1 returned PASS on `6a734ec99db51e8ebae34ef89364015081b4c3a6`
+after about nine minutes, but did not override the separately reproduced
+specialist finding. Corrected head `980e39564254eaf844e09f583a0755a67cd34371`
+has 393 passing workflow/replay tests and a passing typecheck. Final round 2
+returned PASS with zero findings after about nine minutes, concurrently with CI:
+https://chatgpt.com/c/6a9b4bce-48a4-83ea-9d83-398eccafa301.
+The tool opened a fresh full-snapshot thread; its verified metadata preserves the
+exact current, first, and previous reviewed heads. Capture/model evidence confirms
+`gpt-6-pro` and the terminal marker. The reviewer independently reproduced the
+old failure and corrected 90-second admission in both transition cases; its
+offline machine harness is additional evidence, not a claimed Vitest/replay run.
+The preliminary review was not repeated. SP-001 is resolved by parent proof and
+final review; no accepted finding remains.
+
+The first local private `pnpm verify` failed two existing deployment-controller
+cleanup timing expectations. First-head CI verification passed. The corrected
+candidate's full local verification is running; no local failure is represented
+as a pass. Real Temporal admission/rollover evidence remains bounded to simulated
+execution and canonical effects, as described above.
+
+Landing and production adoption are separate. The public monitor and private
+scheduler are independently wire-compatible. Landing requires their final CI and
+review gates; production release and the protected run-bound migration remain
+operator work. Confirm successor histories contain the new marker after release;
+no deployment, production signal, history reset, or database mutation was made.
+Updated: 2026-09-04
+Completed: 2026-09-04
