@@ -1853,17 +1853,12 @@ Last verified: 2026-09-04
   error-code-independent stalls. Conversation rows with a non-null
   `consumed_at` are terminal and are excluded before both head selection and the
   lane's `COUNT(*) OVER()`; system-lane selection remains unchanged. A system
-  `device-sync.wake` head covered by the workspace's canonical
-  `hostedMailboxSystemImportedSeq` ages from the later of its creation and the
-  scheduled wake. The runtime keeps that device deadline in the canonical
-  model-free `nextWakeAt` selection and projects an independent assistant
-  deadline through `nextDefaultProcessingWakeAt`, so orchestration retains both
-  owners without polling unchanged system progress. The first live system item
-  above the imported frontier keeps its own creation-time clock, and an absent,
-  malformed, behind-head, or beyond-high-water imported frontier cannot defer
-  the head. Other system work still ages from creation, and a covered device
-  retry becomes anomalous when it remains pending for 15 minutes after that
-  scheduled runtime opportunity.
+  head ages from its accepted mailbox creation time. Import and unrelated
+  checkpoint or wake changes cannot reset that clock. The independent device
+  and assistant wake projections remain scheduler inputs, not per-item progress
+  evidence. Advancing the canonical handling frontier exposes the next live
+  head's own age. A mailbox can be clear after durable transfer into a retained
+  operation; this monitor does not establish that retained device work completed.
   An active runtime is otherwise
   anomalous when the resulting oldest live item beyond that high-water remains
   pending for at least 15 minutes. Eligibility uses the canonical

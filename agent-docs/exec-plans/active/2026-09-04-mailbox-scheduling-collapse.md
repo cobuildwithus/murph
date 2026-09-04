@@ -1,6 +1,6 @@
 # Mailbox scheduling: one bounded retry owner
 
-Status: active; architecture review before implementation.
+Status: active; implementation and direct proof underway.
 
 ## Outcome and invariant
 
@@ -160,7 +160,7 @@ Use protected release workflows and their existing current/ramping reader admiss
 
 - [x] Recover prior task and source findings; inspect current heads and open PRs.
 - [x] Establish an isolated task checkout and write this architecture-first plan.
-- [ ] Ask latest ReviewGPT 0.5.145 with GPT-6 Pro to critique this plan and suggest
+- [x] Ask latest ReviewGPT 0.5.145 with GPT-6 Pro to critique this plan and suggest
   a materially simpler architecture; validate the captured model identity.
 - [ ] Record accepted/rejected design advice, settle the monitoring evidence seam,
   and implement the smallest complete collapse across the existing owners.
@@ -181,18 +181,47 @@ Use protected release workflows and their existing current/ramping reader admiss
 
 ## Progress
 
-Plan review pending. Latest ReviewGPT 0.5.145 was verified from the package
-registry and invoked with explicit GPT-6 Pro selection. The first browser profile
-failed before send because regular Chat could not be confirmed; the second profile
-confirmed regular Chat and model selection and sent the review at 21:50 UTC.
-The tool-owned completion capture is waiting for PLAN_REVIEW_COMPLETE. No review result is being inferred from either attempt.
+Latest ReviewGPT 0.5.145 reviewed the plan with GPT-6 Pro. The exported thread
+metadata confirms `gpt-6-pro`; the complete response ended in the requested
+completion marker. The capture validator rejected duplicate model-confirmation
+lines (one prompt-specified, one tool-generated), so this is manually verified
+advisory evidence, not a final implementation gate PASS.
 
-Baseline proof: 16 public monitor unit tests and 15 focused private exact-pointer
-workflow tests pass. Existing PostgreSQL proof cannot run on the shared local test
-schema because recent workspace/member columns are absent. An isolated test
-database has all current migrations applied and the full PostgreSQL proof is
-running; no shared or production schema was changed. The real Temporal
-quiescence test also passes its existing one-admission expectation.
+Accepted advice: retain current facts and boundaries; collapse exact-pointer
+retry ownership into the progress gate; age unhandled mailbox work from acceptance
+without claiming retained-operation completion; prove no-ingress recovery, signal
+coalescing, deadline carry, and explicit migration adoption. No new work-summary
+schema, operation-health ledger, or parallel scheduler is justified.
 
-No production code, production state, or deployed configuration has changed.
-Prior incidents are summarized without production identifiers or rows.
+The monitor now removes the arbitrary workspace-wake clock and unused supporting
+query. Five focused PostgreSQL tests pass, including unchanged age across imports,
+checkpoint changes, unrelated deadlines, and genuine frontier advancement.
+The isolated database has current migrations; no shared or production schema was
+changed. The pre-change maximum-cardinality test timed out after 240 seconds;
+the five other baseline PostgreSQL tests passed. Recheck the changed query's
+maximum-cardinality behavior before delivery.
+
+Temporal now uses one current-capability progress gate and a finite legacy-facts
+fallback, retaining the accepted horizon and absolute deadlines across rollover.
+Adversarial facts-read tests exposed starvation from duplicate admission hints.
+The implementation preserves signal wake semantics while preventing identical
+pointers from repeatedly discarding usable facts. Legacy marker histories retain
+their recorded policy; the new deployed-combination replay fixture passes.
+Real Temporal no-ingress recovery, full verification, and final review remain in
+progress. No production state or deployed configuration has changed.
+
+Public candidate proof: 16 unit tests and all five focused PostgreSQL behavior
+tests pass. The full PostgreSQL run repeats a baseline setup failure: the
+20,001-row lane-counter fixture insert reaches its 180-second statement timeout,
+before the monitor query. Maximum-cardinality execution is therefore unverified
+locally; the production query's cardinality contract is unchanged and its unused
+lateral read is removed. Web typecheck passes after building the existing
+`device-syncd` dependency. Complexity guard passes with no hotspots above 20.
+Parent review confirms the public diff changes only monitoring and its contract;
+changelog is not applicable to this operator-only outcome.
+
+Both real Temporal no-ingress cases pass using a local server and simulated
+processing Activities (complete and legacy facts), with no new mailbox arrival
+and one simulated effect. This proves scheduler admission and settlement, not a
+new end-to-end UserRunner/device-provider claim. Full private verification and
+final exact-head reviews remain pending.

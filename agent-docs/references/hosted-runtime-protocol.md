@@ -1525,18 +1525,16 @@ side table or lane high-water advance past gaps. The runtime-progress monitor
 uses that same terminal distinction without redefining the contiguous floor:
 conversation candidates above the effective floor must still have
 `consumed_at IS NULL`, while system-lane candidates retain their existing
-live-row semantics. A `device-sync.wake` system head covered by the workspace's
-canonical `hostedMailboxSystemImportedSeq` uses the later of its mailbox
-creation time and its canonical model-free `nextWakeAt` as its progress origin.
-The workspace stores an independent assistant deadline in
-`nextDefaultProcessingWakeAt`, so assistant work does not replace the device
-owner and both remain visible to orchestration. The first live system item
-above the imported frontier independently keeps its creation-time origin; an
-absent, malformed, behind-head, or beyond-high-water frontier fails closed to
-the head's creation time. Covered work is therefore not stalled before its
-next runtime opportunity, but becomes
-alertable 15 minutes after it is due.
-Non-device system heads continue to age from mailbox creation. The selected
+live-row semantics. Every unhandled system head ages from mailbox creation.
+Import, workspace version, progress generation, and workspace-wide wake changes
+cannot establish completion or a deferral for that particular item. The runtime
+still projects independent model-free and assistant deadlines through `nextWakeAt`
+and `nextDefaultProcessingWakeAt`; those facts select future runtime opportunities.
+Once the canonical handling frontier advances, the next live item uses its own
+creation time. Durable transfer into a retained device operation can retire its
+mailbox input before the operation finishes, so a clear mailbox does not establish
+that every retained operation completed. Retained-operation health remains the
+responsibility of its existing device owner. The selected
 head and `COUNT(*) OVER()` come from that one lane-aware predicate. A stamped
 conversation row is terminal, not usage-resume evidence; only staging, provider
 start, or accepted delivery can establish post-denial execution for a remaining
