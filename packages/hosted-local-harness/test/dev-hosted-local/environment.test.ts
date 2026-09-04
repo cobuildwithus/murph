@@ -569,13 +569,20 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBe(generatedPrivateJwkJson);
   });
 
-  it("preserves matching persisted local authority signing keys and key version", () => {
+  it("migrates matching persisted local authority keys from a legacy version name", () => {
+    const legacyKeyVersionName =
+      "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/legacy-local";
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
       existing: {
         HOSTED_CRYPTO_ENV: "local",
-        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION:
-          "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/legacy-local",
+        HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON: JSON.stringify({
+          [legacyKeyVersionName]: {
+            publicKeyPem: existingAuthorityPublicPem.trim(),
+            status: "active",
+          },
+        }),
+        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION: legacyKeyVersionName,
         HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM: existingAuthorityPublicPem,
         HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: existingAuthorityPrivateJwkJson,
         HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: "existing-wrap-key",
@@ -592,8 +599,11 @@ describe("mergeCloudflareLocalEnv", () => {
       }),
     });
 
-    expect(merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION).toBe(
-      "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/legacy-local",
+    expect(merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION).toMatch(
+      /^projects\/murph-local\/locations\/global\/keyRings\/hosted-local\/cryptoKeys\/authority-sign\/cryptoKeyVersions\/[1-9][0-9]*$/u,
+    );
+    expect(merged.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION).toBe(
+      merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION,
     );
     expect(merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM).toBe(
       existingAuthorityPublicPem.trim(),
@@ -601,6 +611,16 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK).toBe(
       existingAuthorityPrivateJwkJson,
     );
+    expect(JSON.parse(merged.HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON)).toEqual({
+      [legacyKeyVersionName]: {
+        publicKeyPem: existingAuthorityPublicPem.trim(),
+        status: "verify_only",
+      },
+      [merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION]: {
+        publicKeyPem: existingAuthorityPublicPem.trim(),
+        status: "active",
+      },
+    });
   });
 
   it("rejects mismatched persisted local authority signing keys instead of regenerating", () => {
@@ -1361,11 +1381,20 @@ describe("buildWranglerVarArgs", () => {
     expect(
       buildWranglerVarArgs({
         HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "CUSTOM_API_KEY",
+        HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: "bundle-fingerprint",
+        HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: "source-fingerprint",
+        HOSTED_EXECUTION_STANDBY_MODE: "allocate",
         HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "45000",
       }),
     ).toEqual([
       "--var",
       "HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS:CUSTOM_API_KEY",
+      "--var",
+      "HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT:bundle-fingerprint",
+      "--var",
+      "HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT:source-fingerprint",
+      "--var",
+      "HOSTED_EXECUTION_STANDBY_MODE:allocate",
       "--var",
       "HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS:45000",
     ]);
@@ -1495,6 +1524,9 @@ describe("buildWranglerEnvFileText", () => {
       EXA_API_KEY: "exa-secret",
       HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph",
       HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "CUSTOM_API_KEY",
+      HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: "bundle-fingerprint",
+      HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: "source-fingerprint",
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
       HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "45000",
       MURPH_ELEVENLABS_MODEL_ID: "eleven_multilingual_v2",
       MURPH_ELEVENLABS_VOICE_ID: "voice-murph",
@@ -1504,6 +1536,9 @@ describe("buildWranglerEnvFileText", () => {
     expect(text).toContain('EXA_API_KEY="exa-secret"');
     expect(text).toContain('HOSTED_EMAIL_DEFAULT_SUBJECT="Murph"');
     expect(text).toContain('HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS="CUSTOM_API_KEY"');
+    expect(text).toContain('HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT="bundle-fingerprint"');
+    expect(text).toContain('HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT="source-fingerprint"');
+    expect(text).toContain('HOSTED_EXECUTION_STANDBY_MODE="allocate"');
     expect(text).toContain('HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS="45000"');
     expect(text).toContain('MURPH_ELEVENLABS_MODEL_ID="eleven_multilingual_v2"');
     expect(text).toContain('MURPH_ELEVENLABS_VOICE_ID="voice-murph"');

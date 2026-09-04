@@ -872,6 +872,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
   vaultShareProjectionResult?: HostedVaultShareProjectionOfferResult;
   vaultRoot: string;
 }): Promise<{
+  deviceSyncWake?: HostedRuntimeWakeCandidate;
   errorCode?: string | null;
   errorMessage?: string | null;
   failed: number;
@@ -921,8 +922,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
         vaultRoot: input.vaultRoot,
       });
     }
-    const nextWake = selectHostedRuntimeWakeCandidate([
-      await resolveHostedSystemMailboxNextWakeCandidate({ vaultRoot: input.vaultRoot }),
+    const deviceSyncWake = selectHostedRuntimeWakeCandidate([
       createHostedRuntimeWakeCandidate(
         retainUntil,
         HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
@@ -934,7 +934,12 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
         HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
       ),
     ]);
+    const nextWake = selectHostedRuntimeWakeCandidate([
+      await resolveHostedSystemMailboxNextWakeCandidate({ vaultRoot: input.vaultRoot }),
+      deviceSyncWake,
+    ]);
     return {
+      deviceSyncWake: presentHostedRuntimeWakeCandidate(deviceSyncWake),
       failed: 0,
       nextWakeAt: nextWake.at,
       ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}),
@@ -983,6 +988,12 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       recorded: 0,
     };
   }
+}
+
+function presentHostedRuntimeWakeCandidate(
+  candidate: HostedRuntimeWakeCandidate,
+): HostedRuntimeWakeCandidate | undefined {
+  return candidate.at ? candidate : undefined;
 }
 
 function resolveHostedDeviceSyncMailboxRetentionAt(
@@ -1294,6 +1305,7 @@ function readHostedSystemMailboxRouteAction(
     || item.route.action === "run-device-sync-wake"
     || item.route.action === "run-environment-interview"
     || item.route.action === "run-environment-voice"
+    || item.route.action === "import-group-journal-fact"
     || item.route.action === "import-reported-daily-metric"
     || item.route.action === "apply-runtime-control-request"
   ) {

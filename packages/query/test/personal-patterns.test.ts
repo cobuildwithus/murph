@@ -11,12 +11,17 @@ import {
 import { test } from "vitest";
 
 import type { CanonicalEntity } from "../src/canonical-entities.ts";
+import { readBrowserVaultPersonalPatternVocabulary } from "../src/browser-replica/source.ts";
+import { DERIVED_KNOWLEDGE_PAGES_ROOT } from "../src/knowledge-graph.ts";
 import {
   BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
   createBrowserVaultReplica,
   parseBrowserVaultReplica,
 } from "../src/browser.ts";
-import { buildPersonalPatternReport } from "../src/personal-patterns.ts";
+import {
+  buildPersonalPatternReport,
+  parsePersonalPatternVocabulary,
+} from "../src/personal-patterns.ts";
 import { createVaultReadModel } from "../src/read-model.ts";
 import type { MetricPoint } from "../src/metrics/index.ts";
 import {
@@ -94,6 +99,269 @@ test("Personal Patterns keeps a repeated next-day link and matched comparison ev
   });
   const parsed = parseBrowserVaultReplica(replica);
   assert.deepEqual(parsed.personalPatterns, report);
+});
+
+test("Personal Patterns applies one validated vocabulary before aggregation", async () => {
+  const vocabulary = parsePersonalPatternVocabulary(
+    JSON.stringify({
+      concepts: [
+        {
+          aliases: ["cardio-dance", "dancing"],
+          icon: "dance",
+          id: "dance",
+          label: "Dance",
+        },
+      ],
+      version: 1,
+    }),
+  );
+  assert.ok(vocabulary);
+  const report = buildPersonalPatternReport(
+    createVaultReadModel({
+      entities: [
+        event("dance_1", "2026-08-20", "activity_session", {
+          activityType: "dancing",
+        }),
+        event("dance_2", "2026-08-21", "activity_session", {
+          activityType: "cardio_dance",
+        }),
+      ],
+      vaultRoot: "test://personal-pattern-vocabulary",
+    }),
+    { asOf: "2026-08-22", vocabulary },
+  );
+
+  assert.deepEqual(report.factors, [
+    {
+      icon: "dance",
+      id: "dance",
+      kind: "activity",
+      label: "Dance",
+      observedDays: 2,
+    },
+  ]);
+
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-08-22T12:00:00.000Z",
+    metricPoints: [],
+    personalPatternVocabulary: vocabulary,
+    sourceBundleHash: "v".repeat(64),
+    vault: createVaultReadModel({
+      entities: [
+        event("dance_1", "2026-08-20", "activity_session", {
+          activityType: "dancing",
+        }),
+        event("dance_2", "2026-08-21", "activity_session", {
+          activityType: "cardio_dance",
+        }),
+      ],
+      vaultRoot: "test://personal-pattern-vocabulary-replica",
+    }),
+  });
+  assert.deepEqual(
+    parseBrowserVaultReplica(replica).personalPatterns?.factors,
+    report.factors,
+  );
+});
+
+test("Personal Patterns counts merged aliases once per independent day", () => {
+  const vocabulary = parsePersonalPatternVocabulary(
+    JSON.stringify({
+      concepts: [
+        {
+          aliases: ["cardio-dance", "dancing"],
+          icon: "dance",
+          id: "dance",
+          label: "Dance",
+        },
+      ],
+      version: 1,
+    }),
+  );
+  assert.ok(vocabulary);
+  const sharedOutcomes = [
+    observation("baseline_1", "2026-07-21", "hrv", 50, "ms"),
+    observation("baseline_2", "2026-07-28", "hrv", 50, "ms"),
+    observation("dance_result_1", "2026-08-04", "hrv", 80, "ms"),
+    observation("dance_result_2", "2026-08-18", "hrv", 80, "ms"),
+  ];
+  const oneDay = buildPersonalPatternReport(
+    createVaultReadModel({
+      entities: [
+        event("dance_1", "2026-08-03", "activity_session", {
+          activityType: "dancing",
+        }),
+        event("dance_2", "2026-08-03", "activity_session", {
+          activityType: "cardio_dance",
+        }),
+        ...sharedOutcomes,
+      ],
+      vaultRoot: "test://personal-pattern-one-merged-day",
+    }),
+    { asOf: "2026-08-18", vocabulary, windowDays: 35 },
+  );
+  const oneDayCell = oneDay.cells.find(
+    (cell) => cell.factorId === "dance" && cell.outcomeId === "hrv",
+  );
+  assert.equal(oneDayCell?.exposedDays, 1);
+  assert.equal(oneDayCell?.grade, "E");
+
+  const twoDays = buildPersonalPatternReport(
+    createVaultReadModel({
+      entities: [
+        event("dance_1", "2026-08-03", "activity_session", {
+          activityType: "dancing",
+        }),
+        event("dance_2", "2026-08-17", "activity_session", {
+          activityType: "cardio_dance",
+        }),
+        ...sharedOutcomes,
+      ],
+      vaultRoot: "test://personal-pattern-two-merged-days",
+    }),
+    { asOf: "2026-08-18", vocabulary, windowDays: 35 },
+  );
+  const twoDayCell = twoDays.cells.find(
+    (cell) => cell.factorId === "dance" && cell.outcomeId === "hrv",
+  );
+  assert.equal(twoDayCell?.exposedDays, 2);
+  assert.equal(twoDayCell?.grade, "D");
+});
+
+test("Personal Patterns rejects ambiguous or unbounded vocabulary", () => {
+  assert.equal(
+    parsePersonalPatternVocabulary(
+      JSON.stringify({
+        concepts: [
+          {
+            aliases: ["dancing"],
+            icon: "dance",
+            id: "dance",
+            label: "Dance",
+          },
+          {
+            aliases: ["dancing"],
+            icon: "activity",
+            id: "performance",
+            label: "Performance",
+          },
+        ],
+        version: 1,
+      }),
+    ),
+    null,
+  );
+  assert.equal(parsePersonalPatternVocabulary("not json"), null);
+});
+
+test("Browser Vault reads the bounded vocabulary from its private Knowledge page", async () => {
+  const testTempRoot = process.env.MURPH_VITEST_TEMP_ROOT;
+  assert.ok(testTempRoot);
+  const vaultRoot = await mkdtemp(
+    path.join(testTempRoot, "personal-pattern-vocabulary-"),
+  );
+  try {
+    const pagesRoot = path.join(vaultRoot, DERIVED_KNOWLEDGE_PAGES_ROOT);
+    await mkdir(path.join(vaultRoot, "ledger/events/2026"), {
+      recursive: true,
+    });
+    await mkdir(pagesRoot, { recursive: true });
+    await writeFile(
+      path.join(vaultRoot, "vault.json"),
+      `${JSON.stringify({
+        createdAt: "2026-01-01T00:00:00.000Z",
+        formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+        timezone: "UTC",
+        title: "Personal Pattern vocabulary fixture",
+        vaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4V",
+      })}\n`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(vaultRoot, "ledger/events/2026/2026-08.jsonl"),
+      `${[
+        {
+          activityType: "dancing",
+          dayKey: "2026-08-20",
+          id: "evt_vocabulary_dance_1",
+          kind: "activity_session",
+          occurredAt: "2026-08-20T12:00:00.000Z",
+          schemaVersion: "murph.event.v1",
+          source: "device",
+          title: "Dancing",
+        },
+        {
+          activityType: "cardio_dance",
+          dayKey: "2026-08-21",
+          id: "evt_vocabulary_dance_2",
+          kind: "activity_session",
+          occurredAt: "2026-08-21T12:00:00.000Z",
+          schemaVersion: "murph.event.v1",
+          source: "device",
+          title: "Cardio dance",
+        },
+      ].map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(pagesRoot, "journal-pattern-vocabulary.md"),
+      [
+        "---",
+        "title: Journal and Pattern vocabulary",
+        "slug: journal-pattern-vocabulary",
+        "pageType: ledger",
+        "status: active",
+        "---",
+        "",
+        "# Journal and Pattern vocabulary",
+        "",
+        JSON.stringify({
+          concepts: [
+            {
+              aliases: ["cardio-dance", "dancing"],
+              icon: "dance",
+              id: "dance",
+              label: "Dance",
+            },
+          ],
+          version: 1,
+        }),
+      ].join("\n"),
+      "utf8",
+    );
+
+    assert.deepEqual(
+      await readBrowserVaultPersonalPatternVocabulary(vaultRoot),
+      {
+        concepts: [
+          {
+            aliases: ["cardio-dance", "dancing"],
+            icon: "dance",
+            id: "dance",
+            label: "Dance",
+          },
+        ],
+        version: 1,
+      },
+    );
+    await rebuildQueryProjection(vaultRoot);
+    assert.deepEqual(
+      (await buildPersonalPatternReportRuntime(vaultRoot, {
+        asOf: "2026-08-22",
+      })).factors,
+      [
+        {
+          icon: "dance",
+          id: "dance",
+          kind: "activity",
+          label: "Dance",
+          observedDays: 2,
+        },
+      ],
+    );
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
 });
 
 test("Personal Patterns keeps a repeated eight-minute deep-sleep change", async () => {
@@ -1429,7 +1697,7 @@ test("Personal Patterns keeps recognized factors when matched history is insuffi
   assert.equal(report.testedCellCount, 0);
 });
 
-test("Personal Patterns uses the concise label for evening light-filtering glasses", () => {
+test("Personal Patterns uses vocabulary instead of a factor-specific label rule", () => {
   const start = "2026-03-02";
   const entities: CanonicalEntity[] = [
     ...Array.from({ length: 5 }, (_, index) => ({
@@ -1459,18 +1727,30 @@ test("Personal Patterns uses the concise label for evening light-filtering glass
       entities,
       vaultRoot: "test://personal-pattern-light-filtering-glasses",
     }),
-    { asOf: "2026-03-08T12:00:00.000Z" },
+    {
+      asOf: "2026-03-08T12:00:00.000Z",
+      vocabulary: parsePersonalPatternVocabulary(
+        JSON.stringify({
+          concepts: [
+            {
+              aliases: [
+                "blue-light-blocking-glasses",
+                "high-filtering-amber-red-or-orange-evening-glasses-with-spectral-data-when-available",
+              ],
+              icon: "red-light",
+              id: "red-light-glasses",
+              label: "Red light glasses",
+            },
+          ],
+          version: 1,
+        }),
+      ),
+    },
   );
 
   assert.deepEqual(
     report.factors.map((factor) => [factor.id, factor.label]),
-    [
-      ["blue-light-blocking-glasses", "Blue-light blocking glasses"],
-      [
-        "high-filtering-amber-red-or-orange-evening-glasses-with-spectral-data-when-available",
-        "Red/amber evening glasses",
-      ],
-    ],
+    [["red-light-glasses", "Red light glasses"]],
   );
 });
 

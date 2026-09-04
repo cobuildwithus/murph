@@ -12,6 +12,7 @@ import {
   readHostedSystemMailboxState,
   removeHostedSystemMailboxPendingItemIfCurrent,
   resolveHostedSystemMailboxHandledThroughSeq,
+  resolveHostedSystemMailboxProgress,
   resolveHostedSystemMailboxNextWakeCandidate,
   resolveHostedSystemMailboxWakeCandidates,
   setHostedDeviceSyncDenseRawRetentionMailboxWakeAt,
@@ -317,6 +318,18 @@ describe("hosted runtime system mailbox state", () => {
         ],
       },
     })).toBe("3");
+    expect(resolveHostedSystemMailboxProgress({
+      importedSeq: "9",
+      state: {
+        pending: [
+          buildPendingSystemMailboxItem({ itemId: "pending_7", mailboxLaneSeq: "7" }),
+          buildPendingSystemMailboxItem({ itemId: "pending_4", mailboxLaneSeq: "4" }),
+        ],
+      },
+    })).toEqual({
+      firstPendingSeq: "4",
+      handledThroughSeq: "3",
+    });
   });
 
   it("blocks legacy unsequenced work without letting synthetic retention wakes block the lane", async () => {
@@ -329,6 +342,18 @@ describe("hosted runtime system mailbox state", () => {
         })],
       },
     })).toBe("0");
+    expect(resolveHostedSystemMailboxProgress({
+      importedSeq: "9",
+      state: {
+        pending: [buildPendingSystemMailboxItem({
+          itemId: "pending_legacy",
+          mailboxLaneSeq: null,
+        })],
+      },
+    })).toEqual({
+      firstPendingSeq: null,
+      handledThroughSeq: "0",
+    });
 
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
     try {

@@ -73,6 +73,11 @@ interface PatternPopoverState {
   setActiveId: (id: string | null) => void;
 }
 
+export interface PatternSort {
+  columnId: string;
+  direction: "ascending" | "descending";
+}
+
 const PatternPopoverContext = createContext<PatternPopoverState | null>(null);
 
 export function PersonalPatternsSection({
@@ -87,11 +92,15 @@ export function PersonalPatternsSection({
   const headingId = useId();
   const matrixId = useId();
   const [showAllFactors, setShowAllFactors] = useState(false);
+  const [sort, setSort] = useState<PatternSort | null>(null);
   const visibleReport = report ? selectVisiblePatternReport(report) : null;
+  const sortedReport = visibleReport
+    ? sortPersonalPatternReport(visibleReport, sort)
+    : null;
   const hasMoreFactors =
-    (visibleReport?.factors.length ?? 0) > INITIAL_VISIBLE_FACTOR_COUNT;
+    (sortedReport?.factors.length ?? 0) > INITIAL_VISIBLE_FACTOR_COUNT;
   const displayedReport = buildDisplayedPatternReport(
-    visibleReport,
+    sortedReport,
     showAllFactors,
   );
 
@@ -132,7 +141,20 @@ export function PersonalPatternsSection({
           displayedReport.outcomes.length > 0 ? (
             <>
               <div id={matrixId}>
-                <PatternMatrix report={displayedReport} />
+                <PatternMatrix
+                  onSort={(columnId) =>
+                    setSort((current) => ({
+                      columnId,
+                      direction:
+                        current?.columnId === columnId &&
+                        current.direction === "descending"
+                          ? "ascending"
+                          : "descending",
+                    }))
+                  }
+                  report={displayedReport}
+                  sort={sort}
+                />
               </div>
               {hasMoreFactors ? (
                 <div className="flex items-center justify-between gap-4 border-t border-border px-6 py-4 sm:px-8">
@@ -238,6 +260,57 @@ function buildDisplayedPatternReport(
   };
 }
 
+export function sortPersonalPatternReport(
+  report: PersonalPatternReport,
+  sort: PatternSort | null,
+): PersonalPatternReport {
+  if (!sort) return report;
+  const column = buildOutcomeColumns(report.outcomes).find(
+    (candidate) => candidate.id === sort.columnId,
+  );
+  if (!column) return report;
+  const originalIndex = new Map(
+    report.factors.map((factor, index) => [factor.id, index]),
+  );
+  const direction = sort.direction === "ascending" ? 1 : -1;
+
+  return {
+    ...report,
+    factors: [...report.factors].sort((left, right) => {
+      const leftValue = patternColumnSortValue(report, left.id, column);
+      const rightValue = patternColumnSortValue(report, right.id, column);
+      if (leftValue === null && rightValue !== null) return 1;
+      if (leftValue !== null && rightValue === null) return -1;
+      if (leftValue !== null && rightValue !== null && leftValue !== rightValue) {
+        return (leftValue - rightValue) * direction;
+      }
+      return (
+        right.observedDays - left.observedDays ||
+        (originalIndex.get(left.id) ?? 0) - (originalIndex.get(right.id) ?? 0)
+      );
+    }),
+  };
+}
+
+function patternColumnSortValue(
+  report: PersonalPatternReport,
+  factorId: string,
+  column: PatternOutcomeColumn,
+): number | null {
+  const values = column.outcomes
+    .flatMap((outcome) => {
+      const cell = findPatternCell(report, factorId, outcome.id);
+      return cell &&
+        cell.stage !== "insufficient" &&
+        cell.deltaPercent !== null
+        ? [cell.deltaPercent]
+        : [];
+    });
+  return values.length > 0
+    ? values.reduce((sum, value) => sum + value, 0) / values.length
+    : null;
+}
+
 function PatternsLoadingState() {
   return (
     <div
@@ -266,7 +339,15 @@ function PatternsLoadingState() {
   );
 }
 
-function PatternMatrix({ report }: { report: PersonalPatternReport }) {
+function PatternMatrix({
+  onSort,
+  report,
+  sort,
+}: {
+  onSort: (columnId: string) => void;
+  report: PersonalPatternReport;
+  sort: PatternSort | null;
+}) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const popoverState = useMemo(() => ({ activeId, setActiveId }), [activeId]);
 
@@ -274,8 +355,8 @@ function PatternMatrix({ report }: { report: PersonalPatternReport }) {
     <PatternPopoverContext.Provider value={popoverState}>
       <TooltipProvider>
         <div className="border-t border-border">
-          <MobilePatternMatrix report={report} />
-          <DesktopPatternMatrix report={report} />
+          <MobilePatternMatrix onSort={onSort} report={report} sort={sort} />
+          <DesktopPatternMatrix onSort={onSort} report={report} sort={sort} />
 
           <div className="border-t border-border px-6 py-4 text-xs text-muted-foreground sm:px-8">
             Results show associations, not proof of cause.
@@ -286,7 +367,15 @@ function PatternMatrix({ report }: { report: PersonalPatternReport }) {
   );
 }
 
-function MobilePatternMatrix({ report }: { report: PersonalPatternReport }) {
+function MobilePatternMatrix({
+  onSort,
+  report,
+  sort,
+}: {
+  onSort: (columnId: string) => void;
+  report: PersonalPatternReport;
+  sort: PatternSort | null;
+}) {
   const outcomeColumns = buildOutcomeColumns(report.outcomes);
   const columns = `repeat(${outcomeColumns.length}, 7rem)`;
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -369,7 +458,14 @@ function MobilePatternMatrix({ report }: { report: PersonalPatternReport }) {
                 className="flex min-w-0 items-end justify-center px-2 py-3 text-center"
                 data-pattern-outcome-column={outcome.id}
               >
-                <PatternOutcomeHeader compact outcome={outcome} />
+                <PatternOutcomeHeader
+                  compact
+                  onSort={onSort}
+                  outcome={outcome}
+                  sortDirection={
+                    sort?.columnId === outcome.id ? sort.direction : null
+                  }
+                />
               </div>
             ))}
           </div>
@@ -411,7 +507,15 @@ function MobilePatternMatrix({ report }: { report: PersonalPatternReport }) {
   );
 }
 
-function DesktopPatternMatrix({ report }: { report: PersonalPatternReport }) {
+function DesktopPatternMatrix({
+  onSort,
+  report,
+  sort,
+}: {
+  onSort: (columnId: string) => void;
+  report: PersonalPatternReport;
+  sort: PatternSort | null;
+}) {
   const outcomeColumns = buildOutcomeColumns(report.outcomes);
   const columns = `13.5rem repeat(${outcomeColumns.length}, minmax(7.5rem, 1fr))`;
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -465,7 +569,13 @@ function DesktopPatternMatrix({ report }: { report: PersonalPatternReport }) {
                 className="px-3 py-4 text-center"
                 data-pattern-outcome-column={outcome.id}
               >
-                <PatternOutcomeHeader outcome={outcome} />
+                <PatternOutcomeHeader
+                  onSort={onSort}
+                  outcome={outcome}
+                  sortDirection={
+                    sort?.columnId === outcome.id ? sort.direction : null
+                  }
+                />
               </div>
             ))}
           </div>
@@ -536,52 +646,31 @@ interface PatternEffectEntry {
 
 function PatternOutcomeHeader({
   compact = false,
+  onSort,
   outcome,
+  sortDirection,
 }: {
   compact?: boolean;
+  onSort: (columnId: string) => void;
   outcome: PatternOutcomeColumn;
+  sortDirection: PatternSort["direction"] | null;
 }) {
-  const pointerAnchor = usePointerPopoverAnchor();
-  const popover = useExclusivePatternPopover();
-
   return (
-    <Popover open={popover.open} onOpenChange={popover.onOpenChange}>
-      <PopoverTrigger
-        closeDelay={200}
-        delay={150}
-        openOnHover
-        render={
-          <button
-            type="button"
-            className={cn(
-              "rounded-sm font-medium text-foreground underline decoration-border underline-offset-4 transition-colors hover:decoration-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-              compact ? "text-[10px] leading-[1.15]" : "text-xs leading-tight",
-            )}
-            onKeyDown={pointerAnchor.onKeyDown}
-            onPointerMove={pointerAnchor.onPointerMove}
-          >
-            {outcome.label}
-          </button>
-        }
-      />
-      <PopoverContent
-        align="center"
-        anchor={pointerAnchor.anchor}
-        className="w-[min(19rem,calc(100vw-2rem))]"
-        positionMethod="fixed"
-        side="right"
-        sideOffset={10}
+    <div className="flex items-center justify-center">
+      <button
+        aria-label={`Sort by ${outcome.label}${
+          sortDirection ? `, ${sortDirection}` : ""
+        }`}
+        className={cn(
+          "inline-flex items-center gap-1 rounded-sm font-medium text-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+          compact ? "text-[10px] leading-[1.15]" : "text-xs leading-tight",
+        )}
+        onClick={() => onSort(outcome.id)}
+        type="button"
       >
-        <PopoverHeader className="gap-1">
-          <PopoverTitle className="font-serif text-base font-semibold">
-            {outcome.label}
-          </PopoverTitle>
-          <PopoverDescription className="text-xs leading-5 text-muted-foreground">
-            {outcome.description}
-          </PopoverDescription>
-        </PopoverHeader>
-      </PopoverContent>
-    </Popover>
+        <span>{outcome.label}</span>
+      </button>
+    </div>
   );
 }
 
@@ -848,13 +937,13 @@ function PatternBubble({
               Still learning
             </p>
             <PopoverTitle className="font-serif text-lg font-semibold leading-6">
-              Not enough data
+              No comparable days
             </PopoverTitle>
             <PopoverDescription className="text-xs leading-5 text-muted-foreground">
-              Murph saw {formatDayCount(factorObservedDays)} with{" "}
-              {factorLabel.toLocaleLowerCase()}, but could not pair them with
-              similar days that also had {formatSentenceTerm(outcomeLabel)}{" "}
-              data.
+              Murph found {formatDayCount(factorObservedDays)} with{" "}
+              {factorLabel.toLocaleLowerCase()}, but not enough matching days
+              also had {formatSentenceTerm(outcomeLabel)} data for a fair
+              comparison.
             </PopoverDescription>
           </PopoverHeader>
         </PopoverContent>
@@ -1222,17 +1311,6 @@ export function getOutcomeDescription(outcomeId: string): string {
     default:
       return "A personal health result compared across recorded days.";
   }
-}
-
-function chunkOutcomeColumns(
-  outcomes: PatternOutcomeColumn[],
-  size: number,
-): PatternOutcomeColumn[][] {
-  const groups: PatternOutcomeColumn[][] = [];
-  for (let index = 0; index < outcomes.length; index += size) {
-    groups.push(outcomes.slice(index, index + size));
-  }
-  return groups;
 }
 
 function findPatternCell(

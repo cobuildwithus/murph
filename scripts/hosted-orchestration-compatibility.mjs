@@ -5,6 +5,7 @@ import path from "node:path";
 
 export const TEMPORAL_COMPATIBILITY_CONTRACT_VERSION = "1";
 export const TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY = "cobuildwithus/murph-cloud";
+export const TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH = "main";
 export const TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW = "public-murph-integration.yml";
 export const TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME = "Public Murph Integration";
 export const TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH =
@@ -12,15 +13,16 @@ export const TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH =
 
 const GITHUB_API_VERSION = "2026-03-10";
 const HTTP_TIMEOUT_MS = 30_000;
-const PRIVATE_RUN_TIMEOUT_MS = 60 * 60_000;
+export const TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS = 58 * 60_000;
+export const TEMPORAL_COMPATIBILITY_RUN_TIMEOUT_MS = 40 * 60_000;
 const CANCEL_GRACE_MS = 2 * 60_000;
+export const TEMPORAL_COMPATIBILITY_SETTLEMENT_RESERVE_MS = 6 * 60_000;
 const POLL_MS = 15_000;
 const PRIVATE_RUN_VISIBILITY_READS = 5;
 const MAX_CHANGED_FILES = 3_000;
 const MAX_PRODUCER_FIXTURE_BYTES = 32 * 1024;
 const MAX_PRODUCER_FIXTURES = 16;
 const PAGE_SIZE = 100;
-
 const RELEVANT_PREFIXES = [
   "apps/cloudflare/",
   "apps/web/",
@@ -37,7 +39,6 @@ const RELEVANT_PREFIXES = [
 const RELEVANT_EXACT_PATHS = new Set([
   ".github/workflows/repo-hygiene.yml",
   ".github/workflows/temporal-compatibility.yml",
-  ".github/temporal-compatibility-controller.json",
   ".nvmrc",
   "config/workspace-source-resolution.ts",
   "package.json",
@@ -204,31 +205,17 @@ export function inspectProducerFixtures(value) {
   };
 }
 
-export function inspectControllerPolicy(raw) {
-  assertRecord(raw, "Temporal compatibility controller policy");
-  if (raw.contractVersion !== Number(TEMPORAL_COMPATIBILITY_CONTRACT_VERSION)) {
-    throw new Error("Temporal compatibility controller policy version is invalid.");
+export function inspectPrivateMainRef(raw) {
+  assertRecord(raw, "private main ref");
+  if (
+    !isRecord(raw.object)
+    || raw.ref !== `refs/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`
+    || raw.object.type !== "commit"
+  ) {
+    throw new Error("Private main ref identity is invalid.");
   }
-  const privateSha = requiredString(raw.privateSha, "private compatibility controller SHA");
-  assertSha(privateSha, "private compatibility controller SHA");
-  const privateRef = safeTag(requiredString(raw.privateRef, "private compatibility controller ref"));
-  if (privateRef !== `temporal-compatibility-v1-${privateSha}`) {
-    throw new Error("Private compatibility controller ref must bind its exact SHA.");
-  }
-  return { privateRef, privateSha };
-}
-
-export function inspectPrivateTag(raw, { expectedSha, ref }) {
-  assertRecord(raw, "private compatibility tag");
-  if (!isRecord(raw.object) || raw.ref !== `refs/tags/${ref}` || raw.object.type !== "commit") {
-    throw new Error("Private compatibility ref must be an immutable lightweight tag.");
-  }
-  const sha = requiredString(raw.object.sha, "private compatibility tag SHA");
-  assertSha(sha, "private compatibility tag SHA");
-  assertSha(expectedSha, "reviewed private compatibility SHA");
-  if (sha !== expectedSha) {
-    throw new Error("Private compatibility tag does not resolve to the reviewed SHA.");
-  }
+  const sha = requiredString(raw.object.sha, "private main SHA");
+  assertSha(sha, "private main SHA");
   return sha;
 }
 
@@ -275,7 +262,7 @@ export function inspectDispatchReceipt(raw) {
   return raw.workflow_run_id;
 }
 
-export function inspectPrivateRun(raw, { privateRef, privateSha, runId, workflowId }) {
+export function inspectPrivateRun(raw, { privateSha, runId, workflowId }) {
   assertRecord(raw, "private compatibility run");
   const repository = isRecord(raw.repository) ? raw.repository.full_name : null;
   const headRepository = isRecord(raw.head_repository) ? raw.head_repository.full_name : null;
@@ -283,9 +270,9 @@ export function inspectPrivateRun(raw, { privateRef, privateSha, runId, workflow
     raw.id !== runId
     || raw.workflow_id !== workflowId
     || raw.name !== TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME
-    || raw.path !== TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH
+    || !isPrivateWorkflowRunPath(raw.path)
     || raw.event !== "workflow_dispatch"
-    || raw.head_branch !== privateRef
+    || raw.head_branch !== TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH
     || raw.head_sha !== privateSha
     || raw.run_attempt !== 1
     || repository !== TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY
@@ -311,8 +298,11 @@ export function supportedReaderDigest(readerShas) {
     throw new Error("Supported-reader set contains a duplicate SHA.");
   }
   // Cross-repository wire format: sorted lowercase SHAs, one per line, with a
-  // trailing newline. The private attestation must compute this exact digest.
-  return createHash("sha256").update(`${normalized.join("\n")}\n`).digest("hex");
+  // trailing newline. Private CI binds lifecycle state separately so public
+  // verification does not duplicate private routing policy.
+  return createHash("sha256")
+    .update(`${normalized.join("\n")}\n`)
+    .digest("hex");
 }
 
 export function compatibilityProofDigest({ producerDigest, publicSha, readersDigest, requestId }) {
@@ -373,8 +363,11 @@ export function inspectAttestationJobs(jobs, {
   if (attestations.length !== 1) {
     throw new Error("Private compatibility run must return exactly one attestation job.");
   }
+  // Private protected CI owns Current/Ramping discovery, while this controller
+  // independently requires the exact dispatched private candidate to appear in
+  // the attested reader matrix.
   if (!readers.includes(privateSha)) {
-    throw new Error("Supported-reader proof omitted the pinned private controller revision.");
+    throw new Error("Supported-reader proof omitted the dispatched private candidate.");
   }
   const digest = supportedReaderDigest(readers);
   const proofDigest = compatibilityProofDigest({
@@ -389,48 +382,41 @@ export function inspectAttestationJobs(jobs, {
   return { digest, proofDigest, readerCount: readers.length };
 }
 
-export function inspectJobPage(raw, { expectedTotal, page }) {
+export function inspectJobPage(raw) {
   assertRecord(raw, "private compatibility job page");
-  if (!Number.isSafeInteger(raw.total_count) || raw.total_count < 0 || !Array.isArray(raw.jobs)) {
+  if (
+    !Number.isSafeInteger(raw.total_count)
+    || raw.total_count < 0
+    || raw.total_count > PAGE_SIZE
+    || !Array.isArray(raw.jobs)
+  ) {
     throw new Error("Private compatibility job page is malformed.");
   }
-  const total = expectedTotal === null ? raw.total_count : expectedTotal;
-  if (raw.total_count !== total) {
-    throw new Error("Private compatibility job count changed during pagination.");
-  }
-  const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const expectedLength = page === lastPage ? total - PAGE_SIZE * (page - 1) : PAGE_SIZE;
-  if (raw.jobs.length !== expectedLength) {
+  if (raw.jobs.length !== raw.total_count) {
     throw new Error("Private compatibility job pagination is incomplete.");
   }
-  return { jobs: raw.jobs, total };
+  return raw.jobs;
 }
 
 export async function listAllRunJobs({ runId, token }) {
-  const jobs = [];
-  let total = null;
-  let pages = 1;
-  for (let page = 1; page <= pages; page += 1) {
-    const inspected = inspectJobPage(await fetchJson(
-      `https://api.github.com/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/actions/runs/${runId}/jobs?filter=latest&per_page=${PAGE_SIZE}&page=${page}`,
-      { headers: githubHeaders(token) },
-      "private compatibility job lookup",
-    ), { expectedTotal: total, page });
-    total = inspected.total;
-    pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-    jobs.push(...inspected.jobs);
-  }
-  if (jobs.length !== total) {
-    throw new Error("Private compatibility jobs did not match the declared count.");
-  }
-  return jobs;
+  return inspectJobPage(await fetchJson(
+    `https://api.github.com/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/actions/runs/${runId}/jobs?filter=latest&per_page=${PAGE_SIZE}&page=1`,
+    { headers: githubHeaders(token) },
+    "private compatibility job lookup",
+  ));
+}
+
+async function resolvePrivateMain({ encodedPrivateRepository, token }) {
+  return inspectPrivateMainRef(await fetchJson(
+    `https://api.github.com/repos/${encodedPrivateRepository}/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`,
+    { headers: githubHeaders(token) },
+    "private main lookup",
+  ));
 }
 
 export async function runTemporalCompatibility({
   expectedBaseRef,
-  expectedPrivateSha,
   privateToken,
-  privateRef,
   producerDigest,
   producerFixtures,
   publicRepository,
@@ -439,6 +425,7 @@ export async function runTemporalCompatibility({
   prNumber,
   requestId,
   sleepFn = sleep,
+  now = Date.now,
 }) {
   assertRepository(publicRepository, "public repository");
   assertSafeId(expectedBaseRef, "expected public base ref", 255, /^[A-Za-z0-9._/-]+$/u);
@@ -449,37 +436,42 @@ export async function runTemporalCompatibility({
   if (!Number.isSafeInteger(prNumber) || prNumber <= 0) {
     throw new Error("Pull request number must be a positive integer.");
   }
-  const inspectedPrivateRef = safeTag(privateRef);
-  assertSha(expectedPrivateSha, "reviewed private compatibility SHA");
+  const tokenDeadline = now() + TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS;
   const encodedPrivateRepository = encodeRepository(TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY);
-  const privateSha = inspectPrivateTag(await fetchJson(
-    `https://api.github.com/repos/${encodedPrivateRepository}/git/ref/tags/${inspectedPrivateRef.split("/").map(encodeURIComponent).join("/")}`,
-    { headers: githubHeaders(privateToken) },
-    "private compatibility tag lookup",
-  ), { expectedSha: expectedPrivateSha, ref: inspectedPrivateRef });
+  const privateSha = await resolvePrivateMain({
+    encodedPrivateRepository,
+    token: privateToken,
+  });
   const workflowId = inspectPrivateWorkflow(await fetchJson(
     `https://api.github.com/repos/${encodedPrivateRepository}/actions/workflows/${encodeURIComponent(TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW)}`,
     { headers: githubHeaders(privateToken) },
     "private compatibility workflow lookup",
   ));
   const encodedPublicRepository = encodeRepository(publicRepository);
-  inspectExactPublicHead(await fetchJson(
-    `https://api.github.com/repos/${encodedPublicRepository}/pulls/${prNumber}`,
-    { headers: githubHeaders(publicToken) },
-    "public pull request revalidation",
-  ), {
-    expectedBaseRef,
-    expectedSha: publicSha,
-    prNumber,
-    repository: publicRepository,
-  });
+  const revalidatePublicTarget = async () => {
+    inspectExactPublicHead(await fetchJson(
+      `https://api.github.com/repos/${encodedPublicRepository}/pulls/${prNumber}`,
+      { headers: githubHeaders(publicToken) },
+      "public pull request revalidation",
+    ), {
+      expectedBaseRef,
+      expectedSha: publicSha,
+      prNumber,
+      repository: publicRepository,
+    });
+  };
+  await revalidatePublicTarget();
+
+  if (now() >= tokenDeadline - TEMPORAL_COMPATIBILITY_SETTLEMENT_RESERVE_MS - HTTP_TIMEOUT_MS) {
+    throw new Error("Private GitHub token budget was exhausted before dispatch.");
+  }
 
   const runId = inspectDispatchReceipt(await fetchJson(
     `https://api.github.com/repos/${encodedPrivateRepository}/actions/workflows/${encodeURIComponent(TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW)}/dispatches`,
     {
       body: JSON.stringify({
         inputs: buildDispatchInputs({ producerDigest, producerFixtures, publicSha, requestId }),
-        ref: inspectedPrivateRef,
+        ref: TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH,
         return_run_details: true,
       }),
       headers: { ...githubHeaders(privateToken), "content-type": "application/json" },
@@ -491,13 +483,17 @@ export async function runTemporalCompatibility({
   let terminal = false;
   let runVisible = false;
   try {
-    const deadline = Date.now() + PRIVATE_RUN_TIMEOUT_MS;
-    while (Date.now() < deadline) {
+    const deadline = Math.min(
+      now() + TEMPORAL_COMPATIBILITY_RUN_TIMEOUT_MS,
+      tokenDeadline - TEMPORAL_COMPATIBILITY_SETTLEMENT_RESERVE_MS,
+    );
+    while (now() < deadline) {
       const run = inspectPrivateRun(await readPrivateRun(runId, privateToken, {
+        deadline,
+        now,
         retryNotFound: !runVisible,
         sleepFn,
       }), {
-        privateRef: inspectedPrivateRef,
         privateSha,
         runId,
         workflowId,
@@ -515,18 +511,27 @@ export async function runTemporalCompatibility({
           requestId,
           runId,
         });
+        await revalidatePublicTarget();
+        const currentPrivateSha = await resolvePrivateMain({
+          encodedPrivateRepository,
+          token: privateToken,
+        });
+        if (currentPrivateSha !== privateSha) {
+          throw new Error("Private main changed during Temporal compatibility proof.");
+        }
         console.log(`::notice::temporal-compatibility result=success readers=${proof.readerCount} digest=${proof.digest}`);
         return proof;
       }
-      await sleepFn(POLL_MS);
+      const remainingMs = deadline - now();
+      if (remainingMs > 0) await sleepFn(Math.min(POLL_MS, remainingMs));
     }
     throw new Error("Private compatibility run timed out.");
   } catch (error) {
     if (!terminal) {
       try {
         await cancelAcceptedRun({
-          privateRef: inspectedPrivateRef,
           privateSha,
+          now,
           runId,
           sleepFn,
           token: privateToken,
@@ -544,8 +549,8 @@ export async function runTemporalCompatibility({
 }
 
 export async function cancelAcceptedRun({
-  privateRef,
   privateSha,
+  now = Date.now,
   runId,
   sleepFn = sleep,
   token,
@@ -563,8 +568,8 @@ export async function cancelAcceptedRun({
     ordinaryCancelFailed = true;
   }
   if (!ordinaryCancelFailed && await waitForTerminal({
-    privateRef,
     privateSha,
+    now,
     runId,
     sleepFn,
     timeoutMs: CANCEL_GRACE_MS,
@@ -578,8 +583,8 @@ export async function cancelAcceptedRun({
     token,
   );
   if (!await waitForTerminal({
-    privateRef,
     privateSha,
+    now,
     runId,
     sleepFn,
     timeoutMs: CANCEL_GRACE_MS,
@@ -591,39 +596,52 @@ export async function cancelAcceptedRun({
 }
 
 async function waitForTerminal({
-  privateRef,
   privateSha,
+  now,
   runId,
   sleepFn,
   timeoutMs,
   token,
   workflowId,
 }) {
-  const attempts = Math.max(1, Math.ceil(timeoutMs / POLL_MS));
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const run = inspectPrivateRun(await readPrivateRun(runId, token), {
-      privateRef,
-      privateSha,
-      runId,
-      workflowId,
-    });
+  const deadline = now() + timeoutMs;
+  while (now() < deadline) {
+    let run;
+    try {
+      run = inspectPrivateRun(await readPrivateRun(runId, token, { deadline, now }), {
+        privateSha,
+        runId,
+        workflowId,
+      });
+    } catch (error) {
+      if (now() >= deadline) return false;
+      throw error;
+    }
     if (run.complete) return true;
-    await sleepFn(POLL_MS);
+    const remainingMs = deadline - now();
+    if (remainingMs > 0) await sleepFn(Math.min(POLL_MS, remainingMs));
   }
   return false;
 }
 
 async function readPrivateRun(runId, token, {
+  deadline = Number.POSITIVE_INFINITY,
+  now = Date.now,
   retryNotFound = false,
   sleepFn = sleep,
 } = {}) {
   const reads = retryNotFound ? PRIVATE_RUN_VISIBILITY_READS : 1;
   for (let read = 1; read <= reads; read += 1) {
+    const remainingMs = deadline - now();
+    if (remainingMs <= 0) {
+      throw new Error("Private compatibility run lookup exceeded its timing budget.");
+    }
     try {
       return await fetchJson(
         `https://api.github.com/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/actions/runs/${runId}`,
         { headers: githubHeaders(token) },
         "private compatibility run lookup",
+        Math.min(HTTP_TIMEOUT_MS, remainingMs),
       );
     } catch (error) {
       if (
@@ -631,7 +649,9 @@ async function readPrivateRun(runId, token, {
         || error.status !== 404
         || read === reads
       ) throw error;
-      await sleepFn(POLL_MS);
+      const retryRemainingMs = deadline - now();
+      if (retryRemainingMs <= 0) throw error;
+      await sleepFn(Math.min(POLL_MS, retryRemainingMs));
     }
   }
   throw new Error("Private compatibility run visibility retry was exhausted.");
@@ -681,13 +701,10 @@ async function runCompatibilityCommand(args) {
   const privateToken = requiredEnv("TEMPORAL_COMPATIBILITY_PRIVATE_GITHUB_TOKEN");
   delete process.env.TEMPORAL_COMPATIBILITY_PUBLIC_GITHUB_TOKEN;
   delete process.env.TEMPORAL_COMPATIBILITY_PRIVATE_GITHUB_TOKEN;
-  const policy = inspectControllerPolicy(JSON.parse(await readFile(requiredArg(args, "policy"), "utf8")));
   const producer = inspectProducerFixtures(await readFile(requiredArg(args, "fixtures"), "utf8"));
   await runTemporalCompatibility({
     expectedBaseRef: requiredEnv("EXPECTED_BASE_REF"),
-    expectedPrivateSha: policy.privateSha,
     privateToken,
-    privateRef: policy.privateRef,
     producerDigest: producer.digest,
     producerFixtures: producer.serialized,
     publicRepository: requiredEnv("GITHUB_REPOSITORY"),
@@ -706,8 +723,8 @@ async function main(argv) {
   throw new Error("Expected select or run.");
 }
 
-async function fetchJson(url, init, label) {
-  const response = await fetch(url, { ...init, signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
+async function fetchJson(url, init, label, timeoutMs = HTTP_TIMEOUT_MS) {
+  const response = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
   if (!response.ok) {
     await response.body?.cancel().catch(() => undefined);
     throw new HttpStatusError(label, response.status);
@@ -746,20 +763,17 @@ function assertRepository(value, label) {
   assertSafeId(value, label, 200, /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u);
 }
 
+function isPrivateWorkflowRunPath(value) {
+  return value === TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH
+    || value === `${TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH}@${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`;
+}
+
 function safeRepoPath(value, label) {
   const filePath = requiredString(value, label);
   if (filePath.startsWith("/") || filePath.includes("\\") || filePath.includes("\n") || filePath.includes("\r")) {
     throw new Error(`${label} is invalid.`);
   }
   return filePath;
-}
-
-function safeTag(value) {
-  assertSafeId(value, "private compatibility tag", 180, /^[A-Za-z0-9._/-]+$/u);
-  if (value.startsWith("refs/") || value.includes("..") || value.includes("//") || value.endsWith(".lock")) {
-    throw new Error("Private compatibility ref must be a safe lightweight tag name.");
-  }
-  return value;
 }
 
 function assertSafeId(value, label, maxLength, pattern = /^[A-Za-z0-9._:-]+$/u) {

@@ -6,6 +6,8 @@ import path from "node:path";
 import type {
   AssistantProviderUsageDraft,
   ConsentedReadOnlyAssistantAskInput,
+  OperatorDiagnosticInput,
+  OperatorDiagnosticResult,
   ReadOnlyAssistantAskInput,
   ReadOnlyAssistantAskResult,
 } from "@murphai/assistant-engine/assistant-ask";
@@ -20,6 +22,7 @@ vi.mock("@murphai/assistant-engine", () => ({
 }));
 vi.mock("@murphai/assistant-engine/assistant-ask", () => ({
   executeConsentedReadOnlyAssistantAsk: vi.fn(),
+  executeOperatorDiagnostic: vi.fn(),
   executeReadOnlyAssistantAsk: vi.fn(),
 }));
 
@@ -794,7 +797,6 @@ describe("hosted detached assistant ask controller", () => {
       );
       assert.equal(consentedInput.question, "Are you free Tuesday afternoon?");
       assert.equal(consentedInput.workspaceRoot, vaultRoot);
-      assert.equal(consentedInput.workspaceInspection, undefined);
       assert.deepEqual(completedResult, { answer: null, outcome: "cannot_answer" });
       assert.equal(usageRecords.length, 0);
       assert.equal(deferredUsageEffects.length, 1);
@@ -837,11 +839,13 @@ describe("hosted detached assistant ask controller", () => {
     }
   });
 
-  test("enables workspace reads for a group-runtime operator diagnostic without delivery authority", async () => {
+  test("dispatches an operator diagnostic directly without consent review or delivery authority", async () => {
     const groupRuntimeRoot = await createVaultRoot();
-    const executeConsentedAsk = vi.fn(async (
-      _input: ConsentedReadOnlyAssistantAskInput,
-    ): Promise<ReadOnlyAssistantAskResult> => ({
+    const executeAsk = vi.fn();
+    const executeConsentedAsk = vi.fn();
+    const executeOperatorDiagnostic = vi.fn(async (
+      _input: OperatorDiagnosticInput,
+    ): Promise<OperatorDiagnosticResult> => ({
       answer: "Synthetic diagnostic answer.",
       outcome: "answered",
     }));
@@ -850,7 +854,6 @@ describe("hosted detached assistant ask controller", () => {
     ) => request.action === "prepare"
       ? {
           action: "prepare" as const,
-          disclosure: { permissionText: "Inspect this workspace only." },
           question: "What is the synthetic status?",
           status: "ready" as const,
           targetLabel: null,
@@ -869,10 +872,11 @@ describe("hosted detached assistant ask controller", () => {
         assistantAskPort: {
           request: assistantAskRequest,
         },
-        codexHome: null,
+        codexHome: "/hosted/codex-home",
         env: {},
-        executeAsk: vi.fn(),
+        executeAsk,
         executeConsentedAsk,
+        executeOperatorDiagnostic,
         now: () => TEST_NOW,
         onStateMutation() {},
         vaultRoot: groupRuntimeRoot,
@@ -887,9 +891,13 @@ describe("hosted detached assistant ask controller", () => {
       });
       await controller.closeAndRequeue();
 
-      const operatorInput = executeConsentedAsk.mock.calls[0]?.[0];
+      assert.equal(executeAsk.mock.calls.length, 0);
+      assert.equal(executeConsentedAsk.mock.calls.length, 0);
+      assert.equal(executeOperatorDiagnostic.mock.calls.length, 1);
+      const operatorInput = executeOperatorDiagnostic.mock.calls[0]?.[0];
       assert.ok(operatorInput);
-      assert.equal(operatorInput.workspaceInspection, "read_tools");
+      assert.equal(operatorInput.codexHome, "/hosted/codex-home");
+      assert.equal(operatorInput.question, "What is the synthetic status?");
       assert.equal(operatorInput.workspaceRoot, groupRuntimeRoot);
       assert.deepEqual(assistantAskRequest.mock.calls[1]?.[0], {
         action: "complete",

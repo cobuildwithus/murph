@@ -2222,6 +2222,10 @@ describe("hosted system mailbox notification execution context", () => {
         runtime,
         vaultRoot: workspace.vaultRoot,
       })).resolves.toEqual({
+        deviceSyncWake: {
+          at: "2026-04-05T00:03:00.000Z",
+          reason: "device-sync.reconcile",
+        },
         failed: 0,
         nextWakeAt: "2026-04-05T00:03:00.000Z",
         nextWakeReason: "device-sync.reconcile",
@@ -3465,6 +3469,10 @@ describe("hosted system mailbox notification execution context", () => {
         runtime,
         vaultRoot: workspace.vaultRoot,
       })).resolves.toEqual({
+        deviceSyncWake: {
+          at: retryAt,
+          reason: "device-sync.reconcile",
+        },
         failed: 0,
         nextWakeAt: retryAt,
         nextWakeReason: "device-sync.reconcile",
@@ -3795,6 +3803,10 @@ describe("hosted system mailbox notification execution context", () => {
         runtime,
         vaultRoot: workspace.vaultRoot,
       })).resolves.toEqual({
+        deviceSyncWake: {
+          at: immediateWakeAt,
+          reason: "device-sync.reconcile",
+        },
         failed: 0,
         nextWakeAt: immediateWakeAt,
         nextWakeReason: "device-sync.reconcile",
@@ -3838,6 +3850,10 @@ describe("hosted system mailbox notification execution context", () => {
         runtime,
         vaultRoot: workspace.vaultRoot,
       })).resolves.toEqual({
+        deviceSyncWake: {
+          at: retryAt,
+          reason: "device-sync.reconcile",
+        },
         failed: 0,
         nextWakeAt: retryAt,
         nextWakeReason: "device-sync.reconcile",
@@ -3898,6 +3914,10 @@ describe("hosted system mailbox notification execution context", () => {
         runtime,
         vaultRoot: workspace.vaultRoot,
       })).resolves.toEqual({
+        deviceSyncWake: {
+          at: payloadRetryAt,
+          reason: "device-sync.reconcile",
+        },
         failed: 0,
         nextWakeAt: payloadRetryAt,
         nextWakeReason: "device-sync.reconcile",
@@ -3954,6 +3974,10 @@ describe("hosted system mailbox notification execution context", () => {
         runtime,
         vaultRoot: workspace.vaultRoot,
       })).resolves.toEqual({
+        deviceSyncWake: {
+          at: retryAt,
+          reason: "device-sync.reconcile",
+        },
         failed: 0,
         nextWakeAt: retryAt,
         nextWakeReason: "device-sync.reconcile",

@@ -290,12 +290,15 @@ describe('assistant outbox runtime', () => {
     )
   })
 
-  it('omits absent or empty context references from persisted outbox intents', async () => {
+  it('normalizes missing current input to no decision and preserves an explicit clear', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-empty-context-references-',
     )
 
     const absent = await createIntent(vaultRoot)
+    const noDecision = await createIntent(vaultRoot, {
+      automationContextReferences: null,
+    })
     const empty = await createIntent(vaultRoot, {
       automationContextReferences: [],
     })
@@ -303,12 +306,18 @@ describe('assistant outbox runtime', () => {
       vaultRoot,
       absent.intentId,
     )
+    const persistedNoDecision = await readRawOutboxIntent(
+      vaultRoot,
+      noDecision.intentId,
+    )
     const persistedEmpty = await readRawOutboxIntent(vaultRoot, empty.intentId)
 
-    expect(absent).not.toHaveProperty('automationContextReferences')
-    expect(empty).not.toHaveProperty('automationContextReferences')
-    expect(persistedAbsent).not.toHaveProperty('automationContextReferences')
-    expect(persistedEmpty).not.toHaveProperty('automationContextReferences')
+    expect(absent.automationContextReferences).toBeNull()
+    expect(noDecision.automationContextReferences).toBeNull()
+    expect(empty.automationContextReferences).toEqual([])
+    expect(persistedAbsent.automationContextReferences).toBeNull()
+    expect(persistedNoDecision.automationContextReferences).toBeNull()
+    expect(persistedEmpty.automationContextReferences).toEqual([])
   })
 
   it('retires claimed export packs only after confirmed delivery', async () => {
@@ -8695,7 +8704,9 @@ async function createIntent(
     actorId: overrides.actorId ?? null,
     answeredMailboxItemIds: overrides.answeredMailboxItemIds,
     automationAuthority: overrides.automationAuthority,
-    automationContextReferences: overrides.automationContextReferences,
+    ...(overrides.automationContextReferences === undefined
+      ? {}
+      : { automationContextReferences: overrides.automationContextReferences }),
     card: overrides.card ?? null,
     channel: overrides.channel ?? 'telegram',
     createdAt: overrides.createdAt,

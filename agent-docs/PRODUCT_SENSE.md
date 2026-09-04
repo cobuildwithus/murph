@@ -283,3 +283,15 @@ missing testing sound reassuring. Keep supplement and branded-food search
 useful without implying that separately ranked corpora are directly
 comparable. Generic foods, inferred test linkage, and formula-revision claims
 remain outside the surface until their product meaning is explicitly defined.
+
+Food comparison should give the useful conclusion before the supporting data.
+Show one quiet winner per complete nutrition metric with its row rule, and at
+most one plain sentence that counts visible rows led. Never turn that result
+into a universal health or safety score. Keep exact test results, evidence
+coverage, and unknowns behind one evidence meter and one combined side sheet.
+Use a short popover for one metric, with raw reports hidden until requested. Never rank an incomplete
+metric or assign unequal ranks to tied values. When evidence is bounded, show
+returned and total observation scope. Render the public DTO's unknowns directly
+instead of rebuilding evidence completeness in the page. Do not infer sample
+coverage from report or lot metadata. A screened observation must keep its
+measured result, threshold, basis, and authority inspectable.

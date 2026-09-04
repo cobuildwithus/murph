@@ -74,11 +74,16 @@ HTTP route. `HOSTED_EXECUTION_STANDBY_MODE` has three strict values:
 - `off` (the default) advertises no slot and retires any still-unclaimed slot.
 - `shadow` keeps one release-scoped ENAM slot ready but never gives it to real
   processing.
-- `allocate` lets only a fresh, authenticated Web-direct `default` start claim
-  that one ready slot, immediately starts a replacement in background work, and
-  falls back to the ordinary exact-user container when the claim does not
-  finish within 250 ms. Temporal starts, background modes, and foreground
-  replacement of work already using the exact-user container do not claim it.
+- `allocate` lets only a fence-free, authenticated Web-direct `default` request
+  claim that one ready slot, immediately starts a replacement in background
+  work, and falls back to the ordinary exact-user container when the claim does
+  not finish within 250 ms. Temporal requests and background modes do not claim
+  it. A trusted foreground replacement may claim it after clearing an
+  exact-user background fence so it does not reuse a child that is still
+  shutting down. In `allocate` mode the standby coordinator is the only
+  shell-prewarm owner: the exact-user prewarm hint is skipped so it cannot
+  reserve a competing stop target before the claim. An unsuccessful claim
+  still uses the ordinary exact-user fallback.
 
 The public banner and health response report the canonical effective mode.
 Deployment smoke pins the newly deployed Worker version and requires its live
@@ -103,7 +108,7 @@ targets are resolved before fresh-claim eligibility, so a later Temporal retry
 continues the same reserved target rather than creating a second container.
 
 Hosted assistant delivery recovery comes from the encrypted local runtime outbox state inside the workspace checkpoint plus web-owned hosted-runtime logs/status.
-The runner container sends runtime internal Worker requests to normal virtual hosts such as `results.worker` and `web-control.worker`. Cloudflare Container outbound interception routes those requests back into Worker-owned handlers, using the runtime write-fence headers as authority.
+The runner container sends runtime internal Worker requests to normal virtual hosts such as `results.worker`, `runner-control.worker`, and `web-control.worker`. Cloudflare Container outbound interception routes those requests back into Worker-owned handlers, using the runtime write-fence headers as authority. After a successful invocation, the container entrypoint clears the invocation's wake and abort pointers, decrements active work, and cleans request transport before it sends the exact result, attempt, and generation through `runner-control.worker` to the durable `UserRunner`. `UserRunner` applies the existing exact completion compare-and-swap, so an activation reset cannot strand a completed write fence and a successor cannot race a process that still reports busy. The ordinary outer result remains the normal completion path; the one-second best-effort receipt logs `recorded` or `not_recorded` and never changes that result. No recovery queue, alarm, poller, persisted promise, or second state owner is added.
 Shared runtime ports cannot supply raw Web-control methods or paths. They must use a branded route descriptor from the same registry that derives the Worker proxy allowlist; bounded query-bearing and device-connect variants can only bind to an already-registered pathname. Cloudflare typecheck rejects an unregistered caller at compile time, and the Node route-contract suite enumerates the registry to prove each exact method/path is allowed while the opposite method and path variants remain blocked.
 The phone-call start port is one bounded `web-control.worker` callback into `apps/web`; its protocol floor is 45 seconds even when the generic web-control timeout is 30 seconds, so the web-owned 40-second aggregate deadline finishes before the caller gives up. Deploy and prove convergence of this 45-second Cloudflare caller before deploying a web build with the 40-second deadline. The longer caller is backward compatible with older web builds; an old 30-second caller is not compatible with the 40-second web deadline, so Cloudflare cannot be rolled back below 45 seconds while that web build is active. Retell credentials and provider calls remain web-owned and are never forwarded into the runner.
 `murph.plan_usage` uses one allowlisted signed `web-control.worker` callback.
@@ -641,9 +646,23 @@ session already restored from the published snapshot adds no extra checkpoint.
 Foreground conversation staging also aborts runner-owned background maintenance,
 including an in-flight provider-cleanup request, without aborting the foreground
 invocation itself.
-When Cloudflare reports
-the container `sleepAfter` lifecycle expiry, the container only yields to an
-active foreground operation or tears down the warm shell.
+After a successful hosted invocation, the container process returns the outer
+result and then sends the exact result, attempt, and generation through the
+existing internal completion route. When `UserRunner` wins the exact durable
+write-fence compare-and-swap, it best-effort notifies the exact existing
+`RunnerContainer` lifecycle owner with attempt, generation, and user identity
+only. `RunnerContainer` matches that notification to its in-memory successful
+result in either arrival order and then runs the same lifecycle decision used by
+`sleepAfter` expiry. That decision remains fenced by the lifecycle lock and the
+single interaction generation captured when that invocation enters the
+container. Any later interaction changes the generation and retains the shell,
+as do an active or replacement invocation, active child work, recent
+conversation warmth, an undefined legacy warmth field, or uncertain status,
+health, or cleanup. A missing or mismatched notification, activation reset,
+retained shell, or failed immediate cleanup leaves the ordinary activity timer
+armed as the fallback. When Cloudflare later reports `sleepAfter` expiry, that
+shared decision either renews the shell or tears it down; a shell already
+stopped by invocation completion is not destroyed again.
 Each invocation runs in-process through `packages/assistant-runtime` with
 per-user warm workspace roots and invocation-local cache/temp roots. Runtime
 effects use internal virtual hosts and write-fence headers instead of
@@ -667,8 +686,9 @@ structured logs use only those fields plus bounded timing/status metadata; they
 do not log artifact hashes or bodies.
 
 The warm shell is destroyed when an invocation fails, warm health is stale,
-deploy smoke finishes, explicit cleanup is called, or Cloudflare reports idle
-activity expiry with no active foreground operation.
+deploy smoke finishes, explicit cleanup is called, a settled terminal
+invocation passes the shared lifecycle proof, or Cloudflare reports idle
+activity expiry and that same proof succeeds.
 
 Foreground progress recovery is write-fenced instead of container-destroy
 driven. A write fence is commit authority, not liveness proof; the exact wake,

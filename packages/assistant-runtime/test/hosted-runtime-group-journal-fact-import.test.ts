@@ -20,6 +20,12 @@ import type {
 import {
   importHostedGroupJournalFactMailboxItem,
 } from "../src/hosted-runtime/group-journal-fact-import.ts";
+import {
+  enqueueHostedSystemMailboxItem,
+} from "../src/hosted-runtime/system-mailbox.ts";
+import {
+  readHostedSystemMailboxState,
+} from "../src/hosted-runtime/system-mailbox-state.ts";
 
 const EVENT_ID = "group_journal_synthetic_001";
 const MEMBER_ID = "member_synthetic_001";
@@ -62,6 +68,18 @@ describe("hosted group Journal fact import", () => {
       });
     await expect(importHostedGroupJournalFactMailboxItem({ item, vaultRoot, wake }))
       .resolves.toMatchObject({ status: "imported" });
+    await expect(enqueueHostedSystemMailboxItem({ item, vaultRoot, wake }))
+      .resolves.toEqual({
+        reasonCode: "system_mailbox.queued",
+        status: "imported",
+      });
+    await expect(readHostedSystemMailboxState(vaultRoot)).resolves.toMatchObject({
+      pending: [{
+        itemId: EVENT_ID,
+        routeAction: "import-group-journal-fact",
+        wake: { kind: "journal.group-fact.recorded" },
+      }],
+    });
 
     await expect(findEventByExternalRef({
       resourceId: EVENT_ID,

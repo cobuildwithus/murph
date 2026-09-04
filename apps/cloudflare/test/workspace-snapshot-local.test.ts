@@ -280,6 +280,9 @@ describe("workspace snapshot local restore", () => {
       await mkdir(path.join(sourceVaultRoot, ".runtime", "operations", "assistant", "sessions"), {
         recursive: true,
       });
+      await mkdir(path.join(sourceVaultRoot, ".runtime", "operations", "assistant", "state"), {
+        recursive: true,
+      });
       await mkdir(path.join(sourceVaultRoot, ".runtime", "operations", "device-sync"), {
         recursive: true,
       });
@@ -303,6 +306,18 @@ describe("workspace snapshot local restore", () => {
             resumeRouteId: "route-ready",
           },
         }) + "\n",
+        "utf8",
+      );
+      await writeFile(
+        path.join(
+          sourceVaultRoot,
+          ".runtime",
+          "operations",
+          "assistant",
+          "state",
+          "group-participant-display-names.json",
+        ),
+        "portable participant display-name cache\n",
         "utf8",
       );
       await writeFile(
@@ -366,6 +381,11 @@ describe("workspace snapshot local restore", () => {
       expect(archivePlan.entries).toEqual(expect.arrayContaining([
         expect.objectContaining({
           archivePath: "vault/.runtime/operations/assistant/hosted-system-mailbox.json",
+          kind: "file",
+        }),
+        expect.objectContaining({
+          archivePath:
+            "vault/.runtime/operations/assistant/state/group-participant-display-names.json",
           kind: "file",
         }),
         expect.objectContaining({
@@ -433,6 +453,17 @@ describe("workspace snapshot local restore", () => {
         ),
         "utf8",
       )).resolves.toBe(`${JSON.stringify(retainedDeviceSyncWakeState)}\n`);
+      await expect(readFile(
+        path.join(
+          restoredVaultRoot,
+          ".runtime",
+          "operations",
+          "assistant",
+          "state",
+          "group-participant-display-names.json",
+        ),
+        "utf8",
+      )).resolves.toBe("portable participant display-name cache\n");
       await expect(access(
         path.join(restoredVaultRoot, ".runtime", "operations", "device-sync", "state.sqlite"),
       )).rejects.toThrow();

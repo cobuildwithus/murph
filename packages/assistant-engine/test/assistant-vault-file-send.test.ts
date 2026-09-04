@@ -93,6 +93,7 @@ describe('assistant vault-file send', () => {
     })
 
     const [intent] = await listAssistantOutboxIntents(vaultRoot)
+    expect(intent?.automationContextReferences).toBeNull()
     expect(intent?.media).toEqual([
       expect.objectContaining({
         contentType: 'application/zip',

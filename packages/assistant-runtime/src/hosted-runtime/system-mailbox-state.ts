@@ -82,6 +82,7 @@ export type HostedSystemMailboxRouteAction =
   | "run-device-sync-wake"
   | "run-environment-interview"
   | "run-environment-voice"
+  | "import-group-journal-fact"
   | "import-reported-daily-metric"
   | "apply-runtime-control-request";
 
@@ -134,11 +135,24 @@ export async function readHostedSystemMailboxHandledThroughSeq(input: {
   now?: () => string;
   vaultRoot: string;
 }): Promise<string> {
-  return resolveHostedSystemMailboxHandledThroughSeq({
+  return (await readHostedSystemMailboxProgress(input)).handledThroughSeq;
+}
+
+export async function readHostedSystemMailboxProgress(input: {
+  importedSeq: string;
+  now?: () => string;
+  vaultRoot: string;
+}): Promise<HostedSystemMailboxProgress> {
+  return resolveHostedSystemMailboxProgress({
     importedSeq: input.importedSeq,
     now: (input.now ?? (() => new Date().toISOString()))(),
     state: await readHostedSystemMailboxState(input.vaultRoot),
   });
+}
+
+export interface HostedSystemMailboxProgress {
+  firstPendingSeq: string | null;
+  handledThroughSeq: string;
 }
 
 export function resolveHostedSystemMailboxHandledThroughSeq(input: {
@@ -146,6 +160,14 @@ export function resolveHostedSystemMailboxHandledThroughSeq(input: {
   now?: string;
   state: HostedSystemMailboxState;
 }): string {
+  return resolveHostedSystemMailboxProgress(input).handledThroughSeq;
+}
+
+export function resolveHostedSystemMailboxProgress(input: {
+  importedSeq: string;
+  now?: string;
+  state: HostedSystemMailboxState;
+}): HostedSystemMailboxProgress {
   if (!/^(?:0|[1-9]\d*)$/u.test(input.importedSeq)) {
     throw new TypeError("Hosted system mailbox imported seq must be a non-negative decimal string.");
   }
@@ -161,7 +183,10 @@ export function resolveHostedSystemMailboxHandledThroughSeq(input: {
       continue;
     }
     if (item.mailboxLaneSeq === null) {
-      return "0";
+      return {
+        firstPendingSeq: null,
+        handledThroughSeq: "0",
+      };
     }
     const pendingSeq = BigInt(item.mailboxLaneSeq);
     if (earliestPendingSeq === null || pendingSeq < earliestPendingSeq) {
@@ -170,10 +195,17 @@ export function resolveHostedSystemMailboxHandledThroughSeq(input: {
   }
 
   if (earliestPendingSeq === null) {
-    return importedSeq.toString();
+    return {
+      firstPendingSeq: null,
+      handledThroughSeq: importedSeq.toString(),
+    };
   }
   const handledBeforePending = earliestPendingSeq - 1n;
-  return (handledBeforePending < importedSeq ? handledBeforePending : importedSeq).toString();
+  return {
+    firstPendingSeq: earliestPendingSeq.toString(),
+    handledThroughSeq:
+      (handledBeforePending < importedSeq ? handledBeforePending : importedSeq).toString(),
+  };
 }
 
 export async function updateHostedSystemMailboxState<TResult = void>(
@@ -989,6 +1021,7 @@ function parseHostedSystemMailboxRouteAction(value: unknown): HostedSystemMailbo
     || value === "run-device-sync-wake"
     || value === "run-environment-interview"
     || value === "run-environment-voice"
+    || value === "import-group-journal-fact"
     || value === "import-reported-daily-metric"
     || value === "apply-runtime-control-request"
   ) {

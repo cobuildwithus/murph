@@ -4337,8 +4337,12 @@ describe('assistant cron runtime orchestration', () => {
     })
 
     const providerInput = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
-      | { instructions?: string }
+      | {
+          instructions?: string
+          outboxAutomationContextReferences?: AssistantOutboxIntent['automationContextReferences']
+        }
       | undefined
+    expect(providerInput?.outboxAutomationContextReferences).toBeNull()
     expect(providerInput?.instructions).toContain(
       'Independent automation authority (engine-supplied):',
     )

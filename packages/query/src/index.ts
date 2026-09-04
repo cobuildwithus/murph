@@ -158,6 +158,8 @@ export {
   buildPersonalPatternReport,
   buildPersonalPatternReportFromWearableBundle,
   emptyPersonalPatternReport,
+  parsePersonalPatternVocabulary,
+  PERSONAL_PATTERN_VOCABULARY_SLUG,
 } from "./personal-patterns.ts";
 export { buildJournalView, emptyJournalView } from "./journal-view.ts";
 export type {
@@ -171,9 +173,12 @@ export type {
   PersonalPatternClassification,
   PersonalPatternFactor,
   PersonalPatternGrade,
+  PersonalPatternIcon,
   PersonalPatternOutcome,
   PersonalPatternReport,
   PersonalPatternStage,
+  PersonalPatternVocabulary,
+  PersonalPatternVocabularyConcept,
 } from "./personal-patterns.ts";
 export {
   buildSharedGroupWeeklyMembers,

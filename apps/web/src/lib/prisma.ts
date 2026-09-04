@@ -19,7 +19,10 @@ const globalForPrisma = globalThis as typeof globalThis & {
 const DEFAULT_DATABASE_POOL_MAX = 15;
 const DATABASE_POOL_MAX = Number.parseInt(process.env.DATABASE_POOL_MAX ?? "", 10);
 const PG_CONNECTION_TIMEOUT_MS = 5_000;
-const PG_IDLE_TIMEOUT_MS = 30_000;
+// attachDatabasePool extends the active Vercel invocation until pg's idle
+// cleanup window closes. Keep that window short so idle connections do not
+// consume most of a 60-second route budget.
+const PG_IDLE_TIMEOUT_MS = 5_000;
 const PRISMA_TRANSACTION_MAX_WAIT_MS = 10_000;
 const PRISMA_TRANSACTION_TIMEOUT_MS = 15_000;
 const DATABASE_RETRY_ATTEMPTS = 2;

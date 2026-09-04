@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-03",
+  "order": 200,
+  "item": {
+    "id": "connected-health-scheduled-recovery-stays-reliable",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Connected health recovery stays reliable",
+    "summary": "Long-running connected-health syncs now keep their recovery path after older private queue content reaches its retention limit.",
+    "details": "Retired content stays deleted. Murph continues only work already accepted for processing and does not recreate old payloads or duplicate completed work.",
+    "relevanceTags": ["wearables", "reliability", "privacy"],
+    "sourcePullRequests": [2779]
+  }
+}

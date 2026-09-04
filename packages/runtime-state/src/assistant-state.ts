@@ -13,6 +13,7 @@ export interface AssistantStatePaths {
   diagnosticsDirectory: string;
   diagnosticEventsPath: string;
   diagnosticSnapshotPath: string;
+  groupParticipantDisplayNameCachePath: string;
   indexesPath: string;
   journalsDirectory: string;
   issuesDirectory: string;
@@ -54,6 +55,11 @@ export function resolveAssistantStatePaths(vaultRoot: string): AssistantStatePat
     diagnosticsDirectory,
     diagnosticEventsPath: path.join(diagnosticsDirectory, "events.jsonl"),
     diagnosticSnapshotPath: path.join(diagnosticsDirectory, "snapshot.json"),
+    groupParticipantDisplayNameCachePath: path.join(
+      rootPath,
+      "state",
+      "group-participant-display-names.json",
+    ),
     indexesPath: path.join(rootPath, "indexes.json"),
     journalsDirectory,
     issuesDirectory,

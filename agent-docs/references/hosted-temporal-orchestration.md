@@ -107,8 +107,9 @@ An exact system-mailbox pointer is admission, not completion. Web projects the
 authenticated `hostedMailboxSystemHandledThroughSeq` scalar from the existing
 redacted workspace checkpoint and classifies only the exact first live system
 row as `model_free` or `default_owned`. Environment completion is one generic
-model-free kind; Temporal does not know its product meaning or select a
-feature-specific processing mode. Temporal applies three distinct retirement
+model-free kind, as is deterministic member-channel reconciliation; Temporal
+does not know their product meaning or select a feature-specific processing
+mode. Temporal applies three distinct retirement
 rules: a handled-through frontier that reaches the pointer lane sequence retires
 it as completed; an explicit `systemMailboxFrontier: null` retires only
 Temporal's noncanonical pointer projection because the current facts admit no
@@ -182,10 +183,12 @@ Allowed Temporal state is tiny and pointer-only:
 - Last reconciliation status, blocked reason/retry timestamp, processing result
   kind, bounded error code, and timestamps.
 - Slim workspace wake/completion projection fields: `nextWakeAt`,
-  `nextWakeReason`, `inboxMediaRetentionWakeAt`, `version`, and the optional
-  authenticated `hostedMailboxSystemHandledThroughSeq` frontier. Temporal may
-  compare that scalar with the current pointer but must not persist another
-  completion cursor.
+  `nextWakeReason`, `nextDefaultProcessingWakeAt`,
+  `nextDefaultProcessingWakeReason`, `systemMailboxProgressGeneration`,
+  `inboxMediaRetentionWakeAt`, `version`, and the optional authenticated
+  `hostedMailboxSystemHandledThroughSeq` frontier. Temporal may compare that
+  scalar with the current pointer but must not persist another completion
+  cursor.
 - Durable timers derived from web-owned runtime/workspace wake projection or
   retry timestamps.
 
@@ -431,7 +434,9 @@ The per-user workflow reads source-less reconciliation facts from web:
 - `blocked`: nullable product/access block with `reason` and `retryAt`
 - `mailboxLag`: lane lag counters only
 - `workspace`: nullable projection with `nextWakeAt`, `nextWakeReason`,
-  `inboxMediaRetentionWakeAt`, optional `systemMailboxFrontier`, and `version`
+  `nextDefaultProcessingWakeAt`, `nextDefaultProcessingWakeReason`,
+  `systemMailboxProgressGeneration`, `inboxMediaRetentionWakeAt`, optional
+  `systemMailboxFrontier`, and `version`
 
 Facts do not contain run/idle decisions, raw mailbox kinds, producer
 source/reason, raw mailbox payloads, workspace redacted status, signed usage
@@ -442,17 +447,20 @@ the explicit not-admitted value without reading mailbox rows; Temporal may
 retire its pointer projection while Web retains durable mailbox truth for a
 future reactivation. Temporal interprets the facts mechanically: fresh mailbox
 signals may ensure processing directly; carried pointers and timers re-read facts;
-conversation lag or a due assistant workspace wake selects default processing;
-system-only lag selects `system_mailbox` processing; a due inbox media retention
-wake selects `inbox_media_retention` processing when foreground/default work is
-not runnable; future or absent wakes wait. These modes are invocation input, not
-new scheduler state. The runtime's checkpoint projection publishes an ordinary
-default-owned mailbox wake only when a default row owns the currently
-executable frontier; a later default row does not compete with a runnable
-model-free frontier. Execution eligibility stays unchanged, and explicitly
-approved continuations retain their foreground priority. Foreground/default work must
-replace an active system-mailbox or retention owner instead of waiting for its
-idle checkpoint.
+conversation lag or a due `nextDefaultProcessingWakeAt` selects default
+processing; system-only lag or a due model-free `nextWakeAt` selects
+`system_mailbox` processing; a due inbox media retention wake selects
+`inbox_media_retention` processing when foreground/default work is not runnable;
+future or absent wakes wait. These modes are invocation input, not new scheduler
+state. The runtime's checkpoint projection publishes an ordinary default-owned
+mailbox wake only when a default row owns the currently executable frontier; a
+later default row does not compete with a runnable model-free frontier. A
+recorded device follow-up remains canonical `nextWakeAt`, while an assistant
+deadline remains independently visible through `nextDefaultProcessingWakeAt`.
+Execution eligibility stays unchanged, and explicitly approved continuations
+retain their foreground priority. Foreground/default work must replace an
+active system-mailbox or retention owner instead of waiting for its idle
+checkpoint.
 If a default invocation's live checks disprove its overdue projection and the
 next due frontier belongs to a model-free owner, the runtime first checkpoints
 the corrected projections without advancing handled-through or the system
@@ -719,9 +727,10 @@ The hard-cut architecture is accepted when:
   mailbox, assistant, browser-vault, or device-sync work due.
 - Cloudflare alarms are write-fence cleanup only.
 - Murph runtime code does not know about Temporal.
-- Runtime `nextWakeAt` remains the only source for assistant timer wakeups;
-  runtime `inboxMediaRetentionWakeAt` remains the only source for inbox media
-  retention wakeups.
+- Runtime `nextDefaultProcessingWakeAt` remains the source for ordinary
+  assistant timer wakeups; runtime `nextWakeAt` remains the canonical
+  model-free wake source, and `inboxMediaRetentionWakeAt` remains the only
+  source for inbox media retention wakeups.
 - Temporal stores no full `HostedWorkspaceState`, no full
   `HostedWorkspaceInvocationResult`, and no signed usage decision.
 - Reconciliation facts return `blocked` for usage denial or gate
@@ -747,12 +756,20 @@ The hard-cut architecture is accepted when:
   candidate producer runs only in unprivileged Repo Hygiene and hands the
   trusted controller a run/head-bound bounded JSON artifact. The controller
   never owns worker code or reader policy: private Murph Cloud receives only
-  serialized fixture data, declares the immutable supported-reader set,
-  automatically includes its pinned controller revision, runs every reader,
-  and returns one producer-and-reader proof digest. The committed public policy
-  binds the private controller to a SHA-suffixed immutable tag. Missing, stale,
-  skipped, canceled, duplicated, malformed, or failed proof remains red or
-  pending.
+  serialized fixture data, derives the live Current and traffic-bearing Ramping
+  readers, automatically includes the exact dispatched private candidate and,
+  while the standby guard remains, the active legacy worker's exact live deploy
+  revision and bounded `active` or `suspended` state, then runs every reader.
+  Final protected attestation re-reads the complete reader set and legacy state
+  and fails on identity or routing drift through a separate private lifecycle
+  digest before returning one cross-repository proof digest. The public
+  verifier hashes only the sorted immutable reader SHA set, so private
+  lifecycle evidence never enters the public wire format and the public
+  repository does not own or duplicate live reader policy. The public controller resolves
+  private `main` before dispatch, binds the returned first-attempt run to that
+  exact commit, and re-reads private `main` before success. Public code stores
+  no private revision pointer or reader policy. Missing, stale, skipped,
+  canceled, duplicated, malformed, or failed proof remains red or pending.
 - Focused tests prove that wake acceptance is not completion and that Temporal
   idles only after reconciliation facts are idle.
 - The hosted-local E2E harness includes a non-manual Temporal orchestration

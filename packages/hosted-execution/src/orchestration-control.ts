@@ -83,6 +83,7 @@ export const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS = [
   "device-sync.wake",
   "environment-interview.completed",
   "health.daily-metric.reported",
+  "member.channels.updated",
   "runtime.browser-vault-refresh-requested",
   "runtime.maintenance-requested",
 ] as const satisfies readonly HostedMailboxKind[];

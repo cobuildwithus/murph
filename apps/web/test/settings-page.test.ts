@@ -172,7 +172,7 @@ const mocks = vi.hoisted(() => ({
   readHostedUsageCreditPurchaseTargetForPayer: vi.fn(),
   readHostedSecureApprovalStatus: vi.fn(),
   withServerApprovedPrivyAccountHints: vi.fn((input: {
-    serverApprovedPrivyLinkedAccounts?: unknown;
+    serverApprovedPrivyUser?: unknown;
     snapshot: unknown;
   }) => input.snapshot),
 }));
@@ -928,6 +928,16 @@ test("SettingsPage reads the app session and persisted account settings into the
         username: "sample_user",
       },
     ],
+    verifiedPrivyUser: {
+      id: "did:privy:user_123",
+      linkedAccounts: [
+        {
+          id: 456,
+          type: "telegram",
+          username: "sample_user",
+        },
+      ],
+    },
   });
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
@@ -1151,13 +1161,16 @@ test("SettingsPage reads the app session and persisted account settings into the
     expect(mocks.getHostedPrivySession).toHaveBeenCalledTimes(1);
     expect(mocks.withServerApprovedPrivyAccountHints).toHaveBeenCalledWith({
       snapshot: accountSnapshot,
-      serverApprovedPrivyLinkedAccounts: [
-        {
-          id: 456,
-          type: "telegram",
-          username: "sample_user",
-        },
-      ],
+      serverApprovedPrivyUser: {
+        id: "did:privy:user_123",
+        linkedAccounts: [
+          {
+            id: 456,
+            type: "telegram",
+            username: "sample_user",
+          },
+        ],
+      },
     });
     expect(mocks.HostedAccountSettingsCards).toHaveBeenCalledWith(expect.objectContaining({
       account: accountSnapshot,
@@ -2982,7 +2995,7 @@ test("SettingsPage preserves billing when optional usage and Privy reads fail", 
   );
   expect(mocks.withServerApprovedPrivyAccountHints).toHaveBeenCalledWith({
     snapshot: EMPTY_ACCOUNT_SETTINGS,
-    serverApprovedPrivyLinkedAccounts: null,
+    serverApprovedPrivyUser: null,
   });
   expect(mocks.HostedAiUsageActivity).not.toHaveBeenCalled();
 });
@@ -3085,7 +3098,7 @@ test("SettingsPage ignores Privy Telegram display hints from a stale Privy sessi
 
   expect(mocks.withServerApprovedPrivyAccountHints).toHaveBeenCalledWith({
     snapshot: accountSnapshot,
-    serverApprovedPrivyLinkedAccounts: null,
+    serverApprovedPrivyUser: null,
   });
 });
 

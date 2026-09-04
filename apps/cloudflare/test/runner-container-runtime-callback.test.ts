@@ -11,21 +11,9 @@ import type {
 } from "../src/runner-job-transport.js";
 
 describe("RunnerContainer internal runtime dispatch", () => {
-  it("reports completion only after the exact container operation is inactive", async () => {
-    let container!: RunnerContainer;
-    let activeFenceAtReceipt: Awaited<
-      ReturnType<RunnerContainer["readActiveRuntimeUserFence"]>
-    > | null = null;
-    const recordRuntimeCompletionFromContainer = vi.fn(async () => {
-      activeFenceAtReceipt = await container.readActiveRuntimeUserFence();
-      return { completed: true };
-    });
-    const environment = {
-      USER_RUNNER: {
-        getByName: vi.fn(() => ({ recordRuntimeCompletionFromContainer })),
-      },
-    };
-    ({ container } = createActivityExpiryContainerDouble({ environment }));
+  it("preserves a completed shell after an interaction races its durable completion notification", async () => {
+    const containerDouble = createActivityExpiryContainerDouble();
+    const { container } = containerDouble;
 
     const result = await container.invoke({
       job: createWorkspaceRunnerJob("member_123"),
@@ -34,29 +22,21 @@ describe("RunnerContainer internal runtime dispatch", () => {
     });
 
     expect(result).toMatchObject({ status: "idle" });
-    expect(recordRuntimeCompletionFromContainer).toHaveBeenCalledOnce();
-    expect(recordRuntimeCompletionFromContainer).toHaveBeenCalledWith({
-      attemptId: "attempt_member_123",
-      generation: "11",
-      result: expect.objectContaining({ status: "idle" }),
-      userId: "member_123",
-    });
-    expect(activeFenceAtReceipt).toEqual({
+    await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
       active: false,
       reason: "no_active_runtime",
     });
+    await container.onRuntimeCompletionRecorded({
+      attemptId: "attempt_member_123",
+      leaseGeneration: "11",
+      userId: "member_123",
+    });
+    expect(containerDouble.destroy).not.toHaveBeenCalled();
   });
 
-  it("preserves a completed result when the completion receipt fails", async () => {
-    const recordRuntimeCompletionFromContainer = vi.fn(async () => {
-      throw new Error("completion receipt unavailable");
-    });
-    const { container } = createActivityExpiryContainerDouble({
-      environment: {
-        USER_RUNNER: {
-          getByName: vi.fn(() => ({ recordRuntimeCompletionFromContainer })),
-        },
-      },
+  it("stops a terminal shell only after durable completion notification and does not double-destroy", async () => {
+    const { container, destroy } = createActivityExpiryContainerDouble({
+      destroyImplementation: async () => {},
     });
 
     await expect(container.invoke({
@@ -64,67 +44,308 @@ describe("RunnerContainer internal runtime dispatch", () => {
       timeoutMs: 5_000,
       userId: "member_123",
     })).resolves.toMatchObject({ status: "idle" });
-    expect(recordRuntimeCompletionFromContainer).toHaveBeenCalledOnce();
-  });
+    expect(destroy).not.toHaveBeenCalled();
 
-  it("bounds a non-settling completion receipt and consumes its late rejection", async () => {
-    vi.useFakeTimers();
-    let rejectReceipt!: (error: unknown) => void;
-    const receipt = new Promise<{ completed: boolean }>((_resolve, reject) => {
-      rejectReceipt = reject;
-    });
-    const recordRuntimeCompletionFromContainer = vi.fn(() => receipt);
-    const { container } = createActivityExpiryContainerDouble({
-      environment: {
-        USER_RUNNER: {
-          getByName: vi.fn(() => ({ recordRuntimeCompletionFromContainer })),
-        },
-      },
+    await container.onRuntimeCompletionRecorded({
+      attemptId: "attempt_member_123",
+      leaseGeneration: "11",
+      userId: "member_123",
     });
 
-    try {
-      const invocation = container.invoke({
-        job: createWorkspaceRunnerJob("member_123"),
-        timeoutMs: 5_000,
-        userId: "member_123",
-      });
-      await vi.advanceTimersByTimeAsync(0);
+    expect(destroy).toHaveBeenCalledOnce();
 
-      expect(recordRuntimeCompletionFromContainer).toHaveBeenCalledOnce();
-      await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
-        active: false,
-        reason: "no_active_runtime",
-      });
-
-      await vi.advanceTimersByTimeAsync(1_000);
-      await expect(invocation).resolves.toMatchObject({ status: "idle" });
-
-      rejectReceipt(new Error("late completion receipt failure"));
-      await vi.advanceTimersByTimeAsync(0);
-    } finally {
-      vi.useRealTimers();
-    }
+    await expect(container.onActivityExpired()).resolves.toBeUndefined();
+    expect(destroy).toHaveBeenCalledOnce();
   });
 
-  it("does not report an invocation that fails in the container", async () => {
-    const recordRuntimeCompletionFromContainer = vi.fn(async () => ({
-      completed: true,
-    }));
-    const { container } = createActivityExpiryContainerDouble({
-      environment: {
-        USER_RUNNER: {
-          getByName: vi.fn(() => ({ recordRuntimeCompletionFromContainer })),
-        },
+  it("stops a terminal shell when durable completion wins the outer response race", async () => {
+    const invocationResponse = createDeferred<Response>();
+    const { container, containerFetch, destroy } = createActivityExpiryContainerDouble({
+      invocationResponse: invocationResponse.promise,
+    });
+    const invocation = container.invoke({
+      job: createWorkspaceRunnerJob("member_123"),
+      timeoutMs: 5_000,
+      userId: "member_123",
+    });
+    await vi.waitFor(() => {
+      expect(containerFetch).toHaveBeenCalled();
+    });
+
+    const completionNotification = container.onRuntimeCompletionRecorded({
+      attemptId: "attempt_member_123",
+      leaseGeneration: "11",
+      userId: "member_123",
+    });
+    invocationResponse.resolve(new Response(
+      JSON.stringify(createRunnerResult()),
+      {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
       },
-      invocationStatus: 500,
+    ));
+
+    await expect(invocation).resolves.toMatchObject({ status: "idle" });
+    await expect(completionNotification).resolves.toBeUndefined();
+    expect(destroy).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    {
+      name: "completion notification arrives before foreground readiness",
+      order: ["completion", "readiness"] as const,
+    },
+    {
+      name: "foreground readiness arrives before the completion notification",
+      order: ["readiness", "completion"] as const,
+    },
+  ])("preserves a shell when $name", async ({ order }) => {
+    const invocationResponse = createDeferred<Response>();
+    const { container, containerFetch, destroy } = createActivityExpiryContainerDouble({
+      invocationResponse: invocationResponse.promise,
+    });
+    const invocation = container.invoke({
+      job: createWorkspaceRunnerJob("member_123"),
+      timeoutMs: 5_000,
+      userId: "member_123",
+    });
+    await vi.waitFor(() => {
+      expect(containerFetch).toHaveBeenCalled();
+    });
+
+    const operations = order.map((operation) =>
+      operation === "completion"
+        ? container.onRuntimeCompletionRecorded({
+            attemptId: "attempt_member_123",
+            leaseGeneration: "11",
+            userId: "member_123",
+          })
+        : container.ensureReadyForProcessing({
+            timeoutMs: 5_000,
+            userId: "member_123",
+          })
+    );
+    invocationResponse.resolve(new Response(
+      JSON.stringify(createRunnerResult()),
+      {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      },
+    ));
+
+    await expect(invocation).resolves.toMatchObject({ status: "idle" });
+    await expect(Promise.all(operations)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "ready" }),
+      ]),
+    );
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      name: "an immediate recheck",
+      resultOverrides: {
+        immediateRecheckRequested: true,
+      },
+    },
+    {
+      name: "a wake inside the lifecycle horizon",
+      resultOverrides: {
+        nextWakeAt: new Date(Date.now() + 30_000).toISOString(),
+      },
+    },
+  ])("keeps the warm shell for $name", async ({ resultOverrides }) => {
+    const { container, destroy } = createActivityExpiryContainerDouble({
+      environment: {
+        HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS: "60000",
+      },
+      resultOverrides,
     });
 
     await expect(container.invoke({
       job: createWorkspaceRunnerJob("member_123"),
       timeoutMs: 5_000,
       userId: "member_123",
-    })).rejects.toThrow();
-    expect(recordRuntimeCompletionFromContainer).not.toHaveBeenCalled();
+    })).resolves.toMatchObject({ status: "idle" });
+
+    await container.onRuntimeCompletionRecorded({
+      attemptId: "attempt_member_123",
+      leaseGeneration: "11",
+      userId: "member_123",
+    });
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "active child",
+    "recent conversation warmth",
+    "legacy child without a warmth watermark",
+  ])("keeps the terminal shell for $name", async (name) => {
+    const nowMs = Date.now();
+    const healthResult = name === "active child"
+      ? {
+          ...createRunnerHealthResult(),
+          activeJobCount: 1,
+        }
+      : name === "recent conversation warmth"
+        ? {
+            ...createRunnerHealthResult(),
+            conversationWarmActivityCompletedAtEpochMs: nowMs,
+          }
+        : {
+            activeJobCount: 0,
+            hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+            ok: true,
+          };
+    const { container, destroy } = createActivityExpiryContainerDouble({
+      healthResult,
+    });
+
+    await expect(container.invoke({
+      job: createWorkspaceRunnerJob("member_123"),
+      timeoutMs: 5_000,
+      userId: "member_123",
+    })).resolves.toMatchObject({ status: "idle" });
+
+    await container.onRuntimeCompletionRecorded({
+      attemptId: "attempt_member_123",
+      leaseGeneration: "11",
+      userId: "member_123",
+    });
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
+  it("retries terminal cleanup on the lifecycle timer after container status is uncertain", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const startedAtMs = Date.parse("2026-08-19T23:00:00.000Z");
+      vi.setSystemTime(startedAtMs);
+      const { container, destroy } = createActivityExpiryContainerDouble({
+        environment: {
+          HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS: "60000",
+        },
+        lifecycleStateResults: [
+          { lastChange: startedAtMs, status: "starting" },
+          { lastChange: startedAtMs, status: "running" },
+        ],
+        renewActivityTimeout: vi.fn(),
+      });
+
+      await expect(container.invoke({
+        job: createWorkspaceRunnerJob("member_123"),
+        timeoutMs: 5_000,
+        userId: "member_123",
+      })).resolves.toMatchObject({ status: "idle" });
+      await container.onRuntimeCompletionRecorded({
+        attemptId: "attempt_member_123",
+        leaseGeneration: "11",
+        userId: "member_123",
+      });
+      expect(destroy).not.toHaveBeenCalled();
+
+      vi.setSystemTime(startedAtMs + 60_001);
+      await expect(container.onActivityExpired()).resolves.toBeUndefined();
+      expect(destroy).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries terminal cleanup on the lifecycle timer after runner health is uncertain", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const startedAtMs = Date.parse("2026-08-20T00:00:00.000Z");
+      vi.setSystemTime(startedAtMs);
+      const { container, destroy } = createActivityExpiryContainerDouble({
+        environment: {
+          HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS: "60000",
+        },
+        healthResults: [
+          createRunnerHealthResult(),
+          new Error("health unavailable"),
+          createRunnerHealthResult(),
+        ],
+        renewActivityTimeout: vi.fn(),
+      });
+
+      await expect(container.invoke({
+        job: createWorkspaceRunnerJob("member_123"),
+        timeoutMs: 5_000,
+        userId: "member_123",
+      })).resolves.toMatchObject({ status: "idle" });
+      await container.onRuntimeCompletionRecorded({
+        attemptId: "attempt_member_123",
+        leaseGeneration: "11",
+        userId: "member_123",
+      });
+      expect(destroy).not.toHaveBeenCalled();
+
+      vi.setSystemTime(startedAtMs + 60_001);
+      await expect(container.onActivityExpired()).resolves.toBeUndefined();
+      expect(destroy).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("falls back to the lifecycle timer after a stop failure and does not double-destroy", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const startedAtMs = Date.parse("2026-08-20T01:00:00.000Z");
+      vi.setSystemTime(startedAtMs);
+      let destroyAttempt = 0;
+      const { container, destroy } = createActivityExpiryContainerDouble({
+        destroyImplementation: async () => {
+          destroyAttempt += 1;
+          if (destroyAttempt === 1) {
+            throw new Error("destroy unavailable");
+          }
+        },
+        environment: {
+          HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS: "60000",
+        },
+        renewActivityTimeout: vi.fn(),
+      });
+
+      await expect(container.invoke({
+        job: createWorkspaceRunnerJob("member_123"),
+        timeoutMs: 5_000,
+        userId: "member_123",
+      })).resolves.toMatchObject({ status: "idle" });
+      await container.onRuntimeCompletionRecorded({
+        attemptId: "attempt_member_123",
+        leaseGeneration: "11",
+        userId: "member_123",
+      });
+      expect(destroy).toHaveBeenCalledOnce();
+
+      vi.setSystemTime(startedAtMs + 60_001);
+      await expect(container.onActivityExpired()).resolves.toBeUndefined();
+      expect(destroy).toHaveBeenCalledTimes(2);
+
+      await expect(container.onActivityExpired()).resolves.toBeUndefined();
+      expect(destroy).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not clean up a terminal shell after a stale completion notification", async () => {
+    const { container, destroy } = createActivityExpiryContainerDouble();
+
+    await expect(container.invoke({
+      job: createWorkspaceRunnerJob("member_123"),
+      timeoutMs: 5_000,
+      userId: "member_123",
+    })).resolves.toMatchObject({ status: "idle" });
+
+    await container.onRuntimeCompletionRecorded({
+      attemptId: "attempt_member_123",
+      leaseGeneration: "999",
+      userId: "member_123",
+    });
+    expect(destroy).not.toHaveBeenCalled();
   });
 
   it("posts workspace jobs without active-operation storage", async () => {
@@ -241,26 +462,47 @@ function createWorkspaceRunnerJob(userId: string): HostedExecutionWorkspaceInvoc
 }
 
 function createActivityExpiryContainerDouble(input: {
+  destroyImplementation?: () => Promise<void>;
   environment?: ConstructorParameters<typeof RunnerContainer>[1];
-  invocationStatus?: number;
+  healthResult?: Record<string, unknown>;
+  healthResults?: Array<Error | Record<string, unknown>>;
+  invocationResponse?: Promise<Response>;
+  lifecycleStateResults?: Array<Error | Record<string, unknown>>;
   renewActivityTimeout?: ReturnType<typeof vi.fn>;
   resultOverrides?: Record<string, unknown>;
 } = {}) {
   const storage = createContainerStorageDouble();
-  const destroy = vi.fn(async () => {});
+  const destroy = vi.fn(input.destroyImplementation ?? (async () => {}));
+  let healthReadIndex = 0;
+  let invocationCompleted = false;
+  let lifecycleStateReadIndex = 0;
   const containerFetch = vi.fn(async (url: string) => {
     if (url.endsWith("/health")) {
-      return new Response(JSON.stringify(createRunnerHealthResult()), {
+      const configuredHealthResults = input.healthResults ?? [
+        input.healthResult ?? createRunnerHealthResult(),
+      ];
+      const healthResult = configuredHealthResults[
+        Math.min(healthReadIndex, configuredHealthResults.length - 1)
+      ];
+      healthReadIndex += 1;
+      if (healthResult instanceof Error) {
+        throw healthResult;
+      }
+      return new Response(JSON.stringify(healthResult), {
         headers: { "content-type": "application/json; charset=utf-8" },
         status: 200,
       });
     }
 
+    invocationCompleted = true;
+    if (input.invocationResponse) {
+      return await input.invocationResponse;
+    }
     return new Response(JSON.stringify(createRunnerResult(input.resultOverrides)), {
       headers: {
         "content-type": "application/json; charset=utf-8",
       },
-      status: input.invocationStatus ?? 200,
+      status: 200,
     });
   });
   let status: "running" | "stopped" = "stopped";
@@ -270,13 +512,25 @@ function createActivityExpiryContainerDouble(input: {
   Object.assign(container, {
     containerFetch,
     destroy: vi.fn(async () => {
-      status = "stopped";
       await destroy();
+      status = "stopped";
     }),
-    getState: vi.fn(async () => ({
-      lastChange: Date.now(),
-      status,
-    })),
+    getState: vi.fn(async () => {
+      const configuredLifecycleState = invocationCompleted
+        ? input.lifecycleStateResults?.[lifecycleStateReadIndex]
+        : undefined;
+      if (configuredLifecycleState !== undefined) {
+        lifecycleStateReadIndex += 1;
+        if (configuredLifecycleState instanceof Error) {
+          throw configuredLifecycleState;
+        }
+        return configuredLifecycleState;
+      }
+      return {
+        lastChange: Date.now(),
+        status,
+      };
+    }),
     ...(input.renewActivityTimeout
       ? { renewActivityTimeout: input.renewActivityTimeout }
       : {}),
@@ -310,6 +564,17 @@ function createRunnerHealthResult(): Record<string, unknown> {
     hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
     ok: true,
   };
+}
+
+function createDeferred<T>(): {
+  promise: Promise<T>;
+  resolve(value: T): void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
 }
 
 function readPostedRunnerBody(

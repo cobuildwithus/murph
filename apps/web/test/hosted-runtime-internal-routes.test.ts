@@ -490,6 +490,7 @@ describe("hosted runtime internal web routes", () => {
     expect(response.status).toBe(200);
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledTimes(1);
     expect(mocks.fetchHostedRuntimeMailboxProjection).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedActiveGroupRunningBit).toHaveBeenCalledTimes(1);
     expect(mocks.fetchHostedRuntimeMailboxProjection).toHaveBeenCalledWith({
       cursorMode: "imported_seq",
       lanes: [
@@ -1294,6 +1295,7 @@ describe("hosted runtime internal web routes", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.readHostedActiveGroupRunningBit).not.toHaveBeenCalled();
   });
 
   it("does not AI-gate non-manual system mailbox consumption", async () => {
@@ -3027,6 +3029,35 @@ describe("hosted runtime internal web routes", () => {
       });
       expect(warn).not.toHaveBeenCalled();
 
+      mocks.recordHostedIngressAssistantMilestone.mockResolvedValue({
+        contendedCount: 1,
+        matchedCount: 0,
+        recorded: false,
+        unmatchedCount: 1,
+      });
+      const contendedResponse = await runtimeLatencyRoute.POST(jsonRequest(
+        "/api/internal/hosted-runtime/latency",
+        {
+          event: {
+            assistantInputIds: ["input_contended_1"],
+            at: FIXED_NOW,
+            milestone: "linq_typing_accepted",
+            runtimeAttemptId: "attempt_routes_1",
+            source: "linq",
+            type: "assistant_milestone",
+          },
+        },
+        runtimeWriteFenceHeaders(),
+      ));
+
+      expect(contendedResponse.status).toBe(200);
+      expect(await contendedResponse.json()).toEqual({
+        matchedCount: 0,
+        recorded: false,
+        unmatchedCount: 1,
+      });
+      expect(warn).not.toHaveBeenCalled();
+
       mocks.recordHostedIngressProviderStarted.mockResolvedValue({
         matchedCount: 1,
         recorded: true,
@@ -3053,6 +3084,7 @@ describe("hosted runtime internal web routes", () => {
       expect(warn).toHaveBeenCalledWith(
         "Hosted runtime latency trace callback had rejected rows.",
         {
+          contendedCount: 0,
           eventType: "provider_started",
           matchedCount: 1,
           rejectedCount: 1,

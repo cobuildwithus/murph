@@ -1068,6 +1068,7 @@ async function createTransportFailureHarness(input: {
     runnerRuntimeEnvSource: {},
     runnerStoreCache: new TestRunnerStoreCache({}),
     stateStore,
+    waitUntil: (promise) => durable.state.waitUntil(promise),
   });
 
   const prepared: PreparedRuntimeInvocation = {
