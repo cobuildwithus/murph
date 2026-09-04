@@ -1898,6 +1898,7 @@ describe('monorepo release flow coverage audit', () => {
       'contextAnchorHead',
       'ORIGINAL_PR',
       'REVIEW_INDUCED',
+      'Complexity Collapse',
     ]) {
       expect(prDeepReviewPrompt).toContain(token)
       expect(prFollowupReviewPrompt).toContain(token)

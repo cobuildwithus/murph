@@ -15,12 +15,15 @@ not review approval.
 
 ## Outcome and Completion Bar
 
-Review the exact pushed PR patch for serious, realistically reachable bugs using
-the guarded repository snapshot. A finding needs a causing change, plausible
-trigger, and serious current harm. Code-path proof suffices without a prior
-incident; practical rare exploits and destructive failures remain in scope.
-Refactoring, UX polish, disclosure gaps, and speculative edge cases are not
-blocking findings. The targeted exploratory presets remain available separately.
+Review the exact pushed PR patch for serious, realistically reachable bugs and
+material Complexity Collapse using the guarded repository snapshot. A bug needs
+a causing change, plausible trigger, and serious current harm. Code-path proof
+suffices without a prior incident; practical rare exploits and destructive failures remain in scope.
+Complexity Collapse independently qualifies when a bounded correction removes
+meaningful code, concepts, or owners while preserving required behavior and
+invariants without replacement machinery. Minor refactoring, UX polish,
+disclosure gaps, and speculative edge cases are not blocking findings. The
+targeted exploratory presets remain available separately.
 
 Round 1 is always a full-patch audit. On round 2 or later, the packager reads the
 PR body's explicit context
@@ -108,7 +111,8 @@ Every final `FINDINGS` result uses this parent-owned disposition boundary.
 Validate the exact response first, then have the parent triage every finding.
 The user-visible report states the result and, for each finding, the parent's
 accepted or rejected disposition, concrete code or path evidence, current user
-or operational harm, and the smallest justified fix with its complexity cost.
+or operational harm or removable complexity, and the smallest justified
+correction with its complexity cost.
 
 A final `ROUND_OUTCOME: FINDINGS` keeps the turn-ending pause: report the result
 and dispositions, then wait for the user to resume before mutating the
@@ -124,9 +128,15 @@ when the parent accepts zero findings and records evidence-backed rejection
 reasons. Accepted findings remain unresolved until fixed and verified; the
 final gate requires a later resolved result.
 
-One narrow exception, `Non-Production Remediation`, lets a final `FINDINGS`
-result complete its disposition boundary without ending the turn after the
-parent reports every finding and its evidence-backed disposition:
+Two narrow exceptions let a final `FINDINGS` result complete its disposition
+boundary without ending the turn after the parent reports every finding and
+its evidence-backed disposition:
+
+- `Complexity Collapse`: the result contains exactly one finding, classified
+  as Complexity Collapse. The parent proves that its correction preserves all
+  required behavior and invariants, stays within existing edit authority, and
+  yields net deletion or removes meaningful concepts or owners without
+  replacement machinery.
 
 - `Non-Production Remediation`: every accepted finding in the result can be
   corrected entirely in isolated tests, fixtures, or direct-proof scaffolding;
@@ -139,12 +149,12 @@ parent reports every finding and its evidence-backed disposition:
   coexist because their evidence-backed disposition is terminal, but every
   accepted finding must qualify.
 
-After this exception qualifies, remediate, verify, push when applicable, and
+After either exception qualifies, remediate, verify, push when applicable, and
 continue the ReviewGPT loop without asking the user for separate permission.
 Use the ordinary turn-ending pause when an accepted finding does not qualify,
 the correction expands beyond the proven boundary, requested behavior or the
 intended outcome would change, scope or authority would expand, or a destructive
-or external action needs new approval. The exception does not bypass a required
+or external action needs new approval. Neither exception bypasses a required
 scope decision or the seven-round hard cap.
 
 `INVALID` stops for an evidence gap. Older review results may contain
@@ -442,16 +452,20 @@ the current user explicitly asks for it.
      route, package, CLI, or integration lane for focused regression proof.
      A practical exploit or destructive failure does not require a prior
      incident. Unsupported hypothetical states do not qualify.
+   - **Accepted Complexity Collapse**: prove the exact removable code or
+     concepts, the smaller target shape, and preserved behavior and invariants.
+     Require net source deletion or fewer meaningful concepts/owners without
+     replacement machinery; reject cosmetic or disproportionate refactors.
    - **Rejected**: wrong, already handled, speculative, not worth the added
      complexity, or missing the required reproduction/proof. Note the reason.
 
    In a `same_thread_delta` round, inspect the remediation and directly affected
-   paths only. A serious original bug encountered there may be accepted without
+   paths only. A qualifying original finding there may be accepted without
    restarting the full audit. In a `full_snapshot` round, inspect the complete
-   current PR. Label every bug by its actual origin; a failed correction does
+   current PR. Label every finding by its actual origin; a failed correction does
    not relabel the original cause. Verify claimed fixes and reassess old
-   findings against the current serious-bug bar. Rejected or out-of-scope
-   observations do not remain blockers. Exclude bugs equivalent on the base.
+   findings against the serious-bug and Complexity Collapse bars. Rejected or
+   out-of-scope observations do not remain blockers. Exclude findings equivalent on the base.
 
    ReviewGPT findings are adversarial signals, not implementation instructions.
    Before accepting a finding, identify the invariant it protects and any
@@ -484,8 +498,8 @@ the current user explicitly asks for it.
 
    Apply the parent-owned finding-disposition boundary after completing this
    triage. A final `FINDINGS` result pauses steps 5–7 until the user resumes,
-   except that qualifying `Non-Production Remediation` may proceed immediately
-   after the report. Remediation remains limited to accepted findings and the
+   except that qualifying `Complexity Collapse` or `Non-Production Remediation`
+   may proceed immediately after the report. Remediation remains limited to accepted findings and the
    proven task or exception boundary. A validated final `ROUND_OUTCOME: PASS` continues
    without that pause.
 
@@ -497,8 +511,8 @@ the current user explicitly asks for it.
    with the PR evidence. Patch size and round count alone do not trigger this
    step; the packager's size-based context selection remains unchanged.
 
-6. Fix accepted bugs within existing authority, preserve the intended success
-   path, and prefer the smallest correction at the owning boundary. Run focused
+6. Correct accepted findings within existing authority, preserve the intended
+   success path, and prefer the smallest correction at the owning boundary. Run focused
    verification under `verification-and-runtime.md`, update affected evidence,
    and push to the PR branch.
 
@@ -573,7 +587,7 @@ worktree active, and stop. Do not poll for a quiet base.
   the round counter; correct the gap and retry the same substantive round.
 - A concrete requirement or authority gap pauses dependent remediation until
   the parent resolves the scope decision under step 5. The reviewer reports
-  bugs or evidence gaps, not process escalation by size or round number.
+  qualifying findings or evidence gaps, not escalation by size or round number.
 - Hard cap: 7 rounds per PR. There is no automatic eighth substantive round. An
   accepted round-seven finding may still be reproduced and fixed; do not leave a
   known bug in place merely because the review counter reached seven. After that

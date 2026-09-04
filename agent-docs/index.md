@@ -129,7 +129,7 @@ not a guarantee that every claim was checked in this cleanup.
 | `agent-docs/operations/imessage-deliverability.md` | Phone-number messaging policy. | Phone-number messaging policy | High | 2026-08-11 |
 | `agent-docs/operations/local-storage-lifecycle.md` | Local rebuildable-storage lifecycle. | Local rebuildable-storage lifecycle | High | 2026-08-10 |
 | `agent-docs/operations/hosted-local-worktree-dev.md` | Local hosted runtime workflow. | Local hosted runtime workflow | Medium | 2026-08-20 |
-| `agent-docs/operations/pr-reviewgpt-loop.md` | PR review for serious, realistically reachable bugs. | Final PR ReviewGPT loop | Medium | 2026-09-02 |
+| `agent-docs/operations/pr-reviewgpt-loop.md` | PR review for realistic serious bugs and material Complexity Collapse. | Final PR ReviewGPT loop | Medium | 2026-09-02 |
 | `agent-docs/operations/device-sync-ingestion-invariants.md` | Device-sync push/pull ingestion invariants. | Device-sync ingestion contract | High | 2026-08-20 |
 | `agent-docs/PLANS.md` | Execution-plan lifecycle and storage rules. | Plan workflow | Medium | 2026-03-31 |
 | `agent-docs/exec-plans/completed/README.md` | Completed-plan archive interpretation. | Completed-plan archive interpretation | Medium | 2026-07-22 |
