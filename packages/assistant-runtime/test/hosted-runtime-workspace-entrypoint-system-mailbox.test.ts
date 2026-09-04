@@ -49,6 +49,7 @@ import {
   buildIntegrationEvidencePart,
   buildIntegrationIngestRecord,
   findCaptureByLookup,
+  findEventByExternalRef,
   initializeVault,
   applyCanonicalWriteBatch,
   patchAutomation,
@@ -64,11 +65,13 @@ import {
   buildHostedExecutionAssistantNotificationRequestedWake,
   buildHostedExecutionDailyMetricReportedWake,
   buildHostedExecutionEnvironmentInterviewCompletedWake,
+  buildHostedExecutionGroupJournalFactRecordedWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionRuntimeControlWake,
   deriveHostedExecutionErrorCode,
+  type HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import {
   HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
@@ -1516,6 +1519,234 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       expect(result.status).toBe("idle");
     } finally {
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("blocked system mailbox mode imports a Group Journal fact and drains later model-free work", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const groupFactItem = createMailboxItem({
+      causalSeq: "1",
+      dedupeKey: "group_journal_model_free_fact",
+      id: "mailbox_item_group_journal_model_free_fact",
+      kind: "journal.group-fact.recorded",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const refreshItem = createMailboxItem({
+      causalSeq: "2",
+      dedupeKey: "runtime.browser-vault-refresh-requested:after-group-journal",
+      id: "mailbox_item_browser_vault_after_group_journal",
+      kind: "runtime.browser-vault-refresh-requested",
+      lane: "system",
+      laneSeq: "2",
+    });
+    const groupFactWake = buildHostedExecutionGroupJournalFactRecordedWake({
+      eventId: groupFactItem.dedupeKey,
+      journalFact: {
+        date: "2026-04-26",
+        factIndex: 1,
+        note: "Completed an afternoon walk.",
+        noteType: "journal-factor",
+        title: "Afternoon walk",
+      },
+      memberId: TEST_USER_ID,
+      occurredAt: groupFactItem.occurredAt,
+    });
+    const refreshWake = buildHostedExecutionRuntimeControlWake({
+      eventId: refreshItem.dedupeKey,
+      kind: "runtime.browser-vault-refresh-requested",
+      occurredAt: refreshItem.occurredAt,
+      userId: TEST_USER_ID,
+    });
+    const wakesByItemId = new Map<string, HostedExecutionWake>([
+      [groupFactItem.id, groupFactWake],
+      [refreshItem.id, refreshWake],
+    ]);
+    let browserPublishCalls = 0;
+    let browserWriteCalls = 0;
+    let currentWorkspace: HostedWorkspaceState | null = null;
+    let snapshotOrdinal = 0;
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      mocks.prepareHostedCodexRuntimeEnvironment.mockClear();
+      mocks.prepareHostedCodexAssistantProcess.mockClear();
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/group-journal-model-free-before.bundle.json",
+        vaultRoot,
+      });
+      artifactBytesByHash.set(restoredWorkspace.hash, restoredWorkspace.bytes);
+      currentWorkspace = createWorkspaceState({
+        snapshotRef: restoredWorkspace.snapshotRef,
+        version: "0",
+      });
+      const workspacePort: HostedRuntimeWorkspacePort = {
+        async checkpoint(request) {
+          events.push("workspace.checkpoint");
+          checkpointRequests.push(request);
+          currentWorkspace = createWorkspaceState({
+            browserVaultReplicaRef: currentWorkspace?.browserVaultReplicaRef ?? null,
+            inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
+            nextDefaultProcessingWakeAt:
+              request.nextDefaultProcessingWakeAt ?? null,
+            nextDefaultProcessingWakeReason:
+              request.nextDefaultProcessingWakeReason ?? null,
+            nextWakeAt: request.nextWakeAt ?? null,
+            nextWakeReason: request.nextWakeReason ?? null,
+            redactedStatus: request.redactedStatus ?? null,
+            snapshotRef: request.snapshotRef,
+            systemMailboxProgressGeneration:
+              request.systemMailboxProgressGeneration ?? null,
+            version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+          });
+          return {
+            checkpointed: true,
+            workspace: currentWorkspace,
+          };
+        },
+        async read() {
+          events.push("workspace.read");
+          return {
+            fetchedAt: TEST_NOW,
+            workspace: currentWorkspace,
+          };
+        },
+      };
+      const platform = createPlatform({
+        artifactBytesByHash,
+        browserVaultReplicaPort: {
+          async publishRef({ replicaRef }) {
+            browserPublishCalls += 1;
+            events.push(`browser-vault.publish:${browserPublishCalls}`);
+            assert.ok(currentWorkspace);
+            currentWorkspace = {
+              ...currentWorkspace,
+              browserVaultReplicaRef: replicaRef,
+            };
+            return {
+              published: true,
+              workspace: currentWorkspace,
+            };
+          },
+          async write({ replica }) {
+            browserWriteCalls += 1;
+            events.push(`browser-vault.write:${browserWriteCalls}`);
+            return createBrowserVaultReplicaRef(replica);
+          },
+        },
+        mailboxPort: createMailboxPort({
+          events,
+          fetchRequests,
+          items: [groupFactItem, refreshItem],
+        }),
+        workspacePort,
+      });
+      const runSystemPass = async (attemptId: string) => {
+        const runtimeJobInput = createWorkspaceRuntimeJobInput({
+          request: {
+            assistantExecutionBlocked: true,
+            attemptId,
+            processingMode: "system_mailbox",
+            workspaceVersion: currentWorkspace?.version ?? "0",
+          },
+        });
+        const runtime = runtimeJobInput.runtime;
+        assert.ok(runtime);
+        const bridgeOptions = createHostedWorkspaceRuntimeBridgeJobOptions({
+          decodeMailboxPayload: {
+            async decode({ itemRef }) {
+              const wake = wakesByItemId.get(itemRef.id);
+              assert.ok(wake);
+              return { status: "decoded", wake };
+            },
+          },
+          platform,
+          request: runtimeJobInput.request,
+          runtime,
+          snapshotArchiveBuilder: {
+            async buildEncryptedSnapshot() {
+              throw new Error("The focused bridge test overrides snapshot construction.");
+            },
+          },
+          vaultRoot,
+          async waitForBackgroundAssistantWork() {},
+        });
+        return await runHostedWorkspaceRuntimeJobInProcess(runtimeJobInput, {
+          ...bridgeOptions,
+          async createCheckpointSnapshot() {
+            snapshotOrdinal += 1;
+            const snapshot = await createVaultSnapshotBundle({
+              key: `users/bundles/member-synthetic/group-journal-model-free-${snapshotOrdinal}.bundle.json`,
+              vaultRoot,
+            });
+            artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
+            return { snapshotRef: snapshot.snapshotRef };
+          },
+          async runAssistantPhase() {
+            throw new Error("Blocked Group Journal work must not enter assistant execution.");
+          },
+        });
+      };
+
+      const firstResult = await runSystemPass(
+        "attempt_group_journal_model_free_first",
+      );
+
+      await expect(findEventByExternalRef({
+        resourceId: groupFactItem.dedupeKey,
+        resourceType: "group-journal-fact",
+        system: "manual",
+        vaultRoot,
+      })).resolves.toMatchObject({
+        kind: "note",
+        note: "Completed an afternoon walk.",
+        title: "Afternoon walk",
+      });
+      assert.deepEqual(
+        fetchRequests.map((request) => request.lanes.map((lane) => lane.lane)),
+        [["system"]],
+      );
+      assert.deepEqual(
+        (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) =>
+          item.itemId
+        ),
+        [refreshItem.id],
+      );
+      assert.equal(
+        checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
+        "1",
+      );
+      assert.ok(browserWriteCalls >= 1);
+      assert.ok(browserPublishCalls >= 1);
+      assert.ok(
+        requireEventIndex(events, "workspace.checkpoint")
+          < requireEventIndex(events, "browser-vault.publish:1"),
+      );
+      assert.equal(firstResult.status, "scheduled");
+
+      const secondResult = await runSystemPass(
+        "attempt_group_journal_model_free_second",
+      );
+
+      assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
+      assert.equal(
+        checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
+        "2",
+      );
+      expect(mocks.prepareHostedCodexRuntimeEnvironment).not.toHaveBeenCalled();
+      expect(mocks.prepareHostedCodexAssistantProcess).not.toHaveBeenCalled();
+      assert.equal(secondResult.status, "idle");
+      assert.equal(secondResult.nextWakeAt, null);
+      assert.equal(secondResult.nextWakeReason ?? null, null);
+    } finally {
+      vi.useRealTimers();
       await removeTempRoot(vaultRoot);
     }
   });
