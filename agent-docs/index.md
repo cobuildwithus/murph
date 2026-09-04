@@ -12,6 +12,11 @@ direct-Current consumer rollout, and its signal-history rollback floor are
 specified by `agent-docs/references/hosted-runtime-protocol.md` and
 `apps/cloudflare/DEPLOY.md`.
 
+Foreground Linq and Assistant Ask mailbox handoffs give the payloadless direct
+ensure request one bounded fetch-dispatch opportunity before Temporal retains
+durable recovery ownership. This ordering is specified by
+`agent-docs/references/hosted-runtime-protocol.md`.
+
 Hosted device-sync completion fences become due immediately after local work
 settles while keeping provider cadence checkpoint-gated. After `UserRunner`
 clears the exact runtime write fence, it may notify the existing container

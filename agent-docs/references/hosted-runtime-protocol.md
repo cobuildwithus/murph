@@ -105,10 +105,12 @@ facts-read-only signal for its existing callers.
 
 Assistant Ask reuses that same ownership split. Web resolves the target and
 return authority, then appends paired encrypted `assistant.ask.requested` and
-`assistant.ask.completed` mailbox items. After each append, Web first signals
-Temporal and then starts the existing payloadless direct `ensure-processing`
-latency hint; the hint may make one deadline-bounded retry after an explicit
-`retry_later`, but has no durable authority. The group runtime may
+`assistant.ask.completed` mailbox items. After each append, Web starts the
+existing payloadless direct `ensure-processing` latency hint and waits only for
+request dispatch, safe pre-dispatch completion, or the one-second dispatch
+budget before signaling Temporal. The direct response remains best effort and
+may make one deadline-bounded retry after an explicit `retry_later`; it has no
+durable authority. The group runtime may
 answer one request in a separate read-only one-shot Codex child while its
 resident foreground assistant continues to own writes and sends. The mailbox
 remains the only durable queue and operation state; Cloudflare gains no second
@@ -118,6 +120,9 @@ The final seam is:
 
 ```text
 append encrypted mailbox item or upsert device-sync dirty state
+for foreground Linq and Assistant Ask handoffs, start the payloadless direct
+  ensure-processing hint and wait only for dispatch, safe pre-dispatch
+  completion, or the one-second dispatch budget
 signal Temporal hosted orchestration
 restore hosted workspace
 import mailbox prefix into local runtime state and stage AssistantInputEvent rows
