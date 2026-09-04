@@ -312,6 +312,14 @@ existing explicit `authenticated-group` owner scope; any feature-specific
 activity, evidence, identity, or participant policy must be designed with that
 feature rather than embedded in the generic ownership boundary.
 
+The removed biweekly product-notes automation follows the same permanent
+retirement contract. Its historical immutable ID is not a seed:
+reconciliation archives active or paused persisted copies, and a claimed
+occurrence fails closed before lifecycle or model work. Direct product-update
+questions remain supported through the ordinary conversation prompt and its
+canonical public changelog and feature-catalog feeds; retirement removes only
+the unsolicited recurring note.
+
 Web then captures the current roster and exact active grants, decrypts the
 bounded encrypted snapshots owned by those share rows, and returns every member
 with every requested scope as `not_granted`, `granted` plus `missing`, or

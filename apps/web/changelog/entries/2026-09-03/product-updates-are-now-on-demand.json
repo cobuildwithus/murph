@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-09-03",
+  "order": 100,
+  "item": {
+    "id": "product-updates-are-now-on-demand",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Product updates are now on demand",
+    "summary": "Murph no longer sends recurring biweekly product notes. You can still ask what is new whenever you choose.",
+    "details": "Direct questions continue to use Murph's current changelog and feature catalog. Other reminders and health check-ins are unchanged.",
+    "relevanceTags": ["assistant", "automations", "product-updates"],
+    "sourcePullRequests": [2795],
+    "tryIt": {
+      "label": "Ask what is new",
+      "prompt": "What is new in Murph?"
+    }
+  }
+}

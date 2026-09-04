@@ -163,9 +163,6 @@ export const MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID =
   'automation_01K2WKKY3F8Q4R5S6T7V8W9XAB'
 export const MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID =
   'automation_01K0EXA5C0VT9F7X3KG6JMPZ5A'
-export const MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID =
-  'automation_01K0Z7X9Y8W6V5T4S3R2Q1P0NM'
-const MURPH_PRODUCT_NOTES_INTERVAL_MS = 14 * 24 * 60 * 60 * 1000
 export const MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID =
   'automation_01K4Y0Q5C8M9N2P3R4S5T6V7WX'
 export const MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY =
@@ -176,11 +173,14 @@ export const MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_PRIVATE_SUMMARY =
   'Group room model consolidation maintenance wake completed.'
 const MURPH_RETIRED_GROUP_SUNDAY_SUPERLATIVES_AUTOMATION_ID =
   'automation_01K55N7S9X4Q2M6P8R3T0V1WYZ'
+export const MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID =
+  'automation_01K0Z7X9Y8W6V5T4S3R2Q1P0NM'
 export const MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID =
   'automation_01KZZM3A9C7P4R6T8V2W5X0YQZ'
 
 const MURPH_RETIRED_MANAGED_AUTOMATION_IDS = new Set<string>([
   MURPH_RETIRED_GROUP_SUNDAY_SUPERLATIVES_AUTOMATION_ID,
+  MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
 ])
 
 export function isRetiredMurphManagedAutomationId(
@@ -816,70 +816,6 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- Put at most one practical next move in the prose. Prefer keep one variable stable, measure one thing, ignore a metric their own data shows is noisy for them, ask a clinician a better question, or avoid changing the plan based on weak/noisy evidence. Suggest adding behavior only when it passes the burden check.',
       '- Keep the message practical, calm, and non-alarmist.',
       '- Append one dated section to `weekly-health-research-scout` with source details, synthesis notes, candidate ranking notes, why the final insight was chosen, and why close alternatives were suppressed.',
-    ].join('\n'),
-  },
-  {
-    automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
-    slug: 'weekly-product-updates',
-    title: 'Murph product notes',
-    summary: 'A biweekly personalized note alternating what is new in Murph with things Murph can do for you.',
-    schedule: {
-      kind: 'every',
-      everyMs: MURPH_PRODUCT_NOTES_INTERVAL_MS,
-    },
-    continuityPolicy: 'fresh',
-    ownerScope: 'member',
-    assistantTargetOverride: {
-      reasoningEffort: 'high',
-    },
-    tags: [
-      'murph-managed:weekly-product-updates',
-    ],
-    instructions: [
-      'Goal: every two weeks, send one concise personalized in-chat product note. Each run is one of two kinds, alternating run to run: a changelog note with the 2-3 recently shipped Murph updates this user is most likely to find genuinely interesting, or a feature discovery note with the 2-3 things Murph can already do that this user has not tried and is most likely to value. Fallback is allowed at most once: attempt the initially chosen kind once; you may attempt the other kind once as the fallback; never fall back from a fallback. If both kinds are unavailable, invalid, empty, or below bar, return `{"kind":"skip","privateSummary":"No product note cleared the send bar."}`. A note with no substance is worse than no note.',
-      '',
-      "Decide this run's kind first:",
-      '- Read `vault-cli knowledge show murph-product-notes`. If the page is missing, treat that as no prior product notes and choose the feature discovery kind.',
-      '- Otherwise find the most recent dated section and choose the other kind: last recorded changelog means feature discovery now; last recorded feature discovery means changelog now.',
-      '- Use `murph-product-notes` as the only ledger for this automation. Do not create per-week pages and do not scan unrelated wiki pages.',
-      '',
-      'Changelog kind:',
-      `- Fetch the canonical JSON feed once from ${MURPH_PRODUCT_ORIGIN}/api/changelog?days=14&featureLimit=70&improvementLimit=10.`,
-      '- Treat that feed as the only source of shipped-product truth. Do not infer launches from repository history or invent availability, benefits, or try-it instructions.',
-      '- If the feed is unavailable, invalid, or empty, do not fabricate updates; fall back to the feature discovery kind.',
-      '- Treat this as a member-facing product update, not a dump of release notes. Keep an item when it introduces or materially changes a member-facing action, decision, or visible experience the member can use. Judge that by substance, not by feed kind or wording, so relevant improvements and capabilities described with phrases such as `can now` or `resume` stay eligible.',
-      '- Never pitch reliability work. Drop an item when it only restores or hardens otherwise unchanged behavior or reports internal durability, even if the feed lists it as a feature and even if this member hit that issue. Reliability is answered in conversation when a member raises it, not offered as product news.',
-      '- Treat settings, privacy, consent, connection-management, export, and other administrative controls as user-visible but lower priority than exciting capabilities unless they directly answer a known concern or unlock a current intention.',
-      '- Do not send a changelog note merely because the feed contains valid items. Prefer one genuinely interesting item over filler; if no changelog item clears, fall back to feature discovery, and if neither kind clears, skip.',
-      '- Choose 2-3 items using only context Murph already has for normal assistance: connected providers and channels, active experiments and automations, recurring request categories, and features the user already uses.',
-      '- Skip items already covered in a prior ledger section.',
-      '- Do not inspect raw health values solely to personalize product news, and do not open raw health records, uploaded documents, inbox attachments, provider payloads, transcripts, or raw notes solely to judge relevance.',
-      '- Prefer user-fit, practical benefit, editorial priority, and novelty. Do not pad with weak matches; one strong item beats stretching to fill 2-3 slots.',
-      '- Use the canonical title, summary, and tryIt fields from the feed, and verify each selected item has a concrete reason it may interest this user. Treat URL only as source metadata; never include it in the outbound note.',
-      '',
-      'Feature discovery kind:',
-      `- Fetch the canonical JSON catalog once from ${MURPH_PRODUCT_ORIGIN}/api/feature-catalog.`,
-      '- Treat that catalog as the only source of truth for what Murph can do. Do not invent capabilities, availability, or try-it instructions beyond it.',
-      '- If the catalog is unavailable or invalid, do not fabricate capabilities; fall back to the changelog kind.',
-      "- Drop items the user is already using. Each item's alreadyUsing field says what to check; judge it using only context Murph already has for normal assistance, and do not inspect raw health values solely to personalize suggestions. Judge alreadyUsing only from context already surfaced for ordinary assistance: connected providers and channels, active experiments and automations, group memberships, and recurring request categories. Do not open raw health records, uploaded documents, inbox attachments, provider payloads, transcripts, or raw notes solely to decide whether a feature was used.",
-      '- Require positive eligibility evidence: if the ordinary context does not establish that an alreadyUsing condition is false, drop the item instead of guessing. For `connect-wearables`, any active or reconnect-required wearable means the feature is already in use; if wearable connection status context is absent or unclear, drop it.',
-      '- Drop items already pitched in any prior ledger section; never repeat a feature pitch.',
-      '- Drop items this conversation cannot actually do right now: if the capability behind an item, such as phone calls, voice memos, songs, or a connected-app action, is not available as a tool in this runtime or supported on this channel, do not pitch it. When unsure, prefer items you are certain work here.',
-      "- If an item lists a requires prerequisite, check it from the same ordinary context. When the user clearly lacks the prerequisite, either skip the item or make the prerequisite an explicit, honest part of the pitch, such as connecting a wearable first.",
-      '- From the remainder pick the 2-3 items this user is most likely to genuinely value right now, judged by user-fit, practical benefit, and editorial priority. Each needs a concrete reason grounded in this user\'s context. One strong item beats padding.',
-      "- Frame each as something the user can try right now in this chat, weaving the item's tryIt prompt in naturally rather than quoting it mechanically.",
-      '',
-      'Both kinds:',
-      '- Before sending, append one dated section to the ledger with the locked append surface, for example: `vault-cli knowledge append-section murph-product-notes YYYY-MM-DD --title "Murph product notes" --body <markdown>`. The appended section body must record only this run\'s kind and the chosen item ids; do not include reasons, user context, health details, raw user wording, provider data, or copied catalog/changelog text.',
-      '- If `append-section` reports that the section already exists, another run already recorded today\'s note: read that section and, if its recorded kind and item ids still clear the current bar, compose and send a note for those exact items; otherwise return `{"kind":"skip","privateSummary":"No product note cleared the send bar."}`. Do not append again and do not switch kinds.',
-      '- Keep this scheduled note text-only. Do not create, attach, or send images or response media.',
-      '- The outbound note must be link-free. Never include URLs, Markdown links, bare domains, or link labels such as "read more".',
-      '- Use exactly one bullet per selected item. Each bullet must be one sentence and no more than 28 words after the bullet marker, including the title. State the benefit directly; omit optional color and repeated personalization, but preserve required prerequisites, availability limits, and approval or confirmation boundaries.',
-      '- Open every outbound note with one sentence of no more than 20 words before the first bullet. In Murph\'s first-person voice, explain that these occasional updates cover what is new or useful so the user can make use of it.',
-      '- Close with one invitation sentence of no more than 12 words.',
-      '- If sending nothing, return `{"kind":"skip","privateSummary":"No product note cleared the send bar."}` and do not append to the ledger.',
-      '',
-      'On a later user turn, call `murph.submit_product_feedback` for explicit product frustration, feature requests, interest in shipped changelog or catalog items, clear inferred workflow friction, or repeated Murph-observed product/tool friction. Start inferred summaries with `Speculative:` and assistant-observed summaries with `Murph-observed:`. Do not log vague low-confidence guesses. Use only structured kind, a concise product-only summary, and optional changelog item ids; do not include tags, topics, raw user wording, raw conversation text, health details, identifiers, contact details, secrets, or provider payloads.',
     ].join('\n'),
   },
   {

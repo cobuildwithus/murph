@@ -291,7 +291,7 @@ describe('post-onboarding support-gap automation', () => {
       now: new Date('2026-03-02T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 7,
+      created: 6,
       skipped: 0,
       updated: 0,
     })
@@ -318,7 +318,7 @@ describe('post-onboarding support-gap automation', () => {
       vaultRoot,
     })).resolves.toEqual({
       created: 0,
-      skipped: 7,
+      skipped: 6,
       updated: 0,
     })
   })
@@ -366,7 +366,7 @@ describe('post-onboarding support-gap automation', () => {
       vaultRoot,
     })).resolves.toEqual({
       created: 0,
-      skipped: 6,
+      skipped: 5,
       updated: 1,
     })
     const reconciled = await showAutomation({
@@ -405,7 +405,7 @@ describe('post-onboarding support-gap automation', () => {
       now: new Date('2026-06-04T15:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 7,
+      created: 6,
       skipped: 0,
       updated: 0,
     })
@@ -427,7 +427,7 @@ describe('post-onboarding support-gap automation', () => {
       vaultRoot,
     })).resolves.toEqual({
       created: 0,
-      skipped: 7,
+      skipped: 6,
       updated: 0,
     })
     await expect(showAutomation({
@@ -485,7 +485,7 @@ describe('post-onboarding support-gap automation', () => {
       now: new Date('2026-06-10T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 6,
+      created: 5,
       skipped: 0,
       updated: 1,
     })
@@ -527,7 +527,7 @@ describe('post-onboarding support-gap automation', () => {
       vaultRoot,
     })).resolves.toEqual({
       created: 0,
-      skipped: 7,
+      skipped: 6,
       updated: 0,
     })
     await expect(showAutomation({
@@ -635,7 +635,7 @@ describe('post-onboarding support-gap automation', () => {
     })
 
     expect(result).toMatchObject({
-      created: 6,
+      created: 5,
       skipped: 0,
       updated: 0,
     })
