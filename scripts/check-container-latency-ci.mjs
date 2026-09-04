@@ -108,7 +108,7 @@ async function main(baseArgument, candidateArgument) {
         bundle: true, platform: "node", format: "esm", target: "node24",
         tsconfig: path.join(root, "tsconfig.base.json"), outfile: path.join(directory, "import.mjs"),
         banner: { js: 'import { createRequire } from "node:module"; const require = createRequire(import.meta.url);' } });
-      await copyFile(path.join(candidate, benchPath, "runner-boot.mjs"), path.join(directory, "boot.mjs"));
+      await copyFile(path.join(candidate, "scripts/container-latency-boot.mjs"), path.join(directory, "boot.mjs"));
       command("pnpm", ["--dir", path.join(root, "apps/cloudflare"), "runner:docker:base"], { stdio: "inherit" });
       const image = `murph-latency-${randomUUID()}`;
       command("docker", ["build", "--platform", "linux/amd64", "--tag", image,

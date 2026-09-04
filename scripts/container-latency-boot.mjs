@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { setTimeout } from "node:timers/promises";
 
-// Exercise the packaged runtime without accepting work or contacting providers.
+// CI probe: exercise the packaged runtime without work or provider requests.
 const entry = await import("/app/dist-bundled/container-entrypoint.js");
 const server = await entry.startHostedContainerEntrypoint({ port: 0 });
 try {
