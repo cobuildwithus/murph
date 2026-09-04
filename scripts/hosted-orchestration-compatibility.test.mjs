@@ -475,14 +475,20 @@ test("dispatch receipt accepts only the returned positive run id", () => {
   assert.throws(() => inspectDispatchReceipt({}), /did not return workflow_run_id/u);
 });
 
-test("private run proof binds stable identity fields without trusting the display title", () => {
+test("private run proof binds repository, workflow, main SHA, event, and first attempt", () => {
   assert.deepEqual(inspectPrivateRun(privateRun(), {
     privateSha: PRIVATE_SHA,
     runId: RUN_ID,
     workflowId: WORKFLOW_ID,
   }), { complete: true, conclusion: "success" });
   assert.deepEqual(inspectPrivateRun(privateRun({
-    name: `Public Murph Integration / temporal_compatibility / ${PUBLIC_SHA} / none`,
+    name: `${TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME} / temporal_compatibility / ${PUBLIC_SHA} / none`,
+  }), {
+    privateSha: PRIVATE_SHA,
+    runId: RUN_ID,
+    workflowId: WORKFLOW_ID,
+  }), { complete: true, conclusion: "success" });
+  assert.deepEqual(inspectPrivateRun(privateRun({
     path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
   }), {
     privateSha: PRIVATE_SHA,
@@ -490,6 +496,7 @@ test("private run proof binds stable identity fields without trusting the displa
     workflowId: WORKFLOW_ID,
   }), { complete: true, conclusion: "success" });
   for (const overrides of [
+    { name: `${TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME}-spoofed` },
     { event: "push" },
     { head_branch: "release" },
     { head_sha: PUBLIC_SHA },

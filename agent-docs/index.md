@@ -266,8 +266,14 @@ Hosted device-sync wake ownership keeps provider cadence in Web's canonical
 connection-specific retry work and Web dirty rows retain dirty resource/deletion
 work across cold replacement. The machine-local SQLite store is an execution
 cache; hosted provider scheduling is mailbox-connection scoped, retained wakes
-come from actual manifest-shaped queued/running rows, and a durable completion
-checkpoint fences canonical cadence publication. An unchanged stale tuple may
+come from actual manifest-shaped queued/running rows, and accepted full
+reconciliation plus a durable completion checkpoint with zero retained jobs
+fences canonical cadence publication. One version conflict rehydrates without
+re-admitting work, carries same-epoch provider cadence and dirty terminal
+evidence, and repeats the full update; a second conflict or a restored
+completion keeps the ordinary full-reconciliation path. The wake must also carry the exact non-null
+epoch of the current active connection; epoch-less legacy, replaced, missing,
+or terminal records drain without writing cadence. An unchanged stale tuple may
 re-signal the same durable mailbox item once in each Web recovery bucket without
 minting another schedule-event or mailbox-item identity. Provider execution is
 intentionally at-least-once across a lost post-pull record/completion checkpoint:
@@ -286,13 +292,16 @@ v2 snapshot checkpoint is persisted, leaving the clean input ref as the last
 committed snapshot. The next recovery bucket cold-restores that exact ref through
 the production restore dispatch, reconstructs from durable authority, and may
 repeat the same method/path classes without publishing cadence early. The
-deterministic WHOOP proof covers four initial
-classes, one four-class replay (eight requests total), eight measured workspace
-checkpoint attempts with seven commits and one injected failure, no third
-provider pull, and cadence publication only after the durable recovery/completion
-checkpoint. The first later bucket performs one bounded post-publication
-convergence checkpoint while returning idle with no wake; the following bucket
-is fully quiescent with no provider work or checkpoint.
+eligible durable completion record then publishes cadence only after accepted
+full reconciliation, removes the mailbox item, and checkpoints that removal
+inside the same runtime admission. The deterministic
+WHOOP proof covers four initial classes, one four-class replay (eight requests
+total), six measured workspace checkpoint attempts with five commits and one
+injected failure, no third provider pull or empty completion runtime, and cadence
+publication between the durable completion-record and mailbox-removal
+checkpoints. A redundant later recovery bucket performs one bounded
+post-publication convergence checkpoint while returning idle with no wake; the
+following bucket is fully quiescent with no provider work or checkpoint.
 The contract is jointly specified by
 `agent-docs/RELIABILITY.md` and
 `agent-docs/references/hosted-runtime-protocol.md`.

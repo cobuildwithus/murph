@@ -1331,13 +1331,28 @@ Last verified: 2026-09-02
   manifest-safe payload/window, dedupe identity, priority, next retry time, and
   remaining attempt limit, including worker-created child jobs. The same wake
   carries the provider's advanced cadence, but Web does not receive that
-  cadence until a terminal completion-fence checkpoint has made the exact
-  retained state durable. Terminal success or terminal failure then clears the
-  source. Web dirty rows separately remain authoritative until dirty
-  resource/deletion jobs are terminally acknowledged. Because the device-sync
-  SQLite store is intentionally excluded from hosted snapshots, a replacement
-  runner rebuilds from those owners; it never projects local retry timing into
-  `nextReconcileAt`. Per-connection mailbox ordering and scheduler scoping
+  cadence until the post-record checkpoint has made the exact completion state
+  durable. Before exposing that completion record, the pass requires Web to
+  accept the full local control-plane update. A version mismatch fetches the
+  current canonical snapshot, rehydrates without re-admitting wake hints or
+  dirty work, carries the same-epoch pass's provider cadence and dirty terminal
+  evidence, and repeats the full update once against that fresh baseline; a
+  second mismatch fails and retains the mailbox owner. A yielded pass retains
+  its exact wake without completion eligibility. The post-checkpoint recorder
+  then treats a fresh same-admission record as complete only when its normalized
+  retained-job set is empty. It publishes cadence only for a non-null wake epoch
+  matching a current active connection, clears the source, and checkpoints that
+  removal within the same runtime admission. The same-admission proof is
+  intentionally transient: a restored record returns to the ordinary full
+  reconciliation path. An epoch-less legacy record or a replaced, missing,
+  disconnected, or reauthorization-required connection has no cadence authority
+  and drains without a Web write.
+  Terminal failure uses the same replayable record. Web dirty rows separately
+  remain authoritative until dirty resource/deletion jobs are terminally
+  acknowledged. Because the device-sync SQLite store is intentionally excluded
+  from hosted snapshots, a replacement runner rebuilds from those owners; it
+  never projects local retry timing into `nextReconcileAt`. Per-connection
+  mailbox ordering and scheduler scoping
   prevent a future retry for one connection from blocking or advancing due work
   for another. A later due webhook for that same connection may admit the older
   exact retained mailbox item so newly dirty data can enter the local worker
@@ -1410,14 +1425,16 @@ Last verified: 2026-09-02
   that committed ref starts without the SQLite execution record, reconstructs the
   pending obligation from durable mailbox authority, observes exactly one replay
   of the four provider classes (eight requests total), and makes three successful
-  recovery checkpoints. Its retained completion fence is immediately due at
-  00:05 and carries the 06:05 provider cadence. The completion pass
-  performs no third provider pull, makes two successful checkpoints, and
-  publishes 06:05 only after the durable recovery/completion checkpoint. The
-  first later bucket at 00:10 returns idle with no wake and performs one bounded
+  recovery checkpoints. After provider work, a heartbeat-only version conflict
+  leaves canonical cadence at 00:00; hydration preserves the same-epoch pass's
+  06:05 provider cadence without re-admitting work. The second checkpoint
+  durably records completion, the same admission publishes 06:05, and the third
+  checkpoints mailbox removal. There is no third provider pull or empty
+  completion runtime. A redundant later bucket at 00:10 returns idle with no
+  wake and performs one bounded
   post-publication convergence checkpoint; the following 00:15 bucket is fully
-  quiescent. Within the measured incident window, the proof records eight
-  checkpoint attempts, seven commits, one injected failure, and no provider work
+  quiescent. Within the measured incident window, the proof records six
+  checkpoint attempts, five commits, one injected failure, and no provider work
   after the single four-class replay.
   Future provider cadence remains projected as the workspace follow-up wake and
   is recorded with a system-mailbox checkpoint handoff; once that cadence is
