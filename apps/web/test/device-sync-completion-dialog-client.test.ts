@@ -215,12 +215,11 @@ test("DeviceSyncCompletionDialog opens the WHOOP setup guide from the summary vi
       target: "_blank",
     },
     detail:
-      "WHOOP is connected for recovery, strain, sleep, and heart rate. Its direct connection doesn't include steps, so connect Apple Health in the Murph app to bring them in.",
+      "Heads up: WHOOP doesn't share all of your data automatically. Syncing through Apple Health gives Murph the complete picture.",
     setupGuide: {
       actionAriaLabel: "See how to sync all of your WHOOP data",
       actionLabel: "Get full sync",
-      detail:
-        "WHOOP's direct connection doesn't include steps. Download the Murph app and connect Apple Health to bring them in.",
+      detail: "Two quick steps and Murph sees everything WHOOP tracks.",
       downloadAction: {
         ariaLabel: "Download App to sync WHOOP through Apple Health",
         href: "https://apps.apple.com/us/app/murph-ai/id6786145859",

@@ -4264,11 +4264,7 @@ test("ConnectSourcesGrid opens the WHOOP setup dialog when an intent reaches cap
   );
   assert.match(
     rendered.container.textContent ?? "",
-    /WHOOP's direct connection doesn't include steps\./,
-  );
-  assert.match(
-    rendered.container.textContent ?? "",
-    /Download the Murph app and connect Apple Health to bring them in\./,
+    /Two quick steps and Murph sees everything WHOOP tracks\./,
   );
   assert.match(
     rendered.container.textContent ?? "",

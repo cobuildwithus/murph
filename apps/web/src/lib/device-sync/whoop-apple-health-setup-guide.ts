@@ -10,8 +10,7 @@ export function buildWhoopAppleHealthSetupGuide(
   return {
     actionAriaLabel: "See how to sync all of your WHOOP data",
     actionLabel: "Get full sync",
-    detail:
-      "WHOOP's direct connection doesn't include steps. Download the Murph app and connect Apple Health to bring them in.",
+    detail: "Two quick steps and Murph sees everything WHOOP tracks.",
     downloadAction: {
       ariaLabel: "Download App to sync WHOOP through Apple Health",
       href: MURPH_IOS_APP_STORE_URL,
