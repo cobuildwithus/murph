@@ -396,6 +396,13 @@ function inspectPrivateProofJob(raw, { ids, privateSha, runId }) {
   }
 
   const name = requiredString(raw.name, "private compatibility job name");
+  if (
+    name.startsWith("Hosted release attestation")
+    && raw.status === "completed"
+    && raw.conclusion === "skipped"
+  ) {
+    return null;
+  }
   const patterns = [
     ["reader", /^Temporal compatibility reader \[sha=([0-9a-f]{40})\]$/u],
     ["attestation", /^Temporal compatibility attestation \[proof=([0-9a-f]{64})\]$/u],
