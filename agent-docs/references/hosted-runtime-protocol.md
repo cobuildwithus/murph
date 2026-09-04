@@ -1649,9 +1649,11 @@ pristine slot after exact release, image fingerprints, architecture,
 heavy-runtime, and content-free Codex App Server initialize/stop readiness all
 pass. In allocation mode, one storage transaction removes that slot from ready
 and records an opaque claim tombstone only for fence-free `default` work from
-authenticated Web-direct ingress with a validated direct-attempt identity.
-Temporal requests, background processing modes, and spoofed direct inputs keep
-the unchanged exact-user target. A trusted foreground replacement may claim the
+authenticated Web-direct ingress with a validated direct-attempt identity or
+an authenticated request carrying `conversationWorkPending: true`. Temporal
+derives that fact from fresh admitted conversation lag; generic default mode
+alone does not qualify. Background-only processing and spoofed direct inputs
+keep the unchanged exact-user target. A trusted foreground replacement may claim the
 slot after the exact-user background fence is cleared rather than reusing a
 child that is still shutting down. The requesting `UserRunner`
 durably reserves the opaque stop target before immutable bind-once member
@@ -1668,8 +1670,8 @@ Warm retention renews the handoff idle window and may repeat for the same
 member without another coordinator claim. An explicit native stop or an exact
 prior-release binding enters the existing one-way `retiring` to `retired` scrub
 path. `UserRunner` clears only its exact stop target and only after that
-retirement settles, after which the same eligible authenticated Web-direct
-`default` request may perform one normal fresh claim. Unknown native status,
+retirement settles, after which the same eligible authenticated conversation
+request may perform one normal fresh claim. Unknown native status,
 failed retirement, foreign-member state, contradictory release authority, or
 any result-identity mismatch retains the pending target and yields without a
 second container. An ambiguous bind after the opaque target is reserved follows

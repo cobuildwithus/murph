@@ -7,6 +7,13 @@ Last verified: 2026-09-04
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists only live architecture, product, verification, and package-boundary docs.
 
+Authenticated Temporal requests may preserve admitted conversation lag as the
+positive-only `conversationWorkPending` fact for fresh standby allocation.
+Its receiver-first rollout, background exclusion, and unchanged consent and
+write-fence boundaries are specified by
+`agent-docs/references/hosted-temporal-orchestration.md`,
+`agent-docs/references/hosted-runtime-protocol.md`, and `apps/cloudflare/DEPLOY.md`.
+
 The exact hosted runtime owner-release signal, its patch-introducing
 direct-Current consumer rollout, and its signal-history rollback floor are
 specified by `agent-docs/references/hosted-runtime-protocol.md` and

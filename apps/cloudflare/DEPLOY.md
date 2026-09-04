@@ -1460,9 +1460,11 @@ Core execution tuning:
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000` (production sets `600000`) and controls the post-completion warm lease minted only by observed conversation activity. Reducing production from 20 minutes to 10 minutes means a follow-up in the former 11–20 minute warm window can take the existing cold-start path instead. `HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS` defaults to the idle TTL when absent for rollback compatibility. Leave it unset for the additive code deploy and one legacy-TTL observation window, drain old containers, then set it to `60000` for a canary before widening the rollout. Device sync, system maintenance, replay, and generic runner activity do not extend conversation warmth. RunnerContainer derives the lease directly from the resident child process's private health watermark on every expiry, re-arms the platform timeout while the lease or active work remains, yields on uncertain cleanup state, and otherwise destroys the idle shell. An old child without the watermark remains protected and re-arms the lifecycle timer; its active-work count independently protects active work. A replacement child starts without inheriting the old process's warmth. Dirty foreground runtime state is checkpointed by the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` path before the invocation returns; RunnerContainer never records pending checkpoint intent.
 - `HOSTED_EXECUTION_STANDBY_MODE` defaults to `off`. `shadow` maintains one
   release-scoped ENAM standby and measures readiness without allocating it;
-  `allocate` lets only a fence-free, authenticated Web-direct `default` request
-  claim it with a 250 ms total coordinator/bind deadline. Temporal requests and
-  background modes use the unchanged exact-user path. A trusted foreground
+  `allocate` lets fence-free `default` work from authenticated Web-direct ingress
+  or an authenticated request with `conversationWorkPending: true` claim it
+  with a 250 ms total coordinator/bind deadline. Temporal derives that fact
+  solely from fresh admitted conversation lag. Background-only requests use
+  the unchanged exact-user path. A trusted foreground
   replacement may claim the standby after clearing an exact-user background
   fence so it does not reuse a child that is still shutting down. Pending or
   retained standby targets still reconcile before that fresh-claim gate. In
@@ -1480,6 +1482,18 @@ Core execution tuning:
   container rollout mode; obey any independently active production rollout
   requirement.
   Invalid values fail deploy/runtime parsing closed.
+
+The `conversationWorkPending` request extension is a separate receiver-first
+rollout: deploy this accepting Cloudflare version before a Temporal worker emits
+the optional field. The older exact-key parser rejects it. Old Temporal workers
+continue to work with omission, and no Web, database, pool-size, or environment
+change is needed. Before enabling the producer, prove the live Worker release
+contains the accepting parser. After deployment, exercise a signed Temporal
+default request derived from conversation lag and observe a claimed standby,
+then verify background-only work remains excluded and ordinary runtime
+completion clears its exact fence. Producer rollback is compatible with the
+new receiver; roll back and drain the producer before any receiver rollback
+below this request contract.
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production` for
   direct/local artifact rendering. The manual deploy workflow derives it from
   the selected `preview` or `production` target; do not configure a conflicting

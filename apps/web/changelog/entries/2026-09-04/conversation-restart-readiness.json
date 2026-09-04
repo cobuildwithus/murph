@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-04",
+  "order": 100,
+  "item": {
+    "id": "conversation-restart-readiness",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Less waiting when a conversation restarts",
+    "summary": "Murph can use ready capacity when its recovery path starts a pending conversation, reducing avoidable startup waits.",
+    "details": "Your conversation still restores its saved context before processing, and ordinary startup remains available when ready capacity is busy.",
+    "relevanceTags": ["conversation", "reliability"],
+    "sourcePullRequests": []
+  }
+}
