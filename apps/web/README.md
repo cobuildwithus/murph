@@ -104,7 +104,8 @@ Verification uses natural traffic only. From the Web deployment-ready timestamp
 through the next natural occurrence, filter Vercel logs by the exact message and
 schema, then count grouped only by message, `stage`, and `errorClass`. The record
 is additive and Web-only: older deployments and readers tolerate its absence,
-and rollback is an ordinary Web rollback with no state or cross-plane drain.
+and recovery uses a fresh revert or forward-fix commit on `main` so the replacement
+deployment receives current production admission.
 
 ## Health-data withdrawal rollback floor
 
@@ -1743,10 +1744,9 @@ Destructive contract cleanup belongs under
 `Hosted Web Contract Migrations` GitHub workflow after Vercel reports a
 successful production deployment. That workflow only accepts Vercel-originated
 completed production deployment statuses, checks out the exact deployed commit,
-verifies it is reachable from `origin/main`, and requires the current main tip
-to be the deployment serving the configured production base domain. A stale
-current-main release fails instead of being reported as a successful no-op;
-late events for older main ancestors remain safe no-op candidates. The workflow
+requires it to equal current `origin/main`, and requires that exact commit to be
+the deployment serving the configured production base domain. Stale or late
+deployment events fail before database authority is exposed. The workflow
 then enumerates and proves every production custom domain against the event's
 exact deployment id, waits
 `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` seconds for prior production
@@ -1760,9 +1760,9 @@ It requires
 `HOSTED_WEB_PRODUCTION_BASE_URL`, and `HOSTED_WEB_DIRECT_DATABASE_URL` in
 GitHub Actions; `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` defaults to
 `300` and is capped at `600` unless the workflow timeout is raised. The workflow
-does not use GitHub Actions concurrency for this lane; the final alias check and
-the contract migration advisory lock make stale or duplicate runs skip safely
-without letting stale events replace valid pending runs. After those gates, it calls
+does not use GitHub Actions concurrency for this lane; the final alias check
+rejects stale runs, and the contract migration advisory lock serializes exact
+deployment retries before the migration ledger is evaluated. After those gates, it calls
 `pnpm --dir apps/web release:production:contract-migrate` with explicit opt-in.
 The public workflow is verification-only: it does not assign aliases, promote a
 deployment, or roll production back.
@@ -2092,24 +2092,21 @@ This branch is a greenfield hosted-runtime cutover. If you have an older local
 database from the superseded run/ingress/cursor chain, reset it before
 reapplying migrations.
 
-## Local Vercel prebuilt deployment
+## Production deployment ownership
 
-Use the repository-owned local prebuilt boundary instead of running a bare
-`vercel build` followed by `vercel deploy --prebuilt`:
+The Vercel Git integration is the only production deployment owner. Every
+commit pushed to `main` creates one managed production candidate; no
+repository ignore command may suppress that candidate. The candidate remains
+off the production domains until its configured Deployment Checks, including
+`Temporal Web production admission`, pass for that exact current commit.
 
-```bash
-pnpm --dir apps/web vercel:deploy:prebuilt -- --prod
-```
-
-Omit `--prod` for a preview deployment. The command runs `vercel build`,
-captures the SDK-generated Workflow function config in an ephemeral local file
-before the normal generated-source cleanup, and applies every exact generated
-trigger to the resolved final function bundle. It handles distinct functions
-and Next.js-deduplicated route links, revalidates the finished Build Output
-artifact, removes the captured evidence, and starts `vercel deploy --prebuilt`
-only after that proof succeeds. Missing, malformed, escaping, or conflicting
-evidence stops before upload. Managed Vercel builds continue to use the
-checked-in `vercel.json` build command and do not use this local boundary.
+Do not deploy production from the local CLI, promote an existing deployment,
+use Instant Rollback, or force-promote past a Deployment Check. Those paths do
+not create fresh compatibility evidence against current private `main` and live
+Temporal readers. Vercel access must withhold Full Production Deployment
+authority from ordinary operators and automation. Recover by reverting or
+forward-fixing on `main`; the new commit creates a fresh managed deployment and
+reruns production admission before domains move.
 
 ## Local dev aids
 

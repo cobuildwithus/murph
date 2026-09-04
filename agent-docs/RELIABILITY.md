@@ -12,9 +12,9 @@ Last verified: 2026-09-02
   to another deployment id. It uses the exact deployment URL from the trusted
   Vercel status, follows the complete project-domain pagination, excludes
   branch/custom-environment domains, and repeats the full proof after the
-  prior-function drain and immediately before contract SQL. Late completed
-  events for older main ancestors may skip when production has advanced; the
-  workflow remains non-concurrent so a stale event cannot cancel the valid run.
+  prior-function drain and immediately before contract SQL. The deployed commit
+  must equal current `main`; stale or late events fail before database authority.
+  The workflow remains non-concurrent so a stale event cannot cancel the valid run.
   The first production Web deployment containing the exact-deployment verifier
   is the postdeploy verification rollback floor because this workflow executes
   from the deployed checkout. A pre-floor manual retry fails closed on the
@@ -46,8 +46,9 @@ Last verified: 2026-09-02
   waiter for every pull request or deployment event. The workflows are
   production-only and non-destructive, with no pull-request or
   deployment-status trigger and no arbitrary-branch manual admission. They
-  dispatch the current production alias SHA; alias lag is accepted only when the existing Vercel classifier
-  proves the intervening `main` diff contains eligible dated release notes.
+  dispatch the current production alias SHA only when it exactly matches the
+  selected `main` revision. A pending or failed production admission retries at
+  the next slot instead of testing a stale deployment.
 - Protected native Android hosted E2E treats private workflow dispatch as an
   uncertain external effect. A timeout, network failure, ambiguous HTTP
   response, malformed successful response, or missing run id after the request
@@ -69,32 +70,59 @@ Last verified: 2026-09-02
   trusted default-branch controller and the private owner's live Current and
   Ramping reader attestation over the bounded reconciliation fixture corpus.
   While the private standby guard remains, the reader set also includes the
-  active legacy worker's exact live deploy revision. Final protected
+  active legacy Render worker's exact live deploy revision. Final protected
   attestation re-reads the complete set and fails on identity or routing drift.
-  Private CI never checks out or imports public pull-request candidate code.
-  Irrelevant changes complete without private work; relevant changes require
-  the same current public head throughout selection and dispatch. The exact
-  candidate producer runs in unprivileged public CI; the trusted controller
-  sends only its bounded canonical fixture JSON and digest to private CI. Using
-  the repository-scoped GitHub App token, it resolves private `main` to an exact
-  commit, validates the fixed private workflow identity, revalidates the exact
-  public PR head, and dispatches that workflow at `main` with returned run
-  details. It accepts only the returned first-attempt run whose workflow and
-  `head_sha` match the pre-resolved private commit. The private proof digest
-  binds public SHA, request id, the private-derived supported-reader digest,
-  and producer digest; the public repository owns no private reader policy.
-  Missing artifacts or dispatch
-  identity, stale heads, incomplete pagination, duplicate or failed readers,
-  skipped proof jobs, a mismatched digest, cancellation, or private failure
-  cannot publish success. After successful run and job attestation, the
+  This is a fixture-only pull-request gate: private CI never checks out or
+  imports public pull-request candidate code. Irrelevant changes complete
+  without private work; relevant changes require the same current public head
+  throughout selection and dispatch. The exact candidate producer runs in
+  unprivileged public CI; the trusted controller sends only its bounded
+  canonical fixture JSON and digest to private CI. Using the repository-scoped
+  GitHub App token, it first
+  resolves private `main` to an exact commit, validates the fixed
+  `public-murph-integration.yml` workflow identity, revalidates the exact public
+  PR head, and dispatches that workflow at `main` with returned run details. It
+  accepts only the returned first-attempt run whose workflow identity and
+  `head_sha` match the fixed workflow and pre-resolved private commit. The
+  private proof digest binds public SHA, request id, the private-derived
+  supported-reader digest, and producer digest; the public repository owns no
+  private reader policy or private source dependency. Missing artifacts or
+  dispatch identity, stale heads, incomplete pagination, duplicate or failed
+  readers, skipped proof jobs, a mismatched digest, cancellation, or private
+  failure cannot publish success. After successful run and job attestation, the
   controller re-reads private `main` and fails closed if it moved. Once dispatch
-  returns a run id, the controller allows
-  five exact-id reads over at most 60 seconds for GitHub to make that newly
-  accepted run visible; only `404` is retryable, and the controller never
-  searches for or guesses a run. After the exact run is visible, uncertain
-  polling or timeout cancels only that run, escalates
-  to force-cancel only if ordinary cancellation does not make it terminal, and
-  never searches for or cancels a guessed run.
+  returns a run id, the controller allows five exact-id reads over at most 60
+  seconds for GitHub to make that newly accepted run visible; only `404` is
+  retryable, and the controller never searches for or guesses a run. After the
+  exact run is visible, uncertain polling or timeout cancels only that run,
+  escalates to force-cancel only if ordinary cancellation does not make it
+  terminal, and never searches for or cancels a guessed run.
+  This pull-request fixture proof is candidate evidence, not deployment
+  admission, and does not claim full application integration. After a relevant
+  revision reaches public `main`, the exact-main producer and controller run
+  again in `.github/workflows/temporal-web-deployment-admission.yml`. Vercel
+  must configure its `Temporal Web production admission` job as a production
+  Deployment Check so production domains remain on the prior deployment until
+  the exact public commit passes against the then-current private `main` and
+  live reader set. The public controller re-reads both branches before success;
+  private protected attestation independently re-reads every supported reader.
+  The Vercel Git integration is the sole production deployment owner, and every
+  `main` commit must create a candidate: no ignore command, local production
+  upload, historical promotion, Instant Rollback, or force-promotion is part of
+  the supported path. Recovery is a revert or forward-fix commit on `main`,
+  which receives fresh admission before domains move. Ordinary Vercel access
+  must not grant Full Production Deployment authority.
+  This main-push boundary proves the reconciliation-facts wire contract, not
+  arbitrary Web, Cloudflare, or worker behavior. Separately, after both
+  revisions reach protected
+  `main`, private unprivileged full-integration CI checks out the exact resolved
+  public `main` revision, never an arbitrary public candidate, and emits an
+  exact private-main/public-main candidate receipt. Protected release admission
+  binds that receipt to both still-current main heads, exhaustive synthetic
+  migration replay, the exact production target, and live reader routing before
+  deployment can mutate production. Bounded replay of histories returned by
+  Temporal Visibility is additional production evidence, not an exhaustive
+  registry guarantee.
 - Native iMessage nutrition-card delivery falls back to its already-derived
   ordinary text only after Linq definitively rejects the app-card request with
   HTTP 400, 415, or 422. Before that text enters the provider, the existing

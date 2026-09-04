@@ -1390,12 +1390,27 @@ locally readable.
   attestation and fails closed on movement. The public repository stores no
   private SHA/tag pointer and no private Current/Ramping reader policy; those
   reader revisions are derived and attested inside private protected CI.
-  Private CI must never check out or import public pull-request candidate code;
-  the protected pull-request lane receives only the bounded canonical fixture
-  produced by unprivileged public CI. Neither side may restore
-  candidate-controlled caches beside credentials, read private logs or
-  artifacts, expose reader revisions publicly, or accept workflow/check names
-  from the candidate.
+  Private CI must never check out or import public pull-request candidate code
+  for Temporal compatibility. The protected pull-request compatibility lane is
+  fixture-only: it receives only the bounded canonical artifact produced by
+  unprivileged public CI. Separately, after revisions reach the protected main
+  branches, private unprivileged full-integration CI may check out only the
+  exact resolved public `main` revision, never an arbitrary public candidate.
+  The credentialed release-admission job consumes that exact main/main
+  integration receipt without checking out or importing public code. Neither
+  side may restore candidate-controlled caches beside credentials, read private
+  logs or artifacts, expose reader revisions publicly, or accept workflow/check
+  names from the candidate.
+- Hosted Web production has one deployment authority: Vercel's Git integration
+  creates a candidate for every exact `main` commit, and configured Deployment
+  Checks alone admit it to production domains. Do not grant Full Production
+  Deployment permission to ordinary operators or automation, and do not use
+  local production uploads, promotion of an existing deployment, Instant
+  Rollback, or Force Promote; those paths can reuse stale commit evidence or
+  bypass the check. Recovery is a revert or forward-fix commit on `main` so the
+  replacement receives fresh compatibility proof. Provider owners remain
+  break-glass authority outside the automatic guarantee and must not exercise
+  it as an ordinary deployment path.
 - The public automated live Junction wearable canary uses only sandbox Junction
   authority, Kernel browser authority, and a dedicated Garmin test account. Keep
   those five credentials
@@ -1442,9 +1457,8 @@ locally readable.
   source refs and SHAs live in `.github/native-hosted-e2e-controller.json` so a
   source rotation must pass ordinary protected-main review. Each controller
   proves the policy tag is an immutable lightweight tag resolving to the exact
-  policy SHA and dispatches the exact current production alias SHA. An alias
-  behind scheduled `main` is accepted only when the existing Vercel classifier
-  proves every intervening path is an eligible dated release note.
+  policy SHA and dispatches only when the current production alias equals the
+  exact current `main` SHA. Any alias lag fails closed.
   Android's public controller may hold only Actions write and Contents read in
   the private repository. It mints repository-scoped installation tokens just
   in time, refreshes them before expiry, and removes the App private key from

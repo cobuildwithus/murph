@@ -116,23 +116,11 @@ and the dependency-free release-plan job plus every runtime-heavy shard remain
 skipped; full mode requires the plan and every runtime-heavy shard to succeed
 while the documentation job remains skipped.
 
-The production Web Vercel project reuses the same path policy through the
-checked-in `apps/web/vercel.json` ignored-build command. For an exact
-`production` deployment of `main`, the classifier compares the last successful
-branch deployment SHA with the checked-out `VERCEL_GIT_COMMIT_SHA`, requires the
-former to be an available ancestor, obtains a complete repository-root Git
-name-status inventory with rename detection disabled so both paths remain
-visible, and skips only when every net change is eligible Markdown. Missing or
-stale system variables, a shallow history gap, a non-ancestor, an unexpected Git
-status, an empty or oversized inventory, a current-HEAD mismatch, or any Git
-failure retains the production build. Runtime-consumed Markdown under Web legal
-and changelog subtrees, assistant skills, generated content, and prompt owners
-is outside the allowlist. Ordinary Preview and Development deployments retain
-the project's existing skip behavior. A distinct `VERCEL_TARGET_ENV` identifies
-a custom environment and always retains its build, including the native iOS
-hosted E2E target. GitHub `main` push verification remains full; this boundary
-cancels only the redundant Vercel Web build after Vercel has created the
-deployment attempt.
+The Markdown-only classifier is a pull-request CI optimization only. Production
+Web does not reuse it: every `main` commit must create a managed Vercel
+production candidate so the exact-main Deployment Check always has a matching
+artifact to admit. `apps/web/vercel.json` therefore has no ignore command and
+enables Git deployment only for `main`.
 
 For changes to the shared Playwright Chromium install wrapper or any workflow
 that calls it, run `bash -n scripts/install-playwright-chromium.sh` and the
@@ -187,10 +175,9 @@ Junction-namespace, or candidate-deployment authority.
 A scheduled native pass is production-shaped evidence for the current
 protected-`main` checkpoint and the exact deployed Web SHA it dispatches.
 Trusted orchestration proves the scheduled revision remains in `main` history,
-then resolves the current production alias. When the alias trails `main`, the
-existing Vercel build classifier must prove the complete intervening diff is
-eligible dated release notes; otherwise the controller fails before paid
-dispatch and retries. It dispatches that deployed SHA with the reviewed
+then resolves the current production alias. The alias must equal the selected
+current-`main` revision; otherwise the controller fails before paid dispatch and
+retries at its next slot. It dispatches that exact SHA with the reviewed
 immutable iOS or Android source in `production_canary` mode. The private journey uses
 `non_destructive_existing_identity`; local mocked or hosted-local tests do not
 replace it. The Android production environment remains narrowly populated. The

@@ -3,8 +3,6 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-import { classifyCurrentVercelBuild } from "./ci-markdown-docs-scope.mjs";
-
 export const NATIVE_IOS_HOSTED_E2E_CONTRACT_VERSION = "3";
 export const HTTP_TIMEOUT_MS = 15_000;
 export const POLL_MS = 5_000;
@@ -79,22 +77,11 @@ export async function readNativeE2EControllerPolicy(filePath) {
 export function selectProductionCanaryWebSha(
   currentProductionSha,
   scheduledMainSha,
-  { classifyBuild = classifyCurrentVercelBuild } = {},
 ) {
   assertSha(currentProductionSha, "current production alias SHA");
   assertSha(scheduledMainSha, "scheduled main SHA");
-  if (currentProductionSha === scheduledMainSha) return currentProductionSha;
-
-  const classification = classifyBuild({
-    env: {
-      VERCEL_ENV: "production",
-      VERCEL_GIT_COMMIT_REF: "main",
-      VERCEL_GIT_COMMIT_SHA: scheduledMainSha,
-      VERCEL_GIT_PREVIOUS_SHA: currentProductionSha,
-    },
-  });
-  if (classification.skipBuild !== true) {
-    throw new Error("Production alias differs from scheduled main by a runtime-relevant change.");
+  if (currentProductionSha !== scheduledMainSha) {
+    throw new Error("Production alias does not match the scheduled main revision.");
   }
   return currentProductionSha;
 }
