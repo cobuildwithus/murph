@@ -102,7 +102,7 @@ const MODEL_OPTIONS = [
   },
   {
     artwork: "astra",
-    description: "Our most capable model",
+    description: "Frontier health intelligence",
     model: HOSTED_ASSISTANT_ASTRA_MODEL,
     name: "Astra",
     usage: "Highest usage",
