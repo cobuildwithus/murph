@@ -626,6 +626,28 @@ test("attestation rejects malformed, skipped, failed, and mismatched proof jobs"
   }
 });
 
+test("temporal-only attestation ignores the skipped hosted-release job placeholder", () => {
+  const skippedHostedReleaseJob = {
+    conclusion: "skipped",
+    head_sha: PRIVATE_SHA,
+    id: 5,
+    name: "Hosted release attestation [proof=${{ needs.hosted-integration-plan.outputs.proof_digest }}]",
+    run_id: RUN_ID,
+    status: "completed",
+  };
+  assert.deepEqual(
+    inspectAttestationJobs([...proofJobs(), skippedHostedReleaseJob], proofInspectionArgs()),
+    inspectAttestationJobs(proofJobs(), proofInspectionArgs()),
+  );
+  assert.throws(() => inspectAttestationJobs(
+    [...proofJobs(), skippedHostedReleaseJob],
+    proofInspectionArgs({
+      expectedTemporalTargetDigest: TEMPORAL_TARGET_DIGEST,
+      releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
+    }),
+  ), /exactly one hosted release attestation/u);
+});
+
 test("attestation rejects a producer digest, public SHA, or request-id mismatch", () => {
   assert.throws(() => inspectAttestationJobs(proofJobs({ proofDigest: "d".repeat(64) }), {
     ...proofInspectionArgs(),

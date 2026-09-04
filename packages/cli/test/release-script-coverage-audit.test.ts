@@ -2266,13 +2266,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionWorkflow).toContain(
       'tests, fixtures, or direct-proof infrastructure that are a primary PR outcome require parent review',
     )
-    expect(verificationAndRuntime).toContain('### Ten-minute local admission fallback')
-    expect(verificationAndRuntime).toContain('### Required post-landing trust-root proof')
     expect(verificationAndRuntime).toContain(
-      'does not require a ten-minute local admission wait',
-    )
-    expect(verificationAndRuntime).toContain(
-      'MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance',
+      'MURPH_VERIFY_EXECUTOR=ssh pnpm verify:acceptance',
     )
     expect(verificationAndRuntime).toMatch(/fully\s+staging any new non-ignored source/u)
     expect(completionWorkflow).toContain(
@@ -4737,11 +4732,6 @@ printf 'ZIP: %s (%s bytes)\n' \
         'agent-docs/prompts/coverage-review.md',
         'coverage lens\n',
       )
-      writeHarnessFile(
-        harnessRoot,
-        '.crabbox.yaml',
-        'profile: murph-verification\nprovider: blacksmith-testbox\nblacksmith:\n  ref: main\n',
-      )
       writeHarnessFile(harnessRoot, 'agent-docs/FRONTEND.md', 'frontend workflow\n')
       writeHarnessFile(
         harnessRoot,
@@ -4886,7 +4876,6 @@ printf 'ZIP: %s (%s bytes)\n' \
       ).toBe('')
       expect(listZipEntries(roundOne.zipPath)).toEqual(
         expect.arrayContaining([
-          '.crabbox.yaml',
           'review-gpt-pr-context/rendered-evidence/01-desktop.png',
           'review-gpt-pr-context/rendered-evidence.txt',
         ]),
@@ -4956,7 +4945,6 @@ printf 'ZIP: %s (%s bytes)\n' \
           'review-gpt-pr-context/changed-since-previous-reviewed-head.txt',
         ]),
       )
-      expect(roundTwoEntries).not.toContain('.crabbox.yaml')
       expect(roundTwoEntries).not.toContain('review-gpt-pr-context/pr.diff')
       expect(roundTwoEntries).not.toContain(
         'review-gpt-pr-context/since-first-reviewed-head.diff',
@@ -5148,7 +5136,6 @@ printf 'ZIP: %s (%s bytes)\n' \
       )
       expect(listZipEntries(roundTwoLargeByLines.zipPath)).toEqual(
         expect.arrayContaining([
-          '.crabbox.yaml',
           'review-gpt-pr-context/pr.diff',
           'review-gpt-pr-context/since-first-reviewed-head.diff',
         ]),
@@ -5213,7 +5200,6 @@ printf 'ZIP: %s (%s bytes)\n' \
       })
       expect(listZipEntries(roundTwoFull.zipPath)).toEqual(
         expect.arrayContaining([
-          '.crabbox.yaml',
           'review-gpt-pr-context/full-review-reason.txt',
           'review-gpt-pr-context/since-first-reviewed-head.diff',
         ]),
@@ -5352,7 +5338,6 @@ printf 'ZIP: %s (%s bytes)\n' \
       expect(leanEntries).toContain('agent-docs/PRODUCT_CONSTITUTION.md')
       expect(leanEntries).toContain('agent-docs/PRODUCT_SENSE.md')
       expect(leanEntries).toContain('Dockerfile.cloudflare-hosted-runner-base')
-      expect(leanEntries).not.toContain('.crabbox.yaml')
       expect(leanEntries).not.toContain('agent-docs/product-specs/repo-v1.md')
       expect(leanEntries).toContain('docs/architecture.md')
       expect(leanEntries).toContain('docs/contracts/00-invariants.md')
@@ -5368,7 +5353,6 @@ printf 'ZIP: %s (%s bytes)\n' \
       expect(leanEntries).not.toContain('apps/web/public/legal/privacy.pdf')
       expect(leanEntries).not.toContain('docs/assets/readme-hero.jpg')
 
-      expect(fullEntries).toContain('.crabbox.yaml')
       expect(fullEntries).toContain(
         'agent-docs/product-specs/hosted-plan-downgrades.md',
       )
