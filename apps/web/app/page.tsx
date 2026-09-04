@@ -29,6 +29,7 @@ import { TrustSection } from "@/src/components/homepage/trust-section";
 import type { HomepageSignupCta } from "@/src/components/homepage/types";
 import { HomepageAuthRuntimeProvider } from "@/src/components/hosted-onboarding/homepage-auth-runtime-provider";
 import { scheduleHomepageBrowserVaultPreparation } from "@/src/lib/browser-vault/homepage-preparation";
+import { resolveGoalContactOption } from "@/src/lib/goals/goal-contact";
 import { resolveGoalIllustrationSrc } from "@/src/lib/goals/goal-illustrations";
 import { createGoalSearchItem } from "@/src/lib/goals/goal-search";
 import { resolveHomepageGoalPersonas } from "@/src/lib/goals/homepage-goal-personas";
@@ -128,6 +129,12 @@ export default async function HomePage() {
     ...createGoalSearchItem(goal),
     illustrationSrc: resolveGoalIllustrationSrc(goal.routeId),
   }));
+  const goalStartOption = resolveGoalContactOption({
+    murphPhoneNumber: heroContactInfo.phone,
+    preferredKind: messengerChannel === "telegram" ? "telegram" : "text",
+    startPrompt: "Hey Murph, I have a goal in mind.",
+    textAvailable: true,
+  });
   const referralRewards = getAvailableHostedPublicReferralRewards();
   const installCommandUrl =
     resolveHostedInstallScriptUrl() ?? "https://www.withmurph.ai/install.sh";
@@ -175,10 +182,9 @@ export default async function HomePage() {
           murphHeadshotSrc={murphHeadshotSrc}
         />
         <GoalsSection
-          contactInfo={heroContactInfo}
           goals={searchGoals}
-          messengerChannel={messengerChannel}
           personas={resolveHomepageGoalPersonas(goalEntries)}
+          startOption={goalStartOption}
           totalGoalCount={goalEntries.length}
         />
         <TogetherSection />

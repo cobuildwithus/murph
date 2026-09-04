@@ -6,6 +6,7 @@ import { test } from "vitest";
 
 import { GoalsSection } from "@/src/components/homepage/goals-section";
 import { AuthContext } from "@/src/components/hosted-onboarding/auth-dialog-provider";
+import { resolveGoalContactOption } from "@/src/lib/goals/goal-contact";
 import { resolveGoalIllustrationSrc } from "@/src/lib/goals/goal-illustrations";
 import { createGoalSearchItem } from "@/src/lib/goals/goal-search";
 import {
@@ -15,11 +16,14 @@ import {
 } from "@/src/lib/goals/homepage-goal-personas";
 import { listHealthCommonsGoalEntries } from "@/src/lib/health-commons/goal-projections";
 
-const CONTACT_INFO = {
-  phone: "+15555550100",
-  phoneConfigured: false,
-  telegram: "withmurph_bot",
-};
+function startOptionFor(messengerChannel: "imessage" | "telegram") {
+  return resolveGoalContactOption({
+    murphPhoneNumber: "+15555550100",
+    preferredKind: messengerChannel === "telegram" ? "telegram" : "text",
+    startPrompt: "Hey Murph, I have a goal in mind.",
+    textAvailable: true,
+  });
+}
 
 function renderSection(input: {
   authenticated?: boolean;
@@ -27,13 +31,12 @@ function renderSection(input: {
 }) {
   const entries = listHealthCommonsGoalEntries();
   const section = createElement(GoalsSection, {
-    contactInfo: CONTACT_INFO,
     goals: entries.map((goal) => ({
       ...createGoalSearchItem(goal),
       illustrationSrc: resolveGoalIllustrationSrc(goal.routeId),
     })),
-    messengerChannel: input.messengerChannel,
     personas: resolveHomepageGoalPersonas(entries),
+    startOption: startOptionFor(input.messengerChannel),
     totalGoalCount: entries.length,
   });
   const markup = renderToStaticMarkup(
@@ -76,7 +79,7 @@ test("GoalsSection opens on Live long and texts Murph the goal for anonymous vis
   const { entries, markup } = renderSection({ messengerChannel: "imessage" });
 
   assert.match(markup, /Hey Murph, help me…/);
-  assert.match(markup, /data-homepage-goal-placeholder[^>]*>sleep better</);
+  assert.match(markup, /data-goal-composer-placeholder[^>]*>sleep better</);
   assert.match(markup, /aria-pressed="true"[^>]*>Live long</);
   for (const persona of HOMEPAGE_GOAL_PERSONAS.filter((persona) =>
     persona.id !== DEFAULT_HOMEPAGE_GOAL_PERSONA_ID)) {
@@ -85,7 +88,7 @@ test("GoalsSection opens on Live long and texts Murph the goal for anonymous vis
   assert.match(markup, new RegExp(`href="/goals"[^>]*>All ${entries.length} goals<`));
   assert.match(
     markup,
-    /data-homepage-goal-ask[^>]*href="sms:\+15555550100\?body=Hey%20Murph%2C%20I%20have%20a%20goal%20in%20mind\."/,
+    /data-goal-composer-send[^>]*href="sms:\+15555550100\?body=Hey%20Murph%2C%20I%20have%20a%20goal%20in%20mind\."/,
   );
   assert.match(
     markup,
@@ -101,16 +104,16 @@ test("GoalsSection routes anonymous visitors to Telegram where that is the defau
 
   assert.match(
     markup,
-    /data-homepage-goal-ask[^>]*href="https:\/\/t\.me\/withmurph_bot\?text=Hey(?:\+|%20)Murph/,
+    /data-goal-composer-send[^>]*href="https:\/\/t\.me\/withmurph_bot\?text=Hey(?:\+|%20)Murph/,
   );
-  assert.match(markup, /data-homepage-goal-ask[^>]*target="_blank"/);
+  assert.match(markup, /data-goal-composer-send[^>]*target="_blank"/);
   assert.match(markup, /href="https:\/\/t\.me\/withmurph_bot\?text=Hey(?:\+|%20)Murph(?:\+|%20)*[^"]*stay/);
 });
 
 test("GoalsSection sends members to the guide, whose CTA resolves their own line", () => {
   const { markup } = renderSection({ authenticated: true, messengerChannel: "imessage" });
 
-  assert.match(markup, /data-homepage-goal-ask[^>]*href="\/home"/);
+  assert.match(markup, /data-goal-composer-send[^>]*href="\/home"/);
   assert.match(markup, /href="\/goals\/stay-independent-as-i-age"/);
   assert.doesNotMatch(markup, /href="sms:/);
 });

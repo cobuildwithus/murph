@@ -1,10 +1,12 @@
 import {
   resolveMurphContactOptions,
+  type MurphContactKind,
   type MurphContactOption,
 } from "@/src/lib/murph-contact-routing";
 
 export function resolveGoalContactOption(input: {
   murphPhoneNumber: string | null;
+  preferredKind?: MurphContactKind;
   startPrompt: string;
   textAvailable: boolean;
 }): MurphContactOption {
@@ -22,7 +24,7 @@ export function resolveGoalContactOption(input: {
       subject: "Help me with this goal",
     },
     murphPhoneNumber: input.murphPhoneNumber,
-    preferredKind: "text",
+    preferredKind: input.preferredKind ?? "text",
   });
 
   if (!option) {

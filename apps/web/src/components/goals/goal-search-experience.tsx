@@ -1,6 +1,5 @@
 "use client";
 
-import { Search, X } from "lucide-react";
 import Link from "next/link";
 import {
   useMemo,
@@ -10,10 +9,10 @@ import {
 } from "react";
 
 import { GoalBrowseCard } from "@/src/components/goals/goal-browse-card";
+import { GoalComposer } from "@/src/components/goals/goal-composer";
 import { GoalContactActionContents } from "@/src/components/goals/goal-contact-action";
 import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
 import { buttonVariants } from "@/src/components/ui/button";
-import { Input } from "@/src/components/ui/input";
 import type { GoalCategorySlug } from "@/src/lib/goals/goal-categories";
 import {
   searchGoalItems,
@@ -31,6 +30,10 @@ const GOAL_SEARCH_EXAMPLES = [
   "run a 5K",
   "reduce stress",
   "build muscle",
+] as const;
+const GOAL_SEARCH_PLACEHOLDERS = [
+  "sleep through the night",
+  ...GOAL_SEARCH_EXAMPLES,
 ] as const;
 
 export interface GoalCategoryDirectoryEntry {
@@ -50,7 +53,7 @@ export function GoalSearchExperience({
   goals: readonly GoalSearchItem[];
   startOption: MurphContactOption;
 }) {
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
   const activeQuery = query.trim();
   const matches = useMemo(
@@ -59,17 +62,11 @@ export function GoalSearchExperience({
   );
 
   function clearSearch() {
-    if (inputRef.current) {
-      inputRef.current.value = "";
-    }
     setQuery("");
     inputRef.current?.focus();
   }
 
   function applyExample(example: string) {
-    if (inputRef.current) {
-      inputRef.current.value = example;
-    }
     setQuery(example);
     inputRef.current?.focus();
   }
@@ -82,42 +79,15 @@ export function GoalSearchExperience({
             Hey Murph, help me…
           </h1>
         </div>
-        <div className="mx-auto mt-10 max-w-2xl">
-          <div
-            className="relative w-full"
-            data-goal-search="full-width"
-            role="search"
-          >
-            <Search
-              aria-hidden="true"
-              className="pointer-events-none absolute left-5 top-1/2 z-10 size-5 -translate-y-1/2 text-muted-foreground"
-            />
-            <Input
-              ref={inputRef}
-              aria-label="Search goals"
-              autoCapitalize="none"
-              autoComplete="off"
-              className="border-border bg-card pl-13 pr-20 text-foreground placeholder:text-muted-foreground [&::-webkit-search-cancel-button]:hidden"
-              enterKeyHint="search"
-              inputSize="xl"
-              maxLength={100}
-              onInput={(event) => setQuery(event.currentTarget.value)}
-              placeholder="sleep through the night"
-              spellCheck={false}
-              type="search"
-            />
-            {query ? (
-              <button
-                aria-label="Clear goal search"
-                className="absolute right-3 top-1/2 flex min-h-10 -translate-y-1/2 items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring"
-                onClick={clearSearch}
-                type="button"
-              >
-                <X aria-hidden="true" className="size-4" />
-                <span className="hidden sm:inline">Clear</span>
-              </button>
-            ) : null}
-          </div>
+        <div className="mx-auto mt-10 max-w-2xl" data-goal-search="full-width">
+          <GoalComposer
+            autoFocusOnView
+            inputRef={inputRef}
+            onQueryChange={setQuery}
+            placeholders={GOAL_SEARCH_PLACEHOLDERS}
+            query={query}
+            startOption={startOption}
+          />
           <p className="mt-4 text-center text-sm leading-6 text-muted-foreground">
             Try:{" "}
             {GOAL_SEARCH_EXAMPLES.map((example, index) => (

@@ -1,24 +1,18 @@
 "use client";
 
-import { ArrowUp } from "lucide-react";
-import Image from "next/image";
 import Link from "next/link";
-import {
-  useEffect,
-  useId,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useMemo, useState } from "react";
 
 import {
   GOAL_BROWSE_CARD_CLASS_NAME,
   GOAL_BROWSE_CARD_TITLE_CLASS_NAME,
   GoalBrowseCardIllustration,
 } from "@/src/components/goals/goal-browse-card";
-import type { HeroMessengerChannel } from "@/src/components/homepage/hero-clocks-in";
-import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
+import { GoalComposer } from "@/src/components/goals/goal-composer";
+import {
+  GoalHandoffAction,
+  useGoalHandoff,
+} from "@/src/components/goals/goal-handoff";
 import {
   searchGoalItems,
   type GoalSearchItem,
@@ -27,26 +21,10 @@ import {
   DEFAULT_HOMEPAGE_GOAL_PERSONA_ID,
   type HomepageGoalPersona,
 } from "@/src/lib/goals/homepage-goal-personas";
-import type { HeroContactInfo } from "@/src/lib/hero-contact-info";
-import { HOSTED_APP_HOME_PATH } from "@/src/lib/hosted-onboarding/app-routes";
-import {
-  buildMurphSmsHref,
-  buildMurphTelegramTextHref,
-} from "@/src/lib/murph-contact-routing";
-import { Input } from "@/src/components/ui/input";
+import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import { cn } from "@/src/lib/utils";
 
 const GOAL_RESULT_LIMIT = 8;
-const PLACEHOLDER_INTERVAL_MS = 2800;
-const GOAL_QUERY_MAX_LENGTH = 100;
-// How long after the last keystroke the send button starts inviting a send.
-const SEND_READY_DELAY_MS = 1000;
-// The field takes focus once this much of it is on screen, desktop only, so a
-// visitor can start typing the moment they arrive without the page jumping.
-const AUTOFOCUS_VISIBLE_RATIO = 0.6;
-// Platforms whose sms: links open a real messaging app. Everything else
-// (Windows, Linux, ChromeOS desktops) gets the signup dialog instead.
-const NATIVE_MESSAGING_PLATFORM_PATTERN = /Macintosh|iPhone|iPad|iPod|Android/u;
 
 const PILL_CLASS_NAME =
   "inline-flex min-h-10 items-center justify-center rounded-full border border-black/[0.12] px-4 text-sm font-medium text-[#3a322a] transition-colors hover:border-black/[0.28] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[#f5f0e8]";
@@ -54,39 +32,6 @@ const ACTIVE_PILL_CLASS_NAME =
   "border-[#2d3436] bg-[#2d3436] text-[#f5f0e8] hover:border-[#2d3436]";
 const GOAL_GRID_CLASS_NAME =
   "mt-8 grid w-full grid-cols-1 gap-2 sm:mt-10 sm:grid-cols-2 sm:gap-3 lg:grid-cols-4";
-const ASK_CLASS_NAME =
-  "absolute right-2 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full text-[#f5f0e8] transition-colors duration-300 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[#fffdf8]";
-const ASK_IDLE_CLASS_NAME = "bg-[#2d3436] hover:bg-[#1f1c18]";
-const ASK_READY_CLASS_NAME = "bg-[#5a6e32] hover:bg-[#3d5028]";
-const COMPOSER_STYLE = `
-@keyframes homepage-goal-placeholder-in {
-  from { opacity: 0; transform: translateY(70%); }
-  to { opacity: 1; transform: translateY(0); }
-}
-[data-homepage-goal-placeholder] {
-  animation: homepage-goal-placeholder-in 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-@keyframes homepage-goal-ready-pulse {
-  0% { box-shadow: 0 0 0 0 rgba(90, 110, 50, 0.45); }
-  70% { box-shadow: 0 0 0 14px rgba(90, 110, 50, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(90, 110, 50, 0); }
-}
-@keyframes homepage-goal-ready-in {
-  from { opacity: 0; transform: scale(0.5) rotate(-90deg); }
-  to { opacity: 1; transform: none; }
-}
-[data-homepage-goal-ready="true"] {
-  animation: homepage-goal-ready-pulse 1.8s ease-out infinite;
-}
-[data-homepage-goal-ready-icon] {
-  animation: homepage-goal-ready-in 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-@media (prefers-reduced-motion: reduce) {
-  [data-homepage-goal-placeholder],
-  [data-homepage-goal-ready="true"],
-  [data-homepage-goal-ready-icon] { animation: none; }
-}
-`;
 
 interface GoalHandoffTarget {
   guideHref: string;
@@ -94,77 +39,23 @@ interface GoalHandoffTarget {
   phrase: string;
 }
 
-/**
- * Where a goal click goes. Members and uncertain sessions open the guide,
- * whose CTA resolves their own Murph line. Anonymous visitors text Murph
- * directly when the platform can, and otherwise open the signup dialog.
- */
-type GoalHandoff =
-  | { kind: "guide" }
-  | { external: boolean; hrefFor: (prompt: string) => string; kind: "message" }
-  | { kind: "signup"; open: () => void; prepare: () => void };
-
-function useGoalHandoff(
-  contactInfo: HeroContactInfo,
-  messengerChannel: HeroMessengerChannel,
-): GoalHandoff {
-  const auth = useAuth();
-  const [nativeMessaging, setNativeMessaging] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    setNativeMessaging(
-      NATIVE_MESSAGING_PLATFORM_PATTERN.test(window.navigator.userAgent),
-    );
-  }, []);
-
-  if (auth.authenticated || auth.authenticationStatus === "unavailable") {
-    return { kind: "guide" };
-  }
-  if (messengerChannel === "telegram") {
-    return {
-      external: true,
-      hrefFor: (prompt) =>
-        buildMurphTelegramTextHref({ body: prompt, username: contactInfo.telegram }),
-      kind: "message",
-    };
-  }
-  // Before mount the platform is unknown; render the text link so the server
-  // and first client render agree, then swap on desktops that cannot text.
-  if (nativeMessaging !== false) {
-    return {
-      external: false,
-      hrefFor: (prompt) =>
-        buildMurphSmsHref({ body: prompt, murphPhoneNumber: contactInfo.phone }),
-      kind: "message",
-    };
-  }
-  return { kind: "signup", open: auth.openAuthDialog, prepare: auth.prepareAuth };
-}
-
 export function GoalsSection({
-  contactInfo,
   goals,
-  messengerChannel,
   personas,
+  startOption,
   totalGoalCount,
 }: {
-  contactInfo: HeroContactInfo;
   goals: readonly GoalSearchItem[];
-  messengerChannel: HeroMessengerChannel;
   personas: readonly HomepageGoalPersona[];
+  startOption: MurphContactOption;
   totalGoalCount: number;
 }) {
-  const inputId = useId();
-  const askRef = useRef<HTMLElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const handoff = useGoalHandoff(contactInfo, messengerChannel);
+  const handoff = useGoalHandoff(startOption);
   const [query, setQuery] = useState("");
   const [personaId, setPersonaId] = useState<string | null>(() =>
     personas.some((persona) => persona.id === DEFAULT_HOMEPAGE_GOAL_PERSONA_ID)
       ? DEFAULT_HOMEPAGE_GOAL_PERSONA_ID
       : personas[0]?.id ?? null);
-  const [placeholderIndex, setPlaceholderIndex] = useState(0);
-  const [sendReady, setSendReady] = useState(false);
 
   const placeholders = useMemo(
     () => personas.flatMap((persona) => persona.goals.map((goal) => goal.phrase)),
@@ -179,57 +70,6 @@ export function GoalsSection({
     [activeQuery, goals],
   );
   const activePersona = personas.find((persona) => persona.id === personaId) ?? null;
-
-  useEffect(() => {
-    if (activeQuery || placeholders.length < 2) {
-      return;
-    }
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      return;
-    }
-    const timer = window.setInterval(() => {
-      setPlaceholderIndex((index) => (index + 1) % placeholders.length);
-    }, PLACEHOLDER_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-  }, [activeQuery, placeholders.length]);
-
-  useEffect(() => {
-    const input = inputRef.current;
-    if (!input || !window.matchMedia("(pointer: fine)").matches) {
-      return;
-    }
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!entries.some((entry) => entry.intersectionRatio >= AUTOFOCUS_VISIBLE_RATIO)) {
-          return;
-        }
-        observer.disconnect();
-        const active = document.activeElement;
-        if (active && active !== document.body && active !== input) {
-          return;
-        }
-        input.focus({ preventScroll: true });
-      },
-      { threshold: AUTOFOCUS_VISIBLE_RATIO },
-    );
-    observer.observe(input);
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    setSendReady(false);
-    if (!activeQuery) {
-      return;
-    }
-    const timer = window.setTimeout(() => setSendReady(true), SEND_READY_DELAY_MS);
-    return () => window.clearTimeout(timer);
-  }, [activeQuery]);
-
-  const prompt = activeQuery
-    ? `Hey Murph, help me ${activeQuery}`
-    : "Hey Murph, I have a goal in mind.";
-  const placeholder = placeholders[placeholderIndex % Math.max(placeholders.length, 1)]
-    ?? "sleep through the night";
 
   const results: GoalHandoffTarget[] = activeQuery
     ? matches.map((goal) => ({
@@ -255,77 +95,14 @@ export function GoalsSection({
           Hey Murph, help me…
         </h2>
 
-        <form
-          className="mt-8 w-full max-w-2xl sm:mt-10"
-          onSubmit={(event) => {
-            event.preventDefault();
-            askRef.current?.click();
-          }}
-          role="search"
-        >
-          <style>{COMPOSER_STYLE}</style>
-          <label className="sr-only" htmlFor={inputId}>
-            Your goal
-          </label>
-          <div className="relative">
-            <Input
-              autoCapitalize="none"
-              autoComplete="off"
-              className="border-border bg-card pl-5 pr-14 text-foreground"
-              data-homepage-goal-input
-              enterKeyHint="go"
-              id={inputId}
-              inputSize="xl"
-              maxLength={GOAL_QUERY_MAX_LENGTH}
-              onChange={(event) => setQuery(event.currentTarget.value)}
-              ref={inputRef}
-              spellCheck={false}
-              type="text"
-              value={query}
-            />
-            {activeQuery || query ? null : (
-              <span
-                aria-hidden="true"
-                className="pointer-events-none absolute inset-y-0 left-5 right-14 flex items-center overflow-hidden text-base text-muted-foreground"
-              >
-                <span
-                  className="block truncate"
-                  data-homepage-goal-placeholder
-                  key={placeholderIndex}
-                >
-                  {placeholder}
-                </span>
-              </span>
-            )}
-            <GoalHandoffAction
-              className={cn(
-                ASK_CLASS_NAME,
-                sendReady ? ASK_READY_CLASS_NAME : ASK_IDLE_CLASS_NAME,
-              )}
-              data-homepage-goal-ask
-              data-homepage-goal-ready={sendReady}
-              guideHref={HOSTED_APP_HOME_PATH}
-              handoff={handoff}
-              label={`Text Murph: ${prompt}`}
-              prompt={prompt}
-              ref={askRef}
-            >
-              {sendReady ? (
-                <Image
-                  alt=""
-                  aria-hidden="true"
-                  className="h-4 w-auto brightness-0 invert"
-                  data-homepage-goal-ready-icon
-                  height={24}
-                  src="/icons/murph-mark.svg"
-                  width={36}
-                />
-              ) : (
-                <ArrowUp aria-hidden="true" className="size-5" />
-              )}
-            </GoalHandoffAction>
-          </div>
-        </form>
+        <GoalComposer
+          autoFocusOnView
+          className="mt-8 max-w-2xl sm:mt-10"
+          onQueryChange={setQuery}
+          placeholders={placeholders}
+          query={query}
+          startOption={startOption}
+        />
 
         <div
           aria-label="Who this is for"
@@ -394,68 +171,5 @@ export function GoalsSection({
         ) : null}
       </div>
     </section>
-  );
-}
-
-function GoalHandoffAction({
-  children,
-  className,
-  guideHref,
-  handoff,
-  label,
-  prompt,
-  ref,
-  ...dataProps
-}: {
-  children: ReactNode;
-  className: string;
-  guideHref: string;
-  handoff: GoalHandoff;
-  label: string;
-  prompt: string;
-  ref?: React.Ref<HTMLElement>;
-  "data-homepage-goal-ask"?: boolean;
-  "data-homepage-goal-ready"?: boolean;
-}) {
-  if (handoff.kind === "guide") {
-    return (
-      <Link
-        {...dataProps}
-        className={className}
-        href={guideHref}
-        prefetch={false}
-        ref={ref as React.Ref<HTMLAnchorElement>}
-      >
-        {children}
-      </Link>
-    );
-  }
-  if (handoff.kind === "message") {
-    return (
-      <a
-        {...dataProps}
-        aria-label={label}
-        className={className}
-        href={handoff.hrefFor(prompt)}
-        ref={ref as React.Ref<HTMLAnchorElement>}
-        {...(handoff.external ? { rel: "noreferrer", target: "_blank" } : {})}
-      >
-        {children}
-      </a>
-    );
-  }
-  return (
-    <button
-      {...dataProps}
-      aria-label={label}
-      className={className}
-      onClick={handoff.open}
-      onFocus={handoff.prepare}
-      onPointerEnter={handoff.prepare}
-      ref={ref as React.Ref<HTMLButtonElement>}
-      type="button"
-    >
-      {children}
-    </button>
   );
 }

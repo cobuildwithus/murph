@@ -93,6 +93,16 @@ export function withMurphContactOptionBody(
   option: MurphContactOption,
   body: string,
 ): MurphContactOption {
+  if (option.kind === "text") {
+    // sms: bodies are percent-encoded, not form-encoded: Messages shows a
+    // form-style "+" as a literal plus sign instead of a space.
+    const [smsTarget] = option.href.split("?");
+    return {
+      ...option,
+      href: `${smsTarget}?body=${encodeURIComponent(body)}`,
+    };
+  }
+
   const href = new URL(option.href);
   href.searchParams.set(option.kind === "telegram" ? "text" : "body", body);
 
