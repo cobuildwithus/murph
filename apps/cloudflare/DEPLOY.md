@@ -1523,10 +1523,12 @@ effective standby mode, expected Worker release, and runner bundle/source
 fingerprints first. Then use `shadow` for at least one ordinary
 observation window and verify that exactly one current-release ENAM slot stays
 ready, failed/stale slots retire, and no processing reports a claimed standby.
-Only then set `allocate`; no Web or Temporal deploy is required. In the bounded
-post-deploy observation, require every claimed allocation to be a validated
-Web-direct `default` attempt and require Temporal or background starts to report
-the exact-user path instead of a claim.
+Only then set `allocate`; changing the mode itself requires no Web or Temporal
+deploy. In the bounded post-deploy observation, require every fresh claim to be
+default work from validated Web-direct ingress or an authenticated request
+carrying the admitted-conversation fact. Background-only starts must report
+the exact-user path instead of a fresh claim. The Temporal producer requires
+the separate receiver-first rollout described above.
 
 At the current 2-vCPU, 6-GiB-memory, 6-GB-disk shape, one continuously ready
 slot costs about $40.52 per average 730-hour month for allocated memory and

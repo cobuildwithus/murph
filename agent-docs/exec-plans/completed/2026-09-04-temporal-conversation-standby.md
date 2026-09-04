@@ -1,6 +1,6 @@
 # Preserve conversation work for standby admission
 
-Status: active
+Status: completed
 Created: 2026-09-04
 
 ## Outcome and ownership
@@ -53,11 +53,32 @@ private consumer appends its locally validated optional fact.
 4. Complete parent UX and diff review, scoped commits, draft paired PRs,
    exact-head review concurrent with CI, and report release prerequisites.
 
-## Verification
+## Verification and handoff
 
-- Pending: focused public parser/Cloudflare auth/allocation proof.
-- Pending: private workflow/Activity positive and negative derivation proof,
-  replay, typecheck, and `pnpm verify`.
-- Pending: source-bounded timeout conclusion and diagnostics disposition.
-- Pending: parent review, complexity, current owner docs, scoped commits,
-  exact-head CI and ReviewGPT.
+- Public parser, signed route, and allocation proof: 176 tests pass, including
+  background-mode refusal, tamper rejection, and retained target convergence.
+- Hosted-execution and Cloudflare typechecks and hosted-execution build pass.
+  Web typecheck and nine archive tests pass; final copy/reference readback is
+  included with the final scoped commit.
+- Private workflow/Activity proof: 405 focused tests and 34 historical replay
+  fixtures pass; typecheck passes. The private PR owns full verification.
+- Complexity guard passes with unchanged existing hotspot debt. Current owner
+  docs, diff check, docs drift, and gardening pass.
+- Parent Product UX walkthrough: Ready for the stated bounded allocation
+  outcome. Authentication, consent, existing target convergence, and fallback
+  remain covered; model behavior and provider inputs are unchanged.
+- Timeout investigation: the activity completed with `retry_later`; its
+  effective request budget is consistent with bounded readiness expiry.
+  The exact internal stage remains unproven in accessible historical logs.
+  Six existing deadline/diagnostics tests pass, including reuse after an
+  eight-second deadline when the same shell becomes healthy at nine seconds.
+- Existing merged startup-stage diagnostics already provide attempt
+  correlation, effective deadline, stage, elapsed time, and cleanup outcome.
+  No duplicate logging or speculative timeout change is needed. Canonical
+  deployment history does not show those diagnostics deployed; direct
+  Cloudflare verification is unavailable with current local authentication.
+- Public PR: #2822. Exact-head CI and ReviewGPT remain external completion
+  gates. Production proof requires receiver-first deployment, followed by the
+  paired private producer. No production state was changed during this task.
+Updated: 2026-09-04
+Completed: 2026-09-04
