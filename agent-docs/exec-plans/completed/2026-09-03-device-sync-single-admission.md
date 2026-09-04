@@ -1,6 +1,6 @@
 # Device-sync single-admission completion
 
-Status: active
+Status: completed
 Created: 2026-09-03
 Updated: 2026-09-03
 
@@ -150,3 +150,4 @@ provider-free completion-fence runtime.
   owner and does not remove the completion runtime admission.
 - Changelog is not applicable because this removes an internal redundant
   runtime admission without changing a member-visible result or promise.
+Completed: 2026-09-03
