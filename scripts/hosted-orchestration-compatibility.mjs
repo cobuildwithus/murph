@@ -303,7 +303,6 @@ export function inspectPrivateRun(raw, { privateSha, runId, workflowId }) {
   if (
     raw.id !== runId
     || raw.workflow_id !== workflowId
-    || raw.name !== TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME
     || !isPrivateWorkflowRunPath(raw.path)
     || raw.event !== "workflow_dispatch"
     || raw.head_branch !== TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH
