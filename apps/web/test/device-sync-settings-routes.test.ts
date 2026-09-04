@@ -1440,10 +1440,11 @@ describe("device sync settings routes", () => {
   it("rejects a new member when current WHOOP capacity is full", async () => {
     vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
     vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
-    mocks.queryWhoopMembers.mockResolvedValueOnce([
-      { userId: "member_existing_one" },
-      { userId: "member_existing_two" },
-    ]);
+    mocks.queryWhoopMembers.mockResolvedValueOnce(
+      Array.from({ length: 100 }, (_, index) => ({
+        userId: `member_existing_${index + 1}`,
+      })),
+    );
 
     const response = await connectSourceStartRoute.POST(
       createJsonPostRequest(
@@ -1470,12 +1471,14 @@ describe("device sync settings routes", () => {
     expect(mocks.startConnection).not.toHaveBeenCalled();
   });
 
-  it("allows a new member to take the second current WHOOP slot", async () => {
+  it("allows a new member to take the 100th current WHOOP slot through direct OAuth", async () => {
     vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
     vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
-    mocks.queryWhoopMembers.mockResolvedValueOnce([
-      { userId: "member_existing_one" },
-    ]);
+    mocks.queryWhoopMembers.mockResolvedValueOnce(
+      Array.from({ length: 99 }, (_, index) => ({
+        userId: `member_existing_${index + 1}`,
+      })),
+    );
 
     const response = await connectSourceStartRoute.POST(
       createJsonPostRequest(

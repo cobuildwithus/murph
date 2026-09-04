@@ -250,6 +250,12 @@ test("resolveDeviceSyncCompletionDialogModel owns the WHOOP action contract", as
     rel: "noopener noreferrer",
     target: "_blank",
   });
+  expect(model?.detail).toBe(
+    "WHOOP is connected for recovery, strain, sleep, and heart rate. Its direct connection doesn't include steps, so connect Apple Health in the Murph app to bring them in.",
+  );
+  expect(model?.setupGuide?.detail).toBe(
+    "WHOOP's direct connection doesn't include steps. Download the Murph app and connect Apple Health to bring them in.",
+  );
   expect(model?.contactAction).toMatchObject({
     href: "sms:+15550100002?body=I%20just%20connected%20my%20WHOOP",
     kind: "imessage",
@@ -269,8 +275,9 @@ test("HomePage shows the connected dialog with the signed-in member's assigned M
   }));
 
   assert.match(markup, /WHOOP is connected/);
-  assert.match(markup, /Heads up: WHOOP doesn&#x27;t share all of your data automatically\./);
-  assert.match(markup, /Syncing through Apple Health gives Murph the complete picture\./);
+  assert.match(markup, /WHOOP is connected for recovery, strain, sleep, and heart rate\./);
+  assert.match(markup, /Its direct connection doesn&#x27;t include steps/);
+  assert.match(markup, /connect Apple Health in the Murph app to bring them in\./);
   assert.match(markup, /data-device-sync-icon="watch"/);
   assert.doesNotMatch(markup, /data-completion-unverified/);
   assert.match(markup, /aria-label="See how to sync all of your WHOOP data"/);
@@ -302,7 +309,7 @@ test("HomePage renders replay-stripped matching store truth as connected", async
   }));
 
   assert.match(markup, /WHOOP is connected/);
-  assert.match(markup, /WHOOP doesn&#x27;t share all of your data automatically\./);
+  assert.match(markup, /direct connection doesn&#x27;t include steps/);
   assert.match(markup, />Get full sync</);
   assert.match(markup, /href="sms:\+15550100002\?body=I%20just%20connected%20my%20WHOOP"/);
   assert.match(markup, />Text Murph</);
@@ -400,7 +407,7 @@ test("HomePage uses connect source labels for Junction-backed targets", async ()
   assert.doesNotMatch(markup, /Junction is connected/);
   assert.doesNotMatch(markup, /Junction is ready/);
   assert.doesNotMatch(markup, /I%20just%20connected%20my%20Junction/);
-  assert.doesNotMatch(markup, /WHOOP doesn&#x27;t share/);
+  assert.doesNotMatch(markup, /direct connection doesn&#x27;t include steps/);
   assert.doesNotMatch(markup, /apps\.apple\.com\/us\/app\/murph-ai/);
   assert.doesNotMatch(markup, />Get full sync</);
 });
@@ -472,7 +479,7 @@ test("HomePage preserves a completed non-WHOOP Junction source when WHOOP is als
   assert.match(markup, /Fitbit is connected/);
   assert.match(markup, /Fitbit is ready\. Say hi to start exploring your data\./);
   assert.match(markup, /href="sms:\+15550100002\?body=I%20just%20connected%20my%20Fitbit"/);
-  assert.doesNotMatch(markup, /WHOOP doesn&#x27;t share/);
+  assert.doesNotMatch(markup, /direct connection doesn&#x27;t include steps/);
   assert.doesNotMatch(markup, /apps\.apple\.com\/us\/app\/murph-ai/);
   assert.doesNotMatch(markup, />Get full sync</);
 });
@@ -544,7 +551,7 @@ test("HomePage matches replay-stripped Junction upstream aliases by resolved con
   }));
 
   assert.match(markup, /WHOOP is connected/);
-  assert.match(markup, /WHOOP doesn&#x27;t share all of your data automatically\./);
+  assert.match(markup, /direct connection doesn&#x27;t include steps/);
   assert.match(markup, />Get full sync</);
   assert.match(markup, /href="sms:\+15550100002\?body=I%20just%20connected%20my%20WHOOP"/);
   assert.match(markup, />Text Murph</);
@@ -573,7 +580,7 @@ test("HomePage keeps a continue-only dialog when there is no messaging destinati
   }));
 
   assert.match(markup, /WHOOP is connected/);
-  assert.match(markup, /WHOOP doesn&#x27;t share all of your data automatically\./);
+  assert.match(markup, /direct connection doesn&#x27;t include steps/);
   assert.match(markup, />Get full sync</);
   assert.doesNotMatch(markup, /data-completion-unverified/);
   assert.match(markup, />Continue exploring</);

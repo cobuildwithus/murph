@@ -385,7 +385,7 @@ function resolveCompletionDetail(input: {
   }
 
   if (input.connected && input.needsWhoopAppleHealthRelay) {
-    return "Heads up: WHOOP doesn't share all of your data automatically. Syncing through Apple Health gives Murph the complete picture.";
+    return "WHOOP is connected for recovery, strain, sleep, and heart rate. Its direct connection doesn't include steps, so connect Apple Health in the Murph app to bring them in.";
   }
 
   if (input.connected && !input.hasContactAction) {
