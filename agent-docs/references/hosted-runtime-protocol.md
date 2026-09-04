@@ -2704,7 +2704,12 @@ persists on the existing mailbox item across pending, sending, recording,
 retryable recording, and preemption transitions, and ends when existing
 completion removes the item. Restore promotes the exact legacy pending
 retained-job shape to the marker once so rollout does not strand an existing
-owner; projection after that compatibility read is marker-based. The set admits
+owner; projection after that compatibility read is marker-based. An idle restore
+also compares the restored exact owner set with the committed checkpoint. An
+unpublished owner enters the existing fenced checkpoint path, including when
+the default pass imports nothing and all retained retries remain in the future.
+The default pass with current ownership remains a no-op; publication neither
+executes a future job early nor changes its retry time. The set admits
 at most one owner per connection and is capped by the existing 100-connection
 complete-snapshot hydration authority. Exact continuation membership is independent
 of the global handled frontier: another connection's earlier retry cannot veto
