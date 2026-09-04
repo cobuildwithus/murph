@@ -343,23 +343,19 @@ async function assertRunnerContainerSmoke(input: {
       Math.max(1, retryPolicy.maxWaitMs - elapsedBeforeAttemptMs),
     );
     try {
-      assertSmokeRunnerBundleManifest(
-        // Each attempt addresses its own smoke Durable Object, so a retry gets a
-        // fresh container-provisioning decision instead of re-reading the one
-        // instance this run already pinned. Worker code updates immediately while
-        // containers roll out gradually, so the first instance can legitimately be
-        // pre-rollout, and polling it keeps it below the idle TTL that would
-        // otherwise replace it.
-        await readRunnerContainerSmoke({
-          ...input,
-          attempt,
-          signal: requestDeadline,
-        }),
+      // Each attempt addresses its own smoke Durable Object, so a retry gets a
+      // fresh container-provisioning decision instead of re-reading the one
+      // instance this run already pinned. Worker code updates immediately while
+      // containers roll out gradually, so the first instance can legitimately be
+      // pre-rollout, and polling it keeps it below the idle TTL that would
+      // otherwise replace it.
+      await readRunnerContainerSmoke({
+        ...input,
+        attempt,
         expectedManifest,
-        {
-          retryable: retryableFailures,
-        },
-      );
+        retryableManifestMismatch: retryableFailures,
+        signal: requestDeadline,
+      });
       return attempt;
     } catch (error) {
       const elapsedMs = Date.now() - startedAtMs;
@@ -401,6 +397,8 @@ async function readRunnerContainerSmoke(input: {
   expectDirectR2PresignedPut: boolean;
   expectLiveModelTurnModel: string | null;
   fetchImpl: FetchLike;
+  expectedManifest: SmokeRunnerBundleManifest;
+  retryableManifestMismatch: boolean;
   signal: AbortSignal;
   source: EnvSource;
   url: string;
@@ -465,6 +463,13 @@ async function readRunnerContainerSmoke(input: {
     throw new Error("runner container smoke did not return the expected service id.");
   }
 
+  const runnerBundle = responsePayload.runnerContainer.runnerBundle ?? null;
+  // A pre-rollout container can implement an older smoke response schema. Check
+  // provenance before asserting current schema fields so that expected rollout
+  // skew remains retryable instead of failing the deployment immediately.
+  assertSmokeRunnerBundleManifest(runnerBundle, input.expectedManifest, {
+    retryable: input.retryableManifestMismatch,
+  });
   assertSmokeCodexShellResult(responsePayload.runnerContainer.codexShell);
   if (input.expectDirectR2PresignedPut) {
     assertSmokeDirectR2PresignedPutResult(responsePayload.runnerContainer.directR2PresignedPut);
@@ -476,7 +481,7 @@ async function readRunnerContainerSmoke(input: {
     );
   }
 
-  return responsePayload.runnerContainer.runnerBundle ?? null;
+  return runnerBundle;
 }
 
 async function readSmokeFailureBody(response: Response): Promise<string | null> {

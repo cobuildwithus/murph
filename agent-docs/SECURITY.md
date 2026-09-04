@@ -1311,24 +1311,9 @@ Last verified: 2026-08-31
   its exact outer run directory.
   Candidate code has arbitrary execution authority within that account, so a
   personal or credential-bearing account is never an acceptable worker.
-  The Blacksmith workflow must retain read-only repository contents permission,
-  no GitHub Environment, no OIDC permission, no Actions-secret references, and
-  pinned actions. The dispatcher must pin the Blacksmith organization,
-  default-branch ref, workflow, and job before each fresh canonical Testbox is
-  created instead of trusting mutable local profile/config values or an
-  arbitrary reusable lease. Before candidate sync can execute repository code,
-  the default-branch workflow must install the trusted verification shell as a
-  root-owned file outside the workspace; canonical delegation invokes that
-  absolute path, which validates the two allowed commands and directly `exec`s
-  the candidate verifier through `env -i` with an isolated temporary home and a
-  one-bit trusted-entry marker. The candidate verifier must fail closed without
-  that marker and then call the shared sanitized core. A change to the workflow
-  or trusted entrypoint cannot use the not-yet-landed trust root for proof:
-  verify it locally, land it through the protected workflow-change path, then
-  run a post-landing remote proof. Never treat either boundary as a sandbox for
-  a compromised initiating account; any process that can already read a
-  production secret and make arbitrary network calls can exfiltrate it without
-  Crabbox.
+  Never treat the static worker boundary as a sandbox for a compromised
+  initiating account; any process that can already read a production secret and
+  make arbitrary network calls can exfiltrate it without Crabbox.
 
 ### Local production-secret stop boundary
 
@@ -1476,7 +1461,7 @@ locally readable.
   instrumentation/provider output in runner-temporary storage, publishes only
   one closed allowlisted stage summary, and removes all raw output before
   completion. Public orchestration never reads private job logs or artifacts.
-- Cloudflare hosted deploys intentionally run the manual predeploy gates, hosted Codex auth guard, production build prep, Wrangler deploy, and deployed endpoint smoke on protected-main Blacksmith runners. Treat that as the only approved Blacksmith production-secret trust expansion: keep the workflow protected-main-only before environment attachment, scope production secrets to the validation, render, deploy, and smoke steps after checkout verification, and do not move any broader production secret access to Blacksmith without a fresh security review and durable docs update.
+- Cloudflare hosted deploys run the manual predeploy gates, hosted Codex auth guard, production build prep, Wrangler deploy, and deployed endpoint smoke on GitHub-hosted Ubuntu runners. Keep the workflow protected-main-only before environment attachment and scope production secrets to the validation, render, deploy, and smoke steps after checkout verification.
 - Cloudflare runner Containers must explicitly render Wrangler SSH disabled for
   every class and must contain no authorized keys. Deploy automation must not
   accept an environment-controlled SSH key or compatibility switch that can

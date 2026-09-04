@@ -172,9 +172,9 @@ import {
   MURPH_MANAGED_AUTOMATIONS,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
+  MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
-  MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.ts'
 import {
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
@@ -1117,7 +1117,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           },
           prompt: [
             "I've already seen your welcome and I'm ready to continue.",
-            "I'd like Murph's help building a steadier evening routine.",
+            "I'd like help building a healthier sleep routine.",
           ].join(' '),
         })
         const actions = readCapabilityRoutingActions(result.jsonEvents)
@@ -12722,35 +12722,27 @@ describeRealCodex('real Codex private group Journal capture e2e', () => {
   }, 720_000)
 })
 
-describeRealCodex('real Codex product notes eligibility e2e', () => {
+describeRealCodex('real Codex on-demand updates after product-note retirement e2e', () => {
   it(
-    'filters repair-only product notes without dropping member-facing changes',
+    'retired product notes leave on-demand updates available',
     async () => {
       const config = await resolveRealCodexE2eConfig()
-      const productNotes = MURPH_MANAGED_AUTOMATIONS.find(
+      expect(MURPH_MANAGED_AUTOMATIONS.some(
         (automation) =>
           automation.automationId
-          === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
-      )
-      if (!productNotes) {
-        throw new Error('Expected the managed product-notes automation.')
-      }
+          === MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+      )).toBe(false)
       const workingDirectory = await mkdtemp(
-        path.join(tmpdir(), 'murph-product-notes-eligibility-e2e-'),
+        path.join(tmpdir(), 'murph-on-demand-product-updates-e2e-'),
       )
 
       try {
-        const appendCapturePath = path.join(
-          workingDirectory,
-          'product-notes-append.txt',
-        )
         const binDirectory = path.join(workingDirectory, 'bin')
         const curlCapturePath = path.join(
           workingDirectory,
-          'product-notes-curl.txt',
+          'product-updates-curl.txt',
         )
-        await materializeProductNotesFixtures({
-          appendCapturePath,
+        await materializeProductUpdatesFixture({
           binDirectory,
           curlCapturePath,
         })
@@ -12762,7 +12754,7 @@ describeRealCodex('real Codex product notes eligibility e2e', () => {
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
             ?? undefined,
           codexHome: config.codexHome,
-          developerInstructions: buildProductNotesDeveloperInstructions(),
+          developerInstructions: buildDirectConversationDeveloperInstructions(),
           dynamicTools: [],
           env: {
             ...config.env,
@@ -12772,15 +12764,11 @@ describeRealCodex('real Codex product notes eligibility e2e', () => {
           model: config.model,
           modelProvider: config.modelProvider,
           prompt: [
-            productNotes.instructions,
-            'Scheduled occurrence context:',
-            '- Current local date: 2026-08-19.',
-            '- The member regularly reviews scheduled reminders and has an active workout they use from Messages.',
-            '- A past connected-health sync delayed one reminder.',
-            '- The controlled canonical ledger and changelog feed are available through the normal vault-cli and curl commands.',
-            '- Complete the normal selection, ledger append, and terminal scheduled decision.',
-          ].join('\n\n'),
-          reasoningEffort: 'high',
+            'What is new in Murph?',
+            'Check the canonical product feed and briefly name the recent automation-recipient and workout-resume updates.',
+            'The controlled canonical feed is available through the normal curl command.',
+          ].join('\n'),
+          reasoningEffort: 'low',
           sandbox: 'workspace-write',
           workingDirectory,
         })
@@ -12790,27 +12778,17 @@ describeRealCodex('real Codex product notes eligibility e2e', () => {
           .split('\n')
         expect(curlCalls).toHaveLength(1)
         expect(curlCalls[0]).toContain(
-          '/api/changelog?days=14&featureLimit=70&improvementLimit=10',
+          '/api/changelog?days=14',
         )
-
-        const appendArguments = await readFile(appendCapturePath, 'utf8')
-        expect(appendArguments).toContain('clearer-automation-recipients')
-        expect(appendArguments).toContain('resume-workouts-in-messages')
-        expect(appendArguments).not.toContain(
-          'scheduled-support-resumes-after-syncs',
+        process.stdout.write(
+          `[real-codex] retired product notes keep on-demand updates: ${JSON.stringify({
+            curlCalls,
+            finalMessage: result.finalMessage,
+          })}\n`,
         )
-
-        const decision = parseAssistantNotificationDecision(
-          result.finalMessage,
-        )
-        expect(decision.kind).toBe('send_message')
-        if (decision.kind === 'send_message') {
-          expect(decision.text).toMatch(/automation/iu)
-          expect(decision.text).toMatch(/resume|workout/iu)
-          expect(decision.text).not.toMatch(
-            /health-data maintenance|reliability|scheduled support resumes/iu,
-          )
-        }
+        expect(result.finalMessage).toMatch(/automation/iu)
+        expect(result.finalMessage).toMatch(/resume|workout/iu)
+        expect(result.finalMessage).not.toMatch(/biweekly|scheduled product note/iu)
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -15160,6 +15138,8 @@ describeRealCodex('real Codex Habitat voice maintenance e2e', () => {
 })
 
 const PUBLIC_GOAL_SETUP_KEY = 'goal_template:improve-deep-sleep'
+const PUBLIC_GOAL_SLEEP_THROUGH_NIGHT_KEY =
+  'goal_template:sleep-through-the-night'
 
 interface PublicGoalSetupRecord {
   goalPhrase: string
@@ -15358,6 +15338,164 @@ type PublicGoalSetupAutomationSaveRequest = Extract<
 >
 
 describeRealCodex('real Codex public goal setup e2e', () => {
+  it(
+    'resolves an achievable sleep Goal before asking one setup question',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const publicGoal = await readPublicGoalSetupRecord(
+        PUBLIC_GOAL_SLEEP_THROUGH_NIGHT_KEY,
+      )
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-public-sleep-goal-routing-e2e-'),
+      )
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const vaultRoot = path.join(workingDirectory, 'vault')
+      const commandLogPath = path.join(workingDirectory, 'goal-commands.log')
+
+      try {
+        await initializeVault({
+          timezone: 'America/New_York',
+          vaultRoot,
+        })
+        await Promise.all([
+          materializeAssistantSkill({ skillsRoot, slug: 'goal-setup' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'sleep-improvement' }),
+          materializeAssistantSkill({
+            skillsRoot,
+            slug: 'sleep-recovery-readiness',
+          }),
+          materializePublicGoalSetupVaultCli({
+            binDirectory,
+            commandLogPath,
+            vaultRoot,
+          }),
+        ])
+        const inheritedPath = normalizeEnvString(config.env.PATH)
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildPublicGoalSetupDeveloperInstructions(),
+          dynamicTools: [MURPH_AUTOMATION_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            PATH: inheritedPath
+              ? `${binDirectory}${path.delimiter}${inheritedPath}`
+              : binDirectory,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: publicGoal.startPrompt,
+          reasoningEffort: 'medium',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const commandAttempts = readGoalSetupVaultCommands(actions, {
+          successfulOnly: false,
+        })
+        const reply = result.finalMessage.trim()
+        process.stdout.write(
+          `[public-goal-setup-e2e] ${JSON.stringify({
+            reply,
+            scenario: 'sleep-through-the-night-routing',
+          })}\n`,
+        )
+
+        const publicGoalListRead = actions.find(
+          isSuccessfulPublicGoalListAction,
+        )
+        const publicGoalShowRead = actions.find((action) =>
+          isSuccessfulPublicGoalShowActionFor(
+            action,
+            'sleep-through-the-night',
+          )
+        )
+        const goalInventoryRead = actions.find(
+          isSuccessfulGoalInventoryReadAction,
+        )
+        const memoryRead = actions.find(isSuccessfulCompactMemoryReadAction)
+        const normalizeWhitespace = (value: string) =>
+          value.replace(/\s+/gu, ' ').trim()
+        const goalSetupSkillPathSuffix =
+          `${path.sep}goal-setup${path.sep}SKILL.md`
+        const goalSetupSkillReads = actions.filter(
+          (candidate): candidate is Extract<
+            CapabilityRoutingAction,
+            { kind: 'command' }
+          > => candidate.kind === 'command'
+            && candidate.ok
+            && candidate.command.includes(goalSetupSkillPathSuffix),
+        )
+        expect(
+          goalSetupSkillReads.length,
+          'goal-setup read actions before setup',
+        ).toBeGreaterThan(0)
+        const expectedGoalSetupSkill = await readFile(
+          path.join(skillsRoot, 'goal-setup', 'SKILL.md'),
+          'utf8',
+        )
+        expect(
+          normalizeWhitespace(
+            goalSetupSkillReads.map((action) => action.output).join('\n'),
+          ),
+          'goal-setup full-file read before setup',
+        ).toContain(normalizeWhitespace(expectedGoalSetupSkill))
+        expect(publicGoalListRead, 'exact public Goal search').toBeDefined()
+        expect(publicGoalListRead?.output).toContain(
+          PUBLIC_GOAL_SLEEP_THROUGH_NIGHT_KEY,
+        )
+        expect(publicGoalShowRead, 'exact public Goal read').toBeDefined()
+        expect(goalInventoryRead, 'all-status Goal inventory').toBeDefined()
+        expect(memoryRead, 'compact memory read').toBeDefined()
+        expect(commandAttempts.some(isGoalSetupMutationCommand)).toBe(false)
+        expect(actions.filter((action) => action.kind === 'dynamic')).toHaveLength(0)
+
+        const firstQuestion = readCompletedAgentMessages(result.jsonEvents)
+          .find((message) => message.text.includes('?'))
+        expect(firstQuestion, 'one grounded setup question').toBeDefined()
+        if (
+          !firstQuestion
+          || !publicGoalListRead
+          || !publicGoalShowRead
+          || !goalInventoryRead
+          || !memoryRead
+        ) {
+          throw new Error('Expected Goal grounding before the setup question.')
+        }
+        for (const groundingRead of [
+          publicGoalListRead,
+          publicGoalShowRead,
+          goalInventoryRead,
+          memoryRead,
+          ...goalSetupSkillReads,
+        ]) {
+          expect(groundingRead.eventIndex).toBeLessThan(firstQuestion.eventIndex)
+        }
+        expect(reply.match(/\?/gu) ?? []).toHaveLength(1)
+        expect(reply).toMatch(/sleep|night|waking|awakening/iu)
+        expect(reply).not.toMatch(
+          /Health Commons|commons goal|goal_template:|sha256:/iu,
+        )
+        expect(reply).not.toMatch(
+          /(?:no|did not|didn't|could not|couldn't).{0,40}(?:matching|match|entry|goal)/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
   it(
     'grounds from memory, persists finite support, and reuses one Goal package in a fresh session',
     async () => {
@@ -16359,7 +16497,9 @@ function buildPublicGoalSetupDeveloperInstructions(): string {
   })
 }
 
-async function readPublicGoalSetupRecord(): Promise<PublicGoalSetupRecord> {
+async function readPublicGoalSetupRecord(
+  key = PUBLIC_GOAL_SETUP_KEY,
+): Promise<PublicGoalSetupRecord> {
   const artifactPath = fileURLToPath(new URL(
     '../../health-commons/generated/web/browse/goals.json',
     import.meta.url,
@@ -16368,7 +16508,7 @@ async function readPublicGoalSetupRecord(): Promise<PublicGoalSetupRecord> {
   const goals = Array.isArray(artifact?.goals) ? artifact.goals : []
   const goal = goals
     .map((value) => readRecord(value))
-    .find((value) => value?.key === PUBLIC_GOAL_SETUP_KEY)
+    .find((value) => value?.key === key)
   const revision = readRecord(goal?.revision)
   const goalPhrase = readString(goal?.goalPhrase)
   const pageRevisionId = readString(revision?.pageRevisionId)
@@ -16384,13 +16524,13 @@ async function readPublicGoalSetupRecord(): Promise<PublicGoalSetupRecord> {
     || !workflowSpecRevisionId
   ) {
     throw new Error(
-      `Generated Goal index is missing ${PUBLIC_GOAL_SETUP_KEY}.`,
+      `Generated Goal index is missing ${key}.`,
     )
   }
 
   return {
     goalPhrase,
-    key: PUBLIC_GOAL_SETUP_KEY,
+    key,
     pageRevisionId,
     startPrompt,
     workflowSpecRevisionId,
@@ -16556,15 +16696,29 @@ function isSuccessfulGoalSetupEntityShowAction(
 function isSuccessfulPublicGoalShowAction(
   action: CapabilityRoutingAction,
 ): boolean {
+  return isSuccessfulPublicGoalShowActionFor(action, 'improve-deep-sleep')
+}
+
+function escapeGoalSetupRegularExpression(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
+}
+
+function isSuccessfulPublicGoalShowActionFor(
+  action: CapabilityRoutingAction,
+  slug: string,
+): boolean {
+  const escapedSlug = escapeGoalSetupRegularExpression(slug)
   return action.kind === 'command'
     && action.ok
     && (
       (
         action.command.includes('commons goal show')
-        && action.command.includes('improve-deep-sleep')
+        && action.command.includes(slug)
       )
-      || /"argv":\s*\[\s*"commons",\s*"goal",\s*"show",\s*"(?:goal_template:)?improve-deep-sleep"/u
-        .test(action.output)
+      || new RegExp(
+        `"argv":\\s*\\[\\s*"commons",\\s*"goal",\\s*"show",\\s*"(?:goal_template:)?${escapedSlug}"`,
+        'u',
+      ).test(action.output)
     )
 }
 
@@ -19710,80 +19864,6 @@ describeRealCodex('real Codex product-feedback summary e2e', () => {
           }
         }
 
-        const managedAutomation = MURPH_MANAGED_AUTOMATIONS.find(
-          (automation) =>
-            automation.automationId
-            === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
-        )
-        if (!managedAutomation) {
-          throw new Error('Expected the managed product-notes automation.')
-        }
-        const managedWorkingDirectory = await mkdtemp(
-          path.join(tmpdir(), 'murph-product-feedback-managed-e2e-'),
-        )
-        try {
-          const first = await executeRealCodexAppServerTurn({
-            ...commonInput,
-            productFeedbackRecorder: createRealCodexFeedbackRecorder(),
-            prompt: [
-              'This is a deterministic context-loading probe.',
-              'Do not execute the scheduled instructions or call tools; reply exactly PRODUCT_NOTES_CONTEXT_READY.',
-              'The managed product-notes instructions that precede a later member turn are:',
-              managedAutomation.instructions,
-            ].join('\n\n'),
-            workingDirectory: managedWorkingDirectory,
-          })
-          expect(first.finalMessage).toContain('PRODUCT_NOTES_CONTEXT_READY')
-          expect(
-            readCapabilityRoutingActions(first.jsonEvents).filter(
-              (action) =>
-                action.kind === 'dynamic'
-                && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name,
-            ),
-          ).toHaveLength(0)
-
-          const second = await executeRealCodexAppServerTurn({
-            ...commonInput,
-            productFeedbackRecorder: createRealCodexFeedbackRecorder(),
-            prompt: [
-              'Treat this synthetic later-turn report as explicit Murph product frustration and use the product-feedback tool.',
-              'A member expected Murph product notes to show two recent changelog updates, but the note was skipped after the feature catalog failed.',
-              'The source establishes that the changelog fetch succeeded.',
-            ].join(' '),
-            resumeSessionId: first.sessionId,
-            workingDirectory: managedWorkingDirectory,
-          })
-          const managedFeedbackCalls = readCapabilityRoutingActions(
-            second.jsonEvents,
-          ).filter(
-            (action) =>
-              action.kind === 'dynamic'
-              && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name,
-          )
-          expect(managedFeedbackCalls).toHaveLength(1)
-          const managedFeedbackCall = managedFeedbackCalls[0]
-          if (managedFeedbackCall?.kind !== 'dynamic') {
-            throw new Error(
-              'Expected one managed product-feedback dynamic tool call.',
-            )
-          }
-          const managedSummary = readString(
-            managedFeedbackCall.argumentsValue.summary,
-          )
-          expect(managedSummary).not.toBeNull()
-          expect(managedSummary?.length).toBeLessThanOrEqual(
-            PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
-          )
-          expect(managedSummary).toMatch(/\b(?:member|user)\b/iu)
-          expect(managedSummary).toMatch(/\bproduct[- ]notes?\b/iu)
-          expect(managedSummary).toMatch(/\b(?:expect|wanted|should)\w*\b/iu)
-          expect(managedSummary).toMatch(/\bskip/iu)
-          expect(managedSummary).toMatch(
-            /\b(?:changelog.*succeed|success\w*.*changelog)\w*\b/iu,
-          )
-        } finally {
-          await removeRealCodexTemporaryPaths([managedWorkingDirectory])
-        }
       } finally {
         await removeRealCodexTemporaryPaths(config.temporaryPaths)
       }
@@ -30861,8 +30941,7 @@ async function materializeWeeklyHealthInsightVaultCli(input: {
   await chmod(executablePath, 0o700)
 }
 
-async function materializeProductNotesFixtures(input: {
-  appendCapturePath: string
+async function materializeProductUpdatesFixture(input: {
   binDirectory: string
   curlCapturePath: string
 }): Promise<void> {
@@ -30946,12 +31025,12 @@ async function materializeProductNotesFixtures(input: {
     [
       '#!/bin/sh',
       'case "$*" in',
-      '  *"/api/changelog?days=14&featureLimit=70&improvementLimit=10"*)',
+      '  *"/api/changelog?days=14"*)',
       `    printf '%s\\n' "$*" >> '${input.curlCapturePath}'`,
       `    printf '%s\\n' '${feed}'`,
       '    ;;',
       '  *)',
-      '    printf \'%s\\n\' \'unexpected product-notes URL\' >&2',
+      '    printf \'%s\\n\' \'unexpected product-updates URL\' >&2',
       '    exit 69',
       '    ;;',
       'esac',
@@ -30960,30 +31039,6 @@ async function materializeProductNotesFixtures(input: {
     { encoding: 'utf8', mode: 0o700 },
   )
   await chmod(curlPath, 0o700)
-
-  const vaultCliPath = path.join(input.binDirectory, 'vault-cli')
-  await writeFile(
-    vaultCliPath,
-    [
-      '#!/bin/sh',
-      'case "$*" in',
-      '  *"knowledge show murph-product-notes"*)',
-      '    printf \'%s\\n\' \'# Murph product notes\' \'\' \'## 2026-08-05 — Murph product notes\' \'Kind: feature discovery\' \'Item ids: earlier-feature\'',
-      '    ;;',
-      '  *"knowledge append-section murph-product-notes"*)',
-      `    printf '%s\\n' "$*" > '${input.appendCapturePath}'`,
-      '    printf \'%s\\n\' \'{"ok":true,"status":"appended"}\'',
-      '    ;;',
-      '  *)',
-      '    printf \'%s\\n\' \'unexpected product-notes vault command\' >&2',
-      '    exit 69',
-      '    ;;',
-      'esac',
-      '',
-    ].join('\n'),
-    { encoding: 'utf8', mode: 0o700 },
-  )
-  await chmod(vaultCliPath, 0o700)
 }
 
 async function buildWearableArrivalPrompt(input: {
@@ -32693,29 +32748,6 @@ function buildAutomaticMealCloseoutDeveloperInstructions(input: {
     onboardingGuidance: false,
     scheduledOccurrenceAt:
       input.scheduledOccurrenceAt ?? '2026-08-25T01:00:00.000Z',
-    turnTrigger: 'automation-cron',
-  })
-}
-
-function buildProductNotesDeveloperInstructions(): string {
-  return buildAssistantSystemPrompt({
-    assistantCliContract: null,
-    assistantContextSnapshotPrompt: null,
-    assistantHostedDeviceConnectAvailable: false,
-    assistantHostedDeviceConnectProviders: [],
-    assistantKnowledgeToolsAvailable: false,
-    channel: 'linq',
-    cliAccess: {
-      rawCommand: 'vault-cli',
-      setupCommand: 'murph',
-    },
-    conversationScope: 'direct',
-    currentLocalDate: '2026-08-19',
-    currentTimeZone: 'America/New_York',
-    hostedRuntime: true,
-    modelBehaviorProfile: 'gpt5-agentic',
-    onboardingGuidance: false,
-    scheduledOccurrenceAt: '2026-08-19T14:00:00.000Z',
     turnTrigger: 'automation-cron',
   })
 }

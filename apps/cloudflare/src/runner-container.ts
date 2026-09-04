@@ -71,6 +71,10 @@ const RUNNER_LIVE_MODEL_TURN_SMOKE_URL =
   "http://container/internal/deploy-live-model-turn-smoke";
 const RUNNER_DIRECT_R2_PRESIGNED_PUT_SMOKE_URL =
   "http://container/internal/direct-r2-presigned-put-smoke";
+// Covers the container-side 45s app-server probe plus request/response margin.
+// This diagnostic grew beyond the ordinary member-runtime readiness budget;
+// keeping the budgets separate avoids changing hot-path admission semantics.
+const RUNNER_CODEX_SHELL_SMOKE_MIN_TIMEOUT_MS = 60_000;
 // Covers the container-side 60s codex exec budget plus boot/dispatch margin.
 const RUNNER_LIVE_MODEL_TURN_SMOKE_MIN_TIMEOUT_MS = 90_000;
 const RUNNER_RUNTIME_WAKE_URL = "http://container/internal/runtime-wake";
@@ -218,6 +222,7 @@ export interface HostedExecutionContainerInvokeRequest {
 type HostedExecutionContainerInvokeInput = HostedExecutionContainerInvokeRequest;
 
 export interface RunnerContainerEnsureReadyForProcessingInput {
+  orchestrationAttemptId?: string;
   timeoutMs: number;
   userId: string;
 }
@@ -980,16 +985,20 @@ export class RunnerContainer extends Container {
       if (result.kind === "cleanup_unsettled") {
         emitRunnerContainerStartupFailureObservation({
           cleanupUnsettled: true,
+          orchestrationAttemptId: input.orchestrationAttemptId,
           readinessRequestedAtEpochMs,
           stage: startupFailureObservation.stage,
+          timeoutMs: input.timeoutMs,
         });
       }
       return result;
     } catch (error) {
       emitRunnerContainerStartupFailureObservation({
         cleanupUnsettled: cleanupSettlementTimedOut,
+        orchestrationAttemptId: input.orchestrationAttemptId,
         readinessRequestedAtEpochMs,
         stage: startupFailureObservation.stage,
+        timeoutMs: input.timeoutMs,
       });
       if (cleanupSettlementTimedOut) {
         return { kind: "cleanup_unsettled" };
@@ -1648,7 +1657,10 @@ export class RunnerContainer extends Container {
   private async smokeCodexShell(
     readyTimeoutMs: number,
   ): Promise<NonNullable<HostedExecutionContainerSmokeHealthResult["codexShell"]>> {
-    const smokeSignal = AbortSignal.timeout(readyTimeoutMs);
+    const smokeSignal = AbortSignal.timeout(Math.max(
+      readyTimeoutMs,
+      RUNNER_CODEX_SHELL_SMOKE_MIN_TIMEOUT_MS,
+    ));
     const response = await this.containerFetch(
       RUNNER_CODEX_SHELL_SMOKE_URL,
       {
@@ -4547,8 +4559,10 @@ function hostedRunnerContainerFragmentsOverlap(left: string, right: string): boo
 
 function emitRunnerContainerStartupFailureObservation(input: {
   cleanupUnsettled: boolean;
+  orchestrationAttemptId?: string;
   readinessRequestedAtEpochMs: number;
   stage: RunnerContainerLocalStartupFailureStage;
+  timeoutMs: number;
 }): void {
   try {
     const rawElapsedMs = Date.now() - input.readinessRequestedAtEpochMs;
@@ -4561,6 +4575,10 @@ function emitRunnerContainerStartupFailureObservation(input: {
     emitHostedExecutionStructuredLog({
       component: "container",
       details: {
+        ...(input.orchestrationAttemptId === undefined
+          ? {}
+          : { orchestrationAttemptId: input.orchestrationAttemptId }),
+        runtimeStartupConfirmTimeoutMs: input.timeoutMs,
         runtimeStartupCleanupUnsettled: input.cleanupUnsettled,
         runtimeStartupFailureElapsedMs: elapsedMs,
         runtimeStartupFailureStage: input.stage,
@@ -4742,6 +4760,14 @@ function parseRunnerContainerEnsureReadyForProcessingInput(
   payload: RunnerContainerEnsureReadyForProcessingInput,
 ): RunnerContainerEnsureReadyForProcessingInput {
   return {
+    ...(payload.orchestrationAttemptId === undefined
+      ? {}
+      : {
+          orchestrationAttemptId: requireString(
+            payload.orchestrationAttemptId,
+            "payload.orchestrationAttemptId",
+          ),
+        }),
     timeoutMs: readTimeoutMs(payload.timeoutMs, DEFAULT_RUNNER_READY_TIMEOUT_MS),
     userId: requireString(payload.userId, "payload.userId"),
   };

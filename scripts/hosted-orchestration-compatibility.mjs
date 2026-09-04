@@ -396,6 +396,10 @@ function inspectPrivateProofJob(raw, { ids, privateSha, runId }) {
   }
 
   const name = requiredString(raw.name, "private compatibility job name");
+  // GitHub leaves output-based job names uninterpolated when their lane is
+  // skipped. Required proof jobs still fail closed below because their proof
+  // count or digest is then missing.
+  if (raw.status === "completed" && raw.conclusion === "skipped") return null;
   const patterns = [
     ["reader", /^Temporal compatibility reader \[sha=([0-9a-f]{40})\]$/u],
     ["attestation", /^Temporal compatibility attestation \[proof=([0-9a-f]{64})\]$/u],

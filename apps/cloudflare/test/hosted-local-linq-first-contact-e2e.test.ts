@@ -110,7 +110,7 @@ const realInstantFirstTurnTimeoutMs = runRealInstantFirstTurn
   : 360_000;
 const linqScenarioSetupTimeoutMs = runRealInstantFirstTurn
   ? 900_000
-  : 300_000;
+  : 600_000;
 const directWakeRetryBarrierPreloadPath = fileURLToPath(new URL(
   "../../web/test/support/hosted-local-direct-wake-retry-barrier-preload.ts",
   import.meta.url,

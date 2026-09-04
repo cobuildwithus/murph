@@ -312,6 +312,14 @@ existing explicit `authenticated-group` owner scope; any feature-specific
 activity, evidence, identity, or participant policy must be designed with that
 feature rather than embedded in the generic ownership boundary.
 
+The removed biweekly product-notes automation follows the same permanent
+retirement contract. Its historical immutable ID is not a seed:
+reconciliation archives active or paused persisted copies, and a claimed
+occurrence fails closed before lifecycle or model work. Direct product-update
+questions remain supported through the ordinary conversation prompt and its
+canonical public changelog and feature-catalog feeds; retirement removes only
+the unsolicited recurring note.
+
 Web then captures the current roster and exact active grants, decrypts the
 bounded encrypted snapshots owned by those share rows, and returns every member
 with every requested scope as `not_granted`, `granted` plus `missing`, or
@@ -3795,10 +3803,9 @@ and subagent prompt record is
 
 The repository uses the current verification commands described in
 `agent-docs/operations/verification-and-runtime.md`. Their dispatcher is local
-by default and exposes two explicit, fail-closed, secret-free remote executors:
-Crabbox's first-party static SSH provider for a dedicated macOS worker account,
-and its direct Blacksmith Testbox provider for the bounded paid fallback. The
-static lane validates explicit operator-local host, user, and port routing,
+by default and exposes one explicit, fail-closed, secret-free remote executor:
+Crabbox's first-party static SSH provider for a dedicated macOS worker account.
+The static lane validates explicit operator-local host, user, and port routing,
 passes those facts only as Crabbox CLI arguments, derives one opaque lease id
 per initiating worktree, and creates a unique remote directory for every
 invocation. After admission, the dispatcher

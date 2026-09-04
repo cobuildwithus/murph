@@ -788,11 +788,10 @@ export function ComponentsContent() {
                   </HostedInlineAuthButton>
                 </div>
               </DialogPreviewFrame>
-              <DialogPreviewFrame label="Telegram ready handoff">
+              <DialogPreviewFrame label="Telegram authorization available">
                 <HostedTelegramAuthButtonPresentation
                   active
                   onClick={() => {}}
-                  readyToContinue
                 />
               </DialogPreviewFrame>
             </div>
@@ -1526,7 +1525,7 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Dialog">
+        <Section id="dialog" title="Dialog">
           <Dialog>
             <div className="flex"><DialogTrigger render={<Button>Open Dialog</Button>} /></div>
             <DialogContent>
