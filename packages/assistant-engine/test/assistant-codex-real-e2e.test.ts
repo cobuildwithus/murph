@@ -166,9 +166,9 @@ import {
   MURPH_MANAGED_AUTOMATIONS,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
+  MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
-  MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.ts'
 import {
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
@@ -12716,35 +12716,27 @@ describeRealCodex('real Codex private group Journal capture e2e', () => {
   }, 720_000)
 })
 
-describeRealCodex('real Codex product notes eligibility e2e', () => {
+describeRealCodex('real Codex on-demand updates after product-note retirement e2e', () => {
   it(
-    'filters repair-only product notes without dropping member-facing changes',
+    'retired product notes leave on-demand updates available',
     async () => {
       const config = await resolveRealCodexE2eConfig()
-      const productNotes = MURPH_MANAGED_AUTOMATIONS.find(
+      expect(MURPH_MANAGED_AUTOMATIONS.some(
         (automation) =>
           automation.automationId
-          === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
-      )
-      if (!productNotes) {
-        throw new Error('Expected the managed product-notes automation.')
-      }
+          === MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+      )).toBe(false)
       const workingDirectory = await mkdtemp(
-        path.join(tmpdir(), 'murph-product-notes-eligibility-e2e-'),
+        path.join(tmpdir(), 'murph-on-demand-product-updates-e2e-'),
       )
 
       try {
-        const appendCapturePath = path.join(
-          workingDirectory,
-          'product-notes-append.txt',
-        )
         const binDirectory = path.join(workingDirectory, 'bin')
         const curlCapturePath = path.join(
           workingDirectory,
-          'product-notes-curl.txt',
+          'product-updates-curl.txt',
         )
-        await materializeProductNotesFixtures({
-          appendCapturePath,
+        await materializeProductUpdatesFixture({
           binDirectory,
           curlCapturePath,
         })
@@ -12756,7 +12748,7 @@ describeRealCodex('real Codex product notes eligibility e2e', () => {
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
             ?? undefined,
           codexHome: config.codexHome,
-          developerInstructions: buildProductNotesDeveloperInstructions(),
+          developerInstructions: buildDirectConversationDeveloperInstructions(),
           dynamicTools: [],
           env: {
             ...config.env,
@@ -12766,15 +12758,11 @@ describeRealCodex('real Codex product notes eligibility e2e', () => {
           model: config.model,
           modelProvider: config.modelProvider,
           prompt: [
-            productNotes.instructions,
-            'Scheduled occurrence context:',
-            '- Current local date: 2026-08-19.',
-            '- The member regularly reviews scheduled reminders and has an active workout they use from Messages.',
-            '- A past connected-health sync delayed one reminder.',
-            '- The controlled canonical ledger and changelog feed are available through the normal vault-cli and curl commands.',
-            '- Complete the normal selection, ledger append, and terminal scheduled decision.',
-          ].join('\n\n'),
-          reasoningEffort: 'high',
+            'What is new in Murph?',
+            'Check the canonical product feed and briefly name the recent automation-recipient and workout-resume updates.',
+            'The controlled canonical feed is available through the normal curl command.',
+          ].join('\n'),
+          reasoningEffort: 'low',
           sandbox: 'workspace-write',
           workingDirectory,
         })
@@ -12784,27 +12772,17 @@ describeRealCodex('real Codex product notes eligibility e2e', () => {
           .split('\n')
         expect(curlCalls).toHaveLength(1)
         expect(curlCalls[0]).toContain(
-          '/api/changelog?days=14&featureLimit=70&improvementLimit=10',
+          '/api/changelog?days=14',
         )
-
-        const appendArguments = await readFile(appendCapturePath, 'utf8')
-        expect(appendArguments).toContain('clearer-automation-recipients')
-        expect(appendArguments).toContain('resume-workouts-in-messages')
-        expect(appendArguments).not.toContain(
-          'scheduled-support-resumes-after-syncs',
+        process.stdout.write(
+          `[real-codex] retired product notes keep on-demand updates: ${JSON.stringify({
+            curlCalls,
+            finalMessage: result.finalMessage,
+          })}\n`,
         )
-
-        const decision = parseAssistantNotificationDecision(
-          result.finalMessage,
-        )
-        expect(decision.kind).toBe('send_message')
-        if (decision.kind === 'send_message') {
-          expect(decision.text).toMatch(/automation/iu)
-          expect(decision.text).toMatch(/resume|workout/iu)
-          expect(decision.text).not.toMatch(
-            /health-data maintenance|reliability|scheduled support resumes/iu,
-          )
-        }
+        expect(result.finalMessage).toMatch(/automation/iu)
+        expect(result.finalMessage).toMatch(/resume|workout/iu)
+        expect(result.finalMessage).not.toMatch(/biweekly|scheduled product note/iu)
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -18216,80 +18194,6 @@ describeRealCodex('real Codex product-feedback summary e2e', () => {
           }
         }
 
-        const managedAutomation = MURPH_MANAGED_AUTOMATIONS.find(
-          (automation) =>
-            automation.automationId
-            === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
-        )
-        if (!managedAutomation) {
-          throw new Error('Expected the managed product-notes automation.')
-        }
-        const managedWorkingDirectory = await mkdtemp(
-          path.join(tmpdir(), 'murph-product-feedback-managed-e2e-'),
-        )
-        try {
-          const first = await executeRealCodexAppServerTurn({
-            ...commonInput,
-            productFeedbackRecorder: createRealCodexFeedbackRecorder(),
-            prompt: [
-              'This is a deterministic context-loading probe.',
-              'Do not execute the scheduled instructions or call tools; reply exactly PRODUCT_NOTES_CONTEXT_READY.',
-              'The managed product-notes instructions that precede a later member turn are:',
-              managedAutomation.instructions,
-            ].join('\n\n'),
-            workingDirectory: managedWorkingDirectory,
-          })
-          expect(first.finalMessage).toContain('PRODUCT_NOTES_CONTEXT_READY')
-          expect(
-            readCapabilityRoutingActions(first.jsonEvents).filter(
-              (action) =>
-                action.kind === 'dynamic'
-                && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name,
-            ),
-          ).toHaveLength(0)
-
-          const second = await executeRealCodexAppServerTurn({
-            ...commonInput,
-            productFeedbackRecorder: createRealCodexFeedbackRecorder(),
-            prompt: [
-              'Treat this synthetic later-turn report as explicit Murph product frustration and use the product-feedback tool.',
-              'A member expected Murph product notes to show two recent changelog updates, but the note was skipped after the feature catalog failed.',
-              'The source establishes that the changelog fetch succeeded.',
-            ].join(' '),
-            resumeSessionId: first.sessionId,
-            workingDirectory: managedWorkingDirectory,
-          })
-          const managedFeedbackCalls = readCapabilityRoutingActions(
-            second.jsonEvents,
-          ).filter(
-            (action) =>
-              action.kind === 'dynamic'
-              && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name,
-          )
-          expect(managedFeedbackCalls).toHaveLength(1)
-          const managedFeedbackCall = managedFeedbackCalls[0]
-          if (managedFeedbackCall?.kind !== 'dynamic') {
-            throw new Error(
-              'Expected one managed product-feedback dynamic tool call.',
-            )
-          }
-          const managedSummary = readString(
-            managedFeedbackCall.argumentsValue.summary,
-          )
-          expect(managedSummary).not.toBeNull()
-          expect(managedSummary?.length).toBeLessThanOrEqual(
-            PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
-          )
-          expect(managedSummary).toMatch(/\b(?:member|user)\b/iu)
-          expect(managedSummary).toMatch(/\bproduct[- ]notes?\b/iu)
-          expect(managedSummary).toMatch(/\b(?:expect|wanted|should)\w*\b/iu)
-          expect(managedSummary).toMatch(/\bskip/iu)
-          expect(managedSummary).toMatch(
-            /\b(?:changelog.*succeed|success\w*.*changelog)\w*\b/iu,
-          )
-        } finally {
-          await removeRealCodexTemporaryPaths([managedWorkingDirectory])
-        }
       } finally {
         await removeRealCodexTemporaryPaths(config.temporaryPaths)
       }
@@ -29367,8 +29271,7 @@ async function materializeWeeklyHealthInsightVaultCli(input: {
   await chmod(executablePath, 0o700)
 }
 
-async function materializeProductNotesFixtures(input: {
-  appendCapturePath: string
+async function materializeProductUpdatesFixture(input: {
   binDirectory: string
   curlCapturePath: string
 }): Promise<void> {
@@ -29452,12 +29355,12 @@ async function materializeProductNotesFixtures(input: {
     [
       '#!/bin/sh',
       'case "$*" in',
-      '  *"/api/changelog?days=14&featureLimit=70&improvementLimit=10"*)',
+      '  *"/api/changelog?days=14"*)',
       `    printf '%s\\n' "$*" >> '${input.curlCapturePath}'`,
       `    printf '%s\\n' '${feed}'`,
       '    ;;',
       '  *)',
-      '    printf \'%s\\n\' \'unexpected product-notes URL\' >&2',
+      '    printf \'%s\\n\' \'unexpected product-updates URL\' >&2',
       '    exit 69',
       '    ;;',
       'esac',
@@ -29466,30 +29369,6 @@ async function materializeProductNotesFixtures(input: {
     { encoding: 'utf8', mode: 0o700 },
   )
   await chmod(curlPath, 0o700)
-
-  const vaultCliPath = path.join(input.binDirectory, 'vault-cli')
-  await writeFile(
-    vaultCliPath,
-    [
-      '#!/bin/sh',
-      'case "$*" in',
-      '  *"knowledge show murph-product-notes"*)',
-      '    printf \'%s\\n\' \'# Murph product notes\' \'\' \'## 2026-08-05 — Murph product notes\' \'Kind: feature discovery\' \'Item ids: earlier-feature\'',
-      '    ;;',
-      '  *"knowledge append-section murph-product-notes"*)',
-      `    printf '%s\\n' "$*" > '${input.appendCapturePath}'`,
-      '    printf \'%s\\n\' \'{"ok":true,"status":"appended"}\'',
-      '    ;;',
-      '  *)',
-      '    printf \'%s\\n\' \'unexpected product-notes vault command\' >&2',
-      '    exit 69',
-      '    ;;',
-      'esac',
-      '',
-    ].join('\n'),
-    { encoding: 'utf8', mode: 0o700 },
-  )
-  await chmod(vaultCliPath, 0o700)
 }
 
 async function buildWearableArrivalPrompt(input: {
@@ -31199,29 +31078,6 @@ function buildAutomaticMealCloseoutDeveloperInstructions(input: {
     onboardingGuidance: false,
     scheduledOccurrenceAt:
       input.scheduledOccurrenceAt ?? '2026-08-25T01:00:00.000Z',
-    turnTrigger: 'automation-cron',
-  })
-}
-
-function buildProductNotesDeveloperInstructions(): string {
-  return buildAssistantSystemPrompt({
-    assistantCliContract: null,
-    assistantContextSnapshotPrompt: null,
-    assistantHostedDeviceConnectAvailable: false,
-    assistantHostedDeviceConnectProviders: [],
-    assistantKnowledgeToolsAvailable: false,
-    channel: 'linq',
-    cliAccess: {
-      rawCommand: 'vault-cli',
-      setupCommand: 'murph',
-    },
-    conversationScope: 'direct',
-    currentLocalDate: '2026-08-19',
-    currentTimeZone: 'America/New_York',
-    hostedRuntime: true,
-    modelBehaviorProfile: 'gpt5-agentic',
-    onboardingGuidance: false,
-    scheduledOccurrenceAt: '2026-08-19T14:00:00.000Z',
     turnTrigger: 'automation-cron',
   })
 }
