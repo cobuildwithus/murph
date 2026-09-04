@@ -1887,7 +1887,7 @@ describe("runHostedDeviceSyncPass", () => {
     );
   });
 
-  it("rehydrates without readmitting work before retrying reconciliation after a version conflict", async () => {
+  it("rehydrates without readmitting work and carries current-pass cadence before retrying reconciliation", async () => {
     const service = {
       close: vi.fn(),
       drainWorker: vi.fn(async () => 0),
@@ -1942,9 +1942,32 @@ describe("runHostedDeviceSyncPass", () => {
       pendingDirtyPayloadJobs: [],
       snapshot: { connections: [] },
     };
+    const currentPassNextReconcileAt = "2026-04-08T06:00:00.000Z";
+    const canonicalNextReconcileAt = "2026-04-08T00:00:00.000Z";
+    const localAccount = {
+      connectedAt: completionWake.expectedConnectedAt,
+      id: "local_account",
+      nextReconcileAt: currentPassNextReconcileAt,
+      status: "active",
+    };
+    const patchAccount = vi.fn((accountId: string, patch: {
+      nextReconcileAt: string | null;
+    }) => {
+      expect(accountId).toBe(localAccount.id);
+      localAccount.nextReconcileAt = patch.nextReconcileAt ?? canonicalNextReconcileAt;
+      return localAccount;
+    });
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
+    mocks.requireHostedRuntimeDeviceSyncStore.mockReturnValue({
+      getAccountById: vi.fn(() => localAccount),
+      patchAccount,
+    });
+    mocks.resolveHostedDeviceSyncWakeLocalAccountId.mockReturnValue(localAccount.id);
     mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValueOnce(initialState);
-    mocks.hydrateHostedDeviceSyncControlPlaneState.mockResolvedValueOnce(refreshedState);
+    mocks.hydrateHostedDeviceSyncControlPlaneState.mockImplementationOnce(async () => {
+      localAccount.nextReconcileAt = canonicalNextReconcileAt;
+      return refreshedState;
+    });
     mocks.resolveHostedDeviceSyncWakeRecovery.mockReturnValue({
       retryAt: "2026-04-08T00:01:30.000Z",
       wake: completionWake,
@@ -1968,6 +1991,10 @@ describe("runHostedDeviceSyncPass", () => {
       mocks.reconcileHostedDeviceSyncControlPlaneState.mock.calls[1]?.[0].state,
     ).toBe(refreshedState);
     expect(refreshedState.pendingDirtyAcks).toBe(pendingDirtyAcks);
+    expect(patchAccount).toHaveBeenCalledWith(localAccount.id, {
+      nextReconcileAt: currentPassNextReconcileAt,
+    });
+    expect(localAccount.nextReconcileAt).toBe(currentPassNextReconcileAt);
     expect(result.postCheckpointRecord).toEqual(expect.objectContaining({
       kind: "device-sync.dirty-processed-batch",
       retainedWake: completionWake,

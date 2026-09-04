@@ -5229,12 +5229,15 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       occurredAt: dueAt,
     });
     let canonicalNextReconcileAt = dueAt;
+    let canonicalUpdatedAt = connectedAt;
     let currentWorkspace: HostedWorkspaceState | null = null;
     let checkpointAttempt = 0;
     let snapshotOrdinal = 0;
     let activeAttemptId = "unassigned";
     let failRecordCheckpoint = true;
     let failRetryFenceCheckpoint = false;
+    let rejectNextControlPlaneApply = false;
+    let reconciliationConflicts = 0;
     const refreshImplementation =
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.getMockImplementation();
 
@@ -5243,6 +5246,23 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         throw new Error("Device sync dirty ack should not run in this closed-loop proof.");
       },
       async applyUpdates(request) {
+        if (rejectNextControlPlaneApply) {
+          rejectNextControlPlaneApply = false;
+          reconciliationConflicts += 1;
+          canonicalUpdatedAt = "2026-04-27T00:04:00.000Z";
+          events.push(`heartbeat.commit:${canonicalUpdatedAt}`);
+          return {
+            appliedAt: request.occurredAt ?? new Date().toISOString(),
+            updates: request.updates.map((update) => ({
+              connection: null,
+              connectionId: update.connectionId,
+              status: "updated" as const,
+              tokenUpdate: "unchanged" as const,
+              writeUpdate: "skipped_version_mismatch" as const,
+            })),
+            userId: TEST_USER_ID,
+          };
+        }
         for (const update of request.updates) {
           const nextReconcileAt = update.localState?.nextReconcileAt;
           if (typeof nextReconcileAt === "string") {
@@ -5294,7 +5314,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
                 "read:workout",
               ],
               status: "active",
-              updatedAt: connectedAt,
+              updatedAt: canonicalUpdatedAt,
             },
             credential: {
               kind: "oauth_tokens",
@@ -5836,6 +5856,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       await removeTempRoot(warmWorkspaceRoot);
       vi.setSystemTime(new Date(nextRecoveryBucketAt));
       failRecordCheckpoint = false;
+      rejectNextControlPlaneApply = true;
       const recoveryAttemptId =
         "attempt_device_sync_closed_loop_next_bucket_signal";
       const recovered = await runSystemPass({
@@ -5852,6 +5873,17 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         false,
       );
       assert.equal(providerRequestClasses.length, 8);
+      assert.equal(reconciliationConflicts, 1);
+      const heartbeatCommitIndex = events.indexOf(
+        "heartbeat.commit:2026-04-27T00:04:00.000Z",
+      );
+      assert.notEqual(heartbeatCommitIndex, -1);
+      assert.equal(
+        events.slice(0, heartbeatCommitIndex).filter((event) =>
+          event.startsWith("provider.request:")
+        ).length,
+        8,
+      );
       const replayedProviderRequestClasses = providerRequestClasses.slice(4);
       assert.deepEqual(
         [...replayedProviderRequestClasses].sort(),

@@ -1285,9 +1285,9 @@ Last verified: 2026-09-01
   durable. Before exposing that completion record, the pass requires Web to
   accept the full local control-plane update. A version mismatch fetches the
   current canonical snapshot, rehydrates without re-admitting wake hints or
-  dirty work, carries the current pass's terminal evidence, and repeats the
-  full update once against that fresh baseline; a second mismatch fails and
-  retains the mailbox owner. A yielded pass retains
+  dirty work, carries the same-epoch pass's provider cadence and dirty terminal
+  evidence, and repeats the full update once against that fresh baseline; a
+  second mismatch fails and retains the mailbox owner. A yielded pass retains
   its exact wake without completion eligibility. The post-checkpoint recorder
   then treats a fresh same-admission record as complete only when its normalized
   retained-job set is empty. It publishes cadence only for a non-null wake epoch

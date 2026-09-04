@@ -13,9 +13,9 @@ Current responsibilities:
   on the normal path; direct completion requires an accepted full
   reconciliation in that admission, zero retained jobs, and an exact active
   connection epoch; one version conflict rehydrates without re-admitting work,
-  carries current-pass terminal evidence, and retries that reconciliation,
-  while restored records repeat the full path and authorityless legacy or
-  terminal records drain without a cadence write
+  carries same-epoch provider cadence and dirty terminal evidence, and retries
+  that reconciliation, while restored records repeat the full path and
+  authorityless legacy or terminal records drain without a cadence write
 - drain each hosted device-sync pass through one bounded worker call so
   canonical imports can safely reuse a pass-local event identity index, while
   cumulative progress remains observable and the service-owned foreground

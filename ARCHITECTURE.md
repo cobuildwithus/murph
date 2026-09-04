@@ -1252,8 +1252,9 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   provider cadence and remove the item within that same runtime admission,
   followed by the existing removal checkpoint. A version conflict performs one
   fresh canonical hydration without admitting wake hints or dirty work again,
-  carries the current pass's terminal evidence, and repeats the full
-  reconciliation; another conflict fails without clearing mailbox authority.
+  carries the same-epoch pass's provider cadence and dirty terminal evidence,
+  and repeats the full reconciliation; another conflict fails without clearing
+  mailbox authority.
   Publication also requires
   the wake's non-null connection epoch to match a current active connection.
   Restored records return to the ordinary full-reconciliation path, while

@@ -2696,9 +2696,9 @@ identity, priority, retry time, and remaining attempt limit, including
 worker-created children. It also carries the provider's advanced cadence, but
 first requires Web to accept the full local reconciliation. One version
 conflict fetches the current canonical snapshot, rehydrates without admitting
-wake hints or dirty work again, carries the current pass's terminal evidence,
-and repeats the full update against that canonical baseline; another conflict
-keeps the mailbox owner. The runtime withholds cadence from Web until the post-record
+wake hints or dirty work again, carries the same-epoch pass's provider cadence
+and dirty terminal evidence, and repeats the full update against that canonical
+baseline; another conflict keeps the mailbox owner. The runtime withholds cadence from Web until the post-record
 checkpoint has made the completion transition durable. The post-checkpoint
 recorder then publishes cadence, removes the mailbox item, and checkpoints that
 removal in the same runtime admission only for a fresh record whose full

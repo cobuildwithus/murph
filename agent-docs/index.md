@@ -255,9 +255,9 @@ cache; hosted provider scheduling is mailbox-connection scoped, retained wakes
 come from actual manifest-shaped queued/running rows, and accepted full
 reconciliation plus a durable completion checkpoint with zero retained jobs
 fences canonical cadence publication. One version conflict rehydrates without
-re-admitting work, carries current-pass terminal evidence, and repeats the full
-update; a second conflict or a restored completion keeps the ordinary
-full-reconciliation path. The wake must also carry the exact non-null
+re-admitting work, carries same-epoch provider cadence and dirty terminal
+evidence, and repeats the full update; a second conflict or a restored
+completion keeps the ordinary full-reconciliation path. The wake must also carry the exact non-null
 epoch of the current active connection; epoch-less legacy, replaced, missing,
 or terminal records drain without writing cadence. An unchanged stale tuple may
 re-signal the same durable mailbox item once in each Web recovery bucket without

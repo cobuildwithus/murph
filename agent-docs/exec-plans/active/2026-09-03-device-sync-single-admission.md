@@ -17,7 +17,7 @@ provider-free completion-fence runtime.
 - Full local control-plane reconciliation is accepted before that record can
   authorize same-admission completion; one version conflict rehydrates and
   retries the full update without losing local credential progress or
-  re-admitting completed work.
+  provider cadence, or re-admitting completed work.
 - The same runtime admission then publishes cadence, removes the mailbox item,
   and durably checkpoints that removal.
 - Checkpoint, cadence-publication, and final-checkpoint failures remain
@@ -64,8 +64,9 @@ provider-free completion-fence runtime.
 - Person and path: an existing member whose scheduled connected-device refresh
   reaches terminal work, including a cold restore after checkpoint failure.
 - Evidence: the production-shaped workspace test preserves the same eight
-  provider requests and final 06:05 cadence while clearing the durable mailbox
-  item between the completion-record and removal checkpoints in one admission.
+  provider requests and final 06:05 cadence through a heartbeat version
+  conflict while clearing the durable mailbox item between the completion-record
+  and removal checkpoints in one admission.
 - Recovery: a full-reconciliation version conflict rehydrates and retries once
   without re-admitting wake hints or dirty work before completion is exposed.
   A restored completion record returns to that ordinary full-reconciliation
@@ -77,12 +78,14 @@ provider-free completion-fence runtime.
   alone was insufficient authority, then exposed that cadence-only completion
   could outlive a rejected full update and lose a locally rotated credential,
   then exposed that retrying through the broad sync path re-admitted already
-  completed retained and dirty work. Eligibility now requires accepted full
-  reconciliation in the same admission, an empty retained-job set, and the
-  exact active connection epoch. Conflict recovery now uses the existing
-  hydration phase alone and carries current-pass terminal evidence into the
-  refreshed state. Restored records use the full path. No persisted proof or
-  new state owner was added.
+  completed retained and dirty work, then exposed that hydration-only retry
+  could replace the provider's newly advanced cadence with the stale canonical
+  value. Eligibility now requires accepted full reconciliation in the same
+  admission, an empty retained-job set, and the exact active connection epoch.
+  Conflict recovery now uses the existing hydration phase alone and carries
+  same-epoch provider cadence plus dirty terminal evidence into the refreshed
+  state. Restored records use the full path. No persisted proof or new state
+  owner was added.
 - Verdict: Ready.
 
 ## Risks and mitigations
@@ -110,6 +113,13 @@ provider-free completion-fence runtime.
    Mitigation: keep hydration and work admission as explicit phases; retry only
    hydration and reconciliation. Production-shaped retained-page and dirty-row
    tests prove one provider execution across the conflict.
+7. Risk: fresh canonical hydration replaces the provider's newly advanced
+   cadence after a heartbeat-only version change.
+   Mitigation: capture the exact active wake account's cadence before hydration
+   and restore it only to the same active connection epoch while retaining the
+   fresh snapshot as the reconciliation baseline. The closed-loop test injects
+   that conflict after provider work and proves final cadence publication,
+   mailbox removal, and quiescence.
 
 ## Tasks
 
@@ -134,6 +144,8 @@ provider-free completion-fence runtime.
   full-reconciliation admission rather than gaining a second durable owner.
 - Keep canonical hydration independently callable from work admission so a
   version retry can refresh one baseline without replaying current-pass work.
+- Carry the active wake account's provider cadence through that hydration only
+  for the same connection epoch; do not add a second cadence owner.
 - Keep PR #2741 separate because its container-lifecycle change has a distinct
   owner and does not remove the completion runtime admission.
 - Changelog is not applicable because this removes an internal redundant

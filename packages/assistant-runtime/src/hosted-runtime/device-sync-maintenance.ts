@@ -577,7 +577,21 @@ async function reconcileHostedDeviceSyncPassControlPlane(input: {
   };
 
   if (!await reconcile()) {
+    const store = requireHostedRuntimeDeviceSyncStore(input.service);
     const currentPassState = state;
+    const currentPassAccountId = resolveHostedDeviceSyncWakeLocalAccountId({
+      state,
+      wake: input.wake,
+    });
+    const currentPassAccount = currentPassAccountId
+      ? store.getAccountById(currentPassAccountId)
+      : null;
+    const currentPassCadence = currentPassAccount?.status === "active"
+      ? {
+          connectedAt: currentPassAccount.connectedAt,
+          nextReconcileAt: currentPassAccount.nextReconcileAt,
+        }
+      : null;
     const snapshot = await fetchCompleteHostedDeviceSyncRuntimeSnapshot({
       deviceSyncPort,
       includeCredentialMaterial: true,
@@ -597,6 +611,22 @@ async function reconcileHostedDeviceSyncPassControlPlane(input: {
     state.dirtyWorkRemaining = currentPassState.dirtyWorkRemaining;
     state.pendingDirtyAcks = currentPassState.pendingDirtyAcks;
     state.pendingDirtyPayloadJobs = currentPassState.pendingDirtyPayloadJobs;
+    const refreshedAccountId = resolveHostedDeviceSyncWakeLocalAccountId({
+      state,
+      wake: input.wake,
+    });
+    const refreshedAccount = refreshedAccountId
+      ? store.getAccountById(refreshedAccountId)
+      : null;
+    if (
+      currentPassCadence
+      && refreshedAccount?.status === "active"
+      && refreshedAccount.connectedAt === currentPassCadence.connectedAt
+    ) {
+      store.patchAccount(refreshedAccount.id, {
+        nextReconcileAt: currentPassCadence.nextReconcileAt,
+      });
+    }
     if (snapshot && state.snapshot) {
       state.snapshot = {
         ...snapshot,
