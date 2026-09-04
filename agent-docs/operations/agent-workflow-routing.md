@@ -149,8 +149,10 @@ See `ARCHITECTURE.md` for the affected owner's contract.
 ## Mechanical Vs Policy
 
 Keep each rule with one owner. Entry files route; scripts enforce mechanical
-contracts; domain docs explain invariants and recovery. Update the owner instead
-of appending the same incident detail to every entrypoint and index row.
+contracts; domain docs explain invariants and recovery. Tests should exercise
+executable behavior and machine-readable formats, not freeze narrative wording
+or require duplicate rules. Update the owner instead of appending the same
+incident detail to every entrypoint and index row.
 
 There is no automatic line-count-driven source split, mandatory local specialist
 review, or separate simplify pass. Inspect changed complexity and simplify when

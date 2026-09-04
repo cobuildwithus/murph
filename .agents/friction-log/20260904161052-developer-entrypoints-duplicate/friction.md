@@ -17,7 +17,7 @@ Keep one workflow owner, a short discovery index, and task-specific reads. Remov
 
 ## Minimal Reproducible Example
 
-Compare CLAUDE.md review retry instructions with agent-docs/operations/pr-reviewgpt-loop.md wait ownership, and compare AGENTS.md required reads with the docs-only task class. Inspect the documentation assertions in scripts/developer-workflow-entrypoints.test.ts.
+Compare CLAUDE.md review retry instructions with agent-docs/operations/pr-reviewgpt-loop.md wait ownership, and compare AGENTS.md required reads with the docs-only task class. Inspect the documentation assertions in scripts/developer-workflow-entrypoints.test.ts, packages/cli/test/release-script-coverage-audit.test.ts, and apps/web/test/production-migration-guard.test.ts. They also pin old model names and require timeout defaults in duplicate documents.
 
 ## Context
 
