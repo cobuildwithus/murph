@@ -26,9 +26,14 @@ three-day default, so upgraded runtime consumers must precede Web rollout.
 
 Recovery policy is independent of push-primary polling classification. Reuse
 source timestamps, existing bounded runtime apply candidates, preference rows,
-mailbox dedupe, and dispatch revalidation. Existing bounded, serial candidate
+mailbox dedupe, and dispatch revalidation. Existing serial candidate
 transactions and private routing remain unchanged; no fleet scan or new timer.
 The independent iOS receipt-refresh patch uses the existing status contract.
+The unchanged apply contract admits 100 updates with 64 submitted sources each;
+candidate enumeration also considers retained sources. Serial materialization
+keeps peak candidate transaction concurrency at one, with a 10-second timeout;
+already consumed episodes exit after the outside-transaction dedupe lookup.
+This policy adds no scan, collection, or per-candidate awaited operation.
 
 ## Steps
 
@@ -36,7 +41,7 @@ The independent iOS receipt-refresh patch uses the existing status contract.
 - [x] Add Apple Health wording and expose existing preference controls.
 - [x] Prove threshold, private routing, dedupe, recovery, and preference paths.
 - [x] Run focused tests, affected typechecks/builds, and real-Codex opt-out proof.
-- [ ] Review Product UX, add changelog, commit, and open PR.
+- [x] Review Product UX, add changelog, commit, and open PR.
 - [ ] Run exact-head ReviewGPT concurrently with required CI and finish gates.
 
 ## Validation and status
