@@ -24,6 +24,7 @@ export function LandingAuthDialogButton({
   requireLaunchConsentOnCompletion = false,
   showArrow = false,
   showPassiveLegalNotice = false,
+  trailingIcon,
 }: {
   buttonClassName: string;
   buttonLabel: string;
@@ -31,6 +32,7 @@ export function LandingAuthDialogButton({
   requireLaunchConsentOnCompletion?: boolean;
   showArrow?: boolean;
   showPassiveLegalNotice?: boolean;
+  trailingIcon?: ReactNode;
 }) {
   const auth = useAuth();
   const [open, setOpen] = useState(false);
@@ -56,6 +58,11 @@ export function LandingAuthDialogButton({
           </span>
         ) : null}
         <span>{buttonLabel}</span>
+        {trailingIcon ? (
+          <span aria-hidden="true" className="inline-flex shrink-0">
+            {trailingIcon}
+          </span>
+        ) : null}
         {showArrow ? (
           <span
             aria-hidden="true"

@@ -106,6 +106,18 @@ vi.mock("@/src/lib/hosted-onboarding/landing", () => ({
 vi.mock("../app/auth-controls", () => ({
   LandingAuthActions: mocks.LandingAuthActions,
   LandingAuthDialog: () => null,
+  LandingAuthDialogButton: ({
+    buttonClassName,
+    buttonLabel,
+  }: {
+    buttonClassName: string;
+    buttonLabel: string;
+  }) =>
+    createElement(
+      "button",
+      { className: buttonClassName, type: "button" },
+      buttonLabel,
+    ),
 }));
 
 afterEach(() => {
@@ -212,10 +224,8 @@ test("HomePage renders the canonical landing page at the root route", async () =
   );
   assert.match(markup, /Start a health challenge with your friends/);
   assert.match(markup, /referees the week/);
-  assert.match(markup, /Better together/);
+  assert.doesNotMatch(markup, /Better together/);
   assert.match(markup, /Do it with your people\./);
-  assert.match(markup, /Walk challenge · Day 5 of 7/);
-  assert.match(markup, /Weekly newsletter · Sunday 8:02 AM/);
   assert.match(markup, /No group\? You’re still not doing this alone\./);
   const pricingStart = markup.indexOf('<section id="pricing"');
   assert.ok(pricingStart >= 0, "signup pricing section missing");
@@ -225,7 +235,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
   );
   assert.match(pricingSection, /Free starter usage/);
   assert.match(pricingSection, /Open source/);
-  assert.match(pricingSection, /Starter usage does not expire\./);
+  assert.doesNotMatch(pricingSection, /Starter usage does not expire\./);
   assert.doesNotMatch(pricingSection, /free trial/i);
   assert.match(markup, /data-root-landing-auth-actions-label="Dashboard"/);
   assert.match(

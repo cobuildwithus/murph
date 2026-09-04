@@ -10,7 +10,6 @@ import {
 type Persona = {
   avatarAlt: string;
   avatarSrc: string;
-  eyebrow: string;
   messages: ReadonlyArray<PhoneMessage>;
   priorMessages: ReadonlyArray<PhoneMessage>;
   result: ExperimentResult;
@@ -21,7 +20,6 @@ const PERSONAS: ReadonlyArray<Persona> = [
   {
     avatarAlt: "",
     avatarSrc: "/personas/sleeper-avatar.avif",
-    eyebrow: "The poor sleeper",
     priorMessages: [
       {
         from: "user",
@@ -62,7 +60,6 @@ const PERSONAS: ReadonlyArray<Persona> = [
   {
     avatarAlt: "",
     avatarSrc: "/personas/athlete-avatar.avif",
-    eyebrow: "The endurance athlete",
     priorMessages: [
       {
         from: "user",
@@ -111,7 +108,6 @@ const PERSONAS: ReadonlyArray<Persona> = [
   {
     avatarAlt: "",
     avatarSrc: "/personas/founder-avatar.avif",
-    eyebrow: "The busy founder",
     priorMessages: [
       {
         from: "user",
@@ -171,10 +167,7 @@ export function PersonasSection({
   return (
     <section className="bg-[#f5f0e8] px-4 pt-16 pb-16 sm:px-6 lg:px-8 lg:pt-24 lg:pb-24">
       <div className="mx-auto max-w-[1280px] overflow-hidden rounded-[2rem] bg-[#1f1c18] px-6 py-16 shadow-[0_30px_80px_-40px_rgba(31,28,24,0.55)] sm:rounded-[2.5rem] sm:px-10 sm:py-20 lg:px-16 lg:py-28">
-        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-[#c4a882]">
-          Pick your goal
-        </span>
-        <h2 className="mt-5 max-w-[18ch] font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.05] tracking-[-0.03em] text-[#f5f0e8]">
+        <h2 className="max-w-[18ch] font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.05] tracking-[-0.03em] text-[#f5f0e8]">
           Everyone’s working on something.
         </h2>
         <p className="mt-5 max-w-[52ch] text-base leading-[1.7] text-pretty text-[#f5f0e8]/55">
@@ -184,7 +177,7 @@ export function PersonasSection({
 
         <div className="mt-14 grid gap-12 lg:grid-cols-3 lg:gap-10">
           {PERSONAS.map((p) => (
-            <article key={p.eyebrow} className="flex flex-col gap-6">
+            <article key={p.avatarSrc} className="flex flex-col gap-6">
               <header className="flex items-center gap-4">
                 <div className="relative size-14 shrink-0 overflow-hidden rounded-full ring-1 ring-[#c4a882]/25">
                   <Image
@@ -196,16 +189,7 @@ export function PersonasSection({
                   />
                 </div>
                 <div className="min-w-0">
-                  <div className="flex items-center gap-2.5">
-                    <span
-                      aria-hidden="true"
-                      className="inline-block h-px w-6 bg-[#c4a882]/40"
-                    />
-                    <span className="font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-[#c4a882]">
-                      {p.eyebrow}
-                    </span>
-                  </div>
-                  <p className="mt-2 max-w-[26ch] text-[0.9375rem] leading-[1.5] text-[#f5f0e8]/85">
+                  <p className="max-w-[26ch] text-[0.9375rem] leading-[1.5] text-[#f5f0e8]/85">
                     {p.tagline}
                   </p>
                 </div>

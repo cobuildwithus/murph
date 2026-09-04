@@ -16,7 +16,6 @@ test("WideFeature keeps the phone treatment compact and restores the desktop sca
       artifactSide: "right",
       body: "Body",
       bubble: "Bubble",
-      eyebrow: "Eyebrow",
       headline: "Headline",
       tint: "sage",
     }),
@@ -42,6 +41,8 @@ test("AsksGridSection stacks dense health findings at iPhone Mini widths", () =>
   assert.match(markup, /min-\[420px\]:flex/);
   assert.match(markup, /text-\[0\.875rem\]/);
   assert.match(markup, /text-\[9px\]/);
-  assert.match(markup, /Latest panel · vs March/);
-  assert.match(markup, /Best HRV in 2 weeks/);
+  assert.match(markup, /Magnesium for Sleep/);
+  assert.match(markup, /Recovery is above your recent baseline/);
+  assert.doesNotMatch(markup, /Latest panel · vs March/);
+  assert.doesNotMatch(markup, /Self-experiments/);
 });
