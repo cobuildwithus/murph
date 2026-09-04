@@ -116,6 +116,34 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
+    it("accepts the exact runtime-retained wake behind the handled frontier", async () => {
+      const client = requirePrisma(prisma);
+      const fixture = await seedRetiredScheduledWake({
+        client,
+        consumedSeq: 1n,
+        importedSeq: "1",
+        memberIds,
+      });
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+      try {
+        await expect(client.$transaction((tx) =>
+          appendHostedScheduledDeviceSyncWakeEnvelopeTx({
+            envelope: fixture.wake,
+            tx,
+          })
+        )).resolves.toMatchObject({
+          dedupeConflict: false,
+          duplicate: true,
+          inserted: false,
+          runtimeOwnedRetiredDuplicate: true,
+        });
+        expect(warn).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
     it("rejects a retired wake skipped behind an earlier pending item", async () => {
       const client = requirePrisma(prisma);
       const fixture = await seedRetiredScheduledWake({
@@ -288,9 +316,12 @@ describe.skipIf(!runPostgresProof)(
         label: "an imported watermark beyond the allocated high-water mark",
       },
       {
-        consumedSeq: 1n,
-        importedSeq: "1",
-        label: "a wake already covered by the handled frontier",
+        consumedSeq: 0n,
+        firstPendingSeq: "2",
+        importedSeq: "2",
+        label: "a first-pending wake ahead of the handled frontier",
+        laneSeq: 2n,
+        nextSeq: 3n,
       },
       {
         importedSeq: "1",
@@ -312,6 +343,8 @@ describe.skipIf(!runPostgresProof)(
       eventSchema,
       firstPendingSeq,
       importedSeq,
+      laneSeq,
+      nextSeq,
       occurredAtOffsetMs,
       sidecar,
     }) => {
@@ -322,7 +355,9 @@ describe.skipIf(!runPostgresProof)(
         eventSchema,
         firstPendingSeq,
         importedSeq,
+        laneSeq,
         memberIds,
+        nextSeq,
         occurredAtOffsetMs,
         sidecar,
       });
@@ -358,6 +393,7 @@ async function seedRetiredScheduledWake(input: {
   consumedSeq?: bigint;
   eventSchema?: string;
   firstPendingSeq?: string | null;
+  handledThroughSeq?: string;
   importedSeq: number | string;
   laneSeq?: bigint;
   memberIds: string[];
@@ -392,6 +428,8 @@ async function seedRetiredScheduledWake(input: {
           input.firstPendingSeq === undefined
             ? laneSeq.toString()
             : input.firstPendingSeq,
+        hostedMailboxSystemHandledThroughSeq:
+          input.handledThroughSeq ?? (input.consumedSeq ?? 0n).toString(),
         hostedMailboxSystemImportedSeq: input.importedSeq,
       },
       userId: memberId,

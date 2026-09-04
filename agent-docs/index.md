@@ -1,11 +1,18 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-09-03
+Last verified: 2026-09-04
 
 ## Purpose
 
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists only live architecture, product, verification, and package-boundary docs.
+
+Hosted system-mailbox checkpoints project the earliest real pending sequence
+independently from the earliest item that blocks the handled frontier. That
+split lets Web recognize one exact payload-retired device retry without making
+the retry pin canonical lane progress. The contract and failure boundaries are
+specified by `agent-docs/RELIABILITY.md` and
+`agent-docs/references/hosted-runtime-protocol.md`.
 
 The exact hosted runtime owner-release signal, its patch-introducing
 direct-Current consumer rollout, and its signal-history rollback floor are

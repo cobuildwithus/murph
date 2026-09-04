@@ -1354,11 +1354,15 @@ Last verified: 2026-09-02
   never projects local retry timing into `nextReconcileAt`. Per-connection
   mailbox ordering and scheduler scoping
   prevent a future retry for one connection from blocking or advancing due work
-  for another. A later due webhook for that same connection may admit the older
-  exact retained mailbox item so newly dirty data can enter the local worker
-  without waiting behind a historical retry. That webhook remains available for
-  an exact continuation only when post-checkpoint acknowledgement reports a
-  newer dirty revision and the retained job hints prove the next pass has
+  for another. Runtime checkpoint progress therefore reports the earliest real
+  pending mailbox sequence separately from the earliest item that blocks the
+  handled frontier. A retained device retry stays the exact pending owner for
+  payload-retired duplicate recovery even when its sequence is already covered
+  by the handled watermark. A later due webhook for that same connection may
+  admit the older exact retained mailbox item so newly dirty data can enter the
+  local worker without waiting behind a historical retry. That webhook remains
+  available for an exact continuation only when post-checkpoint
+  acknowledgement reports a newer dirty revision and the retained job hints prove the next pass has
   admission capacity. Every accepted dirty append advances that revision,
   including payload-only work accepted after the pass fetched its input, while
   ingress still coalesces mailbox delivery for an already-dirty connection.

@@ -2695,15 +2695,19 @@ the stable duplicate without another signal only when the remaining row matches
 the schedule identity and the runtime checkpoint identifies its lane sequence
 as `hostedMailboxSystemFirstPendingSeq`. The same checkpoint's canonical system
 imported watermark must cover that sequence without exceeding the allocated
-high-water mark, and the lane counter must agree that it is the first unhandled
-sequence. The row must have no inline ciphertext, sidecar, payload reference,
-byte count, or hash. A missing or different first-pending sequence—including
-when supported legacy unsequenced work makes the frontier ambiguous—a
-never-imported row, malformed watermark, remaining payload surface, or
-structural mismatch stays a dedupe conflict and fails recovery closed.
+high-water mark, and the lane counter must show no unhandled gap before it. The
+first-pending identity is independent from the handled frontier: a retained
+device retry remains the exact pending owner even after that local continuation
+permits the canonical handled watermark to advance past its sequence. The row
+must have no inline ciphertext, sidecar, payload reference, byte count, or hash.
+A missing or different first-pending
+sequence—including when supported legacy unsequenced work makes the frontier
+ambiguous—a never-imported row, malformed watermark, remaining payload surface,
+or structural mismatch stays a dedupe conflict and fails recovery closed.
 Runtime-owned retry state remains the sole continuation owner for an accepted
-retired duplicate. Deploy the runtime checkpoint projection before Web begins
-requiring it; older runtime checkpoints omit the fact and therefore fail closed.
+retired duplicate. Deploy the corrected runtime checkpoint projection before
+Web accepts behind-frontier ownership; older runtime checkpoints do not identify
+that retained item and therefore fail closed.
 It does not promise exactly-once provider execution. Dirty rows are not
 independently swept; due-reconcile candidates may include dirty or stuck rows
 when canonical `nextReconcileAt` is due. Dirty state remains the work source,

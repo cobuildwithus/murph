@@ -3624,7 +3624,7 @@ async function hasHostedMailboxRuntimeImportedRetiredDuplicateTx(input: {
         AND item."payload_hash" IS NULL
         AND item."content_retired_at" IS NOT NULL
         AND item."retention_disposition" IS NULL
-        AND item."lane_seq" = lane_counter."consumed_seq" + 1::bigint
+        AND item."lane_seq" <= lane_counter."consumed_seq" + 1::bigint
         AND workspace."redacted_status_json"
           -> 'hostedMailboxSystemFirstPendingSeq'
           = to_jsonb(item."lane_seq"::text)

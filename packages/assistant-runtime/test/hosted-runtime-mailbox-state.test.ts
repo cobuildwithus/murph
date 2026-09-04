@@ -373,7 +373,7 @@ describe("hosted runtime system mailbox state", () => {
       now: "2026-04-27T00:00:00.000Z",
       state: { pending: [retainedDeviceRetry, pendingSuccessor] },
     })).toEqual({
-      firstPendingSeq: "9",
+      firstPendingSeq: "4",
       handledThroughSeq: "8",
     });
     expect(resolveHostedSystemMailboxProgress({
@@ -381,7 +381,7 @@ describe("hosted runtime system mailbox state", () => {
       now: retryAt,
       state: { pending: [retainedDeviceRetry] },
     })).toEqual({
-      firstPendingSeq: null,
+      firstPendingSeq: "4",
       handledThroughSeq: "9",
     });
   });

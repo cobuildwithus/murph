@@ -174,14 +174,10 @@ export function resolveHostedSystemMailboxProgress(input: {
 
   const importedSeq = BigInt(input.importedSeq);
   let earliestPendingSeq: bigint | null = null;
+  let earliestBlockingPendingSeq: bigint | null = null;
   const now = input.now ?? new Date().toISOString();
   for (const item of input.state.pending) {
-    // Retained device retries are local continuations of an already handled
-    // mailbox item, so they must not hold back canonical mailbox progress.
-    if (
-      isHostedDeviceSyncDenseRawRetentionMailboxItem(item)
-      || isHostedRetainedDeviceJobRetry(item)
-    ) {
+    if (isHostedDeviceSyncDenseRawRetentionMailboxItem(item)) {
       continue;
     }
     if (isExpiredHostedGroupContextHandoffSystemMailboxItem(item, now)) {
@@ -197,17 +193,25 @@ export function resolveHostedSystemMailboxProgress(input: {
     if (earliestPendingSeq === null || pendingSeq < earliestPendingSeq) {
       earliestPendingSeq = pendingSeq;
     }
+
+    // A retained device retry still owns this exact mailbox item, but it is a
+    // local continuation of handled work and must not hold back lane progress.
+    if (isHostedRetainedDeviceJobRetry(item)) {
+      continue;
+    }
+    if (
+      earliestBlockingPendingSeq === null
+      || pendingSeq < earliestBlockingPendingSeq
+    ) {
+      earliestBlockingPendingSeq = pendingSeq;
+    }
   }
 
-  if (earliestPendingSeq === null) {
-    return {
-      firstPendingSeq: null,
-      handledThroughSeq: importedSeq.toString(),
-    };
-  }
-  const handledBeforePending = earliestPendingSeq - 1n;
+  const handledBeforePending = earliestBlockingPendingSeq === null
+    ? importedSeq
+    : earliestBlockingPendingSeq - 1n;
   return {
-    firstPendingSeq: earliestPendingSeq.toString(),
+    firstPendingSeq: earliestPendingSeq?.toString() ?? null,
     handledThroughSeq:
       (handledBeforePending < importedSeq ? handledBeforePending : importedSeq).toString(),
   };
