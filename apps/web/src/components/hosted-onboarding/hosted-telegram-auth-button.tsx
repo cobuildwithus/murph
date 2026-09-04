@@ -42,6 +42,7 @@ export function HostedTelegramAuthButton({
     onComplete: () => {
       if (!consumeHostedTelegramOAuthDialogIntent()) return;
 
+      onActivate();
       void onAuthenticated({ authMethod: "telegram" });
     },
     onError: handleOAuthFailure,
@@ -84,6 +85,7 @@ export function HostedTelegramAuthButton({
   function handleOAuthFailure(error: unknown) {
     if (!consumeHostedTelegramOAuthDialogIntent()) return;
 
+    onActivate();
     onAuthCancel?.();
     onNoticeChange?.(describeTelegramAuthError(error));
   }

@@ -42,7 +42,7 @@ describe('assistant signup link guidance', () => {
       '$MURPH_ASSISTANT_SKILLS_ROOT/signup-link/SKILL.md',
     )
     expect(buildPrompt()).toContain(
-      'signup-link (explicit requests)',
+      'hosted-low-usage, signup-link, experiment-onboarding',
     )
     expect(lowUsage?.triggerHint).not.toContain('signup link')
     expect(lowUsage?.triggerHint).not.toContain('invite link')

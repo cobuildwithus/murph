@@ -12,12 +12,18 @@ export function markHostedTelegramOAuthDialogIntent(): void {
   }
 }
 
-export function hasHostedTelegramOAuthDialogIntent(): boolean {
+export function claimHostedTelegramOAuthDialogIntent(): boolean {
   try {
-    return (
+    if (
       window.sessionStorage.getItem(HOSTED_TELEGRAM_OAUTH_DIALOG_INTENT_KEY)
-      === "1"
+      !== "1"
+    ) return false;
+
+    window.sessionStorage.setItem(
+      HOSTED_TELEGRAM_OAUTH_DIALOG_INTENT_KEY,
+      "claimed",
     );
+    return true;
   } catch {
     return false;
   }
@@ -25,10 +31,10 @@ export function hasHostedTelegramOAuthDialogIntent(): boolean {
 
 export function consumeHostedTelegramOAuthDialogIntent(): boolean {
   try {
-    if (
-      window.sessionStorage.getItem(HOSTED_TELEGRAM_OAUTH_DIALOG_INTENT_KEY)
-      !== "1"
-    ) {
+    const intent = window.sessionStorage.getItem(
+      HOSTED_TELEGRAM_OAUTH_DIALOG_INTENT_KEY,
+    );
+    if (intent !== "1" && intent !== "claimed") {
       return false;
     }
 

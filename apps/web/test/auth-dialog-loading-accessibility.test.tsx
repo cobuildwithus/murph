@@ -382,7 +382,7 @@ test("reopens a closed dialog and preserves the intent until Privy finishes Tele
     rendered.window.sessionStorage.getItem(
       "murph:telegram-oauth-dialog-intent:v1",
     ),
-  ).toBe("1");
+  ).toBe("claimed");
 });
 
 async function renderPendingAuthDialog() {
