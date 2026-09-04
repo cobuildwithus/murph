@@ -61,10 +61,20 @@ lookup policy in `goal-setup`.
   made no writes, and asked one question only after grounding.
 - Focused prompt tests, the assistant-engine typecheck, and the complexity
   ratchet pass. The stable route prompt is smaller than its prior bound.
+- A normalized local Responses capture of identical direct and group initial
+  requests measured base/head at 27,531/27,538 tokens and 127,558/127,554
+  bytes for direct, and 23,446/23,453 tokens and 109,019/109,015 bytes for
+  group. The +7-token, -4-byte delta is entirely assembled router instructions;
+  tool schemas and other provider-visible fields are unchanged.
+- The public changelog fragment for PR 2814 passes its focused nine-test suite,
+  and the Web typecheck passes.
 
 ## Delivery
 
-Commit the scoped prompt, deterministic test, live journey, and completed plan;
-open a draft PR, start ReviewGPT only if the final scope triggers it, and use
-exact-head CI as the merge gate. Deployment remains a separate authorization
-boundary.
+Commit the scoped prompt, deterministic test, live journey, changelog, and
+completed plan; update draft PR 2814, start ReviewGPT only if the final scope
+triggers it, and use exact-head CI as the merge gate. Deployment remains a
+separate authorization boundary.
+Status: completed
+Updated: 2026-09-04
+Completed: 2026-09-04
