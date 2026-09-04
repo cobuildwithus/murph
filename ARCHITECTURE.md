@@ -1091,6 +1091,16 @@ expanded image-owned Astra catalog. Missing authority retains the three-model
 catalog, preserving Edge and group delegation while Codex's native validation
 rejects Astra before a provider request. Catalog selection changes the native
 launch key, so a warm process cannot retain an earlier catalog after access changes.
+Those entries force mixed Code Mode so the code executor and native
+`tool_search` remain available together; individual dynamic-tool
+`deferLoading` values still decide which schemas stay out of the initial
+model-visible surface. Code-only `ALL_TOOLS` still contains generated input
+declarations, but Codex
+0.151.0 renders the automation schema's action branches without combining their
+shared sibling properties, exposing fields such as `contextReferences` as
+`unknown`. Mixed mode provides native JSON-schema discovery around that lossy
+conversion; it does not repair the converter. Keep the structured schema and
+runtime validation authoritative rather than duplicating them in prompts.
 The runtime may request an update only from eligible user input in the active
 bounded exact-successor provider batch and
 forwards only that batch's terminal input id; inside the mutation transaction,

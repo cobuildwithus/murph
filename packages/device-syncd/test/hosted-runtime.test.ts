@@ -514,6 +514,39 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
     }
   });
 
+  it("retains summary progress while composing coverage into a full envelope", () => {
+    const progress = {
+      junctionHistoricalBackfillStatus: "coverage_v3_complete",
+      junctionHistoricalBackfillEmptyAttempts: 0,
+      junctionHistoricalBackfillLastEmptyAt: null,
+      junctionHistoricalBackfillWindowStart: "2025-01-01",
+      junctionHistoricalBackfillWindowEnd: "2025-04-01",
+    };
+    const coverage = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      metadata: progress,
+      providerSlug: "omron",
+      resource: "caffeine",
+      version: historyCoverageVersion("caffeine"),
+    });
+    if (!coverage) {
+      throw new TypeError("Expected representable Junction coverage.");
+    }
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: {
+        ...Object.fromEntries(Array.from({ length: 11 }, (_, index) => [`diagnostic${index}`, index])),
+        ...progress,
+      },
+      localConnectionStateUnpublished: true,
+      localMetadata: { ...progress, [coverage.metadataKey]: coverage.value },
+    });
+    expect(result.metadata).toMatchObject({
+      ...progress,
+      [coverage.metadataKey]: coverage.value,
+    });
+    expect(Object.keys(result.metadata)).toHaveLength(16);
+    expect(result.preservedLocalProgress).toBe(true);
+  });
+
   it("compacts split coverage slots before merging a full hosted envelope", () => {
     const sharedMetadata = Object.fromEntries(
       Array.from({ length: 15 }, (_, index) => [`sharedFact${index}`, `value-${index}`]),

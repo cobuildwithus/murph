@@ -50,7 +50,7 @@ export function ConnectTelegram(props: {
   const clientAuthenticated = privyReady && privyAuthenticated;
   const isBusy = isLinkingTelegram || (isSyncingTelegram && !isQuietSyncingTelegram);
 
-  const { linkTelegram } = useLinkAccount({
+  const { linkOAuth } = useLinkAccount({
     onError: (error, details) => {
       if (!details || details.linkMethod === "telegram") {
         setIsLinkingTelegram(false);
@@ -168,7 +168,7 @@ export function ConnectTelegram(props: {
       return;
     }
 
-    if (typeof linkTelegram !== "function") {
+    if (typeof linkOAuth !== "function") {
       setErrorMessage("Telegram linking is not available yet.");
       return;
     }
@@ -176,7 +176,7 @@ export function ConnectTelegram(props: {
     setIsLinkingTelegram(true);
 
     try {
-      linkTelegram();
+      linkOAuth({ provider: "telegram" });
     } catch (error) {
       setIsLinkingTelegram(false);
       setErrorMessage(toHostedTelegramLinkErrorMessage(error));

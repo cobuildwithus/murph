@@ -2,29 +2,16 @@
 
 Last verified: 2026-09-04
 
-This document owns the managed-browser `pr-review` loop: the final
-cross-cutting gate for eligible PR-lane work and the replacement for local
-`deep-review` on that path. Product UX, prompt, frontend, and coverage proof are
-parent-owned and do not create a preliminary ReviewGPT or local-subagent gate.
+Use this runbook only when `completion-workflow.md` selects final ReviewGPT or
+the user requests it. It owns the managed-browser review, exact-head packaging,
+finding disposition, retries, and base-update rules. It does not add a local
+specialist or deep-review pass.
 
-The final gate uses the managed Eragon, Phlebas, Hercules, Mountain,
-Vonneumann, and Apollo browser lanes. After focused local proof and the
-parent's candidate review, it starts concurrently with CI and is bound to the
-exact pushed head. Its accepted findings must be resolved before the parent's
-final review and completion.
-
-Never combine local `deep-review` with the final ReviewGPT gate for the same
-completed change, including when the change is complex, sensitive, or the user
-asks for a final bug hunt.
-
-For final-ReviewGPT-eligible PR-lane work, do not call the PR good to merge until
-the latest substantive round is resolved, local triage has zero accepted
-findings, every required finding-disposition boundary is complete, and PR CI is green on the
-final head. A round is resolved by `ROUND_OUTCOME: PASS`, or by
-`ROUND_OUTCOME: FINDINGS` when the parent accepts none and records concrete
-disposition evidence. A completed anomaly retrospective may justify continuing
-the same PR, but it never substitutes for a later resolved result on the
-resulting patch.
+Read the sections needed for the current round. Run on the stable pushed head
+after focused local proof and parent candidate review, concurrently with CI.
+Keep one completion owner. Completion requires the resolved review, zero
+unresolved accepted findings, and green required CI; a retrospective alone is
+not review approval.
 
 ## Outcome and Completion Bar
 

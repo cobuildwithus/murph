@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-09-02
+Last verified: 2026-09-04
 
 ## Current Guardrails
 
@@ -21,17 +21,21 @@ Last verified: 2026-09-02
   missing verifier before database authority or SQL, and recovery must roll
   forward to the floor or newer rather than re-running an older base-domain-only
   workflow.
-- The Linq production canary runs only after the same exact Vercel production
-  proof succeeds for a protected-main deployment. One fixed Photon identity
-  starts a three-turn private iMessage conversation, and every Murph reply must
-  arrive in under twenty seconds. That workflow remains the canary's latency
-  owner: the Web reply-latency email monitor resolves the same configured
+- The Linq production canary runs from one staggered hourly schedule only after
+  the same exact Vercel production proof succeeds for the scheduled
+  protected-main revision. Manual dispatch remains available for recovery. One
+  fixed Photon identity starts a three-turn private iMessage conversation, and
+  every Murph reply must arrive in under twenty seconds. The canary member's
+  existing assistant-model
+  preference selects GPT-5.6 Luna for its runtime turns without changing the
+  model selected for ordinary members. That workflow remains the canary's
+  latency owner: the Web reply-latency email monitor resolves the same configured
   identity through its canonical blind-index lookup and excludes its current
   member from both the initial health read and the pre-send recheck. The
-  workflow is non-canceling and serialized; an older deployment skips when the
-  production alias has advanced. Before the first send, a dedicated fixed-target
-  Web route clears only that identity's admission rows and fully pre-provider
-  instant-reply claim, then invokes the canonical account-deletion owner.
+  workflow is non-canceling and serialized; a scheduled revision skips when the
+  production alias has not converged. Before the first send, a dedicated
+  fixed-target Web route clears only that identity's admission rows and fully
+  pre-provider instant-reply claim, then invokes the canonical account-deletion owner.
   Completed delivery evidence is preserved, and any provider-entered or
   ambiguous claim blocks the reset. The route has no target input and accepts
   only its dedicated constant-time bearer secret. Provider, reset, target, and
@@ -1384,6 +1388,13 @@ Last verified: 2026-09-02
   `device-sync.maintenance_failed`, and activity scheduling uses
   `assistant.device_activity_automation_failed`; none increments the
   failed-attempt metric.
+  Junction sync-result metadata preserves the existing historical progress and
+  coverage keys before optional diagnostics when the 16-entry envelope fills.
+  The provider owner supplies that priority to the shared sanitized merge for
+  success, failure, and coverage composition. Patch values and explicit null
+  clearing remain authoritative; secret filtering and size limits still apply.
+  This prevents local metadata eviction from manufacturing a canonical apply
+  conflict, without weakening Web's version or historical-progress fences.
   Every hosted device-sync lane also enqueues a best-effort
   `device-sync.pass_started` marker before snapshot/provider work and a paired
   `device-sync.pass_finished` marker before returning or rethrowing. Both use

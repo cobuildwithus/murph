@@ -45,6 +45,9 @@ import {
   MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
 import {
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
+} from '@murphai/hosted-execution/env'
+import {
   createAssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
 import {
@@ -254,6 +257,9 @@ import type {
 import {
   createVersionedAutomationPatchFixture,
 } from './support/automation-live-fixture.ts'
+import {
+  writeHostedOpenAiMixedModeModelCatalogJson,
+} from './support/codex-model-catalog.ts'
 import { createDeferred } from './test-helpers.ts'
 
 const RUN_REAL_CODEX_E2E = process.env.MURPH_RUN_REAL_CODEX_E2E === '1'
@@ -1183,7 +1189,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           },
           prompt: [
             "I've already seen your welcome and I'm ready to continue.",
-            "I'd like Murph's help building a steadier evening routine.",
+            "I'd like help building a healthier sleep routine.",
           ].join(' '),
         })
         const actions = readCapabilityRoutingActions(result.jsonEvents)
@@ -15204,6 +15210,8 @@ describeRealCodex('real Codex Habitat voice maintenance e2e', () => {
 })
 
 const PUBLIC_GOAL_SETUP_KEY = 'goal_template:improve-deep-sleep'
+const PUBLIC_GOAL_SLEEP_THROUGH_NIGHT_KEY =
+  'goal_template:sleep-through-the-night'
 
 interface PublicGoalSetupRecord {
   goalPhrase: string
@@ -15402,6 +15410,164 @@ type PublicGoalSetupAutomationSaveRequest = Extract<
 >
 
 describeRealCodex('real Codex public goal setup e2e', () => {
+  it(
+    'resolves an achievable sleep Goal before asking one setup question',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const publicGoal = await readPublicGoalSetupRecord(
+        PUBLIC_GOAL_SLEEP_THROUGH_NIGHT_KEY,
+      )
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-public-sleep-goal-routing-e2e-'),
+      )
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const vaultRoot = path.join(workingDirectory, 'vault')
+      const commandLogPath = path.join(workingDirectory, 'goal-commands.log')
+
+      try {
+        await initializeVault({
+          timezone: 'America/New_York',
+          vaultRoot,
+        })
+        await Promise.all([
+          materializeAssistantSkill({ skillsRoot, slug: 'goal-setup' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'sleep-improvement' }),
+          materializeAssistantSkill({
+            skillsRoot,
+            slug: 'sleep-recovery-readiness',
+          }),
+          materializePublicGoalSetupVaultCli({
+            binDirectory,
+            commandLogPath,
+            vaultRoot,
+          }),
+        ])
+        const inheritedPath = normalizeEnvString(config.env.PATH)
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildPublicGoalSetupDeveloperInstructions(),
+          dynamicTools: [MURPH_AUTOMATION_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            PATH: inheritedPath
+              ? `${binDirectory}${path.delimiter}${inheritedPath}`
+              : binDirectory,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: publicGoal.startPrompt,
+          reasoningEffort: 'medium',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const commandAttempts = readGoalSetupVaultCommands(actions, {
+          successfulOnly: false,
+        })
+        const reply = result.finalMessage.trim()
+        process.stdout.write(
+          `[public-goal-setup-e2e] ${JSON.stringify({
+            reply,
+            scenario: 'sleep-through-the-night-routing',
+          })}\n`,
+        )
+
+        const publicGoalListRead = actions.find(
+          isSuccessfulPublicGoalListAction,
+        )
+        const publicGoalShowRead = actions.find((action) =>
+          isSuccessfulPublicGoalShowActionFor(
+            action,
+            'sleep-through-the-night',
+          )
+        )
+        const goalInventoryRead = actions.find(
+          isSuccessfulGoalInventoryReadAction,
+        )
+        const memoryRead = actions.find(isSuccessfulCompactMemoryReadAction)
+        const normalizeWhitespace = (value: string) =>
+          value.replace(/\s+/gu, ' ').trim()
+        const goalSetupSkillPathSuffix =
+          `${path.sep}goal-setup${path.sep}SKILL.md`
+        const goalSetupSkillReads = actions.filter(
+          (candidate): candidate is Extract<
+            CapabilityRoutingAction,
+            { kind: 'command' }
+          > => candidate.kind === 'command'
+            && candidate.ok
+            && candidate.command.includes(goalSetupSkillPathSuffix),
+        )
+        expect(
+          goalSetupSkillReads.length,
+          'goal-setup read actions before setup',
+        ).toBeGreaterThan(0)
+        const expectedGoalSetupSkill = await readFile(
+          path.join(skillsRoot, 'goal-setup', 'SKILL.md'),
+          'utf8',
+        )
+        expect(
+          normalizeWhitespace(
+            goalSetupSkillReads.map((action) => action.output).join('\n'),
+          ),
+          'goal-setup full-file read before setup',
+        ).toContain(normalizeWhitespace(expectedGoalSetupSkill))
+        expect(publicGoalListRead, 'exact public Goal search').toBeDefined()
+        expect(publicGoalListRead?.output).toContain(
+          PUBLIC_GOAL_SLEEP_THROUGH_NIGHT_KEY,
+        )
+        expect(publicGoalShowRead, 'exact public Goal read').toBeDefined()
+        expect(goalInventoryRead, 'all-status Goal inventory').toBeDefined()
+        expect(memoryRead, 'compact memory read').toBeDefined()
+        expect(commandAttempts.some(isGoalSetupMutationCommand)).toBe(false)
+        expect(actions.filter((action) => action.kind === 'dynamic')).toHaveLength(0)
+
+        const firstQuestion = readCompletedAgentMessages(result.jsonEvents)
+          .find((message) => message.text.includes('?'))
+        expect(firstQuestion, 'one grounded setup question').toBeDefined()
+        if (
+          !firstQuestion
+          || !publicGoalListRead
+          || !publicGoalShowRead
+          || !goalInventoryRead
+          || !memoryRead
+        ) {
+          throw new Error('Expected Goal grounding before the setup question.')
+        }
+        for (const groundingRead of [
+          publicGoalListRead,
+          publicGoalShowRead,
+          goalInventoryRead,
+          memoryRead,
+          ...goalSetupSkillReads,
+        ]) {
+          expect(groundingRead.eventIndex).toBeLessThan(firstQuestion.eventIndex)
+        }
+        expect(reply.match(/\?/gu) ?? []).toHaveLength(1)
+        expect(reply).toMatch(/sleep|night|waking|awakening/iu)
+        expect(reply).not.toMatch(
+          /Health Commons|commons goal|goal_template:|sha256:/iu,
+        )
+        expect(reply).not.toMatch(
+          /(?:no|did not|didn't|could not|couldn't).{0,40}(?:matching|match|entry|goal)/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
   it(
     'grounds from memory, persists finite support, and reuses one Goal package in a fresh session',
     async () => {
@@ -16403,7 +16569,9 @@ function buildPublicGoalSetupDeveloperInstructions(): string {
   })
 }
 
-async function readPublicGoalSetupRecord(): Promise<PublicGoalSetupRecord> {
+async function readPublicGoalSetupRecord(
+  key = PUBLIC_GOAL_SETUP_KEY,
+): Promise<PublicGoalSetupRecord> {
   const artifactPath = fileURLToPath(new URL(
     '../../health-commons/generated/web/browse/goals.json',
     import.meta.url,
@@ -16412,7 +16580,7 @@ async function readPublicGoalSetupRecord(): Promise<PublicGoalSetupRecord> {
   const goals = Array.isArray(artifact?.goals) ? artifact.goals : []
   const goal = goals
     .map((value) => readRecord(value))
-    .find((value) => value?.key === PUBLIC_GOAL_SETUP_KEY)
+    .find((value) => value?.key === key)
   const revision = readRecord(goal?.revision)
   const goalPhrase = readString(goal?.goalPhrase)
   const pageRevisionId = readString(revision?.pageRevisionId)
@@ -16428,13 +16596,13 @@ async function readPublicGoalSetupRecord(): Promise<PublicGoalSetupRecord> {
     || !workflowSpecRevisionId
   ) {
     throw new Error(
-      `Generated Goal index is missing ${PUBLIC_GOAL_SETUP_KEY}.`,
+      `Generated Goal index is missing ${key}.`,
     )
   }
 
   return {
     goalPhrase,
-    key: PUBLIC_GOAL_SETUP_KEY,
+    key,
     pageRevisionId,
     startPrompt,
     workflowSpecRevisionId,
@@ -16600,15 +16768,29 @@ function isSuccessfulGoalSetupEntityShowAction(
 function isSuccessfulPublicGoalShowAction(
   action: CapabilityRoutingAction,
 ): boolean {
+  return isSuccessfulPublicGoalShowActionFor(action, 'improve-deep-sleep')
+}
+
+function escapeGoalSetupRegularExpression(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
+}
+
+function isSuccessfulPublicGoalShowActionFor(
+  action: CapabilityRoutingAction,
+  slug: string,
+): boolean {
+  const escapedSlug = escapeGoalSetupRegularExpression(slug)
   return action.kind === 'command'
     && action.ok
     && (
       (
         action.command.includes('commons goal show')
-        && action.command.includes('improve-deep-sleep')
+        && action.command.includes(slug)
       )
-      || /"argv":\s*\[\s*"commons",\s*"goal",\s*"show",\s*"(?:goal_template:)?improve-deep-sleep"/u
-        .test(action.output)
+      || new RegExp(
+        `"argv":\\s*\\[\\s*"commons",\\s*"goal",\\s*"show",\\s*"(?:goal_template:)?${escapedSlug}"`,
+        'u',
+      ).test(action.output)
     )
 }
 
@@ -21544,6 +21726,272 @@ describeRealCodex('real Codex Kernel browser continuation e2e', () => {
 })
 
 describeRealCodex('real Codex app-server cache usage e2e', () => {
+  it.each([
+    { guided: true, journey: 'prescribed schema discovery' },
+    { guided: false, journey: 'ordinary reminder request' },
+  ])(
+    'mixed Terra saves one referenced rehabilitation reminder: $journey',
+    async ({ guided }) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-mixed-tool-search-reminder-e2e-'),
+      )
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLog = path.join(workingDirectory, 'vault-commands.log')
+      const conditionId = 'condition_rehabilitation_knee'
+      const codexCommand =
+        normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+        ?? path.resolve(
+          path.dirname(fileURLToPath(import.meta.url)),
+          '../node_modules/.bin/codex',
+        )
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+      let isolatedCodexHome: string | null = null
+      const isolatedCodexHomePaths: string[] = []
+
+      try {
+        await mkdir(binDirectory, { recursive: true })
+        await writeFile(
+          path.join(binDirectory, 'vault-cli'),
+          [
+            '#!/bin/sh',
+            'set -eu',
+            `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(commandLog)}`,
+            'case "$*" in',
+            `  "condition show ${conditionId} --format json") printf '%s\\n' ${quoteNutritionShellLiteral(JSON.stringify({
+              entity: {
+                data: { clinicalStatus: 'active' },
+                id: conditionId,
+                kind: 'condition',
+                title: 'Knee rehabilitation',
+              },
+              vault: 'synthetic-vault',
+            }))} ;;`,
+            '  *) printf \'unsupported mixed-mode fixture command: %s\\n\' "$*" >&2; exit 64 ;;',
+            'esac',
+            '',
+          ].join('\n'),
+          { encoding: 'utf8', mode: 0o700 },
+        )
+        const materializedCodexHome =
+          await materializeRealCodexHostedPermissionHome(config, {
+            trustedProjectRoot: workingDirectory,
+          })
+        isolatedCodexHome = materializedCodexHome.codexHome
+        isolatedCodexHomePaths.push(...materializedCodexHome.temporaryPaths)
+        const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
+          codexCommand,
+          directory: workingDirectory,
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand,
+          codexHome: isolatedCodexHome,
+          developerInstructions: buildAssistantSystemPrompt({
+            assistantCliContract: guided ? [
+              'Use vault-cli for canonical member data.',
+              `For this exact regression, read the condition once with: vault-cli condition show ${conditionId} --format json`,
+              'After that read, use native tool_search to load the deferred murph.automation schema before the first automation call.',
+              'Do not inspect ALL_TOOLS or invoke murph.automation through exec.',
+              'Call the loaded automation dynamic tool directly and at most once.',
+            ].join('\n') : [
+              'Use vault-cli for canonical member data.',
+              'Read a condition with: vault-cli condition show <condition-id> --format json',
+            ].join('\n'),
+            assistantContextSnapshotPrompt: null,
+            assistantHostedAutomationAvailable: true,
+            assistantHostedDeviceConnectAvailable: false,
+            assistantHostedDeviceConnectProviders: [],
+            assistantKnowledgeToolsAvailable: false,
+            channel: 'linq',
+            cliAccess: {
+              rawCommand: 'vault-cli',
+              setupCommand: 'murph',
+            },
+            conversationScope: 'direct',
+            currentLocalDate: '2026-09-04',
+            currentTimeZone: 'America/New_York',
+            hostedRuntime: true,
+            modelBehaviorProfile: 'gpt5-agentic',
+            onboardingGuidance: false,
+            turnTrigger: null,
+          }),
+          dynamicTools: [MURPH_AUTOMATION_TOOL],
+          env: {
+            ...config.env,
+            [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+            PATH: [binDirectory, config.env.PATH]
+              .filter((value): value is string => Boolean(value))
+              .join(path.delimiter),
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            automationTool: {
+              request: async (request) => {
+                if (request.action !== 'save') {
+                  throw new Error('Expected one automation save request.')
+                }
+                automationRequests.push(request)
+                return {
+                  action: 'save',
+                  automationId: 'automation_rehabilitation_knee',
+                  contextReferences: request.contextReferences,
+                  created: true,
+                  effectiveTimeZone: 'America/New_York',
+                  lookupId: 'rehabilitation-knee-reminder',
+                  occurrenceProjection: {
+                    nextOccurrenceAt: '2026-09-05T13:00:00.000Z',
+                    status: 'resolved' as const,
+                  },
+                  routeBinding: 'current_conversation',
+                  schedule: request.schedule,
+                  status: 'active',
+                  updatedAt: '2026-09-04T12:00:00.000Z',
+                }
+              },
+            },
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: 'gpt-5.6-terra',
+          modelProvider: config.modelProvider,
+          prompt: [
+            `My knee rehabilitation condition is saved as ${conditionId}.`,
+            'Read that exact condition, then save a reminder here every day at 9:00 AM',
+            'to complete my knee rehabilitation exercises.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+
+        const commands = (await readFile(commandLog, 'utf8'))
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const rolloutEvidence = guided
+          ? await readMixedToolSearchRolloutEvidence({
+            codexHome: isolatedCodexHome,
+            conditionId,
+          })
+          : null
+        const conditionReads = actions.filter((action) =>
+          action.kind === 'command'
+          && action.command.includes(
+            `vault-cli condition show ${conditionId} --format json`,
+          )
+        )
+        const automationCalls = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_AUTOMATION_TOOL.name
+        )
+
+        expect(commands).toEqual([
+          `condition show ${conditionId} --format json`,
+        ])
+        expect(conditionReads).toHaveLength(1)
+        if (rolloutEvidence) {
+          const toolSearches = rolloutEvidence.toolSearchCalls
+          expect(toolSearches).toHaveLength(1)
+          expect(JSON.stringify(toolSearches[0]?.argumentsValue)).toMatch(
+            /automation|reminder|context/iu,
+          )
+          expect(toolSearches[0]?.lineIndex).toBeGreaterThan(
+            rolloutEvidence.conditionOutputLineIndex,
+          )
+          const automationSearchTool = rolloutEvidence.toolSearchOutputTools
+            .flatMap((candidate) => {
+              const tool = readRecord(candidate)
+              if (tool?.name === 'automation') {
+                return [tool]
+              }
+              return Array.isArray(tool?.tools)
+                ? tool.tools.map(readRecord).filter((item) => item !== null)
+                : []
+            })
+            .find((tool) => tool.name === 'automation')
+          expect(automationSearchTool).not.toBeUndefined()
+          const automationParameters = readRecord(automationSearchTool?.parameters)
+          const automationProperties = readRecord(automationParameters?.properties)
+          const contextReferences = readRecord(
+            automationProperties?.contextReferences,
+          )
+          const contextReferenceItem = readRecord(contextReferences?.items)
+          expect(contextReferences).toMatchObject({
+            items: {
+              additionalProperties: false,
+              required: expect.arrayContaining(['entityKind', 'entityId']),
+              type: 'object',
+            },
+            type: 'array',
+          })
+          expect(readRecord(contextReferenceItem?.properties)).toMatchObject({
+            entityId: { type: 'string' },
+            entityKind: { type: 'string' },
+          })
+          expect(rolloutEvidence.automationCallLineIndex).toBeGreaterThan(
+            toolSearches[0]?.lineIndex ?? Number.POSITIVE_INFINITY,
+          )
+        }
+        expect(automationCalls).toHaveLength(1)
+        expect(automationCalls[0]).toMatchObject({ success: true })
+        expect(actions.indexOf(automationCalls[0]!)).toBeGreaterThan(
+          actions.indexOf(conditionReads[0]!),
+        )
+        expect(automationRequests).toHaveLength(1)
+        const savedRequest = automationRequests[0]
+        if (savedRequest?.action !== 'save') {
+          throw new Error('Expected one saved rehabilitation reminder.')
+        }
+        expect(savedRequest.contextReferences).toEqual([{
+          entityId: conditionId,
+          entityKind: 'condition',
+        }])
+        expect(['gpt-5.6-luna', 'gpt-5.6-terra']).toContain(
+          savedRequest.assistantTargetOverride?.model,
+        )
+        if (savedRequest.schedule.kind === 'dailyLocal') {
+          expect(savedRequest.schedule.localTime).toBe('09:00')
+        } else if (savedRequest.schedule.kind === 'cron') {
+          expect(savedRequest.schedule.expression).toMatch(/^0\s+9\s+/u)
+        } else {
+          throw new Error('Expected one daily wall-clock reminder.')
+        }
+        expect(result.finalMessage).toMatch(
+          /active|created|saved|scheduled|set(?: up)?|will remind/iu,
+        )
+        expect(result.finalMessage).toMatch(
+          /rehab|rehabilitation|knee/iu,
+        )
+        expect(result.finalMessage).toMatch(/9(?::00)?\s*(?:a\.?m\.?|in the morning)/iu)
+        expect(result.finalMessage).not.toMatch(/schema|tool_search|entityKind|entityId/iu)
+        process.stdout.write(
+          `[mixed-tool-search-reminder-e2e] ${JSON.stringify({
+            automationCalls: automationCalls.length,
+            canonicalReads: conditionReads.length,
+            reply: result.finalMessage.trim(),
+            journey: guided ? 'prescribed schema discovery' : 'ordinary reminder request',
+            toolSearches: rolloutEvidence?.toolSearchCalls.length ?? 'not prescribed',
+          })}\n`,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...isolatedCodexHomePaths,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
   it(
     'loads each moved capability owner before its representative tool call',
     async () => {
@@ -32899,6 +33347,101 @@ interface DynamicToolAttempt {
   argumentsValue: Record<string, unknown>
   eventIndex: number
   tool: string
+}
+
+interface RolloutToolSearchCall {
+  argumentsValue: Record<string, unknown>
+  lineIndex: number
+}
+
+interface MixedToolSearchRolloutEvidence {
+  automationCallLineIndex: number
+  conditionOutputLineIndex: number
+  toolSearchCalls: RolloutToolSearchCall[]
+  toolSearchOutputTools: unknown[]
+}
+
+async function readMixedToolSearchRolloutEvidence(input: {
+  codexHome: string
+  conditionId: string
+}): Promise<MixedToolSearchRolloutEvidence> {
+  const rolloutPaths = await listCodexRolloutPaths(
+    path.join(input.codexHome, 'sessions'),
+  )
+  if (rolloutPaths.length !== 1) {
+    throw new Error(
+      `Expected one isolated Codex rollout, received ${rolloutPaths.length}.`,
+    )
+  }
+  const rollout = await readFile(
+    rolloutPaths[0] ?? '',
+    'utf8',
+  )
+  const responseItems = rollout
+    .split('\n')
+    .flatMap((line, lineIndex) => {
+      if (line.trim() === '') {
+        return []
+      }
+      const record = readRecord(JSON.parse(line))
+      if (record?.type !== 'response_item') {
+        return []
+      }
+      const payload = readRecord(record.payload)
+      return payload ? [{ lineIndex, payload }] : []
+    })
+  const toolSearchCalls = responseItems.flatMap<RolloutToolSearchCall>(
+    ({ lineIndex, payload }) => payload.type === 'tool_search_call'
+      ? [{
+          argumentsValue: readArgumentsRecord(payload.arguments),
+          lineIndex,
+        }]
+      : [],
+  )
+  const conditionOutputLineIndex = responseItems.find(
+    ({ payload }) =>
+      payload.type === 'function_call_output'
+      && JSON.stringify(payload.output).includes(input.conditionId),
+  )?.lineIndex
+  const automationCallLineIndex = responseItems.find(
+    ({ payload }) =>
+      payload.type === 'function_call'
+      && payload.name === MURPH_AUTOMATION_TOOL.name,
+  )?.lineIndex
+  if (
+    conditionOutputLineIndex === undefined
+    || automationCallLineIndex === undefined
+  ) {
+    throw new Error(
+      'Codex rollout was missing the condition output or automation call.',
+    )
+  }
+  return {
+    automationCallLineIndex,
+    conditionOutputLineIndex,
+    toolSearchCalls,
+    toolSearchOutputTools: responseItems.flatMap(({ payload }) =>
+      payload.type === 'tool_search_output' && Array.isArray(payload.tools)
+        ? payload.tools
+        : []
+    ),
+  }
+}
+
+async function listCodexRolloutPaths(directory: string): Promise<string[]> {
+  const entries = await readdir(directory, { withFileTypes: true })
+  const paths = await Promise.all(entries.map(async (entry) => {
+    const entryPath = path.join(directory, entry.name)
+    if (entry.isDirectory()) {
+      return listCodexRolloutPaths(entryPath)
+    }
+    return entry.isFile()
+      && entry.name.startsWith('rollout-')
+      && entry.name.endsWith('.jsonl')
+      ? [entryPath]
+      : []
+  }))
+  return paths.flat().sort()
 }
 
 function readDynamicToolAttempts(
