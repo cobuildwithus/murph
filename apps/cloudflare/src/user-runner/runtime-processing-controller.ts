@@ -1078,7 +1078,10 @@ export class RuntimeProcessingController {
         standbyAllocationReason: "processing_mode_not_default",
       };
     }
-    if (!isTrustedWebDirectRuntimeProcessing(input.input)) {
+    if (
+      !isTrustedWebDirectRuntimeProcessing(input.input)
+      && input.input.conversationWorkPending !== true
+    ) {
       return {
         kind: "ready",
         runnerContainerName: input.exactRunnerContainerName,

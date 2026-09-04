@@ -569,9 +569,9 @@ POST /internal/users/:userId/runtime/ensure-processing
 ```
 
 Temporal signs this request with the hosted internal callback key and includes
-the bound hosted user header in the signature input. Cloudflare accepts only
-that signed form for the runtime processing adapter; Vercel OIDC remains for
-browser-vault, status, and deletion control clients.
+the bound hosted user header in the signature input. Cloudflare also accepts
+Vercel OIDC for Web's existing direct ingress wake; both forms bind the target
+user before the same processing adapter runs.
 Do not introduce a static shared bearer token for this adapter.
 
 Request summary:
@@ -580,12 +580,26 @@ Request summary:
   idempotency at the orchestration boundary.
 - `processingMode`: an optional narrow execution lane selected from current
   reconciliation facts.
+- `conversationWorkPending`: optional exact `true`, valid only with absent,
+  null, or `default` processing mode. Temporal derives it from positive admitted
+  conversation lag in the current reconciliation read. It allows a fresh
+  standby claim without changing runtime admission, consent, write fences,
+  activity priority, or Web-direct latency attribution. Timers, retries, and
+  continued executions rederive it; it is not persisted workflow policy.
 - `assistantExecutionBlocked`: an optional positive-only execution guard valid
   only with `system_mailbox`. Temporal includes it when Web blocks assistant
   admission but retained model-free system work remains runnable. Cloudflare
   forwards it to the runtime invocation without persisting a second policy
   projection; the runtime drains eligible system work, skips assistant
   execution, and preserves the canonical assistant wake for later restoration.
+
+Deploy the Cloudflare receiver accepting this optional field before the Temporal
+producer emits it: older exact-key parsers reject it. Old producers omitting
+the field remain compatible. Roll back the producer before a receiver rollback
+below this contract. The private consumer can retain its existing exact public
+registry dependency by parsing the base request with that package and appending
+its locally validated positive-only fact before signing; remove that adapter
+when adopting a public package release that parses the field.
 
 The request does not carry signed AI usage decisions. Web reconciliation facts
 gate mailbox lag and model-capable workspace wakes before Temporal calls

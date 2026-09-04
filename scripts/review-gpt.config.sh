@@ -271,7 +271,7 @@ package_script="scripts/package-audit-context-full.sh"
 # composer to have no app connector selected before auto-send because review
 # context must come from the guarded codebase ZIP.
 app_connector="current"
-model="gpt-5.6-sol"
+model="gpt-6-pro"
 thinking="current"
 response_timeout_ms="${response_timeout_ms:-$((250 * 60 * 1000))}"
 

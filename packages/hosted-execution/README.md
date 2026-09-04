@@ -73,6 +73,10 @@ mention the deleted generic state.
 - Temporal calls Cloudflare `ensure-processing`; Cloudflare returns
   `runtime_processing_accepted` or `retry_later` and owns runner start, wake,
   active-fence alarm cleanup, and execution cleanup.
+- The optional positive-only `conversationWorkPending` ensure fact permits
+  standby allocation for admitted conversation work in default mode. Deploy
+  the accepting Cloudflare receiver before its Temporal producer; absent fields
+  preserve existing behavior. It grants no consent, access, or write authority.
 - device-sync runtime snapshot/apply/token contracts stay on
   `@murphai/device-syncd/hosted-runtime`; this package only carries the outer
   hosted runtime control seam plus the shared device-sync wake-hint shape needed

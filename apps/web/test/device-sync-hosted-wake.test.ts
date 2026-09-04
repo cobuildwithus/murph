@@ -1929,35 +1929,48 @@ describe("hosted device-sync wakes", () => {
     ]);
   });
 
-  it("accepts an imported retired due tuple without another signal", async () => {
-    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValueOnce({
-      dedupeConflict: false,
-      duplicate: true,
-      inserted: false,
-      item: {
-        id: "mailbox_existing",
+  it("accepts imported retired due tuples without recreating either signal", async () => {
+    mocks.appendHostedMailboxEnvelopeTx
+      .mockResolvedValueOnce({
+        dedupeConflict: false,
+        duplicate: true,
+        inserted: false,
+        item: {
+          id: "mailbox_existing",
+          userId: "user-123",
+        },
+        runtimeOwnedRetiredDuplicate: true,
+      })
+      .mockResolvedValueOnce({
+        dedupeConflict: false,
+        duplicate: true,
+        inserted: false,
+        item: {
+          id: "mailbox_existing",
+          userId: "user-123",
+        },
+        runtimeOwnedRetiredDuplicate: true,
+      });
+
+    for (const connectionId of ["dsc_123", "dsc_456"]) {
+      await expect(appendHostedDeviceSyncScheduledReconcileWake({
+        connectionId,
+        createdAt: "2026-03-26T12:05:00.000Z",
+        eventId:
+          `device-sync:scheduled-reconcile:v3:${connectionId}:2026-03-26T12:00:00.000Z:2026-03-26T12:30:00.000Z`,
+        expectedConnectedAt: "2026-03-26T12:00:00.000Z",
+        nextReconcileAt: "2026-03-26T12:30:00.000Z",
+        provider: "oura",
         userId: "user-123",
-      },
-      runtimeOwnedRetiredDuplicate: true,
-    });
+      })).resolves.toEqual({
+        wakeAccepted: true,
+        wakeAppended: false,
+        wakeDuplicate: true,
+        wakeInserted: false,
+      });
+    }
 
-    await expect(appendHostedDeviceSyncScheduledReconcileWake({
-      connectionId: "dsc_123",
-      createdAt: "2026-03-26T12:05:00.000Z",
-      eventId:
-        "device-sync:scheduled-reconcile:v3:dsc_123:2026-03-26T12:00:00.000Z:2026-03-26T12:30:00.000Z",
-      expectedConnectedAt: "2026-03-26T12:00:00.000Z",
-      nextReconcileAt: "2026-03-26T12:30:00.000Z",
-      provider: "oura",
-      userId: "user-123",
-    })).resolves.toEqual({
-      wakeAccepted: true,
-      wakeAppended: false,
-      wakeDuplicate: true,
-      wakeInserted: false,
-    });
-
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
     expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
   });
