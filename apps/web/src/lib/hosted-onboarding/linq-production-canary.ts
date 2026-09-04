@@ -1,7 +1,6 @@
-import type { PrismaClient } from "@prisma/client";
-
 import { lookupHostedMemberIdentityByPhoneNumber } from "./hosted-member-identity-store";
 import { normalizePhoneNumber } from "./phone";
+import type { HostedOnboardingReadClient } from "./shared";
 
 const HOSTED_LINQ_PRODUCTION_CANARY_PHONE_NUMBER_ENV =
   "HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_PHONE_NUMBER";
@@ -19,7 +18,7 @@ export function readHostedLinqProductionCanaryPhoneNumber(
 }
 
 export async function readHostedLinqProductionCanaryMemberId(input: {
-  prisma: PrismaClient;
+  prisma: HostedOnboardingReadClient;
   source?: HostedLinqProductionCanaryEnvironment;
 }): Promise<string | null> {
   const phoneNumber = readHostedLinqProductionCanaryPhoneNumber(input.source);

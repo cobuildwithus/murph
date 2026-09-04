@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-09-03
+Last verified: 2026-09-04
 
 ## Purpose
 
@@ -60,7 +60,9 @@ procedure are specified by `agent-docs/SECURITY.md` and
 The fixed-identity production iMessage canary verifies the exact deployed Web
 revision before resetting its private test identity and exercising the fast
 first reply plus ordinary hosted-runtime continuation. Its configured identity
-is omitted from internal signup notification and operator Growth reporting.
+is omitted from internal signup notification, operator Growth reporting, and
+reply-latency email alerts; the protected canary workflow remains its latency
+owner.
 Its fixed-target reset, serialization, twenty-second latency, privacy, and provider-transit
 contracts are specified by `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`,
 `agent-docs/operations/imessage-deliverability.md`, and
