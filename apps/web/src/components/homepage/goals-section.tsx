@@ -42,7 +42,7 @@ const PILL_CLASS_NAME =
 const ACTIVE_PILL_CLASS_NAME =
   "border-[#2d3436] bg-[#2d3436] text-[#f5f0e8] hover:border-[#2d3436]";
 const GOAL_GRID_CLASS_NAME =
-  "mt-8 grid w-full grid-cols-1 gap-2 sm:mt-10 sm:grid-cols-2 sm:gap-3 lg:grid-cols-4";
+  "mt-8 grid w-full grid-cols-1 gap-2 sm:mt-10 sm:grid-cols-2 sm:gap-3 xl:grid-cols-4";
 const NOTE_CLASS_NAME =
   "mt-8 max-w-[44ch] text-center text-[0.9375rem] leading-[1.7] text-[#635a48] sm:mt-10";
 
@@ -112,8 +112,6 @@ export function GoalsSection({
     personas.some((persona) => persona.id === DEFAULT_HOMEPAGE_GOAL_PERSONA_ID)
       ? DEFAULT_HOMEPAGE_GOAL_PERSONA_ID
       : personas[0]?.id ?? null);
-  const [announcedSignature, setAnnouncedSignature] = useState("");
-
   const placeholders = useMemo(
     () => personas.flatMap((persona) => persona.goals.map((goal) => goal.phrase)),
     [personas],
@@ -164,6 +162,8 @@ export function GoalsSection({
       ? `${activePersona.goals.length} goals for ${activePersona.label}.`
       : "";
   const announcementSignature = `${activeQuery}|${personaId ?? ""}|${announcement}`;
+  // Start matched so the initial persona is not read out unprompted on load.
+  const [announcedSignature, setAnnouncedSignature] = useState(announcementSignature);
 
   useEffect(() => {
     const timer = window.setTimeout(
@@ -205,7 +205,10 @@ export function GoalsSection({
                 aria-pressed={active}
                 className={cn(PILL_CLASS_NAME, active && ACTIVE_PILL_CLASS_NAME)}
                 key={persona.id}
-                onClick={() => setPersonaId(persona.id)}
+                onClick={() => {
+                  setPersonaId(persona.id);
+                  setQuery("");
+                }}
                 type="button"
               >
                 {persona.label}
@@ -236,7 +239,7 @@ export function GoalsSection({
                   prompt={`Hey Murph, help me ${goal.phrase}`}
                 >
                   <GoalBrowseCardIllustration src={goal.illustrationSrc} />
-                  <span className={cn("min-w-0", GOAL_BROWSE_CARD_TITLE_CLASS_NAME)}>
+                  <span className={cn("min-w-0 break-words", GOAL_BROWSE_CARD_TITLE_CLASS_NAME)}>
                     {goal.phrase}
                   </span>
                 </GoalHandoffAction>

@@ -1,6 +1,8 @@
 import { GoalCategoryBrowse } from "@/src/components/goals/goal-category-browse";
 import { GoalGuide } from "@/src/components/goals/goal-guide";
+import { GoalsSection } from "@/src/components/homepage/goals-section";
 import type { GoalIndexEntryModel } from "@/src/lib/goals/goal-models";
+import type { HomepageGoalPersona } from "@/src/lib/goals/homepage-goal-personas";
 
 const DESIGN_GOAL = {
   aliases: ["lower rhr"],
@@ -58,6 +60,49 @@ const DESIGN_CONTACT_OPTION = {
   kind: "text" as const,
   label: "Messages",
 };
+
+function designPersona(
+  id: HomepageGoalPersona["id"],
+  label: string,
+  goals: ReadonlyArray<readonly [routeId: string, phrase: string]>,
+): HomepageGoalPersona {
+  return {
+    goals: goals.map(([routeId, phrase]) => ({
+      href: `/goals/${routeId}`,
+      illustrationSrc: `/design-assets/goals/${routeId}.svg`,
+      phrase,
+    })),
+    id,
+    label,
+  };
+}
+
+const DESIGN_GOAL_PERSONAS: HomepageGoalPersona[] = [
+  designPersona("feel-better", "Just feel better", [
+    ["sleep-better", "sleep better"],
+    ["feel-more-energetic", "feel more energetic"],
+    ["reduce-stress", "reduce my stress"],
+    ["walk-every-day", "walk every day"],
+  ]),
+  designPersona("compete", "Compete", [
+    ["run-marathon", "run a marathon"],
+    ["improve-vo2-max", "improve my VO₂ max"],
+    ["run-ironman", "run an Ironman"],
+    ["dunk-basketball", "dunk a basketball"],
+  ]),
+  designPersona("live-long", "Live long", [
+    ["stay-independent-as-i-age", "stay independent as I age"],
+    ["keep-my-brain-healthy-as-i-age", "keep my brain healthy as I age"],
+    ["lower-blood-pressure", "lower my blood pressure"],
+    ["lower-cholesterol", "lower my cholesterol"],
+  ]),
+  designPersona("motherhood", "Motherhood", [
+    ["stay-strong-during-pregnancy", "stay strong during pregnancy"],
+    ["sleep-better-during-pregnancy", "sleep better during pregnancy"],
+    ["recover-after-giving-birth", "recover after giving birth"],
+    ["return-to-running-postpartum", "return to running postpartum"],
+  ]),
+];
 
 const DESIGN_BROWSE_CATEGORY = {
   description: "Improve endurance, heart health, and the activities you want to finish.",
@@ -140,6 +185,32 @@ const DESIGN_BROWSE_GOALS = [
 export function GoalGuideStudy() {
   return (
     <>
+      <section
+        className="mx-auto w-full max-w-[1320px] px-6 pb-4 pt-12 sm:px-10 lg:px-16"
+        data-design-study="goal-composer"
+        id="goal-composer"
+      >
+        <div className="border-b border-[#e5e1d8] pb-12">
+          <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+            Homepage goals section
+          </p>
+          <h1 className="mt-2 max-w-2xl font-serif text-3xl font-semibold tracking-tight text-foreground">
+            Hey Murph, help me… composer
+          </h1>
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
+            Production composition with synthetic personas: the shared goal composer, persona pills opening on Live long, and goal cards that hand off to Messages. Inert here, so nothing fetches or sends.
+          </p>
+
+          <div className="mt-10 overflow-hidden rounded-2xl border border-border bg-background" inert>
+            <GoalsSection
+              personas={DESIGN_GOAL_PERSONAS}
+              startOption={DESIGN_CONTACT_OPTION}
+              totalGoalCount={252}
+            />
+          </div>
+        </div>
+      </section>
+
       <section
         className="mx-auto w-full max-w-5xl px-6 pb-4 pt-12 sm:px-10 lg:px-16"
         data-design-study="goal-category-browse"

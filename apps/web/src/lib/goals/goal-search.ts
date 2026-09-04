@@ -26,11 +26,18 @@ export function createGoalSearchItem(
   };
 }
 
+// The field invites finishing "Hey Murph, help me…", so people type the
+// sentence; the guides are indexed by the goal alone.
+const GOAL_SEARCH_LEAD_IN_PATTERN =
+  /^(?:hey\s+murph[,\s]+)?(?:please\s+)?(?:help\s+me(?:\s+to)?|i\s+(?:want|need|would\s+like|['’]d\s+like|wanna)(?:\s+to)?)\s+/iu;
+
 export function searchGoalItems(
   goals: readonly GoalSearchItem[],
   query: string,
 ): GoalSearchItem[] {
-  const normalizedQuery = normalizeGoalSearchText(query);
+  const normalizedQuery = normalizeGoalSearchText(
+    query.trim().replace(GOAL_SEARCH_LEAD_IN_PATTERN, ""),
+  );
   const terms = tokenizeGoalSearchText(normalizedQuery);
 
   if (terms.length === 0) {

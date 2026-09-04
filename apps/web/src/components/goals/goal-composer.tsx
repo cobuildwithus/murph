@@ -29,6 +29,10 @@ const AUTOFOCUS_VISIBLE_RATIO = 0.6;
 // Someone paging down with the keyboard is scrolling, not arriving: taking
 // focus would turn their next Space into a typed character.
 const KEYBOARD_SCROLL_GRACE_MS = 1500;
+// Focus only once the page has stopped moving with the field on screen, so a
+// fling or smooth scroll past the section never grabs focus off-screen.
+const AUTOFOCUS_SETTLE_MS = 300;
+const AUTOFOCUS_SETTLE_ATTEMPTS = 10;
 
 const SEND_CLASS_NAME =
   "absolute right-2 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full text-[#f5f0e8] transition-colors duration-300 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[#fffdf8]";
@@ -51,7 +55,7 @@ const COMPOSER_STYLE = `
   from { opacity: 0; transform: scale(0.5) rotate(-90deg); }
   to { opacity: 1; transform: none; }
 }
-[data-goal-composer-ready="true"] {
+[data-goal-composer-ready="true"]:not(:focus-visible) {
   animation: goal-composer-ready-pulse 1.8s ease-out infinite;
 }
 [data-goal-composer-ready-icon] {
@@ -63,6 +67,15 @@ const COMPOSER_STYLE = `
   [data-goal-composer-ready-icon] { animation: none; }
 }
 `;
+
+function visibleRatio(element: HTMLElement): number {
+  const rect = element.getBoundingClientRect();
+  if (rect.height === 0) {
+    return 0;
+  }
+  const visibleHeight = Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0);
+  return Math.max(0, visibleHeight) / rect.height;
+}
 
 function mediaMatches(query: string): boolean {
   return typeof window.matchMedia === "function"
@@ -103,6 +116,7 @@ export function GoalComposer({
   startOption: MurphContactOption;
 }) {
   const inputId = useId();
+  const hintId = useId();
   const sendRef = useRef<HTMLElement | null>(null);
   const ownInputRef = useRef<HTMLInputElement | null>(null);
   const handoff = useGoalHandoff(startOption);
@@ -156,17 +170,31 @@ export function GoalComposer({
       return;
     }
     let lastKeyDownAt = 0;
+    let settleTimer: number | null = null;
     const noteKeyDown = () => {
       lastKeyDownAt = Date.now();
     };
-    window.addEventListener("keydown", noteKeyDown, true);
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!entries.some((entry) => entry.intersectionRatio >= AUTOFOCUS_VISIBLE_RATIO)) {
+    const stop = () => {
+      observer.disconnect();
+      window.removeEventListener("keydown", noteKeyDown, true);
+      if (settleTimer !== null) {
+        window.clearTimeout(settleTimer);
+        settleTimer = null;
+      }
+    };
+    const settle = (scrollYAtArrival: number, attempt: number) => {
+      settleTimer = window.setTimeout(() => {
+        settleTimer = null;
+        if (visibleRatio(input) < AUTOFOCUS_VISIBLE_RATIO) {
           return;
         }
-        observer.disconnect();
-        window.removeEventListener("keydown", noteKeyDown, true);
+        if (Math.abs(window.scrollY - scrollYAtArrival) > 2) {
+          if (attempt < AUTOFOCUS_SETTLE_ATTEMPTS) {
+            settle(window.scrollY, attempt + 1);
+          }
+          return;
+        }
+        stop();
         const active = document.activeElement;
         if (active && active !== document.body && active !== input) {
           return;
@@ -175,14 +203,27 @@ export function GoalComposer({
           return;
         }
         input.focus({ preventScroll: true });
+      }, AUTOFOCUS_SETTLE_MS);
+    };
+    window.addEventListener("keydown", noteKeyDown, true);
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries.some((entry) => entry.intersectionRatio >= AUTOFOCUS_VISIBLE_RATIO);
+        if (!visible) {
+          if (settleTimer !== null) {
+            window.clearTimeout(settleTimer);
+            settleTimer = null;
+          }
+          return;
+        }
+        if (settleTimer === null) {
+          settle(window.scrollY, 1);
+        }
       },
       { threshold: AUTOFOCUS_VISIBLE_RATIO },
     );
     observer.observe(input);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("keydown", noteKeyDown, true);
-    };
+    return stop;
   }, [autoFocusOnView]);
 
   const placeholder = placeholders[placeholderIndex % Math.max(placeholders.length, 1)]
@@ -198,12 +239,13 @@ export function GoalComposer({
       <label className="sr-only" htmlFor={inputId}>
         Your goal
       </label>
-      <div
-        className="relative"
-        onFocus={onEngage}
-        onPointerEnter={onEngage}
-      >
+      <p className="sr-only" id={hintId}>
+        Finish the sentence, for example: {placeholders[0] ?? "sleep better"}
+        {placeholders[1] ? ` or ${placeholders[1]}` : ""}.
+      </p>
+      <div className="relative" onPointerEnter={onEngage}>
         <Input
+          aria-describedby={hintId}
           autoCapitalize="none"
           autoComplete="off"
           className="border-border bg-card pl-5 pr-14 text-foreground"
@@ -217,10 +259,16 @@ export function GoalComposer({
           // React change event; both call the same setter so either works.
           onInput={(event) => onQueryChange(event.currentTarget.value)}
           onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              sendRef.current?.click();
+            // Enter while an IME is composing commits the text, not the goal.
+            if (
+              event.key !== "Enter"
+              || event.nativeEvent.isComposing
+              || event.keyCode === 229
+            ) {
+              return;
             }
+            event.preventDefault();
+            sendRef.current?.click();
           }}
           ref={setInputNode}
           spellCheck={false}

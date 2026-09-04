@@ -21,6 +21,15 @@ function goal(input: {
 }
 
 describe("goal search", () => {
+  it("ignores sentence lead-ins so finishing the prompt still finds the goal", () => {
+    const goals = [goal({ routeId: "sleep-better", title: "Sleep Better" })];
+
+    expect(searchGoalItems(goals, "help me sleep better").map((g) => g.routeId)).toEqual(["sleep-better"]);
+    expect(searchGoalItems(goals, "I want to sleep better").map((g) => g.routeId)).toEqual(["sleep-better"]);
+    expect(searchGoalItems(goals, "Hey Murph, help me to sleep").map((g) => g.routeId)).toEqual(["sleep-better"]);
+    expect(searchGoalItems(goals, "help me")).toEqual([]);
+  });
+
   it("ranks direct title matches ahead of aliases and summaries", () => {
     const direct = goal({
       routeId: "improve-deep-sleep",
