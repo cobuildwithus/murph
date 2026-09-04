@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-04",
+  "order": 100,
+  "item": {
+    "id": "faster-first-onboarding-reply",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "First onboarding replies arrive faster",
+    "summary": "After Murph's welcome, the next onboarding question now arrives without repeating setup checks the conversation already answered.",
+    "details": "Ambiguous or later onboarding conversations still use the normal resume check so Murph does not skip or repeat progress.",
+    "relevanceTags": ["assistant", "messaging", "onboarding", "performance"],
+    "sourcePullRequests": [2802]
+  }
+}

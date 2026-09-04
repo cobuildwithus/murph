@@ -1,6 +1,6 @@
 # Linq canary first-runtime-turn latency
 
-Status: candidate
+Status: completed
 Created: 2026-08-31
 Updated: 2026-09-04
 
@@ -45,9 +45,10 @@ Updated: 2026-09-04
    onboarding-state resolution, or hosted cold-start sequencing.
 3. [x] Implement the smallest owner-local latency reduction with deterministic
    regression coverage.
-4. [ ] Finish the public changelog entry, parent review, scoped commits, draft
-   PR, and exact-head CI. The prompt-primary diff is exempt from final
-   ReviewGPT unless a separate cross-cutting trigger appears.
+4. [x] Finish the public changelog entry, parent review, scoped commits, and
+   draft PR. The prompt-primary diff is exempt from final ReviewGPT because no
+   separate cross-cutting trigger appeared; required exact-head CI remains the
+   PR-owned admission gate after the archived-plan commit is pushed.
 
 ## Done when
 
@@ -109,3 +110,9 @@ Updated: 2026-09-04
     tool/schema/generated guidance or other provider-visible field changed.
 - `pnpm complexity:diff` and `git diff --check` passed. Existing complexity debt
   in the prompt builder stayed unchanged; no new abstraction is justified.
+- The content-only public changelog fragment passed all nine focused archive
+  tests, and the hosted Web typecheck passed. Its unchanged presentation is the
+  production changelog archive study.
+- Parent prompt, privacy, exact-diff, and Product UX review is Ready. Draft PR
+  #2802 owns the remaining exact-head required checks.
+Completed: 2026-09-04
