@@ -40,7 +40,8 @@ export function AstraStarfield() {
           const dx = (x / 100) * bounds.width - cursorX;
           const dy = (y / 100) * bounds.height - cursorY;
           const distance = Math.hypot(dx, dy);
-          const force = Math.max(0, 1 - distance / 90) ** 2 * (12 + depth * 7);
+          const force = -Math.min(distance * 0.65,
+            Math.max(0, 1 - distance / 90) ** 2 * (12 + depth * 7));
           const angle = distance < 1 ? index * 2.4 : Math.atan2(dy, dx);
           star.style.translate = `${Math.cos(angle) * force}px ${Math.sin(angle) * force}px`;
         });
