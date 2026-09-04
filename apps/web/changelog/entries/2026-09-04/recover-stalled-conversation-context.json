@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-04",
+  "order": 100,
+  "item": {
+    "id": "recover-stalled-conversation-context",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Recover sooner when loading conversation context stalls",
+    "summary": "Murph retries a stalled context download when reopening your conversation, reducing waits caused by an inactive download.",
+    "details": "Downloads that keep making progress can continue, and an unsuccessful recovery preserves the saved workspace.",
+    "relevanceTags": [
+      "conversation",
+      "reliability"
+    ],
+    "sourcePullRequests": []
+  }
+}

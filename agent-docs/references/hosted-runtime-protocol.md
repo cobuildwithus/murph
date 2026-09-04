@@ -3443,6 +3443,18 @@ snapshot planning, diagnostics, and mailbox-import policy; Cloudflare supplies
 only explicit platform capabilities such as mailbox payload decode, direct-R2
 ports, and the local encrypted archive writer.
 
+Direct-R2 snapshot body reads have a 15-second inactivity budget for each pending
+stream read. Consumer hash/decrypt work between reads does not spend that budget;
+the original signed-URL expiry still bounds the complete download. A body-idle
+timeout cancels that stream and uses the existing two-attempt restore read loop.
+Caller cancellation and the overall deadline remain terminal, and neither attempt
+replaces the durable root until byte counts, hashes, and authenticated decryption
+succeed. Other control-plane response readers retain their existing timeout policy.
+Each body attempt emits scalar-only read-wait, maximum read-wait, consumer-elapsed,
+byte-count, and completion diagnostics through the existing structured logger.
+Read-wait includes event-loop scheduling delay and must not be called pure network
+latency. The existing persisted restore timing fields keep their current meaning.
+
 True idle-shutdown maintenance also compacts closed
 `ledger/integration-ingests/YYYY/YYYY-MM.jsonl` shards in place before snapshot
 planning. The core owner streams each raw shard into deterministic level-6
