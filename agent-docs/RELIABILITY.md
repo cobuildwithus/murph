@@ -107,11 +107,13 @@ Last verified: 2026-09-02
   live reader set. The same dispatch selects exactly the private integration
   manifest's foreground-priority lane, forces and observes
   `HOSTED_EXECUTION_STANDBY_MODE=allocate`, and returns one additional digest
-  bound to the exact public SHA, private SHA, and fixed lane. The private
-  workflow rejects any release request that is not current public `main` plus
-  current protected private `main`. The public controller re-reads both branches
-  before success; private protected attestations independently re-read every
-  supported reader and both branch heads.
+  bound to the exact public SHA, private SHA, fixed lane, and the protected
+  public environment's expected production Temporal target digest. The private
+  workflow independently derives the live target and rejects mismatch before
+  or after hosted proof, as well as any release request that is not current
+  public `main` plus current protected private `main`. The public controller
+  re-reads both branches before success; private protected attestations
+  independently re-read every supported reader and both branch heads.
   The Vercel Git integration is the sole production deployment owner, and every
   `main` commit must create a candidate: no ignore command, local production
   upload, historical promotion, Instant Rollback, or force-promotion is part of

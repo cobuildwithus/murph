@@ -46,6 +46,8 @@ const PRIVATE_SHA = "b".repeat(40);
 const CURRENT_READER_SHA = "c".repeat(40);
 const RAMPING_READER_SHA = "d".repeat(40);
 const MOVED_PRIVATE_SHA = "e".repeat(40);
+const TEMPORAL_TARGET_DIGEST = "e".repeat(64);
+const OTHER_TEMPORAL_TARGET_DIGEST = "f".repeat(64);
 const REQUEST_ID = `temporal-${PUBLIC_SHA}-123-1`;
 const PRODUCER_FIXTURES = JSON.stringify([{
   blocked: null,
@@ -110,6 +112,7 @@ function privateRun(overrides = {}) {
 }
 
 function proofJobs({
+  expectedTemporalTargetDigest = TEMPORAL_TARGET_DIGEST,
   releaseScope = HOSTED_RELEASE_SCOPE_NONE,
   proofDigest = compatibilityProofDigest({
     producerDigest: PRODUCER_DIGEST,
@@ -163,6 +166,7 @@ function proofJobs({
       id: 5,
       name: buildHostedReleaseAttestationJobName({
         proofDigest: hostedReleaseProofDigest({
+          expectedTemporalTargetDigest,
           releaseScope,
           privateSha: PRIVATE_SHA,
           publicSha: PUBLIC_SHA,
@@ -388,8 +392,10 @@ test("dispatch contract is closed, versioned, and exact-SHA only", () => {
     producer_digest: PRODUCER_DIGEST,
     producer_fixtures: PRODUCER_FIXTURES,
     request_id: REQUEST_ID,
+    temporal_target_digest: "",
   });
   assert.deepEqual(buildDispatchInputs({
+    expectedTemporalTargetDigest: TEMPORAL_TARGET_DIGEST,
     releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
     mode: HOSTED_RELEASE_ADMISSION_MODE,
     producerDigest: PRODUCER_DIGEST,
@@ -404,7 +410,16 @@ test("dispatch contract is closed, versioned, and exact-SHA only", () => {
     producer_digest: PRODUCER_DIGEST,
     producer_fixtures: PRODUCER_FIXTURES,
     request_id: REQUEST_ID,
+    temporal_target_digest: TEMPORAL_TARGET_DIGEST,
   });
+  assert.throws(() => buildDispatchInputs({
+    releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
+    mode: HOSTED_RELEASE_ADMISSION_MODE,
+    producerDigest: PRODUCER_DIGEST,
+    producerFixtures: PRODUCER_FIXTURES,
+    publicSha: PUBLIC_SHA,
+    requestId: REQUEST_ID,
+  }), /expected Temporal target digest/u);
   assert.throws(() => buildDispatchInputs({
     releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
     producerDigest: PRODUCER_DIGEST,
@@ -525,15 +540,17 @@ test("attestation accepts the exact SHA-only private reader proof", () => {
   });
 });
 
-test("hosted release attestation binds scope plus exact public and private revisions", () => {
+test("hosted release attestation binds scope, exact revisions, and the expected Temporal target", () => {
   assert.equal(hostedReleaseProofDigest({
+    expectedTemporalTargetDigest: TEMPORAL_TARGET_DIGEST,
     privateSha: PRIVATE_SHA,
     publicSha: PUBLIC_SHA,
     releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
-  }), "960beac94412483af1bca487dcb5a4d1355856bcc3706d478662ede153219463");
+  }), "f5f38e52bff74f3d20cc60c9bc53bcef4341ca6260c84c18aa8bce929207fd0d");
   assert.equal(inspectAttestationJobs(
     proofJobs({ releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND }),
     {
+      expectedTemporalTargetDigest: TEMPORAL_TARGET_DIGEST,
       ...proofInspectionArgs(),
       releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
     },
@@ -541,14 +558,24 @@ test("hosted release attestation binds scope plus exact public and private revis
   assert.throws(() => inspectAttestationJobs(
     proofJobs({ releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND }),
     {
+      expectedTemporalTargetDigest: TEMPORAL_TARGET_DIGEST,
       ...proofInspectionArgs({ privateSha: MOVED_PRIVATE_SHA }),
       releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
     },
   ), /not bound to the accepted run|does not bind/u);
   assert.throws(() => inspectAttestationJobs(proofJobs(), {
+    expectedTemporalTargetDigest: TEMPORAL_TARGET_DIGEST,
     ...proofInspectionArgs(),
     releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
   }), /exactly one hosted release attestation/u);
+  assert.throws(() => inspectAttestationJobs(
+    proofJobs({ releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND }),
+    {
+      expectedTemporalTargetDigest: OTHER_TEMPORAL_TARGET_DIGEST,
+      ...proofInspectionArgs(),
+      releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
+    },
+  ), /does not bind the requested proof/u);
 });
 
 test("attestation rejects omission of the dispatched private candidate", () => {
@@ -759,6 +786,7 @@ test("deployment controller dispatches the hosted release lane and binds both re
     if (url.endsWith("/dispatches")) {
       assert.deepEqual(JSON.parse(init.body), {
         inputs: buildDispatchInputs({
+          expectedTemporalTargetDigest: TEMPORAL_TARGET_DIGEST,
           releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
           mode: HOSTED_RELEASE_ADMISSION_MODE,
           producerDigest: PRODUCER_DIGEST,
@@ -782,6 +810,7 @@ test("deployment controller dispatches the hosted release lane and binds both re
   }, async () => {
     const proof = await runTemporalCompatibility(compatibilityArgs({
       dispatchMode: HOSTED_RELEASE_ADMISSION_MODE,
+      expectedTemporalTargetDigest: TEMPORAL_TARGET_DIGEST,
       releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
       prNumber: null,
       sleepFn: async () => undefined,
@@ -1286,6 +1315,10 @@ test("Web production admission runs only for exact public main", async () => {
   assert.match(workflow, /environment: temporal-compatibility/u);
   assert.match(workflow, /ref: \$\{\{ github\.sha \}\}/u);
   assert.match(workflow, /hosted-orchestration-compatibility\.mjs run-main/u);
+  assert.match(
+    workflow,
+    /TEMPORAL_PRODUCTION_TARGET_DIGEST: \$\{\{ vars\.TEMPORAL_PRODUCTION_TARGET_DIGEST \}\}/u,
+  );
   assert.match(workflow, /--sha "\$\{GITHUB_SHA\}"/u);
   assert.match(workflow, /permission-actions: write/u);
   assert.match(workflow, /repositories: murph-cloud/u);

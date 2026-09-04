@@ -817,11 +817,14 @@ The hard-cut architecture is accepted when:
   current private `main`, and current live readers produce one accepted proof.
   That same private run selects the one canonical foreground-priority lane from
   its integration manifest, forces and observes standby allocation, and emits a
-  second digest bound to both exact main SHAs and the fixed lane. The release
-  mode rejects an arbitrary public ref; public pull requests remain fixture-only
-  and never execute beside private source. The public controller re-reads both
-  branch heads, and private protected attestations re-read the supported reader
-  set and both heads, before success. Every `main` commit creates one managed
+  second digest bound to both exact main SHAs, the fixed lane, and the public
+  protected environment's expected production Temporal target digest. Private
+  setup and final attestation derive the live target from protected
+  configuration and reject mismatch without exporting its component values.
+  The release mode rejects an arbitrary public ref; public pull requests remain
+  fixture-only and never execute beside private source. The public controller
+  re-reads both branch heads, and private protected attestations re-read the
+  supported reader set and both heads, before success. Every `main` commit creates one managed
   candidate, and no local production upload or historical promotion/rollback
   path may compete with that Git owner. Rollback uses a fresh revert commit so
   it receives current proof. This proves the reconciliation-facts wire boundary

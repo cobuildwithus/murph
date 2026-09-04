@@ -1403,7 +1403,11 @@ locally readable.
   and attestation jobs remain isolated jobs that check out only private
   controller or immutable reader source. The final private release attestation
   consumes job results, independently re-reads both protected branches, and
-  names a digest bound to both SHAs and the fixed scope. Neither side may
+  names a digest bound to both SHAs, the fixed scope, and the public protected
+  environment's non-secret expected production target digest. Private setup
+  and final attestation derive the live target from protected Temporal
+  configuration and reject mismatch without returning its address, namespace,
+  credentials, poller identities, or timestamps. Neither side may
   restore candidate-controlled caches beside credentials, read private logs or
   artifacts, expose reader revisions publicly, or accept workflow/check names
   from the candidate.

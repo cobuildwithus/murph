@@ -872,7 +872,9 @@ request status in addition to public checks. After merge, every public `main`
 production candidate dispatches private `Public Murph Integration` release
 admission against the exact public and private main revisions. That lane runs
 the canonical foreground-priority scenario with standby allocation explicitly
-enabled; it never checks out a public pull-request candidate. The public
+enabled, binds its proof to the public protected environment's expected
+production Temporal target digest, and rejects live-target drift; it never
+checks out a public pull-request candidate. The public
 `hosted-temporal:guard` remains wired into `pnpm typecheck`; it prevents the
 worker implementation from returning here and retains the Web/Cloudflare
 architecture guards, while Murph Cloud owns patch-marker and replay gates.

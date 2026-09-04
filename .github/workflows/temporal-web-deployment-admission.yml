@@ -8,6 +8,8 @@ on:
 # Vercel must configure the admission job below as a production Deployment
 # Check. The build may complete while this workflow runs, but the production
 # domains must not move until this exact-main compatibility proof succeeds.
+# Its protected environment also owns the non-secret digest of the production
+# Temporal target expected by the private release proof.
 permissions:
   contents: read
 
@@ -58,6 +60,7 @@ jobs:
           EXPECTED_BASE_REF: ${{ github.event.repository.default_branch }}
           TEMPORAL_COMPATIBILITY_PRIVATE_GITHUB_TOKEN: ${{ steps.private-app-token.outputs.token }}
           TEMPORAL_COMPATIBILITY_PUBLIC_GITHUB_TOKEN: ${{ github.token }}
+          TEMPORAL_PRODUCTION_TARGET_DIGEST: ${{ vars.TEMPORAL_PRODUCTION_TARGET_DIGEST }}
         run: >-
           node scripts/hosted-orchestration-compatibility.mjs run-main
           --sha "${GITHUB_SHA}"

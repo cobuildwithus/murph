@@ -55,10 +55,14 @@ promotion.
   the corrected standby eligibility truth table from the landed regression fix.
 - [x] Update canonical security, reliability, testing, and deployment contracts
   for the implemented owner model.
-- [ ] Run focused local proof in both repositories, inspect privacy and diff
-  shape, commit through the scoped plan path, and open paired draft PRs.
-- [ ] Complete both repositories' exact-head CI and ReviewGPT gates before
-  merge; retarget the public PR to `main` only after #2683 lands.
+- [x] Run focused local proof in both repositories, inspect privacy and diff
+  shape, commit through the scoped plan path, and open the private draft PR.
+- [x] Merge public prerequisites #2683 and #2747, then merge private #96 after
+  its exact-head CI and final review findings were resolved.
+- [x] Bind the remaining public controller to the merged private target-digest
+  contract and provision the protected public environment. Exact-head CI,
+  merge, and post-merge admission are remote follow-through for the scoped
+  commit; do not run another ReviewGPT round per user instruction.
 
 ## Product UX
 
@@ -86,12 +90,16 @@ the targeted hosted execution proof.
 
 ## Deployment Concerns
 
-Land the private release-mode support first. After #2683 lands, retarget and
-land the public controller so `Temporal Web production admission` requires both
+The private release mode and public prerequisites are landed. Before the public
+controller merges, configure its protected `temporal-compatibility` environment
+with the non-secret `TEMPORAL_PRODUCTION_TARGET_DIGEST` for the same production
+target that private setup and final attestation derive. Then land the public
+controller so `Temporal Web production admission` requires both
 the existing live-reader proof and the exact-main foreground hosted proof.
 Confirm one public `main` candidate blocks when the foreground proof fails and
 passes only when standby allocation is explicitly observed. The existing
 Vercel Deployment Check binding remains the production authority.
 
-Status: active
-Updated: 2026-09-02
+Status: completed
+Updated: 2026-09-03
+Completed: 2026-09-03
