@@ -4,6 +4,7 @@ import path from "node:path";
 
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
+  buildHostedExecutionDeviceSyncWake,
 } from "@murphai/hosted-execution";
 import { describe, expect, it } from "vitest";
 
@@ -329,6 +330,59 @@ describe("hosted runtime system mailbox state", () => {
     })).toEqual({
       firstPendingSeq: "4",
       handledThroughSeq: "3",
+    });
+  });
+
+  it("does not let a handled device item retained as a local retry pin the canonical prefix", () => {
+    const retryAt = "2026-04-28T00:00:00.000Z";
+    const base = buildPendingDeviceSyncMailboxItem({
+      itemId: "retained_device_retry",
+      mailboxLaneSeq: "4",
+    });
+    const retainedDeviceRetry: HostedSystemMailboxPendingItem = {
+      ...base,
+      attemptCount: 1,
+      lastAttemptAt: "2026-04-27T00:00:00.000Z",
+      nextAttemptAt: retryAt,
+      wake: buildHostedExecutionDeviceSyncWake({
+        connectionId: "dsc_retained_retry",
+        eventId: "device-sync.wake:retained_device_retry",
+        expectedConnectedAt: "2026-04-01T00:00:00.000Z",
+        hint: {
+          jobs: [{
+            availableAt: retryAt,
+            dedupeKey: "retained-weight-retry",
+            kind: "resource",
+            maxAttempts: 1,
+            payload: {},
+          }],
+        },
+        occurredAt: "2026-04-27T00:00:00.000Z",
+        provider: "junction",
+        reason: "reconcile_due",
+        userId: "member_123",
+      }),
+    };
+    const pendingSuccessor = buildPendingSystemMailboxItem({
+      itemId: "pending_successor",
+      mailboxLaneSeq: "9",
+    });
+
+    expect(resolveHostedSystemMailboxProgress({
+      importedSeq: "9",
+      now: "2026-04-27T00:00:00.000Z",
+      state: { pending: [retainedDeviceRetry, pendingSuccessor] },
+    })).toEqual({
+      firstPendingSeq: "9",
+      handledThroughSeq: "8",
+    });
+    expect(resolveHostedSystemMailboxProgress({
+      importedSeq: "9",
+      now: retryAt,
+      state: { pending: [retainedDeviceRetry] },
+    })).toEqual({
+      firstPendingSeq: null,
+      handledThroughSeq: "9",
     });
   });
 

@@ -176,7 +176,12 @@ export function resolveHostedSystemMailboxProgress(input: {
   let earliestPendingSeq: bigint | null = null;
   const now = input.now ?? new Date().toISOString();
   for (const item of input.state.pending) {
-    if (isHostedDeviceSyncDenseRawRetentionMailboxItem(item)) {
+    // Retained device retries are local continuations of an already handled
+    // mailbox item, so they must not hold back canonical mailbox progress.
+    if (
+      isHostedDeviceSyncDenseRawRetentionMailboxItem(item)
+      || isHostedRetainedDeviceJobRetry(item)
+    ) {
       continue;
     }
     if (isExpiredHostedGroupContextHandoffSystemMailboxItem(item, now)) {
@@ -658,13 +663,19 @@ function isHostedFutureRetainedDeviceJobRetry(
   item: HostedSystemMailboxPendingItem,
   now: string,
 ): boolean {
+  return isHostedRetainedDeviceJobRetry(item)
+    && !systemMailboxItemIsDue(item, now);
+}
+
+function isHostedRetainedDeviceJobRetry(
+  item: HostedSystemMailboxPendingItem,
+): boolean {
   if (
     item.status !== "pending"
     || item.postCheckpointRecord !== null
     || item.nextAttemptAt === null
     || item.wake.kind !== "device-sync.wake"
     || !item.wake.connectionId
-    || systemMailboxItemIsDue(item, now)
   ) {
     return false;
   }
