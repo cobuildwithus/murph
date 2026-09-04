@@ -151,8 +151,32 @@ export async function readHostedSystemMailboxProgress(input: {
 }
 
 export interface HostedSystemMailboxProgress {
+  firstPendingClassifierFailures: HostedSystemMailboxFirstPendingClassifierFailure[] | null;
   firstPendingSeq: string | null;
   handledThroughSeq: string;
+}
+
+const HOSTED_SYSTEM_MAILBOX_FIRST_PENDING_CLASSIFIER_FAILURE_VALUES = [
+  "connection_missing",
+  "job_hints_missing",
+  "job_schedule_match_missing",
+  "next_attempt_missing",
+  "post_checkpoint_record_present",
+  "status_not_pending",
+  "wake_not_device_sync",
+] as const;
+
+export type HostedSystemMailboxFirstPendingClassifierFailure =
+  typeof HOSTED_SYSTEM_MAILBOX_FIRST_PENDING_CLASSIFIER_FAILURE_VALUES[number];
+
+const HOSTED_SYSTEM_MAILBOX_FIRST_PENDING_CLASSIFIER_FAILURES =
+  new Set<string>(HOSTED_SYSTEM_MAILBOX_FIRST_PENDING_CLASSIFIER_FAILURE_VALUES);
+
+export function isHostedSystemMailboxFirstPendingClassifierFailure(
+  value: unknown,
+): value is HostedSystemMailboxFirstPendingClassifierFailure {
+  return typeof value === "string"
+    && HOSTED_SYSTEM_MAILBOX_FIRST_PENDING_CLASSIFIER_FAILURES.has(value);
 }
 
 export function resolveHostedSystemMailboxHandledThroughSeq(input: {
@@ -174,6 +198,7 @@ export function resolveHostedSystemMailboxProgress(input: {
 
   const importedSeq = BigInt(input.importedSeq);
   let earliestPendingSeq: bigint | null = null;
+  let earliestPendingItem: HostedSystemMailboxPendingItem | null = null;
   const now = input.now ?? new Date().toISOString();
   for (const item of input.state.pending) {
     // Retained device retries are local continuations of an already handled
@@ -189,6 +214,8 @@ export function resolveHostedSystemMailboxProgress(input: {
     }
     if (item.mailboxLaneSeq === null) {
       return {
+        firstPendingClassifierFailures:
+          classifyHostedSystemMailboxFirstPendingItem(item),
         firstPendingSeq: null,
         handledThroughSeq: "0",
       };
@@ -196,21 +223,60 @@ export function resolveHostedSystemMailboxProgress(input: {
     const pendingSeq = BigInt(item.mailboxLaneSeq);
     if (earliestPendingSeq === null || pendingSeq < earliestPendingSeq) {
       earliestPendingSeq = pendingSeq;
+      earliestPendingItem = item;
     }
   }
 
   if (earliestPendingSeq === null) {
     return {
+      firstPendingClassifierFailures: null,
       firstPendingSeq: null,
       handledThroughSeq: importedSeq.toString(),
     };
   }
+  if (earliestPendingItem === null) {
+    throw new Error("Hosted system mailbox first pending item is missing.");
+  }
   const handledBeforePending = earliestPendingSeq - 1n;
   return {
+    firstPendingClassifierFailures:
+      classifyHostedSystemMailboxFirstPendingItem(earliestPendingItem),
     firstPendingSeq: earliestPendingSeq.toString(),
     handledThroughSeq:
       (handledBeforePending < importedSeq ? handledBeforePending : importedSeq).toString(),
   };
+}
+
+function classifyHostedSystemMailboxFirstPendingItem(
+  item: HostedSystemMailboxPendingItem,
+): HostedSystemMailboxFirstPendingClassifierFailure[] {
+  if (item.wake.kind !== "device-sync.wake") {
+    return ["wake_not_device_sync"];
+  }
+
+  const failures: HostedSystemMailboxFirstPendingClassifierFailure[] = [];
+  if (item.status !== "pending") {
+    failures.push("status_not_pending");
+  }
+  if (item.postCheckpointRecord !== null) {
+    failures.push("post_checkpoint_record_present");
+  }
+  if (item.nextAttemptAt === null) {
+    failures.push("next_attempt_missing");
+  }
+  if (!item.wake.connectionId) {
+    failures.push("connection_missing");
+  }
+  const jobs = item.wake.hint?.jobs;
+  if (jobs === undefined) {
+    failures.push("job_hints_missing");
+  } else if (
+    item.nextAttemptAt === null
+    || !jobs.some((job) => job.availableAt === item.nextAttemptAt)
+  ) {
+    failures.push("job_schedule_match_missing");
+  }
+  return failures;
 }
 
 export async function updateHostedSystemMailboxState<TResult = void>(
@@ -670,18 +736,7 @@ function isHostedFutureRetainedDeviceJobRetry(
 function isHostedRetainedDeviceJobRetry(
   item: HostedSystemMailboxPendingItem,
 ): boolean {
-  if (
-    item.status !== "pending"
-    || item.postCheckpointRecord !== null
-    || item.nextAttemptAt === null
-    || item.wake.kind !== "device-sync.wake"
-    || !item.wake.connectionId
-  ) {
-    return false;
-  }
-  return item.wake.hint?.jobs?.some((job) =>
-    job.availableAt === item.nextAttemptAt
-  ) === true;
+  return classifyHostedSystemMailboxFirstPendingItem(item).length === 0;
 }
 
 function findNextHostedSystemMailboxQueueItemByOrder(input: {

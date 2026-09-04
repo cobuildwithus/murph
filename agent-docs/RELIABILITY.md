@@ -1866,9 +1866,19 @@ Last verified: 2026-09-02
   plus one truncation probe before runtime-access and usage-denial exclusions;
   exclusion-heavy populations therefore set `scanTruncated` instead of causing
   an unbounded scan. Its persisted state and email contain aggregate
-  runtime/lane counts, pending counts, timings, and invalid/truncated evidence
-  only; they never contain member, mailbox, phone, message, trace, or exception
-  identifiers. The progress and latency incidents rearm independently, so one
+  runtime/lane counts, pending counts, timings, invalid/truncated evidence, and
+  system-lane diagnostics only. Those diagnostics classify device-sync heads,
+  full/partial/head-unimported/unknown workspace import coverage,
+  imported-but-unhandled item counts, and assistant/device-sync/other wake
+  ownership; they never contain member, mailbox, phone, message, trace, or
+  exception identifiers. The existing terminal runtime-invocation log records
+  the public runner release SHA, result status, selected wake, and derived
+  system imported/handled/first-pending sequences. When an item holds the
+  system frontier, it also records bounded code-only failures for the retained
+  device-retry classifier (status, post-checkpoint state, retry time,
+  connection presence, and job-schedule match) so an operator can correlate
+  aggregate alert evidence with the exact privacy-safe runtime history. The
+  progress and latency incidents rearm independently, so one
   continuous anomaly cannot hide the first alert for the other. A continuing
   progress incident also becomes eligible for one fresh aggregate reminder six
   hours after its prior successful email plus stable bounded jitter. The

@@ -328,6 +328,7 @@ describe("hosted runtime system mailbox state", () => {
         ],
       },
     })).toEqual({
+      firstPendingClassifierFailures: ["wake_not_device_sync"],
       firstPendingSeq: "4",
       handledThroughSeq: "3",
     });
@@ -373,6 +374,7 @@ describe("hosted runtime system mailbox state", () => {
       now: "2026-04-27T00:00:00.000Z",
       state: { pending: [retainedDeviceRetry, pendingSuccessor] },
     })).toEqual({
+      firstPendingClassifierFailures: ["wake_not_device_sync"],
       firstPendingSeq: "9",
       handledThroughSeq: "8",
     });
@@ -381,8 +383,40 @@ describe("hosted runtime system mailbox state", () => {
       now: retryAt,
       state: { pending: [retainedDeviceRetry] },
     })).toEqual({
+      firstPendingClassifierFailures: null,
       firstPendingSeq: null,
       handledThroughSeq: "9",
+    });
+
+    const mismatchedRetry = {
+      ...retainedDeviceRetry,
+      wake: buildHostedExecutionDeviceSyncWake({
+        connectionId: "dsc_retained_retry",
+        eventId: "device-sync.wake:retained_device_retry",
+        expectedConnectedAt: "2026-04-01T00:00:00.000Z",
+        hint: {
+          jobs: [{
+            availableAt: "2026-04-28T00:01:00.000Z",
+            dedupeKey: "retained-weight-retry",
+            kind: "resource",
+            maxAttempts: 1,
+            payload: {},
+          }],
+        },
+        occurredAt: "2026-04-27T00:00:00.000Z",
+        provider: "junction",
+        reason: "reconcile_due",
+        userId: "member_123",
+      }),
+    };
+    expect(resolveHostedSystemMailboxProgress({
+      importedSeq: "9",
+      now: retryAt,
+      state: { pending: [mismatchedRetry] },
+    })).toEqual({
+      firstPendingClassifierFailures: ["job_schedule_match_missing"],
+      firstPendingSeq: "4",
+      handledThroughSeq: "3",
     });
   });
 
@@ -405,6 +439,7 @@ describe("hosted runtime system mailbox state", () => {
         })],
       },
     })).toEqual({
+      firstPendingClassifierFailures: ["wake_not_device_sync"],
       firstPendingSeq: null,
       handledThroughSeq: "0",
     });

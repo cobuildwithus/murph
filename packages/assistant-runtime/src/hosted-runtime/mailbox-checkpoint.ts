@@ -173,6 +173,8 @@ export async function importHostedMailboxPrefixAndCheckpoint(
     });
     const redactedStatus = {
       ...buildHostedMailboxImportRedactedStatus(importResult),
+      hostedMailboxSystemFirstPendingClassifierFailures:
+        systemMailboxProgress.firstPendingClassifierFailures,
       hostedMailboxSystemHandledThroughSeq:
         systemMailboxProgress.handledThroughSeq,
       hostedMailboxSystemFirstPendingSeq:

@@ -539,9 +539,12 @@ Hosted runtime-progress monitoring and Linq exact-consume reaction confirmation,
 including consumed conversation exclusion before lane head/count selection,
 canonical device-retry wake timing, bounded raw candidate scans, receipt-backed
 confirmation-failure ownership, provider-no-replay recovery, and immediate
-quiet-hour paging for durable runtime-progress incidents, are jointly
-specified by `agent-docs/RELIABILITY.md` and
-`agent-docs/references/hosted-runtime-protocol.md`.
+quiet-hour paging for durable runtime-progress incidents, plus identifier-free
+system import/wake aggregates and code-only first-pending classifier diagnostics
+on the existing terminal invocation log, are jointly specified by
+`agent-docs/RELIABILITY.md`,
+`agent-docs/references/hosted-runtime-protocol.md`, and
+`agent-docs/references/testing-ci-map.md`.
 
 Content-free provider-turn correlation with progress call, sent, and first-call
 timing diagnostics—and unsent delivery derived from the call/sent delta—is
