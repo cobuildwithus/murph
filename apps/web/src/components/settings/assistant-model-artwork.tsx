@@ -40,81 +40,35 @@ export function AssistantModelArtwork({
   );
 }
 
-// Fixed particles keep the illustration identical across server and client renders.
-const ASTRA_DUST = Array.from({ length: 240 }, (_, index) => {
-  const progress = index / 239;
-  const angle = progress * 10 + 1.27;
-  const scatter = Math.sin(index * 127.1) * Math.cos(index * 311.7);
-  const radius = 3 + progress * 69 + scatter * (2 + progress * 5);
-
-  return (
-    <circle
-      key={index}
-      cx={(181 + Math.cos(angle) * radius).toFixed(3)}
-      cy={(99 + Math.sin(angle) * radius).toFixed(3)}
-      r={(index % 13 === 0 ? 1.05 : 0.35 + Math.abs(scatter) * 0.55).toFixed(3)}
-      fill={index % 4 === 0 ? "#c4a882" : index % 3 === 0 ? "#f5f7f4" : "#6d9eaf"}
-      opacity={(0.45 + Math.abs(scatter) * 0.55).toFixed(3)}
-    />
-  );
-});
-
 function AstraArtwork() {
   const id = useId();
 
   return (
     <g className={styles.astra}>
       <defs>
-        <g id={`${id}-dust`}>{ASTRA_DUST}</g>
-        <radialGradient id={`${id}-nebula`}>
-          <stop stopColor="#0e252f" stopOpacity="0.95" />
-          <stop offset="0.5" stopColor="#143947" stopOpacity="0.84" />
-          <stop offset="0.7" stopColor="#326475" stopOpacity="0.38" />
-          <stop offset="1" stopColor="#5d8693" stopOpacity="0" />
-        </radialGradient>
-        <radialGradient id={`${id}-core`}>
-          <stop stopColor="#fffdf4" />
-          <stop offset="0.12" stopColor="#f9edca" stopOpacity="0.95" />
-          <stop offset="0.38" stopColor="#94c7da" stopOpacity="0.55" />
-          <stop offset="1" stopColor="#94c7da" stopOpacity="0" />
-        </radialGradient>
+        <linearGradient id={`${id}-starlight`} x1="0" y1="0" x2="1" y2="1">
+          <stop stopColor="#8db6be" />
+          <stop offset="0.5" stopColor="#c8d9cc" />
+          <stop offset="1" stopColor="#d9b778" />
+        </linearGradient>
       </defs>
-      <ellipse cx="184" cy="95" rx="80" ry="79" fill={`url(#${id}-nebula)`} />
-      <g className={styles.dust}>
-        <use href={`#${id}-dust`} />
-      </g>
-      <g className={styles.echo} opacity="0.45">
-        <use href={`#${id}-dust`} />
-      </g>
-      <g className={styles.orbit}>
+      <g className={styles.star}>
         <path
-          d="M159 82a28 28 0 0 1 22-11"
-          fill="none"
-          stroke="#94c7da"
-          strokeWidth="0.7"
-          opacity="0.5"
+          d="M182 45C188 79 194 90 230 99C194 108 188 119 182 153C176 119 170 108 134 99C170 90 176 79 182 45Z"
+          fill={`url(#${id}-starlight)`}
+          opacity="0.8"
         />
-        <circle cx="181" cy="71" r="1.3" fill="#fffdf4" />
+        <path
+          d="m182 73 2.5 23.5L204 99l-19.5 2.5L182 125l-2.5-23.5L160 99l19.5-2.5Z"
+          fill="#fffcf6"
+          opacity="0.9"
+        />
       </g>
-      <circle
-        className={styles.core}
-        cx="181"
-        cy="99"
-        r="22"
-        fill={`url(#${id}-core)`}
-      />
-      <g className={styles.stars} fill="#fffdf4">
-        <path d="m181 88 1.4 9.6L192 99l-9.6 1.4L181 110l-1.4-9.6L170 99l9.6-1.4Z" />
-        <path d="m125 77 1 5 5 1-5 1-1 5-1-5-5-1 5-1Z" />
-        <path d="m191 29 0.8 4.2 4.2 0.8-4.2 0.8-0.8 4.2-0.8-4.2-4.2-0.8 4.2-0.8Z" />
-      </g>
-      <g className={styles.satellites} fill="#85a5b0">
-        <circle cx="113" cy="47" r="0.8" />
-        <circle cx="156" cy="21" r="0.6" />
-        <circle cx="232" cy="71" r="1" />
-        <circle cx="130" cy="132" r="0.7" />
-        <circle cx="205" cy="148" r="0.8" />
-        <path d="m212 100 0.8 4.2 4.2 0.8-4.2 0.8-0.8 4.2-0.8-4.2-4.2-0.8 4.2-0.8Z" />
+      <g className={styles.sparks}>
+        <path d="m132 48 2 8 8 2-8 2-2 8-2-8-8-2 8-2Z" fill="#9ebfbf" />
+        <path d="m223 118 1.5 6.5 6.5 1.5-6.5 1.5-1.5 6.5-1.5-6.5-6.5-1.5 6.5-1.5Z" fill="#d3b37c" />
+        <circle cx="211" cy="53" r="1.5" fill="#b5caba" />
+        <circle cx="143" cy="129" r="1.5" fill="#a8c3c6" />
       </g>
     </g>
   );
