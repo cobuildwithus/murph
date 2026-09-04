@@ -2422,10 +2422,7 @@ describeRealCodex('real Codex workout capture default e2e', () => {
 
       try {
         const skillsRoot = path.join(workingDirectory, 'skills')
-        await materializeAssistantSkill({
-          skillsRoot,
-          slug: 'daily-activity',
-        })
+        await cp(resolveAssistantSkillsRoot(), skillsRoot, { recursive: true })
         await initializeVault({
           title: 'Synthetic workout capture default proof',
           timezone: 'UTC',
@@ -2618,6 +2615,9 @@ describeRealCodex('real Codex workout capture default e2e', () => {
         const routeWorkouts = routeVault.events.filter(
           (event) => event.kind === 'activity_session',
         )
+        const routeWorkout = routeWorkouts.find(
+          (event) => event.attributes.activityType === 'running',
+        )
         const routeCommands = (await readFile(commandLogPath, 'utf8'))
           .trim()
           .split('\n')
@@ -2632,7 +2632,7 @@ describeRealCodex('real Codex workout capture default e2e', () => {
         process.stdout.write(
           `[workout-capture-default-e2e] ${JSON.stringify({
             durationMinutes:
-              routeWorkouts.at(-1)?.attributes.durationMinutes ?? null,
+              routeWorkout?.attributes.durationMinutes ?? null,
             finalMessage: routeReported.finalMessage,
             routeEstimateCommand: routeEstimateCommand ?? null,
             routeWorkoutCommand: routeWorkoutCommand ?? null,
@@ -2642,7 +2642,7 @@ describeRealCodex('real Codex workout capture default e2e', () => {
         )
 
         expect(routeWorkouts).toHaveLength(3)
-        expect(routeWorkouts.at(-1)?.attributes.durationMinutes).toBe(60)
+        expect(routeWorkout?.attributes.durationMinutes).toBe(60)
         expect(routeEstimateCommand).toBeDefined()
         expect(routeWorkoutCommand).toBeDefined()
         expect(routeWorkoutCommand).not.toMatch(/--duration(?:=|\s)/u)
