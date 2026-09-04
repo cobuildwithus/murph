@@ -57,7 +57,11 @@ describe.skipIf(!runPostgresMigrationProof)(
           );
         `);
 
-        await client.query(migrationSql);
+        await applyMigration(client);
+
+        await expect(client.query(
+          "SELECT to_regclass('pg_temp.linq_email_identity_backfill') AS scratch",
+        )).resolves.toMatchObject({ rows: [{ scratch: null }] });
 
         await expect(client.query<{ lookupKey: string | null }>(`
           SELECT "linq_email_handle_lookup_key" AS "lookupKey"
@@ -89,7 +93,7 @@ describe.skipIf(!runPostgresMigrationProof)(
             ('member_two', 'email', 'shared-key');
         `);
 
-        await expect(client.query(migrationSql)).rejects.toThrow(
+        await expect(applyMigration(client)).rejects.toThrow(
           "one handle belongs to multiple members",
         );
       });
@@ -111,13 +115,62 @@ describe.skipIf(!runPostgresMigrationProof)(
           ) VALUES ('member_verified', 'conflict-key');
         `);
 
-        await expect(client.query(migrationSql)).rejects.toThrow(
+        await expect(applyMigration(client)).rejects.toThrow(
           "verified email belongs to another member",
+        );
+      });
+    });
+
+    it("rejects different active and pending handles on one member", async () => {
+      await withFixtureSchema(async (client) => {
+        await client.query(`
+          INSERT INTO "hosted_member_identity" ("member_id") VALUES ('member_one');
+          INSERT INTO "hosted_member_routing" (
+            "member_id", "linq_participant_contact_kind",
+            "linq_participant_contact_lookup_key",
+            "pending_linq_participant_contact_kind",
+            "pending_linq_participant_contact_lookup_key"
+          ) VALUES ('member_one', 'email', 'active-key', 'email', 'pending-key');
+        `);
+        await expect(applyMigration(client)).rejects.toThrow(
+          "one member has multiple handles",
+        );
+      });
+    });
+
+    it("rejects an email route without an identity owner", async () => {
+      await withFixtureSchema(async (client) => {
+        await client.query(`
+          INSERT INTO "hosted_member_routing" (
+            "member_id", "pending_linq_participant_contact_kind",
+            "pending_linq_participant_contact_lookup_key"
+          ) VALUES ('member_missing', 'email', 'orphan-key');
+        `);
+        await expect(applyMigration(client)).rejects.toThrow(
+          "a route owner has no identity row",
         );
       });
     });
   },
 );
+
+async function applyMigration(client: pg.Client): Promise<void> {
+  try {
+    await client.query(migrationSql);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    await expect(client.query(`
+      SELECT column_name FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = 'hosted_member_identity'
+        AND column_name = 'linq_email_handle_lookup_key'
+    `)).resolves.toMatchObject({ rows: [] });
+    await expect(client.query(
+      "SELECT to_regclass('pg_temp.linq_email_identity_backfill') AS scratch",
+    )).resolves.toMatchObject({ rows: [{ scratch: null }] });
+    throw error;
+  }
+}
 
 async function withFixtureSchema(
   run: (client: pg.Client) => Promise<void>,

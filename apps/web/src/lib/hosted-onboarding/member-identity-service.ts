@@ -330,7 +330,9 @@ export async function ensureHostedMemberForPendingLinqParticipantContactTx(input
     memberId,
     prisma: input.prisma,
   });
-  const identityCreated = await tryCreateHostedMemberIdentity({
+  // Email-handle writers hold the contact lock across lookup and creation.
+  // An unexpected unique-index conflict aborts this transaction.
+  await upsertHostedMemberIdentity({
     ...(input.contact.kind === "email"
       ? { linqEmailHandleLookupKey: input.contact.lookupKey }
       : {}),
@@ -346,42 +348,6 @@ export async function ensureHostedMemberForPendingLinqParticipantContactTx(input
     signupPhoneCodeSentAt: null,
     signupPhoneNumber: null,
   });
-  if (!identityCreated) {
-    await input.prisma.hostedMember.delete({
-      where: {
-        id: memberId,
-      },
-    });
-    const concurrentIdentity = input.contact.kind === "phone"
-      ? await lookupHostedMemberIdentityByPhoneNumber({
-          phoneNumber: input.contact.value,
-          prisma: input.prisma,
-        })
-      : await lookupHostedMemberIdentityByLinqEmailHandle({
-          emailAddress: input.contact.value,
-          prisma: input.prisma,
-        });
-    if (concurrentIdentity) {
-      assertHostedMemberNotSuspended(concurrentIdentity.core);
-      await upsertHostedMemberPendingLinqParticipantContactTx({
-        contact: input.contact,
-        memberId: concurrentIdentity.core.id,
-        observedAt: input.observedAt,
-        prisma: input.prisma,
-      });
-      return {
-        created: false,
-        member: concurrentIdentity.core,
-      };
-    }
-    throw new Prisma.PrismaClientKnownRequestError(
-      "Hosted member participant identity was not created and no concurrent identity was found.",
-      {
-        clientVersion: Prisma.prismaVersion.client,
-        code: "P2002",
-      },
-    );
-  }
 
   const routingCreated = await tryCreateHostedMemberPendingLinqParticipantContactTx({
     contact: input.contact,
@@ -521,8 +487,9 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
     identity: input.identity,
   });
   const emailLockContact = await acquireHostedPrivyEmailIdentityLockTx({
-    enabled: authMethod === "email",
-    identity: input.preparedLiveIdentity ?? input.identity,
+    authMethod,
+    identity: input.identity,
+    preparedLiveIdentity: input.preparedLiveIdentity,
     prisma: input.prisma,
   });
   if (
@@ -661,16 +628,7 @@ export async function reconcileHostedPrivyIdentityOnMemberResolutionTx(input: {
   identity: HostedPrivyIdentity;
   member: HostedMemberCoreState;
 }> {
-  const emailIdentityForLock = resolveHostedPrivyIdentityForLock(input);
-  const emailLockContact = await acquireHostedPrivyEmailIdentityLockTx({
-    enabled: shouldAcquireHostedPrivyEmailIdentityLock({
-      authMethod: input.authMethod,
-      expectedEmailLookupKey: input.expectedEmailLookupKey,
-      identity: emailIdentityForLock,
-    }),
-    identity: emailIdentityForLock,
-    prisma: input.prisma,
-  });
+  const emailLockContact = await acquireHostedPrivyEmailIdentityLockTx(input);
   if (
     input.identity.phone
     && (
@@ -806,23 +764,22 @@ export async function reconcileHostedPrivyIdentityOnMemberResolutionTx(input: {
 }
 
 async function acquireHostedPrivyEmailIdentityLockTx(input: {
-  enabled: boolean;
+  authMethod?: HostedPrivyAuthMethod;
+  expectedEmailLookupKey?: string;
   identity: HostedPrivyIdentity;
+  preparedLiveIdentity?: HostedPrivyIdentity;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedLinqParticipantContact | null> {
-  if (!input.enabled) {
+  const identity = input.preparedLiveIdentity ?? input.identity;
+  const needsEmailLock = input.authMethod === "email"
+    || Boolean(input.expectedEmailLookupKey)
+    || (!input.authMethod && !identity.phone && Boolean(identity.email?.verifiedAt));
+  if (!needsEmailLock) {
     return null;
-  }
-  if (!input.identity.email?.verifiedAt) {
-    throw hostedOnboardingError({
-      code: "PRIVY_EMAIL_REQUIRED",
-      message: "Finish email verification before continuing.",
-      httpStatus: 400,
-    });
   }
   const contact = createHostedLinqParticipantContact({
     kind: "email",
-    value: input.identity.email.address,
+    value: identity.email?.verifiedAt ? identity.email.address : null,
   });
   if (!contact) {
     throw hostedOnboardingError({
@@ -836,26 +793,6 @@ async function acquireHostedPrivyEmailIdentityLockTx(input: {
     tx: input.prisma,
   });
   return contact;
-}
-
-function resolveHostedPrivyIdentityForLock(input: {
-  identity: HostedPrivyIdentity;
-  preparedLiveIdentity?: HostedPrivyIdentity;
-}): HostedPrivyIdentity {
-  return input.preparedLiveIdentity ?? input.identity;
-}
-
-function shouldAcquireHostedPrivyEmailIdentityLock(input: {
-  authMethod?: HostedPrivyAuthMethod;
-  expectedEmailLookupKey?: string;
-  identity: HostedPrivyIdentity;
-}): boolean {
-  if (input.authMethod === "email" || input.expectedEmailLookupKey) {
-    return true;
-  }
-  return !input.authMethod
-    && !input.identity.phone
-    && Boolean(input.identity.email?.verifiedAt);
 }
 
 async function assertHostedPrivyLinqEmailHandleOwnerMatchesTx(input: {

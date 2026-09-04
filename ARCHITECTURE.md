@@ -3506,12 +3506,15 @@ later converge the Linq handle owner, verified-email owner, and Privy
 principal owner when more than one exists; any disagreement fails closed.
 The additive migration backfills only the blinded email-handle identity from
 existing active and pending email routes and never grants starter access
-retroactively. That invite carries only the event id of the
+retroactively. Validation and backfill share one transaction-scoped route set;
+failure rolls back the column and scratch state. Email identity lookup and
+creation use the existing participant contact lock, with the unique index as
+the final backstop. That invite carries only the event id of the
 persisted model-source allow and is the single-owner token for that exact
 original inbound. Only the transaction creating a genuinely new member may
 mint that token; an existing inactive member without the exact same-event token
-remains on the signup path. The participant identity owner reports whether its unique
-insert actually won; a stale outer lookup that loses that insert exits
+remains on the signup path. The participant identity owner reports whether it
+created the member; a stale outer lookup that resolves an existing owner exits
 retryably before invite or accounting work. While the token remains pending, a
 different inbound for the inactive member exits retryably before counting or
 creating an effect; it cannot continue or cancel the admitted start. The

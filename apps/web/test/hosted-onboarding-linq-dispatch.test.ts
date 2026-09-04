@@ -9997,7 +9997,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         findMany: vi.fn().mockResolvedValue([]),
       },
       hostedMemberIdentity: {
-        createMany: vi.fn().mockResolvedValue({ count: 1 }),
+        upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
         findMany: vi.fn().mockResolvedValue([]),
         findUnique: vi.fn().mockResolvedValue(null),
       },
@@ -10063,9 +10063,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         reason: "instant-start-enrollment-required",
       },
     });
-    expect(prismaMocks.hostedMemberIdentity.createMany).toHaveBeenCalledWith(
+    expect(prismaMocks.hostedMemberIdentity.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
+        create: expect.objectContaining({
           linqEmailHandleLookupKey: expect.stringMatching(/^hbidx:email:v1:/u),
           phoneLookupKey: null,
           phoneNumberEncrypted: null,
