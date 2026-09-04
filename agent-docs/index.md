@@ -4,6 +4,9 @@ Last verified: 2026-09-04
 
 ## Purpose
 
+Device-sync metadata priority within the existing bounded envelope is specified
+by `agent-docs/RELIABILITY.md`; Junction's progress keys remain provider-owned.
+
 This is a directory, not a second copy of the system contracts. Start with
 `AGENTS.md` and `agent-docs/operations/agent-workflow-routing.md`; open the
 owners relevant to the task. A row's date is its recorded verification date,
