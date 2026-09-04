@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-09-02
+Last verified: 2026-09-04
 
 ## Decision
 
@@ -2692,18 +2692,42 @@ still stale. That signal is recovery admission for the existing mailbox/event
 identity and must not mint another schedule-event or mailbox-item identity.
 After mailbox retention has removed a scheduled v3 wake's payload, Web accepts
 the stable duplicate without another signal only when the remaining row matches
-the schedule identity and the runtime checkpoint identifies its lane sequence
-as `hostedMailboxSystemFirstPendingSeq`. The same checkpoint's canonical system
-imported watermark must cover that sequence without exceeding the allocated
-high-water mark, and the lane counter must agree that it is the first unhandled
-sequence. The row must have no inline ciphertext, sidecar, payload reference,
-byte count, or hash. A missing or different first-pending sequence—including
-when supported legacy unsequenced work makes the frontier ambiguous—a
-never-imported row, malformed watermark, remaining payload surface, or
-structural mismatch stays a dedupe conflict and fails recovery closed.
+the schedule identity and the runtime checkpoint supplies one of two exact
+sequence proofs. A first-unhandled row must equal both the lane counter's next
+sequence and `hostedMailboxSystemFirstPendingSeq`. A continuation must appear in
+`hostedMailboxSystemDeviceSyncContinuationSeqs`, the sorted exact set of
+sequenced device continuations still owned by the runtime. Ownership begins only
+when post-checkpoint retention transfers the imported wake to that local owner,
+persists on the existing mailbox item across pending, sending, recording,
+retryable recording, and preemption transitions, and ends when existing
+completion removes the item. Restore promotes the exact legacy pending
+retained-job shape to the marker once so rollout does not strand an existing
+owner; projection after that compatibility read is marker-based. The set admits
+at most one owner per connection and is capped by the existing 100-connection
+complete-snapshot hydration authority. Exact continuation membership is independent
+of the global handled frontier: another connection's earlier retry cannot veto
+a later connection's already-owned work.
+Malformed structure, a duplicate connection, item, or sequence, a sequence past
+the imported watermark, or overflow invalidates the whole projection: the
+runtime publishes an empty owner set and treats every marked item as an ordinary
+frontier blocker. The same checkpoint's
+canonical system imported watermark must cover the sequence without exceeding
+the allocated high-water mark. The row must have no inline ciphertext, sidecar,
+payload reference, byte count, or hash. A missing, malformed, or different
+owner proof—including when supported legacy unsequenced work makes the frontier
+ambiguous—an unowned skipped-ahead or never-imported row, malformed watermark, remaining
+payload surface, or structural mismatch stays a dedupe conflict and fails
+recovery closed.
 Runtime-owned retry state remains the sole continuation owner for an accepted
-retired duplicate. Deploy the runtime checkpoint projection before Web begins
-requiring it; older runtime checkpoints omit the fact and therefore fail closed.
+retired duplicate. Corrected runtimes overwrite the owner set on every
+checkpoint. For initial rollout, deploy Web's compatible reader first, then
+the Worker/runner with immediate container rollout. Old runtimes publish no
+continuation set, so Web preserves the existing first-unhandled behavior until
+the corrected runtime checkpoints. The old Web reader caps arrays at 16 and
+cannot accept the new 100-owner bound. Verify runner convergence before declaring
+recovery restored. Once a continuation set has been published, rolling back the
+runtime requires rolling Web back first so an older runtime cannot preserve a
+stale unknown owner-set field; prefer a forward fix through the managed deploys.
 It does not promise exactly-once provider execution. Dirty rows are not
 independently swept; due-reconcile candidates may include dirty or stuck rows
 when canonical `nextReconcileAt` is due. Dirty state remains the work source,

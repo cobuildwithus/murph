@@ -1360,13 +1360,29 @@ Last verified: 2026-09-04
   acknowledged. Because the device-sync SQLite store is intentionally excluded
   from hosted snapshots, a replacement runner rebuilds from those owners; it
   never projects local retry timing into `nextReconcileAt`. Per-connection
-  mailbox ordering and scheduler scoping
-  prevent a future retry for one connection from blocking or advancing due work
-  for another. A later due webhook for that same connection may admit the older
-  exact retained mailbox item so newly dirty data can enter the local worker
-  without waiting behind a historical retry. That webhook remains available for
-  an exact continuation only when post-checkpoint acknowledgement reports a
-  newer dirty revision and the retained job hints prove the next pass has
+  mailbox ordering and scheduler scoping prevent a future retry for one
+  connection from blocking or advancing due work for another. After
+  post-checkpoint retention transfers an imported device wake to the local
+  continuation owner, the existing runtime mailbox item carries that ownership
+  through pending, sending, recording, retryable recording, and preemption
+  transitions. The marker disappears only when the existing completion owner
+  removes the item. Restore promotes the exact legacy pending retained-job shape
+  to this marker so already-owned work is not stranded during rollout; all later
+  ownership is marker-based rather than status-derived. Runtime checkpoint
+  progress therefore keeps the first
+  ordinary pending sequence as the handled-frontier blocker and separately
+  publishes the sorted exact device-sync continuation sequences. The projection
+  admits at most one owner per connection and is capped by the existing
+  100-connection complete-snapshot hydration authority. A malformed owner,
+  duplicate connection or sequence, impossible imported sequence, or overflow
+  invalidates the whole projection: marked items remain ordinary blockers and
+  Web receives no continuation owner set. A payload-retired duplicate is
+  recoverable when that exact owner set names its sequence, independently of
+  another connection's position in the global frontier. A later due webhook for that same connection may
+  admit the older exact retained mailbox item so newly dirty data can enter the
+  local worker without waiting behind a historical retry. That webhook remains
+  available for an exact continuation only when post-checkpoint
+  acknowledgement reports a newer dirty revision and the retained job hints prove the next pass has
   admission capacity. Every accepted dirty append advances that revision,
   including payload-only work accepted after the pass fetched its input, while
   ingress still coalesces mailbox delivery for an already-dirty connection.
