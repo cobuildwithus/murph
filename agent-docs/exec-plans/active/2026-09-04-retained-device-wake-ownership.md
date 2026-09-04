@@ -84,8 +84,8 @@ Updated: 2026-09-04
    item.
 3. Completed: added lifecycle, transition, invalid-cardinality, parser-bound,
    legacy-restore, multi-connection, completion, and Web PostgreSQL regressions.
-4. Completed: updated the reliability, protocol, index, and testing contracts
-   for the lifecycle-complete design.
+4. Completed: updated the reliability, protocol, index, testing, and existing
+   changelog contracts for the lifecycle-complete design.
 5. Completed: reran focused and package verification, the isolated PostgreSQL
    proof, documentation checks, and the complexity ratchet.
 6. Remaining: commit and push the exact candidate, run ReviewGPT on the new head
@@ -118,9 +118,9 @@ Updated: 2026-09-04
 
 ## Changelog
 
-- Not applicable: this internal recovery correction restores the existing
-  connected-device promise without new copy, surface, capability, or
-  member-visible behavior.
+- Reused the existing 2026-09-03 connected-health recovery item because this
+  correction completes the same member outcome. Added PR 2801 as a contributing
+  source without duplicating the public claim or creating a second entry.
 
 ## Verification
 
@@ -132,6 +132,7 @@ Updated: 2026-09-04
 - Passed: focused Web wake, due-reconcile, and recovery slice (206 tests).
 - Passed: isolated migrated PostgreSQL recovery suite (20 tests).
 - Passed: hosted-execution, assistant-runtime, and Web typechecks.
+- Passed: changelog archive proof (9 tests) for the reused item.
 - Passed: documentation drift/gardening, complexity ratchet, privacy scan, and
   diff check.
 - Remaining: exact pushed-head ReviewGPT and CI gates.
