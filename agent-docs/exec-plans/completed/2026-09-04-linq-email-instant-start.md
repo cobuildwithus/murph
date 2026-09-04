@@ -1,6 +1,6 @@
 # Linq email-handle instant start
 
-Status: active
+Status: completed
 Created: 2026-09-04
 Updated: 2026-09-04
 
@@ -82,3 +82,24 @@ without receiving the signup link first.
   separate first-onboarding-reply PR until that lane is merged or an explicit
   handoff is available; keep this patch focused on Web onboarding and
   deterministic proof first.
+
+## Result
+
+- Direct iMessage email handles now share the admitted instant-start path while
+  phone prefix policy and unsupported channels remain unchanged.
+- A unique blinded identity claim, shared email-contact lock, migration
+  conflict gates, and Privy reconciliation keep Linq routing identity separate
+  from verified email authorization and converge concurrent owners safely.
+- The migration applied through the complete local migration chain. Five
+  opt-in PostgreSQL cases proved backfill rejection boundaries and one-member
+  concurrency; 430 focused Web tests, full Web typecheck, lint, the migration
+  guard, changelog rendering, and the complexity ratchet passed.
+- The required shared real-Codex journey file remains exclusively owned by the
+  separate open first-onboarding-reply PR. This task did not duplicate or edit
+  that active lane; its final PR evidence records the live-journey Hold and the
+  deterministic proof used here.
+- ReviewGPT supplied the identity and migration design. Its generated patch
+  attachment was empty in two captures, so the parent implemented the reviewed
+  design locally and retained final exact-head ReviewGPT as the independent
+  candidate gate.
+Completed: 2026-09-04
