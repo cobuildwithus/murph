@@ -1,7 +1,9 @@
 import {
+  commonsGoalRefSchema,
   extractHealthEntityRegistryLinks,
   goalRegistryEntityDefinition,
   goalUpsertPatchPayloadSchema,
+  type CommonsGoalRef,
   type GoalFrontmatter,
 } from "@murphai/contracts";
 
@@ -81,6 +83,19 @@ function normalizeGoalMetricTargets(value: unknown, fieldName: string): GoalMetr
   }
 
   return result.data.metricTargets;
+}
+
+function normalizeCommonsGoalRef(value: unknown): CommonsGoalRef {
+  const result = commonsGoalRefSchema.safeParse(value);
+
+  if (!result.success) {
+    throw new VaultError(
+      "VAULT_INVALID_INPUT",
+      "commonsGoalRef must be a valid Health Commons goal reference.",
+    );
+  }
+
+  return result.data;
 }
 
 function parseGoalFrontmatter(attributes: FrontmatterObject): GoalFrontmatter {
@@ -319,6 +334,7 @@ function parseGoalStoredDocument(
     window: normalizeGoalWindow(parsed.window, "window"),
     ...relations,
     metricTargets: parsed.metricTargets,
+    commonsGoalRef: parsed.commonsGoalRef,
     domains: normalizeDomainList(parsed.domains, "domains"),
   }) as GoalEntity;
 
@@ -352,6 +368,7 @@ function buildAttributes(record: GoalEntity): FrontmatterObject {
     relatedExperimentIds: relations.relatedExperimentIds,
     links: frontmatterLinkObjects(relations.links),
     metricTargets: record.metricTargets,
+    commonsGoalRef: record.commonsGoalRef,
     domains: record.domains,
   }) as FrontmatterObject;
 }
@@ -413,8 +430,8 @@ async function upsertGoalWithLatestRecord(input: UpsertGoalInput): Promise<Upser
     slug: requestedSlug,
   });
   if (
-    input.requireExistingGoalId &&
-    existingRecord?.entity.goalId !== normalizedGoalId
+    input.requireExistingGoalId
+    && existingRecord?.entity.goalId !== normalizedGoalId
   ) {
     throw new VaultError("VAULT_GOAL_MISSING", "Goal was not found.");
   }
@@ -485,6 +502,11 @@ async function upsertGoalWithLatestRecord(input: UpsertGoalInput): Promise<Upser
             input.metricTargets,
             existingEntity?.metricTargets,
             (value) => normalizeGoalMetricTargets(value, "metricTargets"),
+          ),
+          commonsGoalRef: resolveOptionalUpsertValue(
+            input.commonsGoalRef,
+            existingEntity?.commonsGoalRef,
+            normalizeCommonsGoalRef,
           ),
           domains: resolveOptionalUpsertValue(input.domains, existingEntity?.domains, (value) =>
             normalizeDomainList(value, "domains"),

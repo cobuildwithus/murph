@@ -1380,14 +1380,22 @@ locally readable.
   Private CI must never check out or import public pull-request candidate code
   for Temporal compatibility. The protected pull-request compatibility lane is
   fixture-only: it receives only the bounded canonical artifact produced by
-  unprivileged public CI. Separately, after revisions reach the protected main
-  branches, private unprivileged full-integration CI may check out only the
-  exact resolved public `main` revision, never an arbitrary public candidate.
-  The credentialed release-admission job consumes that exact main/main
-  integration receipt without checking out or importing public code. Neither
-  side may restore candidate-controlled caches beside credentials, read private
-  logs or artifacts, expose reader revisions publicly, or accept workflow/check
-  names from the candidate.
+  unprivileged public CI. Separately, after a revision reaches protected public
+  `main`, the existing deployment controller may request `release_admission`
+  against exact private `main`. Only the unprivileged hosted jobs check out that
+  exact released public revision; they select the canonical foreground-priority
+  lane and force its standby mode to `allocate`. Credentialed Temporal setup
+  and attestation jobs remain isolated jobs that check out only private
+  controller or immutable reader source. The final private release attestation
+  consumes job results, independently re-reads both protected branches, and
+  names a digest bound to both SHAs, the fixed scope, and the public protected
+  environment's non-secret expected production target digest. Private setup
+  and final attestation derive the live target from protected Temporal
+  configuration and reject mismatch without returning its address, namespace,
+  credentials, poller identities, or timestamps. Neither side may
+  restore candidate-controlled caches beside credentials, read private logs or
+  artifacts, expose reader revisions publicly, or accept workflow/check names
+  from the candidate.
 - Hosted Web production has one deployment authority: Vercel's Git integration
   creates a candidate for every exact `main` commit, and configured Deployment
   Checks alone admit it to production domains. Do not grant Full Production

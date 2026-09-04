@@ -624,6 +624,7 @@ async function upsertRegimenWithLatestRegistry(
   const requestedSlug = normalizeUpsertSelectorSlug(input.slug, input.title);
   const requestedGroup = input.group ? normalizeGroupPath(input.group, input.kind ?? "regimen") : undefined;
   const existingRecord = selectRegimenRecord(existingRecords, normalizedRegimenId, requestedSlug, requestedGroup);
+  assertRequiredExistingRegimen(input, existingRecord, normalizedRegimenId);
   if (input.rejectExistingSlug === true && !normalizedRegimenId && requestedSlug && existingRecord) {
     throw new VaultError(
       "VAULT_REGIMEN_SLUG_EXISTS",
@@ -746,6 +747,19 @@ async function upsertRegimenWithLatestRegistry(
     auditPath,
     record,
   };
+}
+
+function assertRequiredExistingRegimen(
+  input: UpsertRegimenInput,
+  existingRecord: RegimenStoredDocument | null,
+  normalizedRegimenId: string | undefined,
+): void {
+  if (
+    input.requireExistingRegimenId
+    && existingRecord?.entity.regimenId !== normalizedRegimenId
+  ) {
+    throw new VaultError("VAULT_REGIMEN_MISSING", "Regimen was not found.");
+  }
 }
 
 export async function listRegimens(vaultRoot: string): Promise<RegimenStoredDocument[]> {

@@ -659,6 +659,7 @@ describe("@murphai/health-commons runtime catalog reader", () => {
       pageRevisionId: expect.stringMatching(/^sha256:/u),
       recipeHash: expect.stringMatching(/^sha256:/u),
       runSpecRevisionId: expect.stringMatching(/^sha256:/u),
+      workflowSpecRevisionId: null,
     });
     const reader = createHealthCommonsRouteBundleReader(bundle);
     expect(reader.route).toEqual(bundle.route);
@@ -1051,25 +1052,40 @@ describe("@murphai/health-commons runtime catalog reader", () => {
 
     const generatedWebRoot = await mkdtemp(path.join(os.tmpdir(), "murph-health-commons-web-"));
     await mkdir(path.join(generatedWebRoot, "routes"), { recursive: true });
-    await writeFile(
-      path.join(generatedWebRoot, "routes/index.json"),
-      JSON.stringify({
-        ...routeIndex,
-        routes: [
-          {
-            ...finnishRoute,
-            projections: {
-              ...finnishRoute.projections,
-              "experiment.research": "../tabs/experiments/norwegian-4x4/research.json",
-            },
-          },
-        ],
-      }),
-      "utf8",
-    );
+    const unsafeProjectionPaths = [
+      "../tabs/experiments/norwegian-4x4/research.json",
+      "%2e%2e/tabs/experiments/norwegian-4x4/research.json",
+      "%252e%252e/tabs/experiments/norwegian-4x4/research.json",
+      "tabs%2fexperiments/finnish-sauna/research.json",
+      "tabs%252fexperiments/finnish-sauna/research.json",
+      "tabs%5cexperiments/finnish-sauna/research.json",
+      "tabs/experiments/finnish-sauna/research.json?outside",
+      "tabs/experiments/finnish-sauna/research.json#outside",
+    ];
 
-    expect(() => getGeneratedHealthCommonsWebRouteIndex({ generatedWebRoot }))
-      .toThrow("Health Commons generated web route index is invalid.");
+    for (const unsafeProjectionPath of unsafeProjectionPaths) {
+      await writeFile(
+        path.join(generatedWebRoot, "routes/index.json"),
+        JSON.stringify({
+          ...routeIndex,
+          routes: [
+            {
+              ...finnishRoute,
+              projections: {
+                ...finnishRoute.projections,
+                "experiment.research": unsafeProjectionPath,
+              },
+            },
+          ],
+        }),
+        "utf8",
+      );
+
+      expect(
+        () => getGeneratedHealthCommonsWebRouteIndex({ generatedWebRoot }),
+        unsafeProjectionPath,
+      ).toThrow("Health Commons generated web route index is invalid.");
+    }
   });
 
   it("rejects projection artifacts whose top-level id no longer matches the route index", async () => {

@@ -8,6 +8,14 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  assertPreparedRunnerBundle,
+  writeRunnerBundleManifest,
+} from "../scripts/deploy-artifacts.js";
+import {
+  hostedRunnerRuntimePackageName,
+  resolveHostedRunnerWorkspacePackageNames,
+} from "../scripts/runner-bundle-contract.js";
+import {
   buildHostedRunnerWorkspaceArtifacts,
   buildHostedRunnerWorkspaceArtifactPlan,
   buildHostedRunnerWorkspaceBuildArgs,
@@ -23,6 +31,7 @@ const temporaryDirectories: string[] = [];
 const finnishDrySaunaProtocolKey = "protocol_variant:dry-sauna/murph-finnish-standard-3x-week";
 const healthCommonsRuntimeArtifactNames = [
   "biomarker-desired-directions.json",
+  "web/browse/goals.json",
   "knowledge.sqlite",
   "protocol-index.json",
   "protocol-run-specs.json",
@@ -455,9 +464,72 @@ describe("runner bundle runtime artifact staging", () => {
     expect(entries).not.toContain("package/generated/catalog.json");
     expect(entries).toContain("package/package.json");
     expect(
-      entries.some((entry) => entry.startsWith("package/generated/web/")),
-    ).toBe(false);
+      entries.filter((entry) =>
+        entry.startsWith("package/generated/web/") && !entry.endsWith("/")
+      ),
+    ).toEqual(["package/generated/web/browse/goals.json"]);
     expect(entries.some((entry) => entry.startsWith("package/content/"))).toBe(false);
+
+    const validatorBundleDir = path.join(tarballsDir, "validator-bundle");
+    const installedHealthCommonsDir = path.join(
+      validatorBundleDir,
+      "node_modules",
+      "@murphai",
+      "health-commons",
+    );
+    await mkdir(installedHealthCommonsDir, { recursive: true });
+    await execFileAsync("tar", [
+      "-xzf",
+      healthCommonsTarball,
+      "-C",
+      installedHealthCommonsDir,
+      "--strip-components=1",
+    ]);
+    await prepareRunnerBundleValidationFixture(validatorBundleDir);
+    await expect(
+      assertPreparedRunnerBundle({
+        appDir: path.join(repoRoot, "apps", "cloudflare"),
+        repoRoot,
+        runnerBundleDir: validatorBundleDir,
+      }),
+    ).resolves.toMatchObject({
+      buildSkipped: false,
+      includeBundleOnlyDependencies: true,
+    });
+
+    const generatedWebDir = path.join(
+      installedHealthCommonsDir,
+      "generated",
+      "web",
+    );
+    const obsoleteRoutesDir = path.join(generatedWebDir, "routes");
+    await mkdir(obsoleteRoutesDir, { recursive: true });
+    await writeFile(path.join(obsoleteRoutesDir, "index.json"), "{}\n", "utf8");
+    await expect(
+      assertPreparedRunnerBundle({
+        appDir: path.join(repoRoot, "apps", "cloudflare"),
+        repoRoot,
+        runnerBundleDir: validatorBundleDir,
+      }),
+    ).rejects.toThrow(
+      "must not ship unexpected Health Commons generated web artifact generated/web/routes",
+    );
+
+    await rm(obsoleteRoutesDir, { recursive: true });
+    await writeFile(
+      path.join(generatedWebDir, "browse", "experiments.json"),
+      "{}\n",
+      "utf8",
+    );
+    await expect(
+      assertPreparedRunnerBundle({
+        appDir: path.join(repoRoot, "apps", "cloudflare"),
+        repoRoot,
+        runnerBundleDir: validatorBundleDir,
+      }),
+    ).rejects.toThrow(
+      "must not ship unexpected Health Commons generated web artifact generated/web/browse/experiments.json",
+    );
 
     const extractDir = path.join(tarballsDir, "health-commons-extract");
     await mkdir(extractDir, { recursive: true });
@@ -470,6 +542,7 @@ describe("runner bundle runtime artifact staging", () => {
       "package/generated/protocol-run-specs.json",
       "package/generated/protocol-family-graph.json",
       "package/generated/biomarker-desired-directions.json",
+      "package/generated/web/browse/goals.json",
     ]);
     const protocolIndexRaw = await readFile(
       path.join(extractDir, "package", "generated", "protocol-index.json"),
@@ -492,12 +565,40 @@ describe("runner bundle runtime artifact staging", () => {
       ),
       "utf8",
     );
+    const goalIndexRaw = await readFile(
+      path.join(
+        extractDir,
+        "package",
+        "generated",
+        "web",
+        "browse",
+        "goals.json",
+      ),
+      "utf8",
+    );
     const protocolIndex: unknown = JSON.parse(protocolIndexRaw);
     const protocolRunSpecs: unknown = JSON.parse(protocolRunSpecsRaw);
     const protocolFamilyGraph: unknown = JSON.parse(protocolFamilyGraphRaw);
     const biomarkerDesiredDirections: unknown = JSON.parse(
       biomarkerDesiredDirectionsRaw,
     );
+    const goalIndex: unknown = JSON.parse(goalIndexRaw);
+
+    expect(findGoalArtifactEntry(goalIndex, "goal_template:improve-deep-sleep"))
+      .toMatchObject({
+        revision: {
+          pageRevisionId: expect.stringMatching(/^sha256:/u),
+          workflowSpecRevisionId: expect.stringMatching(/^sha256:/u),
+        },
+        routeId: "improve-deep-sleep",
+        sources: expect.arrayContaining([
+          expect.objectContaining({
+            label: expect.any(String),
+            url: expect.stringMatching(/^https?:\/\//u),
+          }),
+        ]),
+        startPrompt: "Hey Murph, help me improve my deep sleep.",
+      });
 
     expect(findProtocolArtifactEntry(protocolIndex, finnishDrySaunaProtocolKey)).toMatchObject({
       entityType: "protocol_variant",
@@ -844,6 +945,7 @@ async function readOptionalText(filePath: string): Promise<string> {
 
 async function writeMinimalHealthCommonsRuntimeArtifacts(generatedDir: string): Promise<void> {
   await mkdir(generatedDir, { recursive: true });
+  await mkdir(path.join(generatedDir, "web", "browse"), { recursive: true });
   await writeFile(
     path.join(generatedDir, "knowledge.sqlite"),
     Buffer.from("SQLite format 3\0fixture"),
@@ -854,6 +956,15 @@ async function writeMinimalHealthCommonsRuntimeArtifacts(generatedDir: string): 
       biomarkers: [],
       catalogHash: "sha256:test",
       schemaVersion: "murph.commons.biomarker-desired-directions.v1",
+    })}\n`,
+    "utf8",
+  );
+  await writeFile(
+    path.join(generatedDir, "web", "browse", "goals.json"),
+    `${JSON.stringify({
+      catalogHash: "sha256:test",
+      goals: [],
+      schemaVersion: "murph.commons.web.goal-index.v2",
     })}\n`,
     "utf8",
   );
@@ -888,6 +999,89 @@ async function writeMinimalHealthCommonsRuntimeArtifacts(generatedDir: string): 
   );
 }
 
+async function prepareRunnerBundleValidationFixture(bundleDir: string): Promise<void> {
+  const nodeModulesDir = path.join(bundleDir, "node_modules");
+  const workspacePackageNames = resolveHostedRunnerWorkspacePackageNames({
+    includeBundleOnlyDependencies: true,
+  });
+
+  await mkdir(path.join(bundleDir, "dist"), { recursive: true });
+  await mkdir(path.join(bundleDir, "dist-bundled"), { recursive: true });
+  await mkdir(path.join(nodeModulesDir, ".bin"), { recursive: true });
+  await writeFile(
+    path.join(bundleDir, "package.json"),
+    `${JSON.stringify({
+      name: hostedRunnerRuntimePackageName,
+      version: "1.0.0",
+    })}\n`,
+    "utf8",
+  );
+  await writeFile(
+    path.join(bundleDir, "dist", "container-entrypoint.js"),
+    "export {};\n",
+    "utf8",
+  );
+  await writeFile(
+    path.join(bundleDir, "dist-bundled", "container-entrypoint.js"),
+    "export {};\n",
+    "utf8",
+  );
+  await writeFile(
+    path.join(bundleDir, "dist", "index.js"),
+    "export {};\n",
+    "utf8",
+  );
+
+  for (const packageName of workspacePackageNames) {
+    if (
+      packageName === hostedRunnerRuntimePackageName
+      || packageName === "@murphai/health-commons"
+    ) {
+      continue;
+    }
+
+    const packageDir = path.join(nodeModulesDir, ...packageName.split("/"));
+    await mkdir(packageDir, { recursive: true });
+    await writeFile(
+      path.join(packageDir, "package.json"),
+      `${JSON.stringify({ name: packageName, version: "1.0.0" })}\n`,
+      "utf8",
+    );
+  }
+
+  const assistantEngineDir = path.join(
+    nodeModulesDir,
+    "@murphai",
+    "assistant-engine",
+  );
+  await mkdir(path.join(assistantEngineDir, "skills"), { recursive: true });
+  await mkdir(path.join(assistantEngineDir, "dist", "assistant"), {
+    recursive: true,
+  });
+  await writeFile(
+    path.join(
+      assistantEngineDir,
+      "dist",
+      "assistant",
+      "cli-surface-contract.generated.json",
+    ),
+    "{}\n",
+    "utf8",
+  );
+  await writeFile(path.join(nodeModulesDir, ".bin", "murph"), "#!/bin/sh\n", "utf8");
+  await writeFile(
+    path.join(nodeModulesDir, ".bin", "vault-cli"),
+    "#!/bin/sh\n",
+    "utf8",
+  );
+
+  await writeRunnerBundleManifest(bundleDir, {
+    appDir: path.join(repoRoot, "apps", "cloudflare"),
+    releaseSha: "0123456789abcdef0123456789abcdef01234567",
+    repoRoot,
+  });
+}
+
 function findProtocolArtifactEntry(artifact: unknown, key: string): Record<string, unknown> | null {
   if (!isRecord(artifact) || !Array.isArray(artifact.protocols)) {
     return null;
@@ -896,6 +1090,16 @@ function findProtocolArtifactEntry(artifact: unknown, key: string): Record<strin
   return artifact.protocols.find((entity) =>
     isRecord(entity) &&
       entity.key === key
+  ) ?? null;
+}
+
+function findGoalArtifactEntry(artifact: unknown, key: string): Record<string, unknown> | null {
+  if (!isRecord(artifact) || !Array.isArray(artifact.goals)) {
+    return null;
+  }
+
+  return artifact.goals.find((entity) =>
+    isRecord(entity) && entity.key === key
   ) ?? null;
 }
 

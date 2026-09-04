@@ -50,7 +50,7 @@ outcomes. Land
 this public producer before enabling a private workflow that requires the
 receipt; the reverse order intentionally fails closed.
 Docker runner smoke derives a separate `.deploy/runner-smoke-bundle/` from the validated production bundle and overlays smoke-only entrypoints there, so the production `.deploy/runner-bundle/` remains the deploy artifact after smoke.
-Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budgets and assembly-time probes: the in-container `vault-cli` binary (`scripts/runner-bundle/bundle-cli.ts`) and the container entrypoint itself (`scripts/runner-bundle/bundle-entrypoint.ts`, output `dist-bundled/`, run by the image CMD). The Node-only CLI chunks use native UTF-8 output so existing Unicode literals are not expanded into ASCII escapes; assembly retains absolute entry-chunk and static-startup-closure caps, while canonical Ubuntu x86_64 host-support CI builds the exact candidate and its exact first parent in isolated sibling checkouts and permits total output growth only up to `max(96 KiB, floor(1% of base total))`. The CLI probe creates private synthetic initialized-vault fixtures, requires exact bundled/unbundled parity for populated `memory show --format json`, and separately preserves the successful empty result when canonical memory is absent. The bundled entrypoint cuts cold-boot module loading from ~960 file reads to ~27 chunk reads on lazily pulled image layers; package resolvers that derive asset paths from their own module location are pinned to the installed package copies via Dockerfile ENV (`MURPH_ASSISTANT_SKILLS_ROOT`, `MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH`, `MURPH_HEALTH_COMMONS_PACKAGE_ROOT`). Health Commons stays installed in the runner bundle for its compact protocol and biomarker desired-direction artifacts, while its JS is inlined and assembly probes set the same package-root pin for bundled and unbundled parity. The web-only Health Commons artifact tree remains excluded. Zod stays installed for deferred package-loader paths, but production assembly removes declaration files, TypeScript source, the legacy v3 runtime, and unused mini variants after verifying that staged JavaScript imports only the retained root and v4 surfaces.
+Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budgets and assembly-time probes: the in-container `vault-cli` binary (`scripts/runner-bundle/bundle-cli.ts`) and the container entrypoint itself (`scripts/runner-bundle/bundle-entrypoint.ts`, output `dist-bundled/`, run by the image CMD). The Node-only CLI chunks use native UTF-8 output so existing Unicode literals are not expanded into ASCII escapes; assembly retains absolute entry-chunk and static-startup-closure caps, while canonical Ubuntu x86_64 host-support CI builds the exact candidate and its exact first parent in isolated sibling checkouts and permits total output growth only up to `max(96 KiB, floor(1% of base total))`. The CLI probe creates private synthetic initialized-vault fixtures, requires exact bundled/unbundled parity for populated `memory show --format json`, and separately preserves the successful empty result when canonical memory is absent. The bundled entrypoint cuts cold-boot module loading from ~960 file reads to ~27 chunk reads on lazily pulled image layers; package resolvers that derive asset paths from their own module location are pinned to the installed package copies via Dockerfile ENV (`MURPH_ASSISTANT_SKILLS_ROOT`, `MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH`, `MURPH_HEALTH_COMMONS_PACKAGE_ROOT`). Health Commons stays installed in the runner bundle for its compact protocol, biomarker desired-direction, and Goal-index artifacts, while its JS is inlined and assembly probes set the same package-root pin for bundled and unbundled parity. The broader web-only Health Commons artifact tree remains excluded; only the compact `generated/web/browse/goals.json` runtime index is retained. Zod stays installed for deferred package-loader paths, but production assembly removes declaration files, TypeScript source, the legacy v3 runtime, and unused mini variants after verifying that staged JavaScript imports only the retained root and v4 surfaces.
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
@@ -740,6 +740,33 @@ than rolling back below the floor. After convergence, exercise a controlled
 finite workout through stored repetitions, terse final-set completion, automatic
 closure, and a subsequent workout start. Monitor bounded hosted-runtime error
 aggregates for strict workout parse failures and rejected workout CLI commands.
+
+## Public Goal Lineage Rollout
+
+The public Goal guide release adds optional `commonsGoalRef` lineage to the
+strict private Goal record and changes the bundled assistant CLI, prompt, skill
+tree, and compact Health Commons artifact set. Deploy the Cloudflare Worker and
+runner together with `container_rollout=immediate`. Require managed-container
+smoke to report the exact new runner-bundle fingerprint, verify bundled
+`commons goal list/show`, and create, read, update, and reread disposable
+old-style and lineage-bearing Goals before publishing the Web Goals library.
+The list proof reads one global count and one bounded sample from each of the
+seven categories, then requires the category totals to reconcile exactly to the
+global count of at least 250 Goals. Catalog or category size is independent of
+the CLI's per-query result limit; full-entry validation remains a build and
+packaging gate.
+The smoke reports only a fixed proof count; private Goal content never leaves
+its temporary smoke vault.
+
+Existing Goals need no migration. Before the first lineage write, the preceding
+runner is a safe rollback. After that write, the compatible runner is the hard
+rollback floor for the affected workspace because the preceding strict core
+parser rejects `commonsGoalRef`; its assistant context snapshot can omit the
+Goal, and core Goal mutations fail until a compatible reader returns. Forward-
+fix on this bundle or newer instead of rolling back below the floor. The public
+Web pages and direct messaging handoff do not write private state and can be
+rolled back independently. Monitor bounded hosted-runtime error aggregates for
+`VAULT_INVALID_GOAL` and rejected Goal commands after convergence.
 
 ## Audience-Key Rollout
 
@@ -2061,7 +2088,7 @@ That command:
 
 - runs deploy preflight inside the apply step before artifact validation and upload
 - renders the deploy config and worker secrets payload
-- assembles the runner bundle, building and packing the runner workspace closure with bounded parallelism (`MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY` and `MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY`, both defaulting to `4`); runner-specific CLI and Health Commons tarballs keep the deployed `murph` / `vault-cli`, compact protocol artifacts, and compact biomarker desired-direction projection without the public npm package's nested bundled workspace payload or web-only Health Commons artifacts
+- assembles the runner bundle, building and packing the runner workspace closure with bounded parallelism (`MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY` defaults to `1`; `MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY` defaults to `4`); runner-specific CLI and Health Commons tarballs keep the deployed `murph` / `vault-cli`, compact protocol artifacts, compact biomarker desired-direction projection, and compact Goal index without the public npm package's nested bundled workspace payload or other web-only Health Commons artifacts
 - prepares the stable native runner base image with Docker's local cache; production deploy paths force that build from source, while hosted-local E2E lanes may reuse the GHCR-published runner base image when the source fingerprint matches the current checkout
 - deploys the Worker directly with Wrangler; production deploys currently default to immediate container rollout for the vault-share selector-scope migration, while non-production deploys default to gradual and build only the small app image layer from the prepared runner bundle
 

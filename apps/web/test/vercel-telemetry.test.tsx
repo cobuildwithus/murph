@@ -441,6 +441,11 @@ test("VercelTelemetry aggregates public dynamic routes without sending identifie
       route: "/experiments/[experimentId]/results",
     },
     {
+      expected: "/goals/[goal]",
+      pathname: "/goals/improve-deep-sleep",
+      route: "/goals/[goalId]",
+    },
+    {
       expected: "/measurement-methods/[method]",
       pathname: "/measurement-methods/resting-heart-rate",
       route: "/measurement-methods/[measurementMethodId]",

@@ -36,6 +36,7 @@ import {
 } from "../src/deploy-smoke-live-model.ts";
 
 import {
+  assertSmokeCodexShellResult,
   buildVersionOverrideHeaders,
   resolveSmokeExpectedStandbyMode,
   resolveSmokeRunnerManifestPath,
@@ -117,6 +118,7 @@ function createCodexShellSmokeResult() {
     cliSurfaceContractBytes: 37282,
     cliSurfaceHotPathProofCount: 5,
     client: "codex-app-server",
+    healthCommonsCliGoalProofCount: 6,
     murphPathBytes: 28,
     noteAddBytes: 128,
     stderrBytes: 0,
@@ -125,6 +127,22 @@ function createCodexShellSmokeResult() {
     vaultShowBytes: 256,
   };
 }
+
+describe("assertSmokeCodexShellResult", () => {
+  it("requires the exact bounded public Goal proof count", () => {
+    for (const healthCommonsCliGoalProofCount of [5, 7, 6.5]) {
+      expect(() => assertSmokeCodexShellResult({
+        ...createCodexShellSmokeResult(),
+        healthCommonsCliGoalProofCount,
+      })).toThrow(
+        "runner container Codex shell smoke did not prove public Goal CLI round trips.",
+      );
+    }
+    expect(() => assertSmokeCodexShellResult(
+      createCodexShellSmokeResult(),
+    )).not.toThrow();
+  });
+});
 
 describe("buildVersionOverrideHeaders", () => {
   it("formats the Cloudflare version override header when the worker name and version id are present", () => {

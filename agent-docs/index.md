@@ -266,8 +266,14 @@ Hosted device-sync wake ownership keeps provider cadence in Web's canonical
 connection-specific retry work and Web dirty rows retain dirty resource/deletion
 work across cold replacement. The machine-local SQLite store is an execution
 cache; hosted provider scheduling is mailbox-connection scoped, retained wakes
-come from actual manifest-shaped queued/running rows, and a durable completion
-checkpoint fences canonical cadence publication. An unchanged stale tuple may
+come from actual manifest-shaped queued/running rows, and accepted full
+reconciliation plus a durable completion checkpoint with zero retained jobs
+fences canonical cadence publication. One version conflict rehydrates without
+re-admitting work, carries same-epoch provider cadence and dirty terminal
+evidence, and repeats the full update; a second conflict or a restored
+completion keeps the ordinary full-reconciliation path. The wake must also carry the exact non-null
+epoch of the current active connection; epoch-less legacy, replaced, missing,
+or terminal records drain without writing cadence. An unchanged stale tuple may
 re-signal the same durable mailbox item once in each Web recovery bucket without
 minting another schedule-event or mailbox-item identity. Provider execution is
 intentionally at-least-once across a lost post-pull record/completion checkpoint:
@@ -286,13 +292,16 @@ v2 snapshot checkpoint is persisted, leaving the clean input ref as the last
 committed snapshot. The next recovery bucket cold-restores that exact ref through
 the production restore dispatch, reconstructs from durable authority, and may
 repeat the same method/path classes without publishing cadence early. The
-deterministic WHOOP proof covers four initial
-classes, one four-class replay (eight requests total), eight measured workspace
-checkpoint attempts with seven commits and one injected failure, no third
-provider pull, and cadence publication only after the durable recovery/completion
-checkpoint. The first later bucket performs one bounded post-publication
-convergence checkpoint while returning idle with no wake; the following bucket
-is fully quiescent with no provider work or checkpoint.
+eligible durable completion record then publishes cadence only after accepted
+full reconciliation, removes the mailbox item, and checkpoints that removal
+inside the same runtime admission. The deterministic
+WHOOP proof covers four initial classes, one four-class replay (eight requests
+total), six measured workspace checkpoint attempts with five commits and one
+injected failure, no third provider pull or empty completion runtime, and cadence
+publication between the durable completion-record and mailbox-removal
+checkpoints. A redundant later recovery bucket performs one bounded
+post-publication convergence checkpoint while returning idle with no wake; the
+following bucket is fully quiescent with no provider work or checkpoint.
 The contract is jointly specified by
 `agent-docs/RELIABILITY.md` and
 `agent-docs/references/hosted-runtime-protocol.md`.
@@ -790,6 +799,7 @@ payloads reuse the set-based root unwrap path. This contract is specified by
 | `agent-docs/product-specs/hosted-support-escalation.md` | Background-first product-failure feedback, opt-in support-address disclosure, and one-turn reserved escalation after an explicit verified-private human-support request, with Murph's bounded sanitized issue in its own words, explicit residual semantic-risk ownership, truthful completion copy, immediate alerts containing the validated stored issue and internal ids, explicit digest and anonymous-retention ownership, a three-email-per-UTC-day server limit, stable provider idempotency, and archived review-history routing. | Hosted support product spec | High | 2026-08-05 |
 | `agent-docs/product-specs/hosted-family-plan.md` | Hosted Family plan for 2-6 sponsored people, mixed Pulse/Edge member assignments, exact owner-funded member usage top-ups, webhook-owned capacity, private member accounts, chat-first invites, bounded legacy trial conversion, and privacy boundaries. | Hosted billing/product spec | High | 2026-08-10 |
 | `agent-docs/product-specs/health-commons.md` | Health Commons product boundary for wiki-like pages, build-time catalog generation, runnable-protocol publishing and withdrawal, exact page/run-spec Start identity, terminally immutable withdrawn private-run lineage, scoped runtime artifacts, future aggregate outcome summaries, revisions, and artifact manifests. | Health Commons behavior | High | 2026-07-29 |
+| `agent-docs/product-specs/public-goal-guides.md` | Public outcome-first Goal guides, canonical grouping and SEO, direct native messaging handoff, private setup workflow, exact page/workflow lineage, and the strict-lineage runner rollout floor. | Goal guide behavior | High | 2026-08-30 |
 | `agent-docs/product-specs/murph-safe-public-product-search.md` | Murph Safe public supplement and branded-food evidence search, `/food` comparison and page-scoped WebMCP, normalized public API, exact test-linkage rules, privacy, and abuse bounds. | Public product evidence behavior | High | 2026-09-02 |
 | `agent-docs/product-specs/protocol-summary-copy.md` | Source-of-truth copy rules for Health Commons protocol `summary:` fields shown on `/experiments` cards. | Health Commons protocol card copy | High | 2026-04-30 |
 | `agent-docs/product-specs/murph-onboarding.md` | Aspiration-anchored new-member onboarding contract for a private broad-assistant relationship, including a compact progressive-disclosure skill router, observable bounded-history forward-progress inference with the shared 72-entry/12 KB cold replay boundary, brief aspiration-thread capture, explicit park, progressive health foundation with an immediate three-child memo split, separate start acknowledgement, modality-matched lab closer, contextual return, collaborative first step, text-only launch close, and finite completion. | New-member onboarding behavior | High | 2026-08-26 |

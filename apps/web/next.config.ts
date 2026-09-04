@@ -88,6 +88,24 @@ const MURPH_CONTACT_CARD_AVATAR_TRACE_INCLUDES = [
   "public/brand-logos/murph-logo-avatar-*.png",
   "public/murph-headshots/*-sm.png",
 ];
+// The package root resolver supports several install layouts. Node file trace
+// conservatively expands that fallback search to every generated Web artifact,
+// so Goal functions must explicitly discard projection families they never read.
+const HEALTH_COMMONS_GOAL_TRACE_EXCLUDES = [
+  "../../packages/health-commons/generated/web/browse/biomarkers.json",
+  "../../packages/health-commons/generated/web/browse/experiments.json",
+  "../../packages/health-commons/generated/web/bundles/**/*.json",
+  "../../packages/health-commons/generated/web/pages/biomarkers/**/*.json",
+  "../../packages/health-commons/generated/web/shell/**/*.json",
+  "../../packages/health-commons/generated/web/tabs/**/*.json",
+];
+const HEALTH_COMMONS_GOAL_INDEX_ONLY_TRACE_EXCLUDES = [
+  "../../packages/health-commons/generated/web/pages/goals/**/*.json",
+  "../../packages/health-commons/generated/web/routes/index.json",
+];
+const HEALTH_COMMONS_GOAL_INDEX_TRACE_INCLUDES = [
+  "../../packages/health-commons/generated/web/browse/goals.json",
+];
 // The footer availability indicator reads the incident.io status-page summary
 // from the browser, so the status-page origin must be reachable client-side.
 const STATUS_PAGE_CONNECT_SOURCES = ["https://status.withmurph.ai"] as const;
@@ -392,6 +410,23 @@ export function buildHostedWebNextConfig(
         "../../packages/health-commons/generated/web/shell/experiments/**/*.json",
         "../../packages/health-commons/generated/web/tabs/experiments/**/*.json",
       ],
+      "/goals": [
+        ...HEALTH_COMMONS_GOAL_INDEX_TRACE_INCLUDES,
+      ],
+      "/goals/[goalId]": [
+        "../../packages/health-commons/generated/web/browse/goals.json",
+        "../../packages/health-commons/generated/web/routes/index.json",
+        "../../packages/health-commons/generated/web/pages/goals/**/*.json",
+      ],
+      "/api/goals/contact": [
+        ...HEALTH_COMMONS_GOAL_INDEX_TRACE_INCLUDES,
+      ],
+      "/api/hosted-onboarding/linq/webhook": [
+        ...HEALTH_COMMONS_GOAL_INDEX_TRACE_INCLUDES,
+      ],
+      "/api/hosted-onboarding/telegram/webhook": [
+        ...HEALTH_COMMONS_GOAL_INDEX_TRACE_INCLUDES,
+      ],
       "/biomarkers": [
         "../../packages/health-commons/generated/web/browse/biomarkers.json",
         "../../packages/health-commons/generated/web/routes/index.json",
@@ -413,6 +448,25 @@ export function buildHostedWebNextConfig(
       "/api/environment/share-card": OG_SHARE_ASSET_TRACE_INCLUDES,
       "/api/murph-contact-card": MURPH_CONTACT_CARD_AVATAR_TRACE_INCLUDES,
       "/imessage/card/v1/[payload]": OG_SHARE_ASSET_TRACE_INCLUDES,
+    },
+    outputFileTracingExcludes: {
+      "/goals": HEALTH_COMMONS_GOAL_TRACE_EXCLUDES,
+      "/goals/[goalId]": HEALTH_COMMONS_GOAL_TRACE_EXCLUDES,
+      // Next matches trace keys with picomatch `contains: true`. This extglob
+      // matches only the directory landing route, not /goals/[goalId].
+      "/goals!(/**)": HEALTH_COMMONS_GOAL_INDEX_ONLY_TRACE_EXCLUDES,
+      "/api/goals/contact": [
+        ...HEALTH_COMMONS_GOAL_TRACE_EXCLUDES,
+        ...HEALTH_COMMONS_GOAL_INDEX_ONLY_TRACE_EXCLUDES,
+      ],
+      "/api/hosted-onboarding/linq/webhook": [
+        ...HEALTH_COMMONS_GOAL_TRACE_EXCLUDES,
+        ...HEALTH_COMMONS_GOAL_INDEX_ONLY_TRACE_EXCLUDES,
+      ],
+      "/api/hosted-onboarding/telegram/webhook": [
+        ...HEALTH_COMMONS_GOAL_TRACE_EXCLUDES,
+        ...HEALTH_COMMONS_GOAL_INDEX_ONLY_TRACE_EXCLUDES,
+      ],
     },
     outputFileTracingRoot: path.resolve(appDir, "../.."),
     // Temporal clients use process-bound transport state. Keep one physical

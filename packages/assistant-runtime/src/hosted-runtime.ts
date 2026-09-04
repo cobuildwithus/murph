@@ -224,6 +224,7 @@ import {
   enqueueHostedSystemMailboxItem,
   prepareHostedSystemMailboxItemForCheckpoint,
   recordHostedSystemMailboxItemAfterCheckpoint,
+  resolveHostedDeviceSyncCompletionRecordInput,
   retainHostedSystemMailboxItemUntilDeliveryWake,
   resolveHostedBrowserVaultRefreshAttempt,
   resolveHostedSystemMailboxNextWakeCandidate,
@@ -3473,6 +3474,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               : runtimeAbortController.signal;
             try {
               const recordResult = await recordHostedSystemMailboxItemAfterCheckpoint({
+                ...resolveHostedDeviceSyncCompletionRecordInput({
+                  item: recordInput.item,
+                  preparation,
+                }),
                 item: recordInput.item,
                 operatorHomeRoot: restored.operatorHomeRoot,
                 runtime: foregroundRuntime,

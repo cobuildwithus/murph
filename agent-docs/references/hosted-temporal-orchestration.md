@@ -815,13 +815,21 @@ The hard-cut architecture is accepted when:
   production Deployment Check; with that external binding in place, production
   domains stay on the previous deployment until the current public commit,
   current private `main`, and current live readers produce one accepted proof.
-  The public controller re-reads both branch heads, and the private controller
-  re-reads the supported reader set, before success. Every `main` commit creates
-  one managed candidate, and no local production upload or historical
-  promotion/rollback path may compete with that Git owner. Rollback uses a fresh
-  revert commit so it receives current proof. This proves the
-  reconciliation-facts wire boundary only; Murph Cloud release admission owns
-  full worker/runtime integration, replay, routing, and canary safety.
+  That same private run selects the one canonical foreground-priority lane from
+  its integration manifest, forces and observes standby allocation, and emits a
+  second digest bound to both exact main SHAs, the fixed lane, and the public
+  protected environment's expected production Temporal target digest. Private
+  setup and final attestation derive the live target from protected
+  configuration and reject mismatch without exporting its component values.
+  The release mode rejects an arbitrary public ref; public pull requests remain
+  fixture-only and never execute beside private source. The public controller
+  re-reads both branch heads, and private protected attestations re-read the
+  supported reader set and both heads, before success. Every `main` commit creates one managed
+  candidate, and no local production upload or historical promotion/rollback
+  path may compete with that Git owner. Rollback uses a fresh revert commit so
+  it receives current proof. This proves the reconciliation-facts wire boundary
+  and foreground/standby path; Murph Cloud release admission still owns full
+  worker/runtime integration, replay, routing, and canary safety.
 - Focused tests prove that wake acceptance is not completion and that Temporal
   idles only after reconciliation facts are idle.
 - The hosted-local E2E harness includes a non-manual Temporal orchestration
