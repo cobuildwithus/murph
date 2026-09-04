@@ -1,0 +1,75 @@
+.astra {
+  /* Keep the launch-inspired constellation inside the card's decorative edge. */
+  isolation: isolate;
+}
+
+.dust,
+.echo {
+  transform-origin: 181px 99px;
+  animation: stardust-drift 12s ease-in-out infinite alternate;
+}
+
+.echo {
+  animation-direction: alternate-reverse;
+  animation-duration: 17s;
+  transform: rotate(-3deg) scale(1.035);
+}
+
+.core {
+  transform-origin: 181px 99px;
+  animation: core-glow 6s ease-in-out infinite;
+}
+
+.orbit {
+  transform-origin: 181px 99px;
+  animation: orbit 16s linear infinite;
+}
+
+.stars {
+  animation: starlight 5s ease-in-out infinite;
+}
+
+.satellites {
+  animation: starlight 7s ease-in-out -3s infinite;
+}
+
+@keyframes stardust-drift {
+  from {
+    transform: rotate(-8deg) scale(0.97);
+  }
+  to {
+    transform: rotate(8deg) scale(1.035);
+  }
+}
+
+@keyframes orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes core-glow {
+  0%, 100% {
+    opacity: 0.7;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+
+@keyframes starlight {
+  0%, 100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .astra * {
+    animation: none;
+  }
+}

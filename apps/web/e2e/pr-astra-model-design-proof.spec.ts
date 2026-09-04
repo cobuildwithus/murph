@@ -9,9 +9,18 @@ test("Max model choice shows Astra on phone and desktop", async ({ browser }) =>
   test.setTimeout(300_000);
   await mkdir(outputDir, { recursive: true });
   for (const width of [390, 1280]) {
-    const context = await browser.newContext({ viewport: { width, height: 1000 } });
+    const context = await browser.newContext({
+      viewport: { width, height: 1000 },
+      reducedMotion: "no-preference",
+    });
     try {
       const page = await context.newPage();
+      const hydrationErrors: string[] = [];
+      page.on("console", (message) => {
+        if (/hydration|hydrated|server rendered HTML/i.test(message.text())) {
+          hydrationErrors.push(message.text());
+        }
+      });
       await page.route("**/*", (route) => {
         const hostname = new URL(route.request().url()).hostname;
         return ["localhost", "127.0.0.1", "[::1]"].includes(hostname)
@@ -29,7 +38,18 @@ test("Max model choice shows Astra on phone and desktop", async ({ browser }) =>
       });
       const bounds = await study.boundingBox();
       expect(bounds?.width).toBeLessThanOrEqual(width);
-      await study.screenshot({ path: path.join(outputDir, `astra-models-${width}.png`), animations: "disabled" });
+      const artwork = study.locator('[data-model-artwork="astra"]');
+      await expect.poll(() => artwork.evaluate((element) =>
+        element.getAnimations({ subtree: true }).filter((animation) => animation.playState === "running").length,
+      )).toBeGreaterThan(0);
+      await study.screenshot({ path: path.join(outputDir, `astra-models-${width}.png`) });
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await expect.poll(() => artwork.evaluate((element) =>
+        element.getAnimations({ subtree: true }).length,
+      )).toBe(0);
+      await expect(study.locator('[id="assistant-model-gpt-6-astra"]')).toBeEnabled();
+      await study.screenshot({ path: path.join(outputDir, `astra-models-${width}-reduced-motion.png`) });
+      expect(hydrationErrors).toEqual([]);
     } finally {
       await context.close();
     }
