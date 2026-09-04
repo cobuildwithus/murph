@@ -3803,10 +3803,9 @@ and subagent prompt record is
 
 The repository uses the current verification commands described in
 `agent-docs/operations/verification-and-runtime.md`. Their dispatcher is local
-by default and exposes two explicit, fail-closed, secret-free remote executors:
-Crabbox's first-party static SSH provider for a dedicated macOS worker account,
-and its direct Blacksmith Testbox provider for the bounded paid fallback. The
-static lane validates explicit operator-local host, user, and port routing,
+by default and exposes one explicit, fail-closed, secret-free remote executor:
+Crabbox's first-party static SSH provider for a dedicated macOS worker account.
+The static lane validates explicit operator-local host, user, and port routing,
 passes those facts only as Crabbox CLI arguments, derives one opaque lease id
 per initiating worktree, and creates a unique remote directory for every
 invocation. After admission, the dispatcher

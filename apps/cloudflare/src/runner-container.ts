@@ -71,6 +71,10 @@ const RUNNER_LIVE_MODEL_TURN_SMOKE_URL =
   "http://container/internal/deploy-live-model-turn-smoke";
 const RUNNER_DIRECT_R2_PRESIGNED_PUT_SMOKE_URL =
   "http://container/internal/direct-r2-presigned-put-smoke";
+// Covers the container-side 45s app-server probe plus request/response margin.
+// This diagnostic grew beyond the ordinary member-runtime readiness budget;
+// keeping the budgets separate avoids changing hot-path admission semantics.
+const RUNNER_CODEX_SHELL_SMOKE_MIN_TIMEOUT_MS = 60_000;
 // Covers the container-side 60s codex exec budget plus boot/dispatch margin.
 const RUNNER_LIVE_MODEL_TURN_SMOKE_MIN_TIMEOUT_MS = 90_000;
 const RUNNER_RUNTIME_WAKE_URL = "http://container/internal/runtime-wake";
@@ -1648,7 +1652,10 @@ export class RunnerContainer extends Container {
   private async smokeCodexShell(
     readyTimeoutMs: number,
   ): Promise<NonNullable<HostedExecutionContainerSmokeHealthResult["codexShell"]>> {
-    const smokeSignal = AbortSignal.timeout(readyTimeoutMs);
+    const smokeSignal = AbortSignal.timeout(Math.max(
+      readyTimeoutMs,
+      RUNNER_CODEX_SHELL_SMOKE_MIN_TIMEOUT_MS,
+    ));
     const response = await this.containerFetch(
       RUNNER_CODEX_SHELL_SMOKE_URL,
       {
