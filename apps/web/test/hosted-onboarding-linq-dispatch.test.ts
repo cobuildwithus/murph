@@ -10067,6 +10067,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       expect.objectContaining({
         create: expect.objectContaining({
           linqEmailHandleLookupKey: expect.stringMatching(/^hbidx:email:v1:/u),
+          linqEmailHandleEncrypted: expect.any(String),
           phoneLookupKey: null,
           phoneNumberEncrypted: null,
         }),
@@ -13402,6 +13403,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(hostedMemberRouting.upsert).toHaveBeenCalled();
     expect(prisma.hostedMemberIdentity?.updateMany).toHaveBeenCalledWith({
       data: {
+        linqEmailHandleEncrypted: expect.any(String),
         linqEmailHandleLookupKey: expect.stringMatching(/^hbidx:email:v1:/u),
       },
       where: {

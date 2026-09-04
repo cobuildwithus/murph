@@ -43,6 +43,7 @@ import {
   upsertHostedMemberPendingLinqParticipantContactTx,
 } from "./hosted-member-routing-store";
 import {
+  assertHostedMemberLinqEmailHandleOwnerTx,
   bindHostedMemberLinqEmailHandleTx,
   lookupHostedMemberIdentityByLinqEmailHandle,
   lookupHostedMemberIdentityByPhoneLookupKey,
@@ -334,7 +335,7 @@ export async function ensureHostedMemberForPendingLinqParticipantContactTx(input
   // An unexpected unique-index conflict aborts this transaction.
   await upsertHostedMemberIdentity({
     ...(input.contact.kind === "email"
-      ? { linqEmailHandleLookupKey: input.contact.lookupKey }
+      ? { linqEmailHandle: input.contact.value }
       : {}),
     maskedPhoneNumberHint: null,
     memberId,
@@ -544,6 +545,12 @@ export async function ensureHostedMemberForPrivyIdentityResolutionTx(input: {
       identity,
     });
     const memberId = input.preparedNewMemberId ?? generateHostedMemberId();
+
+    await assertHostedPrivyLinqEmailHandleOwnerMatchesTx({
+      emailLockContact,
+      memberId,
+      prisma: input.prisma,
+    });
 
     const createdMember = await createHostedMember({
       billingStatus: HostedBillingStatus.not_started,
@@ -803,13 +810,11 @@ async function assertHostedPrivyLinqEmailHandleOwnerMatchesTx(input: {
   if (!input.emailLockContact) {
     return;
   }
-  const owner = await lookupHostedMemberIdentityByLinqEmailHandle({
+  await assertHostedMemberLinqEmailHandleOwnerTx({
     emailAddress: input.emailLockContact.value,
+    memberId: input.memberId,
     prisma: input.prisma,
   });
-  if (owner && owner.core.id !== input.memberId) {
-    throw createHostedPrivyIdentityConflictError();
-  }
 }
 
 function assertHostedPrivyEmailIdentityLockMatches(input: {

@@ -3653,6 +3653,7 @@ function buildHostedMemberIdentityRecord(
   return {
     createdAt: now,
     linqEmailHandleLookupKey: nullableString(input.linqEmailHandleLookupKey),
+    linqEmailHandleEncrypted: null,
     maskedPhoneNumberHint: nullableString(input.maskedPhoneNumberHint),
     memberId: input.memberId,
     phoneLookupKey: nullableString(input.phoneLookupKey),

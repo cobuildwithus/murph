@@ -3499,15 +3499,24 @@ configured E.164 phone prefix or is a normalized email handle may use a
 persisted model-source allow to enter instant start. The selected
 permanent home line must be the same line the person contacted. The first
 planner transaction creates the canonical member, either verified phone
-identity or a unique blinded Linq email-handle identity, the pending route,
+identity or a unique blinded Linq email-handle identity with its encrypted
+normalized source, the pending route,
 and the invite. A provider-observed email handle is routing identity only and
 never asserts verified email authorization. Privy email authentication must
 later converge the Linq handle owner, verified-email owner, and Privy
 principal owner when more than one exists; any disagreement fails closed.
-The additive migration backfills only the blinded email-handle identity from
-existing active and pending email routes and never grants starter access
-retroactively. Validation and backfill share one transaction-scoped route set;
-failure rolls back the column and scratch state. Email identity lookup and
+The additive migration copies each route's blinded key and matching same-member
+pending participant ciphertext, preserving its existing encryption context.
+It rejects active-only or missing-source history before changing identity;
+it never substitutes a verified-email ciphertext with a different field binding
+or grants starter access retroactively. Validation and backfill share one
+transaction-scoped route set; failure rolls back both columns and scratch state.
+The identity keeps the encrypted source after activation clears pending routing.
+Canonical verified-email writes and email unlink take the participant contact
+lock before the member lock. A foreign handle blocks a primary email write;
+optional secondary enrichment skips that email while preserving phone or
+Telegram sign-in. Unlink clears only the matching handle and encrypted source.
+Email identity lookup and
 creation use the existing participant contact lock, with the unique index as
 the final backstop. That invite carries only the event id of the
 persisted model-source allow and is the single-owner token for that exact

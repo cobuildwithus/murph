@@ -47,13 +47,15 @@ describe.skipIf(!runPostgresMigrationProof)(
             "linq_participant_contact_kind",
             "linq_participant_contact_lookup_key",
             "pending_linq_participant_contact_kind",
-            "pending_linq_participant_contact_lookup_key"
+            "pending_linq_participant_contact_lookup_key",
+            "pending_linq_participant_contact_encrypted"
           ) VALUES (
             'member_email',
             'email',
             'email-key',
             'email',
-            'email-key'
+            'email-key',
+            'sealed-participant'
           );
         `);
 
@@ -64,18 +66,44 @@ describe.skipIf(!runPostgresMigrationProof)(
         )).resolves.toMatchObject({ rows: [{ scratch: null }] });
 
         await expect(client.query<{ lookupKey: string | null }>(`
-          SELECT "linq_email_handle_lookup_key" AS "lookupKey"
+          SELECT "linq_email_handle_lookup_key" AS "lookupKey",
+            "linq_email_handle_encrypted" AS "encrypted"
           FROM "hosted_member_identity"
           WHERE "member_id" = 'member_email'
         `)).resolves.toMatchObject({
-          rows: [{ lookupKey: "email-key" }],
+          rows: [{ lookupKey: "email-key", encrypted: "sealed-participant" }],
         });
         await expect(client.query(`
           INSERT INTO "hosted_member_identity" (
             "member_id",
-            "linq_email_handle_lookup_key"
-          ) VALUES ('member_other', 'email-key')
+            "linq_email_handle_lookup_key", "linq_email_handle_encrypted"
+          ) VALUES ('member_other', 'email-key', 'sealed-other')
         `)).rejects.toMatchObject({ code: "23505" });
+      });
+    });
+
+    it.each([null, ""])("rejects a pending identity without a usable source (%s)", async (source) => {
+      await withFixtureSchema(async (client) => {
+        await client.query(`INSERT INTO "hosted_member_identity" ("member_id") VALUES ('member_source')`);
+        await client.query(`
+          INSERT INTO "hosted_member_routing" (
+            "member_id", "pending_linq_participant_contact_kind",
+            "pending_linq_participant_contact_lookup_key", "pending_linq_participant_contact_encrypted"
+          ) VALUES ('member_source', 'email', 'source-key', $1)
+        `, [source]);
+        await expect(applyMigration(client)).rejects.toThrow("matching encrypted participant source required");
+      });
+    });
+
+    it("rejects active-only history instead of inventing an encrypted source", async () => {
+      await withFixtureSchema(async (client) => {
+        await client.query(`
+          INSERT INTO "hosted_member_identity" ("member_id") VALUES ('member_active');
+          INSERT INTO "hosted_member_routing" (
+            "member_id", "linq_participant_contact_kind", "linq_participant_contact_lookup_key"
+          ) VALUES ('member_active', 'email', 'active-key');
+        `);
+        await expect(applyMigration(client)).rejects.toThrow("matching encrypted participant source required");
       });
     });
 
@@ -163,7 +191,7 @@ async function applyMigration(client: pg.Client): Promise<void> {
       SELECT column_name FROM information_schema.columns
       WHERE table_schema = current_schema()
         AND table_name = 'hosted_member_identity'
-        AND column_name = 'linq_email_handle_lookup_key'
+        AND column_name IN ('linq_email_handle_lookup_key', 'linq_email_handle_encrypted')
     `)).resolves.toMatchObject({ rows: [] });
     await expect(client.query(
       "SELECT to_regclass('pg_temp.linq_email_identity_backfill') AS scratch",
@@ -192,7 +220,8 @@ async function withFixtureSchema(
         "linq_participant_contact_kind" TEXT,
         "linq_participant_contact_lookup_key" TEXT,
         "pending_linq_participant_contact_kind" TEXT,
-        "pending_linq_participant_contact_lookup_key" TEXT
+        "pending_linq_participant_contact_lookup_key" TEXT,
+        "pending_linq_participant_contact_encrypted" TEXT
       );
       CREATE TABLE "hosted_member_email_authorization" (
         "member_id" TEXT PRIMARY KEY,

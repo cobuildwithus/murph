@@ -4,6 +4,18 @@ Last verified: 2026-09-02
 
 ## Current Repo Checks
 
+Linq email identity remediation is covered by the focused
+`hosted-onboarding-linq-email-authority.test.ts` and
+`hosted-onboarding-linq-email-crypto.test.ts` suites, plus linked-account,
+Settings email, Privy, and dispatch regressions. The crypto proof uses real
+authenticated encryption with a synthetic local root. With an isolated local
+`DATABASE_URL` and `MURPH_TEST_POSTGRES_CONCURRENCY=1`, run
+`hosted-onboarding-linq-email-identity-migration-postgres.test.ts` and the
+`Linq email-handle identity` slice of `hosted-onboarding-member-lock-postgres.test.ts`
+through `pnpm --dir apps/web test:prepared -- test/<file>`. These prove exact
+same-member ciphertext copying, source/ownership rejection and rollback,
+concurrent creation, and unlink followed by a fresh inbound identity.
+
 | Command | Purpose | Current coverage |
 | --- | --- | --- |
 | `pnpm test:assistant:live -- --test "<name-pattern>"` | Required focused local real-Codex journey for assistant-behavior changes after deterministic proof. Defaults to the local ChatGPT/Codex subscription and `gpt-5.6-terra`; `--auth provider` preserves the isolated provider-key lane. | One selected `assistant-codex-real-e2e.test.ts` journey, including exact required/forbidden effects and printed synthetic replies for manual `Ready`/`Hold` UX review. Routine CI leaves the paid gate unset. |

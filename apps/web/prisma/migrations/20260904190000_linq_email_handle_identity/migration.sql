@@ -1,7 +1,8 @@
 BEGIN;
 
 ALTER TABLE "hosted_member_identity"
-  ADD COLUMN "linq_email_handle_lookup_key" TEXT;
+  ADD COLUMN "linq_email_handle_lookup_key" TEXT,
+  ADD COLUMN "linq_email_handle_encrypted" TEXT;
 
 CREATE TEMP TABLE "linq_email_identity_backfill" ON COMMIT DROP AS
   SELECT "member_id", "linq_participant_contact_lookup_key" AS "lookup_key"
@@ -55,11 +56,29 @@ BEGIN
     RAISE EXCEPTION
       'Cannot backfill Linq email handle identity: verified email belongs to another member';
   END IF;
+
+  -- The identity retains the pending participant's encryption context and
+  -- member binding. Copy only that exact same-member source; another field's
+  -- ciphertext cannot be substituted without authenticated re-encryption.
+  IF EXISTS (
+    SELECT 1
+    FROM "linq_email_identity_backfill" routes
+    JOIN "hosted_member_routing" routing
+      ON routing."member_id" = routes."member_id"
+    WHERE routing."pending_linq_participant_contact_kind" IS DISTINCT FROM 'email'
+      OR routing."pending_linq_participant_contact_lookup_key" IS DISTINCT FROM routes."lookup_key"
+      OR NULLIF(routing."pending_linq_participant_contact_encrypted", '') IS NULL
+  ) THEN
+    RAISE EXCEPTION
+      'Cannot backfill Linq email handle identity: matching encrypted participant source required';
+  END IF;
 END $$;
 
 UPDATE "hosted_member_identity" identity
-SET "linq_email_handle_lookup_key" = routes."lookup_key"
+SET "linq_email_handle_lookup_key" = routes."lookup_key",
+    "linq_email_handle_encrypted" = routing."pending_linq_participant_contact_encrypted"
 FROM "linq_email_identity_backfill" routes
+JOIN "hosted_member_routing" routing ON routing."member_id" = routes."member_id"
 WHERE identity."member_id" = routes."member_id";
 
 CREATE UNIQUE INDEX "hosted_member_identity_linq_email_handle_lookup_key_key"

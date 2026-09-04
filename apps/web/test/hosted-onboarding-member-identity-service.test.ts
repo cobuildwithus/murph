@@ -523,7 +523,7 @@ describe("hosted-onboarding member-identity-service", () => {
       now: NOW,
       prisma: prisma as never,
     })).rejects.toMatchObject({
-      code: "PRIVY_IDENTITY_CONFLICT",
+      code: "HOSTED_LINQ_EMAIL_HANDLE_IDENTITY_CONFLICT",
       httpStatus: 409,
     });
 
