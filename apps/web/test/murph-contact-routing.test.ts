@@ -59,6 +59,24 @@ test("withMurphContactOptionBody carries one exact workout through every contact
   assert.equal(new URL(email.webmail.href).searchParams.get("body"), body);
 });
 
+test("withMurphContactOptionBody percent-encodes sms bodies so Messages shows spaces, not plus signs", () => {
+  const [option] = resolveMurphContactOptions({
+    contactChannels: { text: true },
+    message: { body: "Hey Murph, I have a goal in mind." },
+    murphPhoneNumber: "+15550100001",
+    preferredKind: "text",
+  });
+  assert.ok(option);
+
+  const updated = withMurphContactOptionBody(option, "Hey Murph, help me sleep better");
+
+  assert.equal(
+    updated.href,
+    "sms:+15550100001?body=Hey%20Murph%2C%20help%20me%20sleep%20better",
+  );
+  assert.ok(!updated.href.includes("+Murph"));
+});
+
 test("withMurphContactOptionBody updates wrapped mailto shortcuts", () => {
   const option = resolveMurphContactOptions({
     contactChannels: { email: true },
@@ -115,6 +133,13 @@ test("resolveMurphContactOptions uses Telegram web links for prefilled text", ()
 });
 
 test("resolveMurphTelegramBotUsername falls back when the override is invalid", () => {
+  assert.equal(
+    resolveMurphTelegramBotUsername({
+      MURPH_TELEGRAM_USERNAME_OVERRIDE: "not valid",
+      TELEGRAM_BOT_USERNAME: "legacy_murph_bot",
+    }),
+    "legacy_murph_bot",
+  );
   assert.equal(
     resolveMurphTelegramBotUsername({
       MURPH_TELEGRAM_USERNAME_OVERRIDE: "not valid",

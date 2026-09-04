@@ -140,8 +140,8 @@ import {
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+  MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
-  MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
   applyMurphManagedAutomations,
   ensureAutomaticMealCloseoutAutomation,
   resolveMurphManagedAutomationSeed,
@@ -149,10 +149,7 @@ import {
   type MurphManagedAutomationSeed,
 } from '../src/assistant/managed-automations.ts'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../src/assistant/automation-tags.ts'
-import {
-  computeAssistantCronNextRunAt,
-  findNextAssistantCronOccurrence,
-} from '../src/assistant/cron/schedule.ts'
+import { findNextAssistantCronOccurrence } from '../src/assistant/cron/schedule.ts'
 
 const vaultRoot = '/tmp/murph-managed-automations/vault'
 
@@ -178,11 +175,6 @@ const EXPECTED_MANAGED_SPREAD_CRONS = {
   digest: { kind: 'cron', expression: '30 10 * * 2' },
   insight: { kind: 'cron', expression: '0 13 * * 0' },
   researchScout: { kind: 'cron', expression: '0 14 * * 3' },
-} as const
-
-const EXPECTED_PRODUCT_NOTES_SCHEDULE = {
-  kind: 'every',
-  everyMs: 14 * 24 * 60 * 60 * 1000,
 } as const
 
 const legacyOnboardingFollowupInstructions = [
@@ -500,9 +492,13 @@ describe('applyMurphManagedAutomations', () => {
       updated: 0,
       yielded: true,
     })
-    expect(managedAutomationMocks.showAutomation).toHaveBeenCalledOnce()
-    expect(managedAutomationMocks.showAutomation).toHaveBeenCalledWith({
+    expect(managedAutomationMocks.showAutomation).toHaveBeenCalledTimes(2)
+    expect(managedAutomationMocks.showAutomation).toHaveBeenNthCalledWith(1, {
       automationId: 'automation_01K55N7S9X4Q2M6P8R3T0V1WYZ',
+      vaultRoot,
+    })
+    expect(managedAutomationMocks.showAutomation).toHaveBeenNthCalledWith(2, {
+      automationId: MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
       vaultRoot,
     })
     expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
@@ -1049,81 +1045,12 @@ describe('applyMurphManagedAutomations', () => {
     )).toBe('2026-07-01T23:30:00.000Z')
   })
 
-  it('runs alternating product notes every two weeks', () => {
-    const seed = MURPH_MANAGED_AUTOMATIONS.find(
-      (entry) => entry.automationId === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
-    )
-    if (!seed) {
-      throw new Error('Expected managed product notes to exist.')
-    }
-
-    expect(seed.schedule).toEqual(EXPECTED_PRODUCT_NOTES_SCHEDULE)
-    expect(seed.title).toBe('Murph product notes')
-    expect(seed.summary).toBe('A biweekly personalized note alternating what is new in Murph with things Murph can do for you.')
-    expect(seed.instructions).toContain('Goal: every two weeks')
-    expect(seed.instructions).toContain('/api/changelog?days=14&featureLimit=70&improvementLimit=10')
-    expect(seed.instructions).toContain('/api/feature-catalog')
-    expect(seed.instructions).toContain('Read `vault-cli knowledge show murph-product-notes`')
-    expect(seed.instructions).toContain('choose the feature discovery kind')
-    expect(seed.instructions).toContain('last recorded changelog means feature discovery now')
-    expect(seed.instructions).toContain('last recorded feature discovery means changelog now')
-    expect(seed.instructions).toContain('Use `murph-product-notes` as the only ledger')
-    expect(seed.instructions).toContain('vault-cli knowledge append-section murph-product-notes YYYY-MM-DD')
-    expect(seed.instructions).toContain('Fallback is allowed at most once')
-    expect(seed.instructions).toContain('never fall back from a fallback')
-    expect(seed.instructions).toContain('If both kinds are unavailable, invalid, empty, or below bar')
-    expect(seed.instructions).toContain('record only this run\'s kind and the chosen item ids')
-    expect(seed.instructions).toContain('do not include reasons, user context, health details, raw user wording, provider data, or copied catalog/changelog text')
-    expect(seed.instructions).toContain('another run already recorded today\'s note')
-    expect(seed.instructions).toContain('Do not append again and do not switch kinds')
-    expect(seed.instructions).toContain('2-3 recently shipped Murph updates')
-    expect(seed.instructions).toContain('2-3 things Murph can already do')
-    expect(seed.instructions).toContain('Do not pad with weak matches')
-    expect(seed.instructions).toContain('member-facing product update, not a dump of release notes')
-    expect(seed.instructions).toContain('introduces or materially changes a member-facing action, decision, or visible experience')
-    expect(seed.instructions).toContain('Never pitch reliability work.')
-    expect(seed.instructions).toContain('only restores or hardens otherwise unchanged behavior or reports internal durability')
-    expect(seed.instructions).not.toContain('member encountered the corresponding issue')
-    expect(seed.instructions).toContain('lower priority than exciting capabilities')
-    expect(seed.instructions).toContain('if neither kind clears, skip')
-    expect(seed.instructions).toContain('Drop items the user is already using')
-    expect(seed.instructions).toContain('context already surfaced for ordinary assistance')
-    expect(seed.instructions).toContain('Require positive eligibility evidence')
-    expect(seed.instructions).toContain('any active or reconnect-required wearable means the feature is already in use')
-    expect(seed.instructions).toContain('if wearable connection status context is absent or unclear, drop it')
-    expect(seed.instructions).toContain('Do not open raw health records, uploaded documents, inbox attachments, provider payloads, transcripts, or raw notes solely to decide whether a feature was used')
-    expect(seed.instructions).toContain('Drop items already pitched in any prior ledger section; never repeat a feature pitch')
-    expect(seed.instructions).toContain('If an item lists a requires prerequisite')
-    expect(seed.instructions).toContain('Drop items this conversation cannot actually do right now')
-    expect(seed.instructions).toContain('Keep this scheduled note text-only')
-    expect(seed.instructions).toContain('The outbound note must be link-free')
-    expect(seed.instructions).toContain('no more than 28 words after the bullet marker')
-    expect(seed.instructions).toContain('preserve required prerequisites, availability limits, and approval or confirmation boundaries')
-    expect(seed.instructions).toContain('Open every outbound note with one sentence of no more than 20 words before the first bullet')
-    expect(seed.instructions).toContain("In Murph's first-person voice")
-    expect(seed.instructions).not.toContain('If the ledger page was missing before this run')
-    expect(seed.instructions).toContain('Close with one invitation sentence of no more than 12 words')
-    expect(seed.instructions).not.toContain('canonical title, summary, URL, and tryIt fields')
-    expect(seed.instructions).not.toContain('Choose 3-7 items')
-    expect(seed.instructions).not.toContain('murph.attach_response_media')
-    expect(seed.instructions).not.toContain('visual digest')
-    expect(seed.instructions).not.toContain('links.digestCardTemplate')
-    expect(seed.instructions).toContain('murph.submit_product_feedback')
-    expect(seed.instructions).toContain('clear inferred workflow friction')
-    expect(seed.instructions).toContain('interest in shipped changelog or catalog items')
-    expect(seed.instructions).toContain('Speculative:')
-    expect(seed.instructions).toContain('Murph-observed:')
-    expect(seed.instructions).toContain('Do not log vague low-confidence guesses')
-    expect(seed.instructions).toContain('concise product-only summary')
-    expect(seed.instructions).toContain('tags, topics, raw user wording')
-    expect(seed.instructions).not.toContain('kind/topic')
-    expect(seed.instructions).toContain(
-      '{"kind":"skip","privateSummary":"No product note cleared the send bar."}',
-    )
-    expect(computeAssistantCronNextRunAt(
-      seed.schedule,
-      new Date('2026-06-22T12:00:00.000Z'),
-    )).toBe('2026-07-06T12:00:00.000Z')
+  it('does not expose the retired product-notes automation as a managed seed', () => {
+    expect(MURPH_MANAGED_AUTOMATIONS.some(
+      (entry) =>
+        entry.automationId
+        === MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+    )).toBe(false)
   })
 
   it('keeps the group room model as a lightweight twice-weekly group-only maintenance seed', () => {
@@ -1369,11 +1296,11 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 6,
+      created: 5,
       skipped: 0,
       updated: 0,
     })
-    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(6)
+    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(5)
     const patternsUpdateRecord = managedAutomationMocks.records.get(
       MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
     )
@@ -1717,49 +1644,9 @@ describe('applyMurphManagedAutomations', () => {
     expect(researchScoutRecord?.instructions).toContain('why close alternatives were suppressed')
     expect(researchScoutRecord?.instructions).toContain('clinician discussion prompt')
 
-    const productUpdatesRecord = managedAutomationMocks.records.get(
-      MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
-    )
-    expect(productUpdatesRecord).toMatchObject({
-      automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
-      continuityPolicy: 'fresh',
-      route: defaultRoute,
-      slug: 'weekly-product-updates',
-      status: 'active',
-      summary: 'A biweekly personalized note alternating what is new in Murph with things Murph can do for you.',
-      title: 'Murph product notes',
-    })
-    expect(productUpdatesRecord?.schedule).toEqual(EXPECTED_PRODUCT_NOTES_SCHEDULE)
-    expect(productUpdatesRecord?.tags).toContain(
-      'murph-managed:weekly-product-updates',
-    )
-    expect(productUpdatesRecord?.tags).not.toContain(
-      ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG,
-    )
-    expect(productUpdatesRecord?.instructions).toContain('/api/changelog?days=14&featureLimit=70&improvementLimit=10')
-    expect(productUpdatesRecord?.instructions).toContain('/api/feature-catalog')
-    expect(productUpdatesRecord?.instructions).toContain('Read `vault-cli knowledge show murph-product-notes`')
-    expect(productUpdatesRecord?.instructions).toContain('choose the feature discovery kind')
-    expect(productUpdatesRecord?.instructions).toContain('Use `murph-product-notes` as the only ledger')
-    expect(productUpdatesRecord?.instructions).toContain('vault-cli knowledge append-section murph-product-notes YYYY-MM-DD')
-    expect(productUpdatesRecord?.instructions).toContain('Fallback is allowed at most once')
-    expect(productUpdatesRecord?.instructions).toContain('never fall back from a fallback')
-    expect(productUpdatesRecord?.instructions).toContain('If both kinds are unavailable, invalid, empty, or below bar')
-    expect(productUpdatesRecord?.instructions).toContain('record only this run\'s kind and the chosen item ids')
-    expect(productUpdatesRecord?.instructions).toContain('do not include reasons, user context, health details, raw user wording, provider data, or copied catalog/changelog text')
-    expect(productUpdatesRecord?.instructions).toContain('another run already recorded today\'s note')
-    expect(productUpdatesRecord?.instructions).toContain('Do not append again and do not switch kinds')
-    expect(productUpdatesRecord?.instructions).toContain('2-3 recently shipped Murph updates')
-    expect(productUpdatesRecord?.instructions).toContain('2-3 things Murph can already do')
-    expect(productUpdatesRecord?.instructions).toContain('Do not pad with weak matches')
-    expect(productUpdatesRecord?.instructions).toContain('Drop items the user is already using')
-    expect(productUpdatesRecord?.instructions).toContain('context already surfaced for ordinary assistance')
-    expect(productUpdatesRecord?.instructions).toContain('Do not open raw health records, uploaded documents, inbox attachments, provider payloads, transcripts, or raw notes solely to decide whether a feature was used')
-    expect(productUpdatesRecord?.instructions).not.toContain('Choose 3-7 items')
-    expect(productUpdatesRecord?.instructions).toContain(
-      '{"kind":"skip","privateSummary":"No product note cleared the send bar."}',
-    )
-    expect(productUpdatesRecord?.instructions).not.toContain('finish_without_reply')
+    expect(managedAutomationMocks.records.has(
+      MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+    )).toBe(false)
     expect(
       managedAutomationMocks.records.has(MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID),
     ).toBe(false)
@@ -1801,7 +1688,7 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 9,
+      created: 8,
       skipped: 0,
       updated: 0,
     })
@@ -1974,17 +1861,17 @@ describe('applyMurphManagedAutomations', () => {
   })
 
   it('archives existing personal managed automations that are bound to Linq group chat routes', async () => {
-    managedAutomationMocks.records.set(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID, {
-      automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+    managedAutomationMocks.records.set(MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID, {
+      automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
       continuityPolicy: 'fresh',
-      instructions: 'OLD weekly product updates instructions.',
+      instructions: 'OLD weekly health digest instructions.',
       route: groupChatRoute,
-      schedule: { kind: 'cron', expression: '30 12 * * 5' },
-      slug: 'weekly-product-updates',
+      schedule: { kind: 'cron', expression: '0 9 * * 1' },
+      slug: 'weekly-health-digest',
       status: 'active',
-      summary: 'Old weekly product updates.',
-      tags: ['assistant', 'scheduled', 'murph-managed', 'murph-managed:weekly-product-updates'],
-      title: 'Murph product notes',
+      summary: 'Old weekly health digest.',
+      tags: ['assistant', 'scheduled', 'murph-managed', 'murph-managed:weekly-health-digest'],
+      title: 'Weekly health digest',
     })
 
     const result = await applyMurphManagedAutomations({
@@ -1994,26 +1881,26 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(result).toEqual({
       created: 0,
-      skipped: 5,
+      skipped: 4,
       updated: 1,
     })
     expect(managedAutomationMocks.patchAutomation).toHaveBeenCalledWith({
-      lookup: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+      lookup: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
       now: new Date('2026-07-09T14:00:00.000Z'),
       status: 'archived',
       vaultRoot,
     })
     expect(
-      managedAutomationMocks.records.get(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID)?.status,
+      managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID)?.status,
     ).toBe('archived')
   })
 
   it('archives paused personal built-ins that are persisted on a group route', async () => {
     const seed = MURPH_MANAGED_AUTOMATIONS.find(
-      (entry) => entry.automationId === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+      (entry) => entry.automationId === MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
     )
     if (!seed) {
-      throw new Error('Expected the managed product updates seed.')
+      throw new Error('Expected the managed weekly health insight seed.')
     }
     managedAutomationMocks.records.set(seed.automationId, {
       automationId: seed.automationId,
@@ -2109,6 +1996,34 @@ describe('applyMurphManagedAutomations', () => {
       .toBe('archived')
   })
 
+  it('archives a paused persisted product-notes record after its seed is retired', async () => {
+    managedAutomationMocks.records.set(
+      MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+      {
+        automationId: MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+        continuityPolicy: 'fresh',
+        instructions: 'Legacy biweekly product-note instructions.',
+        route: defaultRoute,
+        schedule: { kind: 'every', everyMs: 14 * 24 * 60 * 60 * 1000 },
+        slug: 'weekly-product-updates',
+        status: 'paused',
+        summary: 'Legacy biweekly product notes.',
+        tags: ['assistant', 'scheduled', 'murph-managed'],
+        title: 'Murph product notes',
+      },
+    )
+
+    await applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-09-03T14:00:00.000Z'),
+      vaultRoot,
+    })
+
+    expect(managedAutomationMocks.records.get(
+      MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+    )?.status).toBe('archived')
+  })
+
   it('updates existing research-oriented automations without rewriting their cadence', async () => {
     managedAutomationMocks.records.set(MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID, {
       automationId: MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
@@ -2148,7 +2063,7 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 4,
+      created: 3,
       skipped: 0,
       updated: 2,
     })
@@ -2190,10 +2105,10 @@ describe('applyMurphManagedAutomations', () => {
     ).not.toContain('Wednesday at 7:30 PM local time')
   })
 
-  it('migrates existing weekly product notes to the two-week cadence', async () => {
+  it('archives existing product notes instead of reconciling their cadence', async () => {
     const existingSchedule = { kind: 'cron', expression: '30 12 * * 5' } as const
-    managedAutomationMocks.records.set(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID, {
-      automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+    managedAutomationMocks.records.set(MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID, {
+      automationId: MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
       continuityPolicy: 'preserve',
       instructions: 'OLD weekly product updates instructions with changelog-only behavior.',
       route: defaultRoute,
@@ -2216,19 +2131,13 @@ describe('applyMurphManagedAutomations', () => {
       skipped: 0,
       updated: 1,
     })
-    const productUpdatesRecord = managedAutomationMocks.records.get(
-      MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
-    )
-    expect(productUpdatesRecord?.schedule).toEqual(EXPECTED_PRODUCT_NOTES_SCHEDULE)
-    expect(productUpdatesRecord?.summary).toBe(
-      'A biweekly personalized note alternating what is new in Murph with things Murph can do for you.',
-    )
-    expect(productUpdatesRecord?.instructions).toContain('Goal: every two weeks')
-    expect(productUpdatesRecord?.instructions).toContain('/api/feature-catalog')
-    expect(productUpdatesRecord?.instructions).toContain('record only this run\'s kind and the chosen item ids')
-    expect(productUpdatesRecord?.instructions).toContain('do not include reasons, user context, health details, raw user wording, provider data, or copied catalog/changelog text')
-    expect(productUpdatesRecord?.instructions).toContain('Do not append again and do not switch kinds')
-    expect(productUpdatesRecord?.instructions).not.toContain('OLD weekly product updates instructions')
+    expect(managedAutomationMocks.records.get(
+      MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+    )).toEqual(expect.objectContaining({
+      instructions: 'OLD weekly product updates instructions with changelog-only behavior.',
+      schedule: existingSchedule,
+      status: 'archived',
+    }))
   })
 
   it('removes the legacy require-send tag from an existing active weekly digest', async () => {
@@ -2312,7 +2221,7 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-20T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 4,
       skipped: 0,
       updated: 1,
     })
@@ -2361,7 +2270,7 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-20T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 4,
       skipped: 1,
       updated: 0,
     })
@@ -2399,8 +2308,6 @@ describe('applyMurphManagedAutomations', () => {
       .toEqual(firstSchedules.get(MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID))
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID)?.schedule)
       .toEqual(firstSchedules.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID))
-    expect(managedAutomationMocks.records.get(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID)?.schedule)
-      .toEqual(EXPECTED_PRODUCT_NOTES_SCHEDULE)
   })
 
   it('defers spread-managed creation when vault metadata cannot be read', async () => {
@@ -2412,21 +2319,18 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-09T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 3,
+      created: 2,
       skipped: 3,
       stableKeyFailure: metadataError,
       stableKeyRetryNeeded: true,
       updated: 0,
     })
-    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(3)
+    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(2)
     expect(managedAutomationMocks.records.get(MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID)?.schedule)
       .toEqual({
         kind: 'cron',
         expression: '0 17 1 * *',
       })
-    expect(managedAutomationMocks.records.get(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID)?.schedule)
-      .toEqual(EXPECTED_PRODUCT_NOTES_SCHEDULE)
-
     managedAutomationMocks.loadVault.mockResolvedValue({
       metadata: { vaultId: 'vault_managed_automations_test' },
     })
@@ -2436,7 +2340,7 @@ describe('applyMurphManagedAutomations', () => {
       vaultRoot,
     })).resolves.toEqual({
       created: 3,
-      skipped: 3,
+      skipped: 2,
       updated: 0,
     })
 
@@ -2451,8 +2355,6 @@ describe('applyMurphManagedAutomations', () => {
       })
     expect(managedAutomationMocks.records.get(MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID)?.schedule)
       .toEqual(EXPECTED_MANAGED_SPREAD_CRONS.researchScout)
-    expect(managedAutomationMocks.records.get(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID)?.schedule)
-      .toEqual(EXPECTED_PRODUCT_NOTES_SCHEDULE)
   })
 
   it('continues non-spread seeds and existing updates when stable-key metadata is unavailable', async () => {
@@ -2475,10 +2377,10 @@ describe('applyMurphManagedAutomations', () => {
     const digestSeed = MURPH_MANAGED_AUTOMATIONS.find((seed) =>
       seed.automationId === MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID
     )
-    const productUpdatesSeed = MURPH_MANAGED_AUTOMATIONS.find((seed) =>
-      seed.automationId === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID
+    const improvementCoachSeed = MURPH_MANAGED_AUTOMATIONS.find((seed) =>
+      seed.automationId === MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID
     )
-    if (!digestSeed || !productUpdatesSeed) {
+    if (!digestSeed || !improvementCoachSeed) {
       throw new Error('Expected managed seeds to exist.')
     }
     const experimentSeed: MurphManagedAutomationSeed = {
@@ -2493,7 +2395,7 @@ describe('applyMurphManagedAutomations', () => {
     await expect(applyMurphManagedAutomations({
       defaultRoute,
       now: new Date('2026-06-09T12:00:00.000Z'),
-      seeds: [digestSeed, productUpdatesSeed, experimentSeed],
+      seeds: [digestSeed, improvementCoachSeed, experimentSeed],
       vaultRoot,
     })).resolves.toEqual({
       created: 2,
@@ -2511,8 +2413,9 @@ describe('applyMurphManagedAutomations', () => {
         instructions: experimentSeed.instructions,
         schedule: experimentSeed.schedule,
       }))
-    expect(managedAutomationMocks.records.get(MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID)?.schedule)
-      .toEqual(EXPECTED_PRODUCT_NOTES_SCHEDULE)
+    expect(managedAutomationMocks.records.get(
+      MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
+    )?.schedule).toEqual({ kind: 'cron', expression: '0 17 1 * *' })
   })
 
   it('skips the research scout seed when hosted runtime env lacks Exa', async () => {
@@ -2524,7 +2427,7 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 5,
+      created: 4,
       skipped: 1,
       updated: 0,
     })
@@ -2554,7 +2457,7 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(result).toEqual({
       created: 0,
-      skipped: 6,
+      skipped: 5,
       updated: 0,
     })
     expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
@@ -2584,7 +2487,7 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 5,
+      created: 4,
       skipped: 1,
       updated: 0,
     })
@@ -2628,7 +2531,7 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-23T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 6,
+      created: 5,
       skipped: 0,
       updated: 1,
     })
@@ -2684,7 +2587,7 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-23T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 6,
+      created: 5,
       skipped: 0,
       updated: 1,
     })
@@ -2730,7 +2633,7 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-23T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 6,
+      created: 5,
       skipped: 0,
       updated: 0,
     })
@@ -2768,7 +2671,7 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-23T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 6,
+      created: 5,
       skipped: 0,
       updated: 1,
     })
@@ -2812,7 +2715,7 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-23T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 6,
+      created: 5,
       skipped: 0,
       updated: 0,
     })
@@ -2841,7 +2744,7 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-23T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 6,
+      created: 5,
       skipped: 0,
       updated: 0,
     })
@@ -2879,7 +2782,7 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 5,
+      created: 4,
       skipped: 0,
       updated: 1,
     })
@@ -2907,7 +2810,7 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 6,
+      created: 5,
       skipped: 0,
       updated: 0,
     })
@@ -2938,7 +2841,7 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(result).toEqual({
       created: 0,
-      skipped: 6,
+      skipped: 5,
       updated: 0,
     })
     expect(
@@ -2966,7 +2869,7 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(result).toEqual({
       created: 0,
-      skipped: 6,
+      skipped: 5,
       updated: 0,
     })
     expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
@@ -3072,7 +2975,7 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(result).toEqual({
       created: 0,
-      skipped: 6,
+      skipped: 5,
       updated: 0,
     })
     expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
@@ -3093,7 +2996,7 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(result).toEqual({
       created: 0,
-      skipped: 6,
+      skipped: 5,
       updated: 0,
     })
     expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()

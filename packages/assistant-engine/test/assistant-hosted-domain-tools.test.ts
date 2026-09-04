@@ -122,6 +122,18 @@ describe('hosted domain dynamic tools', () => {
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'a replacement recurring wall-clock schedule that omits schedule.timeZone preserves the stored explicit timezone',
     )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'Pass contextReferences as an array shaped exactly [{"entityKind":"<canonical-kind>","entityId":"<exact-id>"}]',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'both camel-case keys are required on every entry',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'pass an object such as {"model":"gpt-5.6-luna"}',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'Never pass a bare string or Luna, Terra, or Sol.',
+    )
   })
 
   it('admits the documented group newsletter stable recipe through the parser', () => {

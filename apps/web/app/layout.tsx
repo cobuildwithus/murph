@@ -5,7 +5,7 @@ import { AuthProvider } from "@/src/components/hosted-onboarding/auth-dialog-pro
 import { VercelTelemetry } from "@/src/components/observability/vercel-telemetry";
 import { PhoneCountryCodeProvider } from "@/src/components/hosted-onboarding/phone-country-code-provider";
 import { resolveHostedPublicBaseUrl } from "@/src/lib/hosted-web/public-url";
-import { getHostedSidebarAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
+import { getHostedPublicLayoutAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import {
   createMurphPageMetadata,
   MURPH_DEFAULT_METADATA_DESCRIPTION,
@@ -34,12 +34,18 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout(input: { children: React.ReactNode }) {
-  const { authenticated } = await getHostedSidebarAuthSnapshot();
+  const auth = await getHostedPublicLayoutAuthSnapshot();
+  const authenticated = auth.status === "ready"
+    ? auth.sidebarAuth.authenticated
+    : false;
 
   return (
     <html lang="en" className={cn(fraunces.variable, dmSans.variable, dmMono.variable)}>
       <body className="bg-background text-foreground font-sans antialiased">
-        <AuthProvider authenticated={authenticated}>
+        <AuthProvider
+          authenticated={authenticated}
+          authenticationStatus={auth.status}
+        >
           <PhoneCountryCodeProvider>
             {input.children}
           </PhoneCountryCodeProvider>

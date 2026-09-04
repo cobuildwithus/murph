@@ -2267,7 +2267,11 @@ function createPrismaStub(input: {
               ? input.pendingLinePhone ?? null
               : null;
         return phoneNumber
-          ? { phoneNumberEncrypted: encodeTestEncryptedValue(phoneNumber) }
+          ? {
+              phoneNumberEncrypted: encodeTestEncryptedValue(phoneNumber),
+              providerInventoryConfirmedAt: new Date(),
+              providerPhoneNumberId: `provider:${where.phoneNumberLookupKey}`,
+            }
           : null;
       }),
       update: vi.fn(async ({ where }: {

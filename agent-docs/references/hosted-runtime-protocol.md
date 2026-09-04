@@ -2736,8 +2736,19 @@ publication, the runtime queries those actual job rows and replaces the item's
 job hints with every unfinished kind, manifest-shaped payload/window, dedupe
 identity, priority, retry time, and remaining attempt limit, including
 worker-created children. It also carries the provider's advanced cadence, but
-withholds that cadence from Web until an empty-job completion-fence checkpoint
-has made the terminal transition durable. A cold replacement, whose snapshot
+first requires Web to accept the full local reconciliation. One version
+conflict fetches the current canonical snapshot, rehydrates without admitting
+wake hints or dirty work again, carries the same-epoch pass's provider cadence
+and dirty terminal evidence, and repeats the full update against that canonical
+baseline; another conflict keeps the mailbox owner. The runtime withholds cadence from Web until the post-record
+checkpoint has made the completion transition durable. The post-checkpoint
+recorder then publishes cadence, removes the mailbox item, and checkpoints that
+removal in the same runtime admission only for a fresh record whose full
+reconciliation was accepted in that admission, whose normalized retained-job
+set is empty, and whose non-null connection epoch still names the current
+active connection. Yielded wakes are not completion-eligible. Restored records
+return to the full-reconciliation path; epoch-less legacy, replaced, missing,
+or terminal records drain without a cadence write. A cold replacement, whose snapshot
 intentionally excludes the device-sync SQLite store, reconstructs the same
 unfinished operation and cadence from that item. The completion fence is due
 immediately once all local jobs are terminal; unlike a
@@ -2780,15 +2791,19 @@ dispatch restores that exact ref without the SQLite execution record,
 reconstructs the pending obligation from durable mailbox authority, and replays
 those same four method/path classes exactly once,
 for eight requests total. That 00:05 recovery pass makes three successful
-checkpoints. Its retained completion-fence wake is immediately due at 00:05 and
-carries the 06:05 provider cadence. The completion pass makes no third provider
-pull,
-makes two successful checkpoints, and publishes 06:05 only after the durable
-recovery/completion checkpoint. The 00:10 pass returns idle with no wake and
-makes one bounded post-publication convergence checkpoint; the 00:15 pass is
-fully quiescent. Within the measured incident window, the proof observes eight
-checkpoint attempts, seven commits, one injected failure, and no provider work
-after the single replay.
+checkpoints. After provider work, a heartbeat-only version conflict leaves
+canonical cadence at 00:00; hydration preserves the same-epoch pass's 06:05
+provider cadence without re-admitting work. The second checkpoint durably
+records completion, the same admission publishes 06:05 only because full
+reconciliation was accepted, the retained job set is empty, and the wake's
+non-null epoch still names the current active connection, and the third
+checkpoints mailbox removal. Epoch-less legacy, replaced, missing, or terminal
+connection records drain without a cadence write. There is no third provider
+pull or empty completion runtime. A redundant 00:10 pass returns idle with no
+wake and makes one bounded post-publication convergence checkpoint; the 00:15
+pass is fully quiescent. Within the measured incident window, the proof observes
+six checkpoint attempts, five commits, one injected failure, and no provider
+work after the single replay.
 
 Hosted clinical-record retrieval uses the existing per-user workflow and
 system-mailbox path, not a separate Temporal workflow. Web transactionally

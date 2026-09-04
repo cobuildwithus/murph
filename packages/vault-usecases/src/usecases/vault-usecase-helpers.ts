@@ -670,6 +670,17 @@ export function toRegimenUpsertVaultCliError(error: unknown) {
     return error
   }
 
+  if (error.code === 'VAULT_REGIMEN_MISSING') {
+    return new VaultCliError(
+      'not_found',
+      'Regimen was not found.',
+      {
+        stage: 'read',
+        hint: 'After this error, run only regimen list once. Do not write again this turn. If a listed regimen matches, end with one question naming its exact regimen id and the requested change; retry only after the user confirms. If none is intended, stop and ask for a separate follow-up. Never offer creation here.',
+      },
+    )
+  }
+
   const slugExists = error.code === 'VAULT_REGIMEN_SLUG_EXISTS'
   if (!slugExists && error.code !== 'VAULT_REGIMEN_CONFLICT') {
     return error

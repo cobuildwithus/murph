@@ -440,35 +440,15 @@ through `scripts/verification-dispatch.mjs`:
   intentionally selects its bounded composed
   profile there when at least 12 logical CPUs are available; ordinary commands
   and smaller hosts keep their conservative shared-host worker budgets.
-- `MURPH_VERIFY_EXECUTOR=local|ssh|crabbox` explicitly selects an executor.
+- `MURPH_VERIFY_EXECUTOR=local|ssh` explicitly selects an executor.
   `ssh` uses a configured, dedicated static macOS worker through Crabbox and
   fails closed when its validated host, user, port, Crabbox CLI, or required
   native archive capability is unavailable. Its locked entrypoint selects the
   `static-ssh` verification profile internally; caller environment values do
   not select or tune that profile.
-  `crabbox` requests a fresh one-shot Blacksmith Testbox and fails closed when
-  either CLI is unavailable. No remote failure silently duplicates work
-  locally. The `:local` package aliases exist only for executor diagnosis
-  because canonical automatic execution is already local.
-- The `crabbox` executor is the only lane that creates paid Blacksmith spend, so
-  it is disabled by default and fails closed with a message naming the free
-  alternatives. A single deliberate invocation accepts the cost by also setting
-  `MURPH_ALLOW_TESTBOX_SPEND=1`. The flag is per-invocation on purpose: do not
-  export it into a shell profile, a worktree env file, or an agent's ambient
-  environment, because that silently restores the unbounded lane. It gates only
-  the paid executor and never widens `local` or `ssh`.
-- The Testbox hydration workflow must exist on the repository default branch
-  before GitHub accepts a delegated `workflow_dispatch`. The change that first
-  introduces or moves `.github/workflows/crabbox-bounded.yml` therefore uses
-  local verification and PR gates; after that bootstrap lands, explicitly
-  forced canonical commands can create fresh one-shot Testboxes from feature
-  branches. Canonical verification rejects reusable lease IDs because current
-  provider metadata does not prove the Blacksmith organization that installed
-  the root-owned entrypoint.
-- The retired `.github/workflows/crabbox.yml` path must remain absent. It is the
-  capability hard cut for pre-cost-control dispatchers: a stale worktree fails
-  workflow lookup before a Blacksmith job can start. Do not restore that path as
-  a compatibility shim.
+  No remote failure silently duplicates work locally. The `:local` package
+  aliases exist only for executor diagnosis because canonical automatic
+  execution is already local.
 
 Remote execution preserves the exact underlying `workspace-verify.sh` command,
 including diff scope, reverse dependents, coverage thresholds, app verification,
@@ -582,7 +562,7 @@ only machine-level package-manager caches outside those directories.
 The three routing variables are non-secret local control inputs and are not
 forwarded as an environment allowlist. Candidate code enters through
 `scripts/crabbox/run-ssh-locked-verification.sh`; its Node verifier rebuilds
-the same synthetic test-only environment as the Blacksmith path and stamps
+the synthetic test-only environment and stamps
 `MURPH_VERIFY_PROFILE=static-ssh` after discarding caller overrides. The root
 verifier treats that profile as executor-owned. For `verify:acceptance`, at
 least 10 logical CPUs and 24 GiB of detected physical memory admit its bounded
@@ -609,41 +589,12 @@ MURPH_VERIFY_EXECUTOR=ssh pnpm test:diff <path ...>
 MURPH_VERIFY_EXECUTOR=ssh pnpm verify:acceptance
 ```
 
-Only when no free executor can run the command does the paid Testbox lane
-apply, and it must be opted into per invocation:
-
-```bash
-MURPH_ALLOW_TESTBOX_SPEND=1 MURPH_VERIFY_EXECUTOR=crabbox pnpm test:diff <path ...>
-MURPH_ALLOW_TESTBOX_SPEND=1 MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance
-```
-
-Report the spend when you take that lane: name the Testbox ID and the reason no
-free executor was usable. A slow local slot is a reason to wait or to use the
-SSH worker, not by itself a reason to spend. The paid forced executor
-creates a fresh one-shot Testbox through the fully pinned route. Crabbox stops
-every newly acquired delegated Testbox when the one-shot command exits unless
-`--keep` is passed; the dispatcher never passes `--keep` or
-`--keep-on-failure`. The provider receives its supported 10-minute idle timeout,
-and the hydration workflow supplies the 50-minute last-resort ceiling. Do not
-leave the local waiter running concurrently, forward local environment values,
-bypass the canonical command, warm a lease separately, or return automatically
-to another unbounded local wait.
 Before delegation, satisfy the Git-state admission boundary, including fully
 staging any new non-ignored source or documentation file. If Crabbox cannot run
-because its CLIs, authentication, or capacity are unavailable, fail closed and
-report that concrete blocker with the completed local evidence. Preserve the
-Testbox ID, timing summary, and linked Actions run when delegation starts.
-
-The dispatcher captures paid Testbox stdout and stderr into separate private
-files while the delegated command is still running. A failed run retains the
-single ignored bundle at
-`.artifacts/verification/crabbox-last-failure/`, records the command and frozen
-candidate tree in `run.txt` with the complete command argument vector encoded as
-one JSON value, and prints that stable repository-relative bundle location
-before returning the provider status. The next paid run replaces that same
-checkout-local bundle, and a successful run removes it so stale failure evidence
-cannot be mistaken for the current result. Do not add `--keep` merely to inspect
-a failure that this bundle already preserves.
+because its CLI, routing, archive capability, or capacity is unavailable, fail
+closed and report that concrete blocker with the completed local evidence. Do
+not leave the local waiter running concurrently, forward local environment
+values, or bypass the canonical command.
 
 Do not run both remote `test:diff` and remote acceptance on the same exact head.
 When acceptance is required, keep the preceding diff checks local and reserve
@@ -651,29 +602,18 @@ the one remote check for acceptance; otherwise use the remote diff lane. Retry
 an unchanged head only after a concrete infrastructure failure and record that
 reason in the completion evidence.
 
-### Required post-landing trust-root proof
-
-One case does not require a ten-minute local admission wait: after a change to
-`.github/workflows/crabbox-bounded.yml` or the trusted entrypoint lands on the
-default branch, run exactly one explicitly forced canonical remote check to
-prove that new trust root. This is required boundary validation, not ordinary
-capacity fallback; do not manufacture a local wait first. Use acceptance when
-the landed change requires acceptance coverage, otherwise use `test:diff`, and
-retain the same lifecycle bounds and evidence.
-
 ### Environment and Vercel boundary
 
-Both canonical remote lanes are synthetic and secret-free:
+The canonical remote lane is synthetic and secret-free:
 
-- Blacksmith Testbox rejects Crabbox environment forwarding. Before invoking
-  either the Crabbox or Blacksmith CLI, the dispatcher replaces its inherited
+- Before invoking the Crabbox CLI, the dispatcher replaces its inherited
   local environment with a small allowlist of host path, account, terminal, and
   XDG config locations. Provider, model, production, GitHub, billing, messaging,
   and application credentials never enter the Crabbox CLI process, so neither
   user-level allowlists nor command flags have a credential value to forward. Do not add
   `--allow-env`, `--env-from-profile`, or credential variables to this lane.
 - Crabbox sync can transfer Git-tracked plus untracked non-ignored paths.
-  Before either remote delegation, the dispatcher derives authorization from one
+  Before remote delegation, the dispatcher derives authorization from one
   `git status --porcelain=v1 -z --untracked-files=all` boundary. It permits
   modified tracked files, tracked renames/deletions, ignored files, and new files
   whose current contents are fully staged. It refuses ordinary untracked files,
@@ -681,57 +621,37 @@ Both canonical remote lanes are synthetic and secret-free:
   unsupported status before Crabbox starts. It then checks the cached/tracked set
   for known credential, vault, runtime-state, local-artifact, and private-document
   paths. Authorized staged and modified tracked working-tree content must leave
-  the host so the Testbox verifies the exact candidate change rather than only
+  the host so the remote worker verifies the exact candidate change rather than only
   the pushed commit. `.gitignore` carries the matching normal exclusions,
   including local Crabbox run artifacts. Every Git subprocess in this guard
   receives the same scrubbed environment as Crabbox, so ambient `GIT_*`
   overrides cannot make the guard inspect a different index or worktree from
   the upload path.
-- The default-branch hydration workflow has read-only repository contents
-  permission, attaches no GitHub Environment, requests no OIDC authority, and
-  references no Actions secrets. It copies
-  `scripts/crabbox/trusted-verification-entrypoint.sh` into a root-owned path
-  outside the synced workspace before opening the delegated Testbox session.
-  Canonical commands invoke only that installed shell. It validates the two
-  allowed verification commands, resolves the candidate verifier from the real
-  current directory, and directly `exec`s it through `env -i` with an isolated
-  temporary home, fixed basic host paths, and a one-bit trusted-entry marker.
-- Canonical delegation pins the Blacksmith organization, `main` ref, workflow,
-  and hydration job on the command line before the one-shot Testbox is created.
-  Local `CRABBOX_CONFIG`, profile, ref, workflow, job, or arbitrary existing
-  lease IDs are not trusted routing inputs.
-- `scripts/crabbox/run-verification.mjs` fails closed without that marker, then
-  calls the shared sanitized verification core.
-  `scripts/crabbox/run-ssh-verification.mjs` enters that core directly on the
+- `scripts/crabbox/run-ssh-verification.mjs` enters the sanitized core on the
   dedicated secret-free static account. The core independently rebuilds the
   process environment with deterministic CI-style placeholder values required
-  by hosted-web build and smoke checks. Candidate changes can still be verified,
-  but they never receive the Testbox orchestration environment first.
-  Blacksmith authentication remains in the local Blacksmith CLI and never
-  enters either test process.
+  by hosted-web build and smoke checks. Candidate changes can still be verified
+  without receiving the initiating process environment.
 - The lane never runs `vercel env pull`, `vercel env run`, or copies `.env*`,
   `.vercel`, provider, model, billing, messaging, or production credentials.
 - Canonical completion tests are expected to pass under this synthetic contract.
   A separate direct scenario that genuinely requires Vercel development state
   must set `MURPH_VERIFY_REQUIRES_VERCEL_ENV=1`, remain local on an authorized
   host, and be reported separately. Do not weaken the default Crabbox boundary;
-  a future remote live-env lane requires its own reviewed Testbox workflow with
-  repository-managed, step-scoped secrets. This secret-free workflow bootstrap
-  is itself a trust root: a change to it or the installed entrypoint must use
-  local verification until that exact trusted version exists on the default
-  branch, followed by a post-landing remote proof.
+  a future remote live-env lane requires its own reviewed, repository-managed,
+  step-scoped secret boundary.
 
 This boundary prevents ambient credential inheritance in the canonical Murph
 verification path. It is not an operating-system sandbox: a process that can
 already read a production secret and make arbitrary network requests can
 exfiltrate that secret without Crabbox. Keep production credentials out of
-ordinary local process environments and never use ad-hoc Crabbox or Blacksmith
+ordinary local process environments and never use ad-hoc Crabbox
 commands to carry secret values. GitHub production secrets must live only in a
 protected-branch environment, never as repository-scoped duplicates that an
 alternate workflow ref could request.
 
-When Crabbox runs, record the command, result, executor, and timing summary.
-For Blacksmith, also retain the Testbox ID and linked GitHub Actions run.
+When Crabbox runs, record the command, result, executor, and timing summary
+without recording host, account, or local-path identifiers.
 
 ## Verification Matrix
 
@@ -867,8 +787,14 @@ prompts, transcripts, provider responses, secrets, local paths, or direct user
 identifiers.
 
 Public shared-contract changes that affect Workflow inputs, signals, queries,
-or retry semantics require the private `Public Murph Integration` workflow
-against the exact public ref in addition to public checks. The public
+or retry semantics require the fixture-only `Temporal compatibility` pull-
+request status in addition to public checks. After merge, every public `main`
+production candidate dispatches private `Public Murph Integration` release
+admission against the exact public and private main revisions. That lane runs
+the canonical foreground-priority scenario with standby allocation explicitly
+enabled, binds its proof to the public protected environment's expected
+production Temporal target digest, and rejects live-target drift; it never
+checks out a public pull-request candidate. The public
 `hosted-temporal:guard` remains wired into `pnpm typecheck`; it prevents the
 worker implementation from returning here and retains the Web/Cloudflare
 architecture guards, while Murph Cloud owns patch-marker and replay gates.
@@ -1071,7 +997,7 @@ the advisory budget.
 - `pnpm test:packages:coverage`: prepares the built CLI/runtime inputs, enforces each package's coverage command, and runs built package-boundary checks. One release-verification plan classifies every `packages/*` workspace owner: assigned packages must declare `test:coverage`, exclusions require a non-empty reason, and any new, stale, duplicate, or unassigned package fails before coverage starts. `MURPH_PACKAGE_COVERAGE_SHARD` selects one non-empty named shard only for the standalone `test:packages:coverage` command while the default remains the complete plan; aggregate coverage and acceptance commands reject subset selection, and the canonical static-SSH profile continues to force the complete plan. Standalone local outer fanout is CPU-aware and capped at six processes; the default per-process Vitest cap is the available CPU count divided by that outer fanout, avoiding the former multiplication of six 75%-of-machine pools. The capable-host acceptance composition protects subprocess-heavy CLI coverage with four workers and one concurrent two-worker package process, then refills to at most five two-worker package processes after CLI releases the two app pools. On the standard 16-vCPU profile that bounds the scheduled Vitest total at 14 workers after the protected phase instead of multiplying per-process percentages. On a resource-qualified static worker, the executor-owned profile instead protects CLI coverage with three workers and one concurrent two-worker package process, then refills to three two-worker package processes. Smaller or memory-unobservable static workers retain the two-process, two-worker serial fallback. Source environment overrides cannot change either static plan. CI remains one outer process with a 50% inner cap inside each isolated job. `MURPH_PACKAGE_COVERAGE_CONCURRENCY`, `MURPH_PACKAGE_COVERAGE_CLI_ACTIVE_CONCURRENCY`, `MURPH_PACKAGE_COVERAGE_VITEST_MAX_WORKERS`, and `MURPH_PACKAGE_COVERAGE_CLI_VITEST_MAX_WORKERS` remain explicit overrides for the default profile. Contracts and CLI artifact ordering, failure aggregation, and prepared acceptance behavior are unchanged.
 - During composed refill, Hosted Local Harness runs after every unrelated package owner and waits while Assistant Engine remains active, so those child-runtime-heavy owners never overlap without reducing earlier package refill.
 - `pnpm test:coverage`: runs the explicit coverage-focused acceptance lane: repo/doc/artifact guards, prepared package coverage, scenario-integrity coverage, and app verification. Standalone local package coverage uses CPU-aware outer fanout capped at six processes and divides the worker budget across them; CI remains serial by default. The capable-host acceptance composition starts Web tests, lint, and dev smoke with package coverage under bounded worker budgets. CLI completion releases the hosted-web Next build and Cloudflare's serial app tests and independently releases package coverage from its protected phase into its full refill. Every ordinary package coverage owner, including Assistant Engine, retains the caller's Node heap; the CLI keeps only its existing prepared-runtime environment. Standalone coverage prepares its own generated inputs; `pnpm verify:acceptance` reuses the preceding typecheck's guards, contracts output, Health Commons catalog, and Prisma client. On a static worker with at least 10 logical CPUs and 24 GiB of detected physical memory, the executor-owned profile overlaps package coverage, fixture verification, and both apps. It gives each ordinary package two workers, the CLI three workers, and each app Vitest pool one worker; CLI completion still gates the Next build, Cloudflare tests, and the package refill from two to three processes. Smaller or memory-unobservable static workers retain the prior serial two-process/two-worker plan. The static profile ignores caller worker and overlap controls. The existing lane-parallelism, retry, and coverage-budget environment overrides remain available to the default and CI profiles, and source-artifact hygiene continues to reject private env files and generated residue.
-- `pnpm verify:acceptance`: the canonical repo acceptance gate. It runs through the root workspace verifier so one lock covers the whole acceptance pass: first the full `typecheck` surface, then the coverage-heavy acceptance lane with already-proven repo guards skipped, `apps/cloudflare` app-local typecheck skipped, and the contracts artifact verification reusing the `packages/contracts` build from typecheck. On non-CI default-profile hosts with at least 12 logical CPUs, including a locally forced Codex/shared-host execution and the Blacksmith Testbox, its startup log reports the composed resource profile. Independent doc gardening and prepared-runtime setup overlap before coverage begins. Web tests/lint/dev smoke then start immediately while the protected CLI phase uses four CLI workers plus one two-worker package peer. CLI terminal success or failure publishes one invocation-scoped readiness marker: that releases Cloudflare's serial app tests and the hosted-web Next build without hiding the CLI result, lets package fanout refill to at most five two-worker processes, and is removed by the root owner at completion. The sanitized bootstrap does not set an app-step policy for that default profile; the root verifier alone assigns Web-parallel and Cloudflare-serial behavior. Static SSH is resource-qualified by construction: its entrypoint selects `profile=static-ssh`, and the verifier admits composition only with at least 10 logical CPUs and 24 GiB of detected physical memory. The `resources` line reports those measurements and the effective worker/overlap plan. Smaller or memory-unobservable static workers retain the serial fallback. Standalone `pnpm test:coverage`, smaller default-profile hosts, and CI retain their self-contained or conservative defaults unless explicitly overridden.
+- `pnpm verify:acceptance`: the canonical repo acceptance gate. It runs through the root workspace verifier so one lock covers the whole acceptance pass: first the full `typecheck` surface, then the coverage-heavy acceptance lane with already-proven repo guards skipped, `apps/cloudflare` app-local typecheck skipped, and the contracts artifact verification reusing the `packages/contracts` build from typecheck. On non-CI default-profile hosts with at least 12 logical CPUs or when locally forced under Codex/shared-host execution, its startup log reports the composed resource profile. Independent doc gardening and prepared-runtime setup overlap before coverage begins. Web tests/lint/dev smoke then start immediately while the protected CLI phase uses four CLI workers plus one two-worker package peer. CLI terminal success or failure publishes one invocation-scoped readiness marker: that releases Cloudflare's serial app tests and the hosted-web Next build without hiding the CLI result, lets package fanout refill to at most five two-worker processes, and is removed by the root owner at completion. The sanitized bootstrap does not set an app-step policy for that default profile; the root verifier alone assigns Web-parallel and Cloudflare-serial behavior. Static SSH is resource-qualified by construction: its entrypoint selects `profile=static-ssh`, and the verifier admits composition only with at least 10 logical CPUs and 24 GiB of detected physical memory. The `resources` line reports those measurements and the effective worker/overlap plan. Smaller or memory-unobservable static workers retain the serial fallback. Standalone `pnpm test:coverage`, smaller default-profile hosts, and CI retain their self-contained or conservative defaults unless explicitly overridden.
 - `pnpm zip:src` and `scripts/package-audit-context.sh`: shell through `pnpm no-js`, which first prunes untracked generated JS/declaration sidecars that sit next to tracked TypeScript source files and then runs the tracked-artifact hygiene guard, before building the source/review bundle from git-visible files while scanning `config/**` alongside app/package code and filtering blocked local residue such as `.env` / `.env.*`, `dist/`, `.next/`, `.next-dev/`, `.next-smoke/`, `.test-dist/`, `*.tsbuildinfo`, and `packages/health-commons/generated/**` paths out of the manifest. This keeps ignored local artifacts out of the upload bundle without requiring a clean development worktree, while raw clone archives remain unsafe. PR-bound `scripts/package-audit-context-full.sh` additionally requires explicit `--zip`, refuses repo-visible candidates under the canonical `review-gpt-pr-context/**` namespace before producing an artifact, owns one private context directory and collision-resistant default ZIP prefix per invocation, and appends the final review packet under that stable archive prefix.
 - `pnpm test:scenario-integrity`: the coverage-bearing root command for
   fixture/scenario-manifest integrity, documented-command coverage, and indexed
@@ -1179,7 +1105,7 @@ it is not permission to send unrelated messages, deploy, or change the webhook.
   closures into the Workflow graph. Production pins a 100-Workflow cache with
   reusable V8 contexts, and the private Render Blueprint pins two worker
   instances to the 2 GB Standard plan.
-- `apps/cloudflare/wrangler.jsonc` remains the checked-in worker scaffold, but the generated deploy config from `apps/cloudflare/scripts/**` is authoritative for environment-specific bindings and required Worker secrets. The generated Worker secret list currently requires `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK`, `HOSTED_LOG_FINGERPRINT_SECRET`, `HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET`, `HOSTED_R2_PRESIGN_ACCESS_KEY_ID`, `HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY`, `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`, and `OPENAI_API_KEY`; optional provider secrets include `ELEVENLABS_API_KEY` for generated voice memos. The checked-in scaffold keeps only a tight local placeholder list. The deploy vars require the direct-R2 presign account and bucket names, with an optional account-scoped R2 HTTPS endpoint override; hosted-local dev, worker-only, and E2E profiles use a Docker MinIO sidecar plus local-only presign endpoint flags instead of relying on `wrangler dev` to emulate the R2 S3 API. The repo also ships the checked-in `apps/cloudflare/r2-bundles-lifecycle.json` transient-cleanup config plus `pnpm --dir apps/cloudflare r2:lifecycle:apply`, while private `cobuildwithus/murph-cloud` owns its protected GitHub Actions workflow for environment-driven config rendering, cached native runner base preparation, direct `wrangler deploy` execution, explicit `instance_type` pinning, and smoke checks that poll operator status until the Durable Object runner reaches idle and status exposes the latest workspace checkpoint ref. The deploy flow requires `CF_PUBLIC_BASE_URL` for normal deploy-and-smoke workflow runs, expects operators to apply the checked-in transient R2 lifecycle rules to the real bundles buckets as part of deploy setup, treats `CF_PLATFORM_ENVELOPE_KEY_ID` as single-key metadata for the active platform envelope key, and uses `wrangler deploy` as the direct-cut default deploy path. The deploy helper validates generated config, secrets, and runner bundle artifacts, runs direct Wrangler deploy, then reads `wrangler deployments status --json` for the smoke version and final traffic summary. That deploy flow prepares `apps/cloudflare/.deploy/runner-bundle/` ahead of time as a runtime leaf artifact and prepares a stable local base image from `Dockerfile.cloudflare-hosted-runner-base`; hosted-local E2E lanes may reuse the matching GHCR fingerprinted base image, but production-capable deploy paths force a local base build from the protected checkout before Wrangler's final image build copies the prepared bundle. The bounded direct hosted workspace invocation core still lives in `packages/assistant-runtime`. Protected-main Cloudflare deploy workflow jobs run on Blacksmith: normal predeploy E2E gates, runner smoke, the hosted Codex auth guard, and the production deploy job. The private workflow's immediate path skips the slower E2E and runner smoke gates, while the production deploy job still builds the runner bundle and native base image directly from its verified protected-main checkout before rendering secrets, dry-running/deploying through Wrangler, and smoking deployed endpoints.
+- `apps/cloudflare/wrangler.jsonc` remains the checked-in worker scaffold, but the generated deploy config from `apps/cloudflare/scripts/**` is authoritative for environment-specific bindings and required Worker secrets. The generated Worker secret list currently requires `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK`, `HOSTED_LOG_FINGERPRINT_SECRET`, `HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET`, `HOSTED_R2_PRESIGN_ACCESS_KEY_ID`, `HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY`, `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`, and `OPENAI_API_KEY`; optional provider secrets include `ELEVENLABS_API_KEY` for generated voice memos. The checked-in scaffold keeps only a tight local placeholder list. The deploy vars require the direct-R2 presign account and bucket names, with an optional account-scoped R2 HTTPS endpoint override; hosted-local dev, worker-only, and E2E profiles use a Docker MinIO sidecar plus local-only presign endpoint flags instead of relying on `wrangler dev` to emulate the R2 S3 API. The repo also ships the checked-in `apps/cloudflare/r2-bundles-lifecycle.json` transient-cleanup config plus `pnpm --dir apps/cloudflare r2:lifecycle:apply`, while private `cobuildwithus/murph-cloud` owns its protected GitHub Actions workflow for environment-driven config rendering, cached native runner base preparation, direct `wrangler deploy` execution, explicit `instance_type` pinning, and smoke checks that poll operator status until the Durable Object runner reaches idle and status exposes the latest workspace checkpoint ref. The deploy flow requires `CF_PUBLIC_BASE_URL` for normal deploy-and-smoke workflow runs, expects operators to apply the checked-in transient R2 lifecycle rules to the real bundles buckets as part of deploy setup, treats `CF_PLATFORM_ENVELOPE_KEY_ID` as single-key metadata for the active platform envelope key, and uses `wrangler deploy` as the direct-cut default deploy path. The deploy helper validates generated config, secrets, and runner bundle artifacts, runs direct Wrangler deploy, then reads `wrangler deployments status --json` for the smoke version and final traffic summary. That deploy flow prepares `apps/cloudflare/.deploy/runner-bundle/` ahead of time as a runtime leaf artifact and prepares a stable local base image from `Dockerfile.cloudflare-hosted-runner-base`; hosted-local E2E lanes may reuse the matching GHCR fingerprinted base image, but production-capable deploy paths force a local base build from the protected checkout before Wrangler's final image build copies the prepared bundle. The bounded direct hosted workspace invocation core still lives in `packages/assistant-runtime`. Protected-main Cloudflare deploy workflow jobs run on GitHub-hosted Ubuntu: normal predeploy E2E gates, runner smoke, the hosted Codex auth guard, and the production deploy job. The private workflow's immediate path skips the slower E2E and runner smoke gates, while the production deploy job still builds the runner bundle and native base image directly from its verified protected-main checkout before rendering secrets, dry-running/deploying through Wrangler, and smoking deployed endpoints.
 - The same protected-main deploy workflow also exposes one reusable `preview`
   target through the existing GitHub `Preview` Environment. It keeps the
   generated deploy path as the single owner, derives the Vercel OIDC

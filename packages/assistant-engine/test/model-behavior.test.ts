@@ -2171,8 +2171,9 @@ describe('assistant system prompt cache stability', () => {
     // target-authority boundary, explicit group-family tool routing, and the
     // cross-route CLI error-recovery contract, and shared exact-versus-vague
     // one-shot reminder timing policy, Apple Health stale-data recovery, and
-    // wearable-summary freshness contract set this exact ceiling.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(67_670)
+    // wearable-summary freshness contract plus the public goal workflow owner
+    // set this exact ceiling.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(67_682)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -2536,7 +2537,7 @@ describe('assistant system prompt cache stability', () => {
     expect(openStablePrefix).toEqual(closedStablePrefix)
     expect(openStablePrefix).toContain('Murph skill router:')
     expect(openStablePrefix).toContain(
-      'Setup: murph-onboarding, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough.',
+      'Setup: murph-onboarding, goal-setup, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough.',
     )
     expect(openStablePrefix).toContain(
       'When the private longitudinal default in turn priority applies, read self-management-experiments.',
@@ -2924,7 +2925,7 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain(
       'Do not preload skills or call a discovery CLI just to route.',
     )
-    expect(prompt).toContain('Setup: murph-onboarding, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough.')
+    expect(prompt).toContain('Setup: murph-onboarding, goal-setup, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough.')
     expect(prompt).toContain('Sleep/readiness: sleep-improvement, circadian-rhythm, sleep-recovery-readiness, hrv-resting-heart-rate, energy-fatigue.')
     expect(prompt).toContain('Nutrition/metabolic: food-journal, nutrition-strategy, body-composition, gut-digestion, micronutrients-supplements, cardiometabolic-health, cycle-hormonal-health.')
     expect(prompt).toContain(
@@ -3085,7 +3086,7 @@ describe('assistant Murph onboarding guidance', () => {
     }))
 
     expect(prompt).toContain(
-      'Setup: murph-onboarding, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough.',
+      'Setup: murph-onboarding, goal-setup, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough.',
     )
     expect(prompt).toContain('Murph skill router:')
     expect(prompt).not.toContain('Murph onboarding:')
@@ -3541,10 +3542,7 @@ describe('assistant conversation scope', () => {
       'Use `murph.automation` with `action: save` to create an ordinary automation, `action: inspect` to read one without mutation, and `action: patch` to change one.',
     )
     expect(prompt).toContain(
-      'Only save `contextReferences` by copying ids from successful current canonical reads or create results that identify exactly one record.',
-    )
-    expect(prompt).toContain(
-      'does not prove that a referenced record exists or is the correct mutation target',
+      'Use exact `contextReferences: [{"entityKind":"<kind>","entityId":"<id>"}]` from canonical results; context, not proof or write authority.',
     )
     expect(prompt).toContain(
       'For every model-authored one-shot local wall-clock request, pass `schedule.kind: at` with `schedule.localAt.time`, `schedule.localAt.timeZone`, and exactly one of `schedule.localAt.date` or `schedule.localAt.relativeDay`',

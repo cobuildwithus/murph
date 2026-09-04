@@ -60,6 +60,12 @@
       "@murphai/health-commons/runtime": [
         "../../packages/health-commons/src/runtime.ts"
       ],
+      "@murphai/health-commons/goal-runtime": [
+        "../../packages/health-commons/src/goal-runtime.ts"
+      ],
+      "@murphai/health-commons/goal-index-runtime": [
+        "../../packages/health-commons/src/goal-index-runtime.ts"
+      ],
       "@murphai/health-commons/generated/*": [
         "../../packages/health-commons/generated/*"
       ],

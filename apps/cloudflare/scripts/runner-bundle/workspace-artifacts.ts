@@ -16,6 +16,7 @@ const CLI_PACKAGE_NAME = "@murphai/murph";
 const ASSISTANT_ENGINE_PACKAGE_NAME = "@murphai/assistant-engine";
 const HEALTH_COMMONS_RUNTIME_GENERATED_FILES = [
   "generated/biomarker-desired-directions.json",
+  "generated/web/browse/goals.json",
   "generated/knowledge.sqlite",
   "generated/protocol-index.json",
   "generated/protocol-run-specs.json",
