@@ -160,11 +160,13 @@ test("wearable trend image leads each row with its average and neutral direction
   for (const dayValue of ["10.2k", "6.8k", "7h21m", "7h08m", "7h12m", "50", "37", "41"]) {
     expect(markup).not.toContain(`>${dayValue}<`);
   }
-  // One continuous fitted line per complete row, with a point on every day.
+  // One fitted line per complete row (six solid day-to-day segments each),
+  // with a point on every day.
   expect(markup.match(/<svg\b/gu)).toHaveLength(3);
-  expect(markup.match(/<path\b/gu)).toHaveLength(3);
   expect(markup.match(/data-day-value="observed"/gu)).toHaveLength(21);
-  expect(markup).not.toContain('data-day-value="missing"');
+  expect(markup).not.toContain("no data");
+  expect(markup.match(/data-line-segment="solid"/gu)).toHaveLength(18);
+  expect(markup).not.toContain('data-line-segment="gap"');
   // A week that moves more than the metric's minimum span fills the chart
   // (steps: 3,400 of a 3,000 floor), while a quiet week stays near the
   // middle so small differences are not exaggerated (sleep: 13 minutes of a
@@ -201,7 +203,9 @@ test("wearable trend image preserves sparse and unavailable calendar slots", asy
     <WearableTrendCardImage card={ALL_MISSING_CARD} />,
   );
 
-  expect(sparseMarkup.match(/data-day-value="missing"/gu)).toHaveLength(9);
+  // Nine missing days: each stays named in the accessibility label, draws no
+  // point, and the observed days around it join with a dashed gap segment.
+  expect(sparseMarkup.match(/ no data/gu)).toHaveLength(9);
   expect(sparseMarkup).toContain('data-metric-average="8.4k"');
   // Rows that cannot be compared show only their label and average.
   expect(sparseMarkup.match(/data-metric-direction="not_enough_data"/gu)).toHaveLength(2);
@@ -210,10 +214,11 @@ test("wearable trend image preserves sparse and unavailable calendar slots", asy
   expect(sparseMarkup.match(/>(?:↑|↓|→)</gu)).toHaveLength(1);
   expect(sparseMarkup).toContain("data-sparkline=\"▁··▅··█\"");
   expect(sparseMarkup).toContain("Tue no data");
-  // A missing day keeps its column marker but never a text placeholder, and
-  // the line breaks around it instead of bridging the gap.
+  // A missing day never gets a text placeholder; adjacent observed days join
+  // solid and days across a gap join dashed.
   expect(sparseMarkup).not.toContain(">—<");
-  expect(sparseMarkup.match(/<path\b/gu)).toHaveLength(3);
+  expect(sparseMarkup.match(/data-line-segment="solid"/gu)).toHaveLength(3);
+  expect(sparseMarkup.match(/data-line-segment="gap"/gu)).toHaveLength(6);
   expect(sparseMarkup.match(/data-day-value="observed"/gu)).toHaveLength(12);
 
   // Metrics with no observed days collapse to a shorter row and never show a
@@ -222,7 +227,8 @@ test("wearable trend image preserves sparse and unavailable calendar slots", asy
     height: 629,
     width: 1_200,
   });
-  expect(missingMarkup.match(/data-day-value="missing"/gu)).toHaveLength(21);
+  expect(missingMarkup.match(/ no data/gu)).toHaveLength(21);
+  expect(missingMarkup).not.toContain("data-day-value=");
   expect(missingMarkup.match(/data-sparkline="·······"/gu)).toHaveLength(3);
   expect(missingMarkup.match(/data-metric-direction="no_data"/gu)).toHaveLength(3);
   expect(missingMarkup.match(/>No data</gu)).toHaveLength(3);

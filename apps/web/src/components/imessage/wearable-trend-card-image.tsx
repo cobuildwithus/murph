@@ -29,7 +29,7 @@ const AXIS_HEIGHT = 40;
 const AXIS_MARGIN_BOTTOM = 14;
 const METRIC_ROW_VERTICAL_INSET = 16;
 const CHART_HEIGHT = 150;
-const EMPTY_CHART_HEIGHT = 40;
+const EMPTY_CHART_HEIGHT = 24;
 const METRIC_ROW_HEIGHT = CHART_HEIGHT + 2 * METRIC_ROW_VERTICAL_INSET;
 const EMPTY_METRIC_ROW_HEIGHT = 120;
 const BOTTOM_PADDING = 42;
@@ -63,14 +63,13 @@ const CHART_MINIMUM_SPAN_BY_METRIC: Record<WearableTrendMetricKey, number> = {
   "total-sleep-minutes": 90,
 };
 const POINT_RADIUS = 7;
-const MISSING_STUB_WIDTH = 40;
-const MISSING_STUB_HEIGHT = 6;
+const GAP_DASH = "2 14";
 
 const COLOR = {
   ...IMESSAGE_CARD_COLOR,
   /** One neutral, warm series stroke; it carries no better/worse meaning. */
   series: "#7A7168",
-  seriesMissing: "rgba(122,113,104,0.38)",
+  seriesGap: "rgba(122,113,104,0.55)",
 } as const;
 
 export function getWearableTrendCardImageSize(
@@ -423,7 +422,7 @@ function DayChart({
         y: CHART_INSET + (1 - level) * (height - 2 * CHART_INSET),
       }
   );
-  const segments = connectedSegments(points);
+  const segments = lineSegments(points);
 
   return (
     <div
@@ -445,39 +444,28 @@ function DayChart({
       >
         {segments.map((segment) => (
           <path
-            d={segment}
+            d={segment.d}
+            data-line-segment={segment.kind}
             fill="none"
-            key={segment}
-            stroke={COLOR.series}
+            key={segment.d}
+            stroke={segment.kind === "gap" ? COLOR.seriesGap : COLOR.series}
+            strokeDasharray={segment.kind === "gap" ? GAP_DASH : undefined}
             strokeLinecap="round"
             strokeLinejoin="round"
             strokeWidth={LINE_WIDTH}
           />
         ))}
         {points.map((point, index) =>
-          point === null
-            ? (
-              <rect
-                data-day-value="missing"
-                fill={COLOR.seriesMissing}
-                height={MISSING_STUB_HEIGHT}
-                key={localDates[index]}
-                rx={MISSING_STUB_HEIGHT / 2}
-                width={MISSING_STUB_WIDTH}
-                x={DAY_COLUMN_WIDTH * (index + 0.5) - MISSING_STUB_WIDTH / 2}
-                y={height - MISSING_STUB_HEIGHT}
-              />
-            )
-            : (
-              <circle
-                cx={point.x}
-                cy={point.y}
-                data-day-value="observed"
-                fill={COLOR.series}
-                key={localDates[index]}
-                r={POINT_RADIUS}
-              />
-            )
+          point === null ? null : (
+            <circle
+              cx={point.x}
+              cy={point.y}
+              data-day-value="observed"
+              fill={COLOR.series}
+              key={localDates[index]}
+              r={POINT_RADIUS}
+            />
+          )
         )}
       </svg>
     </div>
@@ -505,26 +493,33 @@ function normalizeLevels(
   return values.map((value) => value === null ? null : (value - low) / span);
 }
 
-/** SVG path data for each run of adjacent observed days. */
-function connectedSegments(
+type LineSegment = { d: string; kind: "gap" | "solid" };
+
+/**
+ * One line through every observed day in order. Adjacent days join with a
+ * solid stroke; a pair separated by missing days joins with a dashed, lighter
+ * stroke so the gap stays visible without breaking the week into fragments.
+ */
+function lineSegments(
   points: readonly ({ x: number; y: number } | null)[],
-): string[] {
-  const segments: string[] = [];
-  let current: string[] = [];
-  const flush = () => {
-    if (current.length > 1) {
-      segments.push(current.join(" "));
-    }
-    current = [];
-  };
-  for (const point of points) {
-    if (point === null) {
-      flush();
+): LineSegment[] {
+  const observed = points
+    .map((point, index) => point === null ? null : { index, point })
+    .filter((entry): entry is { index: number; point: { x: number; y: number } } =>
+      entry !== null
+    );
+  const segments: LineSegment[] = [];
+  for (let position = 1; position < observed.length; position += 1) {
+    const previous = observed[position - 1];
+    const current = observed[position];
+    if (previous === undefined || current === undefined) {
       continue;
     }
-    current.push(`${current.length === 0 ? "M" : "L"} ${round(point.x)} ${round(point.y)}`);
+    segments.push({
+      d: `M ${round(previous.point.x)} ${round(previous.point.y)} L ${round(current.point.x)} ${round(current.point.y)}`,
+      kind: current.index - previous.index === 1 ? "solid" : "gap",
+    });
   }
-  flush();
   return segments;
 }
 

@@ -282,8 +282,10 @@ rate 8 bpm; HRV 15 ms), so a week that really moves fills the chart while a
 quiet week draws a nearly level line instead of exaggerating small
 differences; there are no value
 labels, so the average is the only number in the row and the text recovery
-carries every day value. A missing day breaks the line and keeps its column
-as a faint baseline stub with no text placeholder. A metric with no observed
+carries every day value. A missing day draws no point and no placeholder; the
+observed days on either side of it join with a dashed, lighter segment so the
+week still reads as one line with a visible hole rather than scattered
+fragments. A metric with no observed
 days collapses to a shorter row that reads `No data` and keeps its seven
 empty slots. No reference lines, legends, metric icons, pills, status color,
 or better/worse language.

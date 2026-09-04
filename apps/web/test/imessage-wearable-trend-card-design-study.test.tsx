@@ -20,7 +20,7 @@ test("design studies expose complete, sparse, and unavailable production card st
   expect(markup).toContain('data-design-contract="imessage-native-wearable-trend-card"');
   expect(markup).toContain('data-metric-key="hrv-rmssd"');
   expect(markup).toContain('data-metric-key="hrv-sdnn"');
-  expect(markup).toContain('data-day-value="missing"');
+  expect(markup).toContain('data-line-segment="gap"');
   expect(markup).toContain('data-sparkline="·······"');
   expect(markup).toContain(">AVERAGE<");
   expect(markup).toContain('data-metric-direction="not_enough_data"');

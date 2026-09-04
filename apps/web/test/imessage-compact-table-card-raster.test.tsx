@@ -337,7 +337,8 @@ test("real-font wearable trend contains the sparse five-metric maximum density",
     }),
     true,
   );
-  // The Sunday column keeps a bar or a visible missing marker in every row.
+  // Sunday is observed in the first four rows and draws a point there; the
+  // fifth row's missing Sunday draws nothing so the gap stays honest.
   for (let row = 0; row < 5; row += 1) {
     assert.equal(
       hasNonBackgroundPixel(image, {
@@ -346,8 +347,8 @@ test("real-font wearable trend contains the sparse five-metric maximum density",
         top: 227 + row * 182 + 16,
         bottom: 227 + (row + 1) * 182 - 16,
       }),
-      true,
-      `Expected a Sunday marker in wearable row ${row + 1}`,
+      row < 4,
+      `Unexpected Sunday marker state in wearable row ${row + 1}`,
     );
   }
 });
@@ -363,27 +364,22 @@ test("real-font wearable trend contains all-missing slots without zero filling",
   assert.ok(bounds !== null);
   assert.ok(bounds.right <= 1_155);
   assert.ok(bounds.bottom <= image.height - 42);
-  // Every collapsed no-data row keeps a visible missing marker in the Monday
-  // and Sunday columns rather than an empty gap, and no day carries a value.
+  // Every collapsed no-data row still states its case in the summary and
+  // draws nothing at all in the day grid: no points, no lines, no values.
   for (let row = 0; row < 3; row += 1) {
     const rect = {
       top: 227 + row * 120 + 20,
       bottom: 227 + (row + 1) * 120 - 16,
     };
     assert.equal(
-      hasNonBackgroundPixel(image, { left: 333, right: 450, ...rect }),
+      hasDarkPixel(image, { left: 45, right: 309, ...rect }),
       true,
-      `Expected a Monday marker in no-data row ${row + 1}`,
+      `Expected the no-data summary in row ${row + 1}`,
     );
     assert.equal(
-      hasNonBackgroundPixel(image, { left: 1_040, right: 1_155, ...rect }),
-      true,
-      `Expected a Sunday marker in no-data row ${row + 1}`,
-    );
-    assert.equal(
-      hasDarkPixel(image, { left: 333, right: 1_155, ...rect }),
+      hasNonBackgroundPixel(image, { left: 333, right: 1_155, ...rect }),
       false,
-      `Expected no day values in no-data row ${row + 1}`,
+      `Expected an empty day grid in no-data row ${row + 1}`,
     );
   }
 });
