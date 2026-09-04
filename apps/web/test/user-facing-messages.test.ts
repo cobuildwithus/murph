@@ -25,6 +25,7 @@ const TEST_TEMPLATE_KEYS = [
   "linq.daily_quota",
   "linq.home_redirect",
   "linq.device_delivery_stalled",
+  "linq.apple_health_delivery_stalled",
   "linq.ai_usage.starter_limit_reached",
   "linq.ai_usage.edge_limit_reached",
   "linq.ai_usage.family_limit_reached",
@@ -68,6 +69,11 @@ const TEST_CONTEXT_BY_KEY = {
     deviceDisplayName: "Garmin device",
     providerDisplayName: "Garmin",
   },
+  "linq.apple_health_delivery_stalled": {
+    companionAppName: "Murph",
+    deviceDisplayName: "iPhone",
+    providerDisplayName: "Apple Health",
+  },
   "linq.ai_usage.starter_limit_reached": {
     settingsUrl: "https://withmurph.ai/settings?usageRecovery=true#subscription",
   },
@@ -95,6 +101,14 @@ const TEST_CONTEXT_BY_KEY = {
 };
 
 describe("user-facing message variants", () => {
+  it("offers Apple Health recovery without inventing app closure or a device fault", () => {
+    for (const text of collectRenderedTexts("linq.apple_health_delivery_stalled")) {
+      expect(text).toContain("Apple Health");
+      expect(text).toContain("Murph");
+      expect(text).toContain("Check for new data");
+      expect(text).not.toMatch(/force.quit|closed|quit|battery|charged|revoked|reconnect|disconnected/iu);
+    }
+  });
   it("keeps at least 20 variants for every rotating message class", () => {
     for (const key of TEST_TEMPLATE_KEYS) {
       expect(collectRenderedTexts(key).size, key).toBeGreaterThanOrEqual(

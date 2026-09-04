@@ -169,6 +169,60 @@ describe("hosted source delivery-stall notice identity", () => {
 });
 
 describe("hosted source delivery-stall notice materialization", () => {
+  it.each(["eligible", "opted-out", "recovered", "group", "already-sent"])(
+    "handles an Apple Health silence episode: %s",
+    async (scenario) => {
+      const input = { ...BASE_INPUT, sourceProviderSlug: "apple_health_kit" };
+      const candidate = resolveHostedSourceDeliveryStallNoticeCandidate(input);
+      expect(candidate).not.toBeNull();
+      if (!candidate) throw new Error("Expected an Apple Health recovery candidate");
+      mocks.findDeviceConnectionSource.mockResolvedValue({
+        connection: { status: "active", userId: "member-1" },
+        id: input.sourceId,
+        lastDataAt: new Date(scenario === "recovered" ? input.now : input.lastDataAt),
+        lifecycleEpoch: input.lifecycleEpoch,
+        sourceProviderSlug: input.sourceProviderSlug,
+        status: input.status,
+      });
+      mocks.readHostedSourceNoDataOutreachPolicy.mockResolvedValue(scenario === "opted-out"
+        ? { enabled: false, setting: "off" }
+        : { afterDays: 3, enabled: true, setting: "default", silentHours: 72 });
+      if (scenario === "group") {
+        mocks.resolveHostedAssistantNotificationDestination.mockResolvedValue({
+          ...DIRECT_LINQ_DESTINATION, conversationShape: "group",
+        });
+      }
+      if (scenario === "already-sent") {
+        mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue({
+          ...MAILBOX_ITEM, consumedAt: new Date(input.now),
+        });
+      }
+
+      await materializeHostedSourceDeliveryStallNotice({
+        candidate, now: input.now, userId: "member-1",
+      });
+
+      if (scenario !== "eligible") {
+        expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).not.toHaveBeenCalled();
+        expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+        return;
+      }
+      expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).toHaveBeenCalledOnce();
+      const appendInput = mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mock.calls[0]?.[0];
+      expect(appendInput.envelope.notification).toMatchObject({
+        deliveryDispatchMode: "queue-only",
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: expect.stringContaining("Apple Health"),
+        },
+        route: DIRECT_LINQ_DESTINATION.route,
+      });
+      for (const phrase of ["Murph", "Check for new data", "stop these check-ins"]) {
+        expect(appendInput.envelope.notification.responsePolicy.text).toContain(phrase);
+      }
+    },
+  );
+
   it("queues exact direct-thread copy through the existing durable mailbox", async () => {
     const candidate = resolveHostedSourceDeliveryStallNoticeCandidate(BASE_INPUT);
     expect(candidate).not.toBeNull();

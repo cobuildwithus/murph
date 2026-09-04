@@ -8,8 +8,8 @@ import { SqliteDeviceSyncStore } from "../src/store.ts";
 import {
   evaluatePushPrimarySourceStaleness,
   isPushPrimarySourceProvider,
-  isPushPrimarySourceRecoveryNoticeEligible,
-  readPushPrimarySourceRecoveryNoticePolicy,
+  isSourceRecoveryNoticeEligible,
+  readSourceRecoveryNoticePolicy,
 } from "../src/source-staleness.ts";
 import { makeTempDirectory } from "./helpers.ts";
 
@@ -101,38 +101,56 @@ test("push-primary staleness ignores pull-capable sources and non-connected rows
 });
 
 test("Garmin recovery notices start after five days of established delivery silence", () => {
-  assert.deepEqual(readPushPrimarySourceRecoveryNoticePolicy("GARMIN"), {
+  assert.deepEqual(readSourceRecoveryNoticePolicy("GARMIN"), {
     companionAppName: "Garmin Connect",
     deviceDisplayName: "Garmin device",
     providerDisplayName: "Garmin",
     silentHours: 120,
   });
-  assert.equal(isPushPrimarySourceRecoveryNoticeEligible({
+  assert.equal(isSourceRecoveryNoticeEligible({
     lastDataAt: "2026-07-19T00:00:00.001Z",
     now: "2026-07-24T00:00:00.000Z",
     sourceProviderSlug: "garmin",
     status: CONNECTED,
   }), false);
-  assert.equal(isPushPrimarySourceRecoveryNoticeEligible({
+  assert.equal(isSourceRecoveryNoticeEligible({
     lastDataAt: "2026-07-19T00:00:00.000Z",
     now: "2026-07-24T00:00:00.000Z",
     sourceProviderSlug: "garmin",
     status: CONNECTED,
   }), true);
-  assert.equal(isPushPrimarySourceRecoveryNoticeEligible({
+  assert.equal(isSourceRecoveryNoticeEligible({
     lastDataAt: "2026-07-14T00:00:00.001Z",
     now: "2026-07-24T00:00:00.000Z",
     silentHours: 10 * 24,
     sourceProviderSlug: "garmin",
     status: CONNECTED,
   }), false);
-  assert.equal(isPushPrimarySourceRecoveryNoticeEligible({
+  assert.equal(isSourceRecoveryNoticeEligible({
     lastDataAt: "2026-07-14T00:00:00.000Z",
     now: "2026-07-24T00:00:00.000Z",
     silentHours: 10 * 24,
     sourceProviderSlug: "garmin",
     status: CONNECTED,
   }), true);
+});
+
+test("Apple Health recovery starts at three days without changing push-primary classification", () => {
+  assert.equal(readSourceRecoveryNoticePolicy(" APPLE_HEALTH_KIT ")?.silentHours, 72);
+  assert.equal(isPushPrimarySourceProvider("apple_health_kit"), false);
+  const input = {
+    lastDataAt: "2026-06-10T12:00:00.000Z",
+    now: "2026-06-13T12:00:00.000Z",
+    sourceProviderSlug: "apple_health_kit",
+    status: CONNECTED,
+  };
+  assert.equal(isSourceRecoveryNoticeEligible(input), true);
+  assert.equal(isSourceRecoveryNoticeEligible({
+    ...input, now: "2026-06-13T11:59:59.999Z",
+  }), false);
+  assert.equal(isSourceRecoveryNoticeEligible({ ...input, lastDataAt: null }), false);
+  assert.equal(isSourceRecoveryNoticeEligible({ ...input, status: "disconnected" }), false);
+  assert.equal(isSourceRecoveryNoticeEligible({ ...input, silentHours: 240 }), false);
 });
 
 test("recovery notices require prior delivery, a connected source, and explicit provider policy", () => {
@@ -149,7 +167,7 @@ test("recovery notices require prior delivery, a connected source, and explicit 
       status: CONNECTED,
     },
   ] as const) {
-    assert.equal(isPushPrimarySourceRecoveryNoticeEligible({
+    assert.equal(isSourceRecoveryNoticeEligible({
       ...input,
       now: "2026-07-24T00:00:00.000Z",
     }), false);

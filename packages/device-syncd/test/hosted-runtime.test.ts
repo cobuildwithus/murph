@@ -280,6 +280,24 @@ describe("hosted device-sync reconcile contract", () => {
 });
 
 describe("hosted device-sync no-data outreach contract", () => {
+  it("accepts the three-day Apple Health default while preserving custom limits", () => {
+    const response = {
+      action: "configure_no_data_outreach",
+      effectiveAfterDays: 3,
+      setting: "default",
+      sourceProviderSlug: "apple_health_kit",
+      status: "saved",
+    };
+    expect(parseHostedExecutionDeviceSyncNoDataOutreachResponse(response)).toEqual(response);
+    for (const invalid of [
+      { ...response, setting: "custom" },
+      { ...response, sourceProviderSlug: "garmin" },
+      { ...response, effectiveAfterDays: 2 },
+    ]) {
+      expect(() => parseHostedExecutionDeviceSyncNoDataOutreachResponse(invalid)).toThrow(/inconsistent/u);
+    }
+  });
+
   it("accepts explicit bounded settings and rejects ambiguous shapes", () => {
     const authority = {
       assistantInputId: "ain_00000000000000000000000000000001",
