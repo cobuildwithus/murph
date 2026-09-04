@@ -1659,14 +1659,25 @@ attachment, then opens its normal write fence and restores the encrypted
 workspace. The real resident Codex App Server remains post-restore because its
 launch identity is member-specific. Coordinator claim and bind share one 250 ms
 deadline; no-ready, stale-release, or coordinator failure before slot ownership
-uses the unchanged exact-user cold target. A pending or retained standby target
-is reconciled before fresh-claim eligibility. An ambiguous bind after the
-opaque target is reserved therefore yields for retry against that exact target
-instead of starting a second container, even when the retry arrives through
-Temporal. Replenishment, readiness re-proving, orphan retirement, and
-stale-release drain run outside the accepted-message path. A bound slot can be
-retained only by that same member under the ordinary conversation idle
-lifecycle and is never returned to ready. Slot invocation,
+uses the unchanged exact-user cold target. A pending standby target is
+reconciled before fresh-claim eligibility. For a member-bound target, one
+bounded RPC to that standby-container owner validates the immutable slot, its
+release, and the exact member, then reads native-container liveness. Only an
+explicit warm status is `retained`; the durable `bound` row by itself is not.
+Warm retention renews the handoff idle window and may repeat for the same
+member without another coordinator claim. An explicit native stop or an exact
+prior-release binding enters the existing one-way `retiring` to `retired` scrub
+path. `UserRunner` clears only its exact stop target and only after that
+retirement settles, after which the same eligible authenticated Web-direct
+`default` request may perform one normal fresh claim. Unknown native status,
+failed retirement, foreign-member state, contradictory release authority, or
+any result-identity mismatch retains the pending target and yields without a
+second container. An ambiguous bind after the opaque target is reserved follows
+the same retry rule, including when the retry arrives through Temporal.
+Replenishment, readiness re-proving, orphan retirement, and stale-release drain
+remain outside the accepted-message path. A claimed slot is never rebound or
+returned to ready. Group chats do not own standby lifecycle; the member's
+`UserRunner` remains the allocation and stop-target owner. Slot invocation,
 provider-credential minting, withdrawal, account deletion, and retirement all
 re-read the exact durable binding; a member mismatch fails closed. A successful
 fresh-start acceptance records the closed standby allocation outcome, bounded

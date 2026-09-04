@@ -2064,6 +2064,14 @@ describe("cloudflare worker routes", () => {
         slotName: standbyContainerName,
         state: "bound" as const,
       })),
+      resolveRetainedStandbySlot: vi.fn(async () => ({
+        claimId: "standby-claim-00000000-0000-4000-8000-000000000000",
+        releaseId: "release_1",
+        region: HOSTED_STANDBY_REGION,
+        slotName: standbyContainerName,
+        state: "bound" as const,
+        userId: "member_123",
+      })),
       retireStandbySlot: vi.fn(async () => ({ retired: true as const })),
     } satisfies HostedStandbyRunnerContainerStubLike & {
       beginShutdownCheckpointGracefulStopForTest(

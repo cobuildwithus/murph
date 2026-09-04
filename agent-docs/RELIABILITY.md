@@ -463,11 +463,20 @@ Last verified: 2026-09-02
   the ready standby instead of reusing the child while it shuts down. A miss
   before slot ownership uses the same exact-user fallback; an ambiguous bind
   after the per-member stop target is durably reserved retries that exact
-  target instead of risking two live containers. Pending and retained targets
-  are reconciled before fresh-claim eligibility. In `allocate` mode the standby
-  coordinator is the only shell-prewarm owner; the exact-user prewarm hint is
-  skipped so it cannot reserve a competing target before a fresh claim. The
-  ordinary exact-user start remains the fallback after a claim miss.
+  target instead of risking two live containers. Pending targets are reconciled
+  before fresh-claim eligibility. A claimed slot counts as retained only when
+  its existing container owner proves explicit native warmth while validating
+  the exact slot, release, and member in one bounded RPC; a durable binding
+  alone never authorizes reuse. The warm proof renews the handoff window.
+  Explicit stop or an exact prior-release binding uses the same one-way
+  transition (`unbound` to `bound` to `retiring` to `retired`), and `UserRunner`
+  clears the exact stop target only after retirement settles. Only then may the
+  same eligible trusted foreground request attempt one fresh claim. Unknown
+  liveness, foreign or contradictory identity, and failed retirement keep the
+  old target assigned and start no second container. In `allocate` mode the
+  standby coordinator is the only shell-prewarm owner; the exact-user prewarm
+  hint is skipped so it cannot reserve a competing target before a fresh claim.
+  The ordinary exact-user start remains the fallback after a claim miss.
   Every accepted fresh start records the bounded standby allocation outcome,
   exact reason, and elapsed milliseconds in the existing latency phase
   breakdown. The same metadata-only fields are emitted immediately in the
@@ -475,11 +484,10 @@ Last verified: 2026-09-02
   budget before an accepted runtime invocation exists.
   A coordinator transaction admits at most one winner, then replacement
   provisioning runs under `waitUntil`; alarms re-prove readiness, retry failed
-  retirement, expire unbound claim tombstones, and drain stale releases. The
-  slot transition is one-way (`unbound` to `bound` to `retiring` to `retired`),
-  and ambiguous bind/cleanup state stays assigned to its exact `UserRunner`
-  stop target until reconciliation succeeds. Mode `off` retires only
-  coordinator-owned slots and never interrupts bound member work.
+  retirement, expire unbound claim tombstones, and drain stale releases. A
+  claimed slot is never rebound or returned to ready; group conversations are
+  not lifecycle owners because allocation remains per member. Mode `off` retires
+  only coordinator-owned slots and never interrupts bound member work.
 - Initial onboarding has one Postgres completion owner across website and
   native clients. Existing members are backfilled complete. During the
   migration-first rolling deploy, a temporary database default also completes

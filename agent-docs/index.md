@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-09-02
+Last verified: 2026-09-03
 
 ## Purpose
 
@@ -702,6 +702,13 @@ contract is specified by `ARCHITECTURE.md` and `agent-docs/RELIABILITY.md`.
 Personal Patterns operator email waits until automatic cron recovery ends.
 Terminal failures and expired occurrences for one scheduled time share one
 member-independent provider idempotency key. This contract is specified by
+`agent-docs/RELIABILITY.md` and
+`agent-docs/references/hosted-runtime-protocol.md`.
+
+Member-bound standby containers are reusable only while their Durable Object
+owner proves native warmth. Stopped slots retire before `UserRunner` clears the
+exact target and an eligible foreground request claims a replacement; group
+chats do not become lifecycle owners. This contract is specified by
 `agent-docs/RELIABILITY.md` and
 `agent-docs/references/hosted-runtime-protocol.md`.
 

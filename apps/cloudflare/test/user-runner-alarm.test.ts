@@ -1138,6 +1138,9 @@ describe("HostedUserRunner execution coordination", () => {
               state: "bound" as const,
             };
           },
+          async resolveRetainedStandbySlot() {
+            throw new Error("Retained standby resolution was not expected.");
+          },
           retireStandbySlot,
           async smokeHealth() {
             return {
@@ -4379,6 +4382,9 @@ describe("HostedUserRunner execution coordination", () => {
           slotName: standbyRunnerContainerName,
           state: standbyBinding.state,
         };
+      },
+      async resolveRetainedStandbySlot() {
+        return standbyBinding;
       },
       async retireStandbySlot() {
         throw new Error("A successfully bound standby must not be retired.");
