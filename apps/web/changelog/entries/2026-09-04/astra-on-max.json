@@ -8,8 +8,15 @@
     "title": "Choose Astra on Max",
     "summary": "Max members can choose GPT-6 Astra for their conversations with Murph.",
     "details": "Available on individual Max and Family Max seats through OpenAI. Choose Astra in Settings or ask Murph to use it for future queries. Astra uses your AI allowance faster than the other models.",
-    "relevanceTags": ["assistant"],
-    "sourcePullRequests": [],
-    "tryIt": { "label": "Choose your model", "href": "/settings" }
+    "relevanceTags": [
+      "assistant"
+    ],
+    "sourcePullRequests": [
+      2823
+    ],
+    "tryIt": {
+      "label": "Choose your model",
+      "href": "/settings"
+    }
   }
 }
