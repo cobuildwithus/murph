@@ -9389,7 +9389,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       targetAvailability: 'available' as const,
     },
   ])(
-    'gives truthful no-queue recovery when $label',
+    'keeps dynamic-tool handoff recovery truthful when $label',
     async ({ targetAvailability }) => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -9517,6 +9517,13 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           workingDirectory,
         })
 
+        process.stdout.write(
+          `[dynamic-tool-handoff-recovery] ${JSON.stringify({
+            scenario: targetAvailability,
+            requestCount: groupRequests.length,
+            reply: result.finalMessage.trim(),
+          })}\n`,
+        )
         const expectedRequestCount = targetAvailability === 'available' ? 2 : 1
         expect(groupRequests).toHaveLength(expectedRequestCount)
         expect(groupRequests[0]).toEqual({ action: 'list_memberships' })
@@ -9524,6 +9531,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           expect(groupRequests[1]).toMatchObject({
             action: 'handoff',
             membershipId: 'membership_former_trail_crew',
+            originAssistantInputId: 'input_group_unavailable_recovery',
           })
         }
         expect(result.finalMessage).toMatch(/Former Trail Crew/iu)
