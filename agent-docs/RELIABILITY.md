@@ -473,9 +473,12 @@ Last verified: 2026-09-04
 - Cloudflare standby allocation is an optional one-slot optimization, not a
   scheduler. `off` is the source-controlled default, `shadow` maintains and
   re-proves one current-release ENAM slot without allocating it, and `allocate`
-  offers one 250 ms claim/bind deadline only to a fence-free, authenticated
-  Web-direct `default` request. Temporal and background requests keep the
-  ordinary exact-user target. After foreground preemption has cleared an
+  offers one 250 ms claim/bind deadline to fence-free `default` work from
+  authenticated Web-direct ingress or an authenticated request carrying
+  `conversationWorkPending: true`. Temporal derives that positive-only fact
+  from fresh admitted conversation lag on every attempt. System-only work,
+  scheduled default work, and provider/runtime wakes without conversation lag
+  keep the ordinary exact-user target. After foreground preemption has cleared an
   exact-user background fence, the trusted foreground replacement may claim
   the ready standby instead of reusing the child while it shuts down. A miss
   before slot ownership uses the same exact-user fallback; an ambiguous bind
