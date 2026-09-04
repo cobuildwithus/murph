@@ -81,6 +81,8 @@ export interface SignalHostedMailboxAppendInput {
     userId: string;
   };
   mailboxItemId: string;
+  // The mailbox owner has been validated and active access has been proved.
+  onReadyToSignal?: () => void;
   prisma?: PrismaClient;
 }
 
@@ -138,9 +140,10 @@ export function hostedUserRuntimeWorkflowId(userId: string): string {
 export async function signalHostedMailboxAppendRuntime(
   input: SignalHostedMailboxAppendInput,
 ): Promise<HostedRuntimeSignalResult> {
+  const prisma = input.prisma ?? getPrisma();
   const mailboxItem = input.knownCheckpoint ?? await readHostedMailboxItemCheckpointById({
     mailboxItemId: input.mailboxItemId,
-    prisma: input.prisma,
+    prisma,
   });
 
   if (!mailboxItem) {
@@ -154,22 +157,26 @@ export async function signalHostedMailboxAppendRuntime(
     await requireHostedRuntimeActiveAccess(mailboxItem.userId, {
       code: "HOSTED_RUNTIME_USER_INACTIVE",
       message: "Hosted runtime user is not active.",
-      prisma: input.prisma ?? getPrisma(),
+      prisma,
     });
+  } else {
+    await ensureHostedRuntimeWorkspaceForActiveUser(mailboxItem.userId, prisma);
   }
+  const signal = parseHostedRuntimeSignal({
+    kind: "mailbox_appended",
+    lane: mailboxItem.lane,
+    laneSeq: mailboxItem.laneSeq,
+    mailboxItemId: input.mailboxItemId,
+  });
+  input.onReadyToSignal?.();
 
   return signalHostedUserRuntimeWorkflow({
     abortSignal: input.abortSignal,
     client: input.client,
     environment: input.environment,
-    ensureWorkspace: input.knownCheckpoint === undefined,
-    prisma: input.prisma,
-    signal: parseHostedRuntimeSignal({
-      kind: "mailbox_appended",
-      lane: mailboxItem.lane,
-      laneSeq: mailboxItem.laneSeq,
-      mailboxItemId: input.mailboxItemId,
-    }),
+    ensureWorkspace: false,
+    prisma,
+    signal,
     userId: mailboxItem.userId,
   });
 }

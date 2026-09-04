@@ -1036,9 +1036,10 @@ route, then appends one deterministic encrypted `assistant.ask.completed` item
 to the bound private runtime. The first committed completion wins. The private
 runtime treats it as correlated untrusted data and may run one output-only
 follow-up after current route validation; it cannot recurse into Assistant Ask
-or invoke side-effecting tools. Once Temporal accepts the completion's
-pointer-only signal, Web starts the same payloadless direct ensure so an active
-private runtime can import it immediately. A typed `cannot_answer` bypasses the
+or invoke side-effecting tools. After active access for the committed completion
+pointer is validated, Web starts the same payloadless direct ensure immediately
+before dispatching Temporal's pointer-only signal, then awaits that signal so
+durable recovery remains explicit. A typed `cannot_answer` bypasses the
 private provider continuation and queues one fixed, self-contained
 earlier-question failure response exactly; it cannot be paraphrased into an
 expiry or execution-failure claim. The completion mailbox outcome carries that
@@ -1616,10 +1617,13 @@ id. Retry reasons and raw errors stay out of the trace; Cloudflare structured
 logs carry retry reasons under the direct orchestration attempt id.
 Linq first proves the committed known-checkpoint owner and
 canonical live active access; Assistant Ask first completes its normal
-server-bound append checks. Web always awaits the applicable Temporal
-`signalWithStart`; only after Temporal accepts that durable signal does Web
-start the direct ensure. An access failure or Temporal acceptance failure starts
-no direct wake. Linq instant start follows the same rule: enrollment returns the
+server-bound append checks. The mailbox signal owner completes its active-access
+and pointer validation, starts the payload-free direct ensure, and then
+dispatches the applicable Temporal `signalWithStart`. Web still awaits the
+bounded Temporal result before completing the handoff. An access failure starts
+no direct wake; a later Temporal failure remains visible while the authorized
+direct hint stays best-effort, and the mailbox handoff sweep retains durable
+signal recovery. Linq instant start follows the same authority rule: enrollment returns the
 newly committed activation as an explicit per-request wake continuation instead
 of signaling it first. Once the instant-start planner has committed the member
 row, Web may fire one best-effort `runtime/shell-prewarm` request while trial
@@ -1713,9 +1717,10 @@ passes through the existing
 Linq delivery ledger, then Web atomically appends its ordinary self-authored
 conversation row, stamps the original inbound and that outbound row consumed,
 clears the encrypted pending body, and substitutes the outbound checkpoint for
-the handoff. Web awaits that conversation-mailbox Temporal signal; only then
-may the ordinary Linq direct ensure start and own readiness plus all runtime
-authority. The runtime imports both consumed rows as context with null reply
+the handoff. The signal owner rechecks active access, starts the ordinary Linq
+direct ensure immediately before Temporal network dispatch, and still awaits
+that conversation-mailbox signal before completing the handoff. Cloudflare
+continues to own readiness and runtime authority. The runtime imports both consumed rows as context with null reply
 targets, so the first exchange is available to later normal turns without
   answering the original inbound again. A different message or group transition
   waits while this exact delivery obligation remains unresolved. Runtime Linq

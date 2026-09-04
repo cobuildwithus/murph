@@ -85,8 +85,9 @@ export function startHostedRuntimeShellPrewarmBestEffort(input: {
 }
 
 /**
- * Starts the payloadless Cloudflare latency hint and always settles. Temporal
- * must accept the durable mailbox signal before a caller invokes this helper.
+ * Starts the payloadless Cloudflare latency hint and always settles. Callers
+ * invoke it only after the corresponding mailbox work has committed; Temporal
+ * remains the durable recovery owner and may be signaled concurrently.
  */
 export function startHostedDirectRuntimeWakeBestEffort(input: {
   onTiming?: (

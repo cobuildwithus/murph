@@ -790,7 +790,11 @@ Last verified: 2026-09-02
   hint as soon as pre-transaction routing preparation resolves the eligible
   active member, before mailbox-root KMS work and transaction entry. This hint may
   overlap or fail without changing the plan: it creates no fence or mailbox
-  owner, and only the accepted Temporal signal permits the direct ensure.
+  owner. After the canonical mailbox append, the signal owner rechecks active
+  access and then starts the payload-free direct ensure immediately before
+  dispatching the Temporal signal. Access failure starts no direct wake;
+  Temporal failure still fails the handoff while the already-authorized direct
+  hint remains best-effort. Temporal remains the durable recovery owner.
   A definite route-read or route-projection failure after generation confirms
   that same attempted row was skipped before allowing ordinary-runtime
   fallback; if the skip cannot be confirmed, Web retains ownership and the

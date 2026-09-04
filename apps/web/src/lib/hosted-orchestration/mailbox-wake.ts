@@ -24,17 +24,18 @@ export async function handoffHostedMailboxWake(input: {
       abortSignal,
       expectedUserId: input.expectedUserId,
       mailboxItemId: input.mailboxItemId,
+      onReadyToSignal: () => {
+        const directWake = startHostedDirectRuntimeWakeBestEffort({
+          source: input.directWakeSource,
+          userId: input.expectedUserId,
+        });
+        try {
+          after(() => directWake);
+        } catch {
+          void directWake;
+        }
+      },
     }),
     signal: input.signal,
   });
-
-  const directWake = startHostedDirectRuntimeWakeBestEffort({
-    source: input.directWakeSource,
-    userId: input.expectedUserId,
-  });
-  try {
-    after(() => directWake);
-  } catch {
-    void directWake;
-  }
 }
