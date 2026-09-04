@@ -15138,6 +15138,8 @@ describeRealCodex('real Codex Habitat voice maintenance e2e', () => {
 })
 
 const PUBLIC_GOAL_SETUP_KEY = 'goal_template:improve-deep-sleep'
+const PUBLIC_GOAL_SLEEP_THROUGH_NIGHT_KEY =
+  'goal_template:sleep-through-the-night'
 
 interface PublicGoalSetupRecord {
   goalPhrase: string
@@ -15336,6 +15338,164 @@ type PublicGoalSetupAutomationSaveRequest = Extract<
 >
 
 describeRealCodex('real Codex public goal setup e2e', () => {
+  it(
+    'resolves an achievable sleep Goal before asking one setup question',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const publicGoal = await readPublicGoalSetupRecord(
+        PUBLIC_GOAL_SLEEP_THROUGH_NIGHT_KEY,
+      )
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-public-sleep-goal-routing-e2e-'),
+      )
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const vaultRoot = path.join(workingDirectory, 'vault')
+      const commandLogPath = path.join(workingDirectory, 'goal-commands.log')
+
+      try {
+        await initializeVault({
+          timezone: 'America/New_York',
+          vaultRoot,
+        })
+        await Promise.all([
+          materializeAssistantSkill({ skillsRoot, slug: 'goal-setup' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'sleep-improvement' }),
+          materializeAssistantSkill({
+            skillsRoot,
+            slug: 'sleep-recovery-readiness',
+          }),
+          materializePublicGoalSetupVaultCli({
+            binDirectory,
+            commandLogPath,
+            vaultRoot,
+          }),
+        ])
+        const inheritedPath = normalizeEnvString(config.env.PATH)
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildPublicGoalSetupDeveloperInstructions(),
+          dynamicTools: [MURPH_AUTOMATION_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            PATH: inheritedPath
+              ? `${binDirectory}${path.delimiter}${inheritedPath}`
+              : binDirectory,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: publicGoal.startPrompt,
+          reasoningEffort: 'medium',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const commandAttempts = readGoalSetupVaultCommands(actions, {
+          successfulOnly: false,
+        })
+        const reply = result.finalMessage.trim()
+        process.stdout.write(
+          `[public-goal-setup-e2e] ${JSON.stringify({
+            reply,
+            scenario: 'sleep-through-the-night-routing',
+          })}\n`,
+        )
+
+        const publicGoalListRead = actions.find(
+          isSuccessfulPublicGoalListAction,
+        )
+        const publicGoalShowRead = actions.find((action) =>
+          isSuccessfulPublicGoalShowActionFor(
+            action,
+            'sleep-through-the-night',
+          )
+        )
+        const goalInventoryRead = actions.find(
+          isSuccessfulGoalInventoryReadAction,
+        )
+        const memoryRead = actions.find(isSuccessfulCompactMemoryReadAction)
+        const normalizeWhitespace = (value: string) =>
+          value.replace(/\s+/gu, ' ').trim()
+        const goalSetupSkillPathSuffix =
+          `${path.sep}goal-setup${path.sep}SKILL.md`
+        const goalSetupSkillReads = actions.filter(
+          (candidate): candidate is Extract<
+            CapabilityRoutingAction,
+            { kind: 'command' }
+          > => candidate.kind === 'command'
+            && candidate.ok
+            && candidate.command.includes(goalSetupSkillPathSuffix),
+        )
+        expect(
+          goalSetupSkillReads.length,
+          'goal-setup read actions before setup',
+        ).toBeGreaterThan(0)
+        const expectedGoalSetupSkill = await readFile(
+          path.join(skillsRoot, 'goal-setup', 'SKILL.md'),
+          'utf8',
+        )
+        expect(
+          normalizeWhitespace(
+            goalSetupSkillReads.map((action) => action.output).join('\n'),
+          ),
+          'goal-setup full-file read before setup',
+        ).toContain(normalizeWhitespace(expectedGoalSetupSkill))
+        expect(publicGoalListRead, 'exact public Goal search').toBeDefined()
+        expect(publicGoalListRead?.output).toContain(
+          PUBLIC_GOAL_SLEEP_THROUGH_NIGHT_KEY,
+        )
+        expect(publicGoalShowRead, 'exact public Goal read').toBeDefined()
+        expect(goalInventoryRead, 'all-status Goal inventory').toBeDefined()
+        expect(memoryRead, 'compact memory read').toBeDefined()
+        expect(commandAttempts.some(isGoalSetupMutationCommand)).toBe(false)
+        expect(actions.filter((action) => action.kind === 'dynamic')).toHaveLength(0)
+
+        const firstQuestion = readCompletedAgentMessages(result.jsonEvents)
+          .find((message) => message.text.includes('?'))
+        expect(firstQuestion, 'one grounded setup question').toBeDefined()
+        if (
+          !firstQuestion
+          || !publicGoalListRead
+          || !publicGoalShowRead
+          || !goalInventoryRead
+          || !memoryRead
+        ) {
+          throw new Error('Expected Goal grounding before the setup question.')
+        }
+        for (const groundingRead of [
+          publicGoalListRead,
+          publicGoalShowRead,
+          goalInventoryRead,
+          memoryRead,
+          ...goalSetupSkillReads,
+        ]) {
+          expect(groundingRead.eventIndex).toBeLessThan(firstQuestion.eventIndex)
+        }
+        expect(reply.match(/\?/gu) ?? []).toHaveLength(1)
+        expect(reply).toMatch(/sleep|night|waking|awakening/iu)
+        expect(reply).not.toMatch(
+          /Health Commons|commons goal|goal_template:|sha256:/iu,
+        )
+        expect(reply).not.toMatch(
+          /(?:no|did not|didn't|could not|couldn't).{0,40}(?:matching|match|entry|goal)/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
   it(
     'grounds from memory, persists finite support, and reuses one Goal package in a fresh session',
     async () => {
@@ -16337,7 +16497,9 @@ function buildPublicGoalSetupDeveloperInstructions(): string {
   })
 }
 
-async function readPublicGoalSetupRecord(): Promise<PublicGoalSetupRecord> {
+async function readPublicGoalSetupRecord(
+  key = PUBLIC_GOAL_SETUP_KEY,
+): Promise<PublicGoalSetupRecord> {
   const artifactPath = fileURLToPath(new URL(
     '../../health-commons/generated/web/browse/goals.json',
     import.meta.url,
@@ -16346,7 +16508,7 @@ async function readPublicGoalSetupRecord(): Promise<PublicGoalSetupRecord> {
   const goals = Array.isArray(artifact?.goals) ? artifact.goals : []
   const goal = goals
     .map((value) => readRecord(value))
-    .find((value) => value?.key === PUBLIC_GOAL_SETUP_KEY)
+    .find((value) => value?.key === key)
   const revision = readRecord(goal?.revision)
   const goalPhrase = readString(goal?.goalPhrase)
   const pageRevisionId = readString(revision?.pageRevisionId)
@@ -16362,13 +16524,13 @@ async function readPublicGoalSetupRecord(): Promise<PublicGoalSetupRecord> {
     || !workflowSpecRevisionId
   ) {
     throw new Error(
-      `Generated Goal index is missing ${PUBLIC_GOAL_SETUP_KEY}.`,
+      `Generated Goal index is missing ${key}.`,
     )
   }
 
   return {
     goalPhrase,
-    key: PUBLIC_GOAL_SETUP_KEY,
+    key,
     pageRevisionId,
     startPrompt,
     workflowSpecRevisionId,
@@ -16534,15 +16696,29 @@ function isSuccessfulGoalSetupEntityShowAction(
 function isSuccessfulPublicGoalShowAction(
   action: CapabilityRoutingAction,
 ): boolean {
+  return isSuccessfulPublicGoalShowActionFor(action, 'improve-deep-sleep')
+}
+
+function escapeGoalSetupRegularExpression(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
+}
+
+function isSuccessfulPublicGoalShowActionFor(
+  action: CapabilityRoutingAction,
+  slug: string,
+): boolean {
+  const escapedSlug = escapeGoalSetupRegularExpression(slug)
   return action.kind === 'command'
     && action.ok
     && (
       (
         action.command.includes('commons goal show')
-        && action.command.includes('improve-deep-sleep')
+        && action.command.includes(slug)
       )
-      || /"argv":\s*\[\s*"commons",\s*"goal",\s*"show",\s*"(?:goal_template:)?improve-deep-sleep"/u
-        .test(action.output)
+      || new RegExp(
+        `"argv":\\s*\\[\\s*"commons",\\s*"goal",\\s*"show",\\s*"(?:goal_template:)?${escapedSlug}"`,
+        'u',
+      ).test(action.output)
     )
 }
 
