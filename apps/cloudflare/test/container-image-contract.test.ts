@@ -726,7 +726,7 @@ describe("hosted runner container image contract", () => {
     expect(appBundleIsOwnedByRoot && appBundleIsMadeNonWritable && containerReturnsToRuntimeUser).toBe(true);
   });
 
-  it("publishes exactly the product Codex models with Flex without replacing their metadata", async () => {
+  it("publishes exactly the product Codex models with Flex and mixed Code Mode", async () => {
     const finalDockerfile = await readFile(
       new URL("../../../Dockerfile.cloudflare-hosted-runner", import.meta.url),
       "utf8",
@@ -747,18 +747,21 @@ describe("hosted runner container image contract", () => {
           display_name: "GPT-5.6-Sol",
           slug: "gpt-5.6-sol",
           service_tiers: [{ id: "priority", name: "Priority" }],
+          tool_mode: "code_mode_only",
         },
         {
           description: "Balanced agentic coding model for everyday work.",
           display_name: "GPT-5.6-Terra",
           slug: "gpt-5.6-terra",
           service_tiers: [{ id: "priority", name: "Priority" }],
+          tool_mode: "code_mode_only",
         },
         {
           description: "Fast, cost-efficient agentic coding model.",
           display_name: "GPT-5.6-Luna",
           slug: "gpt-5.6-luna",
           service_tiers: [{ id: "priority", name: "Priority" }],
+          tool_mode: "code_mode_only",
         },
       ],
     };
@@ -769,6 +772,7 @@ describe("hosted runner container image contract", () => {
     expect(readCodexModelSlugs(patchedCatalog)).toEqual(hostedRunnerProductModelSlugs);
     for (const slug of hostedRunnerProductModelSlugs) {
       expect(readCodexModelServiceTierIds(patchedCatalog, slug)).toEqual(["priority", "flex"]);
+      expect(readCodexModel(patchedCatalog, slug).tool_mode).toBe("code_mode");
     }
     expect(readCodexModel(patchedCatalog, "gpt-5.6-sol")).toMatchObject({
       description: "Flagship agentic coding model for complex professional work.",
@@ -812,6 +816,13 @@ describe("hosted runner container image contract", () => {
         ...patchedCatalog.models,
         { slug: "gpt-5.5", service_tiers: [{ id: "priority", name: "Priority" }] },
       ],
+    }, { slurp: true }).trim()).toBe("false");
+    expect(runJqFilter(validationFilter, {
+      models: patchedCatalog.models.map((model) =>
+        model.slug === "gpt-5.6-terra"
+          ? { ...model, tool_mode: "code_mode_only" }
+          : model
+      ),
     }, { slurp: true }).trim()).toBe("false");
   });
 

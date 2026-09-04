@@ -184,7 +184,18 @@ const collectDockerDevDiagnostics = vi.fn(async () => "Docker diagnostics:\n- do
 const DEFAULT_CODEX_MODEL_CATALOG_TEXT = JSON.stringify({
   models: [
     {
-      name: "GPT-5.5",
+      name: "GPT-5.6-Sol",
+      service_tiers: [
+        {
+          id: "priority",
+          name: "Priority",
+        },
+      ],
+      slug: "gpt-5.6-sol",
+      tool_mode: "code_mode_only",
+    },
+    {
+      name: "GPT-5.6-Terra",
       service_tiers: [
         {
           id: "priority",
@@ -192,6 +203,18 @@ const DEFAULT_CODEX_MODEL_CATALOG_TEXT = JSON.stringify({
         },
       ],
       slug: "gpt-5.6-terra",
+      tool_mode: "code_mode_only",
+    },
+    {
+      name: "GPT-5.6-Luna",
+      service_tiers: [
+        {
+          id: "priority",
+          name: "Priority",
+        },
+      ],
+      slug: "gpt-5.6-luna",
+      tool_mode: "code_mode_only",
     },
     {
       display_name: "GPT-5.4-Mini",
@@ -2864,7 +2887,18 @@ describe("hosted local dev stack", () => {
           stdout: JSON.stringify({
             models: [
               {
-                name: "GPT-5.5",
+                name: "GPT-5.6-Sol",
+                service_tiers: [
+                  {
+                    id: "priority",
+                    name: "Priority",
+                  },
+                ],
+                slug: "gpt-5.6-sol",
+                tool_mode: "code_mode_only",
+              },
+              {
+                name: "GPT-5.6-Terra",
                 service_tiers: [
                   {
                     id: "priority",
@@ -2872,6 +2906,18 @@ describe("hosted local dev stack", () => {
                   },
                 ],
                 slug: "gpt-5.6-terra",
+                tool_mode: "code_mode_only",
+              },
+              {
+                name: "GPT-5.6-Luna",
+                service_tiers: [
+                  {
+                    id: "priority",
+                    name: "Priority",
+                  },
+                ],
+                slug: "gpt-5.6-luna",
+                tool_mode: "code_mode_only",
               },
               {
                 display_name: "GPT-5.4-Mini",
@@ -2954,7 +3000,22 @@ describe("hosted local dev stack", () => {
           service_tiers: expect.arrayContaining([
             expect.objectContaining({ id: "flex" }),
           ]),
+          slug: "gpt-5.6-sol",
+          tool_mode: "code_mode",
+        },
+        {
+          service_tiers: expect.arrayContaining([
+            expect.objectContaining({ id: "flex" }),
+          ]),
           slug: "gpt-5.6-terra",
+          tool_mode: "code_mode",
+        },
+        {
+          service_tiers: expect.arrayContaining([
+            expect.objectContaining({ id: "flex" }),
+          ]),
+          slug: "gpt-5.6-luna",
+          tool_mode: "code_mode",
         },
         {
           display_name: "GPT-5.4-Mini",
@@ -2986,12 +3047,18 @@ describe("hosted local dev stack", () => {
       stdout: "{not-json",
     },
     {
-      expectedMessage: "Hosted local dev Codex model catalog is missing gpt-5.6-terra.",
+      expectedMessage: "Hosted local dev Codex model catalog is missing gpt-5.6-sol.",
       stdout: JSON.stringify({ models: [] }),
     },
     {
       expectedMessage: "Hosted local dev Codex model catalog is missing gpt-5.4-mini.",
-      stdout: JSON.stringify({ models: [{ slug: "gpt-5.6-terra" }] }),
+      stdout: JSON.stringify({
+        models: [
+          { slug: "gpt-5.6-sol" },
+          { slug: "gpt-5.6-terra" },
+          { slug: "gpt-5.6-luna" },
+        ],
+      }),
     },
   ])(
     "fails closed when Codex bundled model catalog prep fails: $expectedMessage",
