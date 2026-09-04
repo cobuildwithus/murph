@@ -12,11 +12,14 @@ export function markHostedTelegramOAuthDialogIntent(): void {
   }
 }
 
-export function clearHostedTelegramOAuthDialogIntent(): void {
+export function hasHostedTelegramOAuthDialogIntent(): boolean {
   try {
-    window.sessionStorage.removeItem(HOSTED_TELEGRAM_OAUTH_DIALOG_INTENT_KEY);
+    return (
+      window.sessionStorage.getItem(HOSTED_TELEGRAM_OAUTH_DIALOG_INTENT_KEY)
+      === "1"
+    );
   } catch {
-    // Nothing else is required when browser storage is unavailable.
+    return false;
   }
 }
 

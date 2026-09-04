@@ -12,9 +12,10 @@ import {
 } from "./hosted-auth-shared";
 import { HostedInlineAuthButton } from "./hosted-inline-auth-button";
 import {
-  clearHostedTelegramOAuthDialogIntent,
+  consumeHostedTelegramOAuthDialogIntent,
   markHostedTelegramOAuthDialogIntent,
 } from "./hosted-telegram-oauth-intent";
+import type { HostedPrivyAuthenticatedInput } from "./use-hosted-auth-completion";
 
 export function HostedTelegramAuthButton({
   active = false,
@@ -24,6 +25,7 @@ export function HostedTelegramAuthButton({
   onAuthCancel,
   onAuthStart,
   onActivate,
+  onAuthenticated,
   onNoticeChange,
 }: {
   active?: boolean;
@@ -33,9 +35,17 @@ export function HostedTelegramAuthButton({
   onAuthCancel?: () => void;
   onAuthStart?: () => boolean;
   onActivate: () => void;
+  onAuthenticated: (input: HostedPrivyAuthenticatedInput) => Promise<void> | void;
   onNoticeChange?: (notice: TelegramAuthNotice | null) => void;
 }) {
-  const { initOAuth, loading: oauthLoading } = useLoginWithOAuth();
+  const { initOAuth, loading: oauthLoading } = useLoginWithOAuth({
+    onComplete: () => {
+      if (!consumeHostedTelegramOAuthDialogIntent()) return;
+
+      void onAuthenticated({ authMethod: "telegram" });
+    },
+    onError: handleOAuthFailure,
+  });
   const { ready } = usePrivy();
   const [telegramLoginPending, setTelegramLoginPending] = useState(false);
   const telegramLoginInFlightRef = useRef(false);
@@ -64,13 +74,18 @@ export function HostedTelegramAuthButton({
         ...(disableSignup ? { disableSignup: true } : {}),
       });
     } catch (error) {
-      clearHostedTelegramOAuthDialogIntent();
-      onAuthCancel?.();
-      onNoticeChange?.(describeTelegramAuthError(error));
+      handleOAuthFailure(error);
     } finally {
       telegramLoginInFlightRef.current = false;
       setTelegramLoginPending(false);
     }
+  }
+
+  function handleOAuthFailure(error: unknown) {
+    if (!consumeHostedTelegramOAuthDialogIntent()) return;
+
+    onAuthCancel?.();
+    onNoticeChange?.(describeTelegramAuthError(error));
   }
 
   return (

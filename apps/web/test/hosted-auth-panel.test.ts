@@ -20,6 +20,10 @@ const mocks = vi.hoisted(() => ({
   } | null,
   loginWithCode: vi.fn(),
   initOAuth: vi.fn(),
+  oauthCallbacks: null as null | {
+    onComplete?: () => void;
+    onError?: (error: unknown) => void;
+  },
   legalConsentCardProps: null as {
     declinePending?: boolean;
     initialStatus?: unknown;
@@ -58,7 +62,11 @@ vi.mock("@privy-io/react-auth", () => ({
       state: { status: "initial" },
     };
   },
-  useLoginWithOAuth() {
+  useLoginWithOAuth(callbacks: {
+    onComplete?: () => void;
+    onError?: (error: unknown) => void;
+  }) {
+    mocks.oauthCallbacks = callbacks;
     return {
       initOAuth: mocks.initOAuth,
       loading: false,
@@ -188,6 +196,7 @@ beforeEach(() => {
   );
   mocks.hostedPhoneAuthProps = null;
   mocks.legalConsentCardProps = null;
+  mocks.oauthCallbacks = null;
   mocks.usePrivy.mockReturnValue({
     authenticated: false,
     logout: vi.fn(),
@@ -963,6 +972,56 @@ test("HostedAuthPanel keeps auth mounted and puts OAuth redirect progress on the
   expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeTruthy();
   expect(mocks.hostedPhoneAuthProps?.interactionGated).toBe(true);
   expect(mocks.completeHostedPrivyAuth).not.toHaveBeenCalled();
+});
+
+test("HostedAuthPanel completes a returned Telegram OAuth flow as Telegram when the account also has a phone", async () => {
+  mocks.usePrivy.mockReturnValue({
+    authenticated: true,
+    logout: vi.fn(),
+    ready: true,
+  });
+  mocks.useUser.mockReturnValue({
+    user: {
+      linkedAccounts: [
+        {
+          latest_verified_at: 1741194420,
+          phone_number: "+14155552671",
+          type: "phone",
+        },
+        {
+          id: "telegram-user-123",
+          type: "telegram",
+          username: "telegram_user",
+        },
+      ],
+    },
+  });
+
+  const rendered = await renderClientComponent(
+    createElement(HostedAuthPanel, {
+      methods: ["phone", "telegram", "email"],
+    }),
+    { requireButton: false },
+  );
+  cleanupRender = rendered.cleanup;
+  rendered.window.sessionStorage.setItem(
+    "murph:telegram-oauth-dialog-intent:v1",
+    "1",
+  );
+
+  await act(async () => {
+    mocks.oauthCallbacks?.onComplete?.();
+    await Promise.resolve();
+  });
+
+  expect(mocks.completeHostedPrivyAuth).toHaveBeenCalledWith(
+    expect.objectContaining({ authMethod: "telegram" }),
+  );
+  expect(
+    rendered.window.sessionStorage.getItem(
+      "murph:telegram-oauth-dialog-intent:v1",
+    ),
+  ).toBeNull();
 });
 
 test("HostedAuthPanel keeps shared auth ownership while Telegram redirects", async () => {

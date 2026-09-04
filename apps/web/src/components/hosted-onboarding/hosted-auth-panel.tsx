@@ -411,6 +411,7 @@ export function HostedAuthPanel({
               }
               onAuthCancel={() => cancelAuthMethod("telegram")}
               onAuthStart={() => beginAuthMethod("telegram")}
+              onAuthenticated={completion.completeAuth}
               onActivate={() => {
                 setPrimaryMethod("phone");
                 setTelegramActive(true);
