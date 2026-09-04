@@ -347,6 +347,44 @@ test("uses a panel preloaded after a closed dialog mounts without suppressing ph
   expect(rendered.container.querySelector('[aria-busy="true"]')).toBeNull();
 });
 
+test("reopens a closed dialog so Privy can finish Telegram OAuth after redirect", async () => {
+  const { AuthDialog } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog"
+  );
+  const initialOpenChange = vi.fn();
+  const returnedOpenChange = vi.fn();
+  const rendered = await renderClientComponent(
+    createElement(AuthDialog, {
+      key: "before-redirect",
+      onOpenChange: initialOpenChange,
+      open: false,
+    }),
+    { requireButton: false },
+  );
+  cleanupRender = rendered.cleanup;
+
+  rendered.window.sessionStorage.setItem(
+    "murph:telegram-oauth-dialog-intent:v1",
+    "1",
+  );
+  await rendered.rerender(
+    createElement(AuthDialog, {
+      key: "after-redirect",
+      onOpenChange: returnedOpenChange,
+      open: false,
+    }),
+  );
+
+  await vi.waitFor(() => {
+    expect(returnedOpenChange).toHaveBeenCalledWith(true);
+  });
+  expect(
+    rendered.window.sessionStorage.getItem(
+      "murph:telegram-oauth-dialog-intent:v1",
+    ),
+  ).toBeNull();
+});
+
 async function renderPendingAuthDialog() {
   const { AuthDialog } = await import(
     "@/src/components/hosted-onboarding/auth-dialog"
