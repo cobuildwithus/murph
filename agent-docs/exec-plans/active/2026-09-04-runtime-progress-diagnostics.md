@@ -54,9 +54,15 @@ mailbox frontier in existing privacy-safe runtime logs.
 ## Verification
 
 - `pnpm --dir apps/web test:prepared -- hosted-runtime-progress-alert-monitor.test.ts`
-  passed all 16 focused tests.
+  passed all 17 focused tests, including every import-coverage and wake-owner
+  diagnostic bucket.
 - Focused Assistant Runtime Vitest passed the mailbox-state,
   mailbox-checkpoint, and workspace-entrypoint files, 58 tests total.
+- The five additional workspace-entrypoint files affected by strict result
+  fixtures plus mailbox-state coverage passed 169 tests. Full Assistant
+  Runtime coverage passed 2,691 tests with five intentional skips across 117
+  passing files and one skipped file; package coverage thresholds remained
+  green.
 - `pnpm typecheck` passed independently in `apps/web` and
   `packages/assistant-runtime`.
 - The Web-owned ESLint configuration passed both changed Web files. Assistant
@@ -64,8 +70,12 @@ mailbox frontier in existing privacy-safe runtime logs.
   green.
 - `pnpm complexity:diff` passed without increasing complexity debt or maximum
   complexity in any changed source owner.
-- `git diff --check` passed. Exact-head CI, final ReviewGPT, merge-tree proof,
-  and final plan closure remain PR-stage gates.
+- `git diff --check` passed. CI on the first reviewed head passed every Web,
+  Cloudflare, build/typecheck, host-matrix, Temporal, billing, hygiene, and
+  package lane except platform-a coverage, whose only failures were five exact
+  result fixtures missing the new optional `null` field. Those fixtures are
+  corrected and proven locally; final-head CI, ReviewGPT completion, merge-tree
+  proof, and final plan closure remain PR-stage gates.
 
 ## State
 

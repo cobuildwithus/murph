@@ -90,6 +90,80 @@ describe("hosted runtime progress health", () => {
     });
   });
 
+  it("classifies every system import and wake-owner diagnostic without identifiers", () => {
+    const health = summarizeHostedRuntimeProgressRows({
+      activeRuntimeKeys: [
+        "runtime_full",
+        "runtime_partial",
+        "runtime_unimported",
+        "runtime_unknown",
+      ],
+      now,
+      rows: [
+        progressRow({
+          durableHighWaterSeq: 10n,
+          effectiveConsumedSeq: 8n,
+          headKind: "device-sync.wake",
+          headLaneSeq: 9n,
+          lane: "system",
+          nextWakeReason: "assistant",
+          pendingCount: 2n,
+          progressOriginAt: "2026-08-10T15:30:00.000Z",
+          runtimeKey: "runtime_full",
+          workspaceSystemImportedSeq: 10n,
+        }),
+        progressRow({
+          durableHighWaterSeq: 10n,
+          effectiveConsumedSeq: 6n,
+          headKind: "device-sync.wake",
+          headLaneSeq: 7n,
+          lane: "system",
+          nextWakeReason: "device-sync.reconcile",
+          pendingCount: 4n,
+          progressOriginAt: "2026-08-10T15:30:00.000Z",
+          runtimeKey: "runtime_partial",
+          workspaceSystemImportedSeq: 8n,
+        }),
+        progressRow({
+          durableHighWaterSeq: 10n,
+          effectiveConsumedSeq: 5n,
+          headKind: "device-sync.wake",
+          headLaneSeq: 7n,
+          lane: "system",
+          nextWakeReason: null,
+          pendingCount: 5n,
+          progressOriginAt: "2026-08-10T15:30:00.000Z",
+          runtimeKey: "runtime_unimported",
+          workspaceSystemImportedSeq: 6n,
+        }),
+        progressRow({
+          durableHighWaterSeq: 10n,
+          effectiveConsumedSeq: 5n,
+          headKind: "runtime.maintenance-requested",
+          headLaneSeq: 6n,
+          lane: "system",
+          nextWakeReason: "mailbox",
+          pendingCount: 5n,
+          progressOriginAt: "2026-08-10T15:30:00.000Z",
+          runtimeKey: "runtime_unknown",
+          workspaceSystemImportedSeq: null,
+        }),
+      ],
+    });
+
+    expect(health.systemDiagnostics).toEqual({
+      assistantWakeLaneCount: 1,
+      deviceSyncHeadLaneCount: 3,
+      deviceSyncWakeLaneCount: 1,
+      fullyImportedLaneCount: 1,
+      importedUnhandledItemCount: 4,
+      otherOrMissingWakeLaneCount: 2,
+      partiallyImportedLaneCount: 1,
+      unimportedHeadLaneCount: 1,
+      unknownImportLaneCount: 1,
+    });
+  });
+
   it("excludes inactive and intentionally usage-blocked work", () => {
     const health = summarizeHostedRuntimeProgressRows({
       activeRuntimeKeys: ["runtime_active"],

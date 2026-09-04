@@ -420,6 +420,71 @@ describe("hosted runtime system mailbox state", () => {
     });
   });
 
+  it("reports every bounded retained-device-retry classifier failure", () => {
+    const base = buildPendingDeviceSyncMailboxItem({
+      itemId: "malformed_device_retry",
+      mailboxLaneSeq: "4",
+    });
+    const retryAt = "2026-04-28T00:00:00.000Z";
+
+    expect(resolveHostedSystemMailboxProgress({
+      importedSeq: "9",
+      now: retryAt,
+      state: {
+        pending: [{
+          ...base,
+          nextAttemptAt: retryAt,
+        }],
+      },
+    })).toEqual({
+      firstPendingClassifierFailures: [
+        "connection_missing",
+        "job_hints_missing",
+      ],
+      firstPendingSeq: "4",
+      handledThroughSeq: "3",
+    });
+
+    expect(resolveHostedSystemMailboxProgress({
+      importedSeq: "9",
+      now: retryAt,
+      state: {
+        pending: [{
+          ...base,
+          postCheckpointRecord: { kind: "vault-share.projection" },
+          status: "recording",
+          wake: buildHostedExecutionDeviceSyncWake({
+            connectionId: "dsc_malformed_retry",
+            eventId: "device-sync.wake:malformed_device_retry",
+            expectedConnectedAt: "2026-04-01T00:00:00.000Z",
+            hint: {
+              jobs: [{
+                availableAt: retryAt,
+                dedupeKey: "malformed-weight-retry",
+                kind: "resource",
+                maxAttempts: 1,
+                payload: {},
+              }],
+            },
+            occurredAt: "2026-04-27T00:00:00.000Z",
+            provider: "junction",
+            reason: "reconcile_due",
+            userId: "member_123",
+          }),
+        }],
+      },
+    })).toEqual({
+      firstPendingClassifierFailures: [
+        "status_not_pending",
+        "post_checkpoint_record_present",
+        "next_attempt_missing",
+        "job_schedule_match_missing",
+      ],
+      firstPendingSeq: "4",
+      handledThroughSeq: "3",
+    });
+  });
+
   it("blocks legacy unsequenced work without letting synthetic retention wakes block the lane", async () => {
     expect(resolveHostedSystemMailboxHandledThroughSeq({
       importedSeq: "9",
