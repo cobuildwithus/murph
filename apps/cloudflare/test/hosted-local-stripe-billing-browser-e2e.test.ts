@@ -126,7 +126,11 @@ describe("hosted-local Stripe billing browser matrix", () => {
 });
 
 async function proveStarterUsageStartsPaidPulseThroughCheckout(): Promise<void> {
-  const member = await createMember("starter_to_paid_pulse");
+  const member = await createMember(
+    "starter_to_paid_pulse",
+    "not_started",
+    "+12025550173",
+  );
   const invite = await issueHostedWebInviteForTest({
     environment: requireScenario().runtimeEnv,
     memberId: member.memberId,
@@ -430,6 +434,7 @@ async function proveFamilyInviteActivation(input: {
 async function createMember(
   label: string,
   billingStatus: "canceled" | "not_started" = "not_started",
+  verifiedPhoneNumber?: string,
 ): Promise<{
   memberId: string;
   session: HostedAppSessionForTest;
@@ -444,6 +449,7 @@ async function createMember(
     previouslyActivated: billingStatus === "canceled",
     privyUserId,
     verifiedEmail,
+    verifiedPhoneNumber,
   });
   await seedHostedLaunchConsentForTest({
     environment: requireScenario().runtimeEnv,
