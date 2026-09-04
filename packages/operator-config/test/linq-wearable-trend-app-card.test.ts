@@ -37,13 +37,9 @@ describe('Linq wearable trend app cards', () => {
         body: typeof init.body === 'string' ? JSON.parse(init.body) : null,
         url,
       })
-      return {
-        arrayBuffer: async () => new ArrayBuffer(0),
-        json: async () => ({ message: { id: 'msg_health_1' } }),
-        ok: true,
-        status: 200,
-        text: async () => '',
-      }
+      return new Response(JSON.stringify({ message: { id: 'msg_health_1' } }), {
+        headers: { 'Content-Type': 'application/json' },
+      })
     }
 
     await sendLinqIMessageAppCard({
