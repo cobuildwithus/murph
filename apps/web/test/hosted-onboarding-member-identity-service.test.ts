@@ -49,6 +49,8 @@ describe("hosted-onboarding member-identity-service", () => {
   const previousHostedContactPrivacyKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
   const previousHostedContactPrivacyCurrentKeyVersion =
     process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
+  const previousLinqProductionCanaryPhoneNumber =
+    process.env.HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_PHONE_NUMBER;
 
   beforeEach(() => {
     process.env.HOSTED_CONTACT_PRIVACY_KEYS = `v1:${TEST_CONTACT_PRIVACY_KEY}`;
@@ -63,6 +65,10 @@ describe("hosted-onboarding member-identity-service", () => {
     restoreEnvValue(
       "HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION",
       previousHostedContactPrivacyCurrentKeyVersion,
+    );
+    restoreEnvValue(
+      "HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_PHONE_NUMBER",
+      previousLinqProductionCanaryPhoneNumber,
     );
     clearHostedOnboardingEnvCache();
   });
@@ -147,15 +153,18 @@ describe("hosted-onboarding member-identity-service", () => {
   });
 
   it("reports creation while persisting a provider-verified phone identity", async () => {
+    process.env.HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_PHONE_NUMBER =
+      "+15551234567";
     const createdMember = makeMember({
       id: "member_created",
     });
     const participantContactLock = vi.fn().mockResolvedValue(0);
     const identityCreateMany = vi.fn(async () => ({ count: 1 }));
+    const memberCreate = vi.fn().mockResolvedValue(createdMember);
     const prisma = asRootPrisma({
       $executeRaw: participantContactLock,
       hostedMember: {
-        create: vi.fn().mockResolvedValue(createdMember),
+        create: memberCreate,
         delete: vi.fn(),
       },
       hostedMemberIdentity: {
@@ -182,6 +191,11 @@ describe("hosted-onboarding member-identity-service", () => {
       }),
       skipDuplicates: true,
     });
+    expect(memberCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        assistantModelPreference: "gpt-5.6-luna",
+      }),
+    }));
     expect(participantContactLock).toHaveBeenCalledTimes(1);
     expect(participantContactLock.mock.invocationCallOrder[0])
       .toBeLessThan(identityCreateMany.mock.invocationCallOrder[0] ?? 0);

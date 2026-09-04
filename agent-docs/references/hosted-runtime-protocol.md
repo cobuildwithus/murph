@@ -4065,12 +4065,15 @@ add no request, polling loop, persisted state owner, or reply-path work.
 Failed authoritative startup confirmation has one failure-only local
 observation because Durable Object RPC does not preserve custom properties on a
 thrown error. `Hosted execution container startup confirmation failed.` carries
-only `runtimeStartupFailureStage`, `runtimeStartupFailureElapsedMs`, and
-`runtimeStartupCleanupUnsettled`; it carries no user, workspace, message,
-command, provider, path, URL, prompt, transcript, argument, payload, health
-value, credential, environment value, raw error, stack, hash, or correlation
-identifier. Elapsed time is a non-negative integer saturated at 60,000 ms. The
-four container-local stages are `lifecycle_lock_or_state_read`,
+`runtimeStartupFailureStage`, `runtimeStartupFailureElapsedMs`,
+`runtimeStartupConfirmTimeoutMs`, and `runtimeStartupCleanupUnsettled`. When the
+validated caller supplied one, it also carries the same opaque
+`orchestrationAttemptId` already present on the UserRunner warning so operators
+can join the caller deadline to its exact container-local stage. It carries no
+user, workspace, message, command, provider, path, URL, prompt, transcript,
+argument, payload, health value, credential, environment value, raw error,
+stack, or hash. Elapsed time is a non-negative integer saturated at 60,000 ms.
+The four container-local stages are `lifecycle_lock_or_state_read`,
 `warm_health_or_cleanup`, `cold_start_or_ports`, and
 `cold_health_or_finalization`. The cleanup boolean overlays the stage that
 triggered cleanup instead of replacing it.
@@ -4096,7 +4099,10 @@ without a safely transported local stage; it must never be guessed into a
 container-local bucket. `caller_deadline` means the command budget or the outer
 startup guard elapsed. The generic
 `Hosted runner runtime processing startup confirmation failed.` warning also
-records its already-selected closed retry reason. Retry selection, fence
+records its already-selected closed retry reason. After readiness dispatch, the
+UserRunner failure warnings also record the effective
+`runtimeStartupConfirmTimeoutMs`; pre-dispatch command-budget exhaustion omits
+it because no readiness timeout was assigned. Retry selection, fence
 clearing or preservation, cleanup, readiness, and exception/RPC behavior remain
 unchanged. Both observations reuse the existing structured logger and add no
 awaited I/O, timer, retry, state, queue, or telemetry backend. During skew, an

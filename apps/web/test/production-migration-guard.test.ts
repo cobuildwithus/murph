@@ -22,6 +22,7 @@ import {
 } from "../scripts/run-production-contract-migrations";
 import {
   resolveVercelProductionAliasSha,
+  verifyCurrentVercelProductionDeployment,
   verifyVercelProductionDeployment,
   verifyVercelProductionDeploymentProtection,
 } from "../scripts/resolve-vercel-production-alias-sha";
@@ -1675,6 +1676,62 @@ describe("hosted web production migration guard", () => {
       1,
     );
     assert.ok(requests.some((request) => request.url.includes("limit=100&until=123")));
+  });
+
+  test("verifies the deployment currently owned by the production alias", async () => {
+    const expectedGitSha = "c".repeat(40);
+    const environment = {
+      HOSTED_WEB_PRODUCTION_BASE_URL: "https://www.withmurph.ai",
+      HOSTED_WEB_VERCEL_PROJECT_ID: "project-id",
+      HOSTED_WEB_VERCEL_TOKEN: "token",
+    };
+    const requests: string[] = [];
+
+    const result = await verifyCurrentVercelProductionDeployment(
+      environment,
+      expectedGitSha,
+      async (url) => {
+        requests.push(url);
+        if (url.includes("/v13/deployments/dpl_current")) {
+          return jsonFetchResponse({
+            gitSource: { sha: expectedGitSha },
+            id: "dpl_current",
+            projectId: "project-id",
+            readyState: "READY",
+            target: "production",
+          });
+        }
+        if (url.includes("/domains")) {
+          return jsonFetchResponse({
+            domains: [
+              {
+                customEnvironmentId: null,
+                gitBranch: null,
+                name: "www.withmurph.ai",
+              },
+            ],
+            pagination: { next: null },
+          });
+        }
+        if (url.includes("/v4/aliases/")) {
+          return jsonFetchResponse({ deploymentId: "dpl_current" });
+        }
+        throw new Error(`Unexpected Vercel URL: ${url}`);
+      },
+    );
+
+    assert.deepEqual(result, {
+      deploymentId: "dpl_current",
+      gitSha: expectedGitSha,
+      productionDomainCount: 1,
+    });
+    assert.equal(
+      requests.filter((url) => url.includes("/v13/deployments/dpl_current")).length,
+      1,
+    );
+    assert.ok(
+      requests.every((url) => !url.includes("/v13/deployments/www.withmurph.ai")),
+    );
   });
 
   test("rejects exact Vercel production proof when any production domain is stale", async () => {

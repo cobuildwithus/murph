@@ -85,15 +85,15 @@ describe('assistant nutrition strategy skill', () => {
     const prompt = buildPrompt()
 
     expect(prompt).toContain(
-      "Route by the user's visible outcome and read the primary owner.",
+      "Read the primary owner for the user's visible outcome.",
     )
     expect(prompt).toContain(
-      'inspect at most two candidates; this cap is discovery-only',
+      'inspect at most two for discovery',
     )
     expect(prompt).toContain(
-      'follow explicit handoffs and load every distinct safety or execution owner',
+      'follow handoffs and load each safety/execution owner',
     )
-    expect(prompt).toContain('Do not preload skills or call a discovery CLI just to route.')
+    expect(prompt).toContain('Do not preload or use a discovery CLI.')
   })
 
   it('stays policy-only and composes with existing owners', async () => {
