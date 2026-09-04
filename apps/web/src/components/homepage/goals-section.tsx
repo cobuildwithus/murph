@@ -41,6 +41,9 @@ const PLACEHOLDER_INTERVAL_MS = 2800;
 const GOAL_QUERY_MAX_LENGTH = 100;
 // How long after the last keystroke the send button starts inviting a send.
 const SEND_READY_DELAY_MS = 1000;
+// The field takes focus once this much of it is on screen, desktop only, so a
+// visitor can start typing the moment they arrive without the page jumping.
+const AUTOFOCUS_VISIBLE_RATIO = 0.6;
 // Platforms whose sms: links open a real messaging app. Everything else
 // (Windows, Linux, ChromeOS desktops) gets the signup dialog instead.
 const NATIVE_MESSAGING_PLATFORM_PATTERN = /Macintosh|iPhone|iPad|iPod|Android/u;
@@ -153,6 +156,7 @@ export function GoalsSection({
 }) {
   const inputId = useId();
   const askRef = useRef<HTMLElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const handoff = useGoalHandoff(contactInfo, messengerChannel);
   const [query, setQuery] = useState("");
   const [personaId, setPersonaId] = useState<string | null>(() =>
@@ -188,6 +192,29 @@ export function GoalsSection({
     }, PLACEHOLDER_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [activeQuery, placeholders.length]);
+
+  useEffect(() => {
+    const input = inputRef.current;
+    if (!input || !window.matchMedia("(pointer: fine)").matches) {
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.intersectionRatio >= AUTOFOCUS_VISIBLE_RATIO)) {
+          return;
+        }
+        observer.disconnect();
+        const active = document.activeElement;
+        if (active && active !== document.body && active !== input) {
+          return;
+        }
+        input.focus({ preventScroll: true });
+      },
+      { threshold: AUTOFOCUS_VISIBLE_RATIO },
+    );
+    observer.observe(input);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     setSendReady(false);
@@ -251,6 +278,7 @@ export function GoalsSection({
               inputSize="xl"
               maxLength={GOAL_QUERY_MAX_LENGTH}
               onChange={(event) => setQuery(event.currentTarget.value)}
+              ref={inputRef}
               spellCheck={false}
               type="text"
               value={query}
