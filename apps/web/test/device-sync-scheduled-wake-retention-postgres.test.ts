@@ -393,7 +393,6 @@ async function seedRetiredScheduledWake(input: {
   consumedSeq?: bigint;
   eventSchema?: string;
   firstPendingSeq?: string | null;
-  handledThroughSeq?: string;
   importedSeq: number | string;
   laneSeq?: bigint;
   memberIds: string[];
@@ -429,7 +428,7 @@ async function seedRetiredScheduledWake(input: {
             ? laneSeq.toString()
             : input.firstPendingSeq,
         hostedMailboxSystemHandledThroughSeq:
-          input.handledThroughSeq ?? (input.consumedSeq ?? 0n).toString(),
+          (input.consumedSeq ?? 0n).toString(),
         hostedMailboxSystemImportedSeq: input.importedSeq,
       },
       userId: memberId,
