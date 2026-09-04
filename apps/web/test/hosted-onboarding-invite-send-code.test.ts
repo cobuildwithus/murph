@@ -429,6 +429,7 @@ function makeIdentityRecord(
 ): HostedMemberIdentity {
   return {
     createdAt: new Date("2026-04-01T00:00:00.000Z"),
+    linqEmailHandleLookupKey: null,
     maskedPhoneNumberHint: "*** 4567",
     memberId: "member_123",
     phoneLookupKey: "hbidx:phone:v1:abc123",

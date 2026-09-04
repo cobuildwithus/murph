@@ -41,8 +41,10 @@ import {
   ensureHostedMemberForPhoneResolutionTx,
 } from "./member-identity-service";
 import {
+  bindHostedMemberLinqEmailHandleTx,
   hostedMemberIdentityRecordsEqual,
   lockHostedMemberIdentityStateTx,
+  lookupHostedMemberIdentityByLinqEmailHandle,
   lookupHostedMemberIdentityByPhoneNumber,
   readHostedMemberIdentityRecord,
   type HostedMemberIdentityRecord,
@@ -197,7 +199,7 @@ import type {
   HostedOnboardingLinqDirectPlan,
 } from "./webhook-provider-linq-types";
 import {
-  acquireHostedLinqParticipantPhoneLockTx,
+  acquireHostedLinqParticipantContactLockTx,
   createHostedLinqParticipantContact,
   createHostedLinqParticipantContactLookupKeyReadCandidates,
   type HostedLinqParticipantContact,
@@ -242,6 +244,7 @@ const HOSTED_LINQ_STAGING_NOTE_PART_TYPE = "text";
 
 type HostedLinqExistingMemberMatch =
   | "home-linq-chat"
+  | "linq-email-handle"
   | "none"
   | "pending-contact"
   | "phone-identity"
@@ -584,24 +587,58 @@ type HostedLinqMemberCoreCandidate = {
   memberId: string;
 };
 
+type HostedLinqIdentityCoreCandidate = HostedLinqMemberCoreCandidate & {
+  identityMatch: "linq-email-handle" | "phone-identity" | "verified-email";
+};
+
 async function lookupHostedLinqIdentityCoreCandidate(input: {
   contact: HostedLinqParticipantContact;
   prisma: HostedOnboardingReadClient;
-}): Promise<HostedLinqMemberCoreCandidate | null> {
+}): Promise<HostedLinqIdentityCoreCandidate | null> {
   if (input.contact.kind === "phone") {
     const lookup = await lookupHostedMemberIdentityCoreByPhoneNumberForLinqWebhook({
       phoneNumber: input.contact.value,
       prisma: input.prisma,
     });
-    return lookup ? { core: lookup.core, memberId: lookup.core.id } : null;
+    return lookup
+      ? {
+          core: lookup.core,
+          identityMatch: "phone-identity",
+          memberId: lookup.core.id,
+        }
+      : null;
   }
 
-  const lookup = await lookupHostedMemberByVerifiedEmailAddress({
+  const handleLookup = await lookupHostedMemberIdentityByLinqEmailHandle({
+    emailAddress: input.contact.value,
+    prisma: input.prisma,
+    projection: "core",
+  });
+  const verifiedEmailLookup = await lookupHostedMemberByVerifiedEmailAddress({
     address: input.contact.value,
     prisma: input.prisma,
     projection: "core",
   });
-  return lookup ? { core: lookup.core, memberId: lookup.core.id } : null;
+  if (
+    handleLookup
+    && verifiedEmailLookup
+    && handleLookup.core.id !== verifiedEmailLookup.core.id
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_EMAIL_HANDLE_IDENTITY_CONFLICT",
+      httpStatus: 409,
+      message:
+        "This iMessage email handle conflicts with an existing Murph account. Contact support so we can resolve it safely.",
+    });
+  }
+  const lookup = handleLookup ?? verifiedEmailLookup;
+  return lookup
+    ? {
+        core: lookup.core,
+        identityMatch: handleLookup ? "linq-email-handle" : "verified-email",
+        memberId: lookup.core.id,
+      }
+    : null;
 }
 
 async function lookupHostedLinqHomeChatCoreCandidate(input: {
@@ -1360,7 +1397,7 @@ export async function planHostedOnboardingLinqWebhook(
   if (
     !isHostedLinqGroupChat(messageEvent)
     && messageEvent.data.message.parts.length > 0
-    && participantContact?.kind === "phone"
+    && participantContact
     && !shouldIgnoreHostedLinqForLocalInboundGuard({
       isFromMe: summary.isFromMe,
       participantContact,
@@ -1369,8 +1406,8 @@ export async function planHostedOnboardingLinqWebhook(
     // Identity and outreach owners take the participant lock before entering
     // chat work. Preserve participant -> chat -> member everywhere so an
     // uncommitted signup cannot deadlock an admitted inbound on the same chat.
-    await acquireHostedLinqParticipantPhoneLockTx({
-      phoneNumber: participantContact.value,
+    await acquireHostedLinqParticipantContactLockTx({
+      contact: participantContact,
       tx: input.prisma,
     });
   }
@@ -1496,9 +1533,8 @@ export async function planHostedOnboardingLinqWebhook(
     ?? null;
   const existingMemberMatch = resolveHostedLinqExistingMemberMatch({
     existingHomeLinqChatLookupPresent: Boolean(existingHomeLinqChatLookup),
-    existingMemberLookupPresent: Boolean(existingMemberLookup),
+    existingMemberLookupMatch: existingMemberLookup?.identityMatch ?? null,
     existingPendingLinqContactLookupPresent: Boolean(existingPendingLinqContactLookup),
-    participantContactKind: participantContact.kind,
   });
   const buildExistingMemberDuplicatePlan = (duplicateInput: {
     existingMemberActive: boolean;
@@ -1647,6 +1683,17 @@ export async function planHostedOnboardingLinqWebhook(
       });
     } else {
       await lockHostedMemberRow(input.prisma, existingMember.id);
+    }
+    if (
+      participantContact.kind === "email"
+      && existingMemberLookup
+    ) {
+      await bindHostedMemberLinqEmailHandleTx({
+        emailAddress: participantContact.value,
+        lookupKey: participantContact.lookupKey,
+        memberId: existingMember.id,
+        prisma: input.prisma,
+      });
     }
     const exactMemberAccess = await readHostedRuntimeAiAccessDecision({
       memberId: existingMember.id,
@@ -2237,8 +2284,8 @@ async function planHostedLinqFirstContactWebhook(planner: {
       participantContact,
       phonePrefixes: instantStartPhonePrefixes,
     });
-  const phoneMemberResolution =
-    existingMember === null && participantContact.kind === "phone"
+  const contactMemberResolution = existingMember === null
+    ? participantContact.kind === "phone"
       ? await ensureHostedMemberForPhoneResolutionTx({
           phoneNumber: participantContact.value,
           ...(currentEventInstantStartEligible
@@ -2246,30 +2293,34 @@ async function planHostedLinqFirstContactWebhook(planner: {
             : {}),
           prisma: input.prisma,
         })
-      : null;
+      : await ensureHostedMemberForPendingLinqParticipantContactTx({
+          contact: participantContact,
+          observedAt: new Date(occurredAt),
+          prisma: input.prisma,
+        })
+    : null;
   const member = existingMember
-    ?? phoneMemberResolution?.member
-    ?? await ensureHostedMemberForPendingLinqParticipantContactTx({
-      contact: participantContact,
-      observedAt: new Date(occurredAt),
-      prisma: input.prisma,
-    });
+    ?? contactMemberResolution?.member;
+  if (!member) {
+    throw new TypeError("Hosted Linq contact resolution did not produce a member.");
+  }
   // The earlier identity lookup is not creation authority: a concurrent
-  // signup can commit while this transaction waits on the unique phone insert.
+  // signup can commit while this transaction waits on the unique participant
+  // identity insert.
   // Retry that loser before it can attach this event to the winner's invite.
   if (
     currentEventInstantStartEligible
-    && phoneMemberResolution?.created === false
+    && contactMemberResolution?.created === false
   ) {
     throw hostedOnboardingError({
       code: "HOSTED_LINQ_MEMBER_IDENTITY_CHANGED",
       httpStatus: 503,
-      message: "Murph is resolving another message from this phone. Try again.",
+      message: "Murph is resolving another message from this contact. Try again.",
       retryable: true,
     });
   }
   const instantStartAdmissionEventId =
-    phoneMemberResolution?.created === true && currentEventInstantStartEligible
+    contactMemberResolution?.created === true && currentEventInstantStartEligible
     ? input.event.event_id
     : pendingInstantStartAdmissionEventId;
   const instantStartEligible = instantStartCandidate
@@ -4440,12 +4491,11 @@ function buildHostedLinqThreadRouteEgressAuthority(input: {
 
 function resolveHostedLinqExistingMemberMatch(input: {
   existingHomeLinqChatLookupPresent: boolean;
-  existingMemberLookupPresent: boolean;
+  existingMemberLookupMatch: HostedLinqIdentityCoreCandidate["identityMatch"] | null;
   existingPendingLinqContactLookupPresent: boolean;
-  participantContactKind: HostedLinqParticipantContact["kind"];
 }): HostedLinqExistingMemberMatch {
-  if (input.existingMemberLookupPresent) {
-    return input.participantContactKind === "phone" ? "phone-identity" : "verified-email";
+  if (input.existingMemberLookupMatch) {
+    return input.existingMemberLookupMatch;
   }
 
   if (input.existingHomeLinqChatLookupPresent) {
@@ -4465,6 +4515,7 @@ function resolveHostedLinqHomeLineRouteBindingAuthority(input: {
 }): HostedLinqHomeLineRouteBindingAuthority | null {
   if (
     input.existingMemberMatch === "phone-identity"
+    || input.existingMemberMatch === "linq-email-handle"
     || input.existingMemberMatch === "verified-email"
   ) {
     return {

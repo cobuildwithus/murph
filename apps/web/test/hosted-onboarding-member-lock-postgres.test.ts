@@ -46,12 +46,14 @@ import {
   readHostedMemberIdByAuthorizedDirectPublicSenderAddress,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import {
+  ensureHostedMemberForPendingLinqParticipantContactTx,
   ensureHostedMemberForPrivyIdentityResolutionTx,
   reconcileHostedPrivyIdentityOnMemberTx,
 } from "@/src/lib/hosted-onboarding/member-identity-service";
 import {
   readHostedMemberIdByReplyAliasLookupKey,
 } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
+import { createHostedLinqParticipantContact } from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import {
   suspendHostedMemberForBillingReversalTx,
   writeHostedMemberStripeBillingTx,
@@ -2135,6 +2137,67 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           where: { id: memberId },
         });
         await disconnectClients([observer, reversalClient, restoreClient]);
+      }
+    });
+  },
+);
+
+describe.skipIf(!runPostgresConcurrencyProof)(
+  "hosted Linq email-handle identity PostgreSQL concurrency",
+  () => {
+    it("selects one member and one instant-start creation winner", async () => {
+      const first = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const second = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const contact = createHostedLinqParticipantContact({
+        kind: "email",
+        value: `instant-${randomUUID()}@example.com`,
+      });
+      if (!contact) {
+        throw new Error("Expected a valid Linq email contact.");
+      }
+      setHostedSecureBoxStringTestCodecForTests({
+        decrypt: ({ value }) => value,
+        encrypt: ({ value }) => value,
+      });
+
+      try {
+        const [firstResolution, secondResolution] = await Promise.all([
+          first.$transaction((tx) =>
+            ensureHostedMemberForPendingLinqParticipantContactTx({
+              contact,
+              observedAt: new Date("2026-09-04T20:46:00.000Z"),
+              prisma: tx,
+            }), { timeout: transactionTimeoutMs }),
+          second.$transaction((tx) =>
+            ensureHostedMemberForPendingLinqParticipantContactTx({
+              contact,
+              observedAt: new Date("2026-09-04T20:46:00.000Z"),
+              prisma: tx,
+            }), { timeout: transactionTimeoutMs }),
+        ]);
+
+        expect(firstResolution.member.id).toBe(secondResolution.member.id);
+        expect([
+          firstResolution.created,
+          secondResolution.created,
+        ].sort()).toEqual([false, true]);
+        await expect(observer.hostedMemberIdentity.count({
+          where: { linqEmailHandleLookupKey: contact.lookupKey },
+        })).resolves.toBe(1);
+        await expect(observer.hostedMemberRouting.count({
+          where: { pendingLinqParticipantContactLookupKey: contact.lookupKey },
+        })).resolves.toBe(1);
+      } finally {
+        setHostedSecureBoxStringTestCodecForTests(null);
+        await observer.hostedMember.deleteMany({
+          where: {
+            identity: {
+              linqEmailHandleLookupKey: contact.lookupKey,
+            },
+          },
+        });
+        await disconnectClients([first, second, observer]);
       }
     });
   },

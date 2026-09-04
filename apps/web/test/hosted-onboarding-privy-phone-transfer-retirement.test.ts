@@ -1274,6 +1274,7 @@ function makeFixture(input: {
   };
   const sourceRawIdentity = {
     createdAt: NOW,
+    linqEmailHandleLookupKey: null,
     maskedPhoneNumberHint: "*** 4567",
     memberId: SOURCE_MEMBER_ID,
     phoneLookupKey: `phone:${PHONE_NUMBER}`,

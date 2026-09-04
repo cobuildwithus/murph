@@ -9,6 +9,7 @@ import {
 } from "@prisma/client";
 
 import {
+  createHostedEmailLookupKeyReadCandidates,
   createHostedPhoneLookupKeyReadCandidates,
   createHostedPrivyUserLookupKey,
   createHostedPrivyUserLookupKeyReadCandidates,
@@ -51,6 +52,7 @@ export interface HostedMemberIdentityState {
 export type HostedMemberIdentityLookupState = Omit<HostedMemberIdentityState, "phoneLookupKey">;
 
 export type HostedMemberIdentityLookupMatch =
+  | "linqEmailHandle"
   | "phoneLookupKey"
   | "phoneNumber"
   | "privyUserId";
@@ -79,7 +81,7 @@ export interface HostedMemberIdentityCoreLookup {
   core: Prisma.HostedMemberIdentityGetPayload<{
     select: typeof hostedMemberIdentityCoreLookupSelect;
   }>["member"];
-  matchedBy: "phoneNumber" | "privyUserId";
+  matchedBy: "linqEmailHandle" | "phoneNumber" | "privyUserId";
 }
 
 type HostedMemberIdentityCoreLookupRecord =
@@ -97,6 +99,7 @@ export type HostedMemberIdentityRecord = HostedMemberIdentity;
 // and onboarding flows do not need to round-trip through readHostedMemberIdentity.
 
 export interface HostedMemberIdentityWriteInput {
+  linqEmailHandleLookupKey?: string | null;
   maskedPhoneNumberHint: string | null;
   memberId: string;
   phoneLookupKey: string | null;
@@ -216,6 +219,50 @@ export async function lookupHostedMemberIdentityByPhoneLookupKey(input: {
   return identityRecord
     ? await projectHostedMemberIdentityLookup(identityRecord, "phoneLookupKey", input.prisma)
     : null;
+}
+
+type HostedMemberIdentityByLinqEmailHandleInput = {
+  emailAddress: string;
+  prisma: HostedOnboardingReadClient;
+};
+
+export async function lookupHostedMemberIdentityByLinqEmailHandle(
+  input: HostedMemberIdentityByLinqEmailHandleInput & { projection: "core" },
+): Promise<HostedMemberIdentityCoreLookup | null>;
+export async function lookupHostedMemberIdentityByLinqEmailHandle(
+  input: HostedMemberIdentityByLinqEmailHandleInput,
+): Promise<HostedMemberIdentityLookup | null>;
+export async function lookupHostedMemberIdentityByLinqEmailHandle(
+  input: HostedMemberIdentityByLinqEmailHandleInput & { projection?: "core" },
+): Promise<HostedMemberIdentityCoreLookup | HostedMemberIdentityLookup | null> {
+  const lookupKeys = createHostedEmailLookupKeyReadCandidates(input.emailAddress);
+  if (lookupKeys.length === 0) {
+    return null;
+  }
+
+  if (input.projection === "core") {
+    const records = await input.prisma.hostedMemberIdentity.findMany({
+      where: {
+        linqEmailHandleLookupKey: { in: lookupKeys },
+      },
+      select: hostedMemberIdentityCoreLookupSelect,
+    });
+    return resolveHostedMemberIdentityCoreLookup(records, "linqEmailHandle");
+  }
+
+  const records = await input.prisma.hostedMemberIdentity.findMany({
+    where: {
+      linqEmailHandleLookupKey: { in: lookupKeys },
+    },
+    include: {
+      member: true,
+    },
+  });
+  return resolveHostedMemberIdentityLookup(
+    records,
+    "linqEmailHandle",
+    input.prisma,
+  );
 }
 
 type HostedMemberIdentityByPhoneNumberInput = {
@@ -395,6 +442,7 @@ export async function lockHostedMemberIdentityStateTx(input: {
 
 const HOSTED_MEMBER_IDENTITY_RECORD_KEYS = [
   "createdAt",
+  "linqEmailHandleLookupKey",
   "maskedPhoneNumberHint",
   "memberId",
   "phoneLookupKey",
@@ -486,6 +534,57 @@ export async function tryCreateHostedMemberIdentity(
   });
 
   return result.count > 0;
+}
+
+export async function bindHostedMemberLinqEmailHandleTx(input: {
+  emailAddress: string;
+  lookupKey: string;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  const lookupKeys = createHostedEmailLookupKeyReadCandidates(input.emailAddress);
+  if (!lookupKeys.includes(input.lookupKey)) {
+    throw new TypeError(
+      "Hosted Linq email handle lookup key must match the normalized address.",
+    );
+  }
+
+  try {
+    const result = await input.prisma.hostedMemberIdentity.updateMany({
+      data: {
+        linqEmailHandleLookupKey: input.lookupKey,
+      },
+      where: {
+        memberId: input.memberId,
+        OR: [
+          { linqEmailHandleLookupKey: null },
+          { linqEmailHandleLookupKey: { in: lookupKeys } },
+        ],
+      },
+    });
+    if (result.count === 1) {
+      return;
+    }
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError
+      && error.code === "P2002"
+    ) {
+      throw hostedLinqEmailHandleIdentityConflict();
+    }
+    throw error;
+  }
+
+  throw hostedLinqEmailHandleIdentityConflict();
+}
+
+function hostedLinqEmailHandleIdentityConflict() {
+  return hostedOnboardingError({
+    code: "HOSTED_LINQ_EMAIL_HANDLE_IDENTITY_CONFLICT",
+    httpStatus: 409,
+    message:
+      "This iMessage email handle conflicts with an existing Murph account. Contact support so we can resolve it safely.",
+  });
 }
 
 export async function writeHostedMemberSignupPhoneState(
@@ -687,6 +786,9 @@ async function buildHostedMemberIdentityMutationData(
   });
 
   return {
+    ...(input.linqEmailHandleLookupKey === undefined
+      ? {}
+      : { linqEmailHandleLookupKey: input.linqEmailHandleLookupKey }),
     maskedPhoneNumberHint: input.maskedPhoneNumberHint,
     phoneLookupKey: input.phoneLookupKey,
     phoneNumberVerifiedAt: input.phoneNumberVerifiedAt,

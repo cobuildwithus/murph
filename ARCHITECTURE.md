@@ -3494,15 +3494,23 @@ non-2xx responses, malformed output, non-completed responses, max-output
 exhaustion, and OpenAI quota or credits exhaustion, intentionally fail open by
 recording a deterministic allow decision so a legitimate first contact is not
 permanently dropped. With enforcement off, only a genuinely unknown member on a
-provider-authenticated direct iMessage from a configured E.164 phone prefix may
-use a persisted model-source allow to enter instant start. The selected
+provider-authenticated direct iMessage whose participant is either on a
+configured E.164 phone prefix or is a normalized email handle may use a
+persisted model-source allow to enter instant start. The selected
 permanent home line must be the same line the person contacted. The first
-planner transaction creates the canonical member, verified phone identity,
-pending route, and invite. That invite carries only the event id of the
+planner transaction creates the canonical member, either verified phone
+identity or a unique blinded Linq email-handle identity, the pending route,
+and the invite. A provider-observed email handle is routing identity only and
+never asserts verified email authorization. Privy email authentication must
+later converge the Linq handle owner, verified-email owner, and Privy
+principal owner when more than one exists; any disagreement fails closed.
+The additive migration backfills only the blinded email-handle identity from
+existing active and pending email routes and never grants starter access
+retroactively. That invite carries only the event id of the
 persisted model-source allow and is the single-owner token for that exact
 original inbound. Only the transaction creating a genuinely new member may
 mint that token; an existing inactive member without the exact same-event token
-remains on the signup path. The phone identity owner reports whether its unique
+remains on the signup path. The participant identity owner reports whether its unique
 insert actually won; a stale outer lookup that loses that insert exits
 retryably before invite or accounting work. While the token remains pending, a
 different inbound for the inactive member exits retryably before counting or
@@ -3512,7 +3520,7 @@ exact invite and event, appends the one semantic-keyed $4.50 starter grant when
 absent, activates the member, and clears the token atomically. It creates no
 Stripe Customer or Subscription. A second ordinary planner pass counts and
 appends the original inbound exactly once after active access is visible. Any
-block, deterministic fail-open, unsupported prefix/channel, cross-line route,
+block, deterministic fail-open, unsupported phone prefix or channel, cross-line route,
 existing member, conflicting billing history, or definitive enrollment failure
 keeps the existing signup-link or ignored behavior. Active members, explicit thread routes, own
 messages, group chats, local guard rejects, deterministic URL/STOP-style spam,

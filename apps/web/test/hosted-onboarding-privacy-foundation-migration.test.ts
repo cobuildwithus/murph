@@ -133,6 +133,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
   ],
   HostedMemberIdentity: [
     'memberId String @unique @map("member_id")',
+    'linqEmailHandleLookupKey String? @unique @map("linq_email_handle_lookup_key")',
     'maskedPhoneNumberHint String? @map("masked_phone_number_hint")',
     'phoneLookupKey String? @unique @map("phone_lookup_key")',
     'phoneNumberEncrypted String? @map("phone_number_encrypted")',
@@ -1184,6 +1185,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260830150000_hosted_system_progress_projection",
       "20260830170000_hosted_account_cleanup_temporal",
       "20260831150000_group_journal_capture",
+      "20260904190000_linq_email_handle_identity",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(
