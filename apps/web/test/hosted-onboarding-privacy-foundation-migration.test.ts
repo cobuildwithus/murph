@@ -134,6 +134,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
   HostedMemberIdentity: [
     'memberId String @unique @map("member_id")',
     'linqEmailHandleLookupKey String? @unique @map("linq_email_handle_lookup_key")',
+    'linqEmailHandleEncrypted String? @map("linq_email_handle_encrypted")',
     'maskedPhoneNumberHint String? @map("masked_phone_number_hint")',
     'phoneLookupKey String? @unique @map("phone_lookup_key")',
     'phoneNumberEncrypted String? @map("phone_number_encrypted")',
