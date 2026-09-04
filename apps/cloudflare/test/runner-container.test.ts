@@ -4663,6 +4663,36 @@ describe("RunnerContainer", () => {
     expect(destroy).toHaveBeenCalledTimes(1);
   });
 
+  it("bounds Codex shell smoke separately from ordinary runner readiness", async () => {
+    const originalAbortSignalTimeout = AbortSignal.timeout;
+    const timeoutBySignal = new Map<AbortSignal, number>();
+    const timeout = vi.spyOn(AbortSignal, "timeout")
+      .mockImplementation((timeoutMs: number) => {
+        const signal = originalAbortSignalTimeout(timeoutMs);
+        timeoutBySignal.set(signal, timeoutMs);
+        return signal;
+      });
+    const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
+
+    try {
+      await container.smokeHealth();
+
+      const healthCall = containerFetch.mock.calls.find(([url]) =>
+        String(url).endsWith("/health")
+      );
+      const codexShellCall = containerFetch.mock.calls.find(([url]) =>
+        String(url).endsWith("/internal/deploy-codex-shell-smoke")
+      );
+      expect(timeoutBySignal.get(
+        startAndWaitForPorts.mock.calls[0]?.[0]?.cancellationOptions.abort,
+      )).toBe(20_000);
+      expect(timeoutBySignal.get(healthCall?.[1]?.signal)).toBe(20_000);
+      expect(timeoutBySignal.get(codexShellCall?.[1]?.signal)).toBe(60_000);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
   it("can extend deploy smoke to run a direct R2 presigned PUT probe", async () => {
     const presignedPutUrl =
       "https://example-account.r2.cloudflarestorage.com/test-bucket/snapshot.enc?X-Amz-Signature=test";

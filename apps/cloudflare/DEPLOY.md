@@ -2307,6 +2307,9 @@ Gradual deploys run managed-container smoke with a longer retry window so Cloudf
 - `GET /health`, including the canonical effective standby mode when the deploy
   workflow supplies an expected mode
 - if `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`, one signed `POST /internal/deploy/container-smoke` that waits until the Cloudflare-managed runner container reports the expected runner-bundle fingerprint and assistant CLI surface hot-path schema proof
+- the managed-container Codex shell phase has its own 60-second Worker budget
+  for the container's bounded 45-second app-server and CLI proof; ordinary
+  runner readiness and health checks retain their 20-second default
 - the managed-container runner smoke also proves the native
   `murph-group-read` profile enforcement used by Assistant Ask:
   intended root reads succeed while writes, `.runtime/**`, `.codex/**`, environment
