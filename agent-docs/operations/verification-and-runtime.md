@@ -1,6 +1,13 @@
 # Verification And Runtime
 
-Last verified: 2026-08-31
+Last verified: 2026-09-04
+
+Read the delivery-path rules first, then only the changed owner's matrix row
+or runtime procedure. The detailed command descriptions below are reference
+material, not a checklist to execute. The delivery path controls whether broad
+proof runs locally or in CI. Do not add a second local acceptance run from a
+subsystem note when the PR rule already assigns that proof to required CI.
+
 ## Verification Ownership By Delivery Path
 
 The delivery path decides who owns broad verification:
@@ -766,11 +773,15 @@ product path for complete journey proof.
 
 ## Scoped Verification Mode
 
-Focused local proof is the default for PR-bound work and does not require a
-pre-existing red repo baseline. The scoped-verification exception below applies
-only when a non-PR task would otherwise require a broader local command. The
-text-only docs/process fast path remains the default for eligible Markdown-only
-docs work unless the change will be pushed directly to a shared default branch.
+Focused local proof is the ordinary PR route, including sensitive work; required
+CI owns the broad suite. Text-only docs use readback and references. Direct
+shared-default pushes keep their acceptance requirement. These routes do not
+require proving an unrelated red baseline first.
+
+For a blocked required check, report the exact command, failing target, why the
+change did not cause a pre-existing failure, and the best focused evidence.
+This does not turn a required red check green or permit bypassing CI. Do not run
+an unrelated broad command merely to establish that a baseline is already red.
 
 ## Hosted Temporal Replay Proof
 
@@ -798,29 +809,6 @@ checks out a public pull-request candidate. The public
 `hosted-temporal:guard` remains wired into `pnpm typecheck`; it prevents the
 worker implementation from returning here and retains the Web/Cloudflare
 architecture guards, while Murph Cloud owns patch-marker and replay gates.
-
-Scoped verification may replace the repo-wide baseline only when all of the following are true:
-
-1. The change is narrow and bounded to one subsystem or one docs/process lane rather than a broad refactor.
-2. `pnpm typecheck` or `pnpm verify:acceptance` are already credibly known red for unrelated reasons in the current branch or working session.
-3. You can name the exact failing command and failing target, and explain why your diff did not cause that failure.
-4. You run the highest-signal scoped checks available for the touched surface and record the evidence in handoff.
-
-Scoped verification is allowed for narrow changes such as:
-
-- low-risk repo-internal workflow/tooling changes where `pnpm test:diff <path ...>` plus direct touched-file checks fully exercise the changed surface
-- docs/process-only updates outside the text-only Markdown fast path when repo-wide checks are already known red and manual readback confirms the touched docs are internally consistent
-- package-local or app-local fixes with a focused test, typecheck, verify, or scenario command that exercises the changed surface directly; for agent/local iteration on repo code, prefer `pnpm test:diff` first so the scope expands from changed owners to their workspace dependents automatically
-- small config changes with a direct validation command or targeted test covering the changed contract
-
-Scoped verification is not allowed when the change is broad, cross-cutting, or high-risk, including schema/storage changes, billing/auth/trust-boundary changes, deploy/runtime entrypoint changes, or refactors that touch multiple subsystems. Those changes still need the full repo-wide baseline unless the user explicitly says otherwise.
-
-When using scoped verification, handoff must include:
-
-- that scoped verification mode was used
-- which repo-wide commands were omitted or left red
-- the prior unrelated failing command(s) and target(s)
-- the focused commands or direct scenario checks that were run instead
 
 ## Pnpm Guard
 
