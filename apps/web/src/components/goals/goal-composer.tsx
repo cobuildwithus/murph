@@ -26,6 +26,9 @@ const SEND_READY_DELAY_MS = 1000;
 // The field takes focus once this much of it is on screen, desktop only, so a
 // visitor can start typing the moment they arrive without the page jumping.
 const AUTOFOCUS_VISIBLE_RATIO = 0.6;
+// Someone paging down with the keyboard is scrolling, not arriving: taking
+// focus would turn their next Space into a typed character.
+const KEYBOARD_SCROLL_GRACE_MS = 1500;
 
 const SEND_CLASS_NAME =
   "absolute right-2 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full text-[#f5f0e8] transition-colors duration-300 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[#fffdf8]";
@@ -82,6 +85,7 @@ export function GoalComposer({
   className,
   inputRef,
   memberHref = HOSTED_APP_HOME_PATH,
+  onEngage,
   onQueryChange,
   placeholders,
   query,
@@ -91,20 +95,27 @@ export function GoalComposer({
   className?: string;
   inputRef?: React.RefObject<HTMLInputElement | null>;
   memberHref?: string;
+  /** Fires when the visitor focuses or hovers the field: a good time to prepare search data. */
+  onEngage?: () => void;
   onQueryChange: (query: string) => void;
   placeholders: readonly string[];
   query: string;
   startOption: MurphContactOption;
 }) {
   const inputId = useId();
-  const sendRef = useRef<HTMLElement>(null);
+  const sendRef = useRef<HTMLElement | null>(null);
   const ownInputRef = useRef<HTMLInputElement | null>(null);
   const handoff = useGoalHandoff(startOption);
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
-  const [sendReady, setSendReady] = useState(false);
+  // The query that has sat unchanged long enough to invite a send.
+  const [settledQuery, setSettledQuery] = useState("");
   const activeQuery = query.trim();
   const prompt = goalComposerPrompt(query);
+  const sendReady = activeQuery !== "" && settledQuery === activeQuery;
 
+  const setSendNode = useCallback((node: HTMLElement | null) => {
+    sendRef.current = node;
+  }, []);
   const setInputNode = useCallback(
     (node: HTMLInputElement | null) => {
       ownInputRef.current = node;
@@ -129,11 +140,13 @@ export function GoalComposer({
   }, [activeQuery, placeholders.length]);
 
   useEffect(() => {
-    setSendReady(false);
     if (!activeQuery) {
       return;
     }
-    const timer = window.setTimeout(() => setSendReady(true), SEND_READY_DELAY_MS);
+    const timer = window.setTimeout(
+      () => setSettledQuery(activeQuery),
+      SEND_READY_DELAY_MS,
+    );
     return () => window.clearTimeout(timer);
   }, [activeQuery]);
 
@@ -142,14 +155,23 @@ export function GoalComposer({
     if (!autoFocusOnView || !input || !mediaMatches("(pointer: fine)")) {
       return;
     }
+    let lastKeyDownAt = 0;
+    const noteKeyDown = () => {
+      lastKeyDownAt = Date.now();
+    };
+    window.addEventListener("keydown", noteKeyDown, true);
     const observer = new IntersectionObserver(
       (entries) => {
         if (!entries.some((entry) => entry.intersectionRatio >= AUTOFOCUS_VISIBLE_RATIO)) {
           return;
         }
         observer.disconnect();
+        window.removeEventListener("keydown", noteKeyDown, true);
         const active = document.activeElement;
         if (active && active !== document.body && active !== input) {
+          return;
+        }
+        if (Date.now() - lastKeyDownAt < KEYBOARD_SCROLL_GRACE_MS) {
           return;
         }
         input.focus({ preventScroll: true });
@@ -157,7 +179,10 @@ export function GoalComposer({
       { threshold: AUTOFOCUS_VISIBLE_RATIO },
     );
     observer.observe(input);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("keydown", noteKeyDown, true);
+    };
   }, [autoFocusOnView]);
 
   const placeholder = placeholders[placeholderIndex % Math.max(placeholders.length, 1)]
@@ -173,7 +198,11 @@ export function GoalComposer({
       <label className="sr-only" htmlFor={inputId}>
         Your goal
       </label>
-      <div className="relative">
+      <div
+        className="relative"
+        onFocus={onEngage}
+        onPointerEnter={onEngage}
+      >
         <Input
           autoCapitalize="none"
           autoComplete="off"
@@ -217,13 +246,19 @@ export function GoalComposer({
             SEND_CLASS_NAME,
             sendReady ? SEND_READY_CLASS_NAME : SEND_IDLE_CLASS_NAME,
           )}
-          data-goal-composer-ready={sendReady}
+          data-goal-composer-ready={sendReady ? true : undefined}
           data-goal-composer-send
           guideHref={memberHref}
           handoff={handoff}
-          label={prompt ? `Text Murph: ${prompt}` : "Text Murph about a goal"}
+          labels={{
+            guide: "Open Murph",
+            message: prompt ? `Text Murph: ${prompt}` : "Text Murph about a goal",
+            signup: prompt
+              ? `Get started with Murph: ${prompt}`
+              : "Get started with Murph",
+          }}
           prompt={prompt}
-          ref={sendRef}
+          ref={setSendNode}
         >
           {sendReady ? (
             <Image

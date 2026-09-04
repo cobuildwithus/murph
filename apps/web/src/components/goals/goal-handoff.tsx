@@ -2,8 +2,7 @@
 
 import Link from "next/link";
 import {
-  useEffect,
-  useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 
@@ -16,6 +15,22 @@ import {
 // Platforms whose sms: links open a real messaging app. Everything else
 // (Windows, Linux, ChromeOS desktops) gets the signup dialog instead.
 const NATIVE_MESSAGING_PLATFORM_PATTERN = /Macintosh|iPhone|iPad|iPod|Android/u;
+
+function subscribeToNothing(): () => void {
+  return () => {};
+}
+
+function readNativeMessagingPlatform(): boolean {
+  return NATIVE_MESSAGING_PLATFORM_PATTERN.test(window.navigator.userAgent);
+}
+
+// The server cannot know the platform; null keeps the first client render
+// identical to the server markup, then React re-renders with the real value.
+function readNativeMessagingPlatformOnServer(): boolean | null {
+  return null;
+}
+
+export type GoalHandoffKind = "guide" | "message" | "signup";
 
 /**
  * Where a goal click goes. Members and uncertain sessions open the guide,
@@ -31,21 +46,19 @@ export type GoalHandoff =
     }
   | { kind: "signup"; open: () => void; prepare: () => void };
 
+export type GoalHandoffLabels = Partial<Record<GoalHandoffKind, string>>;
+
 export function useGoalHandoff(option: MurphContactOption): GoalHandoff {
   const auth = useAuth();
-  const [nativeMessaging, setNativeMessaging] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    setNativeMessaging(
-      NATIVE_MESSAGING_PLATFORM_PATTERN.test(window.navigator.userAgent),
-    );
-  }, []);
+  const nativeMessaging = useSyncExternalStore(
+    subscribeToNothing,
+    readNativeMessagingPlatform,
+    readNativeMessagingPlatformOnServer,
+  );
 
   if (auth.authenticated || auth.authenticationStatus === "unavailable") {
     return { kind: "guide" };
   }
-  // Before mount the platform is unknown; keep the message link so the server
-  // and first client render agree, then swap on desktops that cannot text.
   if (option.kind !== "text" || nativeMessaging !== false) {
     return {
       external: option.target === "_blank",
@@ -57,12 +70,17 @@ export function useGoalHandoff(option: MurphContactOption): GoalHandoff {
   return { kind: "signup", open: auth.openAuthDialog, prepare: auth.prepareAuth };
 }
 
+/**
+ * One clickable goal rendered as whatever the handoff needs: a guide link, a
+ * message link, or a button that opens signup. Icon-only children should pass
+ * `labels`; children with visible text name themselves.
+ */
 export function GoalHandoffAction({
   children,
   className,
   guideHref,
   handoff,
-  label,
+  labels,
   prompt,
   ref,
   ...dataProps
@@ -71,9 +89,9 @@ export function GoalHandoffAction({
   className: string;
   guideHref: string;
   handoff: GoalHandoff;
-  label: string;
+  labels?: GoalHandoffLabels;
   prompt: string | null;
-  ref?: React.Ref<HTMLElement>;
+  ref?: React.RefCallback<HTMLElement>;
   "data-goal-composer-send"?: boolean;
   "data-goal-composer-ready"?: boolean;
 }) {
@@ -81,10 +99,11 @@ export function GoalHandoffAction({
     return (
       <Link
         {...dataProps}
+        aria-label={labels?.guide}
         className={className}
         href={guideHref}
         prefetch={false}
-        ref={ref as React.Ref<HTMLAnchorElement>}
+        ref={ref}
       >
         {children}
       </Link>
@@ -94,10 +113,10 @@ export function GoalHandoffAction({
     return (
       <a
         {...dataProps}
-        aria-label={label}
+        aria-label={labels?.message}
         className={className}
         href={handoff.hrefFor(prompt)}
-        ref={ref as React.Ref<HTMLAnchorElement>}
+        ref={ref}
         {...(handoff.external ? { rel: "noreferrer", target: "_blank" } : {})}
       >
         {children}
@@ -107,12 +126,12 @@ export function GoalHandoffAction({
   return (
     <button
       {...dataProps}
-      aria-label={label}
+      aria-label={labels?.signup}
       className={className}
       onClick={handoff.open}
       onFocus={handoff.prepare}
       onPointerEnter={handoff.prepare}
-      ref={ref as React.Ref<HTMLButtonElement>}
+      ref={ref}
       type="button"
     >
       {children}

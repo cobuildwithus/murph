@@ -67,6 +67,10 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedDashboardPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
 
+vi.mock("@/src/lib/goals/public-murph-line", () => ({
+  resolvePublicMurphLinePhoneNumber: async () => "+15550100001",
+}));
+
 vi.mock("@/src/lib/browser-vault/homepage-preparation", () => ({
   scheduleHomepageBrowserVaultPreparation:
     mocks.scheduleHomepageBrowserVaultPreparation,

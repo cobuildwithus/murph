@@ -30,9 +30,8 @@ import type { HomepageSignupCta } from "@/src/components/homepage/types";
 import { HomepageAuthRuntimeProvider } from "@/src/components/hosted-onboarding/homepage-auth-runtime-provider";
 import { scheduleHomepageBrowserVaultPreparation } from "@/src/lib/browser-vault/homepage-preparation";
 import { resolveGoalContactOption } from "@/src/lib/goals/goal-contact";
-import { resolveGoalIllustrationSrc } from "@/src/lib/goals/goal-illustrations";
-import { createGoalSearchItem } from "@/src/lib/goals/goal-search";
 import { resolveHomepageGoalPersonas } from "@/src/lib/goals/homepage-goal-personas";
+import { resolvePublicMurphLinePhoneNumber } from "@/src/lib/goals/public-murph-line";
 import { listHealthCommonsGoalEntries } from "@/src/lib/health-commons/goal-projections";
 import { fetchHeroContactInfo } from "@/src/lib/hero-contact-info";
 import { isHostedCustomInferenceEnabled } from "@/src/lib/hosted-inference/feature";
@@ -109,11 +108,13 @@ export default async function HomePage() {
     githubStarCount,
     heroContactInfo,
     headerList,
+    publicMurphLinePhoneNumber,
   ] = await Promise.all([
     getHostedPageAuthSnapshot(),
     getMurphGithubStarCount(),
     fetchHeroContactInfo(),
     headers(),
+    resolvePublicMurphLinePhoneNumber(),
   ]);
   if (authenticatedMember) {
     scheduleHomepageBrowserVaultPreparation({
@@ -125,12 +126,9 @@ export default async function HomePage() {
   const messengerChannel = resolveHeroMessengerChannel(country);
   const murphHeadshotSrc = pickRandomMurphHeadshotSrc();
   const goalEntries = listHealthCommonsGoalEntries();
-  const searchGoals = goalEntries.map((goal) => ({
-    ...createGoalSearchItem(goal),
-    illustrationSrc: resolveGoalIllustrationSrc(goal.routeId),
-  }));
+  // The same health-checked public line the goal library hands out.
   const goalStartOption = resolveGoalContactOption({
-    murphPhoneNumber: heroContactInfo.phone,
+    murphPhoneNumber: publicMurphLinePhoneNumber,
     preferredKind: messengerChannel === "telegram" ? "telegram" : "text",
     startPrompt: "Hey Murph, I have a goal in mind.",
     textAvailable: true,
@@ -182,7 +180,6 @@ export default async function HomePage() {
           murphHeadshotSrc={murphHeadshotSrc}
         />
         <GoalsSection
-          goals={searchGoals}
           personas={resolveHomepageGoalPersonas(goalEntries)}
           startOption={goalStartOption}
           totalGoalCount={goalEntries.length}

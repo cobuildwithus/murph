@@ -2,6 +2,7 @@
 
 import {
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -58,6 +59,9 @@ function UnauthenticatedHomepageAuthRuntimeProvider({
   authenticatedDestination?: string;
   children?: ReactNode;
 }) {
+  // The root layout knows whether the session store answered; keep that
+  // signal so public CTAs never treat an unverifiable member as anonymous.
+  const { authenticationStatus } = useContext(AuthContext);
   const [open, setOpen] = useState(false);
   const [loadedRuntime, setLoadedRuntime] =
     useState<HomepageAuthRuntimeComponent | null>(null);
@@ -141,12 +145,12 @@ function UnauthenticatedHomepageAuthRuntimeProvider({
   const value = useMemo(
     () => ({
       authenticated: false,
-      authenticationStatus: "ready" as const,
+      authenticationStatus,
       openAuthDialog,
       prepareAuth,
       shared: true,
     }),
-    [openAuthDialog, prepareAuth],
+    [authenticationStatus, openAuthDialog, prepareAuth],
   );
   const dialogProps = {
     autoSendPastedPhoneNumber: true,
