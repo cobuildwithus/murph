@@ -418,6 +418,13 @@ test("private run proof binds repository, workflow, main SHA, event, and first a
     workflowId: WORKFLOW_ID,
   }), { complete: true, conclusion: "success" });
   assert.deepEqual(inspectPrivateRun(privateRun({
+    name: `${TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME} / temporal_compatibility / ${PUBLIC_SHA} / none`,
+  }), {
+    privateSha: PRIVATE_SHA,
+    runId: RUN_ID,
+    workflowId: WORKFLOW_ID,
+  }), { complete: true, conclusion: "success" });
+  assert.deepEqual(inspectPrivateRun(privateRun({
     path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
   }), {
     privateSha: PRIVATE_SHA,
@@ -425,6 +432,7 @@ test("private run proof binds repository, workflow, main SHA, event, and first a
     workflowId: WORKFLOW_ID,
   }), { complete: true, conclusion: "success" });
   for (const overrides of [
+    { name: `${TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME}-spoofed` },
     { event: "push" },
     { head_branch: "release" },
     { head_sha: PUBLIC_SHA },
