@@ -46,6 +46,8 @@ import {
 
 type HostedRuntimeAiAccessDecisionReader =
   typeof import("@/src/lib/hosted-onboarding/member-access").readHostedRuntimeAiAccessDecision;
+type SignalHostedMailboxAppendRuntime =
+  typeof import("@/src/lib/hosted-orchestration/signal-runtime").signalHostedMailboxAppendRuntime;
 
 function buildPreparedDomainRootCandidate(input: {
   domain: HostedCryptoDomain;
@@ -161,7 +163,7 @@ const mocks = vi.hoisted(() => {
     shareMurphHostedLinqNativeContactCardToChat: vi.fn().mockResolvedValue({
       status: "sent",
     }),
-    signalHostedMailboxAppendRuntime: vi.fn(async () => ({
+    signalHostedMailboxAppendRuntime: vi.fn<SignalHostedMailboxAppendRuntime>(async () => ({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
     })),
@@ -8186,9 +8188,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         };
       },
     );
-    mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(async (input: {
-      onReadyToSignal?: () => void;
-    }) => {
+    mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(async (input) => {
       input.onReadyToSignal?.();
       callOrder.push("conversation-signal");
       return {
