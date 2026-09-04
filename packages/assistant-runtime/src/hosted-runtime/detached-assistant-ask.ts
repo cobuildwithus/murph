@@ -1,8 +1,11 @@
 import {
   executeConsentedReadOnlyAssistantAsk,
+  executeOperatorDiagnostic,
   executeReadOnlyAssistantAsk,
   type ConsentedReadOnlyAssistantAskInput,
   type ConsentedReadOnlyAssistantAskResult,
+  type OperatorDiagnosticInput,
+  type OperatorDiagnosticResult,
   type ReadOnlyAssistantAskProviderUsageEvent,
   type ReadOnlyAssistantAskInput,
   type ReadOnlyAssistantAskResult,
@@ -68,6 +71,9 @@ export interface HostedDetachedAssistantAskControllerInput {
   executeConsentedAsk?: (
     input: ConsentedReadOnlyAssistantAskInput,
   ) => Promise<ConsentedReadOnlyAssistantAskResult>;
+  executeOperatorDiagnostic?: (
+    input: OperatorDiagnosticInput,
+  ) => Promise<OperatorDiagnosticResult>;
   deferUsageUntilAfterDurableCheckpoint?: (
     effect: HostedWorkspaceDurableCheckpointEffect,
   ) => void;
@@ -89,6 +95,8 @@ export function createHostedDetachedAssistantAskController(
   const executeAsk = input.executeAsk ?? executeReadOnlyAssistantAsk;
   const executeConsentedAsk =
     input.executeConsentedAsk ?? executeConsentedReadOnlyAssistantAsk;
+  const executeOperatorTask =
+    input.executeOperatorDiagnostic ?? executeOperatorDiagnostic;
   const now = input.now ?? (() => new Date().toISOString());
   let activeAbortController: AbortController | null = null;
   let activePromise: Promise<HostedDetachedAssistantAskRunResult> | null = null;
@@ -117,6 +125,7 @@ export function createHostedDetachedAssistantAskController(
         env: input.env,
         executeAsk,
         executeConsentedAsk,
+        executeOperatorDiagnostic: executeOperatorTask,
         deferUsageUntilAfterDurableCheckpoint:
           input.deferUsageUntilAfterDurableCheckpoint ?? null,
         itemId: selectedItemId,
@@ -263,6 +272,9 @@ async function runOneHostedDetachedAssistantAsk(input: {
   executeConsentedAsk: (
     input: ConsentedReadOnlyAssistantAskInput,
   ) => Promise<ConsentedReadOnlyAssistantAskResult>;
+  executeOperatorDiagnostic: (
+    input: OperatorDiagnosticInput,
+  ) => Promise<OperatorDiagnosticResult>;
   deferUsageUntilAfterDurableCheckpoint: ((
     effect: HostedWorkspaceDurableCheckpointEffect,
   ) => void) | null;
@@ -376,10 +388,10 @@ async function runOneHostedDetachedAssistantAsk(input: {
       question: prepared.question,
       workspaceRoot: input.vaultRoot,
     };
-    const reviewedPersonalAsk =
-      claimed.wake.ask.target.kind !== "joined_group";
-    let answer: ConsentedReadOnlyAssistantAskResult | ReadOnlyAssistantAskResult;
-    if (claimed.wake.ask.target.kind !== "joined_group") {
+    let answer: ReadOnlyAssistantAskResult;
+    if (claimed.wake.ask.target.kind === "operator_task") {
+      answer = await input.executeOperatorDiagnostic(executionInput);
+    } else if (claimed.wake.ask.target.kind !== "joined_group") {
       if (prepared.disclosure === undefined) {
         throw new TypeError(
           "Reviewed personal ask prepare omitted its disclosure context.",
@@ -418,9 +430,7 @@ async function runOneHostedDetachedAssistantAsk(input: {
         requesterParticipantId: claimed.wake.ask.target.membershipId,
       });
     }
-    const result = reviewedPersonalAsk && answer.outcome === "cannot_answer"
-      ? { answer: null, outcome: "cannot_answer" as const }
-      : normalizeHostedDetachedAssistantAskResult(answer);
+    const result = normalizeHostedDetachedAssistantAskResult(answer);
     const completed = await input.assistantAskPort.request(
       {
         action: "complete",

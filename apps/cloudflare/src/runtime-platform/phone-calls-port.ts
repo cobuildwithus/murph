@@ -1,9 +1,6 @@
 import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
-  HOSTED_PHONE_CALLS_PATH,
-  HOSTED_PHONE_CALL_STATUS_PATH,
   HOSTED_PHONE_CALL_START_TRANSPORT_TIMEOUT_MS,
-  HOSTED_PHONE_CALL_STOP_PATH,
   hostedPhoneCallStatusResponseSchema,
   hostedPhoneCallStartResponseSchema,
   hostedPhoneCallStopResponseSchema,
@@ -11,6 +8,7 @@ import {
 
 import {
   fetchHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
 
@@ -27,8 +25,7 @@ export function createHostedWebPhoneCallPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted phone-call termination",
         fetchImpl: input.fetchImpl,
-        method: "POST",
-        path: HOSTED_PHONE_CALL_STOP_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.phoneCallStop,
         signal: options?.signal ?? null,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
@@ -42,8 +39,7 @@ export function createHostedWebPhoneCallPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted phone-call status",
         fetchImpl: input.fetchImpl,
-        method: "POST",
-        path: HOSTED_PHONE_CALL_STATUS_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.phoneCallStatus,
         sensitiveResponseBody: {
           maxBytes: 32 * 1024,
         },
@@ -60,8 +56,7 @@ export function createHostedWebPhoneCallPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted phone call",
         fetchImpl: input.fetchImpl,
-        method: "POST",
-        path: HOSTED_PHONE_CALLS_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.phoneCallStart,
         signal: options?.signal ?? null,
         timeoutMs: resolveHostedPhoneCallTransportTimeoutMs(input.timeoutMs),
         transport: input.transport,

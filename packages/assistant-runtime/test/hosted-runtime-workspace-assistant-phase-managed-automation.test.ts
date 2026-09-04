@@ -17,7 +17,7 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   initializeVault,
   patchAutomation,
@@ -41,9 +41,24 @@ import {
   type AssistantExecutionContext,
 } from "@murphai/assistant-engine";
 import {
-  runHostedWorkspaceAssistantPhase,
+  runHostedWorkspaceAssistantPhase as runHostedWorkspaceAssistantPhaseWithoutDrain,
   type HostedWorkspaceRuntimeAssistantPhaseInput,
 } from "../src/hosted-runtime/workspace-assistant-phase.ts";
+import { drainHostedRuntimeLogWritesBestEffort } from "../src/hosted-runtime/runtime-logs.ts";
+
+afterEach(async () => {
+  await drainHostedRuntimeLogWritesBestEffort();
+});
+
+async function runHostedWorkspaceAssistantPhase(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+) {
+  try {
+    return await runHostedWorkspaceAssistantPhaseWithoutDrain(input);
+  } finally {
+    await drainHostedRuntimeLogWritesBestEffort();
+  }
+}
 
 describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("checkpoints hosted managed automation changes before continuing assistant work", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
@@ -3259,7 +3274,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("checkpoints
         logRequests,
         vaultRoot,
       }));
-
       const verificationEntries = logRequests
         .flatMap((request) => request.entries)
         .filter((entry) =>

@@ -383,7 +383,9 @@ describe('assistant capability-offers prompt contract', () => {
     expect(prompt).toContain(
       'explicit current visibility or explicitly present-time attribution of a consented shared metric',
     )
-    expect(prompt).toContain('call exact-scope `read_shared` once first')
+    expect(prompt).toContain(
+      'call exact-scope `read_shared` exactly once before answering; do not repeat it that turn',
+    )
     expect(prompt).toContain('`pending` means permission is active')
     expect(prompt).toContain('never score or count it as zero, missing, disconnected, or non-consenting')
     expect(prompt).toContain('never offer consent again for that scope')

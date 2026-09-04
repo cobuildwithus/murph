@@ -21,6 +21,10 @@ import {
 } from "../src/standby-runner-contract.js";
 import { StandbyRunnerCoordinatorDurableObject } from "../src/worker/standby-runner-coordinator-durable-object.js";
 import { handleStandbyRunnerScheduled } from "../src/worker/index.js";
+import { handleTestEnsureStandbyReadyRoute } from "../src/worker/route-handlers/test-standby.js";
+import {
+  HostedLocalTestStandbyRunnerContainer,
+} from "../src/hosted-local-test/standby-runner-container.js";
 import type {
   DurableObjectSqlCursorLike,
   DurableObjectSqlStorageLike,
@@ -80,6 +84,45 @@ describe("hosted standby contract", () => {
 });
 
 describe("StandbyRunnerContainer", () => {
+  it("uses SIGTERM for the hosted-local shutdown checkpoint control", async () => {
+    const stop = vi.fn(async () => undefined);
+    const container: HostedLocalTestStandbyRunnerContainer = Object.create(
+      HostedLocalTestStandbyRunnerContainer.prototype,
+    );
+    Object.defineProperty(container, "stop", { value: stop });
+
+    await expect(container.beginShutdownCheckpointGracefulStopForTest({
+      userId: "member_shutdown_checkpoint_signal",
+    })).resolves.toEqual({ ok: true });
+    expect(stop).toHaveBeenCalledOnce();
+    expect(stop).toHaveBeenCalledWith("SIGTERM");
+  });
+
+  it("keeps Wrangler's synthetic region override isolated to the local test class", async () => {
+    const localHarness = createStandbyContainerHarness({
+      containerClass: HostedLocalTestStandbyRunnerContainer,
+      healthRegion: "REGN",
+      preflightReady: true,
+    });
+    await expect(localHarness.container.prepareStandbySlot({
+      releaseId: RELEASE_ID,
+      region: HOSTED_STANDBY_REGION,
+      slotName: createHostedStandbySlotName(RELEASE_ID),
+      timeoutMs: 75_000,
+    })).resolves.toMatchObject({ prepared: true });
+
+    const productionHarness = createStandbyContainerHarness({
+      healthRegion: "REGN",
+      preflightReady: true,
+    });
+    await expect(productionHarness.container.prepareStandbySlot({
+      releaseId: RELEASE_ID,
+      region: HOSTED_STANDBY_REGION,
+      slotName: createHostedStandbySlotName(RELEASE_ID),
+      timeoutMs: 75_000,
+    })).rejects.toThrow("failed pristine readiness proof");
+  });
+
   it("proves heavy hydration and a content-free Codex initialize/stop preflight before binding once", async () => {
     const harness = createStandbyContainerHarness();
     const slotName = createHostedStandbySlotName(RELEASE_ID);
@@ -129,6 +172,11 @@ describe("StandbyRunnerContainer", () => {
     await expect(harness.container.ensureProcessing({
       userId: "member_456",
     })).rejects.toThrow("not bound to the runtime user");
+    await expect(harness.container.onRuntimeCompletionRecorded({
+      attemptId: "attempt_wrong_member",
+      leaseGeneration: "1",
+      userId: "member_456",
+    })).rejects.toThrow("not bound to the runtime user");
     await expect(harness.container.ensureReadyForProcessing({
       timeoutMs: 1_000,
       userId: "member_123",
@@ -147,6 +195,81 @@ describe("StandbyRunnerContainer", () => {
       state: "retired",
       userId: null,
     });
+  });
+
+  it("reuses a claimed slot while warm and retires it after native stop", async () => {
+    const harness = createStandbyContainerHarness();
+    const slotName = createHostedStandbySlotName(RELEASE_ID);
+    await harness.container.prepareStandbySlot({
+      releaseId: RELEASE_ID,
+      region: HOSTED_STANDBY_REGION,
+      slotName,
+      timeoutMs: 75_000,
+    });
+    const claimId = createHostedStandbyClaimId();
+    await harness.container.bindStandbySlot({
+      claimId,
+      releaseId: RELEASE_ID,
+      region: HOSTED_STANDBY_REGION,
+      slotName,
+      userId: "member_123",
+    });
+    harness.renewActivityTimeout.mockClear();
+
+    const resolution = {
+      currentReleaseId: RELEASE_ID,
+      region: HOSTED_STANDBY_REGION,
+      slotName,
+      userId: "member_123",
+    } as const;
+    await expect(harness.container.resolveRetainedStandbySlot(resolution))
+      .resolves.toMatchObject({ claimId, state: "bound", userId: "member_123" });
+    await expect(harness.container.resolveRetainedStandbySlot(resolution))
+      .resolves.toMatchObject({ claimId, state: "bound", userId: "member_123" });
+    expect(harness.renewActivityTimeout).toHaveBeenCalledTimes(2);
+
+    harness.setNativeStatus("stopped");
+    await expect(harness.container.resolveRetainedStandbySlot(resolution))
+      .resolves.toMatchObject({ claimId: null, state: "retired", userId: null });
+    await expect(harness.container.readStandbySlotBinding()).resolves
+      .toMatchObject({ claimId: null, state: "retired", userId: null });
+  });
+
+  it("keeps a claimed slot assigned for foreign users or ambiguous liveness", async () => {
+    const harness = createStandbyContainerHarness();
+    const slotName = createHostedStandbySlotName(RELEASE_ID);
+    await harness.container.prepareStandbySlot({
+      releaseId: RELEASE_ID,
+      region: HOSTED_STANDBY_REGION,
+      slotName,
+      timeoutMs: 75_000,
+    });
+    const claimId = createHostedStandbyClaimId();
+    await harness.container.bindStandbySlot({
+      claimId,
+      releaseId: RELEASE_ID,
+      region: HOSTED_STANDBY_REGION,
+      slotName,
+      userId: "member_123",
+    });
+
+    await expect(harness.container.resolveRetainedStandbySlot({
+      currentReleaseId: RELEASE_ID,
+      region: HOSTED_STANDBY_REGION,
+      slotName,
+      userId: "member_456",
+    })).rejects.toThrow("belongs to another member");
+    harness.setNativeStatus("stopping");
+
+    await expect(harness.container.resolveRetainedStandbySlot({
+      currentReleaseId: RELEASE_ID,
+      region: HOSTED_STANDBY_REGION,
+      slotName,
+      userId: "member_123",
+    })).rejects.toThrow("native liveness is unsettled");
+    await expect(harness.container.readStandbySlotBinding()).resolves
+      .toMatchObject({ claimId, state: "bound", userId: "member_123" });
+    expect(harness.destroy).not.toHaveBeenCalled();
   });
 
   it("keeps an unbound ready slot alive at ordinary activity expiry", async () => {
@@ -585,6 +708,40 @@ describe("standby scheduled bootstrap", () => {
   });
 });
 
+describe("hosted-local standby readiness route", () => {
+  it("polls an in-progress slot without enqueueing duplicate maintenance", async () => {
+    const state = {
+      provisioningSlotName: "standby--v-release_1--pending",
+      readySlotName: null,
+      releaseId: RELEASE_ID,
+      region: HOSTED_STANDBY_REGION,
+    };
+    const ensureReadyStandby = vi.fn(async () => ({ accepted: true as const }));
+    const readStandbyCoordinatorState = vi.fn(async () => state);
+
+    const response = await handleTestEnsureStandbyReadyRoute({
+      env: {
+        CF_VERSION_METADATA: { id: RELEASE_ID },
+        HOSTED_EXECUTION_STANDBY_MODE: "allocate",
+        MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+        NODE_ENV: "test",
+        STANDBY_COORDINATOR: {
+          getByName: vi.fn(() => ({
+            claimReadyStandby: vi.fn(),
+            ensureReadyStandby,
+            readStandbyCoordinatorState,
+          })),
+        },
+      },
+    } as never);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(state);
+    expect(ensureReadyStandby).not.toHaveBeenCalled();
+    expect(readStandbyCoordinatorState).toHaveBeenCalledOnce();
+  });
+});
+
 async function createClaimedCoordinatorHarness(claimedAtMs: number) {
   const pending: Promise<unknown>[] = [];
   const db = new DatabaseSync(":memory:");
@@ -652,29 +809,35 @@ async function createClaimedCoordinatorHarness(claimedAtMs: number) {
 }
 
 function createStandbyContainerHarness(input: {
+  containerClass?: typeof StandbyRunnerContainer;
   destroy?: () => Promise<void>;
+  nativeStatus?: string;
+  environment?: Record<string, unknown>;
+  healthRegion?: string;
   preflightReady?: boolean;
 } = {}) {
   const db = new DatabaseSync(":memory:");
   const state = createDurableObjectState(db, []);
   let preflightReady = input.preflightReady ?? false;
-  let running = true;
+  let nativeStatus = input.nativeStatus ?? "running";
   const codexPreflight = vi.fn(async () => {
     preflightReady = true;
     return new Response(JSON.stringify({ ok: true }), { status: 200 });
   });
-  const container = new StandbyRunnerContainer(state, {
+  const ContainerClass = input.containerClass ?? StandbyRunnerContainer;
+  const container = new ContainerClass(state, {
     CF_VERSION_METADATA: { id: RELEASE_ID },
     HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: BUNDLE_FINGERPRINT,
     HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: SOURCE_FINGERPRINT,
+    ...input.environment,
   });
   const platformDestroy = input.destroy;
   const destroy = vi.fn(async () => {
     await platformDestroy?.();
-    running = false;
+    nativeStatus = "stopped";
   });
   const startAndWaitForPorts = vi.fn(async () => {
-    running = true;
+    nativeStatus = "running";
   });
   const renewActivityTimeout = vi.fn();
   Object.assign(container, {
@@ -683,7 +846,10 @@ function createStandbyContainerHarness(input: {
         return await codexPreflight();
       }
       if (url.endsWith("/health")) {
-        return new Response(JSON.stringify(createStandbyHealth(preflightReady)), {
+        return new Response(JSON.stringify(createStandbyHealth(
+          preflightReady,
+          input.healthRegion,
+        )), {
           headers: { "content-type": "application/json; charset=utf-8" },
           status: 200,
         });
@@ -693,7 +859,7 @@ function createStandbyContainerHarness(input: {
     destroy,
     getState: vi.fn(async () => ({
       lastChange: Date.now(),
-      status: running ? "running" : "stopped",
+      status: nativeStatus,
     })),
     renewActivityTimeout,
     startAndWaitForPorts,
@@ -703,16 +869,22 @@ function createStandbyContainerHarness(input: {
     container,
     destroy,
     renewActivityTimeout,
+    setNativeStatus(status: string) {
+      nativeStatus = status;
+    },
     startAndWaitForPorts,
   };
 }
 
-function createStandbyHealth(preflightReady: boolean): Record<string, unknown> {
+function createStandbyHealth(
+  preflightReady: boolean,
+  cloudflareRegion: string = HOSTED_STANDBY_REGION,
+): Record<string, unknown> {
   return {
     activeJobCount: 0,
     codexShellPreflightCompletedAtEpochMs: preflightReady ? Date.now() : null,
     codexShellPreflightStatus: preflightReady ? "ready" : "pending",
-    cloudflareRegion: HOSTED_STANDBY_REGION,
+    cloudflareRegion,
     conversationWarmActivityCompletedAtEpochMs: null,
     heavyRuntimeHydrationCompletedAtEpochMs: Date.now(),
     heavyRuntimeHydrationStatus: "ready",
@@ -776,6 +948,9 @@ function createSlotStub(slotName: string): HostedStandbyRunnerContainerStubLike 
         slotName: binding.slotName,
         state: binding.state,
       };
+    },
+    async resolveRetainedStandbySlot() {
+      return binding;
     },
     async retireStandbySlot() {
       binding = {

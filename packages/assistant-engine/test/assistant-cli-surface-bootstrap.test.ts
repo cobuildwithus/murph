@@ -341,6 +341,24 @@ test('buildAssistantCliSurfaceContract normalizes commands into a compact index 
         name: 'document import',
       },
       {
+        description: 'List semantic daily activity summaries.',
+        hint:
+          'One data read only. Day totals (`sessionCount`, `sessionMinutes`, distinct `activityTypes`): omit detail; no false flag or schema read. Workout/subset facts: include detail first.',
+        name: 'wearables activity list',
+        schema: {
+          options: {
+            properties: {
+              date: {
+                type: 'string',
+              },
+              includeWorkoutDetails: {
+                type: 'boolean',
+              },
+            },
+          },
+        },
+      },
+      {
         description: 'Root status alias',
         name: 'status',
       },
@@ -376,6 +394,10 @@ test('buildAssistantCliSurfaceContract normalizes commands into a compact index 
   assert.match(
     contract,
     /- `assistant onboarding resume-context`: Read compact setup context for onboarding resume; options --limit=number\./u,
+  )
+  assert.match(
+    contract,
+    /- `wearables activity list`: List semantic daily activity summaries\.; options --date=string, --includeWorkoutDetails; hint One data read only\. Day totals \(`sessionCount`, `sessionMinutes`, distinct `activityTypes`\): omit detail; no false flag or schema read\. Workout\/subset facts: include detail first\./u,
   )
   assert.doesNotMatch(contract, /Search the indexed documents/u)
   assert.doesNotMatch(contract, /Root command help/u)

@@ -301,10 +301,6 @@ export async function tryHandleHostedOperatorDiagnosticControl(input: {
       mailboxWake: null,
       response: {
         action: "prepare",
-        disclosure: {
-          permissionText:
-            "An authorized Murph operator requested one private, read-only diagnostic. Inspect only this member's Murph context needed to answer the question. Do not send a member message, change state, invoke tools, or disclose anyone else's information. Return the concise diagnostic only to the authorized operator.",
-        },
         question: wake.ask.question,
         status: "ready",
         targetLabel: null,

@@ -2,8 +2,16 @@ import { emitHostedExecutionStructuredLog, type HostedExecutionStructuredLogDeta
 
 import { CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS } from "../internal-hosts.ts";
 import {
-  assertAllowedHostedRunnerWebControlRequest,
+  assertAllowedHostedRunnerWebControlRoute,
+  HostedWebControlRouteNotAllowlistedError,
   readHostedRunnerWebControlRoute,
+  type HostedRunnerWebControlOperation,
+  type HostedRunnerWebControlRoute,
+} from "../runner-outbound/shared-web-control-policy.ts";
+export {
+  bindHostedRunnerWebControlRoutePath,
+  createHostedRunnerDeviceSyncConnectLinkRoute,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
 } from "../runner-outbound/shared-web-control-policy.ts";
 import {
   HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
@@ -13,10 +21,6 @@ import {
 } from "../runner-outbound/headers.ts";
 import { fetchHostedExecutionWebControlPlaneResponse } from "../web-control-plane.ts";
 import type { HostedWebCallbackSigningEnvironment } from "../web-callback-auth.ts";
-import {
-  HOSTED_RUNTIME_MAILBOX_FETCH_PATH,
-  HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
-} from "@murphai/hosted-execution/routes";
 import {
   HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER,
@@ -41,7 +45,7 @@ import {
   type HostedWorkspaceCheckpointBridgeAuthority,
 } from "./authority-headers.ts";
 
-export type HostedWebControlTransport =
+type HostedWebControlTransportConfig =
   | {
     callbackSigning: HostedWebCallbackSigningEnvironment;
     mode: "direct";
@@ -52,6 +56,18 @@ export type HostedWebControlTransport =
     mode: "proxy";
   };
 
+export interface HostedWebControlPreflightRejection {
+  method: "GET" | "POST";
+  operation: HostedRunnerWebControlOperation;
+  transport: HostedWebControlTransportConfig["mode"];
+}
+
+export type HostedWebControlTransport = HostedWebControlTransportConfig & {
+  reportPreflightRejection?: (
+    rejection: HostedWebControlPreflightRejection,
+  ) => Promise<void>;
+};
+
 interface HostedWebControlPlaneJsonRequest {
   acceptedStatuses?: readonly number[];
   body?: unknown;
@@ -59,10 +75,9 @@ interface HostedWebControlPlaneJsonRequest {
   description: string;
   fetchImpl: typeof fetch;
   headers?: Headers;
-  method?: "GET" | "POST";
-  path: string;
   preserveInitialFailureOnReplayFailure?: boolean;
   replayOnceOnRetryableFailure?: boolean;
+  route: HostedRunnerWebControlRoute;
   sensitiveResponseBody?: {
     maxBytes: number;
   };
@@ -124,6 +139,30 @@ class HostedWebControlPlaneSensitiveResponseInvalidJsonError extends Error {
   }
 }
 
+async function assertAllowedHostedWebControlPreflight(input: {
+  route: HostedRunnerWebControlRoute;
+  transport: HostedWebControlTransport;
+}): Promise<void> {
+  try {
+    assertAllowedHostedRunnerWebControlRoute(input.route);
+    return;
+  } catch (error) {
+    if (!(error instanceof HostedWebControlRouteNotAllowlistedError)) {
+      throw error;
+    }
+    try {
+      await input.transport.reportPreflightRejection?.({
+        method: input.route.method,
+        operation: error.operation,
+        transport: input.transport.mode,
+      });
+    } catch {
+      // Best-effort telemetry must never replace the fail-closed policy error.
+    }
+    throw error;
+  }
+}
+
 export function resolveHostedWebControlTransport(input: {
   webCallbackSigning: HostedWebCallbackSigningEnvironment | null;
   webControlBaseUrl: string | null;
@@ -151,13 +190,12 @@ export async function fetchReplaySafeHostedWebControlPlaneJson(input: {
   boundUserId: string;
   description: string;
   fetchImpl: typeof fetch;
-  method?: "GET" | "POST";
-  path: string;
+  route: HostedRunnerWebControlRoute;
   signal?: AbortSignal | null;
   timeoutMs: number;
   transport: HostedWebControlTransport;
 }): Promise<unknown> {
-  assertReplaySafeHostedWebControlRetryPath(input.path);
+  assertReplaySafeHostedWebControlRetryRoute(input.route);
 
   let attempt = 0;
   let lastError: unknown;
@@ -186,11 +224,12 @@ export async function fetchReplaySafeHostedWebControlPlaneJson(input: {
   throw lastError;
 }
 
-function assertReplaySafeHostedWebControlRetryPath(path: string): void {
-  const { pathname } = readHostedRunnerWebControlRoute(path);
+function assertReplaySafeHostedWebControlRetryRoute(
+  route: HostedRunnerWebControlRoute,
+): void {
   if (
-    pathname !== HOSTED_RUNTIME_MAILBOX_FETCH_PATH
-    && pathname !== HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH
+    route.operation !== "mailbox_fetch"
+    && route.operation !== "mailbox_payload_fetch"
   ) {
     throw new TypeError("Hosted web-control retry is only allowed for hosted mailbox reads.");
   }
@@ -250,12 +289,12 @@ async function fetchHostedWebControlPlaneJsonAttempt(
     throw new TypeError("Sensitive web-control response maxBytes must be a non-negative integer.");
   }
 
-  const method = input.method ?? (input.body === undefined ? "GET" : "POST");
-  const route = readHostedRunnerWebControlRoute(input.path);
-  assertAllowedHostedRunnerWebControlRequest({
-    method,
-    path: route.pathname,
+  await assertAllowedHostedWebControlPreflight({
+    route: input.route,
+    transport: input.transport,
   });
+  const method = input.route.method;
+  const route = readHostedRunnerWebControlRoute(input.route.path);
   const body = input.body === undefined ? undefined : JSON.stringify(input.body);
   const requestStartedAt = Date.now();
   const requestDeadlineMs = requestStartedAt + input.timeoutMs;

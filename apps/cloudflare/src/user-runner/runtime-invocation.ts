@@ -20,8 +20,8 @@ import {
   HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
+  buildHostedRuntimeOwnerReleaseSearch,
   HOSTED_RUNTIME_LOG_PATH,
-  HOSTED_RUNTIME_OWNER_RELEASE_IMMEDIATE_RECHECK_QUERY,
   HOSTED_RUNTIME_OWNER_RELEASED_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
@@ -201,6 +201,7 @@ export class RuntimeInvocationService {
         userId: string,
         input?: { timeoutMs?: number },
       ): Promise<HostedWorkspaceReadResponse>;
+      waitUntil(promise: Promise<unknown>): void;
     },
   ) {}
 
@@ -744,10 +745,49 @@ export class RuntimeInvocationService {
       return { completed: false };
     }
 
+    this.input.waitUntil(
+      this.notifyRunnerContainerCompletionRecordedBestEffort(input),
+    );
     if (!shouldDeferHostedRuntimeOwnerReleaseCallback(input.result)) {
       await this.notifyRuntimeOwnerReleasedBestEffort(input);
     }
     return { completed: true };
+  }
+
+  private async notifyRunnerContainerCompletionRecordedBestEffort(input: {
+    token: RunnerWriteFenceToken;
+    userId: string;
+  }): Promise<void> {
+    try {
+      if (!this.input.runnerContainerNamespace) {
+        return;
+      }
+      const runnerContainerName = input.token.runnerContainerName ?? input.userId;
+      const container = this.input.runnerContainerNamespace.getByName(
+        runnerContainerName,
+      );
+      if (!container.onRuntimeCompletionRecorded) {
+        return;
+      }
+      await container.onRuntimeCompletionRecorded({
+        attemptId: input.token.attemptId,
+        leaseGeneration: input.token.generation,
+        userId: input.userId,
+      });
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          ...buildHostedRunnerMetadataOnlyErrorDetails(error),
+          workspaceAttemptId: input.token.attemptId,
+        },
+        level: "warn",
+        message:
+          "Hosted runner completion cleanup notification failed; preserving the lifecycle timer fallback.",
+        phase: "checkpoint",
+        userId: input.userId,
+      });
+    }
   }
 
   private async notifyRuntimeOwnerReleasedBestEffort(input: {
@@ -767,12 +807,11 @@ export class RuntimeInvocationService {
         callbackSigning: this.input.env.webCallbackSigning,
         method: "POST",
         path: HOSTED_RUNTIME_OWNER_RELEASED_PATH,
-        ...(input.result.immediateRecheckRequested === true
-          ? {
-              search:
-                `?${HOSTED_RUNTIME_OWNER_RELEASE_IMMEDIATE_RECHECK_QUERY}=1`,
-            }
-          : {}),
+        search: buildHostedRuntimeOwnerReleaseSearch({
+          immediateRecheckRequested:
+            input.result.immediateRecheckRequested === true,
+          runtimeAttemptId: input.token.attemptId,
+        }),
         timeoutMs: Math.min(
           this.input.env.webControlTimeoutMs,
           RUNTIME_OWNER_RELEASE_CALLBACK_TIMEOUT_MS,
@@ -1052,6 +1091,7 @@ export class RuntimeInvocationService {
     emitHostedExecutionStructuredLog({
       component: "runner",
       details: {
+        assistantExecutionBlocked: input.assistantExecutionBlocked,
         forwardedEnvKeyCount: Object.keys(forwardedEnv).length,
         hostedAssistantProviderConfigured:
           typeof forwardedEnv.HOSTED_ASSISTANT_PROVIDER === "string"
@@ -1074,6 +1114,7 @@ export class RuntimeInvocationService {
         veniceCredentialBeforeMintKind,
         veniceProviderCredentialMinted,
         preparedSnapshotRestorePresent: preparedSnapshotRestore !== null,
+        processingMode: nullableRunnerValue(input.processingMode),
         runnerContainerWorkerVersionPresent: runnerContainerName !== input.userId,
         workspaceAttemptId: input.token.attemptId,
         workspaceWriteFenceGeneration: input.token.generation,
@@ -1321,6 +1362,10 @@ export class RuntimeInvocationService {
       return true;
     }
   }
+}
+
+function nullableRunnerValue<T>(value: T | undefined): T | null {
+  return value ?? null;
 }
 
 function isDueHostedAssistantDeliveryWake(

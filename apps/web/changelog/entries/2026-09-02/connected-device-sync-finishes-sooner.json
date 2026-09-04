@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-02",
+  "order": 100,
+  "item": {
+    "id": "connected-device-sync-finishes-sooner",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Connected-device sync finishes sooner",
+    "summary": "Connected health data can finish syncing sooner after a background refresh completes.",
+    "details": "Murph removes an unnecessary final wait once a refresh has safely finished, while preserving normal connection cadence and recovery when work is still pending.",
+    "relevanceTags": ["wearables", "sync", "performance"],
+    "sourcePullRequests": [2741]
+  }
+}

@@ -147,11 +147,12 @@ type FreshRunnerContainerResolution =
   | {
       kind: "ready";
       runnerContainerName: string;
-      standbyAllocationOutcome:
-        | "claimed"
-        | "disabled"
-        | "fallback"
-        | "retained";
+      standbyAllocationOutcome: NonNullable<
+        RuntimeProcessingOrchestrationDiagnostics["standbyAllocationOutcome"]
+      >;
+      standbyAllocationReason: NonNullable<
+        RuntimeProcessingOrchestrationDiagnostics["standbyAllocationReason"]
+      >;
     }
   | {
       kind: "retry";
@@ -307,6 +308,22 @@ export class RuntimeProcessingController {
   ): Promise<void> {
     const orchestrationAttemptId =
       orchestration?.shellPrewarmOrchestrationAttemptId;
+    if (readHostedStandbyMode(this.input.runnerRuntimeEnvSource) === "allocate") {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          shellPrewarmAdmissionOutcome: "skipped_standby_pool",
+          ...(orchestrationAttemptId === undefined
+            ? {}
+            : { orchestrationAttemptId }),
+          shellPrewarmSource: source ?? "unknown",
+        },
+        message: "Hosted runner shell prewarm admission decided.",
+        phase: "scheduled",
+        userId,
+      });
+      return;
+    }
     const namespace = this.input.runnerContainerNamespace;
     if (!namespace) {
       throw new Error("Runner container namespace is unavailable.");
@@ -528,10 +545,7 @@ export class RuntimeProcessingController {
 
     const requestedProcessingMode = normalizeRuntimeProcessingMode(input.input.processingMode);
     const triggeredByTrustedWebDirect =
-      input.input.orchestration?.triggeredByWebDirect === true
-      && isHostedRuntimeDirectEnsureOrchestrationAttemptId(
-        input.input.orchestrationAttemptId,
-      );
+      isTrustedWebDirectRuntimeProcessing(input.input);
     const cooperativeMailboxOwnerHandoff =
       activeFence.processingMode === "system_mailbox"
       && requestedProcessingMode === "default";
@@ -761,15 +775,13 @@ export class RuntimeProcessingController {
       generation: String(activeFence.generation),
       userId: record.userId,
     });
-    if (!cleared.cleared) {
+    if (!cleared.cleared && cleared.record.writeFence) {
       const convergedInput = withoutSupersededRuntimeFenceDiagnostics(inputAtClearStart);
       return await this.ensureExistingRuntimeProcessing({
         commandBudget: input.commandBudget,
-        input: cleared.record.writeFence
-          ? withRuntimeProcessingOrchestration(convergedInput, {
-              activeFenceObservedAtEpochMs: Date.now(),
-            })
-          : convergedInput,
+        input: withRuntimeProcessingOrchestration(convergedInput, {
+          activeFenceObservedAtEpochMs: Date.now(),
+        }),
         record: cleared.record,
         runtimeWakeStartedAt: input.runtimeWakeStartedAt,
       });
@@ -781,16 +793,17 @@ export class RuntimeProcessingController {
         userId: input.input.userId,
       });
     }
-
     const replacementFenceClearedAtEpochMs = Date.now();
-    const replacementInput = withRuntimeProcessingOrchestration(inputAtClearStart, {
-      replacedStaleFence: input.replacedStaleFence ?? true,
-      replacementFenceClearElapsedMs: Math.max(
-        0,
-        replacementFenceClearedAtEpochMs - replacementFenceClearStartedAtEpochMs,
-      ),
-      replacementFenceClearedAtEpochMs,
-    });
+    const replacementInput = cleared.cleared
+      ? withRuntimeProcessingOrchestration(inputAtClearStart, {
+          replacedStaleFence: input.replacedStaleFence ?? true,
+          replacementFenceClearElapsedMs: Math.max(
+            0,
+            replacementFenceClearedAtEpochMs - replacementFenceClearStartedAtEpochMs,
+          ),
+          replacementFenceClearedAtEpochMs,
+        })
+      : withoutSupersededRuntimeFenceDiagnostics(inputAtClearStart);
     return await this.startRuntimeProcessing({
       action: "replaced",
       commandBudget: input.commandBudget,
@@ -1028,6 +1041,7 @@ export class RuntimeProcessingController {
             kind: "ready",
             runnerContainerName: pendingRunnerContainerName,
             standbyAllocationOutcome: "retained",
+            standbyAllocationReason: "retained",
           };
         }
         if (retained === "retry") {
@@ -1038,6 +1052,7 @@ export class RuntimeProcessingController {
           kind: "ready",
           runnerContainerName: input.exactRunnerContainerName,
           standbyAllocationOutcome: "disabled",
+          standbyAllocationReason: "exact_user_pending",
         };
       } else if (!await this.destroyAndClearPendingRunnerContainer({
         runnerContainerName: pendingRunnerContainerName,
@@ -1052,6 +1067,23 @@ export class RuntimeProcessingController {
         kind: "ready",
         runnerContainerName: input.exactRunnerContainerName,
         standbyAllocationOutcome: "disabled",
+        standbyAllocationReason: "mode_not_allocate",
+      };
+    }
+    if (normalizeRuntimeProcessingMode(input.input.processingMode) !== "default") {
+      return {
+        kind: "ready",
+        runnerContainerName: input.exactRunnerContainerName,
+        standbyAllocationOutcome: "disabled",
+        standbyAllocationReason: "processing_mode_not_default",
+      };
+    }
+    if (!isTrustedWebDirectRuntimeProcessing(input.input)) {
+      return {
+        kind: "ready",
+        runnerContainerName: input.exactRunnerContainerName,
+        standbyAllocationOutcome: "disabled",
+        standbyAllocationReason: "not_trusted_web_direct",
       };
     }
     const releaseId = readHostedStandbyReleaseId(this.input.runnerRuntimeEnvSource);
@@ -1062,6 +1094,7 @@ export class RuntimeProcessingController {
         kind: "ready",
         runnerContainerName: input.exactRunnerContainerName,
         standbyAllocationOutcome: "fallback",
+        standbyAllocationReason: "bindings_unavailable",
       };
     }
 
@@ -1118,11 +1151,20 @@ export class RuntimeProcessingController {
       standbyBudget,
       HOSTED_STANDBY_CLAIM_TIMEOUT_MS,
     );
-    if (claim.kind !== "completed" || claim.value.outcome !== "claimed") {
+    if (claim.kind !== "completed") {
       return {
         kind: "ready",
         runnerContainerName: exactRunnerContainerName,
         standbyAllocationOutcome: "fallback",
+        standbyAllocationReason: `claim_${claim.kind}`,
+      };
+    }
+    if (claim.value.outcome !== "claimed") {
+      return {
+        kind: "ready",
+        runnerContainerName: exactRunnerContainerName,
+        standbyAllocationOutcome: "fallback",
+        standbyAllocationReason: `claim_${claim.value.outcome}`,
       };
     }
 
@@ -1159,6 +1201,7 @@ export class RuntimeProcessingController {
         kind: "ready",
         runnerContainerName: slotName,
         standbyAllocationOutcome: "claimed",
+        standbyAllocationReason: "bind_completed",
       };
     }
     if (bind.kind === "timed_out") {
@@ -1184,6 +1227,7 @@ export class RuntimeProcessingController {
         kind: "ready",
         runnerContainerName: slotName,
         standbyAllocationOutcome: "claimed",
+        standbyAllocationReason: "bind_recovered",
       };
     }
     if (binding.state === "unbound") {
@@ -1207,6 +1251,7 @@ export class RuntimeProcessingController {
       kind: "ready",
       runnerContainerName: exactRunnerContainerName,
       standbyAllocationOutcome: "fallback",
+      standbyAllocationReason: "bind_rejected",
     };
   }
 
@@ -1216,65 +1261,46 @@ export class RuntimeProcessingController {
     userId: string;
   }): Promise<"cleared" | "ready" | "retry"> {
     const namespace = this.input.standbyContainerNamespace;
-    const releaseId = readHostedStandbyReleaseId(this.input.runnerRuntimeEnvSource);
-    if (!namespace || !releaseId) {
+    const currentReleaseId = readHostedStandbyReleaseId(
+      this.input.runnerRuntimeEnvSource,
+    );
+    const targetReleaseId = readHostedStandbySlotReleaseId(
+      input.runnerContainerName,
+    );
+    if (!namespace || !currentReleaseId || !targetReleaseId) {
       return "retry";
     }
     const slot = namespace.getByName(input.runnerContainerName, {
       locationHint: HOSTED_STANDBY_LOCATION_HINT,
     });
-    const bindingResult = await settleStandbyOperationWithinBudget(
-      () => slot.readStandbySlotBinding(),
+    const resolutionResult = await settleStandbyOperationWithinBudget(
+      () => slot.resolveRetainedStandbySlot({
+        currentReleaseId,
+        region: HOSTED_STANDBY_REGION,
+        slotName: input.runnerContainerName,
+        userId: input.userId,
+      }),
       input.commandBudget,
       this.input.env.webControlTimeoutMs,
     );
-    if (bindingResult.kind !== "completed") {
+    if (resolutionResult.kind !== "completed") {
       return "retry";
     }
-    const binding = bindingResult.value;
+    const binding = resolutionResult.value;
     if (
-      binding.state === "bound"
-      && binding.userId === input.userId
-      && binding.releaseId === releaseId
-      && binding.slotName === input.runnerContainerName
+      binding.releaseId !== targetReleaseId
+      || binding.region !== HOSTED_STANDBY_REGION
+      || binding.slotName !== input.runnerContainerName
     ) {
-      return "ready";
+      return "retry";
     }
-    if (binding.state === "retiring") {
-      const claimId = binding.claimId;
-      const retirement = claimId === null || binding.userId === input.userId
-        ? await settleStandbyOperationWithinBudget(
-            () => slot.retireStandbySlot(claimId === null ? {} : { claimId }),
-            input.commandBudget,
-            this.input.env.webControlTimeoutMs,
-          )
-        : null;
-      if (retirement !== null && retirement.kind !== "completed") {
-        return "retry";
-      }
+    if (binding.state === "bound") {
+      const retainedExactly = binding.releaseId === currentReleaseId
+        && binding.userId === input.userId;
+      return retainedExactly ? "ready" : "retry";
     }
-    if (binding.state === "unbound") {
-      const retirement = await settleStandbyOperationWithinBudget(
-        () => slot.retireStandbySlot({}),
-        input.commandBudget,
-        this.input.env.webControlTimeoutMs,
-      );
-      if (retirement.kind !== "completed") {
-        return "retry";
-      }
-    } else if (binding.state === "bound" && binding.userId === input.userId) {
-      const destroyed = await settleStandbyOperationWithinBudget(
-        async () => await destroyHostedExecutionContainer({
-          runnerContainerName: input.runnerContainerName,
-          runnerContainerNamespace: this.input.runnerContainerNamespace,
-          userId: input.userId,
-        }),
-        input.commandBudget,
-        this.input.env.webControlTimeoutMs,
-      );
-      if (destroyed.kind !== "completed" || !destroyed.value.ok) {
-        return "retry";
-      }
+    if (binding.state !== "retired") {
+      return "retry";
     }
     const cleared = await this.input.stateStore.clearStoppedRunnerContainerForUserControl({
       runnerContainerName: input.runnerContainerName,
@@ -1348,6 +1374,7 @@ export class RuntimeProcessingController {
     if (!runnerContainerIdentity || runnerContainerIdentity.userId !== processingInput.userId) {
       throw new Error("Hosted runner container identity did not match the runtime start user.");
     }
+    const standbyAllocationStartedAtEpochMs = Date.now();
     const resolution = await this.resolveFreshRunnerContainer({
       commandBudget: input.commandBudget,
       exactRunnerContainerName: runnerContainerIdentity.runnerContainerName,
@@ -1357,11 +1384,22 @@ export class RuntimeProcessingController {
     if (resolution.kind === "retry") {
       return resolution.response;
     }
+    const standbyAllocationElapsedMs = Math.max(
+      0,
+      Date.now() - standbyAllocationStartedAtEpochMs,
+    );
+    processingInput = withRuntimeProcessingOrchestration(processingInput, {
+      standbyAllocationElapsedMs,
+      standbyAllocationOutcome: resolution.standbyAllocationOutcome,
+      standbyAllocationReason: resolution.standbyAllocationReason,
+    });
     const runnerContainerName = resolution.runnerContainerName;
     emitHostedExecutionStructuredLog({
       component: "hosted.runner",
       details: {
         standbyAllocationOutcome: resolution.standbyAllocationOutcome,
+        standbyAllocationReason: resolution.standbyAllocationReason,
+        standbyAllocationElapsedMs,
       },
       message: "Hosted runner selected a fresh container target.",
       phase: "runtime.starting",
@@ -1487,6 +1525,9 @@ export class RuntimeProcessingController {
         runtimeProcessingAction: input.action,
         runtimePreparationWaitAfterContainerReadyMs:
           preparation.runtimePreparationWaitAfterContainerReadyMs,
+        standbyAllocationOutcome: resolution.standbyAllocationOutcome,
+        standbyAllocationReason: resolution.standbyAllocationReason,
+        standbyAllocationElapsedMs,
         workspaceAttemptId: prepared.token.attemptId,
       },
       message: "Hosted runner runtime processing accepted.",
@@ -1971,4 +2012,13 @@ function normalizeRuntimeProcessingMode(
       || value === "system_mailbox"
     ? value
     : "default";
+}
+
+function isTrustedWebDirectRuntimeProcessing(
+  input: RuntimeProcessingInput,
+): boolean {
+  return input.orchestration?.triggeredByWebDirect === true
+    && isHostedRuntimeDirectEnsureOrchestrationAttemptId(
+      input.orchestrationAttemptId,
+    );
 }

@@ -6,12 +6,15 @@ import path from "node:path";
 import type {
   AssistantProviderUsageDraft,
   ConsentedReadOnlyAssistantAskInput,
+  OperatorDiagnosticInput,
+  OperatorDiagnosticResult,
   ReadOnlyAssistantAskInput,
   ReadOnlyAssistantAskResult,
 } from "@murphai/assistant-engine/assistant-ask";
 import { initializeVault } from "@murphai/core";
 import { buildHostedExecutionAssistantAskCompletedWake } from "@murphai/hosted-execution";
 import type { AssistantUsageRecord } from "@murphai/hosted-execution/assistant-usage";
+import type { HostedRuntimeAssistantAskControlRequest } from "@murphai/hosted-execution/runtime-control";
 import { describe, test, vi } from "vitest";
 
 vi.mock("@murphai/assistant-engine", () => ({
@@ -19,6 +22,7 @@ vi.mock("@murphai/assistant-engine", () => ({
 }));
 vi.mock("@murphai/assistant-engine/assistant-ask", () => ({
   executeConsentedReadOnlyAssistantAsk: vi.fn(),
+  executeOperatorDiagnostic: vi.fn(),
   executeReadOnlyAssistantAsk: vi.fn(),
 }));
 
@@ -835,6 +839,79 @@ describe("hosted detached assistant ask controller", () => {
     }
   });
 
+  test("dispatches an operator diagnostic directly without consent review or delivery authority", async () => {
+    const groupRuntimeRoot = await createVaultRoot();
+    const executeAsk = vi.fn();
+    const executeConsentedAsk = vi.fn();
+    const executeOperatorDiagnostic = vi.fn(async (
+      _input: OperatorDiagnosticInput,
+    ): Promise<OperatorDiagnosticResult> => ({
+      answer: "Synthetic diagnostic answer.",
+      outcome: "answered",
+    }));
+    const assistantAskRequest = vi.fn(async (
+      request: HostedRuntimeAssistantAskControlRequest,
+    ) => request.action === "prepare"
+      ? {
+          action: "prepare" as const,
+          question: "What is the synthetic status?",
+          status: "ready" as const,
+          targetLabel: null,
+        }
+      : { action: "complete" as const, status: "completed" as const });
+
+    try {
+      await writePending(groupRuntimeRoot, [
+        createPendingAsk({
+          eventId: "ask_event_operator_diagnostic",
+          itemId: "item_operator_diagnostic",
+          operator: true,
+        }),
+      ]);
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          request: assistantAskRequest,
+        },
+        codexHome: "/hosted/codex-home",
+        env: {},
+        executeAsk,
+        executeConsentedAsk,
+        executeOperatorDiagnostic,
+        now: () => TEST_NOW,
+        onStateMutation() {},
+        vaultRoot: groupRuntimeRoot,
+      });
+
+      controller.kick();
+      await waitUntil(async () => {
+        assert.equal(
+          (await readHostedSystemMailboxState(groupRuntimeRoot)).pending.length,
+          0,
+        );
+      });
+      await controller.closeAndRequeue();
+
+      assert.equal(executeAsk.mock.calls.length, 0);
+      assert.equal(executeConsentedAsk.mock.calls.length, 0);
+      assert.equal(executeOperatorDiagnostic.mock.calls.length, 1);
+      const operatorInput = executeOperatorDiagnostic.mock.calls[0]?.[0];
+      assert.ok(operatorInput);
+      assert.equal(operatorInput.codexHome, "/hosted/codex-home");
+      assert.equal(operatorInput.question, "What is the synthetic status?");
+      assert.equal(operatorInput.workspaceRoot, groupRuntimeRoot);
+      assert.deepEqual(assistantAskRequest.mock.calls[1]?.[0], {
+        action: "complete",
+        requestId: "ask_event_operator_diagnostic",
+        result: {
+          answer: "Synthetic diagnostic answer.",
+          outcome: "answered",
+        },
+      });
+    } finally {
+      await removeVaultRoot(groupRuntimeRoot);
+    }
+  });
+
   test("keeps usage-record failures isolated from ask completion", async () => {
     const vaultRoot = await createVaultRoot();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -1471,6 +1548,7 @@ function createPendingAsk(input: {
   currentSender?: boolean;
   eventId: string;
   itemId: string;
+  operator?: boolean;
 }): HostedSystemMailboxPendingItem {
   return {
     attemptCount: 0,
@@ -1487,7 +1565,16 @@ function createPendingAsk(input: {
     routeAction: "run-assistant-ask",
     status: "pending",
     wake: {
-      ask: input.currentSender
+      ask: input.operator
+        ? {
+            expiresAt: "2026-07-15T12:10:00.000Z",
+            question: "operator diagnostic question",
+            target: {
+              kind: "operator_task" as const,
+              taskId: "opt_synthetic_diagnostic",
+            },
+          }
+        : input.currentSender
         ? {
             expiresAt: "2026-07-15T12:10:00.000Z",
             origin: {

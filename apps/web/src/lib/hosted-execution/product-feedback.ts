@@ -6,7 +6,6 @@ import {
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
   isHostedProductSupportEscalationFeedback,
-  isHostedProductSupportEscalationSummary,
   sanitizeHostedProductFeedbackSummary,
   type HostedRuntimeProductFeedbackRecord,
   type HostedRuntimeProductFeedbackRecordResponse,

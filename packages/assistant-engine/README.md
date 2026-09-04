@@ -144,53 +144,27 @@ is not process cleanup.
 ## Read-only Assistant Ask
 
 `executeReadOnlyAssistantAsk`, exported from
-`@murphai/assistant-engine/assistant-ask`, is the one deliberate exception to
-the warm single-process path. It starts a separate one-shot Codex App Server
-child for a target-owned Assistant Ask, so its provider latency, failure, and
-interruption domain cannot block or poison the resident foreground process. The
-trusted caller supplies the authorized target workspace root plus one untrusted
-question; the executor owns no membership, routing, mailbox, retry, or delivery
-state and returns only one schema-checked bounded answer.
+`@murphai/assistant-engine/assistant-ask`, starts a separate one-shot Codex App
+Server child for detached group/member reads. The caller supplies the target
+workspace and question; the engine owns no membership, mailbox, retry,
+persistence, or delivery state. The native `murph-group-read` profile makes the
+workspace read-only and hides private runtime/configuration state. Joined-group
+asks alone may receive `murph.group/read_shared`.
 
-The child reuses the trusted hosted Codex home for minimum provider auth and
-configuration, but starts from a fresh empty working directory and removes that
-directory after the exact child exits. It uses process lifetime `one-shot`; its
-`thread/start` request sets `permissions = "murph-group-read"`, exact
-`runtimeWorkspaceRoots`, `ephemeral = true`, and approval policy `never` without
-legacy `sandbox`. The App Server response is not an authorization boundary;
-production-like Linux smoke proves the named profile's actual filesystem,
-environment, and network enforcement. The profile permits read-only access to
-the exact target roots
-while denying `.runtime/**`, `.codex/**`, environment files, writes, other
-workspaces, and tool network. Model-run shell commands inherit no provider
-credential or hosted secret. The child's only dynamic tool is the consent-aware
-lazy `murph.group/read_shared` read. It receives no mutation or delivery route,
-MCP, web search, memory, plugin, app, or multi-agent authority.
+`executeOperatorDiagnostic` is the direct authenticated-operator variant. It
+runs one turn with `murph-operator-diagnostic-read`, the bound workspace
+including `.runtime`, and only the hosted Codex `sessions/` directory as an
+optional second root. It has no writes, network, dynamic tools, project
+configuration, effects, or delivery authority, and returns directly to the
+caller's encrypted Ops-only result instead of entering member disclosure review.
 
-The runtime may keep one such child beside foreground work. It owns the exact
-process handle and must interrupt, await with bounded grace, terminate only
-that proven-owned child if needed, and prove exit before its workspace can be
-checkpointed, replaced, or released. Further asks remain pending in the
-existing hosted mailbox; assistant-engine does not add a process pool or
-scheduler.
-
-`executeConsentedReadOnlyAssistantAsk` is the disclosure-scoped composition of
-that primitive. Its first one-shot child reads the authorized personal
-workspace with the exact immutable permission context and proposes one bounded
-answer. A second, sequential, fresh-context one-shot child receives only that
-permission, the incoming question, and the proposed answer against an empty
-runtime root. It has no personal workspace, conversation history, dynamic
-tools, delivery route, network, or other authority and returns only `allow` or
-`deny`.
-
-There is no incoming model reviewer and no rewrite pass. The reviewer interprets
-the proposed answer in the context of the question because a terse confirmation
-can disclose the question's premise. An allow returns the candidate bytes
-unchanged; deny produces `cannot_answer`, while invalid output fails closed for
-the existing retry/expiry lifecycle. This executor still owns no grant,
-membership, routing, persistence, retry, completion, or delivery
-state. Web and the hosted runtime must revalidate those boundaries before the
-read and before exact-byte group delivery.
+Every detached turn uses a fresh temporary working directory, exact host-bound
+roots, approval policy `never`, and one-shot process lifetime. The hosted
+runtime owns cancellation and retries and permits at most one detached child
+beside the resident foreground process. `executeConsentedReadOnlyAssistantAsk`
+remains the member disclosure composition: a candidate runs under
+`murph-group-read`, then a second tool-free child may allow its exact bytes or
+return `cannot_answer`.
 
 Private grant discovery reuses `murph.group(action="list_memberships")`, whose
 successful result includes a top-level `disclosureGrants` array. The runtime

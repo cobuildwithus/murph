@@ -89,6 +89,7 @@ import {
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH,
+  HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH,
   HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH,
   HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
   HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH,
@@ -121,12 +122,17 @@ import {
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import { clearHostedRuntimeCryptoContextEnvelopeCacheForTests } from "../src/hosted-crypto/runtime-user-crypto-context.ts";
 import {
+  CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_ENDPOINT,
+} from "../src/internal-hosts.ts";
+import {
   handleRunnerOutboundRequest,
   type RunnerOutboundEnvironmentSource,
 } from "../src/runner-outbound.ts";
 import {
   HOSTED_RUNTIME_ARTIFACT_FETCH_CORRELATION_ID_HEADER,
   HOSTED_RUNTIME_ARTIFACT_READ_PURPOSE_HEADER,
+  HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
+  HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
   HOSTED_WEB_CONTROL_FORWARDED_RESPONSE_HEADER,
 } from "../src/runner-outbound/headers.ts";
 import {
@@ -217,6 +223,16 @@ type HostedSystemProgressProjection = Required<Pick<
   | "systemMailboxProgressGeneration"
 >>;
 const ALLOWLISTED_WEB_CONTROL_CASES = [
+  {
+    body: {
+      action: "authorize",
+      expiresAt: "2036-08-25T18:10:00.000Z",
+      requestId: "assistant.notification.requested:operator-task:opt_synthetic",
+      taskId: "opt_synthetic",
+    },
+    name: "hosted operator task control",
+    path: HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH,
+  },
   {
     body: {
       action: "upgrade_edge",
@@ -2326,6 +2342,132 @@ describe("handleRunnerOutboundRequest", () => {
       userId: "member_123",
     });
     expect(ownsActiveInvocationLease).not.toHaveBeenCalled();
+  });
+
+  it("records a container-origin completion against the exact durable write fence", async () => {
+    const recordRuntimeCompletionFromContainer = vi.fn(async () => ({
+      completed: true,
+    }));
+    const response = await handleRunnerOutboundRequest(
+      new Request(CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_ENDPOINT, {
+        body: JSON.stringify({
+          result: {
+            nextWakeAt: null,
+            status: "idle",
+          },
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          "x-hosted-runtime-attempt-id": "attempt_1",
+          "x-hosted-runtime-lease-generation": "9",
+          "x-hosted-runtime-workspace-version": "4",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return {
+              recordRuntimeCompletionFromContainer,
+            };
+          },
+        },
+      }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ completed: true });
+    expect(recordRuntimeCompletionFromContainer).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "9",
+      result: {
+        nextWakeAt: null,
+        status: "idle",
+      },
+      userId: "member_123",
+    });
+  });
+
+  it("returns a not-recorded container completion without a second authority read", async () => {
+    const recordRuntimeCompletionFromContainer = vi.fn(async () => ({
+      completed: false,
+    }));
+    const response = await handleRunnerOutboundRequest(
+      new Request(CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_ENDPOINT, {
+        body: JSON.stringify({ result: { status: "idle" } }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt_stale",
+          [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: "8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName: () => ({ recordRuntimeCompletionFromContainer }),
+        },
+      }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ completed: false });
+    expect(recordRuntimeCompletionFromContainer).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    {
+      body: JSON.stringify({ result: { status: "idle" } }),
+      headers: createRunnerProxyHeaders({
+        "content-type": "application/json; charset=utf-8",
+      }),
+      name: "missing fence authority",
+      status: 401,
+    },
+    {
+      body: "{",
+      headers: createRunnerProxyHeaders({
+        "content-type": "application/json; charset=utf-8",
+        [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt_malformed",
+        [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: "9",
+      }),
+      name: "malformed input",
+      status: 400,
+    },
+    {
+      body: JSON.stringify({
+        padding: "x".repeat(256 * 1024),
+        result: { status: "idle" },
+      }),
+      headers: createRunnerProxyHeaders({
+        "content-type": "application/json; charset=utf-8",
+        [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt_oversized",
+        [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: "10",
+      }),
+      name: "an oversized body",
+      status: 413,
+    },
+  ])("rejects container completion with $name", async ({ body, headers, status }) => {
+    const recordRuntimeCompletionFromContainer = vi.fn(async () => ({
+      completed: true,
+    }));
+    const response = await handleRunnerOutboundRequest(
+      new Request(CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_ENDPOINT, {
+        body,
+        headers,
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName: () => ({ recordRuntimeCompletionFromContainer }),
+        },
+      }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(status);
+    expect(recordRuntimeCompletionFromContainer).not.toHaveBeenCalled();
   });
 
   it("rejects workspace checkpoints when the live invocation lease is stale", async () => {

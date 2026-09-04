@@ -110,7 +110,7 @@ declare module 'incur' {
       'event import-jsonl': { args: {}; options: { requestId?: string; input: string; apply: boolean; sourceRawRefOnce?: string } }
       'event list': { args: {}; options: { requestId?: string; kind?: "adverse_effect" | "body_measurement" | "clinical_assertion" | "document" | "encounter" | "exposure" | "meal" | "measurement" | "symptom" | "note" | "observation" | "experiment_event" | "experiment_context" | "immunization" | "medication_intake" | "procedure" | "supplement_intake" | "test" | "activity_session" | "sleep_session" | "intervention_session"; from?: string; to?: string; tag?: string[]; experiment?: string; limit: number } }
       'event medication-intake add': { args: {}; options: { requestId?: string; medicationName: string; dose: number; unit: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
-      'event note add': { args: {}; options: { requestId?: string; note: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; tag?: string[] } }
+      'event note add': { args: {}; options: { requestId?: string; note: string; noteType?: string; relatedId?: string[]; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; tag?: string[] } }
       'event observation add': { args: {}; options: { requestId?: string; metric: string; value: number; unit: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
       'event payload-schema': { args: {}; options: { for: "import-jsonl"; kind: "symptom" | "note" | "observation" | "clinical_assertion" | "exposure" | "measurement" | "test" | "medication_intake" | "supplement_intake" | "activity_session" | "body_measurement" | "sleep_session" | "intervention_session" | "experiment_context" } }
       'event procedure add': { args: {}; options: { requestId?: string; procedure: string; status?: "ordered" | "planned" | "completed" | "cancelled"; occurredAt: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
@@ -309,7 +309,7 @@ declare module 'incur' {
       'vitals payload-schema': { args: {}; options: {} }
       'vitals save': { args: {}; options: { requestId?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; timeZone?: string; systolic?: number; diastolic?: number; heartRate?: number; respiratoryRate?: number; temperatureF?: number; temperatureC?: number; spo2?: number; weightLb?: number; heightIn?: number } }
       'vitals scaffold': { args: {}; options: { requestId?: string } }
-      'wearables activity list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
+      'wearables activity list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number; includeWorkoutDetails: boolean } }
       'wearables body list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
       'wearables day': { args: { date: string }; options: { requestId?: string; provider?: string[] } }
       'wearables drift': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; windowDays: number } }

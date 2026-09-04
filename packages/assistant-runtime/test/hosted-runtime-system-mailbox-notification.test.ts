@@ -1764,6 +1764,7 @@ describe("hosted system mailbox notification execution context", () => {
       },
       runtime,
     })).resolves.toEqual({
+      newerRevisionPending: true,
       nextWakeAt: immediateWakeAt,
       recorded: 1,
       stillDirty: true,
@@ -2221,6 +2222,10 @@ describe("hosted system mailbox notification execution context", () => {
         runtime,
         vaultRoot: workspace.vaultRoot,
       })).resolves.toEqual({
+        deviceSyncWake: {
+          at: "2026-04-05T00:03:00.000Z",
+          reason: "device-sync.reconcile",
+        },
         failed: 0,
         nextWakeAt: "2026-04-05T00:03:00.000Z",
         nextWakeReason: "device-sync.reconcile",
@@ -3464,6 +3469,10 @@ describe("hosted system mailbox notification execution context", () => {
         runtime,
         vaultRoot: workspace.vaultRoot,
       })).resolves.toEqual({
+        deviceSyncWake: {
+          at: retryAt,
+          reason: "device-sync.reconcile",
+        },
         failed: 0,
         nextWakeAt: retryAt,
         nextWakeReason: "device-sync.reconcile",
@@ -3505,6 +3514,497 @@ describe("hosted system mailbox notification execution context", () => {
         recorded: 0,
       });
       expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending).toEqual([]);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("uses a fresh webhook to admit the older exact local device retry", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const retryAt = "2026-04-28T00:00:00.000Z";
+    const connectionId = "dsc_webhook_admits_retained_retry";
+    const retainedWake = buildHostedExecutionDeviceSyncWake({
+      connectionId,
+      eventId: "device-sync.wake:retained-local-retry",
+      hint: {
+        jobs: [{
+          availableAt: retryAt,
+          dedupeKey: "retained-historical-job",
+          kind: "resource",
+          maxAttempts: 1,
+          payload: {},
+          priority: 30,
+        }],
+      },
+      occurredAt: FIXED_NOW,
+      provider: "junction",
+      reason: "reconcile_due",
+      userId: "member_123",
+    });
+    const webhookWake = buildHostedExecutionDeviceSyncWake({
+      connectionId,
+      eventId: "device-sync.wake:fresh-webhook",
+      occurredAt: "2026-04-27T00:00:01.000Z",
+      provider: "junction",
+      reason: "webhook_hint",
+      userId: "member_123",
+    });
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedDeviceSyncItem({
+          id: "mailbox_item_retained_local_retry",
+          laneSeq: "1",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: retainedWake,
+      });
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedDeviceSyncItem({
+          id: "mailbox_item_fresh_webhook",
+          laneSeq: "2",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: webhookWake,
+      });
+      await updateHostedSystemMailboxState(workspace.vaultRoot, (state) => ({
+        pending: state.pending.map((item) =>
+          item.itemId === "mailbox_item_retained_local_retry"
+            ? {
+                ...item,
+                attemptCount: 1,
+                lastAttemptAt: FIXED_NOW,
+                nextAttemptAt: retryAt,
+              }
+            : item
+        ),
+      }));
+
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["run-device-sync-wake"],
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      assert.equal(prepared?.status, "processed");
+      assert.equal(prepared.itemId, "mailbox_item_retained_local_retry");
+      assert.equal(prepared.item.nextAttemptAt, null);
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          wake: retainedWake,
+        }),
+      );
+      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending)
+        .toEqual([
+          expect.objectContaining({
+            itemId: "mailbox_item_fresh_webhook",
+            wake: webhookWake,
+          }),
+        ]);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("keeps a retained webhook admission edge only while a newer revision remains", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const retryAt = "2026-04-28T00:00:00.000Z";
+    const beforeRetryAt = "2026-04-27T00:10:00.000Z";
+    const immediateWakeAt = "2026-04-27T00:00:03.000Z";
+    const beforePayloadRetryAt = "2026-04-27T00:15:00.000Z";
+    const payloadRetryAt = "2026-04-27T00:20:00.000Z";
+    const connectionId = "dsc_webhook_edge_once";
+    const retainedWake = buildHostedExecutionDeviceSyncWake({
+      connectionId,
+      eventId: "device-sync.wake:retained-retry-once",
+      hint: {
+        jobs: [{
+          availableAt: retryAt,
+          dedupeKey: "retained-historical-job",
+          kind: "resource",
+          maxAttempts: 1,
+          payload: {},
+          priority: 30,
+        }],
+      },
+      occurredAt: FIXED_NOW,
+      provider: "junction",
+      reason: "reconcile_due",
+      userId: "member_123",
+    });
+    const payloadRetainedWake = buildHostedExecutionDeviceSyncWake({
+      ...retainedWake,
+      hint: {
+        jobs: [
+          ...(retainedWake.hint?.jobs ?? []),
+          {
+            availableAt: payloadRetryAt,
+            dedupeKey: "retained-payload-job",
+            kind: "resource",
+            maxAttempts: 1,
+            payload: {},
+            priority: 30,
+          },
+        ],
+      },
+    });
+    const scheduledWake = buildHostedExecutionDeviceSyncWake({
+      connectionId,
+      eventId: "device-sync.wake:scheduled-successor",
+      occurredAt: "2026-04-27T00:00:01.000Z",
+      provider: "junction",
+      reason: "reconcile_due",
+      userId: "member_123",
+    });
+    const webhookWake = buildHostedExecutionDeviceSyncWake({
+      connectionId,
+      eventId: "device-sync.wake:first-webhook-edge",
+      occurredAt: "2026-04-27T00:00:02.000Z",
+      provider: "junction",
+      reason: "webhook_hint",
+      userId: "member_123",
+    });
+    const laterWebhookWake = buildHostedExecutionDeviceSyncWake({
+      connectionId,
+      eventId: "device-sync.wake:later-webhook-edge",
+      occurredAt: beforeRetryAt,
+      provider: "junction",
+      reason: "webhook_hint",
+      userId: "member_123",
+    });
+    const ackDirtyStateProcessed = vi.fn()
+      .mockResolvedValueOnce({
+        connectionId,
+        dirtyRevision: "2",
+        nextWakeAt: immediateWakeAt,
+        processedRevision: "1",
+        recorded: true,
+        stillDirty: true,
+        userId: "member_123",
+      })
+      .mockResolvedValueOnce({
+        connectionId,
+        dirtyRevision: "2",
+        nextWakeAt: null,
+        processedRevision: "2",
+        recorded: true,
+        stillDirty: false,
+        userId: "member_123",
+      })
+      .mockResolvedValueOnce({
+        connectionId,
+        dirtyRevision: "3",
+        nextWakeAt: immediateWakeAt,
+        processedRevision: "3",
+        recorded: true,
+        stillDirty: true,
+        userId: "member_123",
+      })
+      .mockResolvedValueOnce({
+        connectionId,
+        dirtyRevision: "3",
+        nextWakeAt: null,
+        processedRevision: "3",
+        recorded: true,
+        stillDirty: false,
+        userId: "member_123",
+      });
+    const runtime = createRuntime({
+      deviceSyncPort: {
+        ...createDeviceSyncPortStub(),
+        ackDirtyStateProcessed,
+      },
+    });
+    const mockRetainedPass = (processedRevision: string) => {
+      mocks.executeHostedMailboxEvent.mockResolvedValueOnce({
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "device-sync",
+        nextWakeAt: retryAt,
+        postCheckpointRecord: {
+          kind: "device-sync.dirty-processed-batch",
+          records: [{ connectionId, processedRevision }],
+          retainMailboxItemUntil: retryAt,
+          retainedWake,
+        },
+        redactedLogEntries: [],
+      });
+    };
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedDeviceSyncItem({
+          id: "mailbox_item_retained_retry_once",
+          laneSeq: "1",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: retainedWake,
+      });
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedDeviceSyncItem({
+          id: "mailbox_item_scheduled_successor",
+          laneSeq: "2",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: scheduledWake,
+      });
+      await updateHostedSystemMailboxState(workspace.vaultRoot, (state) => ({
+        pending: state.pending.map((item) =>
+          item.itemId === "mailbox_item_retained_retry_once"
+            ? {
+                ...item,
+                attemptCount: 1,
+                lastAttemptAt: FIXED_NOW,
+                nextAttemptAt: retryAt,
+              }
+            : item
+        ),
+      }));
+
+      const scheduledOnly = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["run-device-sync-wake"],
+        executionContext: null,
+        now: () => FIXED_NOW,
+        retainProcessedItemUntilRecorded: true,
+        runtime,
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(scheduledOnly, null);
+
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedDeviceSyncItem({
+          id: "mailbox_item_first_webhook_edge",
+          laneSeq: "3",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: webhookWake,
+      });
+      mockRetainedPass("1");
+
+      const firstPass = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["run-device-sync-wake"],
+        executionContext: null,
+        now: () => FIXED_NOW,
+        retainProcessedItemUntilRecorded: true,
+        runtime,
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(firstPass?.status, "processed");
+      assert.equal(firstPass.itemId, "mailbox_item_retained_retry_once");
+      assert.equal(firstPass.item.nextAttemptAt, null);
+
+      await expect(recordHostedSystemMailboxItemAfterCheckpoint({
+        item: firstPass.item,
+        runtime,
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toEqual({
+        deviceSyncWake: {
+          at: immediateWakeAt,
+          reason: "device-sync.reconcile",
+        },
+        failed: 0,
+        nextWakeAt: immediateWakeAt,
+        nextWakeReason: "device-sync.reconcile",
+        recorded: 1,
+      });
+
+      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending)
+        .toEqual([
+          expect.objectContaining({
+            itemId: "mailbox_item_retained_retry_once",
+            nextAttemptAt: retryAt,
+            wake: retainedWake,
+          }),
+          expect.objectContaining({
+            itemId: "mailbox_item_scheduled_successor",
+            nextAttemptAt: null,
+            wake: scheduledWake,
+          }),
+          expect.objectContaining({
+            itemId: "mailbox_item_first_webhook_edge",
+            nextAttemptAt: null,
+            wake: webhookWake,
+          }),
+        ]);
+
+      mockRetainedPass("2");
+      const remainingDirtyPass = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["run-device-sync-wake"],
+        executionContext: null,
+        now: () => beforeRetryAt,
+        retainProcessedItemUntilRecorded: true,
+        runtime,
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(remainingDirtyPass?.status, "processed");
+      assert.equal(remainingDirtyPass.itemId, "mailbox_item_retained_retry_once");
+
+      await expect(recordHostedSystemMailboxItemAfterCheckpoint({
+        item: remainingDirtyPass.item,
+        runtime,
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toEqual({
+        deviceSyncWake: {
+          at: retryAt,
+          reason: "device-sync.reconcile",
+        },
+        failed: 0,
+        nextWakeAt: retryAt,
+        nextWakeReason: "device-sync.reconcile",
+        recorded: 1,
+      });
+
+      const repeatBeforeRetry = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["run-device-sync-wake"],
+        executionContext: null,
+        now: () => beforeRetryAt,
+        retainProcessedItemUntilRecorded: true,
+        runtime,
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(repeatBeforeRetry, null);
+
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedDeviceSyncItem({
+          id: "mailbox_item_later_webhook_edge",
+          laneSeq: "4",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: laterWebhookWake,
+      });
+      mocks.executeHostedMailboxEvent.mockResolvedValueOnce({
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "device-sync",
+        nextWakeAt: payloadRetryAt,
+        postCheckpointRecord: {
+          kind: "device-sync.dirty-processed-batch",
+          records: [{
+            connectionId,
+            nextWakeAt: payloadRetryAt,
+            processedRevision: "3",
+          }],
+          retainMailboxItemUntil: payloadRetryAt,
+          retainedWake: payloadRetainedWake,
+        },
+        redactedLogEntries: [],
+      });
+
+      const payloadBackoffPass = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["run-device-sync-wake"],
+        executionContext: null,
+        now: () => beforeRetryAt,
+        retainProcessedItemUntilRecorded: true,
+        runtime,
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(payloadBackoffPass?.status, "processed");
+      assert.equal(payloadBackoffPass.itemId, "mailbox_item_retained_retry_once");
+
+      await expect(recordHostedSystemMailboxItemAfterCheckpoint({
+        item: payloadBackoffPass.item,
+        runtime,
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toEqual({
+        deviceSyncWake: {
+          at: payloadRetryAt,
+          reason: "device-sync.reconcile",
+        },
+        failed: 0,
+        nextWakeAt: payloadRetryAt,
+        nextWakeReason: "device-sync.reconcile",
+        recorded: 1,
+      });
+
+      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending)
+        .toEqual([
+          expect.objectContaining({
+            itemId: "mailbox_item_retained_retry_once",
+            nextAttemptAt: payloadRetryAt,
+            wake: payloadRetainedWake,
+          }),
+          expect.objectContaining({
+            itemId: "mailbox_item_scheduled_successor",
+            nextAttemptAt: null,
+          }),
+          expect.objectContaining({
+            itemId: "mailbox_item_first_webhook_edge",
+            nextAttemptAt: retryAt,
+          }),
+          expect.objectContaining({
+            itemId: "mailbox_item_later_webhook_edge",
+            nextAttemptAt: payloadRetryAt,
+          }),
+        ]);
+
+      const repeatBeforePayloadRetry = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["run-device-sync-wake"],
+        executionContext: null,
+        now: () => beforePayloadRetryAt,
+        retainProcessedItemUntilRecorded: true,
+        runtime,
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(repeatBeforePayloadRetry, null);
+
+      mockRetainedPass("3");
+      const payloadRetryPass = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["run-device-sync-wake"],
+        executionContext: null,
+        now: () => payloadRetryAt,
+        retainProcessedItemUntilRecorded: true,
+        runtime,
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(payloadRetryPass?.status, "processed");
+      assert.deepEqual(payloadRetryPass.item.wake, payloadRetainedWake);
+
+      await expect(recordHostedSystemMailboxItemAfterCheckpoint({
+        item: payloadRetryPass.item,
+        runtime,
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toEqual({
+        deviceSyncWake: {
+          at: retryAt,
+          reason: "device-sync.reconcile",
+        },
+        failed: 0,
+        nextWakeAt: retryAt,
+        nextWakeReason: "device-sync.reconcile",
+        recorded: 1,
+      });
+
+      const repeatAfterPayloadRetry = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["run-device-sync-wake"],
+        executionContext: null,
+        now: () => beforePayloadRetryAt,
+        retainProcessedItemUntilRecorded: true,
+        runtime,
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(repeatAfterPayloadRetry, null);
+      expect(mocks.executeHostedMailboxEvent.mock.calls.map((call) =>
+        call[0]?.wake?.eventId
+      )).toEqual([
+        "device-sync.wake:retained-retry-once",
+        "device-sync.wake:retained-retry-once",
+        "device-sync.wake:retained-retry-once",
+        "device-sync.wake:retained-retry-once",
+      ]);
+      expect(ackDirtyStateProcessed.mock.calls.map((call) =>
+        call[0]?.processedRevision
+      )).toEqual(["1", "2", "3", "3"]);
     } finally {
       await workspace.cleanup();
     }

@@ -139,18 +139,13 @@ export default async function HomePage() {
   const signupCta: HomepageSignupCta = authenticated
     ? {
         body: "Manage billing and connected wearables from one place.",
-        eyebrow: "Welcome back",
         metaItems: ["Subscription and billing", "Wearable connections"],
-        note: null,
         signupLabel: "Go to dashboard",
         title: "You’re already set up.",
       }
     : {
         body: null,
-        eyebrow: "Sign up",
         metaItems: ["Free starter usage", "Open source"],
-        note:
-          "Starter usage does not expire. No card required; choose a plan when you need more.",
         signupLabel: "Get started",
         title: "Whatever your goal, you don’t have to hit it alone.",
       };
@@ -187,7 +182,7 @@ export default async function HomePage() {
         <TogetherSection />
         <AsksGridSection />
         <TrustSection />
-        <MealPhotosSection />
+        <MealPhotosSection authenticated={authenticated} />
         <NutritionSection />
         <EnvironmentSection />
         <PersonasSection murphHeadshotSrc={murphHeadshotSrc} />

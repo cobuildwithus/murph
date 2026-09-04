@@ -809,6 +809,7 @@ test("buildHostedWebContentSecurityPolicy includes Privy, WalletConnect, and hos
   assert.match(csp, /script-src [^;]*https:\/\/challenges\.cloudflare\.com/);
   assert.match(csp, /script-src-attr 'none'/);
   assert.match(csp, /style-src 'self' 'unsafe-inline'/);
+  assert.match(csp, /img-src [^;]*https:\/\/cdn\.brandfetch\.io/);
   assert.match(csp, /manifest-src 'self'/);
   assert.match(csp, /media-src 'self' blob:/);
   assert.match(csp, /object-src 'none'/);
@@ -829,8 +830,20 @@ test("buildHostedWebContentSecurityPolicy includes Privy, WalletConnect, and hos
   assert.match(csp, /connect-src [^;]*https:\/\/\*\.rpc\.privy\.systems/);
   assert.match(csp, /connect-src [^;]*https:\/\/explorer-api\.walletconnect\.com/);
   assert.match(csp, /connect-src [^;]*https:\/\/status\.withmurph\.ai/);
+  assert.match(csp, /connect-src [^;]*https:\/\/api\.brandfetch\.io/);
+  assert.match(csp, /img-src [^;]*https:\/\/cdn\.brandfetch\.io/);
   assert.match(csp, /upgrade-insecure-requests/);
   assert.doesNotMatch(csp, /'unsafe-eval'/);
+});
+
+test("next.config permits only the Brandfetch CDN for remote brand images", () => {
+  assert.deepEqual(productionNextConfig.images?.remotePatterns, [
+    {
+      protocol: "https",
+      hostname: "cdn.brandfetch.io",
+      pathname: "/**",
+    },
+  ]);
 });
 
 test("buildHostedWebContentSecurityPolicy keeps production script origins on a tight allowlist", () => {

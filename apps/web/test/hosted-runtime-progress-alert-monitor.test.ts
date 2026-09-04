@@ -581,7 +581,35 @@ describe("hosted runtime progress alert monitor", () => {
     expect(sendAlert).toHaveBeenCalledTimes(2);
   });
 
-  it("defers an overdue reminder through quiet hours and resumes in the morning", async () => {
+  it("sends a first progress alert during quiet hours", async () => {
+    const quietNow = instant("2026-08-11T06:20:00.000Z");
+    const fixture = createProgressMonitorFixture([
+      progressRow({
+        progressOriginAt: "2026-08-11T05:00:00.000Z",
+        lane: "system",
+        runtimeKey: "runtime_private",
+      }),
+    ]);
+    const sendAlert = vi.fn(async (_input: AlertSendInput) => {
+      void _input;
+      return { providerMessageId: "provider-message" };
+    });
+
+    const result = await runHostedRuntimeProgressAlertMonitor({
+      env: alertEnv,
+      now: quietNow,
+      prisma: fixture.prisma,
+      sendAlert,
+    });
+
+    expect(result.outcome).toBe("alert_sent");
+    expect(sendAlert).toHaveBeenCalledTimes(1);
+    expect(sendAlert.mock.calls[0]?.[0].text).toContain(
+      "Murph runtime progress alert.",
+    );
+  });
+
+  it("sends an overdue progress reminder during quiet hours", async () => {
     const initialNow = instant("2026-08-11T00:00:00.000Z");
     const fixture = createProgressMonitorFixture([
       progressRow({
@@ -607,15 +635,8 @@ describe("hosted runtime progress alert monitor", () => {
       prisma: fixture.prisma,
       sendAlert,
     });
-    const morning = await runHostedRuntimeProgressAlertMonitor({
-      env: alertEnv,
-      now: instant("2026-08-11T14:20:00.000Z"),
-      prisma: fixture.prisma,
-      sendAlert,
-    });
 
-    expect(overnight.outcome).toBe("deferred_quiet_hours");
-    expect(morning.outcome).toBe("alert_sent");
+    expect(overnight.outcome).toBe("alert_sent");
     expect(sendAlert).toHaveBeenCalledTimes(2);
     expect(sendAlert.mock.calls[1]?.[0].text).toContain(
       "Murph runtime progress reminder.",

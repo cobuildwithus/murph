@@ -4337,8 +4337,12 @@ describe('assistant cron runtime orchestration', () => {
     })
 
     const providerInput = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
-      | { instructions?: string }
+      | {
+          instructions?: string
+          outboxAutomationContextReferences?: AssistantOutboxIntent['automationContextReferences']
+        }
       | undefined
+    expect(providerInput?.outboxAutomationContextReferences).toBeNull()
     expect(providerInput?.instructions).toContain(
       'Independent automation authority (engine-supplied):',
     )
@@ -5880,6 +5884,7 @@ describe('assistant cron runtime orchestration', () => {
       )
       const canonicalJob = await createCanonicalJob(vaultRoot, 'yield-in-flight')
       let shouldYield = false
+      const events: AssistantRunEvent[] = []
       cronMocks.sendAssistantMessageLocal.mockImplementationOnce(
         async (input: { abortSignal?: AbortSignal }) => {
           expect(input.abortSignal?.aborted).toBe(false)
@@ -5892,6 +5897,7 @@ describe('assistant cron runtime orchestration', () => {
 
       const summary = await processDueAssistantCronJobsLocal({
         limit: 1,
+        onEvent: (event) => events.push(event),
         shouldYield: () => shouldYield,
         vault: vaultRoot,
       })
@@ -5920,6 +5926,15 @@ describe('assistant cron runtime orchestration', () => {
       expect(current.state.lastFailedAt).toBeNull()
       expect(current.state.consecutiveFailures).toBe(0)
       expect(current.state.nextRunAt).toBe('2026-04-08T10:20:10.050Z')
+      expect(events).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          failureContext: expect.objectContaining({
+            retryScheduled: true,
+            runOutcome: 'failed',
+          }),
+          type: 'cron.job.completed',
+        }),
+      ]))
     } finally {
       vi.useRealTimers()
     }
@@ -7107,13 +7122,16 @@ describe('assistant cron runtime orchestration', () => {
           failureContext: expect.objectContaining({
             automationSlug: 'expired-one-shot-reminder',
             latenessMinutes: 240,
+            occurrenceAt: '2026-04-08T09:00:00.000Z',
           }),
           safeDetails: 'cron_occurrence_expired',
           type: 'cron.occurrence.expired',
         }),
         expect.objectContaining({
           failureContext: expect.objectContaining({
+            automationSlug: 'expired-one-shot-reminder',
             errorPresent: true,
+            occurrenceAt: '2026-04-08T09:00:00.000Z',
             runOutcome: 'expired',
             scheduleKind: 'at',
             sourceKind: 'automation',
@@ -7829,6 +7847,7 @@ describe('assistant cron runtime orchestration', () => {
           failureContext: expect.objectContaining({
             errorCode: 'ASSISTANT_CODEX_USAGE_LIMIT',
             errorPresent: true,
+            retryScheduled: true,
             runOutcome: 'failed',
             scheduleKind: 'at',
             sourceKind: 'automation',
@@ -7863,9 +7882,16 @@ describe('assistant cron runtime orchestration', () => {
       },
     )
     cronMocks.sendAssistantMessageLocal.mockRejectedValueOnce(error)
+    const events: Array<{
+      failureContext?: Record<string, boolean | number | string | null>
+      type: string
+    }> = []
 
     const summary = await processDueAssistantCronJobsLocal({
       limit: 1,
+      onEvent: (event) => {
+        events.push(event)
+      },
       vault: vaultRoot,
     })
 
@@ -7885,6 +7911,15 @@ describe('assistant cron runtime orchestration', () => {
       'Hosted Linq egress authority assertion request failed.',
     )
     expect(runtimeRecord?.state.consecutiveFailures).toBe(0)
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        failureContext: expect.objectContaining({
+          retryScheduled: false,
+          runOutcome: 'failed',
+        }),
+        type: 'cron.job.completed',
+      }),
+    ]))
     await expect(
       listAssistantCronRuns({
         job: canonicalJob.jobId,
@@ -9111,6 +9146,85 @@ describe('assistant cron runtime orchestration', () => {
     expect(stillRunning.state.runningAt).toBe('2026-04-08T12:30:00.000Z')
     expect(stillRunning.state.runningPid).toBe(222)
     expect(stillRunning.state.lastSucceededAt).toBeNull()
+  })
+
+  it('recovers a fresh one-shot canonical claim from its only future wake and becomes quiescent', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:10:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-running-recovery-wake-',
+    )
+    const job = await addAssistantCronJob({
+      channel: 'telegram',
+      deliveryTarget: 'room-1',
+      name: 'running-recovery-wake',
+      now: new Date('2026-04-08T08:00:00.000Z'),
+      prompt: 'Recover the stranded one-shot occurrence.',
+      resolveTargetDefaults: false,
+      schedule: {
+        at: '2026-04-08T10:00:00.000Z',
+        kind: 'at',
+      },
+      threadIsDirect: true,
+      vault: vaultRoot,
+    })
+
+    await updateCanonicalRuntimeState(vaultRoot, job.jobId, (record) => ({
+      ...record,
+      state: {
+        ...record.state,
+        pendingOccurrenceAt: '2026-04-08T10:00:00.000Z',
+        runningAt: '2026-04-08T10:05:00.000Z',
+        runningClaimId: 'claim_running_recovery_wake',
+        runningPid: 42,
+      },
+      updatedAt: '2026-04-08T10:05:00.000Z',
+    }))
+
+    await expect(getAssistantCronStatus(vaultRoot)).resolves.toEqual({
+      dueJobs: 0,
+      enabledJobs: 1,
+      nextRunAt: '2026-04-08T11:05:00.001Z',
+      runningJobs: 1,
+      totalJobs: 1,
+    })
+
+    vi.setSystemTime(new Date('2026-04-08T11:05:00.000Z'))
+    await expect(getAssistantCronStatus(vaultRoot)).resolves.toMatchObject({
+      dueJobs: 0,
+      nextRunAt: '2026-04-08T11:05:00.001Z',
+      runningJobs: 1,
+    })
+
+    vi.setSystemTime(new Date('2026-04-08T11:05:00.001Z'))
+    await expect(getAssistantCronStatus(vaultRoot)).resolves.toMatchObject({
+      dueJobs: 1,
+      nextRunAt: '2026-04-08T10:00:00.000Z',
+      runningJobs: 0,
+    })
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 0,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    await expect(getAssistantCronStatus(vaultRoot)).resolves.toMatchObject({
+      dueJobs: 0,
+      nextRunAt: null,
+      runningJobs: 0,
+    })
+
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(
+      resolveAssistantStatePaths(vaultRoot),
+      { reclaimStaleRunningClaims: false },
+    )
+    expect(runtimeStore.jobs.find((record) => record.jobId === job.jobId))
+      .toBeUndefined()
   })
 
   it('does not run or append a canonical cron result after the claim is replaced', async () => {

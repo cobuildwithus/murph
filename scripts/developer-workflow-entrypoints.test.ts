@@ -335,6 +335,30 @@ describe("pre-commit fixture identity", () => {
   });
 });
 
+describe("review candidate commit documentation", () => {
+  it("keeps directory expansion with final plan closure", () => {
+    const completionWorkflow = readFileSync(
+      path.join(
+        repoRoot,
+        "agent-docs",
+        "operations",
+        "completion-workflow.md",
+      ),
+      "utf8",
+    );
+
+    expect(completionWorkflow).toContain(
+      "`scripts/committer` requires every changed file to be listed explicitly",
+    );
+    expect(completionWorkflow).toContain(
+      "rejects directory targets",
+    );
+    expect(completionWorkflow).toContain(
+      "Directory expansion belongs only to\n   `scripts/finish-task`",
+    );
+  });
+});
+
 describe("pre-commit CLI schema generation", () => {
   it("documents the narrow ordinary merge-commit exception", () => {
     const agents = readFileSync(path.join(repoRoot, "AGENTS.md"), "utf8");

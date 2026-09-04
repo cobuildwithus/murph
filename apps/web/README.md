@@ -104,7 +104,8 @@ Verification uses natural traffic only. From the Web deployment-ready timestamp
 through the next natural occurrence, filter Vercel logs by the exact message and
 schema, then count grouped only by message, `stage`, and `errorClass`. The record
 is additive and Web-only: older deployments and readers tolerate its absence,
-and rollback is an ordinary Web rollback with no state or cross-plane drain.
+and recovery uses a fresh revert or forward-fix commit on `main` so the replacement
+deployment receives current production admission.
 
 ## Health-data withdrawal rollback floor
 
@@ -723,6 +724,7 @@ Optional but recommended:
 - `HOSTED_WEB_BASE_URL`
 - `MURPH_LABELS_DB_URL` for the shared product labels Postgres database required by `/api/foods` and `/api/supplements`
 - `MURPH_DATA_API_KEY` for server-to-server data API auth on `/api/foods` and `/api/supplements`; hosted Cloudflare owns the same secret for Worker-side injection and the key must not be exposed to browsers or runner env
+- `BRANDFETCH_CLIENT_ID` enables brand logos on the public `/food` page. It is a browser-safe Brandfetch client identifier, not server authority. The page searches Brandfetch with a bounded brand and broad food category, accepts only matching brand names from the fixed Brandfetch CDN, falls back to local category art, and keeps results only in page memory.
 - `CRON_SECRET`
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK`
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`
@@ -793,10 +795,15 @@ product-threshold application rows.
 Attribution lives under `sql/product-tests/`.
 
 The current search path uses built-in Postgres full-text search plus the
-`pg_trgm` extension for indexed name similarity. Public food searches retain
-their existing 250-candidate SQL bound, and supplement searches retain their
-existing ranking path. Private food-name search uses a separate bounded
-retrieval contract for the roughly two-million-row foods corpus: it admits at
+`pg_trgm` extension for indexed name similarity. Public and private food-name
+searches share the bounded retrieval path for the roughly two-million-row foods
+corpus. Public search keeps at most 250 deduplicated candidates before its
+optional comparison-readiness filter and bounded page selection. Food callers
+can request an evidence-first order for related comparison choices. That order
+checks exact indexed `product_tests.food_id` links inside the bounded candidate
+set, then prefers records with a reported package size, then keeps the existing
+relevance order. It does not claim sales or usage popularity. Supplement
+searches retain their existing ranking path. Food retrieval admits at
 most 250 literal exact-name rows and 10,000 GIN full-text matches before
 similarity scoring, canonical-key deduplication, and window sorting. When the
 GIN set reaches that cap and may be truncated, one GiST branch admits up to
@@ -853,18 +860,40 @@ fields; an older importer requires an explicit constraint rollback first.
 
 ## Murph Safe public product data
 
-`/search` exposes the public Murph Safe product-evidence experience. Its browser
-search calls `POST /api/public/v1/products/search`; server-rendered product
-details use the same service as
+`/search` exposes the public Murph Safe product-evidence experience. `/food`
+uses the same records for a conclusion-first comparison of up to ten branded
+foods. Browser searches call `POST /api/public/v1/products/search`;
+server-rendered product details use the same service as
 `GET /api/public/v1/products/[productRef]`. The generated OpenAPI 3.1 document
 is available at `/api/public/v1/openapi.json`, and the current schema id is
 `murph.public-products.v1`.
+
+On `/food`, autocomplete keeps relevance order. Category comparisons and the
+related-product grid use a dated US Google Shopping brand snapshot for 342 food
+queries. The database keeps category relevance and usable nutrition as gates,
+spreads results across brands, then uses exact-linked test count as a secondary
+signal. It rejects empty, zero-only, and physically impossible nutrition rows.
+A single exact food derives a peer category when the local food taxonomy can
+identify one, so a branded soda can lead to other sodas.
+Share URLs contain only public product references and the nutrition basis. They
+never contain the typed search query.
 
 The public catalog includes current supplement and branded-food sources and
 excludes generic food origins. Search and detail DTOs are bounded normalized
 projections; product tests join only through the selected row's exact
 `food_id` or `supplement_id`. Search terms stay in POST bodies and are not
 echoed, persisted, analyzed, or logged.
+
+Compatible browsers expose four page-scoped, read-only WebMCP tools while
+`/food` is open: `search_food_products`, `compare_food_products`,
+`get_food_comparison`, and `show_food_evidence`. The tools use exact public
+product references and update the same visible page state as manual controls.
+Comparison results carry returned, total, and truncated observation scope so a
+bounded evidence response cannot look complete to an agent. They also include
+the same four nutrition values, complete-row winners, ties, and the row-win
+counts behind the visible rows-led caption.
+One abort signal removes every registration when the page unmounts. This is a
+browser surface, not a remote MCP server, and it adds no account or vault access.
 
 Before a production build, configure these Production-scoped server values:
 
@@ -977,8 +1006,8 @@ Hosted onboarding extras:
   row cap; execution that starts after denial is measured from its earliest
   milestone even when ingress is older than that window. The monitor sends
   no alert for scheduled automation turns, including Flex-tier turns, because
-  they do not own a user-ingress reply trace. The monitor sends one email per
-  continuous incident, suppresses sends from 11 PM through 7 AM
+  they do not own a user-ingress reply trace. The latency monitor sends one
+  email per continuous incident, suppresses sends from 11 PM through 7 AM
   operator-local time, and adds up to ten minutes of stable wake/retry jitter.
   The existing seven-day trace cleanup retires a trace only when both ingress
   and latest activity are stale, so recent resumed work remains observable
@@ -1011,8 +1040,10 @@ Hosted onboarding extras:
   lane, age, and pending-item counts only. It has its own singleton incident
   row, so an active reply-latency incident cannot suppress a newly discovered
   progress stall. While one progress incident remains anomalous, the same row
-  sends a fresh aggregate reminder every six hours plus stable jitter, outside
-  quiet hours. Each fresh reminder claim persists a new generation identity
+  sends a fresh aggregate reminder every six hours plus stable jitter,
+  including during quiet hours. The first progress alert also bypasses the
+  shared quiet-hours deferral. Each fresh reminder claim persists a new
+  generation identity
   before Resend, while an ambiguous retry reuses that identity and the exact
   body. The latency monitor remains one email per continuous incident. Recovery
   silently rearms each monitor independently and sends no recovery email.
@@ -1322,17 +1353,22 @@ Callback auth contract:
   authority and seals only from that scoped cache entry, with one full retry on
   typed root drift. Legacy transaction append surfaces remain for separately
   migrated callers and are not the transaction-safe generic entrypoint.
-- `POST /api/internal/hosted-runtime/owner-released` is the payload-free
-  completion handoff. Web accepts a zero-byte body and either no query or the
-  exact signature-bound `immediateRecheckRequested=1` positive edge, binds the
-  user through the signed request plus normal nonce protection, and emits the
-  existing `runtime_recheck_requested` Temporal signal. Without the edge, Web
-  signals only for current runnable mailbox lag; a persisted default or
-  retention wake is not itself signal authority. The edge means the completed
-  invocation newly committed an unserviced schedule and carries no wake data.
-  Known future mailbox retry continuations remain deferred. Cloudflare calls the
-  route at most once, with a timeout capped at two seconds, only after exact
-  write-fence completion; failure is non-fatal and has no callback retry.
+- `POST /api/internal/hosted-runtime/owner-released` is the pointer-only
+  completion handoff. Web accepts a zero-byte body and a signed query containing
+  the opaque released `runtimeAttemptId`, plus the optional exact
+  `immediateRecheckRequested=1` positive edge. It binds the user through the
+  signed request plus normal nonce protection. Without the positive edge, Web
+  emits a signal only when current runnable mailbox lag or a live system mailbox
+  item beyond the handled-through frontier remains. Exact callbacks use
+  `runtime_owner_released`, which Temporal matches before releasing an
+  accepted-owner horizon; legacy pointerless callbacks use the facts-only
+  `runtime_recheck_requested` signal during rollout. A persisted default or
+  retention wake alone is not signal authority. The positive edge means the
+  completed invocation newly committed an unserviced schedule and carries no
+  wake data. Known future mailbox retry continuations remain deferred.
+  Cloudflare calls the route at most once, with a timeout capped at two seconds,
+  only after exact write-fence completion; failure is non-fatal and has no
+  callback retry.
 
 When you set `DEVICE_SYNC_PUBLIC_BASE_URL`, use the same stable production
 hostname as every first-party hosted app-session URL that can serve the OAuth
@@ -1660,11 +1696,12 @@ registers it with Vercel Fluid Compute, and passes that same pool to
 its existing cleanup contract. Keep session-persistent setup such as connection
 `SET` hooks out of this path because transaction pooling can move consecutive
 transactions between backend connections. The default pool limit is 15 clients
-per module runtime, with five seconds for connection acquisition and 30 seconds
-for idle retirement; tune those values only from measured pool and database
-pressure. Connection failure logs expose only fixed operation/source labels,
-retry attempt and disposition, the configured pool limit, and numeric
-pre-attempt and post-failure pool counts.
+per module runtime, with five seconds each for connection acquisition and idle
+retirement. Vercel's pool attachment extends the active invocation through that
+idle window, so keep it short and tune it only from measured invocation, pool,
+and database pressure. Connection failure logs expose only fixed
+operation/source labels, retry attempt and disposition, the configured pool
+limit, and numeric pre-attempt and post-failure pool counts.
 
 That module permits one jittered retry only for ambiguous transient failures
 that prove the database did no work. A `pool_checkout_timeout` means the
@@ -1707,10 +1744,9 @@ Destructive contract cleanup belongs under
 `Hosted Web Contract Migrations` GitHub workflow after Vercel reports a
 successful production deployment. That workflow only accepts Vercel-originated
 completed production deployment statuses, checks out the exact deployed commit,
-verifies it is reachable from `origin/main`, and requires the current main tip
-to be the deployment serving the configured production base domain. A stale
-current-main release fails instead of being reported as a successful no-op;
-late events for older main ancestors remain safe no-op candidates. The workflow
+requires it to equal current `origin/main`, and requires that exact commit to be
+the deployment serving the configured production base domain. Stale or late
+deployment events fail before database authority is exposed. The workflow
 then enumerates and proves every production custom domain against the event's
 exact deployment id, waits
 `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` seconds for prior production
@@ -1724,9 +1760,9 @@ It requires
 `HOSTED_WEB_PRODUCTION_BASE_URL`, and `HOSTED_WEB_DIRECT_DATABASE_URL` in
 GitHub Actions; `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` defaults to
 `300` and is capped at `600` unless the workflow timeout is raised. The workflow
-does not use GitHub Actions concurrency for this lane; the final alias check and
-the contract migration advisory lock make stale or duplicate runs skip safely
-without letting stale events replace valid pending runs. After those gates, it calls
+does not use GitHub Actions concurrency for this lane; the final alias check
+rejects stale runs, and the contract migration advisory lock serializes exact
+deployment retries before the migration ledger is evaluated. After those gates, it calls
 `pnpm --dir apps/web release:production:contract-migrate` with explicit opt-in.
 The public workflow is verification-only: it does not assign aliases, promote a
 deployment, or roll production back.
@@ -2056,24 +2092,21 @@ This branch is a greenfield hosted-runtime cutover. If you have an older local
 database from the superseded run/ingress/cursor chain, reset it before
 reapplying migrations.
 
-## Local Vercel prebuilt deployment
+## Production deployment ownership
 
-Use the repository-owned local prebuilt boundary instead of running a bare
-`vercel build` followed by `vercel deploy --prebuilt`:
+The Vercel Git integration is the only production deployment owner. Every
+commit pushed to `main` creates one managed production candidate; no
+repository ignore command may suppress that candidate. The candidate remains
+off the production domains until its configured Deployment Checks, including
+`Temporal Web production admission`, pass for that exact current commit.
 
-```bash
-pnpm --dir apps/web vercel:deploy:prebuilt -- --prod
-```
-
-Omit `--prod` for a preview deployment. The command runs `vercel build`,
-captures the SDK-generated Workflow function config in an ephemeral local file
-before the normal generated-source cleanup, and applies every exact generated
-trigger to the resolved final function bundle. It handles distinct functions
-and Next.js-deduplicated route links, revalidates the finished Build Output
-artifact, removes the captured evidence, and starts `vercel deploy --prebuilt`
-only after that proof succeeds. Missing, malformed, escaping, or conflicting
-evidence stops before upload. Managed Vercel builds continue to use the
-checked-in `vercel.json` build command and do not use this local boundary.
+Do not deploy production from the local CLI, promote an existing deployment,
+use Instant Rollback, or force-promote past a Deployment Check. Those paths do
+not create fresh compatibility evidence against current private `main` and live
+Temporal readers. Vercel access must withhold Full Production Deployment
+authority from ordinary operators and automation. Recover by reverting or
+forward-fixing on `main`; the new commit creates a fresh managed deployment and
+reruns production admission before domains move.
 
 ## Local dev aids
 
@@ -2206,7 +2239,7 @@ deleted sharing CRUD, local-vault import callbacks, or an outbox drain route. It
 still uses narrow signed hosted-web callbacks for execution-time device-sync
 runtime snapshot/apply, device connect-link starts, direct hosted usage
 recording, member-bound plan-usage reads, mailbox/workspace runtime status plus
-log callbacks, and the payload-free runtime owner-release recheck handoff.
+log callbacks, and the pointer-only runtime owner-release recheck handoff.
 
 ## Hosted onboarding routes
 

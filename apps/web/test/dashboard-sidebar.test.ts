@@ -188,16 +188,34 @@ beforeEach(() => {
   mocks.setOpenMobile.mockClear();
 });
 
-test("Sidebar hides Patterns and the internal Overview route", () => {
+test("Sidebar exposes Journal and Patterns but keeps the internal Overview route hidden", () => {
   mocks.usePathname.mockReturnValue("/experiments");
 
   const markup = renderToStaticMarkup(createElement(Sidebar));
 
   assert.match(markup, /href="\/home"[^>]*>\s*<svg/);
-  assert.doesNotMatch(markup, /href="\/patterns"/);
-  assert.doesNotMatch(markup, />Patterns<\/a>/);
+  assert.match(markup, /href="\/journal"/);
+  assert.match(markup, />Journal<\/a>/);
+  assert.match(markup, /href="\/patterns"/);
+  assert.match(markup, />Patterns<\/a>/);
   assert.doesNotMatch(markup, /href="\/overview"/);
   assert.doesNotMatch(markup, />Overview<\/a>/);
+});
+
+test.each([
+  ["/journal", "Journal"],
+  ["/patterns", "Patterns"],
+])("Sidebar marks %s as the active primary destination", (pathname, label) => {
+  mocks.usePathname.mockReturnValue(pathname);
+
+  const markup = renderToStaticMarkup(createElement(Sidebar));
+
+  assert.match(
+    markup,
+    new RegExp(
+      `data-active="true">\\s*<a[^>]*href="${pathname}"[^>]*>[\\s\\S]*${label}<\\/a>`,
+    ),
+  );
 });
 
 test("Sidebar renders Environment as an active primary destination", () => {

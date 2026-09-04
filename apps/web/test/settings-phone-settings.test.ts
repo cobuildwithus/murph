@@ -384,6 +384,34 @@ describe("HostedPhoneSettings", () => {
     expect(mocks.updatePhone).not.toHaveBeenCalled();
   });
 
+  it("repairs a completed provider phone change without reopening Privy", async () => {
+    const onLinked = vi.fn();
+    mocks.providerPhoneNumber = "+15550100002";
+    const { HostedPhoneSettings } = await import("@/src/components/settings/hosted-phone-settings");
+    const { cleanup } = await renderClientComponent(
+      createElement(HostedPhoneSettings, {
+        autoOpen: true,
+        initialPhoneNumber: "+15550100001",
+        onLinked,
+      }),
+      { requireButton: false },
+    );
+    cleanupRender = cleanup;
+
+    await vi.waitFor(() => {
+      expect(onLinked).toHaveBeenCalledTimes(1);
+    });
+    expect(mocks.finalizeHostedPhoneLink).toHaveBeenCalledWith({
+      expectation: {
+        kind: "exact",
+        phoneNumber: "+15550100002",
+      },
+      onLinked: expect.any(Function),
+    });
+    expect(mocks.linkPhone).not.toHaveBeenCalled();
+    expect(mocks.updatePhone).not.toHaveBeenCalled();
+  });
+
   it("retries a completed provider transfer save without reopening Privy", async () => {
     const onLinked = vi.fn();
     mocks.providerPhoneNumber = "+15550100002";

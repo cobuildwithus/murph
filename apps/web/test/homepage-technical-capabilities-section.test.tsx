@@ -21,7 +21,7 @@ test("TechnicalCapabilitiesSection renders the agent runtime and every enabled i
     veniceAvailable: true,
   });
 
-  assert.match(markup, /Under the hood/);
+  assert.doesNotMatch(markup, /Under the hood/);
   // The headline glues phrase groups with non-breaking spaces so it stacks as
   // "Built on Codex, / with a computer / of its own." at every width.
   assert.match(markup, /Built on Codex, with a computer of its own\./);
@@ -36,7 +36,7 @@ test("TechnicalCapabilitiesSection renders the agent runtime and every enabled i
   assert.doesNotMatch(markup, /changes model and reasoning effort/);
   assert.match(markup, /Codex CLI \+ App Server/);
   assert.match(markup, /be the most capable health agent in the world/);
-  assert.match(markup, /keep the member in control/);
+  assert.doesNotMatch(markup, /keep the member in control/);
   assert.match(markup, /Its own computer/);
   assert.match(markup, /A real phone number/);
   assert.match(markup, /Bounded subagents/);

@@ -1144,7 +1144,7 @@ async function abandonStaleSignupWelcomeCandidatesAfterReplyEvidence(input: {
       const terminalIntent = await markAssistantOutboxIntentMirrorTerminalById({
         error: new VaultCliError(
           "ASSISTANT_STALE_SIGNUP_WELCOME_SUPPRESSED",
-          "Stale signup welcome suppressed after a newer reply for the same route.",
+          "Stale signup welcome suppressed after first contact was already accepted.",
         ),
         intentId: welcome.intentId,
         onlyCurrentStatuses: ["pending", "retryable"],
@@ -1187,20 +1187,32 @@ function hostedAssistantReplySupersedesSignupWelcome(input: {
   reply: AssistantOutboxIntent;
   welcome: AssistantOutboxIntent;
 }): boolean {
-  if (
-    input.reply.intentId === input.welcome.intentId
-    || compareHostedIsoTimestampsAscending(
-      input.reply.createdAt,
-      input.welcome.createdAt,
-    ) < 0
-  ) {
+  if (input.reply.intentId === input.welcome.intentId) {
     return false;
   }
 
-  return hostedAssistantReplyTargetsSignupWelcomeRecipient(
-    buildHostedAssistantDeliveryPayloadFromIntent(input.reply),
-    buildHostedAssistantDeliveryPayloadFromIntent(input.welcome),
-  );
+  const reply = buildHostedAssistantDeliveryPayloadFromIntent(input.reply);
+  const welcome = buildHostedAssistantDeliveryPayloadFromIntent(input.welcome);
+  if (hostedDirectEmailReplySupersedesSignupWelcome(reply, welcome)) {
+    return true;
+  }
+
+  return compareHostedIsoTimestampsAscending(
+    input.reply.createdAt,
+    input.welcome.createdAt,
+  ) >= 0 && hostedAssistantReplyTargetsSignupWelcomeRecipient(reply, welcome);
+}
+
+function hostedDirectEmailReplySupersedesSignupWelcome(
+  reply: HostedAssistantDeliveryPayload,
+  welcome: HostedAssistantDeliveryPayload,
+): boolean {
+  // The vault is already scoped to one member. Direct email therefore identifies
+  // the same conversation even when a recovered welcome has no provider thread yet.
+  return reply.channel?.trim() === "email"
+    && welcome.channel?.trim() === "email"
+    && reply.threadIsDirect === true
+    && welcome.threadIsDirect === true;
 }
 
 function hostedAssistantReplyTargetsSignupWelcomeRecipient(
@@ -2520,6 +2532,20 @@ function markHostedLinqAttachmentReservationMayHaveSucceeded(
     deliveryMayHaveSucceeded: true,
     linqAttachmentReservationMayHaveSucceeded: true,
   });
+}
+
+function markHostedLinqDeliveryMayHaveSucceeded(input: {
+  error: unknown;
+  hasVerifiedVaultAttachment: boolean;
+}): unknown {
+  if (
+    input.hasVerifiedVaultAttachment
+    && isHostedLinqProviderOutcomeAmbiguous(input.error)
+  ) {
+    return markHostedLinqAttachmentReservationMayHaveSucceeded(input.error);
+  }
+
+  return markHostedDeliveryMayHaveSucceeded(input.error);
 }
 
 function markHostedDeliveryPreProviderRetryable(error: unknown): unknown {
@@ -4990,7 +5016,10 @@ function createHostedAssistantLinqSendDependency(input: {
         hostedDeliveryErrorProvesProviderWasSkipped(error)
         || isHostedLinqProviderOutcomeAmbiguous(error)
       ) {
-        throw markHostedDeliveryMayHaveSucceeded(error);
+        throw markHostedLinqDeliveryMayHaveSucceeded({
+          error,
+          hasVerifiedVaultAttachment,
+        });
       }
       queueHostedAssistantLinqDeliveryOutcomeWrite({
         effectsPort: input.effectsPort ?? null,

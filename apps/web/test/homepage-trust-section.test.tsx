@@ -7,12 +7,11 @@ import { test } from "vitest";
 import { TrustSection } from "@/src/components/homepage/trust-section";
 import { formatMessageVolume } from "@/src/lib/message-volume";
 
-test("TrustSection renders the trust pillars and message volume line", () => {
+test("TrustSection renders the trust pillars", () => {
   const markup = renderToStaticMarkup(createElement(TrustSection));
 
-  assert.match(markup, /Why people trust Murph/);
-  assert.match(markup, /5,000\+ messages and counting/);
-  assert.match(markup, /Studies cited/);
+  assert.doesNotMatch(markup, /Why people trust Murph/);
+  assert.match(markup, /5,972 studies/);
   assert.match(markup, /Apache 2\.0/);
   assert.match(markup, /Never sold/);
   assert.match(markup, /Export a structured copy of your vault or delete your account\./);

@@ -83,11 +83,11 @@ function captureForPrompt(promptSignature: string, turnIndex = 0): CaptureIdenti
 }
 
 describe("ReviewGPT detached capture identity", () => {
-  it("rebinds a first user turn after its provisional DOM identity becomes canonical", async () => {
+  it("rebinds a user turn after its provisional DOM identity becomes canonical and reindexed", async () => {
     const reviewGpt = await loadReviewGptThreadSnapshotModule();
     const promptSignature = "synthetic guarded review request";
     const canonicalUserTurnId = "data-message-id:synthetic-user-turn";
-    const capture = captureForPrompt(promptSignature);
+    const capture = captureForPrompt(promptSignature, 1);
     const snapshot: ThreadSnapshot = {
       assistantSnapshots: [
         {
@@ -95,7 +95,7 @@ describe("ReviewGPT detached capture identity", () => {
           assistantTurnIndex: 0,
           precedingUserMessageSignature: promptSignature,
           precedingUserTurnId: canonicalUserTurnId,
-          precedingUserTurnIndex: 0,
+          precedingUserTurnIndex: 4,
           signature: "synthetic completed response",
           text: "Synthetic completed response.",
         },
@@ -104,7 +104,7 @@ describe("ReviewGPT detached capture identity", () => {
         {
           signature: promptSignature,
           turnId: canonicalUserTurnId,
-          turnIndex: 0,
+          turnIndex: 4,
         },
       ],
     };
@@ -138,7 +138,7 @@ describe("ReviewGPT detached capture identity", () => {
     );
   });
 
-  it("still rejects a same-signature canonical user turn at a different index", async () => {
+  it("rebinds a same-signature canonical user turn at its hydrated index", async () => {
     const reviewGpt = await loadReviewGptThreadSnapshotModule();
     const promptSignature = "captured guarded review request";
     const capture = captureForPrompt(promptSignature, 1);
@@ -147,14 +147,14 @@ describe("ReviewGPT detached capture identity", () => {
       userSnapshots: [
         {
           signature: promptSignature,
-          turnId: "data-message-id:wrong-index-user-turn",
-          turnIndex: 0,
+          turnId: "data-message-id:hydrated-user-turn",
+          turnIndex: 4,
         },
       ],
     };
 
-    expect(() => reviewGpt.scopeThreadSnapshotToCaptureIdentity(snapshot, capture)).toThrow(
-      "Captured committed user-turn identity resolved to 0 turns",
+    expect(reviewGpt.scopeThreadSnapshotToCaptureIdentity(snapshot, capture).userSnapshots).toEqual(
+      snapshot.userSnapshots,
     );
   });
 
@@ -179,7 +179,7 @@ describe("ReviewGPT detached capture identity", () => {
         {
           signature: promptSignature,
           turnId: canonicalUserTurnId,
-          turnIndex: 1,
+          turnIndex: 4,
         },
       ],
     };

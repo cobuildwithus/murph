@@ -19,7 +19,9 @@ export const PUBLIC_PRODUCT_API_ERROR_CODES = [
 const PUBLIC_PRODUCT_REF_PATTERN =
   /^(?:supplement|food)_[A-Za-z0-9_-]{1,1024}$/u;
 const PUBLIC_PRODUCT_REF_MAX_LENGTH = 1_035;
-const PUBLIC_PRODUCT_SEARCH_RESULT_LIMIT = 10;
+const PUBLIC_PRODUCT_SEARCH_RESULT_LIMIT = 30;
+const PUBLIC_PRODUCT_SEARCH_OFFSET_LIMIT = 220;
+const PUBLIC_PRODUCT_SEARCH_CANDIDATE_LIMIT = 250;
 const PUBLIC_PRODUCT_TEST_OBSERVATION_LIMIT = 20;
 const PUBLIC_PRODUCT_TEST_ALERT_LIMIT = 5;
 
@@ -63,9 +65,24 @@ export const publicProductSearchRequestSchema = z
     kinds: publicProductSearchKindsSchema.default(() => [
       ...PUBLIC_PRODUCT_KINDS,
     ]),
-    limitPerKind: z.number().int().min(1).max(10).default(6),
+    limitPerKind: z.number().int().min(1).max(PUBLIC_PRODUCT_SEARCH_RESULT_LIMIT).default(6),
+    offsetPerKind: z.number().int().min(0).max(PUBLIC_PRODUCT_SEARCH_OFFSET_LIMIT).default(0),
+    foodComparisonReadyOnly: z.boolean().default(false),
+    foodSearchOrder: z.enum(["relevance", "evidence", "popular"]).default("relevance"),
   })
-  .strict();
+  .strict()
+  .superRefine((request, context) => {
+    if (
+      request.limitPerKind + request.offsetPerKind
+      > PUBLIC_PRODUCT_SEARCH_CANDIDATE_LIMIT
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Product search page must stay within the candidate limit.",
+        path: ["offsetPerKind"],
+      });
+    }
+  });
 
 const publicProductTestStatusSchema = z.enum([
   "no_known_product_tests",
@@ -114,6 +131,7 @@ const publicSupplementSearchHitSchema = publicProductSearchHitBaseSchema.extend(
 
 const publicFoodSearchHitSchema = publicProductSearchHitBaseSchema.extend({
   kind: z.literal("food"),
+  servingGrams: positiveFiniteNumber.nullable().optional(),
 });
 
 export const publicProductSearchHitSchema = z.discriminatedUnion("kind", [

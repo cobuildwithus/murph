@@ -13,6 +13,7 @@ import {
   createWorkspacePort,
   createWorkspaceRuntimeJobInput,
   createWorkspaceState,
+  enqueueDeviceSyncSystemMailboxItemForTest,
   importRuntimeControlSystemMailboxItemForTest,
   mocks,
   readCapturedRuntimePhaseLogs,
@@ -230,6 +231,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reports mailbox bud
           hostedMailboxImportedCount: 1,
           hostedMailboxNextRetryAtPresent: true,
           hostedMailboxRetryableBlockedCount: 1,
+          hostedMailboxSystemFirstPendingSeq: null,
           hostedMailboxSystemHandledThroughSeq: "0",
           hostedMailboxSystemImportedSeq: "0",
         },
@@ -1113,6 +1115,208 @@ describe("hosted workspace runtime entrypoint", () => {test("reports mailbox bud
     }
   });
 
+  test("idle checkpoint retains an earlier future device-sync mailbox wake over the assistant scalar", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const deviceWakeAt = "2026-04-27T00:00:10.000Z";
+    const assistantWakeAt = "2026-04-27T00:00:20.000Z";
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const deviceItem = createMailboxItem({
+      dedupeKey: "device-sync.wake:idle-device-wake-retention",
+      id: "mailbox_item_entrypoint_idle_device_wake_retention_system",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "1",
+    });
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            idleCheckpointDelayMs: 1,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "4".repeat(64),
+                key: "users/bundles/member-synthetic/idle-device-wake-retention.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            await enqueueDeviceSyncSystemMailboxItemForTest({
+              item: deviceItem,
+              vaultRoot,
+            });
+            await updateHostedSystemMailboxState(vaultRoot, (state) => ({
+              pending: state.pending.map((item) =>
+                item.itemId === deviceItem.id
+                  ? {
+                      ...item,
+                      nextAttemptAt: deviceWakeAt,
+                      routeAction: "run-device-sync-wake",
+                    }
+                  : item
+              ),
+            }));
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [
+                createMailboxItem({
+                  id: "mailbox_item_entrypoint_idle_device_wake_retention",
+                  laneSeq: "1",
+                }),
+              ],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            return {
+              nextWakeAt: assistantWakeAt,
+              nextWakeReason: "assistant",
+              progressed: false,
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "idle_shutdown",
+      ]);
+      assert.equal(checkpointRequests[0]?.nextWakeAt, deviceWakeAt);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "device-sync.reconcile");
+      assert.equal(result.nextWakeAt, deviceWakeAt);
+      assert.equal(result.nextWakeReason, "device-sync.reconcile");
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("canonical runtime-status checkpoint retains an earlier future device-sync mailbox wake over the assistant scalar", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const deviceWakeAt = "2026-04-27T00:00:10.000Z";
+    const assistantWakeAt = "2026-04-27T00:00:20.000Z";
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const deviceItem = createMailboxItem({
+      dedupeKey: "device-sync.wake:status-device-wake-retention",
+      id: "mailbox_item_entrypoint_status_device_wake_retention_system",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const canonicalWriteItem = createMailboxItem({
+      id: "mailbox_item_entrypoint_status_device_wake_retention_write",
+      kind: "runtime.manual-requested",
+      lane: "system",
+      laneSeq: "1",
+    });
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "5".repeat(64),
+                key: "users/bundles/member-synthetic/status-device-wake-retention.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            assert.equal(item.item.id, canonicalWriteItem.id);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [canonicalWriteItem],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: assistantWakeAt,
+                nextWakeReason: "assistant",
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            await enqueueDeviceSyncSystemMailboxItemForTest({
+              item: deviceItem,
+              vaultRoot,
+            });
+            await updateHostedSystemMailboxState(vaultRoot, (state) => ({
+              pending: state.pending.map((pendingItem) =>
+                pendingItem.itemId === deviceItem.id
+                  ? {
+                      ...pendingItem,
+                      nextAttemptAt: deviceWakeAt,
+                      routeAction: "run-device-sync-wake",
+                    }
+                  : pendingItem
+              ),
+            }));
+            await runCanonicalWrite({
+              mutate: async ({ batch }) => {
+                await batch.stageTextWrite(
+                  "bank/status-device-wake-retention.md",
+                  "synthetic canonical status checkpoint\n",
+                );
+              },
+              occurredAt: TEST_NOW,
+              operationType: "hosted_status_device_wake_retention_test",
+              summary: "Persist synthetic status checkpoint",
+              vaultRoot,
+            });
+            return { progressed: false };
+          },
+          vaultRoot,
+        },
+      );
+
+      const canonicalCheckpoint = checkpointRequests.find(
+        (request) => request.reason === "canonical_runtime_commit",
+      );
+      assert.ok(canonicalCheckpoint);
+      assert.equal(
+        typeof canonicalCheckpoint.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        "string",
+      );
+      assert.equal(canonicalCheckpoint.nextWakeAt, deviceWakeAt);
+      assert.equal(canonicalCheckpoint.nextWakeReason, "device-sync.reconcile");
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("returns scheduled when no mailbox import runs and the workspace has a future wake", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
@@ -1209,7 +1413,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reports mailbox bud
     }
   });
 
-  test("fresh due assistant wake supersedes a stale carried device-sync wake under a pending checkpoint", async () => {
+  test("fresh due assistant wake supersedes a progressed projection marker with a stale carried device-sync wake", async () => {
     // Incident shape (2026-08-15): a workspace restores with a stale,
     // already-past device-sync.reconcile wake. While runtime state is dirty
     // with pending durable effects (a delivered reply's consume acks), a
@@ -1318,6 +1522,11 @@ describe("hosted workspace runtime entrypoint", () => {test("reports mailbox bud
                 nextWakeAt: staleDeviceWakeAt,
                 nextWakeReason: "device-sync.reconcile",
                 progressed: true,
+                // System-owner and foreground results can merge this marker
+                // onto a genuinely progressed pass. That composite result
+                // must keep foreground authority instead of handing the stale
+                // device token back to its owner.
+                runtimeProjectionCheckpointRequested: true,
               };
             }
 

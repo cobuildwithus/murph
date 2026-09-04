@@ -428,6 +428,36 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
+  it("leaves fresh foreground container selection to the standby pool in allocate mode", async () => {
+    const prewarmShell = vi.fn();
+    const { runner, runnerContainerNames, sql } = createRunnerHarness({
+      prewarmShell,
+      readHealthDataConsentState: () => "granted",
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        HOSTED_EXECUTION_STANDBY_MODE: "allocate",
+      },
+    });
+
+    await runner.prewarmRuntimeShellForUser(
+      TEST_USER_ID,
+      "linq-message-routing",
+    );
+
+    expect(prewarmShell).not.toHaveBeenCalled();
+    expect(runnerContainerNames).toEqual([]);
+    expect(sql.exec("SELECT user_id FROM runner_meta").toArray()).toEqual([]);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: {
+          shellPrewarmAdmissionOutcome: "skipped_standby_pool",
+          shellPrewarmSource: "linq-message-routing",
+        },
+        message: "Hosted runner shell prewarm admission decided.",
+      }),
+    );
+  });
+
   it("abandons a slow shell hint admission before authoritative processing begins", async () => {
     vi.useFakeTimers();
     let admissionReads = 0;
@@ -1108,6 +1138,9 @@ describe("HostedUserRunner execution coordination", () => {
               state: "bound" as const,
             };
           },
+          async resolveRetainedStandbySlot() {
+            throw new Error("Retained standby resolution was not expected.");
+          },
           retireStandbySlot,
           async smokeHealth() {
             return {
@@ -1154,7 +1187,9 @@ describe("HostedUserRunner execution coordination", () => {
     const ensure = harness.runner.ensureRuntimeProcessingForUser({
       commandTimeoutMs:
         HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS + foregroundBudgetMs,
-      orchestrationAttemptId: "standby-binding-timeout",
+      orchestration: { triggeredByWebDirect: true },
+      orchestrationAttemptId:
+        "web-ingress-99999999-9999-4999-8999-999999999999",
       userId: TEST_USER_ID,
     });
     await bindingReadStarted.promise;
@@ -1561,10 +1596,12 @@ describe("HostedUserRunner execution coordination", () => {
     expect(ownerReleaseCalls[0]?.[0]).toMatchObject({
       boundUserId: TEST_USER_ID,
       method: "POST",
+      search: expect.stringMatching(
+        /^\?runtimeAttemptId=runtime-write-[A-Za-z0-9_-]+$/u,
+      ),
       timeoutMs: 2_000,
     });
     expect(ownerReleaseCalls[0]?.[0]).not.toHaveProperty("body");
-    expect(ownerReleaseCalls[0]?.[0]).not.toHaveProperty("search");
     expect(alarms).toEqual([]);
   });
 
@@ -1655,7 +1692,11 @@ describe("HostedUserRunner execution coordination", () => {
         (call) => call[0].path === HOSTED_RUNTIME_OWNER_RELEASED_PATH,
       );
     expect(ownerReleaseCalls).toHaveLength(1);
-    expect(ownerReleaseCalls[0]?.[0]).not.toHaveProperty("search");
+    expect(ownerReleaseCalls[0]?.[0]).toMatchObject({
+      search: expect.stringMatching(
+        /^\?runtimeAttemptId=runtime-write-[A-Za-z0-9_-]+$/u,
+      ),
+    });
   });
 
   it("carries an immediate recheck request in the signed owner-release query", async () => {
@@ -1695,7 +1736,9 @@ describe("HostedUserRunner execution coordination", () => {
       );
     expect(ownerReleaseCalls).toHaveLength(1);
     expect(ownerReleaseCalls[0]?.[0]).toMatchObject({
-      search: "?immediateRecheckRequested=1",
+      search: expect.stringMatching(
+        /^\?runtimeAttemptId=runtime-write-[A-Za-z0-9_-]+&immediateRecheckRequested=1$/u,
+      ),
     });
     expect(ownerReleaseCalls[0]?.[0]).not.toHaveProperty("body");
   });
@@ -1742,8 +1785,10 @@ describe("HostedUserRunner execution coordination", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
-    const { invoke, runner, sql } = createRunnerHarness({
+    const onRuntimeCompletionRecorded = vi.fn(async () => {});
+    const { flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
       invocationResults: [invocationResult.promise],
+      onRuntimeCompletionRecorded,
     });
     await runner.bindUser(TEST_USER_ID);
 
@@ -1771,6 +1816,12 @@ describe("HostedUserRunner execution coordination", () => {
       userId: TEST_USER_ID,
     })).resolves.toEqual({ completed: true });
     expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+    await flushWaitUntil();
+    expect(onRuntimeCompletionRecorded).toHaveBeenCalledWith({
+      attemptId: invokeInput.job.request.attemptId,
+      leaseGeneration: invokeInput.job.request.leaseGeneration,
+      userId: TEST_USER_ID,
+    });
     expect(
       mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
         (call) => call[0].path === HOSTED_RUNTIME_OWNER_RELEASED_PATH,
@@ -1792,12 +1843,58 @@ describe("HostedUserRunner execution coordination", () => {
     ).toHaveLength(1);
   });
 
+  it("preserves exact completion when container cleanup notification fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const { flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
+      invocationResults: [invocationResult.promise],
+      onRuntimeCompletionRecorded: async () => {
+        throw new Error("container cleanup unavailable");
+      },
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-container-completion-cleanup-failure",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({ action: "started" });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    const invokeInput = invoke.mock.calls[0]?.[0];
+    if (!invokeInput) {
+      throw new Error("Expected a hosted runtime invocation.");
+    }
+    const result: HostedWorkspaceInvocationResult = {
+      nextWakeAt: null,
+      status: "idle",
+    };
+
+    await expect(runner.recordRuntimeCompletionFromContainer({
+      attemptId: invokeInput.job.request.attemptId,
+      generation: invokeInput.job.request.leaseGeneration,
+      result,
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({ completed: true });
+    await flushWaitUntil();
+
+    expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message:
+          "Hosted runner completion cleanup notification failed; preserving the lifecycle timer fallback.",
+      }),
+    );
+    invocationResult.resolve(result);
+  });
+
   it("rejects a stale container completion without clearing the active fence", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
-    const { invoke, runner, sql } = createRunnerHarness({
+    const onRuntimeCompletionRecorded = vi.fn(async () => {});
+    const { flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
       invocationResults: [invocationResult.promise],
+      onRuntimeCompletionRecorded,
     });
     await runner.bindUser(TEST_USER_ID);
 
@@ -1821,7 +1918,9 @@ describe("HostedUserRunner execution coordination", () => {
       result: { nextWakeAt: null, status: "idle" },
       userId: TEST_USER_ID,
     })).resolves.toEqual({ completed: false });
+    await flushWaitUntil();
     expect(readRunnerMeta(sql).active_attempt_id).toBe(activeAttemptId);
+    expect(onRuntimeCompletionRecorded).not.toHaveBeenCalled();
     expect(
       mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
         (call) => call[0].path === HOSTED_RUNTIME_OWNER_RELEASED_PATH,
@@ -4173,9 +4272,10 @@ describe("HostedUserRunner execution coordination", () => {
   });
 
   it.each([
-    ["retention-only", "default", "inbox_media_retention", undefined, false],
-    ["retention-only", "system-mailbox", "inbox_media_retention", "system_mailbox", false],
-    ["system-mailbox", "default", "system_mailbox", undefined, true],
+    ["retention-only", "default", "inbox_media_retention", undefined, false, false, false],
+    ["retention-only", "system-mailbox", "inbox_media_retention", "system_mailbox", false, false, false],
+    ["system-mailbox", "default", "system_mailbox", undefined, true, false, true],
+    ["completing system-mailbox", "default", "system_mailbox", undefined, true, true, true],
   ] as const)(
     "preempts active %s work before starting %s processing",
     async (
@@ -4184,6 +4284,8 @@ describe("HostedUserRunner execution coordination", () => {
       activeProcessingMode,
       processingMode,
       triggeredByWebDirect,
+      completeDuringAbort,
+      expectStandbyClaim,
     ) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -4215,21 +4317,118 @@ describe("HostedUserRunner execution coordination", () => {
     const runnerRuntimeEnvSource = {
       ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
       CF_VERSION_METADATA: { id: "current" },
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
     };
     const priorRunnerContainerName = `${TEST_USER_ID}--v-prior`;
     const currentRunnerContainerName = `${TEST_USER_ID}--v-current`;
+    const activeRunnerContainerName = triggeredByWebDirect
+      ? currentRunnerContainerName
+      : priorRunnerContainerName;
+    const standbyRunnerContainerName =
+      `standby--v-current--${"c".repeat(32)}`;
+    let standbyBinding: HostedStandbySlotBinding = {
+      claimId: null,
+      releaseId: "current",
+      region: "ENAM",
+      slotName: standbyRunnerContainerName,
+      state: "unbound",
+      userId: null,
+    };
+    const claimReadyStandby = vi.fn(async () => ({
+      outcome: "claimed" as const,
+      slotName: standbyRunnerContainerName,
+    }));
+    const bindStandbySlot = vi.fn(async (input: {
+      claimId: string;
+      releaseId: string;
+      region: "ENAM";
+      slotName: string;
+      userId: string;
+    }) => {
+      standbyBinding = {
+        claimId: input.claimId,
+        releaseId: input.releaseId,
+        region: input.region,
+        slotName: input.slotName,
+        state: "bound",
+        userId: input.userId,
+      };
+      return { bound: true as const, ...input };
+    });
+    const createStandbyStub = (
+      base?: HostedExecutionContainerStubLike,
+    ) => ({
+      ...base,
+      bindStandbySlot,
+      destroyInstance: base?.destroyInstance ?? (async () => {}),
+      invoke: base?.invoke ?? (async () => {
+        throw new Error("Standby coordination must not invoke runtime work directly.");
+      }),
+      async prepareStandbySlot(input: {
+        releaseId: string;
+        region: "ENAM";
+        slotName: string;
+        timeoutMs: number;
+      }) {
+        return { prepared: true as const, ...input };
+      },
+      async readStandbySlotBinding() {
+        return standbyBinding;
+      },
+      async readStandbySlotCoordinatorState() {
+        return {
+          coordinatorOwned: standbyBinding.state === "unbound",
+          releaseId: "current",
+          slotName: standbyRunnerContainerName,
+          state: standbyBinding.state,
+        };
+      },
+      async resolveRetainedStandbySlot() {
+        return standbyBinding;
+      },
+      async retireStandbySlot() {
+        throw new Error("A successfully bound standby must not be retired.");
+      },
+      smokeHealth: base?.smokeHealth ?? (async () => ({
+        ok: true as const,
+        runnerBundle: null,
+        service: "runner" as const,
+        status: 200 as const,
+      })),
+    });
     const { invoke, runner, runnerContainerNames, sql } = createRunnerHarness({
       abortWorkspaceInvocation,
       ensureProcessing,
       invocationResults: [invocationResult.promise],
       readActiveRuntimeUserFence,
+      runnerContainerStubForName(name, defaultStub) {
+        return name === standbyRunnerContainerName
+          ? createStandbyStub(defaultStub)
+          : defaultStub;
+      },
       runnerRuntimeEnvSource,
+      standbyContainerNamespace: {
+        getByName(name) {
+          expect(name).toBe(standbyRunnerContainerName);
+          return createStandbyStub();
+        },
+      },
+      standbyCoordinatorNamespace: {
+        getByName() {
+          return {
+            claimReadyStandby,
+            async ensureReadyStandby() {
+              return { accepted: true } as const;
+            },
+          };
+        },
+      },
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
     const token = writeRuntimeFenceForTest(sql, {
       processingMode: activeProcessingMode,
-      runnerContainerName: priorRunnerContainerName,
+      runnerContainerName: activeRunnerContainerName,
       workspaceVersion: "7",
     });
     activeAttemptId = token.attemptId;
@@ -4278,7 +4477,16 @@ describe("HostedUserRunner execution coordination", () => {
     expect(abortWorkspaceInvocation).toHaveBeenCalledOnce();
     expect(ensureRuntimeProcessingSettled).toBe(false);
     expect(invoke).not.toHaveBeenCalled();
-    expect(runnerContainerNames[0]).toBe(priorRunnerContainerName);
+    expect(runnerContainerNames[0]).toBe(activeRunnerContainerName);
+    if (completeDuringAbort) {
+      await expect(runner.recordRuntimeCompletionFromContainer({
+        attemptId: token.attemptId,
+        generation: String(token.generation),
+        result: { nextWakeAt: null, status: "idle" },
+        userId: TEST_USER_ID,
+      })).resolves.toEqual({ completed: true });
+      expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+    }
     abortResult.resolve("accepted");
 
     await expect(ensureRuntimeProcessing).resolves.toMatchObject({
@@ -4295,14 +4503,23 @@ describe("HostedUserRunner execution coordination", () => {
       userId: TEST_USER_ID,
     });
     expect(ensureProcessing).not.toHaveBeenCalled();
+    expect(claimReadyStandby).toHaveBeenCalledTimes(expectStandbyClaim ? 1 : 0);
+    expect(bindStandbySlot).toHaveBeenCalledTimes(expectStandbyClaim ? 1 : 0);
     expect(ensureRuntimeProcessingSettled).toBe(true);
     expect(invoke).toHaveBeenCalledOnce();
-    expect(runnerContainerNames).toContain(currentRunnerContainerName);
+    expect(runnerContainerNames).toContain(
+      expectStandbyClaim ? standbyRunnerContainerName : currentRunnerContainerName,
+    );
+    expect(readStructuredLogDetails(
+      "Hosted runner selected a fresh container target.",
+    )).toMatchObject({
+      standbyAllocationOutcome: expectStandbyClaim ? "claimed" : "disabled",
+    });
     expect(invoke.mock.calls[0]?.[0].job.request.processingMode).toBe(
       processingMode,
     );
     expect(invoke.mock.calls[0]?.[0].orchestration).toMatchObject({
-      replacedStaleFence: false,
+      ...(completeDuringAbort ? {} : { replacedStaleFence: false }),
       ...(triggeredByWebDirect
         ? {
             runtimeInvocationOrchestrationAttemptId: orchestrationAttemptId,
@@ -4310,6 +4527,11 @@ describe("HostedUserRunner execution coordination", () => {
           }
         : {}),
     });
+    if (completeDuringAbort) {
+      expect(invoke.mock.calls[0]?.[0].orchestration).not.toHaveProperty(
+        "replacedStaleFence",
+      );
+    }
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: expect.not.stringMatching(token.attemptId),
       active_expires_at: null,
@@ -6808,6 +7030,7 @@ describe("HostedUserRunner execution coordination", () => {
     })).resolves.toEqual({
       attemptId: stuck.attemptId,
       processingMode: "default",
+      runnerContainerName: TEST_USER_ID,
     });
 
     expect(stuck.nextWakeAt).toBeNull();
@@ -8834,6 +9057,7 @@ function createRunnerHarness(input: {
   invocationResults?: Array<Error | HostedWorkspaceInvocationResult | Promise<HostedWorkspaceInvocationResult>>;
   mailboxLag?: HostedRuntimeWebStatusResponse["mailboxLag"];
   onCryptoContextRead?: () => Promise<void> | void;
+  onRuntimeCompletionRecorded?: HostedExecutionContainerStubLike["onRuntimeCompletionRecorded"];
   readHealthDataConsentState?: (input: { timeoutMs: number }) =>
     | "granted"
     | "missing"
@@ -8879,6 +9103,7 @@ function createRunnerHarness(input: {
     },
   );
   const readActiveRuntimeUserFenceInput = input.readActiveRuntimeUserFence;
+  const onRuntimeCompletionRecordedInput = input.onRuntimeCompletionRecorded;
   const abortWorkspaceInvocationInput = input.abortWorkspaceInvocation;
   const ensureReadyForProcessing = input.ensureReadyForProcessing === null
     ? null
@@ -8908,6 +9133,24 @@ function createRunnerHarness(input: {
         }
       : {}),
     ...(ensureReadyForProcessing ? { ensureReadyForProcessing } : {}),
+    ...(onRuntimeCompletionRecordedInput
+      ? {
+          onRuntimeCompletionRecorded: createDirectOnlyRpcMethod<
+            NonNullable<HostedExecutionContainerStubLike["onRuntimeCompletionRecorded"]>
+          >(
+            async function (
+              this: HostedExecutionContainerStubLike,
+              completionInput,
+            ) {
+              expect(this).toBe(stub);
+              await onRuntimeCompletionRecordedInput.call(
+                this,
+                completionInput,
+              );
+            },
+          ),
+        }
+      : {}),
     ...(input.prewarmShell
       ? {
           beginShellPrewarm: createDirectOnlyRpcMethod<

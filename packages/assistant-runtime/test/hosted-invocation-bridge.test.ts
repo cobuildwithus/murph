@@ -82,6 +82,9 @@ import {
   type HostedWorkspaceSnapshotArchiveBuilder,
 } from "../src/hosted-runtime/snapshot-bridge.ts";
 import {
+  createHostedWorkspaceSnapshotCheckpointRequestBuilder,
+} from "../src/hosted-runtime/workspace-runner.ts";
+import {
   drainHostedRuntimeLogWritesBestEffort,
 } from "../src/hosted-runtime/runtime-logs.ts";
 import {
@@ -437,14 +440,27 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         });
       }
 
+      let request: HostedWorkspaceInvocationRequest | undefined;
       if (expectedStage === "plan") {
-        platform.workspacePort = {
-          checkpoint: async () => {
-            throw new Error("Unexpected workspace checkpoint call.");
-          },
-          read: async () => {
+        const planSnapshotRef = {
+          hash: "e".repeat(64),
+          key: `legacy/${"e".repeat(64)}.bundle`,
+          size: 1,
+          updatedAt: "2026-05-01T00:00:00.000Z",
+        };
+        platform.artifactStore = {
+          get: async () => {
             throw failure;
           },
+          put: async () => {},
+        };
+        request = {
+          ...TEST_REQUEST,
+          workspace: createCheckpointResponse({
+            snapshotRef: planSnapshotRef,
+            userId: TEST_REQUEST.userId,
+            version: TEST_REQUEST.workspaceVersion,
+          }).workspace,
         };
       } else if (expectedStage === "session") {
         calls.startSnapshotSession.mockRejectedValueOnce(failure);
@@ -459,6 +475,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
 
       const options = createBridgeOptions({
         platform,
+        ...(request ? { request } : {}),
         snapshotArchiveBuilder,
         vaultRoot,
       });
@@ -565,13 +582,15 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       return result;
     });
 
+    let pendingLogDrain: Promise<void> | null = null;
     try {
-      await vi.waitFor(() => {
-        expect(calls.logWrite).toHaveBeenCalledOnce();
-      });
       await vi.waitFor(() => {
         expect(checkpointSettled).toBe(true);
       }, { timeout: 250 });
+      pendingLogDrain = drainHostedRuntimeLogWritesBestEffort();
+      await vi.waitFor(() => {
+        expect(calls.logWrite).toHaveBeenCalledOnce();
+      });
       expect(finishedLogSettled).toBe(false);
       await expect(checkpoint).resolves.toMatchObject({
         snapshotRef: {
@@ -580,6 +599,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       });
     } finally {
       releaseFinishedLog();
+      await pendingLogDrain;
       await checkpoint;
     }
 
@@ -724,6 +744,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(calls.abortSnapshotSession).toHaveBeenCalledOnce();
     expect(calls.putSnapshotObjectDirect).not.toHaveBeenCalled();
     expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
+    await drainHostedRuntimeLogWritesBestEffort();
     await vi.waitFor(() => {
       const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
       expect(entries.some((entry) => entry.eventCode === "checkpoint.snapshot_preempted"))
@@ -1014,7 +1035,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
   });
 
-  it("publishes legacy skipped-inline files atomically before surfacing a wake", async () => {
+  it("carries legacy material without workspace reads and advances after an accepted checkpoint", async () => {
     const vaultRoot = await createVaultRoot();
     const workspaceRoot = path.dirname(path.dirname(vaultRoot));
     const sourceVaultRoot = path.join(workspaceRoot, "legacy-source");
@@ -1069,21 +1090,23 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       userId: TEST_REQUEST.userId,
       version: TEST_REQUEST.workspaceVersion,
     }).workspace;
+    const artifactGet = vi.fn(
+      async (sha256: string) => sha256 === baseHash ? baseBundle : null,
+    );
+    const workspaceRead = vi.fn(async () => {
+      throw new Error("Legacy v2 planning must not reread the hosted workspace.");
+    });
     const platform: HostedRuntimePlatform = {
       ...basePlatform,
       artifactStore: {
-        get: async (sha256) => sha256 === baseHash ? baseBundle : null,
+        get: artifactGet,
         put: async () => {},
       },
       workspacePort: {
-        checkpoint: async () => ({
-          checkpointed: true,
-          workspace: legacyWorkspace,
-        }),
-        read: async () => ({
-          fetchedAt: "2026-05-01T00:00:00.000Z",
-          workspace: legacyWorkspace,
-        }),
+        checkpoint: async () => {
+          throw new Error("V2 snapshot completion must own the checkpoint.");
+        },
+        read: workspaceRead,
       },
     };
     const controller = new AbortController();
@@ -1102,12 +1125,35 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     };
     const options = createBridgeOptions({
       platform,
+      request: {
+        ...TEST_REQUEST,
+        workspace: legacyWorkspace,
+      },
       snapshotArchiveBuilder,
       vaultRoot,
     });
+    const carriedSnapshotRefs: HostedWorkspaceCheckpointRequest["snapshotRef"][] = [];
+    const checkpointBuilder = createHostedWorkspaceSnapshotCheckpointRequestBuilder({
+      createSnapshot: async (snapshotInput, context) => {
+        carriedSnapshotRefs.push(snapshotInput.currentSnapshotRef ?? null);
+        return await options.createCheckpointSnapshot(snapshotInput, context);
+      },
+      metadata: {
+        attemptId: TEST_REQUEST.attemptId,
+        currentSnapshotRef: legacySnapshotRef,
+        expectedWorkspaceVersion: TEST_REQUEST.workspaceVersion,
+        leaseGeneration: TEST_REQUEST.leaseGeneration,
+      },
+    });
+    const checkpoint = checkpointBuilder.checkpoint;
+    const workspacePort = platform.workspacePort;
+    if (!checkpoint || !workspacePort) {
+      throw new Error("Expected a hosted workspace checkpoint bridge.");
+    }
 
-    await expect(options.createCheckpointSnapshot(
+    await expect(checkpoint(
       createCheckpointInput("idle_shutdown"),
+      workspacePort,
       { signal: controller.signal },
     )).rejects.toBe(interruption);
 
@@ -1121,7 +1167,10 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
 
     await rm(path.join(vaultRoot, firstRelativePath));
-    await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+    const acceptedCheckpoint = await checkpoint(
+      createCheckpointInput("idle_shutdown"),
+      workspacePort,
+    );
 
     await expectMissing(path.join(vaultRoot, firstRelativePath));
     expect(await readFile(path.join(vaultRoot, secondRelativePath), "utf8"))
@@ -1131,6 +1180,19 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(calls.startSnapshotSession).toHaveBeenCalledTimes(2);
     expect(calls.abortSnapshotSession).toHaveBeenCalledOnce();
     expect(calls.completeSnapshotSession).toHaveBeenCalledOnce();
+    expect(artifactGet).toHaveBeenCalledTimes(2);
+    expect(workspaceRead).not.toHaveBeenCalled();
+
+    await checkpoint(createCheckpointInput("idle_shutdown"), workspacePort);
+
+    expect(calls.completeSnapshotSession).toHaveBeenCalledTimes(2);
+    expect(artifactGet).toHaveBeenCalledTimes(2);
+    expect(workspaceRead).not.toHaveBeenCalled();
+    expect(carriedSnapshotRefs).toEqual([
+      legacySnapshotRef,
+      legacySnapshotRef,
+      acceptedCheckpoint.workspace.snapshotRef,
+    ]);
   });
 
   it("redacts snapshot lifecycle safe error messages before writing runtime logs", async () => {
@@ -1336,6 +1398,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(checkpointRequest?.idleCheckpointTrigger).toBe("shutdown_signal");
     expect(checkpointRequest?.runtimeWakePendingAtCheckpoint).toBe(false);
 
+    await drainHostedRuntimeLogWritesBestEffort();
     const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
     expect(JSON.stringify(entries)).not.toContain("item_terminal_7");
     const lifecycleEntries = entries.filter((entry) =>
@@ -1378,21 +1441,38 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
 
   it("keeps snapshot elapsed time scoped after legacy planning", async () => {
     const vaultRoot = await createVaultRoot();
+    const baseBundle = await snapshotHostedBundleRoots({
+      kind: "vault",
+      roots: [{
+        root: vaultRoot,
+        rootKey: "vault",
+      }],
+    });
+    expect(baseBundle).not.toBeNull();
+    if (!baseBundle) {
+      throw new Error("Expected a legacy hosted workspace bundle.");
+    }
+    const baseHash = sha256HostedBundleHex(baseBundle);
+    const legacyWorkspace = createCheckpointResponse({
+      snapshotRef: {
+        hash: baseHash,
+        key: `legacy/${baseHash}.bundle`,
+        size: baseBundle.byteLength,
+        updatedAt: "2026-05-01T00:00:00.000Z",
+      },
+      userId: TEST_REQUEST.userId,
+      version: TEST_REQUEST.workspaceVersion,
+    }).workspace;
     const { calls, platform } = createRuntimePlatform();
     const realDateNow = Date.now.bind(Date);
     let clockOffsetMs = 0;
     vi.spyOn(Date, "now").mockImplementation(() => realDateNow() + clockOffsetMs);
-    platform.workspacePort = {
-      checkpoint: async () => {
-        throw new Error("Unexpected workspace checkpoint call.");
-      },
-      read: async () => {
+    platform.artifactStore = {
+      get: async (sha256) => {
         clockOffsetMs += 60_000;
-        return {
-          fetchedAt: "2026-05-01T00:00:00.000Z",
-          workspace: null,
-        };
+        return sha256 === baseHash ? baseBundle : null;
       },
+      put: async () => {},
     };
     let postPlanTimeAdvanced = false;
     const options = createBridgeOptions({
@@ -1404,11 +1484,16 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         }
         return createLease();
       },
+      request: {
+        ...TEST_REQUEST,
+        workspace: legacyWorkspace,
+      },
       vaultRoot,
     });
 
     await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
 
+    await drainHostedRuntimeLogWritesBestEffort();
     const lifecycleEntries = calls.logWrite.mock.calls
       .flatMap(([request]) => request.entries)
       .filter((entry) => entry.eventCode.startsWith("checkpoint.snapshot_"));
@@ -1682,6 +1767,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     await expectPresent(path.join(vaultRoot, nestedRef));
     await expectPresent(path.join(vaultRoot, legacyRef));
 
+    await drainHostedRuntimeLogWritesBestEffort();
     const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
     expect(entries.some((entry) =>
       entry.redactedJson?.prunedAssistantRuntimeGeneratedDeliveryFileCount === 1
@@ -1824,6 +1910,10 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
     const options = createBridgeOptions({
       platform,
+      request: {
+        ...TEST_REQUEST,
+        workspace: legacyWorkspace,
+      },
       snapshotArchiveBuilder,
       vaultRoot,
     });
@@ -1841,6 +1931,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     await expectPresent(path.join(vaultRoot, activeRef));
     expect(await readHostedWorkspaceSkippedInlineFiles({ vaultRoot })).toEqual([]);
 
+    await drainHostedRuntimeLogWritesBestEffort();
     const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
     expect(entries.some((entry) =>
       entry.redactedJson?.prunedAssistantRuntimeGeneratedDeliveryFileCount === 1

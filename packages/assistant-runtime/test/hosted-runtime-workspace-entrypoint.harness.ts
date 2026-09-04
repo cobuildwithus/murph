@@ -172,6 +172,7 @@ type HostedWorkspaceEntrypointMockName =
   | "drainHostedPreparedAssistantDeliveries"
   | "enqueueHostedPendingAssistantInputId"
   | "executeConsentedReadOnlyAssistantAsk"
+  | "executeOperatorDiagnostic"
   | "executeReadOnlyAssistantAsk"
   | "hasCompleteAssistantAutoReplyDeliveryTerminalEvidence"
   | "maintainAssistantAutoReplyRouteState"
@@ -229,6 +230,7 @@ const mocks: HostedWorkspaceEntrypointMocks = vi.hoisted(() => ({
     vi.fn<DrainHostedPreparedAssistantDeliveries>(),
   enqueueHostedPendingAssistantInputId: vi.fn(),
   executeConsentedReadOnlyAssistantAsk: vi.fn(),
+  executeOperatorDiagnostic: vi.fn(),
   executeReadOnlyAssistantAsk: vi.fn(),
   hasCompleteAssistantAutoReplyDeliveryTerminalEvidence:
     vi.fn<HasCompleteAssistantAutoReplyDeliveryTerminalEvidence>(),
@@ -306,6 +308,10 @@ vi.mock("@murphai/assistant-engine/assistant-ask", async (importOriginal) => {
     executeConsentedReadOnlyAssistantAsk:
       mocks.executeConsentedReadOnlyAssistantAsk.mockImplementation(
         actual.executeConsentedReadOnlyAssistantAsk,
+      ),
+    executeOperatorDiagnostic:
+      mocks.executeOperatorDiagnostic.mockImplementation(
+        actual.executeOperatorDiagnostic,
       ),
     executeReadOnlyAssistantAsk:
       mocks.executeReadOnlyAssistantAsk.mockImplementation(
@@ -448,7 +454,7 @@ import {
   HostedWorkspaceRunnerUserMismatchError,
   drainHostedRuntimeDeferredUsageCompletionsBestEffort,
   parseHostedAssistantWorkspaceRuntimeJobInput,
-  runHostedWorkspaceRuntimeJobInProcess,
+  runHostedWorkspaceRuntimeJobInProcess as runHostedWorkspaceRuntimeJobInProcessWithoutDrain,
   type HostedWorkspaceRuntimeJobOptions,
   type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
@@ -2586,6 +2592,16 @@ async function waitUntil(assertion: () => void, timeoutMs = 1_000): Promise<void
   throw lastError instanceof Error ? lastError : new Error("Timed out waiting for assertion.");
 }
 
+async function runHostedWorkspaceRuntimeJobInProcess(
+  ...args: Parameters<typeof runHostedWorkspaceRuntimeJobInProcessWithoutDrain>
+) {
+  try {
+    return await runHostedWorkspaceRuntimeJobInProcessWithoutDrain(...args);
+  } finally {
+    await drainHostedRuntimeLogWritesBestEffort();
+  }
+}
+
 export {
   HOSTED_CONTAINER_CA_ENV_KEYS,
   HOSTED_UNSTABLE_PROCESS_ENV_KEYS,
@@ -2648,6 +2664,7 @@ export {
   readConversationImportedSeqs,
   removeTempRoot,
   requireEventIndex,
+  runHostedWorkspaceRuntimeJobInProcess,
   runOpenAiHttpsProbe,
   sha256Hex,
   stageAssistantInputEventForMailboxItem,

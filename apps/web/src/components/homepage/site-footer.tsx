@@ -1,9 +1,7 @@
 import Link from "next/link";
 
-import { MURPH_SUPPORT_EMAIL } from "@/src/components/support/contact-support-action";
-import {
-  getAvailableHostedPublicReferralRewards,
-} from "@/src/lib/hosted-growth/referral-program";
+import { getAvailableHostedPublicReferralRewards } from "@/src/lib/hosted-growth/referral-program";
+import { cn } from "@/src/lib/utils";
 
 import {
   SiteFooterVitals,
@@ -42,6 +40,7 @@ const footerLinks = {
   murph: [
     { label: "About", href: "/about", external: false },
     { label: "Goals", href: "/goals", external: false },
+    { label: "Comparisons", href: "/compare", external: false },
     { label: "Contact", href: "/contact", external: false },
     { label: "Clubs", href: "/clubs", external: false },
     { label: "Referrals", href: "/refer", external: false },
@@ -59,11 +58,6 @@ const footerLinks = {
     { label: "Design", href: "/design", external: false },
     { label: "Security", href: "/security", external: false },
     {
-      label: "Support",
-      href: `mailto:${MURPH_SUPPORT_EMAIL}`,
-      external: false,
-    },
-    {
       label: "GitHub",
       href: "https://github.com/cobuildwithus/murph",
       external: true,
@@ -72,7 +66,10 @@ const footerLinks = {
   legal: [
     { label: "Terms of Use", href: "/legal/terms" },
     { label: "Privacy Policy", href: "/legal/privacy" },
-    { label: "Consumer Health Data", href: "/consumer-health-data-privacy-policy" },
+    {
+      label: "Consumer Health Data",
+      href: "/consumer-health-data-privacy-policy",
+    },
     { label: "Subprocessors", href: "/subprocessors" },
   ],
 };
@@ -81,24 +78,37 @@ export function SiteFooter({
   id = "site-footer",
   referralsAvailable = getAvailableHostedPublicReferralRewards().length > 0,
   vitalsMode = "live",
+  wide = false,
 }: {
   id?: string;
   referralsAvailable?: boolean;
   vitalsMode?: SiteFooterVitalsMode;
+  wide?: boolean;
 }) {
   const productLinks = referralsAvailable
     ? footerLinks.murph
     : footerLinks.murph.filter(({ href }) => href !== "/refer");
 
   return (
-    <footer id={id} className="border-t border-[rgba(196,168,130,0.25)] bg-[#f5f0e8] px-6 sm:px-10 lg:px-16">
-      <div className="mx-auto max-w-[1080px]">
+    <footer
+      id={id}
+      className="border-t border-[rgba(196,168,130,0.25)] bg-[#f5f0e8] px-6 sm:px-10 lg:px-16"
+    >
+      <div
+        className={cn("mx-auto", wide ? "max-w-[1400px]" : "max-w-[1080px]")}
+      >
         {/* Logo + link columns */}
         <div className="flex flex-col gap-10 py-10 sm:flex-row sm:justify-between">
           <div className="flex flex-col items-start gap-8">
             <Link href="/" aria-label="Murph home">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/logo.svg" alt="Murph" width={125} height={28} className="h-7 w-auto" />
+              <img
+                src="/logo.svg"
+                alt="Murph"
+                width={125}
+                height={28}
+                className="h-7 w-auto"
+              />
             </Link>
             <SiteFooterVitals mode={vitalsMode} />
           </div>
@@ -119,7 +129,7 @@ export function SiteFooter({
                     {...(link.external
                       ? { target: "_blank", rel: "noreferrer" }
                       : {})}
-                    className="inline-flex w-fit py-1 text-[0.875rem] text-[#2d3436] transition-colors hover:text-[#736a58]"
+                    className="inline-flex w-fit py-1 text-sm text-[#2d3436] transition-colors hover:text-[#736a58]"
                   >
                     {link.label}
                   </a>
@@ -136,7 +146,7 @@ export function SiteFooter({
                   <a
                     key={link.href}
                     href={link.href}
-                    className="inline-flex w-fit py-1 text-[0.875rem] text-[#2d3436] transition-colors hover:text-[#736a58]"
+                    className="inline-flex w-fit py-1 text-sm text-[#2d3436] transition-colors hover:text-[#736a58]"
                   >
                     {link.label}
                   </a>
@@ -147,19 +157,19 @@ export function SiteFooter({
         </div>
 
         {/* Medical disclaimer */}
-        <p className="border-t border-[rgba(196,168,130,0.25)] py-4 text-[0.75rem] leading-relaxed text-[#736a58]">
+        <p className="border-t border-[rgba(196,168,130,0.25)] py-4 text-xs leading-relaxed text-[#736a58]">
           Murph provides educational health information and tools to help you
-          understand your data and have better conversations with your clinician.
-          It is not intended to diagnose, treat, or prevent diseases or other
-          conditions and is not a substitute for professional medical advice. If
-          you are or may be pregnant, nursing, have a history of an eating
-          disorder, or have another medical condition, please talk to your doctor
-          before using Murph.
+          understand your data and have better conversations with your
+          clinician. It is not intended to diagnose, treat, or prevent diseases
+          or other conditions and is not a substitute for professional medical
+          advice. If you are or may be pregnant, nursing, have a history of an
+          eating disorder, or have another medical condition, please talk to
+          your doctor before using Murph.
         </p>
 
         {/* Bottom bar */}
         <div className="flex flex-col gap-3 border-t border-[rgba(196,168,130,0.25)] py-4 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-[0.8125rem] text-[#736a58]">
+          <p className="text-xs text-[#736a58]">
             Murph &copy; 2025&ndash;2026
           </p>
           <div className="flex items-center gap-5">

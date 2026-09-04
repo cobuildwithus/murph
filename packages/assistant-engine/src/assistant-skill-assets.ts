@@ -200,6 +200,12 @@ export const ASSISTANT_SKILLS = [
       'Use when Murph needs connected email, calendar, documents, storage, notes, or tasks; an approved accountless service such as weather, places, provider registry, product search, or Instacart; account connection or removal; connected-app context for another action; or a verified manual export or one-time import fallback for a health or fitness source without a proven direct Murph connection. Owns account selection, narrow discovery and reads, limited calendar writes, verified provider export handoffs, privacy, and untrusted provider content.',
   },
   {
+    slug: 'journal-connected-context',
+    name: 'journal-connected-context',
+    triggerHint:
+      'Use for automatic private Journal context from newly connected calendars or narrow email travel confirmations, and when a member changes or stops that capture. Owns the private connection notice, new-account baseline, category filters, normalized Journal plans, reconciliation, follow-ups, and opt-outs.',
+  },
+  {
     slug: 'computer-use',
     name: 'computer-use',
     triggerHint:

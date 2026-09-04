@@ -501,6 +501,7 @@ interface ExecuteClaimedAssistantCronJobInput {
 }
 
 interface AssistantCronRunExecutionResult {
+  automationSlug: string | null
   job: AssistantCronJob
   removedAfterRun: boolean
   run: AssistantCronRunRecord
@@ -784,6 +785,7 @@ export async function executeClaimedAssistantCronJob(
         job: input.job,
         latenessMinutes: staleError.latenessMinutes,
         onEvent: input.onEvent,
+        occurrenceAt,
       })
     } else {
       const onboardingSkipError =
@@ -1430,6 +1432,7 @@ export async function executeClaimedAssistantCronJob(
   })
 
   return {
+    automationSlug: resolveAssistantCronAutomationSlug(input.job),
     job: finalized.job,
     removedAfterRun: finalized.removedAfterRun,
     run,
@@ -1751,14 +1754,15 @@ function resolveAssistantCronOutboxAutomationAuthority(
 function resolveAssistantCronOutboxAutomationContextReferences(
   job: ResolvedAssistantCronJob,
   deviceActivityAuthority: DeviceActivityParentAuthority,
-): AssistantOutboxIntent['automationContextReferences'] | undefined {
-  if (job.kind === 'canonical' && job.source.kind === 'automation') {
-    return [...job.source.contextReferences]
-  }
+): AssistantOutboxIntent['automationContextReferences'] {
+  const contextReferences =
+    job.kind === 'canonical' && job.source.kind === 'automation'
+      ? job.source.contextReferences
+      : deviceActivityAuthority.automationId === null
+        ? []
+        : deviceActivityAuthority.contextReferences
 
-  return deviceActivityAuthority.automationId === null
-    ? undefined
-    : [...deviceActivityAuthority.contextReferences]
+  return contextReferences.length === 0 ? null : [...contextReferences]
 }
 
 function resolveAssistantCronOutboxPlannedOccurrenceAt(input: {
@@ -2678,6 +2682,7 @@ function emitAssistantCronOccurrenceExpiredEvent(input: {
   job: ResolvedAssistantCronJob
   latenessMinutes: number
   onEvent?: (event: AssistantRunEvent) => void
+  occurrenceAt: string
 }): void {
   const automationSlug = resolveAssistantCronAutomationSlug(input.job)
   if (!automationSlug) {
@@ -2691,6 +2696,7 @@ function emitAssistantCronOccurrenceExpiredEvent(input: {
     failureContext: {
       automationSlug,
       latenessMinutes: input.latenessMinutes,
+      occurrenceAt: input.occurrenceAt,
     },
     providerKind: 'status',
     providerState: 'completed',

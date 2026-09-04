@@ -164,6 +164,7 @@ describe("hosted-local worktree config", () => {
       wranglerPersistDir: "../.tmp/hosted-local-worktrees/feature-a/wrangler-state",
     });
     expect(config.env).toMatchObject({
+      CLOUDFLARE_ACCOUNT_ID: "790196a825975e8b2f885acb904ae3cc",
       MURPH_DEV_WORKTREE_SCOPE: "feature-a",
       MURPH_HOSTED_LOCAL_PROFILE: "dev",
       MURPH_DEV_HOSTED_LOCAL_CRYPTO_STATE_PATH:
@@ -174,11 +175,14 @@ describe("hosted-local worktree config", () => {
       MURPH_DEV_LINQ_WEBHOOK_TUNNEL_CONFIG:
         ".tmp/hosted-local-worktrees/feature-a/cloudflared-linq-webhook.yml",
       MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
-      DEVICE_SYNC_PUBLIC_BASE_URL: "http://localhost:3101/api/device-sync",
+      DEVICE_SYNC_PUBLIC_BASE_URL:
+        "https://local.withmurph.ai:3443/api/device-sync",
       HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS:
-        "http://localhost:3101,http://127.0.0.1:3101",
-      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "http://localhost:3101",
-      HOSTED_WEB_BASE_URL: "http://localhost:3101",
+        "https://local.withmurph.ai:3443,http://localhost:3101,http://127.0.0.1:3101",
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL:
+        "https://local.withmurph.ai:3443",
+      HOSTED_WEB_BASE_URL: "https://local.withmurph.ai:3443",
+      MURPH_DEV_WEB_PUBLIC_BASE_URL: "https://local.withmurph.ai:3443",
       MURPH_DEV_MINIO_PORT: "9101",
       MURPH_DEV_REUSE_EXISTING_WORKER: "0",
       MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
@@ -190,10 +194,13 @@ describe("hosted-local worktree config", () => {
       NEXT_DIST_DIR_MODE: "smoke",
       NEXT_DIST_DIR_SUFFIX: "feature-a",
     });
-    expect(config.urls.webBaseUrl).toBe("http://localhost:3101");
+    expect(config.urls.webBaseUrl).toBe("https://local.withmurph.ai:3443");
 
     const rendered = formatHostedLocalWorktreeEnv(config);
     expect(rendered).toContain("export MURPH_HOSTED_LOCAL_PROFILE='dev'");
+    expect(rendered).toContain(
+      "export CLOUDFLARE_ACCOUNT_ID='790196a825975e8b2f885acb904ae3cc'",
+    );
     expect(rendered).toContain("export MURPH_DEV_WORKTREE_SCOPE='feature-a'");
     expect(rendered).toContain("export MURPH_DEV_DATABASE_URL='[redacted]'");
     expect(rendered).toContain("export MURPH_DEV_LINQ_WEBHOOK_TUNNEL='0'");
@@ -201,12 +208,25 @@ describe("hosted-local worktree config", () => {
     expect(rendered).toContain("export MURPH_DEV_SKIP_STRIPE_LISTEN='1'");
     expect(rendered).toContain("export MURPH_DEV_WEB_HOST='localhost'");
     expect(rendered).toContain("export MURPH_DEV_WEB_PORT='3101'");
-    expect(rendered).toContain("export DEVICE_SYNC_PUBLIC_BASE_URL='http://localhost:3101/api/device-sync'");
-    expect(rendered).toContain("export HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS='http://localhost:3101,http://127.0.0.1:3101'");
-    expect(rendered).toContain("export HOSTED_ONBOARDING_PUBLIC_BASE_URL='http://localhost:3101'");
-    expect(rendered).toContain("export HOSTED_WEB_BASE_URL='http://localhost:3101'");
+    expect(rendered).toContain("export MURPH_DEV_WEB_PUBLIC_BASE_URL='https://local.withmurph.ai:3443'");
+    expect(rendered).toContain("export DEVICE_SYNC_PUBLIC_BASE_URL='https://local.withmurph.ai:3443/api/device-sync'");
+    expect(rendered).toContain("export HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS='https://local.withmurph.ai:3443,http://localhost:3101,http://127.0.0.1:3101'");
+    expect(rendered).toContain("export HOSTED_ONBOARDING_PUBLIC_BASE_URL='https://local.withmurph.ai:3443'");
+    expect(rendered).toContain("export HOSTED_WEB_BASE_URL='https://local.withmurph.ai:3443'");
     expect(rendered).not.toContain("MURPH_DEV_TEMP_DIR");
     expect(rendered).not.toContain(config.databaseUrl);
+  });
+
+  it("preserves an explicit Cloudflare account override", () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {
+        CLOUDFLARE_ACCOUNT_ID: "explicit-account-id",
+      },
+      ports,
+      slug: "feature-a",
+    });
+
+    expect(config.env.CLOUDFLARE_ACCOUNT_ID).toBe("explicit-account-id");
   });
 
   it("removes inherited web session authority from worktree config", () => {
@@ -233,14 +253,55 @@ describe("hosted-local worktree config", () => {
       slug: "feature-a",
     });
 
-    expect(config.urls.webBaseUrl).toBe("http://127.0.0.1:3101");
+    expect(config.urls.webBaseUrl).toBe("https://local.withmurph.ai:3443");
     expect(config.env).toMatchObject({
-      DEVICE_SYNC_PUBLIC_BASE_URL: "http://127.0.0.1:3101/api/device-sync",
+      DEVICE_SYNC_PUBLIC_BASE_URL:
+        "https://local.withmurph.ai:3443/api/device-sync",
       HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS:
-        "http://localhost:3101,http://127.0.0.1:3101",
-      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "http://127.0.0.1:3101",
-      HOSTED_WEB_BASE_URL: "http://127.0.0.1:3101",
+        "https://local.withmurph.ai:3443,http://localhost:3101,http://127.0.0.1:3101",
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL:
+        "https://local.withmurph.ai:3443",
+      HOSTED_WEB_BASE_URL: "https://local.withmurph.ai:3443",
       MURPH_DEV_WEB_HOST: "127.0.0.1",
+    });
+  });
+
+  it("keeps the direct worktree URL when the HTTPS proxy is explicitly disabled", () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {
+        MURPH_DEV_SKIP_TLS_PROXY: "1",
+      },
+      ports,
+      slug: "feature-a",
+    });
+
+    expect(config.urls.webBaseUrl).toBe("http://localhost:3101");
+    expect(config.env.MURPH_DEV_WEB_PUBLIC_BASE_URL).toBeUndefined();
+    expect(config.env.DEVICE_SYNC_PUBLIC_BASE_URL).toBe(
+      "http://localhost:3101/api/device-sync",
+    );
+  });
+
+  it("keeps the isolated listener while publishing an explicit browser origin", () => {
+    const config = buildHostedLocalWorktreeConfig({
+      env: {
+        MURPH_DEV_WEB_PUBLIC_BASE_URL: "https://local.withmurph.ai:3443",
+      },
+      ports,
+      slug: "feature-a",
+    });
+
+    expect(config.urls.webBaseUrl).toBe("https://local.withmurph.ai:3443");
+    expect(config.env).toMatchObject({
+      DEVICE_SYNC_PUBLIC_BASE_URL:
+        "https://local.withmurph.ai:3443/api/device-sync",
+      HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS:
+        "https://local.withmurph.ai:3443,http://localhost:3101,http://127.0.0.1:3101",
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL:
+        "https://local.withmurph.ai:3443",
+      HOSTED_WEB_BASE_URL: "https://local.withmurph.ai:3443",
+      MURPH_DEV_WEB_HOST: "localhost",
+      MURPH_DEV_WEB_PORT: "3101",
     });
   });
 
@@ -601,7 +662,7 @@ describe("hosted-local worktree config", () => {
 
     expect(config.ports).toEqual(repeated.ports);
     expect(worktreeMocks.readFile).not.toHaveBeenCalled();
-    expect(config.urls.webBaseUrl).toBe(`http://localhost:${config.ports.web}`);
+    expect(config.urls.webBaseUrl).toBe("https://local.withmurph.ai:3443");
     expect(config.urls.workerBaseUrl).toBe(`http://127.0.0.1:${config.ports.worker}`);
   });
 

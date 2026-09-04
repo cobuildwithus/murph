@@ -31,9 +31,11 @@ import {
 // (e.g. vault-cli PATH candidates) keeps landing on `<bundle>/node_modules`.
 export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 
-// Byte budgets over the esbuild metafile make import-graph growth fail the
+// Startup budgets over the esbuild metafile make eager import-graph growth fail
 // assembly instead of silently regressing cold start. Entry and static-closure
-// caps retain their platform-jitter tolerances.
+// caps retain their platform-jitter tolerances. Historical total measurements
+// below are provenance only: exact-base CI owns total-output growth so ordinary
+// local and hosted-local assembly cannot be blocked by a stale fixed ceiling.
 //
 // Static-closure baseline raised 2026-07-25 on main. The previous baseline left
 // the packaged boot closure 735B under its cap, so the next small reviewed
@@ -319,11 +321,6 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // input. Exact macOS production assembly measured 11,678,063B total on
 // 2026-08-31; ratchet only the total baseline and retain the fixed
 // cross-platform allowance and all startup-specific gates.
-// Goal catalog and setup support extend the existing lazy Health Commons and
-// assistant graph without adding a boot input. Exact macOS production assembly
-// measured 11,713,714B total on 2026-09-01; ratchet only the total baseline and
-// retain the fixed cross-platform allowance and all startup-specific gates.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 11_713_714 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 64_257;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 1_950_662;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CHUNK_COUNT_BUDGET = 24;
@@ -400,7 +397,7 @@ export async function bundleRunnerContainerEntrypoint(
     buildResult.metafile,
   );
   console.log(
-    `runner entrypoint bundle size: entry ${bundleBytes.entryBytes}B (baseline ${RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES}B + ${RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES}B tolerance), static boot closure ${bundleBytes.staticClosureBytes}B (baseline ${RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES}B + ${RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES}B tolerance) across ${bundleBytes.staticChunkCount} chunks of ${RUNNER_ENTRYPOINT_BUNDLE_STATIC_CHUNK_COUNT_BUDGET} budget, total ${bundleBytes.totalBytes}B of ${RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET}B budget`,
+    `runner entrypoint bundle size: entry ${bundleBytes.entryBytes}B (baseline ${RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES}B + ${RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES}B tolerance), static boot closure ${bundleBytes.staticClosureBytes}B (baseline ${RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES}B + ${RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES}B tolerance) across ${bundleBytes.staticChunkCount} chunks of ${RUNNER_ENTRYPOINT_BUNDLE_STATIC_CHUNK_COUNT_BUDGET} budget, total ${bundleBytes.totalBytes}B (exact-base CI relative guard)`,
   );
   assertRunnerEntrypointBundleBoots({
     bundleDir,
@@ -412,16 +409,14 @@ export async function bundleRunnerContainerEntrypoint(
   });
 }
 
-// Single source of truth for the production budgets: both boot-path caps use
-// their measured baseline plus emit-jitter tolerance; the total remains a
-// fixed ceiling.
+// Single source of truth for the production startup budgets: both boot-path
+// caps use their measured baseline plus emit-jitter tolerance.
 // Exported so a unit test can lock these values (the assembly path calls
 // assertRunnerEntrypointBundleWithinBudgets with this as the default).
 export function resolveRunnerEntrypointBundleBudgets(): {
   entryBytes: number;
   staticClosureBytes: number;
   staticChunkCount: number;
-  totalBytes: number;
 } {
   return {
     entryBytes:
@@ -431,7 +426,6 @@ export function resolveRunnerEntrypointBundleBudgets(): {
       RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES
       + RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES,
     staticChunkCount: RUNNER_ENTRYPOINT_BUNDLE_STATIC_CHUNK_COUNT_BUDGET,
-    totalBytes: RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET,
   };
 }
 
@@ -457,7 +451,6 @@ export function assertRunnerEntrypointBundleWithinBudgets(
     entryBytes: number;
     staticClosureBytes: number;
     staticChunkCount: number;
-    totalBytes: number;
   }
     = resolveRunnerEntrypointBundleBudgets(),
 ): {
@@ -491,11 +484,6 @@ export function assertRunnerEntrypointBundleWithinBudgets(
   );
 
   const violations: string[] = [];
-  if (totalBytes > budgets.totalBytes) {
-    violations.push(
-      `total output ${totalBytes}B exceeds budget ${budgets.totalBytes}B`,
-    );
-  }
   if (entryBytes > budgets.entryBytes) {
     violations.push(
       `entry chunk ${entryPath} ${entryBytes}B exceeds budget ${budgets.entryBytes}B`,

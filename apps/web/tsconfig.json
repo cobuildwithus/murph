@@ -231,6 +231,9 @@
       "@murphai/query/browser-replica-client": [
         "../../packages/query/src/browser-replica-client.ts"
       ],
+      "@murphai/query/browser-replica-server": [
+        "../../packages/query/src/browser-replica-server.ts"
+      ],
       "@murphai/core": [
         "../../packages/core/src/index.ts"
       ],

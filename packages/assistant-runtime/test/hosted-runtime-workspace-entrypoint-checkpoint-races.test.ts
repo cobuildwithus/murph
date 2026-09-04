@@ -14,6 +14,7 @@ import {
   readConversationImportedSeqs,
   removeTempRoot,
   requireEventIndex,
+  runHostedWorkspaceRuntimeJobInProcess,
   stageAssistantInputEventForMailboxItem,
   waitForFakeTimerScheduled,
   waitUntil,
@@ -79,7 +80,6 @@ import {
   HostedWorkspaceRunnerUserMismatchError,
   drainHostedRuntimeDeferredUsageCompletionsBestEffort,
   parseHostedAssistantWorkspaceRuntimeJobInput,
-  runHostedWorkspaceRuntimeJobInProcess,
   type HostedWorkspaceRuntimeJobOptions,
   type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";

@@ -9883,6 +9883,19 @@
                                   "maxLength": 4000,
                                   "description": "Freeform note text to store on the event."
                                 },
+                                "noteType": {
+                                  "description": "Optional structured note type, such as journal-factor or journal-outcome.",
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                                },
+                                "relatedId": {
+                                  "description": "Optional related event ids. Repeat --related-id for multiple events.",
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "pattern": "^evt_[0-9A-HJKMNP-TV-Z]{26}$"
+                                  }
+                                },
                                 "occurredAt": {
                                   "description": "Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.",
                                   "anyOf": [
@@ -11323,6 +11336,11 @@
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 200
+                                },
+                                "includeWorkoutDetails": {
+                                  "default": false,
+                                  "description": "Include bounded workoutFeatures and splits (up to 32 workouts per day and 64 splits per workout). Choose compact or detailed output from the question before the first and only activity-list data read; never use compact output as a probe before retrying with detail. Omit this option only when the answer is entirely available from day-level sessionCount, sessionMinutes, and distinct activityTypes. Pass it truthy whenever selecting, comparing, grouping, ordering, or attributing individual workouts, including type-specific count, duration, distance, start time, provider, heart rate, cadence, power, speed, or splits.",
+                                  "type": "boolean"
                                 }
                               }
                             }

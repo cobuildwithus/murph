@@ -22,12 +22,6 @@ import {
   HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS,
 } from "@murphai/hosted-execution/assistant-model";
 import {
-  HOSTED_GEMINI_VIDEO_ANALYSIS_MODEL,
-} from "@murphai/hosted-execution/assistant-capabilities";
-import {
-  HOSTED_RUNTIME_LOG_PATH,
-} from "@murphai/hosted-execution/routes";
-import {
   buildHostedCodexMemoryUsageRecord,
   buildHostedElevenLabsMusicUsageRecord,
   buildHostedElevenLabsTtsUsageRecord,
@@ -65,6 +59,9 @@ import {
   readHostedRunnerInternalOperation,
   readHostedRunnerSafeResponseBodyMetadata,
 } from "./runner-outbound/diagnostics.ts";
+import {
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
+} from "./runner-outbound/shared-web-control-policy.ts";
 import {
   applyRunnerRuntimeUsageSettlement,
   requireRunnerRuntimeWriteFenceWrite,
@@ -139,8 +136,8 @@ import {
   DEFAULT_GEMINI_API_BASE_URL,
   HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_BODY_BYTES,
   HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_RESPONSE_BODY_BYTES,
-  isAllowedHostedGeminiVideoAnalysisRequest,
   parseHostedGeminiVideoAnalysisRequestBody,
+  readHostedGeminiVideoAnalysisRequestModel,
   readHostedGeminiVideoAnalysisUsageMetadata,
 } from "./runner-egress-gemini.ts";
 import {
@@ -2255,11 +2252,12 @@ async function maybeHandleGeminiRequest(input: {
   if (input.url.origin !== DEFAULT_GEMINI_API_BASE_URL) {
     return null;
   }
+  const model = readHostedGeminiVideoAnalysisRequestModel(
+    input.request.method,
+    input.url.pathname,
+  );
   if (
-    !isAllowedHostedGeminiVideoAnalysisRequest(
-      input.request.method,
-      input.url.pathname,
-    )
+    model === null
     || input.url.search.length > 0
     || input.request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase()
       !== "application/json"
@@ -2295,6 +2293,7 @@ async function maybeHandleGeminiRequest(input: {
   try {
     parsedBody = parseHostedGeminiVideoAnalysisRequestBody(
       JSON.parse(new TextDecoder().decode(requestBody)),
+      model,
     );
   } catch {
     return disallowedProviderEgress();
@@ -2347,7 +2346,7 @@ async function maybeHandleGeminiRequest(input: {
   const usageRecording = recordHostedGeminiVideoAnalysisUsage({
     authorization,
     env: input.env,
-    model: HOSTED_GEMINI_VIDEO_ANALYSIS_MODEL,
+    model,
     occurredAt: new Date(providerRequestStartedAt).toISOString(),
     providerRequestId:
       response.headers.get("x-goog-request-id")
@@ -2935,12 +2934,13 @@ async function writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog(input: {
   userId: string;
   writeFence: HostedProviderEgressWriteFenceMetadata | null;
 }): Promise<void> {
+  const route = HOSTED_RUNNER_WEB_CONTROL_ROUTES.runtimeLogWrite;
   const writeFence = input.writeFence ?? readRuntimeLogWriteFenceMetadata({
     headers: input.request.headers,
     userId: input.userId,
   });
   const response = await handleRunnerOutboundRequest(
-    new Request(`${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane}${HOSTED_RUNTIME_LOG_PATH}`, {
+    new Request(`${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane}${route.path}`, {
       body: JSON.stringify({
         entries: [{
           at: new Date().toISOString(),
@@ -2970,7 +2970,7 @@ async function writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog(input: {
             }
           : {}),
       },
-      method: "POST",
+      method: route.method,
     }),
     input.env,
     input.userId,

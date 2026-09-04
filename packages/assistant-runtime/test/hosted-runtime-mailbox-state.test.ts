@@ -2,6 +2,10 @@ import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import {
+  buildHostedExecutionAssistantNotificationRequestedWake,
+  buildHostedExecutionDeviceSyncWake,
+} from "@murphai/hosted-execution";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -9,6 +13,7 @@ import {
   readHostedSystemMailboxState,
   removeHostedSystemMailboxPendingItemIfCurrent,
   resolveHostedSystemMailboxHandledThroughSeq,
+  resolveHostedSystemMailboxProgress,
   resolveHostedSystemMailboxNextWakeCandidate,
   resolveHostedSystemMailboxWakeCandidates,
   setHostedDeviceSyncDenseRawRetentionMailboxWakeAt,
@@ -314,6 +319,71 @@ describe("hosted runtime system mailbox state", () => {
         ],
       },
     })).toBe("3");
+    expect(resolveHostedSystemMailboxProgress({
+      importedSeq: "9",
+      state: {
+        pending: [
+          buildPendingSystemMailboxItem({ itemId: "pending_7", mailboxLaneSeq: "7" }),
+          buildPendingSystemMailboxItem({ itemId: "pending_4", mailboxLaneSeq: "4" }),
+        ],
+      },
+    })).toEqual({
+      firstPendingSeq: "4",
+      handledThroughSeq: "3",
+    });
+  });
+
+  it("does not let a handled device item retained as a local retry pin the canonical prefix", () => {
+    const retryAt = "2026-04-28T00:00:00.000Z";
+    const base = buildPendingDeviceSyncMailboxItem({
+      itemId: "retained_device_retry",
+      mailboxLaneSeq: "4",
+    });
+    const retainedDeviceRetry: HostedSystemMailboxPendingItem = {
+      ...base,
+      attemptCount: 1,
+      lastAttemptAt: "2026-04-27T00:00:00.000Z",
+      nextAttemptAt: retryAt,
+      wake: buildHostedExecutionDeviceSyncWake({
+        connectionId: "dsc_retained_retry",
+        eventId: "device-sync.wake:retained_device_retry",
+        expectedConnectedAt: "2026-04-01T00:00:00.000Z",
+        hint: {
+          jobs: [{
+            availableAt: retryAt,
+            dedupeKey: "retained-weight-retry",
+            kind: "resource",
+            maxAttempts: 1,
+            payload: {},
+          }],
+        },
+        occurredAt: "2026-04-27T00:00:00.000Z",
+        provider: "junction",
+        reason: "reconcile_due",
+        userId: "member_123",
+      }),
+    };
+    const pendingSuccessor = buildPendingSystemMailboxItem({
+      itemId: "pending_successor",
+      mailboxLaneSeq: "9",
+    });
+
+    expect(resolveHostedSystemMailboxProgress({
+      importedSeq: "9",
+      now: "2026-04-27T00:00:00.000Z",
+      state: { pending: [retainedDeviceRetry, pendingSuccessor] },
+    })).toEqual({
+      firstPendingSeq: "9",
+      handledThroughSeq: "8",
+    });
+    expect(resolveHostedSystemMailboxProgress({
+      importedSeq: "9",
+      now: retryAt,
+      state: { pending: [retainedDeviceRetry] },
+    })).toEqual({
+      firstPendingSeq: null,
+      handledThroughSeq: "9",
+    });
   });
 
   it("blocks legacy unsequenced work without letting synthetic retention wakes block the lane", async () => {
@@ -326,6 +396,18 @@ describe("hosted runtime system mailbox state", () => {
         })],
       },
     })).toBe("0");
+    expect(resolveHostedSystemMailboxProgress({
+      importedSeq: "9",
+      state: {
+        pending: [buildPendingSystemMailboxItem({
+          itemId: "pending_legacy",
+          mailboxLaneSeq: null,
+        })],
+      },
+    })).toEqual({
+      firstPendingSeq: null,
+      handledThroughSeq: "0",
+    });
 
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
     try {
@@ -541,15 +623,33 @@ describe("hosted runtime system mailbox state", () => {
       });
 
       await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [deviceWake, approvedContinuationA],
+      }));
+      await expect(resolveHostedSystemMailboxWakeCandidates({
+        now: () => "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      })).resolves.toEqual({
+        defaultOwned: {
+          at: "2026-04-27T00:00:00.000Z",
+          reason: "assistant",
+        },
+        next: {
+          at: "2026-04-27T00:00:00.000Z",
+          executionClass: "default_owned",
+          reason: "assistant",
+        },
+      });
+
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
         pending: [codexRetry, deviceWake],
       }));
       await expect(resolveHostedSystemMailboxNextWakeCandidate({
         now: () => "2026-04-27T00:00:00.000Z",
         vaultRoot,
       })).resolves.toEqual({
-        at: "2026-04-27T00:00:00.000Z",
-        executionClass: "model_free",
-        reason: "device-sync.reconcile",
+        at: "2026-04-27T00:01:00.000Z",
+        executionClass: null,
+        reason: "assistant",
       });
       await expect(resolveHostedSystemMailboxWakeCandidates({
         now: () => "2026-04-27T00:00:00.000Z",
@@ -560,9 +660,9 @@ describe("hosted runtime system mailbox state", () => {
           reason: "assistant",
         },
         next: {
-          at: "2026-04-27T00:00:00.000Z",
-          executionClass: "model_free",
-          reason: "device-sync.reconcile",
+          at: "2026-04-27T00:01:00.000Z",
+          executionClass: null,
+          reason: "assistant",
         },
       });
       await expect(resolveHostedSystemMailboxWakeCandidates({
@@ -670,6 +770,363 @@ describe("hosted runtime system mailbox state", () => {
         at: "2026-04-27T00:00:00.000Z",
         executionClass: "model_free",
         reason: "mailbox",
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps a later due model-free row behind a future durable frontier", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
+    const now = "2026-04-27T00:00:00.000Z";
+    const deviceRetryAt = "2026-04-27T00:01:00.000Z";
+    const retainedDeviceFrontier = {
+      ...buildPendingDeviceSyncMailboxItem({
+        itemId: "pending_retained_device_frontier",
+        mailboxLaneSeq: "1",
+      }),
+      attemptCount: 1,
+      lastAttemptAt: now,
+      lastErrorCode: "device_sync_retry",
+      lastErrorMessage: "redacted",
+      nextAttemptAt: deviceRetryAt,
+    };
+    const dueMaintenanceSuccessor = buildPendingRuntimeControlMailboxItem({
+      itemId: "pending_due_maintenance_successor",
+      mailboxDedupeKey: "runtime-control:maintenance:successor",
+      mailboxLaneSeq: "2",
+      wakeKind: "runtime.maintenance-requested",
+    });
+
+    try {
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [retainedDeviceFrontier, dueMaintenanceSuccessor],
+      }));
+
+      await expect(resolveHostedSystemMailboxWakeCandidates({
+        now: () => now,
+        vaultRoot,
+      })).resolves.toEqual({
+        defaultOwned: {
+          at: null,
+          reason: null,
+        },
+        next: {
+          at: deviceRetryAt,
+          executionClass: null,
+          reason: "device-sync.reconcile",
+        },
+      });
+      await expect(resolveHostedSystemMailboxNextWakeCandidate({
+        now: () => deviceRetryAt,
+        vaultRoot,
+      })).resolves.toEqual({
+        at: deviceRetryAt,
+        executionClass: "model_free",
+        reason: "device-sync.reconcile",
+      });
+      await removeHostedSystemMailboxPendingItemIfCurrent({
+        item: retainedDeviceFrontier,
+        vaultRoot,
+      });
+      await expect(resolveHostedSystemMailboxNextWakeCandidate({
+        now: () => deviceRetryAt,
+        vaultRoot,
+      })).resolves.toEqual({
+        at: deviceRetryAt,
+        executionClass: "model_free",
+        reason: "mailbox",
+      });
+      await removeHostedSystemMailboxPendingItemIfCurrent({
+        item: dueMaintenanceSuccessor,
+        vaultRoot,
+      });
+      await expect(resolveHostedSystemMailboxNextWakeCandidate({
+        now: () => deviceRetryAt,
+        vaultRoot,
+      })).resolves.toEqual({
+        at: null,
+        executionClass: null,
+        reason: null,
+      });
+
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [retainedDeviceFrontier, dueMaintenanceSuccessor],
+      }));
+      await expect(resolveHostedSystemMailboxNextWakeCandidate({
+        excludeItemId: retainedDeviceFrontier.itemId,
+        now: () => now,
+        vaultRoot,
+      })).resolves.toEqual({
+        at: now,
+        executionClass: "model_free",
+        reason: "mailbox",
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps a reported daily metric in the model-free device frontier", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-system-mailbox-state-"));
+    const deviceWake = buildPendingDeviceSyncMailboxItem({
+      itemId: "pending_device_sync_before_reported_metric",
+      mailboxLaneSeq: "1",
+    });
+    const reportedMetric = buildPendingReportedDailyMetricMailboxItem({
+      itemId: "pending_reported_metric_after_device_sync",
+      mailboxLaneSeq: "2",
+    });
+
+    try {
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [deviceWake, reportedMetric],
+      }));
+
+      await expect(resolveHostedSystemMailboxWakeCandidates({
+        now: () => "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      })).resolves.toEqual({
+        defaultOwned: {
+          at: null,
+          reason: null,
+        },
+        next: {
+          at: "2026-04-27T00:00:00.000Z",
+          executionClass: "model_free",
+          reason: "device-sync.reconcile",
+        },
+      });
+
+      await removeHostedSystemMailboxPendingItemIfCurrent({
+        item: deviceWake,
+        vaultRoot,
+      });
+      await expect(resolveHostedSystemMailboxWakeCandidates({
+        now: () => "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      })).resolves.toEqual({
+        defaultOwned: {
+          at: null,
+          reason: null,
+        },
+        next: {
+          at: "2026-04-27T00:00:00.000Z",
+          executionClass: "model_free",
+          reason: "mailbox",
+        },
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps a later generic notification behind a runnable device-sync owner", async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-hosted-system-mailbox-state-"),
+    );
+    const now = "2026-04-27T00:00:00.000Z";
+    const deviceRetryAt = "2026-04-27T00:05:00.000Z";
+    const deviceWake: HostedSystemMailboxPendingItem = {
+      ...buildPendingDeviceSyncMailboxItem({
+        itemId: "pending_device_sync_before_generic_notification",
+        mailboxLaneSeq: "1",
+      }),
+      attemptCount: 1,
+      lastAttemptAt: now,
+      postCheckpointRecord: {
+        connectionId: "device_sync_connection_synthetic",
+        kind: "device-sync.dirty-processed",
+        processedRevision: "7",
+      },
+      status: "recording",
+    };
+    const notification = buildPendingAssistantNotificationMailboxItem({
+      itemId: "pending_generic_notification_after_device_sync",
+      mailboxLaneSeq: "2",
+    });
+
+    try {
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [deviceWake, notification],
+      }));
+
+      await expect(resolveHostedSystemMailboxWakeCandidates({
+        now: () => now,
+        vaultRoot,
+      })).resolves.toEqual({
+        defaultOwned: {
+          at: null,
+          reason: null,
+        },
+        next: {
+          at: now,
+          executionClass: "model_free",
+          reason: "device-sync.reconcile",
+        },
+      });
+
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [{
+          ...deviceWake,
+          lastErrorCode: "device_sync_retry",
+          lastErrorMessage: "redacted",
+          nextAttemptAt: deviceRetryAt,
+        }, notification],
+      }));
+      await expect(resolveHostedSystemMailboxWakeCandidates({
+        now: () => now,
+        vaultRoot,
+      })).resolves.toEqual({
+        defaultOwned: {
+          at: now,
+          reason: "assistant",
+        },
+        next: {
+          at: now,
+          executionClass: "default_owned",
+          reason: "assistant",
+        },
+      });
+
+      const retainedDeviceWake = (await readHostedSystemMailboxState(vaultRoot))
+        .pending.find((item) => item.itemId === deviceWake.itemId);
+      if (!retainedDeviceWake) {
+        throw new Error("Expected the synthetic device frontier to remain pending.");
+      }
+      await removeHostedSystemMailboxPendingItemIfCurrent({
+        item: retainedDeviceWake,
+        vaultRoot,
+      });
+      await expect(resolveHostedSystemMailboxWakeCandidates({
+        now: () => now,
+        vaultRoot,
+      })).resolves.toEqual({
+        defaultOwned: {
+          at: now,
+          reason: "assistant",
+        },
+        next: {
+          at: now,
+          executionClass: "default_owned",
+          reason: "assistant",
+        },
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("lets a fresh same-connection webhook admit the retained device frontier", async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-hosted-system-mailbox-state-"),
+    );
+    const now = "2026-04-27T00:00:00.000Z";
+    const retryAt = "2026-04-28T00:00:00.000Z";
+    const connectionId = "device_sync_connection_synthetic";
+    const retained: HostedSystemMailboxPendingItem = {
+      ...buildPendingDeviceSyncMailboxItem({
+        itemId: "pending_retained_device_retry",
+        mailboxLaneSeq: "1",
+      }),
+      attemptCount: 1,
+      lastAttemptAt: now,
+      nextAttemptAt: retryAt,
+      wake: {
+        connectionId,
+        eventId: "device-sync.wake:retained-retry",
+        hint: {
+          jobs: [{
+            availableAt: retryAt,
+            dedupeKey: "retained-historical-job",
+            kind: "resource",
+            maxAttempts: 1,
+            payload: {},
+            priority: 30,
+          }],
+        },
+        kind: "device-sync.wake",
+        occurredAt: now,
+        provider: "junction",
+        reason: "reconcile_due",
+        userId: "member_123",
+      },
+    };
+    const webhook: HostedSystemMailboxPendingItem = {
+      ...buildPendingDeviceSyncMailboxItem({
+        itemId: "pending_fresh_device_webhook",
+        mailboxLaneSeq: "2",
+      }),
+      occurredAt: "2026-04-27T00:00:01.000Z",
+      wake: {
+        connectionId,
+        eventId: "device-sync.wake:fresh-webhook",
+        kind: "device-sync.wake",
+        occurredAt: "2026-04-27T00:00:01.000Z",
+        provider: "junction",
+        reason: "webhook_hint",
+        userId: "member_123",
+      },
+    };
+
+    try {
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [retained, webhook],
+      }));
+
+      expect(findNextHostedSystemMailboxQueueItem({
+        allowedRouteActions: ["run-device-sync-wake"],
+        now,
+        state: { pending: [retained, webhook] },
+      })).toEqual({
+        ...retained,
+        nextAttemptAt: null,
+      });
+      await expect(resolveHostedSystemMailboxWakeCandidates({
+        now: () => now,
+        vaultRoot,
+      })).resolves.toEqual({
+        defaultOwned: {
+          at: null,
+          reason: null,
+        },
+        next: {
+          at: now,
+          executionClass: "model_free",
+          reason: "device-sync.reconcile",
+        },
+      });
+
+      const scheduledSuccessor: HostedSystemMailboxPendingItem = {
+        ...webhook,
+        itemId: "pending_repeated_scheduled_reconcile",
+        mailboxDedupeKey: "device-sync.wake:repeated-scheduled-reconcile",
+        wake: {
+          connectionId,
+          eventId: "device-sync.wake:repeated-scheduled-reconcile",
+          kind: "device-sync.wake",
+          occurredAt: "2026-04-27T00:00:01.000Z",
+          provider: "junction",
+          reason: "reconcile_due",
+          userId: "member_123",
+        },
+      };
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [retained, scheduledSuccessor],
+      }));
+      await expect(resolveHostedSystemMailboxWakeCandidates({
+        now: () => now,
+        vaultRoot,
+      })).resolves.toEqual({
+        defaultOwned: {
+          at: null,
+          reason: null,
+        },
+        next: {
+          at: retryAt,
+          executionClass: null,
+          reason: "device-sync.reconcile",
+        },
       });
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
@@ -1106,6 +1563,83 @@ function buildPendingDeviceSyncMailboxItem(input: {
       kind: "device-sync.wake",
       occurredAt: "2026-04-27T00:00:00.000Z",
       reason: "reconcile_due",
+      userId: "member_123",
+    },
+  };
+}
+
+function buildPendingAssistantNotificationMailboxItem(input: {
+  itemId: string;
+  mailboxLaneSeq: string;
+}): HostedSystemMailboxPendingItem {
+  const mailboxDedupeKey =
+    `assistant.notification.requested:${input.itemId}`;
+  return {
+    attemptCount: 0,
+    itemId: input.itemId,
+    lastAttemptAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    mailboxDedupeKey,
+    mailboxLaneSeq: input.mailboxLaneSeq,
+    nextAttemptAt: null,
+    occurredAt: "2026-04-27T00:00:00.000Z",
+    postCheckpointRecord: null,
+    preferenceCausalSeq: null,
+    requestId: `request_${input.itemId}`,
+    routeAction: "dispatch-assistant-notification",
+    status: "pending",
+    wake: buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: mailboxDedupeKey,
+      memberId: "member_123",
+      notification: {
+        instructions: "Handle one synthetic background notification.",
+        route: {
+          actorId: null,
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "synthetic_notification_thread",
+          },
+          identityId: "synthetic_notification_identity",
+          threadId: "synthetic_notification_thread",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-27T00:00:00.000Z",
+    }),
+  };
+}
+
+function buildPendingReportedDailyMetricMailboxItem(input: {
+  itemId: string;
+  mailboxLaneSeq: string;
+}): HostedSystemMailboxPendingItem {
+  return {
+    attemptCount: 0,
+    itemId: input.itemId,
+    lastAttemptAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    mailboxDedupeKey: `health.daily-metric.reported:${input.itemId}`,
+    mailboxLaneSeq: input.mailboxLaneSeq,
+    nextAttemptAt: null,
+    occurredAt: "2026-04-27T00:00:00.000Z",
+    postCheckpointRecord: null,
+    preferenceCausalSeq: null,
+    requestId: null,
+    routeAction: "import-reported-daily-metric",
+    status: "pending",
+    wake: {
+      dailyMetric: {
+        date: "2026-04-27",
+        metric: "steps",
+        unit: "count",
+        value: 8_000,
+      },
+      eventId: `health.daily-metric.reported:${input.itemId}`,
+      kind: "health.daily-metric.reported",
+      occurredAt: "2026-04-27T00:00:00.000Z",
       userId: "member_123",
     },
   };

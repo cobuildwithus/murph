@@ -116,7 +116,7 @@ function isBundleOnlyContainerSmokeRequest(url: string): boolean {
 function createCodexShellSmokeResult() {
   return {
     cliSurfaceContractBytes: 37282,
-    cliSurfaceHotPathProofCount: 4,
+    cliSurfaceHotPathProofCount: 5,
     client: "codex-app-server",
     healthCommonsCliGoalProofCount: 6,
     murphPathBytes: 28,
