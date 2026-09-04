@@ -1782,8 +1782,10 @@ describe("HostedUserRunner execution coordination", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
-    const { invoke, runner, sql } = createRunnerHarness({
+    const onRuntimeCompletionRecorded = vi.fn(async () => {});
+    const { flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
       invocationResults: [invocationResult.promise],
+      onRuntimeCompletionRecorded,
     });
     await runner.bindUser(TEST_USER_ID);
 
@@ -1811,6 +1813,12 @@ describe("HostedUserRunner execution coordination", () => {
       userId: TEST_USER_ID,
     })).resolves.toEqual({ completed: true });
     expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+    await flushWaitUntil();
+    expect(onRuntimeCompletionRecorded).toHaveBeenCalledWith({
+      attemptId: invokeInput.job.request.attemptId,
+      leaseGeneration: invokeInput.job.request.leaseGeneration,
+      userId: TEST_USER_ID,
+    });
     expect(
       mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
         (call) => call[0].path === HOSTED_RUNTIME_OWNER_RELEASED_PATH,
@@ -1832,12 +1840,58 @@ describe("HostedUserRunner execution coordination", () => {
     ).toHaveLength(1);
   });
 
+  it("preserves exact completion when container cleanup notification fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const { flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
+      invocationResults: [invocationResult.promise],
+      onRuntimeCompletionRecorded: async () => {
+        throw new Error("container cleanup unavailable");
+      },
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-container-completion-cleanup-failure",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({ action: "started" });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    const invokeInput = invoke.mock.calls[0]?.[0];
+    if (!invokeInput) {
+      throw new Error("Expected a hosted runtime invocation.");
+    }
+    const result: HostedWorkspaceInvocationResult = {
+      nextWakeAt: null,
+      status: "idle",
+    };
+
+    await expect(runner.recordRuntimeCompletionFromContainer({
+      attemptId: invokeInput.job.request.attemptId,
+      generation: invokeInput.job.request.leaseGeneration,
+      result,
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({ completed: true });
+    await flushWaitUntil();
+
+    expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message:
+          "Hosted runner completion cleanup notification failed; preserving the lifecycle timer fallback.",
+      }),
+    );
+    invocationResult.resolve(result);
+  });
+
   it("rejects a stale container completion without clearing the active fence", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
-    const { invoke, runner, sql } = createRunnerHarness({
+    const onRuntimeCompletionRecorded = vi.fn(async () => {});
+    const { flushWaitUntil, invoke, runner, sql } = createRunnerHarness({
       invocationResults: [invocationResult.promise],
+      onRuntimeCompletionRecorded,
     });
     await runner.bindUser(TEST_USER_ID);
 
@@ -1861,7 +1915,9 @@ describe("HostedUserRunner execution coordination", () => {
       result: { nextWakeAt: null, status: "idle" },
       userId: TEST_USER_ID,
     })).resolves.toEqual({ completed: false });
+    await flushWaitUntil();
     expect(readRunnerMeta(sql).active_attempt_id).toBe(activeAttemptId);
+    expect(onRuntimeCompletionRecorded).not.toHaveBeenCalled();
     expect(
       mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
         (call) => call[0].path === HOSTED_RUNTIME_OWNER_RELEASED_PATH,
@@ -8995,6 +9051,7 @@ function createRunnerHarness(input: {
   invocationResults?: Array<Error | HostedWorkspaceInvocationResult | Promise<HostedWorkspaceInvocationResult>>;
   mailboxLag?: HostedRuntimeWebStatusResponse["mailboxLag"];
   onCryptoContextRead?: () => Promise<void> | void;
+  onRuntimeCompletionRecorded?: HostedExecutionContainerStubLike["onRuntimeCompletionRecorded"];
   readHealthDataConsentState?: (input: { timeoutMs: number }) =>
     | "granted"
     | "missing"
@@ -9040,6 +9097,7 @@ function createRunnerHarness(input: {
     },
   );
   const readActiveRuntimeUserFenceInput = input.readActiveRuntimeUserFence;
+  const onRuntimeCompletionRecordedInput = input.onRuntimeCompletionRecorded;
   const abortWorkspaceInvocationInput = input.abortWorkspaceInvocation;
   const ensureReadyForProcessing = input.ensureReadyForProcessing === null
     ? null
@@ -9069,6 +9127,24 @@ function createRunnerHarness(input: {
         }
       : {}),
     ...(ensureReadyForProcessing ? { ensureReadyForProcessing } : {}),
+    ...(onRuntimeCompletionRecordedInput
+      ? {
+          onRuntimeCompletionRecorded: createDirectOnlyRpcMethod<
+            NonNullable<HostedExecutionContainerStubLike["onRuntimeCompletionRecorded"]>
+          >(
+            async function (
+              this: HostedExecutionContainerStubLike,
+              completionInput,
+            ) {
+              expect(this).toBe(stub);
+              await onRuntimeCompletionRecordedInput.call(
+                this,
+                completionInput,
+              );
+            },
+          ),
+        }
+      : {}),
     ...(input.prewarmShell
       ? {
           beginShellPrewarm: createDirectOnlyRpcMethod<

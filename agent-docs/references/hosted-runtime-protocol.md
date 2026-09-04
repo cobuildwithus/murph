@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-31
+Last verified: 2026-09-02
 
 ## Decision
 
@@ -791,6 +791,11 @@ mailbox. When the runnable mailbox owner is model-free, the checkpoint
 projection does not publish a second ordinary default wake behind it. Default
 rows remain eligible inside an already-running pass and become independently
 wake-eligible whenever the model-free frontier is backed off or advances.
+After a device item records a durable follow-up deadline, that
+`device-sync.reconcile` deadline remains in the canonical model-free
+`nextWakeAt` selection; an independently due or future assistant deadline
+remains available through `nextDefaultProcessingWakeAt` instead of replacing
+the device deadline.
 Current conversation work and explicitly approved continuations retain
 foreground priority. A non-direct default request behind
 `system_mailbox` wakes the exact active child, preserves its fence, and retries
@@ -1522,13 +1527,15 @@ conversation candidates above the effective floor must still have
 `consumed_at IS NULL`, while system-lane candidates retain their existing
 live-row semantics. A `device-sync.wake` system head covered by the workspace's
 canonical `hostedMailboxSystemImportedSeq` uses the later of its mailbox
-creation time and `nextWakeAt` as its progress origin. The workspace stores the
-earliest model-free or assistant candidate, so an earlier assistant wake can
-legitimately win while the device item remains retained. The first live system
-item above the imported frontier independently keeps its creation-time origin;
-an absent, malformed, behind-head, or beyond-high-water frontier fails closed
-to the head's creation time. Covered work is therefore not stalled before its
-next runtime opportunity, but becomes alertable 15 minutes after it is due.
+creation time and its canonical model-free `nextWakeAt` as its progress origin.
+The workspace stores an independent assistant deadline in
+`nextDefaultProcessingWakeAt`, so assistant work does not replace the device
+owner and both remain visible to orchestration. The first live system item
+above the imported frontier independently keeps its creation-time origin; an
+absent, malformed, behind-head, or beyond-high-water frontier fails closed to
+the head's creation time. Covered work is therefore not stalled before its
+next runtime opportunity, but becomes
+alertable 15 minutes after it is due.
 Non-device system heads continue to age from mailbox creation. The selected
 head and `COUNT(*) OVER()` come from that one lane-aware predicate. A stamped
 conversation row is terminal, not usage-resume evidence; only staging, provider
@@ -2672,6 +2679,20 @@ is suppressed only inside the current five-minute recovery bucket; a later
 bucket may re-signal the same durable mailbox item while canonical cadence is
 still stale. That signal is recovery admission for the existing mailbox/event
 identity and must not mint another schedule-event or mailbox-item identity.
+After mailbox retention has removed a scheduled v3 wake's payload, Web accepts
+the stable duplicate without another signal only when the remaining row matches
+the schedule identity and the runtime checkpoint identifies its lane sequence
+as `hostedMailboxSystemFirstPendingSeq`. The same checkpoint's canonical system
+imported watermark must cover that sequence without exceeding the allocated
+high-water mark, and the lane counter must agree that it is the first unhandled
+sequence. The row must have no inline ciphertext, sidecar, payload reference,
+byte count, or hash. A missing or different first-pending sequence—including
+when supported legacy unsequenced work makes the frontier ambiguous—a
+never-imported row, malformed watermark, remaining payload surface, or
+structural mismatch stays a dedupe conflict and fails recovery closed.
+Runtime-owned retry state remains the sole continuation owner for an accepted
+retired duplicate. Deploy the runtime checkpoint projection before Web begins
+requiring it; older runtime checkpoints omit the fact and therefore fail closed.
 It does not promise exactly-once provider execution. Dirty rows are not
 independently swept; due-reconcile candidates may include dirty or stuck rows
 when canonical `nextReconcileAt` is due. Dirty state remains the work source,
@@ -2708,8 +2729,15 @@ active connection. Yielded wakes are not completion-eligible. Restored records
 return to the full-reconciliation path; epoch-less legacy, replaced, missing,
 or terminal records drain without a cadence write. A cold replacement, whose snapshot
 intentionally excludes the device-sync SQLite store, reconstructs the same
-unfinished operation and cadence from that item. The canonical mailbox
-item/event already exists in the committed input workspace. The read-only
+unfinished operation and cadence from that item. The completion fence is due
+immediately once all local jobs are terminal; unlike a
+dirty-remainder or genuine retry/yield wake, it adds no 30-second backoff. Its
+empty job set and `retained_completion_fence` reason continue to suppress
+provider scheduling, and the retained item and schedule-event identities do not
+change. The due-now runtime wake therefore reuses the warm shell while the fence
+checkpoint remains the sole boundary before Web receives the carried cadence.
+The canonical mailbox item/event already exists in the committed input
+workspace. The read-only
 provider classes and their artifact writes run before checkpoint 1, which then
 durably captures the replayable post-pull/intermediate state. If checkpoint 2
 fails to persist record/completion, cold restore from checkpoint 1 lacks the
@@ -2742,17 +2770,19 @@ dispatch restores that exact ref without the SQLite execution record,
 reconstructs the pending obligation from durable mailbox authority, and replays
 those same four method/path classes exactly once,
 for eight requests total. That 00:05 recovery pass makes three successful
-checkpoints. The second durably records completion, the same admission publishes
-the 06:05 provider cadence only because its full reconciliation was accepted,
-the retained job set is empty, and the wake's non-null epoch still names the
-current active connection, and the third
+checkpoints. After provider work, a heartbeat-only version conflict leaves
+canonical cadence at 00:00; hydration preserves the same-epoch pass's 06:05
+provider cadence without re-admitting work. The second checkpoint durably
+records completion, the same admission publishes 06:05 only because full
+reconciliation was accepted, the retained job set is empty, and the wake's
+non-null epoch still names the current active connection, and the third
 checkpoints mailbox removal. Epoch-less legacy, replaced, missing, or terminal
-connection records drain without a cadence write. There is
-no third provider pull or empty completion runtime. A redundant 00:10 pass
-returns idle with no wake and makes one bounded post-publication convergence
-checkpoint; the 00:15 pass is fully quiescent. Within the measured incident
-window, the proof observes six checkpoint attempts, five commits, one injected
-failure, and no provider work after the single replay.
+connection records drain without a cadence write. There is no third provider
+pull or empty completion runtime. A redundant 00:10 pass returns idle with no
+wake and makes one bounded post-publication convergence checkpoint; the 00:15
+pass is fully quiescent. Within the measured incident window, the proof observes
+six checkpoint attempts, five commits, one injected failure, and no provider
+work after the single replay.
 
 Hosted clinical-record retrieval uses the existing per-user workflow and
 system-mailbox path, not a separate Temporal workflow. Web transactionally
@@ -2935,6 +2965,18 @@ normal completion path. Structured receipt outcomes distinguish only
 receipt adds no poller, queue, stored recovery job, or second completion
 authority, and does not make checkpoint success, idle expiry, container stop,
 or elapsed time completion authority.
+After that exact compare-and-swap succeeds, `UserRunner` may also make one
+best-effort metadata-only RPC to the token's exact runner-container name. The
+RPC carries only attempt, generation, and user identity. It is lifecycle advice,
+not completion authority: `RunnerContainer` must match it to the successful
+outer result retained in memory before it can run the existing warm-shell
+lifecycle decision. That result is the sole owner of the interaction generation,
+captured when its invocation enters the container; the notification carries
+identity only. The two in-memory halves accept either arrival order. A mismatch,
+newer interaction, Durable Object activation reset, RPC failure, active child,
+retained warmth, near wake, or uncertain status/health leaves the ordinary
+`sleepAfter` timer as the cleanup owner. No durable notification, retry loop,
+queue, scheduler, or second lifecycle owner is added.
 When the outer RunnerContainer active-operation pointer is missing, a container
 wake response must carry explicit identity-checked wake metadata before an
 accepted wake is trusted; identity-blind accepted responses from deploy-skewed
@@ -2976,18 +3018,26 @@ restored `.runtime/operations/assistant/hosted-mailbox.json` file is the
 authoritative source for imported per-lane watermarks; `HostedWorkspace`
 redacted status is a diagnostic/status surface, not an import progress input.
 Fetching after restore keeps user messages appended during restore visible to
-the same invocation instead of hiding them behind a stale pre-restore read. The
-normal foreground path takes one authorized post-restore snapshot of the
-conversation and system lanes, consumes the conversation slice first, and then
-consumes the system slice through the existing failure-contained pre-assistant
-phase. A failed mixed snapshot falls back independently by lane, so system-lane
-denial or import failure cannot suppress current conversation work. Additional
-system pages remain ordinary system-only fetches. This snapshot defines the
-same-turn system-fact barrier: system facts accepted before the snapshot may
-affect the current turn, while facts appended after it remain durable for their
-normal wake or a later pass. Late conversation input continues through the
-active-turn import path and retains foreground priority. Cold bootstrap and
-background-only mailbox semantics are unchanged.
+the same invocation instead of hiding them behind a stale pre-restore read. An
+established conversation-first foreground path takes one authorized
+post-restore snapshot of the conversation and system lanes, consumes the
+conversation slice first, and then consumes the system slice through the
+existing failure-contained pre-assistant phase. A workspace whose imported
+system watermark is still zero refreshes the system lane before assistant
+execution because its first conversation import can race the one-time
+activation append. A pass whose initial import already fetched the system lane
+also refreshes it before assistant execution; `system_mailbox` relies on that
+post-import check to keep a newly arrived ask from bypassing its owner ordering.
+Otherwise, the shared conversation-first snapshot defines the same-turn
+system-fact barrier: system facts accepted before it may affect the current
+turn, while facts appended after it remain durable for their normal wake or a
+later pass. A failed mixed snapshot falls back
+independently by lane, so system-lane denial or import failure cannot suppress
+current conversation work. Additional system pages remain ordinary system-only
+fetches. System-only fetches omit the optional group sponsorship presentation
+read because no conversation item can consume it. Late conversation input
+continues through the active-turn import path and retains foreground priority.
+Cold bootstrap and background-only mailbox semantics are unchanged.
 The runtime stages decoded conversation rows as assistant input and marks the
 active invocation dirty. Foreground runtime work may defer intermediate checkpoints.
 The active invocation remains dirty until the runtime-owned
@@ -3045,8 +3095,8 @@ never returns a hosted member id or participant id.
 
 The assistant-runtime presentation reader owns one operation-local memo and one
 bounded versioned file cache at
-`.runtime/cache/assistant-runtime/group-participant-display-names.json` for those
-results. Initial prompt preparation reads unresolved unique handles once,
+`.runtime/operations/assistant/state/group-participant-display-names.json` for
+those results. Initial prompt preparation reads unresolved unique handles once,
 including a 20-message/four-sender burst as one four-handle request. Later live
 admissions reuse operation-local positive, negative, and fail-soft entries and
 batch only newly unresolved handles. Across ordinary turns and fresh reader or
@@ -3062,10 +3112,12 @@ rejected above two MiB. Missing, corrupt, oversized, or unreadable files are
 ordinary misses. Failures, policy-limited reads, and malformed or unauthorized
 responses are operation-local only and never written. There are no timers,
 resident mirror,
-single-flight, mutation invalidation, locks, or distributed cache owners.
-`.runtime/cache/**` is excluded from hosted workspace snapshots, so only the
-same surviving local workspace can reuse the file; cold restore or replacement
-re-reads Web. Neither cache layer becomes profile or contact state. Profile names render as display-only profile text; owner-contact labels render
+single-flight, mutation invalidation, locks, or distributed cache owners. The
+file is classified as portable, rebuildable assistant operational state, so
+encrypted hosted workspace snapshots retain it across replacement or cold
+restore. A renamed or newly unauthorized label may therefore remain visible
+until the existing fixed TTL expires. Neither cache layer becomes profile or
+contact state. Profile names render as display-only profile text; owner-contact labels render
 explicitly as unverified display-only text. Neither label nor the raw handle
 authorizes participant selection or an effect. Only an accepted opaque message
 ref plus trusted server derivation can authorize a participant-scoped action.

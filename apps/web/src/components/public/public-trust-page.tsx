@@ -5,6 +5,7 @@ export function PublicTrustPageContent({
 }: {
   content: PublicTrustPageContentModel;
 }) {
+  const compact = content.layout === "compact";
   const titleId = `public-trust-${content.eyebrow.toLowerCase().replaceAll(" ", "-")}`;
 
   return (
@@ -43,16 +44,32 @@ export function PublicTrustPageContent({
       </header>
 
       <div className="bg-[#f5f0e8] px-6 py-16 text-[#2d3436] sm:px-10 sm:py-20 lg:px-16 lg:py-24">
-        <div className="mx-auto max-w-[1080px]">
+        <div className={compact ? "mx-auto max-w-[760px]" : "mx-auto max-w-[1080px]"}>
           {content.sections.map((section) => (
             <section
-              className="grid gap-5 border-t border-[#c4a882]/35 py-10 first:pt-0 lg:grid-cols-[minmax(0,0.72fr)_minmax(0,1.28fr)] lg:gap-16"
+              className={
+                compact
+                  ? "border-t border-[#c4a882]/35 py-8 first:border-t-0 first:pt-0 sm:py-10"
+                  : "grid gap-5 border-t border-[#c4a882]/35 py-10 first:pt-0 lg:grid-cols-[minmax(0,0.72fr)_minmax(0,1.28fr)] lg:gap-16"
+              }
               key={section.title}
             >
-              <h2 className="max-w-[20ch] font-serif text-[clamp(1.6rem,3vw,2.35rem)] font-semibold leading-[1.08] tracking-[-0.025em]">
+              <h2
+                className={
+                  compact
+                    ? "max-w-[24ch] font-serif text-[clamp(1.5rem,3vw,2rem)] font-semibold leading-[1.1] tracking-[-0.025em]"
+                    : "max-w-[20ch] font-serif text-[clamp(1.6rem,3vw,2.35rem)] font-semibold leading-[1.08] tracking-[-0.025em]"
+                }
+              >
                 {section.title}
               </h2>
-              <div className="max-w-[66ch] space-y-5 text-[0.975rem] leading-[1.75] text-[#4d4533]">
+              <div
+                className={
+                  compact
+                    ? "mt-4 max-w-[62ch] space-y-3 text-[0.95rem] leading-7 text-[#4d4533]"
+                    : "max-w-[66ch] space-y-5 text-[0.975rem] leading-[1.75] text-[#4d4533]"
+                }
+              >
                 {section.paragraphs.map((paragraph) => (
                   <p key={paragraph}>{paragraph}</p>
                 ))}

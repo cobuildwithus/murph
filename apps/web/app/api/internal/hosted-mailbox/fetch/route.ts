@@ -68,12 +68,16 @@ export const POST = withJsonError(async (request: Request) => {
     prisma,
     userId,
   });
-  // Sponsorship color is optional; it must never block ordinary mailbox work.
-  const groupRunningBit = await readHostedActiveGroupRunningBit({
-    now: fetchedAt,
-    prisma,
-    runtimeMemberId: userId,
-  }).catch(() => null);
+  // Sponsorship color is presentation for conversation imports only. A
+  // system-only consistency read cannot consume it, so keep that hot path to
+  // the mailbox projection it actually requested.
+  const groupRunningBit = body.lanes.some(({ lane }) => lane === "conversation")
+    ? await readHostedActiveGroupRunningBit({
+        now: fetchedAt,
+        prisma,
+        runtimeMemberId: userId,
+      }).catch(() => null)
+    : null;
 
   return jsonOk(parseHostedMailboxFetchResponse({
     ...(usageRunningLow ? { conversationUsageStatus: "low" as const } : {}),

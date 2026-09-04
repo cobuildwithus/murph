@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-09-01
+Last verified: 2026-09-02
 
 ## Current Guardrails
 
@@ -12,9 +12,9 @@ Last verified: 2026-09-01
   to another deployment id. It uses the exact deployment URL from the trusted
   Vercel status, follows the complete project-domain pagination, excludes
   branch/custom-environment domains, and repeats the full proof after the
-  prior-function drain and immediately before contract SQL. Late completed
-  events for older main ancestors may skip when production has advanced; the
-  workflow remains non-concurrent so a stale event cannot cancel the valid run.
+  prior-function drain and immediately before contract SQL. The deployed commit
+  must equal current `main`; stale or late events fail before database authority.
+  The workflow remains non-concurrent so a stale event cannot cancel the valid run.
   The first production Web deployment containing the exact-deployment verifier
   is the postdeploy verification rollback floor because this workflow executes
   from the deployed checkout. A pre-floor manual retry fails closed on the
@@ -46,8 +46,9 @@ Last verified: 2026-09-01
   waiter for every pull request or deployment event. The workflows are
   production-only and non-destructive, with no pull-request or
   deployment-status trigger and no arbitrary-branch manual admission. They
-  dispatch the current production alias SHA; alias lag is accepted only when the existing Vercel classifier
-  proves the intervening `main` diff contains eligible dated release notes.
+  dispatch the current production alias SHA only when it exactly matches the
+  selected `main` revision. A pending or failed production admission retries at
+  the next slot instead of testing a stale deployment.
 - Protected native Android hosted E2E treats private workflow dispatch as an
   uncertain external effect. A timeout, network failure, ambiguous HTTP
   response, malformed successful response, or missing run id after the request
@@ -69,32 +70,59 @@ Last verified: 2026-09-01
   trusted default-branch controller and the private owner's live Current and
   Ramping reader attestation over the bounded reconciliation fixture corpus.
   While the private standby guard remains, the reader set also includes the
-  active legacy worker's exact live deploy revision. Final protected
+  active legacy Render worker's exact live deploy revision. Final protected
   attestation re-reads the complete set and fails on identity or routing drift.
-  Private CI never checks out or imports public pull-request candidate code.
-  Irrelevant changes complete without private work; relevant changes require
-  the same current public head throughout selection and dispatch. The exact
-  candidate producer runs in unprivileged public CI; the trusted controller
-  sends only its bounded canonical fixture JSON and digest to private CI. Using
-  the repository-scoped GitHub App token, it resolves private `main` to an exact
-  commit, validates the fixed private workflow identity, revalidates the exact
-  public PR head, and dispatches that workflow at `main` with returned run
-  details. It accepts only the returned first-attempt run whose workflow and
-  `head_sha` match the pre-resolved private commit. The private proof digest
-  binds public SHA, request id, the private-derived supported-reader digest,
-  and producer digest; the public repository owns no private reader policy.
-  Missing artifacts or dispatch
-  identity, stale heads, incomplete pagination, duplicate or failed readers,
-  skipped proof jobs, a mismatched digest, cancellation, or private failure
-  cannot publish success. After successful run and job attestation, the
+  This is a fixture-only pull-request gate: private CI never checks out or
+  imports public pull-request candidate code. Irrelevant changes complete
+  without private work; relevant changes require the same current public head
+  throughout selection and dispatch. The exact candidate producer runs in
+  unprivileged public CI; the trusted controller sends only its bounded
+  canonical fixture JSON and digest to private CI. Using the repository-scoped
+  GitHub App token, it first
+  resolves private `main` to an exact commit, validates the fixed
+  `public-murph-integration.yml` workflow identity, revalidates the exact public
+  PR head, and dispatches that workflow at `main` with returned run details. It
+  accepts only the returned first-attempt run whose workflow identity and
+  `head_sha` match the fixed workflow and pre-resolved private commit. The
+  private proof digest binds public SHA, request id, the private-derived
+  supported-reader digest, and producer digest; the public repository owns no
+  private reader policy or private source dependency. Missing artifacts or
+  dispatch identity, stale heads, incomplete pagination, duplicate or failed
+  readers, skipped proof jobs, a mismatched digest, cancellation, or private
+  failure cannot publish success. After successful run and job attestation, the
   controller re-reads private `main` and fails closed if it moved. Once dispatch
-  returns a run id, the controller allows
-  five exact-id reads over at most 60 seconds for GitHub to make that newly
-  accepted run visible; only `404` is retryable, and the controller never
-  searches for or guesses a run. After the exact run is visible, uncertain
-  polling or timeout cancels only that run, escalates
-  to force-cancel only if ordinary cancellation does not make it terminal, and
-  never searches for or cancels a guessed run.
+  returns a run id, the controller allows five exact-id reads over at most 60
+  seconds for GitHub to make that newly accepted run visible; only `404` is
+  retryable, and the controller never searches for or guesses a run. After the
+  exact run is visible, uncertain polling or timeout cancels only that run,
+  escalates to force-cancel only if ordinary cancellation does not make it
+  terminal, and never searches for or cancels a guessed run.
+  This pull-request fixture proof is candidate evidence, not deployment
+  admission, and does not claim full application integration. After a relevant
+  revision reaches public `main`, the exact-main producer and controller run
+  again in `.github/workflows/temporal-web-deployment-admission.yml`. Vercel
+  must configure its `Temporal Web production admission` job as a production
+  Deployment Check so production domains remain on the prior deployment until
+  the exact public commit passes against the then-current private `main` and
+  live reader set. The public controller re-reads both branches before success;
+  private protected attestation independently re-reads every supported reader.
+  The Vercel Git integration is the sole production deployment owner, and every
+  `main` commit must create a candidate: no ignore command, local production
+  upload, historical promotion, Instant Rollback, or force-promotion is part of
+  the supported path. Recovery is a revert or forward-fix commit on `main`,
+  which receives fresh admission before domains move. Ordinary Vercel access
+  must not grant Full Production Deployment authority.
+  This main-push boundary proves the reconciliation-facts wire contract, not
+  arbitrary Web, Cloudflare, or worker behavior. Separately, after both
+  revisions reach protected
+  `main`, private unprivileged full-integration CI checks out the exact resolved
+  public `main` revision, never an arbitrary public candidate, and emits an
+  exact private-main/public-main candidate receipt. Protected release admission
+  binds that receipt to both still-current main heads, exhaustive synthetic
+  migration replay, the exact production target, and live reader routing before
+  deployment can mutate production. Bounded replay of histories returned by
+  Temporal Visibility is additional production evidence, not an exhaustive
+  registry guarantee.
 - Native iMessage nutrition-card delivery falls back to its already-derived
   ordinary text only after Linq definitively rejects the app-card request with
   HTTP 400, 415, or 422. Before that text enters the provider, the existing
@@ -1273,7 +1301,12 @@ Last verified: 2026-09-01
   connection mailbox wake; only that wake may fetch its exact Web-owned dirty
   row or claim its account's local jobs. A runtime-authored dirty-remainder
   retry bypasses provider scheduling so cadence cannot refill the bounded local
-  queue before the authoritative dirty payload is admitted. A generic runtime
+  queue before the authoritative dirty payload is admitted, and retains its
+  existing 30-second delay. Once all local jobs are terminal, the empty-job
+  `retained_completion_fence` is due immediately instead: it preserves the same
+  mailbox item and schedule-event identities, suppresses provider scheduling,
+  and carries the provider cadence without publishing it before the fence
+  checkpoint. A generic runtime
   timer admits neither
   dirty work, provider cadence, nor unrelated-account jobs. The connection-specific encrypted
   mailbox item stays pending while that account has queued or running work and
@@ -1375,10 +1408,13 @@ Last verified: 2026-09-01
   that committed ref starts without the SQLite execution record, reconstructs the
   pending obligation from durable mailbox authority, observes exactly one replay
   of the four provider classes (eight requests total), and makes three successful
-  recovery checkpoints. The second durably records completion, the same
-  admission publishes the 06:05 provider cadence, and the third checkpoints
-  mailbox removal. There is no third provider pull or empty completion runtime.
-  A redundant later bucket at 00:10 returns idle with no wake and performs one bounded
+  recovery checkpoints. After provider work, a heartbeat-only version conflict
+  leaves canonical cadence at 00:00; hydration preserves the same-epoch pass's
+  06:05 provider cadence without re-admitting work. The second checkpoint
+  durably records completion, the same admission publishes 06:05, and the third
+  checkpoints mailbox removal. There is no third provider pull or empty
+  completion runtime. A redundant later bucket at 00:10 returns idle with no
+  wake and performs one bounded
   post-publication convergence checkpoint; the following 00:15 bucket is fully
   quiescent. Within the measured incident window, the proof records six
   checkpoint attempts, five commits, one injected failure, and no provider work
@@ -1787,13 +1823,15 @@ Last verified: 2026-09-01
   lane's `COUNT(*) OVER()`; system-lane selection remains unchanged. A system
   `device-sync.wake` head covered by the workspace's canonical
   `hostedMailboxSystemImportedSeq` ages from the later of its creation and the
-  scheduled wake. That workspace wake is the runtime's earliest selected wake,
-  so an earlier assistant wake may own the next pass before the device retry
-  itself is due. The first live system item above the imported frontier keeps
-  its own creation-time clock, and an absent, malformed, behind-head, or
-  beyond-high-water imported frontier cannot defer the head. Other system work
-  still ages from creation, and a covered device retry becomes anomalous when
-  it remains pending for 15 minutes after that scheduled runtime opportunity.
+  scheduled wake. The runtime keeps that device deadline in the canonical
+  model-free `nextWakeAt` selection and projects an independent assistant
+  deadline through `nextDefaultProcessingWakeAt`, so orchestration retains both
+  owners without polling unchanged system progress. The first live system item
+  above the imported frontier keeps its own creation-time clock, and an absent,
+  malformed, behind-head, or beyond-high-water imported frontier cannot defer
+  the head. Other system work still ages from creation, and a covered device
+  retry becomes anomalous when it remains pending for 15 minutes after that
+  scheduled runtime opportunity.
   An active runtime is otherwise
   anomalous when the resulting oldest live item beyond that high-water remains
   pending for at least 15 minutes. Eligibility uses the canonical
@@ -2146,7 +2184,7 @@ Last verified: 2026-09-01
 - Read-only Labs discovery has no automatic provider retry, background refresh, or stale cache fallback. Web applies explicit time, response-byte, result-count, and location-fanout bounds and propagates caller cancellation. A Junction timeout, rate limit, or server failure is `temporarily_unavailable`; it must not be collapsed into an empty catalog or `not_served`. Only a clean provider response that reports no ZIP coverage is `not_served`.
 - Labs capability rollout is additive and fail-closed. Deploy Web's signed callback and provider configuration before Cloudflare/runtime registration; a missing or incompatible route surfaces as unavailable rather than falling back to a copied catalog. Roll back the runtime capability before removing the Web route. Because the feature has no DB, cache, queue, or retry owner, recovery is a later member-initiated live request.
 - Definite assistant outbox delivery failures may run at most 48 persisted dispatch attempts. A definite failure on attempt 48 terminalizes as `ASSISTANT_DELIVERY_RETRY_EXHAUSTED`, and no 49th provider call begins; generic group-email parent and recipient intents use that same terminal lifecycle and never reset the budget with a new token. A delivery that may already have succeeded is not exhausted as an ordinary failure: hosted non-idempotent confirmation remains parked without an automatic wake, while replay-safe delivery checks persisted or provider reconciliation evidence before terminalization.
-- A canonical pending or retryable signup welcome is obsolete once durable auto-reply provenance proves a newer accepted reply for the same recipient route. Hosted collection must abandon that welcome before provider dispatch; a `sending` welcome remains under the normal delivery-confirmation contract rather than being hidden mid-flight.
+- A canonical pending or retryable signup welcome is obsolete once durable auto-reply provenance proves a newer accepted reply for the same recipient route. Within one member vault, any accepted direct-email auto-reply also makes a direct-email welcome obsolete regardless of creation order or provider-thread encoding, because a recovered first-contact message must not arrive after the conversation has begun. Group email remains route-specific. Hosted collection must abandon that welcome before provider dispatch; a `sending` welcome remains under the normal delivery-confirmation contract rather than being hidden mid-flight.
 - Accepted canonical Linq signup welcomes require a completed delivery-outcome callback even when they answer no conversation mailbox item. Web records acceptance and materializes the provider's direct chat in one transaction under existing route ownership locks; callback failure is a may-have-succeeded delivery, and replay relies on the canonical provider idempotency key instead of issuing an ordinary duplicate send.
 - Assistant Ask uses `assistant.ask.requested` and
   `assistant.ask.completed` in the existing encrypted mailbox as its only
@@ -2506,7 +2544,7 @@ Last verified: 2026-09-01
   Eastern day converges on the new format without a compatibility state.
 - Exact-message targeting must preserve existing effect owners. Reply selection is side-effect free until normal delivery, while reactions keep the existing `message-reaction` operation and retry policy. The local service re-resolves the accepted input before either effect. For a reaction followed by `finish_without_reply`, the provider's already-recorded reaction patch—not a later mutable eligibility check—defers suppression evidence until the delivery outcome is known. The same outbox intent carries the exact answered mailbox ids through reaction dispatch. Once a concrete Linq reaction receipt is durable, signed Web exact-consume confirmation is required before the intent becomes sent; callback uncertainty retains that receipt and retries confirmation without replaying the provider, while provider ambiguity without an accepted receipt cannot consume. Checkpoint exact acknowledgement remains the idempotent fallback. A marked normal message persists `nativeReplyRequested: true` with its provider target, and both fields participate in outbox fingerprinting, equality, dedupe, and retry. Every `---` bubble from one response segment copies that same pair; unmarked automatic replies remain flat. Invalid or stale refs fail as recoverable tool results before any effect. A marked Linq send may not create a replacement direct chat, and a selected Linq voice-only response must fail before sending because the voice-memo endpoint cannot carry the reply target.
 - An authenticated non-direct group burst may cross sender and native reply-anchor changes only while exact positive causal succession, room/account/delivery/audience, projection readiness, reaction rules, and the 50-input bound still hold. It remains one provider turn and at most one normal reply, but every admitted input keeps separate sender/ref/text/attachment/reply-context prompt evidence plus separate journaling, checkpoint, answered-mailbox, and terminal evidence. Direct actor/anchor grouping is unchanged. When any Linq input carries an explicit anchor, resolve each explicit anchor independently and do not use the unanchored latest-reply fallback for that compound turn. Missing participant attribution blocks only an exact participant effect, never admission or the normal reply.
-- Linq speaker-label resolution is prompt-time, presentation-only work owned by the assistant-runtime reader. Its operation-local memo retains successful labels, explicit valid unnamed results, and fail-soft misses through later live admissions, so an already-seen handle never recontacts Web during the compound operation. One versioned private file at `.runtime/cache/assistant-runtime/group-participant-display-names.json` opportunistically reuses validated profile and owner-shared contact labels for 14 days across ordinary turns and fresh reader or process instances that share the same local workspace. A six-hour negative entry requires the additive `nameMissSenderHandles` evidence that Web successfully checked every applicable authorized profile/contact source for that exact requested handle and found no safe label; legacy responses and ordinary omissions remain operation-local. A granted but not-yet-materialized profile snapshot is unavailable rather than profileless, and only the exact first 16 phones admitted to the bounded owner-contact reader may receive contact evidence; overflow handles remain operation-local. Opaque SHA-256 keys bind the callback-bound runtime member, exact accepted-input route conversation key, channel, and normalized handle; hits do not slide expiry or insertion-order eviction. The file is atomically replaced, bounded to 2,048 entries and two MiB on read, and protected by `0700`/`0600` permissions. New or expired handles still form one bounded Web batch. Missing, corrupt, oversized, or unreadable files are ordinary misses. Failures, timeout, late completion, pending snapshots, parser skew, authorization loss, suspension, consent loss, disabled projections, ambiguity, KMS/storage failure, and malformed responses remain operation-local and are never written, so the label always falls back unnamed without blocking, retrying, or acknowledging accepted conversation work. The cache has no timer, resident mirror, single-flight, mutation invalidation, lock owner, or distributed coordination. Because `.runtime/cache/**` is excluded from hosted workspace checkpoints, a cold restore, replacement, or workspace loss re-reads Web; the existing `read_participant_display_names` one-second soft deadline remains unchanged.
+- Linq speaker-label resolution is prompt-time, presentation-only work owned by the assistant-runtime reader. Its operation-local memo retains successful labels, explicit valid unnamed results, and fail-soft misses through later live admissions, so an already-seen handle never recontacts Web during the compound operation. One versioned private file at `.runtime/operations/assistant/state/group-participant-display-names.json` opportunistically reuses validated profile and owner-shared contact labels for 14 days across ordinary turns, fresh reader or process instances, and encrypted hosted workspace restore. A six-hour negative entry requires the additive `nameMissSenderHandles` evidence that Web successfully checked every applicable authorized profile/contact source for that exact requested handle and found no safe label; legacy responses and ordinary omissions remain operation-local. A granted but not-yet-materialized profile snapshot is unavailable rather than profileless, and only the exact first 16 phones admitted to the bounded owner-contact reader may receive contact evidence; overflow handles remain operation-local. Opaque SHA-256 keys bind the callback-bound runtime member, exact accepted-input route conversation key, channel, and normalized handle; hits do not slide expiry or insertion-order eviction. The file is atomically replaced, bounded to 2,048 entries and two MiB on read, protected by `0700`/`0600` permissions, and classified as portable, rebuildable assistant operational state for encrypted snapshots. New or expired handles still form one bounded Web batch. Missing, corrupt, oversized, or unreadable files are ordinary misses. Failures, timeout, late completion, pending snapshots, parser skew, authorization loss, suspension, consent loss, disabled projections, ambiguity, KMS/storage failure, and malformed responses remain operation-local and are never written, so the label always falls back unnamed without blocking, retrying, or acknowledging accepted conversation work. A renamed or newly unauthorized label can remain visible until its fixed TTL expires, but it never authorizes membership, routing, consent, or an effect. The cache has no timer, resident mirror, single-flight, mutation invalidation, lock owner, or distributed coordination; the existing `read_participant_display_names` one-second soft deadline remains unchanged.
 - Clinical Records retrieval is generation-fenced and page-idempotent. A
   server-derived run/page fingerprint deduplicates caller request ids without
   persisting them or page URLs; claim-version compare and swap prevents a

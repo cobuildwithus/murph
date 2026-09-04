@@ -74,7 +74,7 @@ import {
 import { HOSTED_PHONE_COUNTRY_OPTIONS } from "@/src/components/hosted-onboarding/hosted-phone-country-options";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import { PublicTrustPageContent } from "@/src/components/public/public-trust-page";
-import { ABOUT_MURPH_CONTENT } from "@/src/lib/public-trust-pages";
+import { CONTACT_MURPH_CONTENT } from "@/src/lib/public-trust-pages";
 import { MURPH_CONTACT_EMAIL } from "@/src/lib/murph-contact-routing";
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
@@ -150,6 +150,7 @@ import { HostedFamilyManager } from "@/src/components/settings/hosted-family-set
 import { HostedPlanChangeConfirmationContent } from "@/src/components/settings/hosted-plan-change-button";
 import { UpgradeToEdgeButton } from "@/src/components/settings/hosted-plan-upgrade-button";
 import { HostedPlanUpdateReturn } from "@/src/components/settings/hosted-plan-update-return";
+import { FoodBrandVisualStudy } from "./food-label-lab-study";
 import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-personality-settings-dialog";
 import {
   DESIGN_AI_USAGE_ACTIVITY,
@@ -179,6 +180,7 @@ import {
   EnvironmentVoiceRefreshNotice,
 } from "../(dashboard)/environment/environment-page-client";
 import { GroupPrivateConversions } from "../(dashboard)/ops/growth/group-private-conversions";
+import { PublicComparisonTableStudy } from "./public-comparison-table-study";
 import type { HostedGrowthDashboard } from "@/src/lib/hosted-ops/growth-metrics";
 import type { EnvironmentVoiceScript } from "../(dashboard)/environment/environment-voice-script";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
@@ -671,14 +673,24 @@ export function ComponentsContent() {
 
         <Separator />
 
+        <div data-design-component="food-brand-visual" id="food-brand-visual" inert>
+          <Section title="Food brand visual">
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              Brand-aware food identity with a local category-art fallback.
+            </p>
+            <FoodBrandVisualStudy />
+          </Section>
+        </div>
+
+        <Separator />
+
         <div data-design-component="public-trust-page" id="public-trust-page">
           <Section title="Public trust page">
             <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              Production About-page content and responsive editorial hierarchy.
-              The Contact page uses the same component with support-specific copy.
+              Production Contact-page content with its compact responsive hierarchy.
             </p>
             <div className="overflow-hidden border border-[#c4a882]/35">
-              <PublicTrustPageContent content={ABOUT_MURPH_CONTENT} />
+              <PublicTrustPageContent content={CONTACT_MURPH_CONTENT} />
             </div>
           </Section>
         </div>
@@ -2598,6 +2610,22 @@ export function ComponentsContent() {
             </div>
           </ScrollArea>
         </Section>
+
+        <Separator />
+
+        <div
+          data-design-component="public-comparison-table"
+          id="public-comparison-table"
+          inert
+        >
+          <Section title="Public comparison table">
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              The production comparison table with synthetic content, including
+              its labeled mobile scroll region and semantic row headers.
+            </p>
+            <PublicComparisonTableStudy />
+          </Section>
+        </div>
 
         <Separator />
 

@@ -12,7 +12,6 @@
     "dev:prepared-local-env": "bash -c 'pnpm changelog:generate && pnpm --dir ../.. exec tsx apps/web/scripts/dev-local.ts \"$@\"' --",
     "prebuild": "pnpm --dir ../../packages/runtime-state build",
     "build": "pnpm public-routes:waf-check && pnpm product-labels:env-check && pnpm hosted-crypto:env-check && pnpm legal:pdf && pnpm changelog:generate && pnpm health-commons:generate && pnpm prisma:generate:build && pnpm typecheck:prepared && bash scripts/run-production-next-build.sh && pnpm --dir ../.. workflow:clean-web-artifacts -- --quiet && pnpm health-commons:trace-check && pnpm og-assets:trace-check && pnpm og-assets:runtime-check",
-    "vercel:deploy:prebuilt": "pnpm --dir ../.. exec tsx --tsconfig tsconfig.base.json scripts/deploy-hosted-web-vercel-prebuilt.ts",
     "changelog:generate": "pnpm --dir ../.. exec tsx apps/web/scripts/generate-changelog-fragments.ts",
     "health-commons:generate": "pnpm --dir ../.. health-commons:generate",
     "health-commons:trace-check": "pnpm --dir ../.. exec tsx apps/web/scripts/check-health-commons-traces.ts",

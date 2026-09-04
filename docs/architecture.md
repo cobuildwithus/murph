@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-05-13
+Last verified: 2026-08-31
 
 ## Purpose
 
@@ -189,8 +189,9 @@ to Codex.
   fixed private compatibility workflow at `main`, bind the returned first
   attempt to the pre-resolved private SHA and workflow identity, and re-read
   private `main` before publishing success. Private protected CI alone derives
-  Current and Ramping reader SHAs; public code imports no private implementation
-  or reader policy.
+  Current and Ramping reader SHAs and owns integration, replay, canary, and
+  deployment admission; public code imports no private implementation or reader
+  policy.
 - Hosted execution is a thin containerized runner over the same local runtime
   input spine. It restores the encrypted workspace, imports hosted mailbox rows,
   stages `AssistantInputEvent` records, runs the local scanner/active-turn

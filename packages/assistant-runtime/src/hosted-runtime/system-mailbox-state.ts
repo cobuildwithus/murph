@@ -135,11 +135,24 @@ export async function readHostedSystemMailboxHandledThroughSeq(input: {
   now?: () => string;
   vaultRoot: string;
 }): Promise<string> {
-  return resolveHostedSystemMailboxHandledThroughSeq({
+  return (await readHostedSystemMailboxProgress(input)).handledThroughSeq;
+}
+
+export async function readHostedSystemMailboxProgress(input: {
+  importedSeq: string;
+  now?: () => string;
+  vaultRoot: string;
+}): Promise<HostedSystemMailboxProgress> {
+  return resolveHostedSystemMailboxProgress({
     importedSeq: input.importedSeq,
     now: (input.now ?? (() => new Date().toISOString()))(),
     state: await readHostedSystemMailboxState(input.vaultRoot),
   });
+}
+
+export interface HostedSystemMailboxProgress {
+  firstPendingSeq: string | null;
+  handledThroughSeq: string;
 }
 
 export function resolveHostedSystemMailboxHandledThroughSeq(input: {
@@ -147,6 +160,14 @@ export function resolveHostedSystemMailboxHandledThroughSeq(input: {
   now?: string;
   state: HostedSystemMailboxState;
 }): string {
+  return resolveHostedSystemMailboxProgress(input).handledThroughSeq;
+}
+
+export function resolveHostedSystemMailboxProgress(input: {
+  importedSeq: string;
+  now?: string;
+  state: HostedSystemMailboxState;
+}): HostedSystemMailboxProgress {
   if (!/^(?:0|[1-9]\d*)$/u.test(input.importedSeq)) {
     throw new TypeError("Hosted system mailbox imported seq must be a non-negative decimal string.");
   }
@@ -155,14 +176,22 @@ export function resolveHostedSystemMailboxHandledThroughSeq(input: {
   let earliestPendingSeq: bigint | null = null;
   const now = input.now ?? new Date().toISOString();
   for (const item of input.state.pending) {
-    if (isHostedDeviceSyncDenseRawRetentionMailboxItem(item)) {
+    // Retained device retries are local continuations of an already handled
+    // mailbox item, so they must not hold back canonical mailbox progress.
+    if (
+      isHostedDeviceSyncDenseRawRetentionMailboxItem(item)
+      || isHostedRetainedDeviceJobRetry(item)
+    ) {
       continue;
     }
     if (isExpiredHostedGroupContextHandoffSystemMailboxItem(item, now)) {
       continue;
     }
     if (item.mailboxLaneSeq === null) {
-      return "0";
+      return {
+        firstPendingSeq: null,
+        handledThroughSeq: "0",
+      };
     }
     const pendingSeq = BigInt(item.mailboxLaneSeq);
     if (earliestPendingSeq === null || pendingSeq < earliestPendingSeq) {
@@ -171,10 +200,17 @@ export function resolveHostedSystemMailboxHandledThroughSeq(input: {
   }
 
   if (earliestPendingSeq === null) {
-    return importedSeq.toString();
+    return {
+      firstPendingSeq: null,
+      handledThroughSeq: importedSeq.toString(),
+    };
   }
   const handledBeforePending = earliestPendingSeq - 1n;
-  return (handledBeforePending < importedSeq ? handledBeforePending : importedSeq).toString();
+  return {
+    firstPendingSeq: earliestPendingSeq.toString(),
+    handledThroughSeq:
+      (handledBeforePending < importedSeq ? handledBeforePending : importedSeq).toString(),
+  };
 }
 
 export async function updateHostedSystemMailboxState<TResult = void>(
@@ -627,13 +663,19 @@ function isHostedFutureRetainedDeviceJobRetry(
   item: HostedSystemMailboxPendingItem,
   now: string,
 ): boolean {
+  return isHostedRetainedDeviceJobRetry(item)
+    && !systemMailboxItemIsDue(item, now);
+}
+
+function isHostedRetainedDeviceJobRetry(
+  item: HostedSystemMailboxPendingItem,
+): boolean {
   if (
     item.status !== "pending"
     || item.postCheckpointRecord !== null
     || item.nextAttemptAt === null
     || item.wake.kind !== "device-sync.wake"
     || !item.wake.connectionId
-    || systemMailboxItemIsDue(item, now)
   ) {
     return false;
   }

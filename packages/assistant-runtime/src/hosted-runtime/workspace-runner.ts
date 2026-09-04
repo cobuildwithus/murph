@@ -878,6 +878,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         async () => await importHostedPreAssistantSystemMailboxForWorkspaceRunner({
           checkpointRequestBuilder: checkpointRequestSession,
           importItemContext: input.initialMailboxImportContext ?? null,
+          initialMailboxImport,
           input,
           requestId: input.requestId,
           signal: input.signal ?? null,
@@ -905,6 +906,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       async () => await importHostedPreAssistantSystemMailboxForWorkspaceRunner({
         checkpointRequestBuilder: checkpointRequestSession,
         importItemContext: input.initialMailboxImportContext ?? null,
+        initialMailboxImport,
         input,
         requestId: input.requestId,
         signal: input.signal ?? null,
@@ -1998,10 +2000,18 @@ async function importHostedPreAssistantSystemMailboxForWorkspaceRunner(input: {
   checkpointRequestBuilder: HostedWorkspaceCheckpointRequestSession;
   checkpointCanonicalMailboxImportProgress: HostedCanonicalMailboxImportProgressCheckpoint;
   importItemContext: HostedWorkspaceRunnerMailboxImportContext | null;
+  initialMailboxImport: HostedMailboxImportCheckpointResult;
   input: HostedWorkspaceRunnerInput;
   requestId: string;
   signal: AbortSignal | null;
 }): Promise<HostedMailboxImportCheckpointResult | null> {
+  const initialMailboxPrefetch = input.input.initialMailboxPrefetch ?? null;
+  const establishedInitialMailboxPrefetch =
+    !hostedMailboxImportFetchedSystemLane(input.initialMailboxImport)
+    && initialMailboxPrefetch?.importedSeqByLane.system !== undefined
+    && initialMailboxPrefetch.importedSeqByLane.system !== "0"
+      ? initialMailboxPrefetch
+      : null;
   let latestImport: HostedMailboxImportCheckpointResult | null = null;
   let previousSystemSeq: string | null = null;
   for (let importPage = 1; importPage <= HOSTED_PRE_ASSISTANT_SYSTEM_IMPORT_MAX_PAGES; importPage += 1) {
@@ -2012,10 +2022,11 @@ async function importHostedPreAssistantSystemMailboxForWorkspaceRunner(input: {
       importItemContext: input.importItemContext,
       input: input.input,
       lanes: ["system"],
-      // The shared foreground prefetch can predate a system wake that arrived
-      // while its conversation item was being imported. Establish a fresh
-      // system-lane boundary before starting the assistant.
-      prefetch: null,
+      // A zero system watermark can still be the first-owner activation race.
+      // A preceding system import also keeps its fresh post-import barrier so
+      // newly arriving asks cannot bypass system-mailbox owner ordering. Only
+      // an established conversation-first pass reuses the shared snapshot.
+      prefetch: importPage === 1 ? establishedInitialMailboxPrefetch : null,
       requestId: `${input.requestId}:pre-assistant-system:${importPage}`,
       signal: input.signal,
       suppressNoopRuntimeLog: true,

@@ -23,7 +23,6 @@ const MAX_CHANGED_FILES = 3_000;
 const MAX_PRODUCER_FIXTURE_BYTES = 32 * 1024;
 const MAX_PRODUCER_FIXTURES = 16;
 const PAGE_SIZE = 100;
-
 const RELEVANT_PREFIXES = [
   "apps/cloudflare/",
   "apps/web/",
@@ -40,6 +39,7 @@ const RELEVANT_PREFIXES = [
 const RELEVANT_EXACT_PATHS = new Set([
   ".github/workflows/repo-hygiene.yml",
   ".github/workflows/temporal-compatibility.yml",
+  ".github/workflows/temporal-web-deployment-admission.yml",
   ".nvmrc",
   "config/workspace-source-resolution.ts",
   "package.json",
@@ -220,6 +220,21 @@ export function inspectPrivateMainRef(raw) {
   return sha;
 }
 
+export function inspectPublicBranchRef(raw, branch) {
+  assertSafeId(branch, "public branch", 255, /^[A-Za-z0-9._/-]+$/u);
+  assertRecord(raw, "public branch ref");
+  if (
+    !isRecord(raw.object)
+    || raw.ref !== `refs/heads/${branch}`
+    || raw.object.type !== "commit"
+  ) {
+    throw new Error("Public branch ref identity is invalid.");
+  }
+  const sha = requiredString(raw.object.sha, "public branch SHA");
+  assertSha(sha, "public branch SHA");
+  return sha;
+}
+
 export function inspectPrivateWorkflow(raw) {
   assertRecord(raw, "private compatibility workflow");
   if (
@@ -299,8 +314,11 @@ export function supportedReaderDigest(readerShas) {
     throw new Error("Supported-reader set contains a duplicate SHA.");
   }
   // Cross-repository wire format: sorted lowercase SHAs, one per line, with a
-  // trailing newline. The private attestation must compute this exact digest.
-  return createHash("sha256").update(`${normalized.join("\n")}\n`).digest("hex");
+  // trailing newline. Private CI binds lifecycle state separately so public
+  // verification does not duplicate private routing policy.
+  return createHash("sha256")
+    .update(`${normalized.join("\n")}\n`)
+    .digest("hex");
 }
 
 export function compatibilityProofDigest({ producerDigest, publicSha, readersDigest, requestId }) {
@@ -431,7 +449,7 @@ export async function runTemporalCompatibility({
   assertSafeId(requestId, "request id", 120);
   requiredString(privateToken, "private GitHub token");
   requiredString(publicToken, "public GitHub token");
-  if (!Number.isSafeInteger(prNumber) || prNumber <= 0) {
+  if (prNumber !== null && (!Number.isSafeInteger(prNumber) || prNumber <= 0)) {
     throw new Error("Pull request number must be a positive integer.");
   }
   const tokenDeadline = now() + TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS;
@@ -447,6 +465,17 @@ export async function runTemporalCompatibility({
   ));
   const encodedPublicRepository = encodeRepository(publicRepository);
   const revalidatePublicTarget = async () => {
+    if (prNumber === null) {
+      const currentSha = inspectPublicBranchRef(await fetchJson(
+        `https://api.github.com/repos/${encodedPublicRepository}/git/ref/heads/${expectedBaseRef.split("/").map(encodeURIComponent).join("/")}`,
+        { headers: githubHeaders(publicToken) },
+        "public deployment branch revalidation",
+      ), expectedBaseRef);
+      if (currentSha !== publicSha) {
+        throw new Error("Public deployment branch changed during Temporal compatibility proof.");
+      }
+      return;
+    }
     inspectExactPublicHead(await fetchJson(
       `https://api.github.com/repos/${encodedPublicRepository}/pulls/${prNumber}`,
       { headers: githubHeaders(publicToken) },
@@ -713,12 +742,32 @@ async function runCompatibilityCommand(args) {
   });
 }
 
+async function runMainCompatibilityCommand(args) {
+  const publicToken = requiredEnv("TEMPORAL_COMPATIBILITY_PUBLIC_GITHUB_TOKEN");
+  const privateToken = requiredEnv("TEMPORAL_COMPATIBILITY_PRIVATE_GITHUB_TOKEN");
+  delete process.env.TEMPORAL_COMPATIBILITY_PUBLIC_GITHUB_TOKEN;
+  delete process.env.TEMPORAL_COMPATIBILITY_PRIVATE_GITHUB_TOKEN;
+  const producer = inspectProducerFixtures(await readFile(requiredArg(args, "fixtures"), "utf8"));
+  await runTemporalCompatibility({
+    expectedBaseRef: requiredEnv("EXPECTED_BASE_REF"),
+    privateToken,
+    producerDigest: producer.digest,
+    producerFixtures: producer.serialized,
+    publicRepository: requiredEnv("GITHUB_REPOSITORY"),
+    publicSha: requiredArg(args, "sha"),
+    publicToken,
+    prNumber: null,
+    requestId: requiredArg(args, "request-id"),
+  });
+}
+
 async function main(argv) {
   const [command, ...rest] = argv;
   if (command === "select" && rest.length === 0) return runSelectCommand();
   const args = parseArgs(rest);
   if (command === "run") return runCompatibilityCommand(args);
-  throw new Error("Expected select or run.");
+  if (command === "run-main") return runMainCompatibilityCommand(args);
+  throw new Error("Expected select, run, or run-main.");
 }
 
 async function fetchJson(url, init, label, timeoutMs = HTTP_TIMEOUT_MS) {

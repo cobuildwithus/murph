@@ -271,28 +271,12 @@ fi
   }
 });
 
-test("release-note-only alias lag dispatches the actual production SHA", () => {
-  let classifiedEnv = null;
-  assert.equal(selectProductionCanaryWebSha(SHA, SHA, {
-    classifyBuild: () => {
-      throw new Error("same SHA must not classify a range");
-    },
-  }), SHA);
-  assert.equal(selectProductionCanaryWebSha(SHA, IOS_SHA, {
-    classifyBuild: ({ env }) => {
-      classifiedEnv = env;
-      return { reason: "eligible-markdown-docs", skipBuild: true };
-    },
-  }), SHA);
-  assert.deepEqual(classifiedEnv, {
-    VERCEL_ENV: "production",
-    VERCEL_GIT_COMMIT_REF: "main",
-    VERCEL_GIT_COMMIT_SHA: IOS_SHA,
-    VERCEL_GIT_PREVIOUS_SHA: SHA,
-  });
-  assert.throws(() => selectProductionCanaryWebSha(SHA, IOS_SHA, {
-    classifyBuild: () => ({ reason: "ineligible-path", skipBuild: false }),
-  }), /runtime-relevant change/u);
+test("production canary requires the exact scheduled main revision", () => {
+  assert.equal(selectProductionCanaryWebSha(SHA, SHA), SHA);
+  assert.throws(
+    () => selectProductionCanaryWebSha(SHA, IOS_SHA),
+    /does not match the scheduled main revision/u,
+  );
 });
 
 test("private workflow proof pins the immutable tag and returned run SHA", () => {

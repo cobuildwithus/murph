@@ -165,7 +165,7 @@ type HostedTerminalDeviceSyncStatus = "disconnected" | "reauthorization_required
 
 const HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON = "retained_completion_fence";
 const HOSTED_DEVICE_SYNC_DIRTY_REMAINDER_HINT_REASON = "retained_dirty_remainder";
-const HOSTED_DEVICE_SYNC_COMPLETION_FENCE_DELAY_MS = 30_000;
+const HOSTED_DEVICE_SYNC_DIRTY_REMAINDER_DELAY_MS = 30_000;
 
 export async function syncHostedDeviceSyncControlPlaneState(input: {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
@@ -1123,7 +1123,7 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
   if (input.state.dirtyWorkRemaining) {
     return {
       retryAt: new Date(
-        Date.now() + HOSTED_DEVICE_SYNC_COMPLETION_FENCE_DELAY_MS,
+        Date.now() + HOSTED_DEVICE_SYNC_DIRTY_REMAINDER_DELAY_MS,
       ).toISOString(),
       wake: {
         ...input.wake,
@@ -1152,9 +1152,7 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
   }
 
   return {
-    retryAt: new Date(
-      Date.now() + HOSTED_DEVICE_SYNC_COMPLETION_FENCE_DELAY_MS,
-    ).toISOString(),
+    retryAt: new Date(Date.now()).toISOString(),
     wake: {
       ...input.wake,
       hint: {
