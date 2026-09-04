@@ -663,13 +663,11 @@ export async function reconcileHostedPrivyIdentityOnMemberResolutionTx(input: {
 }> {
   const emailIdentityForLock = input.preparedLiveIdentity ?? input.identity;
   const emailLockContact = await acquireHostedPrivyEmailIdentityLockTx({
-    enabled: input.authMethod === "email"
-      || Boolean(input.expectedEmailLookupKey)
-      || (
-        !input.authMethod
-        && !input.identity.phone
-        && Boolean(emailIdentityForLock.email?.verifiedAt)
-      ),
+    enabled: shouldAcquireHostedPrivyEmailIdentityLock({
+      authMethod: input.authMethod,
+      expectedEmailLookupKey: input.expectedEmailLookupKey,
+      identity: emailIdentityForLock,
+    }),
     identity: emailIdentityForLock,
     prisma: input.prisma,
   });
@@ -740,19 +738,11 @@ export async function reconcileHostedPrivyIdentityOnMemberResolutionTx(input: {
     identity,
   });
 
-  if (emailLockContact) {
-    const linqEmailHandleOwner =
-      await lookupHostedMemberIdentityByLinqEmailHandle({
-        emailAddress: emailLockContact.value,
-        prisma: input.prisma,
-      });
-    if (
-      linqEmailHandleOwner
-      && linqEmailHandleOwner.core.id !== currentMember.id
-    ) {
-      throw createHostedPrivyIdentityConflictError();
-    }
-  }
+  await assertHostedPrivyLinqEmailHandleOwnerMatchesTx({
+    emailLockContact,
+    memberId: currentMember.id,
+    prisma: input.prisma,
+  });
   const verifiedEmailAuthorizesRebinding = privyUserChanged && input.allowVerifiedEmailRebinding
     ? await hasHostedVerifiedEmailRebindingAuthorityTx({
         identity,
@@ -846,6 +836,36 @@ async function acquireHostedPrivyEmailIdentityLockTx(input: {
     tx: input.prisma,
   });
   return contact;
+}
+
+function shouldAcquireHostedPrivyEmailIdentityLock(input: {
+  authMethod?: HostedPrivyAuthMethod;
+  expectedEmailLookupKey?: string;
+  identity: HostedPrivyIdentity;
+}): boolean {
+  if (input.authMethod === "email" || input.expectedEmailLookupKey) {
+    return true;
+  }
+  return !input.authMethod
+    && !input.identity.phone
+    && Boolean(input.identity.email?.verifiedAt);
+}
+
+async function assertHostedPrivyLinqEmailHandleOwnerMatchesTx(input: {
+  emailLockContact: HostedLinqParticipantContact | null;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  if (!input.emailLockContact) {
+    return;
+  }
+  const owner = await lookupHostedMemberIdentityByLinqEmailHandle({
+    emailAddress: input.emailLockContact.value,
+    prisma: input.prisma,
+  });
+  if (owner && owner.core.id !== input.memberId) {
+    throw createHostedPrivyIdentityConflictError();
+  }
 }
 
 function assertHostedPrivyEmailIdentityLockMatches(input: {

@@ -1533,7 +1533,7 @@ export async function planHostedOnboardingLinqWebhook(
     ?? null;
   const existingMemberMatch = resolveHostedLinqExistingMemberMatch({
     existingHomeLinqChatLookupPresent: Boolean(existingHomeLinqChatLookup),
-    existingMemberLookupMatch: existingMemberLookup?.identityMatch ?? null,
+    existingMemberLookup,
     existingPendingLinqContactLookupPresent: Boolean(existingPendingLinqContactLookup),
   });
   const buildExistingMemberDuplicatePlan = (duplicateInput: {
@@ -1684,17 +1684,12 @@ export async function planHostedOnboardingLinqWebhook(
     } else {
       await lockHostedMemberRow(input.prisma, existingMember.id);
     }
-    if (
-      participantContact.kind === "email"
-      && existingMemberLookup
-    ) {
-      await bindHostedMemberLinqEmailHandleTx({
-        emailAddress: participantContact.value,
-        lookupKey: participantContact.lookupKey,
-        memberId: existingMember.id,
-        prisma: input.prisma,
-      });
-    }
+    await bindHostedLinqEmailHandleIdentityIfMatchedTx({
+      existingMemberLookup,
+      memberId: existingMember.id,
+      participantContact,
+      prisma: input.prisma,
+    });
     const exactMemberAccess = await readHostedRuntimeAiAccessDecision({
       memberId: existingMember.id,
       noticeSeed: input.event.event_id,
@@ -4491,11 +4486,11 @@ function buildHostedLinqThreadRouteEgressAuthority(input: {
 
 function resolveHostedLinqExistingMemberMatch(input: {
   existingHomeLinqChatLookupPresent: boolean;
-  existingMemberLookupMatch: HostedLinqIdentityCoreCandidate["identityMatch"] | null;
+  existingMemberLookup: HostedLinqIdentityCoreCandidate | null;
   existingPendingLinqContactLookupPresent: boolean;
 }): HostedLinqExistingMemberMatch {
-  if (input.existingMemberLookupMatch) {
-    return input.existingMemberLookupMatch;
+  if (input.existingMemberLookup) {
+    return input.existingMemberLookup.identityMatch;
   }
 
   if (input.existingHomeLinqChatLookupPresent) {
@@ -4507,6 +4502,26 @@ function resolveHostedLinqExistingMemberMatch(input: {
   }
 
   return "none";
+}
+
+async function bindHostedLinqEmailHandleIdentityIfMatchedTx(input: {
+  existingMemberLookup: HostedLinqIdentityCoreCandidate | null;
+  memberId: string;
+  participantContact: HostedLinqParticipantContact;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  if (
+    input.participantContact.kind !== "email"
+    || !input.existingMemberLookup
+  ) {
+    return;
+  }
+  await bindHostedMemberLinqEmailHandleTx({
+    emailAddress: input.participantContact.value,
+    lookupKey: input.participantContact.lookupKey,
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
 }
 
 function resolveHostedLinqHomeLineRouteBindingAuthority(input: {
