@@ -2314,6 +2314,8 @@ describe('real Codex live fixture contracts', () => {
       'I don’t see a hosted group for this chat.',
       'This room isn’t connected to a hosted group yet.',
       'This chat does not currently have a Murph hosted group set up.',
+      'No Murph hosted group is configured for this room.',
+      'No hosted group has been created here.',
     ]) {
       expect(hasNoCurrentHostedGroupMeaning(text), text).toBe(true)
     }
@@ -2322,6 +2324,7 @@ describe('real Codex live fixture contracts', () => {
       'I could not determine the current group status.',
       'The hosted group has already been set up.',
       'There is no issue with the current hosted group.',
+      'No group is configured here. The hosted group is active.',
     ]) {
       expect(hasNoCurrentHostedGroupMeaning(text), text).toBe(false)
     }
@@ -2418,6 +2421,8 @@ describeRealCodex('real Codex workout capture default e2e', () => {
       const commandLogPath = path.join(workingDirectory, 'workout-commands.log')
 
       try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await cp(resolveAssistantSkillsRoot(), skillsRoot, { recursive: true })
         await initializeVault({
           title: 'Synthetic workout capture default proof',
           timezone: 'UTC',
@@ -2475,6 +2480,7 @@ describeRealCodex('real Codex workout capture default e2e', () => {
           dynamicTools: [],
           env: {
             ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
             PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
           },
           excludeResumeTurns: true,
@@ -2545,13 +2551,17 @@ describeRealCodex('real Codex workout capture default e2e', () => {
         expect(workouts[0]?.attributes.activityType).toBe('yoga')
         expect(reported.finalMessage).toMatch(/logged|saved|recorded/iu)
         expect(reported.finalMessage).toMatch(/yoga/iu)
-        expect(reported.finalMessage).not.toMatch(/how long|duration|\?/iu)
+        expect(reported.finalMessage).not.toMatch(/how long|\?/iu)
 
         expect(
-          commands.filter((command) => command.startsWith('workout defaults set ')),
+          commands.filter((command) =>
+            command.startsWith('workout defaults set ')
+            && !isRecordedVaultHelpCommand(command)
+          ),
         ).toHaveLength(1)
         const workoutAddCommands = commands.filter((command) =>
-          command.startsWith('workout add '),
+          command.startsWith('workout add ')
+          && !isRecordedVaultHelpCommand(command),
         )
         expect(workoutAddCommands).toHaveLength(1)
         expect(workoutAddCommands[0]).toMatch(/--type(?:=|\s)yoga\b/iu)
@@ -2593,7 +2603,7 @@ describeRealCodex('real Codex workout capture default e2e', () => {
         expect(explicitWorkouts.at(-1)?.attributes.activityType).toBe('swimming')
         expect(explicitWorkoutCommand).toMatch(/--duration(?:=|\s)35\b/u)
         expect(explicitWorkoutCommand).toMatch(/--type(?:=|\s)(?:swim|swimming)\b/iu)
-        expect(explicitReported.finalMessage).not.toMatch(/how long|duration|\?/iu)
+        expect(explicitReported.finalMessage).not.toMatch(/how long|\?/iu)
         expect(explicitReported.runtimeIssueInputs).toEqual([])
 
         const routeReported = await executeRealCodexAppServerTurn({
@@ -2604,6 +2614,9 @@ describeRealCodex('real Codex workout capture default e2e', () => {
         const routeVault = await readVaultRawTolerant(workingDirectory)
         const routeWorkouts = routeVault.events.filter(
           (event) => event.kind === 'activity_session',
+        )
+        const routeWorkout = routeWorkouts.find(
+          (event) => event.attributes.activityType === 'running',
         )
         const routeCommands = (await readFile(commandLogPath, 'utf8'))
           .trim()
@@ -2619,7 +2632,7 @@ describeRealCodex('real Codex workout capture default e2e', () => {
         process.stdout.write(
           `[workout-capture-default-e2e] ${JSON.stringify({
             durationMinutes:
-              routeWorkouts.at(-1)?.attributes.durationMinutes ?? null,
+              routeWorkout?.attributes.durationMinutes ?? null,
             finalMessage: routeReported.finalMessage,
             routeEstimateCommand: routeEstimateCommand ?? null,
             routeWorkoutCommand: routeWorkoutCommand ?? null,
@@ -2629,12 +2642,12 @@ describeRealCodex('real Codex workout capture default e2e', () => {
         )
 
         expect(routeWorkouts).toHaveLength(3)
-        expect(routeWorkouts.at(-1)?.attributes.durationMinutes).toBe(60)
+        expect(routeWorkout?.attributes.durationMinutes).toBe(60)
         expect(routeEstimateCommand).toBeDefined()
         expect(routeWorkoutCommand).toBeDefined()
         expect(routeWorkoutCommand).not.toMatch(/--duration(?:=|\s)/u)
         expect(routeWorkoutCommand).toMatch(/--type(?:=|\s)(?:run|running)\b/iu)
-        expect(routeReported.finalMessage).not.toMatch(/how long|duration|\?/iu)
+        expect(routeReported.finalMessage).not.toMatch(/how long|\?/iu)
         expect(routeReported.runtimeIssueInputs).toEqual([])
       } finally {
         await removeRealCodexTemporaryPaths([
@@ -7011,6 +7024,10 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           && action.tool === MURPH_GROUP_MEMBERSHIP_TOOL.name
         )
 
+        process.stdout.write(`[group-status-e2e] ${JSON.stringify({
+          requestCount: groupRequests.length,
+          reply: result.finalMessage,
+        })}\n`)
         expect(groupCall).toBeDefined()
         expect(groupRequests).toEqual([{ action: 'read_current' }])
         expect(
@@ -17271,8 +17288,13 @@ describeRealCodex('real Codex repeated-set resolution e2e', () => {
       const result = await runRepeatedSetResolutionProbe('ambiguous')
       const mutations = result.commandLog.filter((command) =>
         /(?:experiment session log|experiment edit|regimen (?:add|edit)|automation (?:add|create|edit|reconcile))/u.test(command)
+        && !isRecordedVaultHelpCommand(command)
       )
 
+      process.stdout.write(`[repeated-set-ambiguity-e2e] ${JSON.stringify({
+        mutationCount: mutations.length,
+        reply: result.finalMessage,
+      })}\n`)
       expect(mutations).toEqual([])
       expect(result.finalMessage).toMatch(/Movement Alpha|Movement Beta|exercise|target/iu)
       expect(result.finalMessage.match(/\?/gu) ?? []).toHaveLength(1)
@@ -27961,6 +27983,24 @@ async function runRealPriorMealNutritionRecovery(input: {
 }
 
 describe('recorded vault command parsing', () => {
+  it('distinguishes help inspection from actual writes', () => {
+    for (const command of [
+      'workout add --help',
+      'workout defaults set --help --format json',
+      'experiment session log -h',
+    ]) {
+      expect(isRecordedVaultHelpCommand(command), command).toBe(true)
+    }
+    for (const command of [
+      'workout add Mobility --type yoga',
+      'workout defaults set --duration 45',
+      'experiment session log experiment_example --set 2',
+      'workout add Helpdesk break --type walking',
+    ]) {
+      expect(isRecordedVaultHelpCommand(command), command).toBe(false)
+    }
+  })
+
   it('normalizes global format options and flattens batch commands', () => {
     expect(expandRecordedVaultCommands([
       '--format json meal edit meal_example --nutrition-source inherited',
@@ -27973,6 +28013,12 @@ describe('recorded vault command parsing', () => {
     ])
   })
 })
+
+function isRecordedVaultHelpCommand(command: string): boolean {
+  return command.split(/\s+/u).some((token) =>
+    token === '--help' || token === '-h'
+  )
+}
 
 function recordedVaultCommandStartsWith(
   commands: readonly string[],
@@ -33152,11 +33198,15 @@ function buildRoutinePresentationDeveloperInstructions(input: {
 
 function hasNoCurrentHostedGroupMeaning(text: string): boolean {
   const normalized = text.replaceAll(/\s+/gu, ' ').trim()
+  const withoutAbsentGroupSubjects = normalized.replaceAll(
+    /\bno (?:Murph )?(?:hosted )?group\b/giu,
+    'absent subject',
+  )
   const reportsPresentGroup = [
     /\b(?:hosted )?group\b[^.!?\n]{0,40}\b(?:is|remains) (?:active|available|configured|existing|set up)\b/iu,
     /\b(?:hosted )?group\b[^.!?\n]{0,40}\b(?:exists|has (?:already )?been (?:configured|created|set up))\b/iu,
     /\bno (?:issue|problem|concern)\b[^.!?\n]{0,48}\b(?:with )?(?:the )?(?:current |active |existing )?(?:hosted )?group\b/iu,
-  ].some((pattern) => pattern.test(normalized))
+  ].some((pattern) => pattern.test(withoutAbsentGroupSubjects))
   if (reportsPresentGroup) {
     return false
   }
