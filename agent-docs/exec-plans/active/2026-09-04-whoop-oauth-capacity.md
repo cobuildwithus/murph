@@ -13,13 +13,14 @@ Updated: 2026-09-04
 
 ## Success criteria
 
-- The WHOOP admission owner allows at most 100 distinct active members across
+- The WHOOP admission owner reserves two provider-side accounts that are not in
+  the connection graph and allows at most 98 tracked active members across
   direct WHOOP and Junction-backed WHOOP connections.
 - Existing WHOOP members can still reconnect when the shared allowance is full.
 - A successful WHOOP callback still opens the existing completion dialog and
   its unchanged App Store and Apple Health setup guide.
-- The 101st new member still receives the existing Apple Health fallback rather
-  than a failed or misleading OAuth handoff.
+- A new member after the 98 tracked slots are full still receives the existing
+  Apple Health fallback rather than a failed or misleading OAuth handoff.
 - Focused tests, hosted-Web typecheck, exact-head CI, and the required
   cross-cutting review gate pass.
 
@@ -58,16 +59,17 @@ Updated: 2026-09-04
    to `main` and retain their existing tests.
 2. Risk: The larger count broadens an unbounded database read.
    Mitigation: Preserve the current per-branch and final SQL limits and update
-   their exact bound to 100.
+   their exact bound to the 98 tracked-member allowance.
 3. Risk: The limit changes but `/connect` still chooses the fallback before the
-   100th slot.
-   Mitigation: Exercise the real route owner at 99 and 100 active members.
+   98th tracked slot.
+   Mitigation: Exercise the real route owner at 97 and 98 active members.
 
 ## Tasks
 
 1. Characterize the current `/connect`, capacity, and completion flows and
    confirm current official WHOOP data availability.
-2. Raise the existing WHOOP member limit to 100 and update exact-bound tests.
+2. Raise the WHOOP provider allowance to 100, reserve the two provider-side
+   accounts absent from the database, and update exact-bound tests.
 3. Verify the existing post-connect App Store and Apple Health guide remains
    intact, without changing its copy or design representation.
 4. Add the member-visible changelog item, run focused tests/typecheck/rendered
@@ -83,12 +85,14 @@ Updated: 2026-09-04
   completion and the eventual capacity-full fallback.
 - Do not change OAuth scopes or provider configuration because the WHOOP API's
   current documented OAuth surface still has no steps scope or endpoint.
+- Reconcile the provider dashboard's 8 used slots with the 6 tracked active
+  members by reserving the two-account gap in the existing capacity owner.
 
 ## Verification
 
 - Commands to run: focused Vitest files for capacity, route interaction, and
   unchanged completion behavior; hosted-Web typecheck; `pnpm complexity:diff`;
   exact PR-head CI; ReviewGPT.
-- Expected outcomes: 99 current members admits the next OAuth start, 100 blocks
+- Expected outcomes: 97 tracked members admits the next OAuth start, 98 blocks
   only a new member, existing members remain admitted, and successful
   completion retains the existing Apple Health/App Store handoff.

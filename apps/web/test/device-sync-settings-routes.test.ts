@@ -1441,7 +1441,7 @@ describe("device sync settings routes", () => {
     vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
     vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
     mocks.queryWhoopMembers.mockResolvedValueOnce(
-      Array.from({ length: 100 }, (_, index) => ({
+      Array.from({ length: 98 }, (_, index) => ({
         userId: `member_existing_${index + 1}`,
       })),
     );
@@ -1471,11 +1471,11 @@ describe("device sync settings routes", () => {
     expect(mocks.startConnection).not.toHaveBeenCalled();
   });
 
-  it("allows a new member to take the 100th current WHOOP slot through direct OAuth", async () => {
+  it("allows a new member to take the 98th tracked WHOOP slot through direct OAuth", async () => {
     vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
     vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
     mocks.queryWhoopMembers.mockResolvedValueOnce(
-      Array.from({ length: 99 }, (_, index) => ({
+      Array.from({ length: 97 }, (_, index) => ({
         userId: `member_existing_${index + 1}`,
       })),
     );

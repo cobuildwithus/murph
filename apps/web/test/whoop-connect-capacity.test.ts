@@ -42,7 +42,7 @@ describe("WHOOP connect capacity", () => {
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
   });
 
-  it("caps each provider branch before combining the 100-member result", async () => {
+  it("reserves two untracked WHOOP accounts in each bounded provider read", async () => {
     const prisma = buildPrisma({ members: [{ userId: "member_one" }] });
 
     await expect(assertHostedWhoopConnectCapacityAvailable({
@@ -61,18 +61,18 @@ describe("WHOOP connect capacity", () => {
     expect(sql).toContain("JOIN device_connection AS connection");
     expect(sql).toContain("source.source_provider_slug = 'whoop_v2'");
     expect(sql.match(/LIMIT \?/gu)).toHaveLength(3);
-    expect(query?.values).toEqual([100, 100, 100]);
+    expect(query?.values).toEqual([98, 98, 98]);
   });
 
-  it("allows the 100th distinct member", async () => {
+  it("allows the 98th tracked member with two provider accounts reserved", async () => {
     const prisma = buildPrisma({
-      members: Array.from({ length: 99 }, (_, index) => ({
+      members: Array.from({ length: 97 }, (_, index) => ({
         userId: `member_${index + 1}`,
       })),
     });
 
     await expect(assertHostedWhoopConnectCapacityAvailable({
-      memberId: "member_100",
+      memberId: "member_98",
       prisma: prisma as never,
       target: { provider: "whoop" } as never,
     })).resolves.toBeUndefined();
@@ -80,9 +80,9 @@ describe("WHOOP connect capacity", () => {
     expect(prisma.deviceConnection.findFirst).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects a new member once 100 distinct members occupy capacity", async () => {
+  it("rejects a new member once 98 tracked members occupy capacity", async () => {
     const prisma = buildPrisma({
-      members: Array.from({ length: 100 }, (_, index) => ({
+      members: Array.from({ length: 98 }, (_, index) => ({
         userId: `member_${index + 1}`,
       })),
     });
@@ -115,7 +115,7 @@ describe("WHOOP connect capacity", () => {
   it("allows a member whose connection appears between the exact and bounded reads", async () => {
     const prisma = buildPrisma({
       existingResults: [false, true],
-      members: Array.from({ length: 100 }, (_, index) => ({
+      members: Array.from({ length: 98 }, (_, index) => ({
         userId: `member_${index + 1}`,
       })),
     });
