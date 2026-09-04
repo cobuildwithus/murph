@@ -4,11 +4,6 @@ Last verified: 2026-09-04
 
 ## Purpose
 
-Linq email identity source preservation, canonical email ownership checks,
-exact unlink, and migration/deployment prerequisites are specified by
-`ARCHITECTURE.md`, `agent-docs/SECURITY.md`, and
-`docs/hosted-contact-privacy-rotation.md`.
-
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists only live architecture, product, verification, and package-boundary docs.
 
