@@ -40,10 +40,16 @@ Optional inspection fields preserve older adapters; no pre-provider work changes
   failed before the corresponding fix; focused assertions pass afterward.
 - Real-Codex replay reproduced the missing-workout clarification when the
   provider serializer still omitted the definition.
-- Final hosted-tool replay and terse follow-up: pending.
+- Final hosted-tool replay and terse follow-up passed on the final behavior:
+  one exact reminder inspection, one start, two set writes on the same event,
+  earlier set pending, older event and reminder unchanged, no identity question.
+  Actual two-turn replies were reviewed. Help reads are not counted as writes.
+- Focused engine regressions passed (36 tests); runtime inspection/authority/route
+  regressions passed (3 tests).
 - Both affected package typechecks passed; final fixture and tracker typecheck passed.
 - Complexity guard passed with unchanged debt and unchanged source hotspots.
-- Changelog archive validation passed (9 tests). Final parent candidate review pending.
+- Changelog archive validation passed (9 tests). Parent candidate review passed: no extra owner, no authority expansion, bounded
+  definition output, unchanged actual-failure handling, synthetic-only evidence.
 
 ## Product UX and release
 

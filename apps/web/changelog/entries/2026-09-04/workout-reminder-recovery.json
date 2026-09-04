@@ -8,7 +8,13 @@
     "title": "Workout reminders carry through to logging",
     "summary": "Murph can recover a clearly defined workout from a saved reminder when you reply with a completed set.",
     "details": "Later set updates stay with that workout. Unreported sets stay empty, and Murph still asks when the saved routine is ambiguous.",
-    "relevanceTags": ["workouts", "reminders", "conversation"],
-    "sourcePullRequests": []
+    "relevanceTags": [
+      "workouts",
+      "reminders",
+      "conversation"
+    ],
+    "sourcePullRequests": [
+      2837
+    ]
   }
 }
