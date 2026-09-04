@@ -1,6 +1,6 @@
 # Simplify developer agent guidance
 
-Status: active
+Status: completed
 Created: 2026-09-04
 Updated: 2026-09-04
 
@@ -39,7 +39,7 @@ Updated: 2026-09-04
 2. Verify official GPT-6 Astra prompting guidance.
 3. Consolidate repeated rules and remove conflicting legacy instructions.
 4. Review links, command contracts, and the complete diff; run focused checks.
-5. Close the plan, commit, open a PR, and report checks and remaining limitations.
+5. Open PR #2821, archive this plan, and publish the final candidate for CI.
 
 ## Decisions
 
@@ -96,3 +96,10 @@ Updated: 2026-09-04
 - Documentation drift and gardening passed; index inventory unchanged.
 - Privacy scan and diff whitespace checks passed.
 - Required exact-head CI remains pending until the final candidate is published.
+
+## Handoff
+
+- PR: https://github.com/cobuildwithus/murph/pull/2821
+- Implementation and local review are complete; exact-head CI gates PR readiness.
+- No merge or deployment is requested. Keep the worktree while the PR is open.
+Completed: 2026-09-04
