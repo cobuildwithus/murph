@@ -328,7 +328,7 @@ review_gpt_register_dir_preset "legacy-removal" "legacy-removal.md" \
   "hard-cut" \
   "greenfield-hard-cut"
 review_gpt_register_dir_preset "pr-review" "$review_gpt_pr_review_prompt_file" \
-  "Deep PR review for serious bugs, invariant drift, and material simplification using the guarded codebase ZIP." \
+  "PR review for serious, realistically reachable bugs using the guarded codebase ZIP." \
   "pr-deep-review" \
   "deep-pr-review" \
   "pr-bugs-and-architecture"

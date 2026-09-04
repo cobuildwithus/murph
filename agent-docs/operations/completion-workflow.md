@@ -210,7 +210,7 @@ validation without changing the reviewed commit baseline.
 
 Treat review findings as claims to verify, not implementation instructions.
 Read the actual path and dependency contract. Accept a finding only with a
-current invariant, material harm, and evidence. Reject wrong, speculative,
+realistic trigger, serious harm, and code-path evidence. Reject wrong, speculative,
 already-handled, disproportionate, or out-of-scope findings with a reason.
 Rejected findings need no reviewer agreement.
 
@@ -222,7 +222,7 @@ retrospective before adding another layer.
 
 The final ReviewGPT Finding Disposition Boundary remains authoritative:
 `FINDINGS` pauses candidate mutation until user resumption except for its proven
-Complexity Collapse or Non-Production Remediation cases; `PASS` continues.
+Non-Production Remediation case; `PASS` continues.
 Rerun affected proof after remediation. The review loop determines whether a
 new substantive round is required; isolated tests, explanatory docs, rejected
 findings, and base-only movement do not by themselves require one.

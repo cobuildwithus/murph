@@ -1,33 +1,19 @@
-Continue the PR review in this conversation. Apply the review rules and output
-contract already given above. Do not start another conversation.
+Continue the PR review in this conversation using the same serious-bug finding
+bar, evidence rules, and output contract. Read the new `codebase.zip` and
+`review-gpt-pr-context/review-round.json` first.
 
-Preserve the required `Complexity disposition:` for every finding, and give
-findings caused by one mechanism one shared root-cause correction instead of
-stacking another guard.
+- `reviewScope: full` with `contextMode: full_snapshot`: use the new complete
+  snapshot for a full review of the current PR.
+- `reviewScope: correction` with `contextMode: same_thread_delta`: verify the
+  remediation and directly affected paths using the earlier snapshot matching
+  `contextAnchorHead` for unchanged context. Do not restart a broad audit.
+- Any other pairing or missing required evidence is `INVALID`.
 
-Read the attached `codebase.zip` and then read `reviewScope` and `contextMode`
-from `review-gpt-pr-context/review-round.json` before choosing the round scope.
+Verify claimed corrections and label each remaining bug by its actual cause:
+`ORIGINAL_PR` or `REVIEW_INDUCED`. Report a serious original bug encountered
+in a directly affected path without expanding the correction review's scope.
+Reassess prior findings against the serious-bug bar; rejected or out-of-scope
+observations do not block completion. Patch size and round count are not bugs.
 
-When `reviewScope` is `full` and `contextMode` is `full_snapshot`:
-
-- treat this ZIP as the new complete guarded snapshot of the current PR;
-- perform a fresh full-patch audit of `review-gpt-pr-context/pr.diff` and the
-  current repository files, including portions unchanged since the prior round;
-- verify every prior accepted finding and claimed correction using the
-  conversation's finding ledger and the current ZIP; and
-- report qualifying `ORIGINAL_PR` or `REVIEW_INDUCED` findings under the review
-  rules already given above.
-
-When `reviewScope` is `correction` and `contextMode` is `same_thread_delta`:
-
-- use the most recent earlier `full_snapshot` ZIP in this conversation for
-  unchanged context;
-- review `since-previous-reviewed-head.diff` and only its directly affected
-  callers, owners, invariants, tests, and production paths;
-- verify every claimed correction; and
-- report only a `REVIEW_INDUCED` finding. If the correction reveals a serious
-  missed `ORIGINAL_PR` issue, return `RETROSPECTIVE_REQUIRED` instead of opening
-  a new full audit.
-
-Any other scope/mode pairing is `INVALID`. Return one final response and end
-with the prior exact outcome and `REVIEW_COMPLETE` contract.
+Return one final response with `ROUND_OUTCOME: PASS`, `ROUND_OUTCOME: FINDINGS`,
+or `ROUND_OUTCOME: INVALID`, followed by the exact final line `REVIEW_COMPLETE`.
