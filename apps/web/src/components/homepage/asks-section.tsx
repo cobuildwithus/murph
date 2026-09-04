@@ -7,28 +7,24 @@ type Tint = "sage" | "gold" | "bronze";
 const TINTS: Record<
   Tint,
   {
-    eyebrow: string;
     panel: string;
     bubble: string;
     glow: string;
   }
 > = {
   sage: {
-    eyebrow: "text-[#3d5028]",
     panel:
       "bg-[linear-gradient(135deg,#e8efde_0%,#d5e2c4_55%,#c8d7b1_100%)]",
     bubble: "bg-[#2c7a3f]",
     glow: "shadow-[0_30px_80px_-35px_rgba(58,80,40,0.45)]",
   },
   gold: {
-    eyebrow: "text-[#8a6428]",
     panel:
       "bg-[linear-gradient(135deg,#f3e8d0_0%,#ead7af_55%,#dec390_100%)]",
     bubble: "bg-[#8a5d17]",
     glow: "shadow-[0_30px_80px_-35px_rgba(138,100,40,0.45)]",
   },
   bronze: {
-    eyebrow: "text-[#7d4a1a]",
     panel:
       "bg-[linear-gradient(135deg,#ead0b0_0%,#d6ad7e_55%,#bf8a55_100%)]",
     bubble: "bg-[#94591f]",
@@ -41,7 +37,6 @@ export function WideFeature({
   artifactSide,
   body,
   bubble,
-  eyebrow,
   headline,
   tint,
   artifact,
@@ -52,7 +47,6 @@ export function WideFeature({
   artifactSide: "left" | "right";
   body: string;
   bubble: string;
-  eyebrow: string;
   headline: string;
   tint: Tint;
   artifact: React.ReactNode;
@@ -60,14 +54,6 @@ export function WideFeature({
   const t = TINTS[tint];
   const copy = (
     <div className="flex flex-col justify-center gap-4 px-5 pt-8 pb-1 sm:gap-5 sm:px-10 sm:pt-12 sm:pb-2 lg:col-span-5 lg:py-16 lg:px-12">
-      <span
-        className={cn(
-          "font-mono text-[10px] font-semibold uppercase tracking-[0.2em]",
-          t.eyebrow,
-        )}
-      >
-        {eyebrow}
-      </span>
       <h3 className="font-serif text-[1.5rem] font-semibold leading-[1.08] tracking-[-0.03em] text-balance text-[#1f1c18] sm:text-[clamp(1.75rem,2.8vw,2.625rem)] sm:leading-[1.02] sm:tracking-[-0.035em]">
         {headline}
       </h3>
@@ -134,21 +120,16 @@ export function WideFeature({
 
 function CompactCard({
   body,
-  eyebrow,
   headline,
   artifact,
 }: {
   body: string;
-  eyebrow: string;
   headline: string;
   artifact: React.ReactNode;
 }) {
   return (
     <article className="flex min-w-0 flex-col gap-5 rounded-[1.5rem] bg-[#fffcf6] p-5 ring-1 ring-black/[0.04] shadow-[0_1px_2px_rgba(45,52,54,0.04),0_16px_50px_-30px_rgba(45,52,54,0.1)] sm:gap-6 sm:rounded-[1.75rem] sm:p-9">
       <div className="flex flex-col gap-2.5 sm:gap-3">
-        <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-[#736a58]">
-          {eyebrow}
-        </span>
         <h3 className="font-serif text-[1.25rem] font-semibold leading-[1.08] tracking-[-0.025em] text-balance text-[#1f1c18] sm:text-[clamp(1.375rem,2vw,1.75rem)] sm:leading-[1.05] sm:tracking-[-0.03em]">
           {headline}
         </h3>
@@ -171,16 +152,7 @@ function RecoveryArtifact() {
   ];
   return (
     <div className="rounded-xl bg-[#fffcf6] p-3.5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)] sm:rounded-2xl sm:p-5">
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
-        <span className="font-mono text-[9px] font-medium uppercase tracking-[0.14em] text-[#5a6e32] sm:text-[10px] sm:tracking-[0.15em]">
-          Tuesday · morning brief
-        </span>
-        <span className="text-right font-mono text-[9px] tabular-nums text-[#5a6e32] sm:text-[10px]">
-          Best HRV in 2 weeks
-        </span>
-      </div>
-
-      <p className="mt-2.5 font-serif text-[0.9375rem] leading-[1.45] text-[#2d3436] sm:mt-3 sm:text-[1rem]">
+      <p className="font-serif text-[0.9375rem] leading-[1.45] text-[#2d3436] sm:text-[1rem]">
         Recovery is above your recent baseline, and HRV was highest on the
         sauna nights. Today looks like a strong training day.
       </p>
@@ -215,19 +187,9 @@ function RecoveryArtifact() {
 function ExperimentArtifact() {
   return (
     <div className="rounded-xl bg-[#fffcf6] p-3.5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)] sm:rounded-2xl sm:p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="font-serif text-[1.0625rem] font-semibold leading-tight text-[#2d3436]">
-            Magnesium for Sleep
-          </p>
-          <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-[#736a58]">
-            Day 9 of 14 · Active phase
-          </p>
-        </div>
-        <span className="shrink-0 rounded-full bg-[#5a6e32]/12 px-2.5 py-0.5 font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#3d5028]">
-          On track
-        </span>
-      </div>
+      <p className="font-serif text-[1.0625rem] font-semibold leading-tight text-[#2d3436]">
+        Magnesium for Sleep
+      </p>
 
       <div className="mt-4">
         <div className="flex h-1.5 overflow-hidden rounded-full bg-[#2d3436]/8">
@@ -333,15 +295,7 @@ function BloodworkArtifact() {
   ];
   return (
     <div className="rounded-xl bg-[#fffcf6] p-3.5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)] sm:rounded-2xl sm:p-5">
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
-        <span className="font-mono text-[9px] font-medium uppercase tracking-[0.14em] text-[#a04f30] sm:text-[10px] sm:tracking-[0.15em]">
-          Latest panel · vs March
-        </span>
-        <span className="text-right font-mono text-[9px] text-[#736a58] sm:text-[10px]">
-          3 flagged
-        </span>
-      </div>
-      <ul className="mt-3 divide-y divide-[#2d3436]/06 sm:mt-4">
+      <ul className="divide-y divide-[#2d3436]/06">
         {markers.map((m) => (
           <li
             key={m.label}
@@ -379,39 +333,27 @@ function BloodworkArtifact() {
 function ErrandsArtifact() {
   const items = [
     {
-      eyebrow: "Booked",
       title: "DEXA scan at BodySpec",
       meta: "Thu 2:00 PM, 1.4 mi away · $49",
     },
     {
-      eyebrow: "In your cart",
       title: "Re-up Omega-3",
       meta: "Thorne EPA/DHA, 90ct · ships in 2 days",
     },
     {
-      eyebrow: "Queued",
       title: "Dr. Patel recap on calendar",
       meta: "With 3 questions to ask · 30 min hold",
     },
   ];
   return (
     <div className="rounded-xl bg-[#fffcf6] p-3.5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)] sm:rounded-2xl sm:p-5">
-      <div className="flex items-baseline justify-between">
-        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.15em] text-[#7d4a1a]">
-          Things I lined up for you
-        </span>
-        <span className="font-mono text-[10px] text-[#736a58]">3 ready</span>
-      </div>
-      <ul className="mt-4 space-y-2.5">
+      <ul className="space-y-2.5">
         {items.map((item) => (
           <li
             key={item.title}
             className="rounded-xl bg-[#f5f0e8]/70 px-3.5 py-3 ring-1 ring-black/[0.03]"
           >
-            <span className="font-mono text-[9px] font-semibold uppercase tracking-[0.14em] text-[#7d4a1a]">
-              {item.eyebrow}
-            </span>
-            <p className="mt-0.5 font-serif text-[0.9375rem] font-semibold leading-tight text-[#2d3436]">
+            <p className="font-serif text-[0.9375rem] font-semibold leading-tight text-[#2d3436]">
               {item.title}
             </p>
             <p className="mt-0.5 font-mono text-[10px] tabular-nums text-[#736a58]">
@@ -427,16 +369,7 @@ function ErrandsArtifact() {
 function CallArtifact() {
   return (
     <div className="rounded-xl bg-[#fffcf6] p-3.5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)] sm:rounded-2xl sm:p-5">
-      <div className="flex items-baseline justify-between">
-        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.15em] text-[#7d4858]">
-          Appointment booked
-        </span>
-        <span className="font-mono text-[10px] tabular-nums text-[#736a58]">
-          just now
-        </span>
-      </div>
-
-      <div className="mt-4">
+      <div>
         <p className="font-serif text-[1.125rem] font-semibold leading-tight text-[#2d3436]">
           Cleaning + exam
         </p>
@@ -449,10 +382,7 @@ function CallArtifact() {
       </div>
 
       <div className="mt-4 rounded-xl bg-[#f5f0e8]/70 px-3.5 py-3 ring-1 ring-black/[0.03]">
-        <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#736a58]">
-          Call summary
-        </span>
-        <p className="mt-1.5 text-[0.8125rem] leading-[1.55] text-[#635a48]">
+        <p className="text-[0.8125rem] leading-[1.55] text-[#635a48]">
           4 min on the line. Navigated the menu, held for the receptionist,
           picked a slot that fits your week.
         </p>
@@ -464,16 +394,7 @@ function CallArtifact() {
 function HabitArtifact() {
   return (
     <div className="rounded-xl bg-[#fffcf6] p-3.5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)] sm:rounded-2xl sm:p-5">
-      <div className="flex items-baseline justify-between">
-        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.15em] text-[#5e5530]">
-          Habit · day 24
-        </span>
-        <span className="font-mono text-[10px] tabular-nums text-[#736a58]">
-          18 of 24 days
-        </span>
-      </div>
-
-      <div className="mt-4">
+      <div>
         <p className="font-serif text-[1.125rem] font-semibold leading-tight text-[#2d3436]">
           Daily morning run
         </p>
@@ -500,10 +421,7 @@ export function AsksGridSection() {
         {/* Bridges the group-chat story above back to the 1:1 assistant:
             everything below happens in a private thread with Murph. */}
         <div className="mb-10 max-w-[720px] sm:mb-12">
-          <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#736a58]">
-            Just you and Murph
-          </p>
-          <h2 className="mt-4 font-serif text-[1.875rem] font-semibold leading-[1.08] tracking-[-0.03em] text-[#2d3436] sm:text-[clamp(2rem,4vw,3.25rem)]">
+          <h2 className="font-serif text-[1.875rem] font-semibold leading-[1.08] tracking-[-0.03em] text-[#2d3436] sm:text-[clamp(2rem,4vw,3.25rem)]">
             No group? You’re still not doing this alone.
           </h2>
           <p className="mt-5 max-w-[62ch] text-[1rem] leading-[1.7] text-[#3a322a]">
@@ -516,7 +434,6 @@ export function AsksGridSection() {
           <WideFeature
             tint="gold"
             artifactSide="right"
-            eyebrow="Self-experiments"
             headline="I run experiments so you know what actually works for you."
             body="Pick a protocol. Murph baselines you for two weeks, runs the active phase, then texts the before-and-after. No more guessing whether anything moved."
             bubble="Did the magnesium actually work?"
@@ -525,13 +442,11 @@ export function AsksGridSection() {
 
           <div className="grid gap-5 sm:gap-6 lg:grid-cols-2">
             <CompactCard
-              eyebrow="Labs"
               headline="I find insights in your bloodwork over time."
               body="Drop in your latest panel. Murph flags what crept up or down and turns it into the questions worth asking your doctor."
               artifact={<BloodworkArtifact />}
             />
             <CompactCard
-              eyebrow="Habits"
               headline="I make it easy to build healthy habits."
               body="A version small enough for bad days, anchored to something you already do. Reminders ease off as it takes hold."
               artifact={<HabitArtifact />}
@@ -541,7 +456,6 @@ export function AsksGridSection() {
           <WideFeature
             tint="bronze"
             artifactSide="left"
-            eyebrow="Closes the loop"
             headline="I order the supplements and book the scans."
             body="Murph finds the DEXA scan nearby, drafts the supplement re-up, and queues the doctor recap on your calendar. You give the final tap. The errands stop slipping."
             bubble="Order me Omega-3, find me a DEXA scan, and confirm my doctor's appointment."
@@ -550,13 +464,11 @@ export function AsksGridSection() {
 
           <div className="grid gap-5 sm:gap-6 lg:grid-cols-2">
             <CompactCard
-              eyebrow="Phone calls"
               headline="I call the dentist and book the appointment."
               body="Dentist, dermatologist, vet, mechanic. Murph dials, waits on hold, picks a slot that fits your week."
               artifact={<CallArtifact />}
             />
             <CompactCard
-              eyebrow="Daily readout"
               headline="I read your wearables and tell you what actually matters."
               body="Murph pulls Oura, WHOOP, Garmin, or Apple Health overnight. Wake up to a one-line readout."
               artifact={<RecoveryArtifact />}

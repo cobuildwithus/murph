@@ -830,7 +830,7 @@ test('generateAssistantCliSurfaceContract preserves the artifact schema and seri
                   type: 'string',
                 },
               },
-              required: ['title'],
+              required: [],
             },
             options: {
               properties: {
@@ -903,7 +903,7 @@ test('generateAssistantCliSurfaceContract preserves the artifact schema and seri
   assert.deepEqual(Object.keys(artifact).sort(), ['contract', 'schemaVersion'])
   assert.match(
     artifact.contract,
-    /- `goal save`: Create or update one goal from typed command fields\.; args <title>; options --horizon=short_term\|medium_term\|long_term\|ongoing, --status=active\|paused\|completed\|abandoned\./u,
+    /- `goal save`: Create or update one goal from typed command fields\.; args \[title\]; options --horizon=short_term\|medium_term\|long_term\|ongoing, --status=active\|paused\|completed\|abandoned\./u,
   )
 })
 
@@ -1221,6 +1221,46 @@ test('buildAssistantCliSurfaceContract exposes optional enum fields for detailed
   )
   assert.doesNotMatch(contract, /requestId/u)
   assert.doesNotMatch(contract, /--vault/u)
+})
+
+test('buildAssistantCliSurfaceContract distinguishes optional positional arguments', async () => {
+  const {
+    buildAssistantCliSurfaceContract,
+  } = await import('../src/assistant/cli-surface-bootstrap.ts')
+
+  const contract = buildAssistantCliSurfaceContract({
+    commands: [
+      {
+        description: 'Create or update one goal from typed command fields.',
+        name: 'goal save',
+        schema: {
+          args: {
+            properties: {
+              title: {
+                type: 'string',
+              },
+            },
+            required: [],
+          },
+          options: {
+            properties: {
+              id: {
+                type: 'string',
+              },
+              status: {
+                enum: ['active', 'paused', 'completed', 'abandoned'],
+                type: 'string',
+              },
+            },
+          },
+        },
+      },
+    ],
+  })
+
+  assert.ok(contract)
+  assert.match(contract, /args \[title\]/u)
+  assert.doesNotMatch(contract, /args <title>/u)
 })
 
 test('buildAssistantCliSurfaceContract keeps large manifests compact without non-hot descriptions or schemas', async () => {

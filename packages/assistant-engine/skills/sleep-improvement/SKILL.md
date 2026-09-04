@@ -70,7 +70,7 @@ Ask: "Is the main issue getting yourself to bed, falling asleep once there, waki
 
 When the user accepts a repeated non-experiment sleep plan, read behavior-followthrough and persist the operational plan in one active `kind=habit` regimen (and a linked goal only when the outcome/window needs one). Update an existing matching plan instead of creating a parallel copy. Include the baseline, target, one primary lever, standard/tiny/fallback versions, anchor or action window, the evidence bundle and outcome that will be reviewed, a dated review point, and an off-ramp.
 
-Offer one bounded review at the point when the chosen outcome could reasonably change; prefer a one-shot check-in. Reminders and check-ins are separate user choices, so do not schedule either without exact consent. If the user wants a multi-day comparison intended to determine whether the lever works, load experiment-onboarding and create the canonical experiment run instead of disguising it as a habit plan.
+Offer one bounded review at the point when the chosen outcome could reasonably change; prefer a one-shot check-in. Time it when that outcome is observable: review morning restoration after waking, not at night. Reminders and check-ins are separate user choices, so do not schedule either without exact consent. If the user wants a multi-day comparison intended to determine whether the lever works, load experiment-onboarding and create the canonical experiment run instead of disguising it as a habit plan.
 
 ## Safety Boundaries
 

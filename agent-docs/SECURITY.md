@@ -379,20 +379,22 @@ Last verified: 2026-08-31
   replies only because snapshot exclusion is the independent persistence
   boundary. An explicit canonical event raw reference is the sole durable-save
   exception and keeps its separately authorized lifecycle. The tool
-  pins Gemini 3.7 Flash and maps only `standard` to 1 FPS or
+  pins Gemini 3.8 Flash and maps only `standard` to 1 FPS or
   `detailed_motion` to 5 FPS. Murph chooses that semantic mode before egress;
   raw FPS remains unavailable to the model and member. Both current profiles
   use medium thinking, omit an explicit output-token cap, allow one call, do
   not retry, keep the 14 MiB raw cap and 90-second timeout, and bound both the
   delivered response and tool result. The Worker must revalidate the exact
   request and use manual redirects before replacing the runner sentinel with
-  `GEMINI_API_KEY`. During rollout it may also accept only the exact deployed
-  legacy profile of 1 FPS, low thinking, and a 1,800-token output cap from a
-  warm old runner; mixed profiles remain denied, new runners never emit the
-  legacy shape, and the compatibility reader is removed after the rollback
-  floor advances. A protocol-valid successful response must be
-  withheld until Web durably accepts its exact usage record; callback rejection
-  fails the tool closed. An upstream response above the 1 MiB delivery cap is a
+  `GEMINI_API_KEY`. During the model rollout it may also accept the exact
+  previous `gemini-3.7-flash` path with either current profile or the exact
+  deployed legacy profile of 1 FPS, low thinking, and a 1,800-token output cap
+  from an older warm runner. The capped profile remains invalid on the 3.8
+  path, mixed profiles remain denied, usage records retain the model derived
+  from the admitted path, new runners emit only 3.8 current profiles, and the
+  3.7 reader is removed after the rollback floor advances. Usage recording is
+  best-effort and cannot withhold an otherwise valid provider response. An
+  upstream response above the 1 MiB delivery cap is a
   protocol violation: reject it without widening the buffer, let Murph absorb
   that unaccountable provider cost, and log only bounded status metadata. Do not
   persist or log video bytes, prompts,
@@ -1390,12 +1392,35 @@ locally readable.
   attestation and fails closed on movement. The public repository stores no
   private SHA/tag pointer and no private Current/Ramping reader policy; those
   reader revisions are derived and attested inside private protected CI.
-  Private CI must never check out or import public pull-request candidate code;
-  the protected pull-request lane receives only the bounded canonical fixture
-  produced by unprivileged public CI. Neither side may restore
-  candidate-controlled caches beside credentials, read private logs or
+  Private CI must never check out or import public pull-request candidate code
+  for Temporal compatibility. The protected pull-request compatibility lane is
+  fixture-only: it receives only the bounded canonical artifact produced by
+  unprivileged public CI. Separately, after a revision reaches protected public
+  `main`, the existing deployment controller may request `release_admission`
+  against exact private `main`. Only the unprivileged hosted jobs check out that
+  exact released public revision; they select the canonical foreground-priority
+  lane and force its standby mode to `allocate`. Credentialed Temporal setup
+  and attestation jobs remain isolated jobs that check out only private
+  controller or immutable reader source. The final private release attestation
+  consumes job results, independently re-reads both protected branches, and
+  names a digest bound to both SHAs, the fixed scope, and the public protected
+  environment's non-secret expected production target digest. Private setup
+  and final attestation derive the live target from protected Temporal
+  configuration and reject mismatch without returning its address, namespace,
+  credentials, poller identities, or timestamps. Neither side may
+  restore candidate-controlled caches beside credentials, read private logs or
   artifacts, expose reader revisions publicly, or accept workflow/check names
   from the candidate.
+- Hosted Web production has one deployment authority: Vercel's Git integration
+  creates a candidate for every exact `main` commit, and configured Deployment
+  Checks alone admit it to production domains. Do not grant Full Production
+  Deployment permission to ordinary operators or automation, and do not use
+  local production uploads, promotion of an existing deployment, Instant
+  Rollback, or Force Promote; those paths can reuse stale commit evidence or
+  bypass the check. Recovery is a revert or forward-fix commit on `main` so the
+  replacement receives fresh compatibility proof. Provider owners remain
+  break-glass authority outside the automatic guarantee and must not exercise
+  it as an ordinary deployment path.
 - The public automated live Junction wearable canary uses only sandbox Junction
   authority, Kernel browser authority, and a dedicated Garmin test account. Keep
   those five credentials
@@ -1442,9 +1467,8 @@ locally readable.
   source refs and SHAs live in `.github/native-hosted-e2e-controller.json` so a
   source rotation must pass ordinary protected-main review. Each controller
   proves the policy tag is an immutable lightweight tag resolving to the exact
-  policy SHA and dispatches the exact current production alias SHA. An alias
-  behind scheduled `main` is accepted only when the existing Vercel classifier
-  proves every intervening path is an eligible dated release note.
+  policy SHA and dispatches only when the current production alias equals the
+  exact current `main` SHA. Any alias lag fails closed.
   Android's public controller may hold only Actions write and Contents read in
   the private repository. It mints repository-scoped installation tokens just
   in time, refreshes them before expiry, and removes the App private key from

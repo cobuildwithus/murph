@@ -276,17 +276,24 @@ vi.mock("../src/hosted-runtime/provider-cleanup.ts", () => ({
     mocks.resolveHostedProviderCleanupScheduledWakeAt,
 }));
 
-vi.mock("../src/hosted-runtime/system-mailbox.ts", () => ({
-  prepareHostedSystemMailboxItemForCheckpoint:
-    mocks.prepareHostedSystemMailboxItemForCheckpoint,
-  recordHostedDeviceSyncDirtyPostCheckpointRecord:
-    mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord,
-  recordHostedSystemMailboxItemAfterCheckpoint:
-    mocks.recordHostedSystemMailboxItemAfterCheckpoint,
-  resolveHostedSystemMailboxNextWakeCandidate:
-    mocks.resolveHostedSystemMailboxNextWakeCandidate,
-  resolveHostedSystemMailboxNextWakeAt: mocks.resolveHostedSystemMailboxNextWakeAt,
-}));
+vi.mock("../src/hosted-runtime/system-mailbox.ts", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../src/hosted-runtime/system-mailbox.ts")
+  >();
+  return {
+    prepareHostedSystemMailboxItemForCheckpoint:
+      mocks.prepareHostedSystemMailboxItemForCheckpoint,
+    recordHostedDeviceSyncDirtyPostCheckpointRecord:
+      mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord,
+    recordHostedSystemMailboxItemAfterCheckpoint:
+      mocks.recordHostedSystemMailboxItemAfterCheckpoint,
+    resolveHostedDeviceSyncCompletionRecordInput:
+      actual.resolveHostedDeviceSyncCompletionRecordInput,
+    resolveHostedSystemMailboxNextWakeCandidate:
+      mocks.resolveHostedSystemMailboxNextWakeCandidate,
+    resolveHostedSystemMailboxNextWakeAt: mocks.resolveHostedSystemMailboxNextWakeAt,
+  };
+});
 
 import {
   initializeVault,

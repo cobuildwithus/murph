@@ -12,9 +12,9 @@ Last verified: 2026-09-02
   to another deployment id. It uses the exact deployment URL from the trusted
   Vercel status, follows the complete project-domain pagination, excludes
   branch/custom-environment domains, and repeats the full proof after the
-  prior-function drain and immediately before contract SQL. Late completed
-  events for older main ancestors may skip when production has advanced; the
-  workflow remains non-concurrent so a stale event cannot cancel the valid run.
+  prior-function drain and immediately before contract SQL. The deployed commit
+  must equal current `main`; stale or late events fail before database authority.
+  The workflow remains non-concurrent so a stale event cannot cancel the valid run.
   The first production Web deployment containing the exact-deployment verifier
   is the postdeploy verification rollback floor because this workflow executes
   from the deployed checkout. A pre-floor manual retry fails closed on the
@@ -46,8 +46,9 @@ Last verified: 2026-09-02
   waiter for every pull request or deployment event. The workflows are
   production-only and non-destructive, with no pull-request or
   deployment-status trigger and no arbitrary-branch manual admission. They
-  dispatch the current production alias SHA; alias lag is accepted only when the existing Vercel classifier
-  proves the intervening `main` diff contains eligible dated release notes.
+  dispatch the current production alias SHA only when it exactly matches the
+  selected `main` revision. A pending or failed production admission retries at
+  the next slot instead of testing a stale deployment.
 - Protected native Android hosted E2E treats private workflow dispatch as an
   uncertain external effect. A timeout, network failure, ambiguous HTTP
   response, malformed successful response, or missing run id after the request
@@ -69,32 +70,68 @@ Last verified: 2026-09-02
   trusted default-branch controller and the private owner's live Current and
   Ramping reader attestation over the bounded reconciliation fixture corpus.
   While the private standby guard remains, the reader set also includes the
-  active legacy worker's exact live deploy revision. Final protected
+  active legacy Render worker's exact live deploy revision. Final protected
   attestation re-reads the complete set and fails on identity or routing drift.
-  Private CI never checks out or imports public pull-request candidate code.
-  Irrelevant changes complete without private work; relevant changes require
-  the same current public head throughout selection and dispatch. The exact
-  candidate producer runs in unprivileged public CI; the trusted controller
-  sends only its bounded canonical fixture JSON and digest to private CI. Using
-  the repository-scoped GitHub App token, it resolves private `main` to an exact
-  commit, validates the fixed private workflow identity, revalidates the exact
-  public PR head, and dispatches that workflow at `main` with returned run
-  details. It accepts only the returned first-attempt run whose workflow and
-  `head_sha` match the pre-resolved private commit. The private proof digest
-  binds public SHA, request id, the private-derived supported-reader digest,
-  and producer digest; the public repository owns no private reader policy.
-  Missing artifacts or dispatch
-  identity, stale heads, incomplete pagination, duplicate or failed readers,
-  skipped proof jobs, a mismatched digest, cancellation, or private failure
-  cannot publish success. After successful run and job attestation, the
+  This is a fixture-only pull-request gate: private CI never checks out or
+  imports public pull-request candidate code. Irrelevant changes complete
+  without private work; relevant changes require the same current public head
+  throughout selection and dispatch. The exact candidate producer runs in
+  unprivileged public CI; the trusted controller sends only its bounded
+  canonical fixture JSON and digest to private CI. Using the repository-scoped
+  GitHub App token, it first
+  resolves private `main` to an exact commit, validates the fixed
+  `public-murph-integration.yml` workflow identity, revalidates the exact public
+  PR head, and dispatches that workflow at `main` with returned run details. It
+  accepts only the returned first-attempt run whose workflow identity and
+  `head_sha` match the fixed workflow and pre-resolved private commit. The
+  private proof digest binds public SHA, request id, the private-derived
+  supported-reader digest, and producer digest; the public repository owns no
+  private reader policy or private source dependency. Missing artifacts or
+  dispatch identity, stale heads, incomplete pagination, duplicate or failed
+  readers, skipped proof jobs, a mismatched digest, cancellation, or private
+  failure cannot publish success. After successful run and job attestation, the
   controller re-reads private `main` and fails closed if it moved. Once dispatch
-  returns a run id, the controller allows
-  five exact-id reads over at most 60 seconds for GitHub to make that newly
-  accepted run visible; only `404` is retryable, and the controller never
-  searches for or guesses a run. After the exact run is visible, uncertain
-  polling or timeout cancels only that run, escalates
-  to force-cancel only if ordinary cancellation does not make it terminal, and
-  never searches for or cancels a guessed run.
+  returns a run id, the controller allows five exact-id reads over at most 60
+  seconds for GitHub to make that newly accepted run visible; only `404` is
+  retryable, and the controller never searches for or guesses a run. After the
+  exact run is visible, uncertain polling or timeout cancels only that run,
+  escalates to force-cancel only if ordinary cancellation does not make it
+  terminal, and never searches for or cancels a guessed run.
+  This pull-request fixture proof is candidate evidence, not deployment
+  admission, and does not claim full application integration. After a relevant
+  revision reaches public `main`, the exact-main producer and controller run
+  again in `.github/workflows/temporal-web-deployment-admission.yml`. Vercel
+  must configure its `Temporal Web production admission` job as a production
+  Deployment Check so production domains remain on the prior deployment until
+  the exact public commit passes against the then-current private `main` and
+  live reader set. The same dispatch selects exactly the private integration
+  manifest's foreground-priority lane, forces and observes
+  `HOSTED_EXECUTION_STANDBY_MODE=allocate`, and returns one additional digest
+  bound to the exact public SHA, private SHA, fixed lane, and the protected
+  public environment's expected production Temporal target digest. The private
+  workflow independently derives the live target and rejects mismatch before
+  or after hosted proof, as well as any release request that is not current
+  public `main` plus current protected private `main`. The public controller
+  re-reads both branches before success; private protected attestations
+  independently re-read every supported reader and both branch heads.
+  The Vercel Git integration is the sole production deployment owner, and every
+  `main` commit must create a candidate: no ignore command, local production
+  upload, historical promotion, Instant Rollback, or force-promotion is part of
+  the supported path. Recovery is a revert or forward-fix commit on `main`,
+  which receives fresh admission before domains move. Ordinary Vercel access
+  must not grant Full Production Deployment authority.
+  This main-push boundary proves the reconciliation-facts wire contract and the
+  production-shaped foreground/standby path, not arbitrary Web, Cloudflare, or
+  worker behavior. Separately, after both
+  revisions reach protected
+  `main`, private unprivileged full-integration CI checks out the exact resolved
+  public `main` revision, never an arbitrary public candidate, and emits an
+  exact private-main/public-main candidate receipt. Protected release admission
+  binds that receipt to both still-current main heads, exhaustive synthetic
+  migration replay, the exact production target, and live reader routing before
+  deployment can mutate production. Bounded replay of histories returned by
+  Temporal Visibility is additional production evidence, not an exhaustive
+  registry guarantee.
 - Native iMessage nutrition-card delivery falls back to its already-derived
   ordinary text only after Linq definitively rejects the app-card request with
   HTTP 400, 415, or 422. Before that text enters the provider, the existing
@@ -435,11 +472,20 @@ Last verified: 2026-09-02
   the ready standby instead of reusing the child while it shuts down. A miss
   before slot ownership uses the same exact-user fallback; an ambiguous bind
   after the per-member stop target is durably reserved retries that exact
-  target instead of risking two live containers. Pending and retained targets
-  are reconciled before fresh-claim eligibility. In `allocate` mode the standby
-  coordinator is the only shell-prewarm owner; the exact-user prewarm hint is
-  skipped so it cannot reserve a competing target before a fresh claim. The
-  ordinary exact-user start remains the fallback after a claim miss.
+  target instead of risking two live containers. Pending targets are reconciled
+  before fresh-claim eligibility. A claimed slot counts as retained only when
+  its existing container owner proves explicit native warmth while validating
+  the exact slot, release, and member in one bounded RPC; a durable binding
+  alone never authorizes reuse. The warm proof renews the handoff window.
+  Explicit stop or an exact prior-release binding uses the same one-way
+  transition (`unbound` to `bound` to `retiring` to `retired`), and `UserRunner`
+  clears the exact stop target only after retirement settles. Only then may the
+  same eligible trusted foreground request attempt one fresh claim. Unknown
+  liveness, foreign or contradictory identity, and failed retirement keep the
+  old target assigned and start no second container. In `allocate` mode the
+  standby coordinator is the only shell-prewarm owner; the exact-user prewarm
+  hint is skipped so it cannot reserve a competing target before a fresh claim.
+  The ordinary exact-user start remains the fallback after a claim miss.
   Every accepted fresh start records the bounded standby allocation outcome,
   exact reason, and elapsed milliseconds in the existing latency phase
   breakdown. The same metadata-only fields are emitted immediately in the
@@ -447,11 +493,10 @@ Last verified: 2026-09-02
   budget before an accepted runtime invocation exists.
   A coordinator transaction admits at most one winner, then replacement
   provisioning runs under `waitUntil`; alarms re-prove readiness, retry failed
-  retirement, expire unbound claim tombstones, and drain stale releases. The
-  slot transition is one-way (`unbound` to `bound` to `retiring` to `retired`),
-  and ambiguous bind/cleanup state stays assigned to its exact `UserRunner`
-  stop target until reconciliation succeeds. Mode `off` retires only
-  coordinator-owned slots and never interrupts bound member work.
+  retirement, expire unbound claim tombstones, and drain stale releases. A
+  claimed slot is never rebound or returned to ready; group conversations are
+  not lifecycle owners because allocation remains per member. Mode `off` retires
+  only coordinator-owned slots and never interrupts bound member work.
 - Initial onboarding has one Postgres completion owner across website and
   native clients. Existing members are backfilled complete. During the
   migration-first rolling deploy, a temporary database default also completes
@@ -1286,13 +1331,28 @@ Last verified: 2026-09-02
   manifest-safe payload/window, dedupe identity, priority, next retry time, and
   remaining attempt limit, including worker-created child jobs. The same wake
   carries the provider's advanced cadence, but Web does not receive that
-  cadence until a terminal completion-fence checkpoint has made the exact
-  retained state durable. Terminal success or terminal failure then clears the
-  source. Web dirty rows separately remain authoritative until dirty
-  resource/deletion jobs are terminally acknowledged. Because the device-sync
-  SQLite store is intentionally excluded from hosted snapshots, a replacement
-  runner rebuilds from those owners; it never projects local retry timing into
-  `nextReconcileAt`. Per-connection mailbox ordering and scheduler scoping
+  cadence until the post-record checkpoint has made the exact completion state
+  durable. Before exposing that completion record, the pass requires Web to
+  accept the full local control-plane update. A version mismatch fetches the
+  current canonical snapshot, rehydrates without re-admitting wake hints or
+  dirty work, carries the same-epoch pass's provider cadence and dirty terminal
+  evidence, and repeats the full update once against that fresh baseline; a
+  second mismatch fails and retains the mailbox owner. A yielded pass retains
+  its exact wake without completion eligibility. The post-checkpoint recorder
+  then treats a fresh same-admission record as complete only when its normalized
+  retained-job set is empty. It publishes cadence only for a non-null wake epoch
+  matching a current active connection, clears the source, and checkpoints that
+  removal within the same runtime admission. The same-admission proof is
+  intentionally transient: a restored record returns to the ordinary full
+  reconciliation path. An epoch-less legacy record or a replaced, missing,
+  disconnected, or reauthorization-required connection has no cadence authority
+  and drains without a Web write.
+  Terminal failure uses the same replayable record. Web dirty rows separately
+  remain authoritative until dirty resource/deletion jobs are terminally
+  acknowledged. Because the device-sync SQLite store is intentionally excluded
+  from hosted snapshots, a replacement runner rebuilds from those owners; it
+  never projects local retry timing into `nextReconcileAt`. Per-connection
+  mailbox ordering and scheduler scoping
   prevent a future retry for one connection from blocking or advancing due work
   for another. A later due webhook for that same connection may admit the older
   exact retained mailbox item so newly dirty data can enter the local worker
@@ -1365,14 +1425,16 @@ Last verified: 2026-09-02
   that committed ref starts without the SQLite execution record, reconstructs the
   pending obligation from durable mailbox authority, observes exactly one replay
   of the four provider classes (eight requests total), and makes three successful
-  recovery checkpoints. Its retained completion fence is immediately due at
-  00:05 and carries the 06:05 provider cadence. The completion pass
-  performs no third provider pull, makes two successful checkpoints, and
-  publishes 06:05 only after the durable recovery/completion checkpoint. The
-  first later bucket at 00:10 returns idle with no wake and performs one bounded
+  recovery checkpoints. After provider work, a heartbeat-only version conflict
+  leaves canonical cadence at 00:00; hydration preserves the same-epoch pass's
+  06:05 provider cadence without re-admitting work. The second checkpoint
+  durably records completion, the same admission publishes 06:05, and the third
+  checkpoints mailbox removal. There is no third provider pull or empty
+  completion runtime. A redundant later bucket at 00:10 returns idle with no
+  wake and performs one bounded
   post-publication convergence checkpoint; the following 00:15 bucket is fully
-  quiescent. Within the measured incident window, the proof records eight
-  checkpoint attempts, seven commits, one injected failure, and no provider work
+  quiescent. Within the measured incident window, the proof records six
+  checkpoint attempts, five commits, one injected failure, and no provider work
   after the single four-class replay.
   Future provider cadence remains projected as the workspace follow-up wake and
   is recorded with a system-mailbox checkpoint handoff; once that cadence is

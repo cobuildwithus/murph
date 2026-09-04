@@ -17,6 +17,16 @@
       "import": "./dist/runtime.js",
       "default": "./dist/runtime.js"
     },
+    "./goal-runtime": {
+      "types": "./dist/goal-runtime.d.ts",
+      "import": "./dist/goal-runtime.js",
+      "default": "./dist/goal-runtime.js"
+    },
+    "./goal-index-runtime": {
+      "types": "./dist/goal-index-runtime.d.ts",
+      "import": "./dist/goal-index-runtime.js",
+      "default": "./dist/goal-index-runtime.js"
+    },
     "./biomarker-entity-mappings": {
       "types": "./dist/biomarker-entity-mappings.d.ts",
       "import": "./dist/biomarker-entity-mappings.js",

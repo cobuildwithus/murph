@@ -433,6 +433,7 @@ interface HostedExecutionContainerSmokeHealthResult {
     cliSurfaceContractBytes: number | null;
     cliSurfaceHotPathProofCount: number | null;
     client: string | null;
+    healthCommonsCliGoalProofCount: number | null;
     murphPathBytes: number | null;
     noteAddBytes: number | null;
     stderrBytes: number | null;
@@ -1524,6 +1525,26 @@ export class RunnerContainer extends Container {
     }
   }
 
+  protected async retainNativeContainerIfWarm(
+    stage: string,
+  ): Promise<"stopped" | "unsettled" | "warm"> {
+    // Keep the native status proof and activity renewal under one lifecycle
+    // lock so idle expiry cannot stop the container between them.
+    return await this.withLifecycleLock(async () => {
+      const status = await readRunnerContainerStatus(this);
+      if (isRunnerContainerStopped(status)) {
+        return "stopped";
+      }
+      if (
+        this.warmShellInvalidatedByUnsettledDestroy
+        || (status !== "running" && status !== "healthy")
+      ) {
+        return "unsettled";
+      }
+      return this.noteRunnerActivity(stage) ? "warm" : "unsettled";
+    });
+  }
+
   private isPlatformContainerDefinitelyStopped(): boolean {
     return this.ctx.container?.running === false;
   }
@@ -1657,6 +1678,9 @@ export class RunnerContainer extends Container {
         ? result.cliSurfaceHotPathProofCount
         : null,
       client: typeof result.client === "string" ? result.client : null,
+      healthCommonsCliGoalProofCount: typeof result.healthCommonsCliGoalProofCount === "number"
+        ? result.healthCommonsCliGoalProofCount
+        : null,
       murphPathBytes: typeof result.murphPathBytes === "number" ? result.murphPathBytes : null,
       noteAddBytes: typeof result.noteAddBytes === "number" ? result.noteAddBytes : null,
       stderrBytes: typeof result.stderrBytes === "number" ? result.stderrBytes : null,

@@ -14,6 +14,13 @@ import { listHealthCommonsBiomarkerRoutes } from "../src/lib/health-commons/biom
 import { listHealthCommonsExperimentRouteParams } from "../src/lib/health-commons/experiment-browse";
 import { listHealthCommonsMeasurementMethodRoutes } from "../src/lib/health-commons/measurement-method-detail";
 import {
+  listHealthCommonsGoalEntries,
+  listHealthCommonsGoalRouteAliases,
+  listHealthCommonsGoalRouteParams,
+  resolveHealthCommonsGoalPage,
+} from "../src/lib/health-commons/goal-projections";
+import { GOAL_CATEGORIES } from "../src/lib/goals/goal-categories";
+import {
   MURPH_INDEXABLE_PAGE_ROBOTS,
   MURPH_NOINDEX_PAGE_ROBOTS,
   MURPH_PUBLIC_SITE_URL,
@@ -28,6 +35,8 @@ const EXPECTED_STATIC_PUBLIC_ROUTES = [
   "/contact",
   "/consumer-health-data-privacy-policy",
   "/experiments",
+  "/goals",
+  "/goals/methodology",
   "/food",
   "/knowledge",
   "/legal",
@@ -73,6 +82,10 @@ describe("public search indexing metadata", () => {
       ...listHealthCommonsMeasurementMethodRoutes().map((measurementMethodId) =>
         `/measurement-methods/${encodeURIComponent(measurementMethodId)}`
       ),
+      ...GOAL_CATEGORIES.map((category) => `/goals/${category.slug}`),
+      ...listHealthCommonsGoalRouteParams().map(({ goalId }) =>
+        `/goals/${encodeURIComponent(goalId)}`
+      ),
     ].sort();
 
     const comparisonLastModifiedByRoute = new Map(
@@ -93,6 +106,60 @@ describe("public search indexing metadata", () => {
       const route = `/experiments/${encodeURIComponent(experimentId)}`;
       expect(expectedRoutes).not.toContain(`${route}/results`);
     }
+  });
+
+  it("publishes a broad, uniquely routed goal library in every category", () => {
+    const goals = listHealthCommonsGoalEntries();
+    const routeIds = goals.map((goal) => goal.routeId);
+    const reservedRouteIds = new Set([
+      "methodology",
+      ...GOAL_CATEGORIES.map((category) => category.slug),
+    ]);
+    const categories = new Set(goals.map((goal) => goal.category));
+
+    expect(goals.length).toBeGreaterThanOrEqual(200);
+    expect(new Set(routeIds).size).toBe(routeIds.length);
+    for (const routeId of [...routeIds, ...listHealthCommonsGoalRouteAliases()]) {
+      expect(
+        reservedRouteIds.has(routeId),
+        `generated goal route must not shadow a reserved route: ${routeId}`,
+      ).toBe(false);
+    }
+    expect(categories).toEqual(new Set(GOAL_CATEGORIES.map((category) => category.slug)));
+    for (const category of GOAL_CATEGORIES) {
+      const categoryRouteIds = new Set(
+        goals
+          .filter((goal) => goal.category === category.slug)
+          .map((goal) => goal.routeId),
+      );
+      for (const featuredRouteId of category.featuredRouteIds) {
+        expect(
+          categoryRouteIds.has(featuredRouteId),
+          `${category.slug} featured goal should resolve: ${featuredRouteId}`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("keeps the retired aerobic-base route mapped to the canonical cardio guide and out of the sitemap", () => {
+    const legacyRouteId = "build-aerobic-base";
+    const canonicalRouteId = "improve-cardio-endurance";
+
+    expect(listHealthCommonsGoalRouteAliases()).toContain(legacyRouteId);
+    expect(resolveHealthCommonsGoalPage(legacyRouteId)).toMatchObject({
+      goal: {
+        key: "goal_template:improve-cardio-endurance",
+        routeId: canonicalRouteId,
+      },
+      route: {
+        canonicalRouteId,
+        isAlias: true,
+      },
+    });
+
+    const sitemapUrls = sitemap().map((entry) => entry.url);
+    expect(sitemapUrls).toContain(publicUrl(`/goals/${canonicalRouteId}`));
+    expect(sitemapUrls).not.toContain(publicUrl(`/goals/${legacyRouteId}`));
   });
 
   it("defaults private routes to noindex and opts the public experiment index back in", () => {

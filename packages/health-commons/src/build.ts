@@ -151,6 +151,7 @@ function buildGeneratedFiles(
     ["web/routes/index.json", stablePrettyJson(webArtifacts.routeIndex)],
     ["web/browse/experiments.json", stablePrettyJson(webArtifacts.experimentIndex)],
     ["web/browse/biomarkers.json", stablePrettyJson(webArtifacts.biomarkerIndex)],
+    ["web/browse/goals.json", stablePrettyJson(webArtifacts.goalIndex)],
   ]);
 
   for (const [fileName, bundle] of webArtifacts.routeBundles.entries()) {

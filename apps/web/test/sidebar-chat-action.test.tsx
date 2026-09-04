@@ -118,7 +118,9 @@ test("SidebarChatWithMurphAction opens a contact picker when multiple channels a
   );
   const markup = await renderSidebarMarkup(await SidebarChatWithMurphAction());
 
-  assert.match(markup, /data-slot="sidebar-menu-button"[^>]*aria-label="Chat with Murph"/);
+  assert.match(markup, /data-slot="dialog-trigger"/);
+  assert.match(markup, /data-sidebar="menu-button"/);
+  assert.match(markup, /aria-label="Chat with Murph"/);
   assert.doesNotMatch(markup, /href="sms:/);
   assert.doesNotMatch(markup, /href="mailto:/);
   assert.doesNotMatch(markup, /\+14045550123/);

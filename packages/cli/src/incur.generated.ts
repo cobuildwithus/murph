@@ -64,6 +64,8 @@ declare module 'incur' {
       'clinical-note import-json': { args: {}; options: { requestId?: string; input: string } }
       'clinical-note payload-schema': { args: {}; options: {} }
       'clinical-note scaffold': { args: {}; options: { requestId?: string } }
+      'commons goal list': { args: {}; options: { query?: string; category?: ("sleep" | "nutrition" | "cardio" | "strength" | "mind" | "biomarkers" | "life-stages")[]; limit: number } }
+      'commons goal show': { args: { key: string }; options: {} }
       'commons knowledge search': { args: { query: string }; options: { limit: number } }
       'commons protocol explore': { args: { lookup: string }; options: { limit: number } }
       'commons protocol list': { args: {}; options: { query?: string; status?: "draft" | "field-testing" | "reviewed" | "deprecated" | "community" | "*"; category?: string[]; limit: number } }
@@ -163,7 +165,7 @@ declare module 'incur' {
       'genetics show': { args: { id: string }; options: { requestId?: string } }
       'goal import-json': { args: {}; options: { requestId?: string; input: string } }
       'goal list': { args: {}; options: { requestId?: string; status?: string; limit: number } }
-      'goal save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "completed" | "abandoned"; horizon?: "short_term" | "medium_term" | "long_term" | "ongoing"; priority?: number; startAt?: string; targetAt?: string; parentGoalId?: string; relatedGoalId?: string[]; relatedExperimentId?: string[]; domain?: string[] } }
+      'goal save': { args: { title?: string }; options: { requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "completed" | "abandoned"; horizon?: "short_term" | "medium_term" | "long_term" | "ongoing"; priority?: number; startAt?: string; targetAt?: string; parentGoalId?: string; relatedGoalId?: string[]; relatedExperimentId?: string[]; commonsGoalKey?: string; commonsPageRevisionId?: string; commonsWorkflowRevisionId?: string; domain?: string[] } }
       'goal scaffold': { args: {}; options: { requestId?: string } }
       'goal show': { args: { id: string }; options: { requestId?: string } }
       'habitat catalog': { args: { aspect?: string }; options: {} }

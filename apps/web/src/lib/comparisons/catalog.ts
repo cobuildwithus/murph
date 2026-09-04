@@ -2,13 +2,14 @@ import { FITNESS_COMPARISONS } from "./data/fitness";
 import { HEALTH_ASSISTANT_COMPARISONS } from "./data/health-assistants";
 import { HEALTH_DATA_COMPARISONS } from "./data/health-data";
 import { LABS_LONGEVITY_COMPARISONS } from "./data/labs-longevity";
+import { MESSAGING_HEALTH_COMPARISONS } from "./data/messaging-health";
 import { NUTRITION_COMPARISONS } from "./data/nutrition";
 import { SLEEP_MENTAL_COMPARISONS } from "./data/sleep-mental";
 import { WEARABLE_COMPARISONS } from "./data/wearables";
 import type { ComparisonEntry } from "./types";
 
 export const COMPARISON_ROUTE_PREFIX = "murph-vs-";
-export const COMPARISON_REVIEWED_ON = "2026-08-31";
+export const COMPARISON_REVIEWED_ON = "2026-09-03";
 
 export const COMPARISONS: readonly ComparisonEntry[] = [
   ...WEARABLE_COMPARISONS,
@@ -18,6 +19,7 @@ export const COMPARISONS: readonly ComparisonEntry[] = [
   ...NUTRITION_COMPARISONS,
   ...SLEEP_MENTAL_COMPARISONS,
   ...HEALTH_ASSISTANT_COMPARISONS,
+  ...MESSAGING_HEALTH_COMPARISONS,
 ];
 
 const COMPARISONS_BY_SLUG = new Map(

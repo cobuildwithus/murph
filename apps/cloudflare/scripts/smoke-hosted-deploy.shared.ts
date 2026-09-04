@@ -32,6 +32,7 @@ import {
 } from "../src/web-callback-auth.ts";
 import {
   HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
+  HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT,
 } from "../src/hosted-runner-smoke-contract.ts";
 import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
@@ -79,6 +80,7 @@ interface SmokeCodexShellResult {
   cliSurfaceContractBytes?: unknown;
   cliSurfaceHotPathProofCount?: unknown;
   client?: unknown;
+  healthCommonsCliGoalProofCount?: unknown;
   murphPathBytes?: unknown;
   noteAddBytes?: unknown;
   stderrBytes?: unknown;
@@ -516,7 +518,7 @@ function buildRunnerContainerSmokeUrl(input: {
   return url.toString();
 }
 
-function assertSmokeCodexShellResult(
+export function assertSmokeCodexShellResult(
   value: SmokeCodexShellResult | null | undefined,
 ): void {
   if (!value || typeof value !== "object") {
@@ -543,6 +545,16 @@ function assertSmokeCodexShellResult(
   ) {
     throw new Error(
       "runner container Codex shell smoke did not prove assistant CLI surface hot-path schemas.",
+    );
+  }
+  if (
+    typeof value.healthCommonsCliGoalProofCount !== "number"
+    || !Number.isInteger(value.healthCommonsCliGoalProofCount)
+    || value.healthCommonsCliGoalProofCount
+      !== HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT
+  ) {
+    throw new Error(
+      "runner container Codex shell smoke did not prove public Goal CLI round trips.",
     );
   }
   if (typeof value.stderrBytes !== "number" || value.stderrBytes < 0) {

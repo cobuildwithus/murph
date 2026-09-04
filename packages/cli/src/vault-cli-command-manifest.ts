@@ -36,6 +36,8 @@ import {
   payloadSchemaEnvelopeSchema,
 } from './commands/command-factory-primitives.js'
 import {
+  commonsGoalListResultSchema,
+  commonsGoalShowResultSchema,
   commonsProtocolExploreResultSchema,
   commonsProtocolListResultSchema,
   commonsProtocolShowResultSchema,
@@ -769,6 +771,18 @@ export const vaultCliCommandDescriptors = [
     bindingMode: 'none',
     rootCommandNames: ['commons'],
     leafCommands: [
+      {
+        path: ['commons', 'goal', 'list'],
+        description:
+          'List public Health Commons outcome guides with optional text and category filters.',
+        output: commonsGoalListResultSchema,
+      },
+      {
+        path: ['commons', 'goal', 'show'],
+        description:
+          'Show one compact public Health Commons outcome guide by key, slug, route id, or alias, including exact revisions.',
+        output: commonsGoalShowResultSchema,
+      },
       {
         path: ['commons', 'protocol', 'list'],
         description:

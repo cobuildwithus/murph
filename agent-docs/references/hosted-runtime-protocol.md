@@ -1659,14 +1659,25 @@ attachment, then opens its normal write fence and restores the encrypted
 workspace. The real resident Codex App Server remains post-restore because its
 launch identity is member-specific. Coordinator claim and bind share one 250 ms
 deadline; no-ready, stale-release, or coordinator failure before slot ownership
-uses the unchanged exact-user cold target. A pending or retained standby target
-is reconciled before fresh-claim eligibility. An ambiguous bind after the
-opaque target is reserved therefore yields for retry against that exact target
-instead of starting a second container, even when the retry arrives through
-Temporal. Replenishment, readiness re-proving, orphan retirement, and
-stale-release drain run outside the accepted-message path. A bound slot can be
-retained only by that same member under the ordinary conversation idle
-lifecycle and is never returned to ready. Slot invocation,
+uses the unchanged exact-user cold target. A pending standby target is
+reconciled before fresh-claim eligibility. For a member-bound target, one
+bounded RPC to that standby-container owner validates the immutable slot, its
+release, and the exact member, then reads native-container liveness. Only an
+explicit warm status is `retained`; the durable `bound` row by itself is not.
+Warm retention renews the handoff idle window and may repeat for the same
+member without another coordinator claim. An explicit native stop or an exact
+prior-release binding enters the existing one-way `retiring` to `retired` scrub
+path. `UserRunner` clears only its exact stop target and only after that
+retirement settles, after which the same eligible authenticated Web-direct
+`default` request may perform one normal fresh claim. Unknown native status,
+failed retirement, foreign-member state, contradictory release authority, or
+any result-identity mismatch retains the pending target and yields without a
+second container. An ambiguous bind after the opaque target is reserved follows
+the same retry rule, including when the retry arrives through Temporal.
+Replenishment, readiness re-proving, orphan retirement, and stale-release drain
+remain outside the accepted-message path. A claimed slot is never rebound or
+returned to ready. Group chats do not own standby lifecycle; the member's
+`UserRunner` remains the allocation and stop-target owner. Slot invocation,
 provider-credential minting, withdrawal, account deletion, and retirement all
 re-read the exact durable binding; a member mismatch fails closed. A successful
 fresh-start acceptance records the closed standby allocation outcome, bounded
@@ -2715,8 +2726,19 @@ publication, the runtime queries those actual job rows and replaces the item's
 job hints with every unfinished kind, manifest-shaped payload/window, dedupe
 identity, priority, retry time, and remaining attempt limit, including
 worker-created children. It also carries the provider's advanced cadence, but
-withholds that cadence from Web until an empty-job completion-fence checkpoint
-has made the terminal transition durable. A cold replacement, whose snapshot
+first requires Web to accept the full local reconciliation. One version
+conflict fetches the current canonical snapshot, rehydrates without admitting
+wake hints or dirty work again, carries the same-epoch pass's provider cadence
+and dirty terminal evidence, and repeats the full update against that canonical
+baseline; another conflict keeps the mailbox owner. The runtime withholds cadence from Web until the post-record
+checkpoint has made the completion transition durable. The post-checkpoint
+recorder then publishes cadence, removes the mailbox item, and checkpoints that
+removal in the same runtime admission only for a fresh record whose full
+reconciliation was accepted in that admission, whose normalized retained-job
+set is empty, and whose non-null connection epoch still names the current
+active connection. Yielded wakes are not completion-eligible. Restored records
+return to the full-reconciliation path; epoch-less legacy, replaced, missing,
+or terminal records drain without a cadence write. A cold replacement, whose snapshot
 intentionally excludes the device-sync SQLite store, reconstructs the same
 unfinished operation and cadence from that item. The completion fence is due
 immediately once all local jobs are terminal; unlike a
@@ -2759,15 +2781,19 @@ dispatch restores that exact ref without the SQLite execution record,
 reconstructs the pending obligation from durable mailbox authority, and replays
 those same four method/path classes exactly once,
 for eight requests total. That 00:05 recovery pass makes three successful
-checkpoints. Its retained completion-fence wake is immediately due at 00:05 and
-carries the 06:05 provider cadence. The completion pass makes no third provider
-pull,
-makes two successful checkpoints, and publishes 06:05 only after the durable
-recovery/completion checkpoint. The 00:10 pass returns idle with no wake and
-makes one bounded post-publication convergence checkpoint; the 00:15 pass is
-fully quiescent. Within the measured incident window, the proof observes eight
-checkpoint attempts, seven commits, one injected failure, and no provider work
-after the single replay.
+checkpoints. After provider work, a heartbeat-only version conflict leaves
+canonical cadence at 00:00; hydration preserves the same-epoch pass's 06:05
+provider cadence without re-admitting work. The second checkpoint durably
+records completion, the same admission publishes 06:05 only because full
+reconciliation was accepted, the retained job set is empty, and the wake's
+non-null epoch still names the current active connection, and the third
+checkpoints mailbox removal. Epoch-less legacy, replaced, missing, or terminal
+connection records drain without a cadence write. There is no third provider
+pull or empty completion runtime. A redundant 00:10 pass returns idle with no
+wake and makes one bounded post-publication convergence checkpoint; the 00:15
+pass is fully quiescent. Within the measured incident window, the proof observes
+six checkpoint attempts, five commits, one injected failure, and no provider
+work after the single replay.
 
 Hosted clinical-record retrieval uses the existing per-user workflow and
 system-mailbox path, not a separate Temporal workflow. Web transactionally

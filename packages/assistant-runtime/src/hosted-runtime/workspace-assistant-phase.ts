@@ -178,6 +178,7 @@ import {
   prepareHostedSystemMailboxItemForCheckpoint,
   recordHostedDeviceSyncDirtyPostCheckpointRecord,
   recordHostedSystemMailboxItemAfterCheckpoint,
+  resolveHostedDeviceSyncCompletionRecordInput,
   resolveHostedSystemMailboxNextWakeAt,
   resolveHostedSystemMailboxNextWakeCandidate,
   type HostedSystemMailboxCheckpointPreparation,
@@ -6836,6 +6837,10 @@ async function runSystemMailboxPostCheckpointPhase(input: {
         ? deferredSystemMailboxRecord.statusCallback
         : await recordHostedSystemMailboxItemAfterCheckpoint({
             ...statusCallbackInput,
+            ...resolveHostedDeviceSyncCompletionRecordInput({
+              item: input.systemMailboxPreparation.item,
+              preparation: input.systemMailboxPreparation,
+            }),
             ...(clinicalOutcomeCancellation?.signal
               ? { signal: clinicalOutcomeCancellation.signal }
               : {}),

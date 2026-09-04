@@ -113,8 +113,10 @@ import {
   startHostedContainerEntrypoint,
 } from "../src/container-entrypoint.js";
 import {
+  buildHostedContainerCodexShellSmokeConfig,
   hostedContainerHeavyRuntime,
   resolveHostedContainerCodexSmokeHomeRoot,
+  resolveHostedContainerHealthCommonsPackageRoot,
 } from "../src/container-entrypoint-heavy-runtime.js";
 import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_EXPECTED_OUTPUT,
@@ -1499,6 +1501,7 @@ describe("startHostedContainerEntrypoint", () => {
       client: "codex-app-server" as const,
       cliSurfaceContractBytes: 37282,
       cliSurfaceHotPathProofCount: 5,
+      healthCommonsCliGoalProofCount: 6,
       murphPathBytes: 28,
       noteAddBytes: 128,
       stderrBytes: 0,
@@ -1531,6 +1534,7 @@ describe("startHostedContainerEntrypoint", () => {
         client: "codex-app-server",
         cliSurfaceContractBytes: 37282,
         cliSurfaceHotPathProofCount: 5,
+        healthCommonsCliGoalProofCount: 6,
         murphPathBytes: 28,
         noteAddBytes: 128,
         stderrBytes: 0,
@@ -1843,6 +1847,24 @@ describe("startHostedContainerEntrypoint", () => {
       HOSTED_HOME: "relative-hosted-home",
     })).toThrow(
       "Hosted Codex shell smoke CODEX_HOME parent must not be under the system temporary directory.",
+    );
+  });
+
+  it("uses only the image-owned Health Commons package root for managed smoke", () => {
+    expect(resolveHostedContainerHealthCommonsPackageRoot({
+      MURPH_HEALTH_COMMONS_PACKAGE_ROOT:
+        " /app/node_modules/@murphai/health-commons ",
+    })).toBe("/app/node_modules/@murphai/health-commons");
+    expect(() => resolveHostedContainerHealthCommonsPackageRoot({
+      MURPH_HEALTH_COMMONS_PACKAGE_ROOT: "relative/health-commons",
+    })).toThrow(
+      "Hosted Codex shell smoke requires the image Health Commons package root.",
+    );
+    expect(() => resolveHostedContainerHealthCommonsPackageRoot({})).toThrow(
+      "Hosted Codex shell smoke requires the image Health Commons package root.",
+    );
+    expect(buildHostedContainerCodexShellSmokeConfig("gpt-test")).toContain(
+      'include_only = ["PATH", "VAULT", "HOME", "CODEX_HOME", "TMPDIR", "MURPH_HEALTH_COMMONS_PACKAGE_ROOT"]',
     );
   });
 

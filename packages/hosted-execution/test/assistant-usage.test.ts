@@ -471,7 +471,7 @@ test("hosted ElevenLabs music usage retains the provider request start", () => {
 test("hosted Gemini video usage records preserve bounded token evidence", () => {
   const record = buildHostedGeminiVideoAnalysisUsageRecord({
     memberId: "member_123",
-    model: "gemini-3.7-flash",
+    model: "gemini-3.8-flash",
     occurredAt: PROVIDER_REQUEST_STARTED_AT,
     providerRequestId: "gemini_request_123",
     usage: {

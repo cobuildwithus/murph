@@ -46,11 +46,14 @@ const HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_CHUNK_BYTES = 1024 * 1024;
 const HOSTED_CONTAINER_CLOUDFLARE_CA_CERT_PATH =
   "/etc/cloudflare/certs/cloudflare-containers-ca.crt";
 const HOSTED_CONTAINER_CODEX_SMOKE_HOME_DIRECTORY = ".codex-deploy-smoke";
+const HOSTED_CONTAINER_HEALTH_COMMONS_PACKAGE_ROOT_ENV =
+  "MURPH_HEALTH_COMMONS_PACKAGE_ROOT";
 
 export interface HostedContainerCodexShellSmokeResult {
   client: "codex-app-server";
   cliSurfaceContractBytes: number;
   cliSurfaceHotPathProofCount: number;
+  healthCommonsCliGoalProofCount: number;
   murphPathBytes: number;
   noteAddBytes: number;
   stderrBytes: number;
@@ -524,7 +527,7 @@ function isPathInside(candidate: string, parent: string): boolean {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-function buildHostedContainerCodexShellSmokeConfig(model: string): string {
+export function buildHostedContainerCodexShellSmokeConfig(model: string): string {
   const modelCatalogJson = readHostedCodexModelCatalogJsonPath();
 
   return [
@@ -566,7 +569,7 @@ function buildHostedContainerCodexShellSmokeConfig(model: string): string {
     "",
     "[shell_environment_policy]",
     'inherit = "all"',
-    'include_only = ["PATH", "VAULT", "HOME", "CODEX_HOME", "TMPDIR"]',
+    'include_only = ["PATH", "VAULT", "HOME", "CODEX_HOME", "TMPDIR", "MURPH_HEALTH_COMMONS_PACKAGE_ROOT"]',
     "",
     "[shell_environment_policy.set]",
     `PATH = ${JSON.stringify(HOSTED_RUNNER_EXECUTABLE_PATH)}`,
@@ -598,7 +601,10 @@ async function runHostedContainerCodexShellAppServerProbe(input: {
     }>();
     const child = spawn("codex", ["app-server"], {
       cwd: input.smokeVaultRoot,
-      env: buildHostedContainerCodexShellSmokeProcessEnv(input),
+      env: buildHostedContainerCodexShellSmokeProcessEnv({
+        ...input,
+        requireHealthCommonsPackageRoot: true,
+      }),
       stdio: ["pipe", "pipe", "pipe"],
     });
 
@@ -629,6 +635,7 @@ async function runHostedContainerCodexShellAppServerProbe(input: {
         client: "codex-app-server",
         cliSurfaceContractBytes: 0,
         cliSurfaceHotPathProofCount: 0,
+        healthCommonsCliGoalProofCount: 0,
         murphPathBytes: 0,
         noteAddBytes: 0,
         stderrBytes,
@@ -775,6 +782,12 @@ async function runHostedContainerCodexShellAppServerProbe(input: {
         "--format",
         "json",
       ]);
+      const { runHostedGoalCliSmoke } = await import("./hosted-goal-cli-smoke.ts");
+      const goalCli = await runHostedGoalCliSmoke({
+        async runCommand(label, args) {
+          return (await execCommand(`goal-cli-${label}`, ["vault-cli", ...args])).stdout;
+        },
+      });
       const noteAdd = await execCommand("event-note-add", [
         "vault-cli",
         "event",
@@ -789,6 +802,7 @@ async function runHostedContainerCodexShellAppServerProbe(input: {
         client: "codex-app-server",
         cliSurfaceContractBytes: cliSurface.contractBytes,
         cliSurfaceHotPathProofCount: cliSurface.hotPathProofCount,
+        healthCommonsCliGoalProofCount: goalCli.proofCount,
         murphPathBytes: environmentProbe.murphPathBytes,
         noteAddBytes: Buffer.byteLength(noteAdd.stdout, "utf8"),
         stderrBytes,
@@ -839,6 +853,7 @@ async function runHostedContainerCliSurfaceContractSmoke(): Promise<{
 function buildHostedContainerCodexShellSmokeProcessEnv(input: {
   codexHome: string;
   liveProviderEgress?: boolean;
+  requireHealthCommonsPackageRoot?: boolean;
   smokeVaultRoot: string;
 }): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
@@ -857,6 +872,11 @@ function buildHostedContainerCodexShellSmokeProcessEnv(input: {
     VAULT: input.smokeVaultRoot,
   };
 
+  if (input.requireHealthCommonsPackageRoot) {
+    env[HOSTED_CONTAINER_HEALTH_COMMONS_PACKAGE_ROOT_ENV] =
+      resolveHostedContainerHealthCommonsPackageRoot();
+  }
+
   if (input.liveProviderEgress) {
     // codex must trust the Cloudflare container egress-interception CA to
     // reach api.openai.com through the Worker.
@@ -873,6 +893,18 @@ function buildHostedContainerCodexShellSmokeProcessEnv(input: {
   copyOptionalHostedContainerSmokeEnv(env, "NO_COLOR");
   copyOptionalHostedContainerSmokeEnv(env, "TERM");
   return env;
+}
+
+export function resolveHostedContainerHealthCommonsPackageRoot(
+  source: Readonly<Record<string, string | undefined>> = process.env,
+): string {
+  const packageRoot = source[HOSTED_CONTAINER_HEALTH_COMMONS_PACKAGE_ROOT_ENV]?.trim();
+  if (!packageRoot || !path.isAbsolute(packageRoot)) {
+    throw new Error(
+      "Hosted Codex shell smoke requires the image Health Commons package root.",
+    );
+  }
+  return path.resolve(packageRoot);
 }
 
 function buildHostedContainerCodexShellEnvironmentProbeScript(): string {

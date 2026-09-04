@@ -7,16 +7,7 @@ const DATABASE_COUNT_FORMATTER = new Intl.NumberFormat("en-US");
 function LabelLookupArtifact() {
   return (
     <div className="rounded-2xl bg-[#fffcf6] p-5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)]">
-      <div className="flex items-baseline justify-between">
-        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.15em] text-[#3d5028]">
-          Label lookup
-        </span>
-        <span className="font-mono text-[10px] tabular-nums text-[#736a58]">
-          UPC match
-        </span>
-      </div>
-
-      <div className="mt-4">
+      <div>
         <p className="font-serif text-[1.125rem] font-semibold leading-tight text-[#2d3436]">
           Chocolate peanut protein bar
         </p>
@@ -123,10 +114,7 @@ export function NutritionSection() {
     <section className="bg-[linear-gradient(165deg,#ebf0de_0%,#d7e2c3_100%)] px-4 py-20 sm:px-8 lg:px-16 lg:py-28">
       <div className="mx-auto max-w-[1200px]">
         <div className="max-w-[720px]">
-          <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#3d5028]">
-            Nutrition
-          </p>
-          <h2 className="mt-4 font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.08] tracking-[-0.03em] text-[#26311f]">
+          <h2 className="font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.08] tracking-[-0.03em] text-[#26311f]">
             Murph reads the label so you don&apos;t have to.
           </h2>
           <p className="mt-5 max-w-[62ch] text-[1rem] leading-[1.7] text-[#3f4a34]">

@@ -24,11 +24,47 @@ The final ownership split is:
   authorization, R2/snapshot transport plumbing, and cleanup.
 
 The public Murph repository owns the released orchestration contracts,
-hosted-local harness, and architecture guardrails. The private
-`cobuildwithus/murph-cloud` repository owns the production Temporal worker,
-Render Blueprint, deploy workflow, operational runbook, and rollback through
-previously deployed private versions. Public Murph contains no worker
-implementation or second production deployment path.
+hosted-local harness, architecture guardrails, and trusted default-branch
+compatibility controller. The private `cobuildwithus/murph-cloud` repository
+owns the production Temporal worker, live Current/Ramping reader discovery and
+attestation, exact-head integration/replay/canary admission, Render Blueprint,
+deploy workflow, operational runbook, and rollback through previously deployed
+private versions. Public Murph contains no worker implementation, private
+reader policy, or second production deployment path.
+
+The compatibility controller persists no private SHA/tag pointer and imports no
+private code. After same-repository human and exact-public-head admission, it
+uses its repository-scoped GitHub App token to resolve private `main`, validates
+the fixed `public-murph-integration.yml` workflow identity, and dispatches that
+workflow at `main` with returned run details. It accepts only the returned first
+attempt whose workflow identity and `head_sha` match the pre-resolved private
+commit. Candidate code can supply only the bounded canonical reconciliation
+fixture artifact produced in unprivileged public CI. Before reporting success,
+the controller re-reads private `main` and fails closed if the branch moved. The
+private protected workflow must derive the live Current and Ramping reader SHAs
+and, while its standby guard remains, include the active legacy Render worker's
+exact live deploy revision. Its final attestation re-reads that complete set and
+fails on identity or routing drift before exact-head integration, exhaustive
+synthetic migration replay, bounded defense-in-depth replay of histories
+returned by Temporal Visibility, or canary proof can become a private deploy
+prerequisite. Visibility is eventually consistent, so only the synthetic
+migration corpus is the exhaustive replay contract.
+
+The pull-request status is candidate evidence, not durable production
+authorization. After a relevant revision reaches public `main`,
+`.github/workflows/temporal-web-deployment-admission.yml` repeats the bounded
+wire proof for that exact public commit against the then-current private
+`main` and live reader set. Its `Temporal Web production admission` job must be
+configured as a Vercel production Deployment Check so a completed build cannot
+move production domains before the proof succeeds. The controller re-reads
+both public and private `main` before accepting the result, while the private
+workflow independently re-reads the complete reader set. Every `main` commit
+must create its managed Vercel candidate, and the Git integration is the only
+production owner. Local production uploads, existing-deployment promotion,
+Instant Rollback, and Force Promote are unsupported; recovery uses a fresh
+revert or forward-fix commit on `main`. This boundary proves
+the hosted reconciliation-facts wire contract; private release admission still
+owns full integration, migration replay, production routing, and canary proof.
 
 Temporal decides when to ask Cloudflare to process based on web-owned
 reconciliation facts and pointer-only signals. Cloudflare starts or wakes the
@@ -749,7 +785,9 @@ The hard-cut architecture is accepted when:
   silently. Murph Cloud independently owns Workflow bundle and replay-policy
   gates.
 - Relevant public producer, contract, hosted-runtime, harness, and CI-owner
-  changes publish one exact-SHA `Temporal compatibility` status. The public
+  changes publish one exact-SHA `Temporal compatibility` pull-request status.
+  That status is candidate evidence and never becomes production authorization
+  merely because it remains green. The public
   controller validates the pull request's exact base repository and ref; only
   pull requests targeting the default branch may publish that SHA-global
   status, so stacked non-default-branch pull requests cannot overwrite it. The
@@ -758,7 +796,7 @@ The hard-cut architecture is accepted when:
   never owns worker code or reader policy: private Murph Cloud receives only
   serialized fixture data, derives the live Current and traffic-bearing Ramping
   readers, automatically includes the exact dispatched private candidate and,
-  while the standby guard remains, the active legacy worker's exact live deploy
+  while the standby guard remains, the active legacy Render worker's exact live deploy
   revision and bounded `active` or `suspended` state, then runs every reader.
   Final protected attestation re-reads the complete reader set and legacy state
   and fails on identity or routing drift through a separate private lifecycle
@@ -770,6 +808,28 @@ The hard-cut architecture is accepted when:
   exact commit, and re-reads private `main` before success. Public code stores
   no private revision pointer or reader policy. Missing, stale, skipped,
   canceled, duplicated, malformed, or failed proof remains red or pending.
+
+- Every public `main` push runs the exact-main producer and compatibility
+  controller again in `.github/workflows/temporal-web-deployment-admission.yml`.
+  Vercel must select the `Temporal Web production admission` job as a
+  production Deployment Check; with that external binding in place, production
+  domains stay on the previous deployment until the current public commit,
+  current private `main`, and current live readers produce one accepted proof.
+  That same private run selects the one canonical foreground-priority lane from
+  its integration manifest, forces and observes standby allocation, and emits a
+  second digest bound to both exact main SHAs, the fixed lane, and the public
+  protected environment's expected production Temporal target digest. Private
+  setup and final attestation derive the live target from protected
+  configuration and reject mismatch without exporting its component values.
+  The release mode rejects an arbitrary public ref; public pull requests remain
+  fixture-only and never execute beside private source. The public controller
+  re-reads both branch heads, and private protected attestations re-read the
+  supported reader set and both heads, before success. Every `main` commit creates one managed
+  candidate, and no local production upload or historical promotion/rollback
+  path may compete with that Git owner. Rollback uses a fresh revert commit so
+  it receives current proof. This proves the reconciliation-facts wire boundary
+  and foreground/standby path; Murph Cloud release admission still owns full
+  worker/runtime integration, replay, routing, and canary safety.
 - Focused tests prove that wake acceptance is not completion and that Temporal
   idles only after reconciliation facts are idle.
 - The hosted-local E2E harness includes a non-manual Temporal orchestration
