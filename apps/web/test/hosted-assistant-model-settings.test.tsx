@@ -1692,6 +1692,11 @@ function installGlobals(
   document: Document,
 ) {
   const restoreEntries = [
+    setGlobal("matchMedia", () => ({
+      matches: true,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    })),
     setGlobal("window", window),
     setGlobal("self", window),
     setGlobal("document", document),

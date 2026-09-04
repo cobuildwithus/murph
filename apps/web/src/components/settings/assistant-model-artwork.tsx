@@ -1,13 +1,12 @@
-import { useId } from "react";
-
 import { cn } from "@/src/lib/utils";
 
 import styles from "./assistant-model-artwork.module.css";
+import { AstraStarfield } from "./astra-starfield";
 
 type AssistantModelArtworkVariant = "astra" | "luna" | "sol" | "terra";
 
 const ASSISTANT_MODEL_CHOICE_CARD_CLASSES = {
-  astra: "hover:border-primary/40 hover:bg-primary/5 has-data-checked:border-primary has-data-checked:bg-primary/10",
+  astra: "border-[#c5d5dd] [--primary:#426b80] [--primary-foreground:#fffcf6] [--muted-foreground:#435e6b] hover:border-[#7b9eaf] has-data-checked:border-[#426b80] has-data-checked:ring-[#7b9eaf]/20 has-data-checked:hover:border-[#426b80] data-[disabled=true]:hover:border-[#c5d5dd] [&>span[aria-hidden=true]]:w-full",
   luna:
     "hover:border-[#777b7d]/40 hover:bg-[#777b7d]/5 has-data-checked:border-[#777b7d] has-data-checked:bg-[#777b7d]/10 has-data-checked:ring-[#777b7d]/15 has-data-checked:hover:border-[#777b7d] has-data-checked:hover:bg-[#777b7d]/10 [&_[data-slot=radio-group-item][data-checked]]:border-[#777b7d] [&_[data-slot=radio-group-item][data-checked]]:bg-[#777b7d]",
   terra:
@@ -24,6 +23,19 @@ export function AssistantModelArtwork({
   className,
   variant,
 }: AssistantModelArtworkProps) {
+  if (variant === "astra") {
+    return (
+      <span
+        aria-hidden="true"
+        className={cn(styles.astra, className)}
+        data-model-artwork="astra"
+      >
+        <span className={styles.aurora} />
+        <AstraStarfield />
+      </span>
+    );
+  }
+
   return (
     <svg
       aria-hidden="true"
@@ -32,45 +44,10 @@ export function AssistantModelArtwork({
       focusable="false"
       viewBox="0 0 240 160"
     >
-      {variant === "astra" ? <AstraArtwork /> : null}
       {variant === "luna" ? <LunaArtwork /> : null}
       {variant === "terra" ? <TerraArtwork /> : null}
       {variant === "sol" ? <SolArtwork /> : null}
     </svg>
-  );
-}
-
-function AstraArtwork() {
-  const id = useId();
-
-  return (
-    <g className={styles.astra}>
-      <defs>
-        <linearGradient id={`${id}-starlight`} x1="0" y1="0" x2="1" y2="1">
-          <stop stopColor="#8db6be" />
-          <stop offset="0.5" stopColor="#c8d9cc" />
-          <stop offset="1" stopColor="#d9b778" />
-        </linearGradient>
-      </defs>
-      <g className={styles.star}>
-        <path
-          d="M182 45C188 79 194 90 230 99C194 108 188 119 182 153C176 119 170 108 134 99C170 90 176 79 182 45Z"
-          fill={`url(#${id}-starlight)`}
-          opacity="0.8"
-        />
-        <path
-          d="m182 73 2.5 23.5L204 99l-19.5 2.5L182 125l-2.5-23.5L160 99l19.5-2.5Z"
-          fill="#fffcf6"
-          opacity="0.9"
-        />
-      </g>
-      <g className={styles.sparks}>
-        <path d="m132 48 2 8 8 2-8 2-2 8-2-8-8-2 8-2Z" fill="#9ebfbf" />
-        <path d="m223 118 1.5 6.5 6.5 1.5-6.5 1.5-1.5 6.5-1.5-6.5-6.5-1.5 6.5-1.5Z" fill="#d3b37c" />
-        <circle cx="211" cy="53" r="1.5" fill="#b5caba" />
-        <circle cx="143" cy="129" r="1.5" fill="#a8c3c6" />
-      </g>
-    </g>
   );
 }
 

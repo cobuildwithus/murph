@@ -43,10 +43,21 @@ test("Max model choice shows Astra on phone and desktop", async ({ browser }) =>
         element.getAnimations({ subtree: true }).filter((animation) => animation.playState === "running").length,
       )).toBeGreaterThan(0);
       await study.screenshot({ path: path.join(outputDir, `astra-models-${width}.png`) });
+      await artwork.scrollIntoViewIfNeeded();
+      const star = artwork.locator('[data-depth="2"]').nth(2);
+      const resting = await star.boundingBox();
+      expect(resting).not.toBeNull();
+      await page.mouse.move(resting!.x - 8, resting!.y);
+      await expect.poll(async () => (await star.boundingBox())!.x - resting!.x).toBeGreaterThan(5);
+      await page.mouse.move(0, 0);
+      await expect.poll(async () => Math.abs((await star.boundingBox())!.x - resting!.x)).toBeLessThan(0.5);
       await page.emulateMedia({ reducedMotion: "reduce" });
       await expect.poll(() => artwork.evaluate((element) =>
         element.getAnimations({ subtree: true }).length,
       )).toBe(0);
+      await page.mouse.move(resting!.x - 8, resting!.y);
+      await page.waitForTimeout(200);
+      expect(Math.abs((await star.boundingBox())!.x - resting!.x)).toBeLessThan(0.5);
       await expect(study.locator('[id="assistant-model-gpt-6-astra"]')).toBeEnabled();
       await study.screenshot({ path: path.join(outputDir, `astra-models-${width}-reduced-motion.png`) });
       expect(hydrationErrors).toEqual([]);

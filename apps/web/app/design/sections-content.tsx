@@ -1,3 +1,5 @@
+import { ModelSettingsHoverPreview } from "./model-settings-hover-preview";
+
 import {
   BiomarkerBoundaryResultStudy,
   BiomarkerDetailStudy,
@@ -242,19 +244,20 @@ export function SectionsContent({
               id="settings-model-provider-save-controls"
               data-design-section="settings-compact-provider-control"
               className="max-w-5xl"
-              inert
             >
-              <HostedAssistantModelSettings
-                availableModels={["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-6-astra"]}
-                canUpgradeToEdge={false}
-                configurationAvailable
-                customInferenceAvailable
-                initialDormantSolPreference={false}
-                initialModel="gpt-5.6-terra"
-                initialProvider="openai"
-                solAvailable
-                veniceAvailable
-              />
+              <ModelSettingsHoverPreview>
+                <HostedAssistantModelSettings
+                  availableModels={["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-6-astra"]}
+                  canUpgradeToEdge={false}
+                  configurationAvailable
+                  customInferenceAvailable
+                  initialDormantSolPreference={false}
+                  initialModel="gpt-5.6-terra"
+                  initialProvider="openai"
+                  solAvailable
+                  veniceAvailable
+                />
+              </ModelSettingsHoverPreview>
             </div>
           </StudySection>
 
