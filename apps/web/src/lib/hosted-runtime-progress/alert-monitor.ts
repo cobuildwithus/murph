@@ -46,7 +46,10 @@ type HostedRuntimeProgressPrismaClient =
 
 export interface HostedRuntimeProgressHealthRow {
   chronologyInvalid: boolean;
+  durableHighWaterSeq: bigint;
+  effectiveConsumedSeq: bigint;
   headKind: string;
+  headLaneSeq: bigint;
   lane: string;
   nextDefaultProcessingWakeAt: Date | null;
   nextDefaultProcessingWakeReason: string | null;
@@ -58,6 +61,7 @@ export interface HostedRuntimeProgressHealthRow {
   systemMailboxProgressGeneration: bigint | null;
   usageBlocked: boolean;
   workspaceCheckpointedAt: Date | null;
+  workspaceSystemImportedSeq: bigint | null;
 }
 
 type HostedRuntimeProgressQueryRow = HostedRuntimeProgressHealthRow;
@@ -74,7 +78,20 @@ export interface HostedRuntimeProgressHealth {
   stalledLaneCount: number;
   stalledRuntimeCount: number;
   stalledSystemLaneCount: number;
+  systemDiagnostics: HostedRuntimeProgressSystemDiagnostics;
   thresholdMs: number;
+}
+
+export interface HostedRuntimeProgressSystemDiagnostics {
+  assistantWakeLaneCount: number;
+  deviceSyncHeadLaneCount: number;
+  deviceSyncWakeLaneCount: number;
+  fullyImportedLaneCount: number;
+  importedUnhandledItemCount: number;
+  otherOrMissingWakeLaneCount: number;
+  partiallyImportedLaneCount: number;
+  unimportedHeadLaneCount: number;
+  unknownImportLaneCount: number;
 }
 
 export interface HostedRuntimeStalledRecheckCandidate {
@@ -391,6 +408,7 @@ async function readHostedRuntimeProgressCandidatePage(input: {
         lane_boundary.user_id,
         lane_boundary.lane,
         lane_boundary.durable_high_water_seq,
+        lane_boundary.effective_consumed_seq,
         pending_head.ai_usage_denied_at AS head_usage_denied_at,
         pending_head.created_at AS head_created_at,
         pending_head.id AS head_item_id,
@@ -533,7 +551,10 @@ async function readHostedRuntimeProgressCandidatePage(input: {
     progress_lane AS (
       SELECT
         progress_evidence.user_id,
+        progress_evidence.durable_high_water_seq,
+        progress_evidence.effective_consumed_seq,
         progress_evidence.head_kind,
+        progress_evidence.head_lane_seq,
         progress_evidence.lane,
         progress_evidence.pending_count,
         progress_evidence.workspace_checkpointed_at,
@@ -542,6 +563,7 @@ async function readHostedRuntimeProgressCandidatePage(input: {
         progress_evidence.workspace_next_wake_at,
         progress_evidence.workspace_next_wake_reason,
         progress_evidence.workspace_system_mailbox_progress_generation,
+        progress_evidence.workspace_system_imported_seq,
         CASE
           WHEN progress_evidence.lane = 'system'
             AND progress_evidence.head_kind = 'device-sync.wake'
@@ -598,7 +620,10 @@ async function readHostedRuntimeProgressCandidatePage(input: {
     )
     SELECT
       progress_lane.chronology_invalid AS "chronologyInvalid",
+      progress_lane.durable_high_water_seq AS "durableHighWaterSeq",
+      progress_lane.effective_consumed_seq AS "effectiveConsumedSeq",
       progress_lane.head_kind AS "headKind",
+      progress_lane.head_lane_seq AS "headLaneSeq",
       progress_lane.lane,
       progress_lane.workspace_next_default_processing_wake_at
         AS "nextDefaultProcessingWakeAt",
@@ -612,7 +637,9 @@ async function readHostedRuntimeProgressCandidatePage(input: {
       progress_lane.workspace_system_mailbox_progress_generation
         AS "systemMailboxProgressGeneration",
       progress_lane.usage_blocked AS "usageBlocked",
-      progress_lane.workspace_checkpointed_at AS "workspaceCheckpointedAt"
+      progress_lane.workspace_checkpointed_at AS "workspaceCheckpointedAt",
+      progress_lane.workspace_system_imported_seq
+        AS "workspaceSystemImportedSeq"
     FROM progress_lane
     WHERE (
       progress_lane.chronology_invalid
@@ -647,6 +674,17 @@ export function summarizeHostedRuntimeProgressRows(input: {
   let stalledConversationLaneCount = 0;
   let stalledLaneCount = 0;
   let stalledSystemLaneCount = 0;
+  const systemDiagnostics: HostedRuntimeProgressSystemDiagnostics = {
+    assistantWakeLaneCount: 0,
+    deviceSyncHeadLaneCount: 0,
+    deviceSyncWakeLaneCount: 0,
+    fullyImportedLaneCount: 0,
+    importedUnhandledItemCount: 0,
+    otherOrMissingWakeLaneCount: 0,
+    partiallyImportedLaneCount: 0,
+    unimportedHeadLaneCount: 0,
+    unknownImportLaneCount: 0,
+  };
 
   for (const row of input.rows) {
     if (!activeRuntimeKeys.has(row.runtimeKey)) {
@@ -679,6 +717,7 @@ export function summarizeHostedRuntimeProgressRows(input: {
       stalledConversationLaneCount += 1;
     } else {
       stalledSystemLaneCount += 1;
+      summarizeHostedRuntimeSystemDiagnostics(systemDiagnostics, row);
     }
   }
 
@@ -695,8 +734,52 @@ export function summarizeHostedRuntimeProgressRows(input: {
     stalledLaneCount,
     stalledRuntimeCount: stalledRuntimeKeys.size,
     stalledSystemLaneCount,
+    systemDiagnostics,
     thresholdMs: HOSTED_RUNTIME_PROGRESS_STALL_THRESHOLD_MS,
   };
+}
+
+function summarizeHostedRuntimeSystemDiagnostics(
+  diagnostics: HostedRuntimeProgressSystemDiagnostics,
+  row: HostedRuntimeProgressHealthRow,
+): void {
+  if (row.headKind === "device-sync.wake") {
+    diagnostics.deviceSyncHeadLaneCount += 1;
+  }
+
+  if (row.nextWakeReason === "assistant") {
+    diagnostics.assistantWakeLaneCount += 1;
+  } else if (row.nextWakeReason === "device-sync.reconcile") {
+    diagnostics.deviceSyncWakeLaneCount += 1;
+  } else {
+    diagnostics.otherOrMissingWakeLaneCount += 1;
+  }
+
+  const importedSeq = row.workspaceSystemImportedSeq;
+  if (importedSeq === null) {
+    diagnostics.unknownImportLaneCount += 1;
+    return;
+  }
+  if (importedSeq < row.headLaneSeq) {
+    diagnostics.unimportedHeadLaneCount += 1;
+    return;
+  }
+  if (importedSeq >= row.durableHighWaterSeq) {
+    diagnostics.fullyImportedLaneCount += 1;
+  } else {
+    diagnostics.partiallyImportedLaneCount += 1;
+  }
+
+  const importedBound = importedSeq < row.durableHighWaterSeq
+    ? importedSeq
+    : row.durableHighWaterSeq;
+  const importedUnhandledCount = importedBound - row.effectiveConsumedSeq;
+  if (importedUnhandledCount > 0n) {
+    diagnostics.importedUnhandledItemCount = addBoundedCount(
+      diagnostics.importedUnhandledItemCount,
+      importedUnhandledCount,
+    );
+  }
 }
 
 type HostedRuntimeProgressRowDisposition =
@@ -752,6 +835,7 @@ function buildHostedRuntimeProgressAlertDetails(input: {
       stalledLaneCount: input.health.stalledLaneCount,
       stalledRuntimeCount: input.health.stalledRuntimeCount,
       stalledSystemLaneCount: input.health.stalledSystemLaneCount,
+      systemDiagnostics: { ...input.health.systemDiagnostics },
     },
     incidentId: input.incidentId,
     lastEvaluatedAt: input.now.toISOString(),
@@ -789,6 +873,12 @@ function buildHostedRuntimeProgressAlertMessage(input: {
       ? `Pending live items: ${input.health.pendingItemCount}`
       : null,
   ].filter((value): value is string => value !== null);
+  const systemDiagnostics = input.health.stalledSystemLaneCount > 0
+    ? formatHostedRuntimeProgressSystemDiagnostics(
+        input.health.systemDiagnostics,
+        input.health.stalledSystemLaneCount,
+      )
+    : null;
 
   return [
     input.notificationKind === "reminder"
@@ -796,8 +886,16 @@ function buildHostedRuntimeProgressAlertMessage(input: {
       : "Murph runtime progress alert.",
     `${evidence.join("; ")}.`,
     timing.length > 0 ? `${timing.join(". ")}.` : null,
+    systemDiagnostics,
     `Checked ${formatAlertTime(input.now)}.`,
   ].filter((value): value is string => value !== null).join(" ");
+}
+
+function formatHostedRuntimeProgressSystemDiagnostics(
+  diagnostics: HostedRuntimeProgressSystemDiagnostics,
+  stalledSystemLaneCount: number,
+): string {
+  return `System diagnostics: ${diagnostics.deviceSyncHeadLaneCount}/${stalledSystemLaneCount} device-sync heads; import coverage ${diagnostics.fullyImportedLaneCount} full, ${diagnostics.partiallyImportedLaneCount} partial, ${diagnostics.unimportedHeadLaneCount} head-unimported, ${diagnostics.unknownImportLaneCount} unknown; ${diagnostics.importedUnhandledItemCount} imported-but-unhandled items; wake owners ${diagnostics.assistantWakeLaneCount} assistant, ${diagnostics.deviceSyncWakeLaneCount} device-sync, ${diagnostics.otherOrMissingWakeLaneCount} other/missing.`;
 }
 
 function addBoundedCount(current: number, addition: bigint): number {

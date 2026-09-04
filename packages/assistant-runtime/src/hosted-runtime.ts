@@ -241,6 +241,7 @@ import type {
 import {
   findNextHostedSystemMailboxQueueItem,
   isHostedApprovedContinuationSystemMailboxItem,
+  isHostedSystemMailboxFirstPendingClassifierFailure,
   isHostedSystemMailboxModelFreeExactNotificationItem,
   readHostedSystemMailboxState,
   readHostedSystemMailboxHandledThroughSeq,
@@ -1423,6 +1424,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
   options: HostedWorkspaceRuntimeJobOptions,
 ): Promise<HostedWorkspaceInvocationResult> {
   const result = await runHostedWorkspaceRuntimeJobInProcessImpl(input, options);
+  const runtimeReleaseSha = options.runtimeIssueProvenance?.releaseSha ?? null;
   void writeHostedRuntimeLogBestEffort({
     entry: {
       attemptId: input.request.attemptId,
@@ -1431,12 +1433,64 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       level: "info",
       phase: "invoke",
       redactedJson: {
+        hostedMailboxSystemFirstPendingClassifierFailures:
+          readHostedRuntimeProgressClassifierFailuresForLog(
+            result.redactedStatus ?? null,
+          ),
+        hostedMailboxSystemFirstPendingSeq:
+          readHostedRuntimeProgressSequenceForLog(
+            result.redactedStatus ?? null,
+            "hostedMailboxSystemFirstPendingSeq",
+          ),
+        hostedMailboxSystemHandledThroughSeq:
+          readHostedRuntimeProgressSequenceForLog(
+            result.redactedStatus ?? null,
+            "hostedMailboxSystemHandledThroughSeq",
+          ),
+        hostedMailboxSystemImportedSeq:
+          readHostedRuntimeProgressSequenceForLog(
+            result.redactedStatus ?? null,
+            "hostedMailboxSystemImportedSeq",
+          ),
+        invocationStatus: result.status,
+        nextWakeAt: result.nextWakeAt ?? null,
+        nextWakeReason: result.nextWakeReason ?? null,
         processingMode: input.request.processingMode ?? "default",
+        runtimeReleaseSha:
+          runtimeReleaseSha && /^[0-9a-f]{40}$/u.test(runtimeReleaseSha)
+            ? runtimeReleaseSha
+            : null,
       },
     },
     platform: options.platform,
   });
   return result;
+}
+
+function readHostedRuntimeProgressSequenceForLog(
+  status: HostedRuntimeRedactedJson | null,
+  key:
+    | "hostedMailboxSystemFirstPendingSeq"
+    | "hostedMailboxSystemHandledThroughSeq"
+    | "hostedMailboxSystemImportedSeq",
+): string | null {
+  const value = status?.[key];
+  return typeof value === "string" && /^(?:0|[1-9]\d*)$/u.test(value)
+    ? value
+    : null;
+}
+
+function readHostedRuntimeProgressClassifierFailuresForLog(
+  status: HostedRuntimeRedactedJson | null,
+): string[] | null {
+  const value = status?.hostedMailboxSystemFirstPendingClassifierFailures;
+  if (
+    !Array.isArray(value)
+    || !value.every(isHostedSystemMailboxFirstPendingClassifierFailure)
+  ) {
+    return null;
+  }
+  return value.map((item) => String(item));
 }
 
 async function runHostedWorkspaceRuntimeJobInProcessImpl(
@@ -8585,6 +8639,8 @@ async function withHostedMailboxProgressStatus(input: {
             mailboxState.watermarks.conversation,
         }
       : {}),
+    hostedMailboxSystemFirstPendingClassifierFailures:
+      systemMailboxProgress.firstPendingClassifierFailures,
     hostedMailboxSystemImportedSeq: mailboxState.watermarks.system,
     hostedMailboxSystemHandledThroughSeq:
       systemMailboxProgress.handledThroughSeq,

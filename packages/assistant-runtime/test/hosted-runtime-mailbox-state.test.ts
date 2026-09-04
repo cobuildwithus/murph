@@ -328,6 +328,7 @@ describe("hosted runtime system mailbox state", () => {
         ],
       },
     })).toEqual({
+      firstPendingClassifierFailures: ["wake_not_device_sync"],
       firstPendingSeq: "4",
       handledThroughSeq: "3",
     });
@@ -373,6 +374,7 @@ describe("hosted runtime system mailbox state", () => {
       now: "2026-04-27T00:00:00.000Z",
       state: { pending: [retainedDeviceRetry, pendingSuccessor] },
     })).toEqual({
+      firstPendingClassifierFailures: ["wake_not_device_sync"],
       firstPendingSeq: "9",
       handledThroughSeq: "8",
     });
@@ -381,8 +383,105 @@ describe("hosted runtime system mailbox state", () => {
       now: retryAt,
       state: { pending: [retainedDeviceRetry] },
     })).toEqual({
+      firstPendingClassifierFailures: null,
       firstPendingSeq: null,
       handledThroughSeq: "9",
+    });
+
+    const mismatchedRetry = {
+      ...retainedDeviceRetry,
+      wake: buildHostedExecutionDeviceSyncWake({
+        connectionId: "dsc_retained_retry",
+        eventId: "device-sync.wake:retained_device_retry",
+        expectedConnectedAt: "2026-04-01T00:00:00.000Z",
+        hint: {
+          jobs: [{
+            availableAt: "2026-04-28T00:01:00.000Z",
+            dedupeKey: "retained-weight-retry",
+            kind: "resource",
+            maxAttempts: 1,
+            payload: {},
+          }],
+        },
+        occurredAt: "2026-04-27T00:00:00.000Z",
+        provider: "junction",
+        reason: "reconcile_due",
+        userId: "member_123",
+      }),
+    };
+    expect(resolveHostedSystemMailboxProgress({
+      importedSeq: "9",
+      now: retryAt,
+      state: { pending: [mismatchedRetry] },
+    })).toEqual({
+      firstPendingClassifierFailures: ["job_schedule_match_missing"],
+      firstPendingSeq: "4",
+      handledThroughSeq: "3",
+    });
+  });
+
+  it("reports every bounded retained-device-retry classifier failure", () => {
+    const base = buildPendingDeviceSyncMailboxItem({
+      itemId: "malformed_device_retry",
+      mailboxLaneSeq: "4",
+    });
+    const retryAt = "2026-04-28T00:00:00.000Z";
+
+    expect(resolveHostedSystemMailboxProgress({
+      importedSeq: "9",
+      now: retryAt,
+      state: {
+        pending: [{
+          ...base,
+          nextAttemptAt: retryAt,
+        }],
+      },
+    })).toEqual({
+      firstPendingClassifierFailures: [
+        "connection_missing",
+        "job_hints_missing",
+      ],
+      firstPendingSeq: "4",
+      handledThroughSeq: "3",
+    });
+
+    expect(resolveHostedSystemMailboxProgress({
+      importedSeq: "9",
+      now: retryAt,
+      state: {
+        pending: [{
+          ...base,
+          postCheckpointRecord: { kind: "vault-share.projection" },
+          status: "recording",
+          wake: buildHostedExecutionDeviceSyncWake({
+            connectionId: "dsc_malformed_retry",
+            eventId: "device-sync.wake:malformed_device_retry",
+            expectedConnectedAt: "2026-04-01T00:00:00.000Z",
+            hint: {
+              jobs: [{
+                availableAt: retryAt,
+                dedupeKey: "malformed-weight-retry",
+                kind: "resource",
+                maxAttempts: 1,
+                payload: {},
+              }],
+            },
+            occurredAt: "2026-04-27T00:00:00.000Z",
+            provider: "junction",
+            reason: "reconcile_due",
+            userId: "member_123",
+          }),
+        }],
+      },
+    })).toEqual({
+      firstPendingClassifierFailures: [
+        "status_not_pending",
+        "post_checkpoint_record_present",
+        "next_attempt_missing",
+        "job_schedule_match_missing",
+      ],
+      firstPendingSeq: "4",
+      handledThroughSeq: "3",
     });
   });
 
@@ -405,6 +504,7 @@ describe("hosted runtime system mailbox state", () => {
         })],
       },
     })).toEqual({
+      firstPendingClassifierFailures: ["wake_not_device_sync"],
       firstPendingSeq: null,
       handledThroughSeq: "0",
     });

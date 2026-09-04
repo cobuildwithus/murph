@@ -48,9 +48,15 @@ describe("hosted runtime progress health", () => {
         }),
         progressRow({
           progressOriginAt: "2026-08-10T15:45:00.000Z",
+          durableHighWaterSeq: 12n,
+          effectiveConsumedSeq: 9n,
+          headKind: "device-sync.wake",
+          headLaneSeq: 10n,
           lane: "system",
+          nextWakeReason: "assistant",
           pendingCount: 3n,
           runtimeKey: "runtime_a",
+          workspaceSystemImportedSeq: 12n,
         }),
         progressRow({
           progressOriginAt: "2026-08-10T15:30:00.000Z",
@@ -70,6 +76,91 @@ describe("hosted runtime progress health", () => {
       stalledLaneCount: 2,
       stalledRuntimeCount: 2,
       stalledSystemLaneCount: 1,
+      systemDiagnostics: {
+        assistantWakeLaneCount: 1,
+        deviceSyncHeadLaneCount: 1,
+        deviceSyncWakeLaneCount: 0,
+        fullyImportedLaneCount: 1,
+        importedUnhandledItemCount: 3,
+        otherOrMissingWakeLaneCount: 0,
+        partiallyImportedLaneCount: 0,
+        unimportedHeadLaneCount: 0,
+        unknownImportLaneCount: 0,
+      },
+    });
+  });
+
+  it("classifies every system import and wake-owner diagnostic without identifiers", () => {
+    const health = summarizeHostedRuntimeProgressRows({
+      activeRuntimeKeys: [
+        "runtime_full",
+        "runtime_partial",
+        "runtime_unimported",
+        "runtime_unknown",
+      ],
+      now,
+      rows: [
+        progressRow({
+          durableHighWaterSeq: 10n,
+          effectiveConsumedSeq: 8n,
+          headKind: "device-sync.wake",
+          headLaneSeq: 9n,
+          lane: "system",
+          nextWakeReason: "assistant",
+          pendingCount: 2n,
+          progressOriginAt: "2026-08-10T15:30:00.000Z",
+          runtimeKey: "runtime_full",
+          workspaceSystemImportedSeq: 10n,
+        }),
+        progressRow({
+          durableHighWaterSeq: 10n,
+          effectiveConsumedSeq: 6n,
+          headKind: "device-sync.wake",
+          headLaneSeq: 7n,
+          lane: "system",
+          nextWakeReason: "device-sync.reconcile",
+          pendingCount: 4n,
+          progressOriginAt: "2026-08-10T15:30:00.000Z",
+          runtimeKey: "runtime_partial",
+          workspaceSystemImportedSeq: 8n,
+        }),
+        progressRow({
+          durableHighWaterSeq: 10n,
+          effectiveConsumedSeq: 5n,
+          headKind: "device-sync.wake",
+          headLaneSeq: 7n,
+          lane: "system",
+          nextWakeReason: null,
+          pendingCount: 5n,
+          progressOriginAt: "2026-08-10T15:30:00.000Z",
+          runtimeKey: "runtime_unimported",
+          workspaceSystemImportedSeq: 6n,
+        }),
+        progressRow({
+          durableHighWaterSeq: 10n,
+          effectiveConsumedSeq: 5n,
+          headKind: "runtime.maintenance-requested",
+          headLaneSeq: 6n,
+          lane: "system",
+          nextWakeReason: "mailbox",
+          pendingCount: 5n,
+          progressOriginAt: "2026-08-10T15:30:00.000Z",
+          runtimeKey: "runtime_unknown",
+          workspaceSystemImportedSeq: null,
+        }),
+      ],
+    });
+
+    expect(health.systemDiagnostics).toEqual({
+      assistantWakeLaneCount: 1,
+      deviceSyncHeadLaneCount: 3,
+      deviceSyncWakeLaneCount: 1,
+      fullyImportedLaneCount: 1,
+      importedUnhandledItemCount: 4,
+      otherOrMissingWakeLaneCount: 2,
+      partiallyImportedLaneCount: 1,
+      unimportedHeadLaneCount: 1,
+      unknownImportLaneCount: 1,
     });
   });
 
@@ -326,9 +417,15 @@ describe("hosted runtime progress alert monitor", () => {
     const fixture = createProgressMonitorFixture([
       progressRow({
         progressOriginAt: "2026-08-10T15:30:00.000Z",
+        durableHighWaterSeq: 7n,
+        effectiveConsumedSeq: 0n,
+        headKind: "device-sync.wake",
+        headLaneSeq: 1n,
         lane: "system",
+        nextWakeReason: "assistant",
         pendingCount: 7n,
         runtimeKey: "runtime_private_a",
+        workspaceSystemImportedSeq: 7n,
       }),
       progressRow({
         progressOriginAt: "2026-08-10T15:20:00.000Z",
@@ -372,11 +469,24 @@ describe("hosted runtime progress alert monitor", () => {
     const message = sendAlert.mock.calls[0]?.[0].text ?? "";
     expect(message).toContain("Affected lanes: 1 system, 1 conversation");
     expect(message).toContain("Pending live items: 9");
+    expect(message).toContain(
+      "System diagnostics: 1/1 device-sync heads; import coverage 1 full, 0 partial, 0 head-unimported, 0 unknown; 7 imported-but-unhandled items; wake owners 1 assistant, 0 device-sync, 0 other/missing.",
+    );
     expect(message).not.toContain("runtime_private_a");
     expect(message).not.toContain("runtime_private_b");
     expect(persisted).not.toContain("runtime_private_a");
     expect(persisted).not.toContain("runtime_private_b");
     expect(fixture.readState()).toMatchObject({
+      detailsJson: {
+        health: {
+          systemDiagnostics: {
+            assistantWakeLaneCount: 1,
+            deviceSyncHeadLaneCount: 1,
+            fullyImportedLaneCount: 1,
+            importedUnhandledItemCount: 7,
+          },
+        },
+      },
       kind: "hosted_runtime_progress_monitor",
       status: "progress_alerting",
     });
@@ -771,7 +881,10 @@ describe("hosted runtime progress alert monitor", () => {
 
 function progressRow(input: {
   chronologyInvalid?: boolean;
+  durableHighWaterSeq?: bigint;
+  effectiveConsumedSeq?: bigint;
   headKind?: string;
+  headLaneSeq?: bigint;
   progressOriginAt: string;
   lane: string;
   nextDefaultProcessingWakeAt?: Date | null;
@@ -783,10 +896,14 @@ function progressRow(input: {
   systemMailboxProgressGeneration?: bigint | null;
   usageBlocked?: boolean;
   workspaceCheckpointedAt?: Date | null;
+  workspaceSystemImportedSeq?: bigint | null;
 }): HostedRuntimeProgressHealthRow {
   return {
     chronologyInvalid: input.chronologyInvalid ?? false,
+    durableHighWaterSeq: input.durableHighWaterSeq ?? 1n,
+    effectiveConsumedSeq: input.effectiveConsumedSeq ?? 0n,
     headKind: input.headKind ?? "test.pending-work",
+    headLaneSeq: input.headLaneSeq ?? 1n,
     progressOriginAt: instant(input.progressOriginAt),
     lane: input.lane,
     nextDefaultProcessingWakeAt:
@@ -801,6 +918,10 @@ function progressRow(input: {
       input.systemMailboxProgressGeneration ?? null,
     usageBlocked: input.usageBlocked ?? false,
     workspaceCheckpointedAt: input.workspaceCheckpointedAt ?? null,
+    workspaceSystemImportedSeq:
+      input.workspaceSystemImportedSeq === undefined
+        ? 1n
+        : input.workspaceSystemImportedSeq,
   };
 }
 

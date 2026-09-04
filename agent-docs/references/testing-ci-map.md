@@ -715,7 +715,14 @@ gate unset and makes no paid request.
   across staging, provider, delivery, and mailbox-consumption evidence, plus
   imported device retries aging from their canonical earliest workspace wake
   while unimported heads and suffixes, overdue retries, malformed frontiers,
-  and non-device system heads remain alertable, plus the 20,000
+  and non-device system heads remain alertable. Focused unit coverage also
+  proves aggregate device-head, import-coverage, imported-but-unhandled, and
+  wake-owner diagnostics remain identifier-free. The assistant-runtime
+  entrypoint suite proves the existing terminal invocation event carries the
+  public runner release, selected wake, result status, and derived numeric
+  system-mailbox frontiers. Mailbox-state coverage proves retained retries do
+  not pin the frontier and a malformed retry records only bounded classifier
+  failure codes. The PostgreSQL proof retains the 20,000
   eligible-row cap after exclusions. The hosted-local
   foreground-priority leg drives this monitor through authenticated cron HTTP
   and the same isolated Resend stub, proving paced lost-ack retry,
