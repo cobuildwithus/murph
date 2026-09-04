@@ -850,7 +850,8 @@ describeRealCodex('real Codex Astra configuration e2e', () => {
             async request(request) {
               if (request.action === 'read') return { action: 'read', result: snapshot }
               updates.push(request)
-              return { action: 'update', result: { ...snapshot, model: 'gpt-6-astra', appliesAt: 'next_turn', requiredPlan: null, status: 'updated' } }
+              snapshot.model = request.model ?? snapshot.model
+              return { action: 'update', result: { ...snapshot, appliesAt: 'next_turn', requiredPlan: null, status: 'updated' } }
             },
           },
           computerToolsAvailable: false,
@@ -869,12 +870,12 @@ describeRealCodex('real Codex Astra configuration e2e', () => {
         vaultRoot: workingDirectory,
         workingDirectory,
       })
+      process.stdout.write(`[astra-selection-e2e] ${JSON.stringify({ reply: result.finalMessage, updates: updates.length })}\n`)
       expect(updates).toEqual([{ action: 'update', assistantInputId: 'ain_00000000000000000000000000000061', model: 'gpt-6-astra' }])
       expect(result.finalMessage).toMatch(/Astra/iu)
       expect(result.finalMessage).toMatch(/next|future|going forward/iu)
       expect(result.finalMessage).not.toMatch(/upgrade|payment|cannot|unable/iu)
       expect(readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'command')).toEqual([])
-      process.stdout.write(`[astra-selection-e2e] ${JSON.stringify({ reply: result.finalMessage, updates: updates.length })}\n`)
     } finally {
       await stopWarmCodexAppServer('astra-selection-e2e-complete')
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])

@@ -38,7 +38,15 @@ Codex turn/subagent totals therefore use ordinary rates. Exact per-request
 records retain long-context pricing. Group and explicit automation model
 choices remain unchanged; existing automations may inherit a selected Astra.
 
-Live Astra subscription proof remains pending after pre-provider cache-probe
-failures. The existing Frog cache-probe entry covers that harness failure.
-Complete the bounded alternate-home checks, PR source linkage, final external
-review, and CI before declaring merge readiness. No deployment performed.
+The live selection journey passes with the default Terra model: one Astra save,
+no provider/reasoning change, and a truthful next-query confirmation. Its synthetic
+port now persists the saved model so later reads match production behavior.
+Actual Astra execution remains unverified: all ten available local subscription
+homes failed before any provider action. The failure wrapper labels this a
+cache-probe failure; that label alone does not establish its underlying cause.
+The existing Frog cache-probe entry covers this diagnostic failure.
+
+PR #2823 links the changelog and reviewed phone/desktop screenshots. A hosted
+preview is building; final external review and broad CI remain outstanding.
+Complete provider-visible input measurement is also unresolved. No production
+deployment performed.
