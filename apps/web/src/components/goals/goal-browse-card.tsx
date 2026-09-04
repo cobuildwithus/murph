@@ -10,6 +10,34 @@ export interface GoalBrowseCardModel {
   title: string;
 }
 
+export const GOAL_BROWSE_CARD_CLASS_NAME =
+  "group flex min-h-20 items-center gap-3.5 rounded-xl border border-black/[0.07] bg-[#fffdf8] p-4 transition-colors hover:border-black/[0.16] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[#f5f0e8] sm:min-h-24 sm:gap-4 sm:p-5";
+
+export const GOAL_BROWSE_CARD_TITLE_CLASS_NAME =
+  "font-serif text-base font-semibold leading-snug tracking-[-0.015em] text-balance text-foreground transition-colors group-hover:text-primary sm:text-lg";
+
+export function GoalBrowseCardIllustration({
+  src,
+}: {
+  src?: string | null;
+}) {
+  if (!src) {
+    return null;
+  }
+
+  return (
+    <Image
+      alt=""
+      aria-hidden="true"
+      className="size-12 shrink-0 sm:size-14"
+      data-goal-illustration
+      height={56}
+      src={src}
+      width={56}
+    />
+  );
+}
+
 export function GoalBrowseCard({
   className,
   href,
@@ -21,24 +49,11 @@ export function GoalBrowseCard({
     <Link
       href={href}
       prefetch={prefetch}
-      className={cn(
-        "group flex min-h-20 items-center gap-3.5 rounded-xl border border-black/[0.07] bg-[#fffdf8] p-4 transition-colors hover:border-black/[0.16] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-[#f5f0e8] sm:min-h-24 sm:gap-4 sm:p-5",
-        className,
-      )}
+      className={cn(GOAL_BROWSE_CARD_CLASS_NAME, className)}
     >
-      {illustrationSrc ? (
-        <Image
-          alt=""
-          aria-hidden="true"
-          className="size-12 shrink-0 sm:size-14"
-          data-goal-illustration
-          height={56}
-          src={illustrationSrc}
-          width={56}
-        />
-      ) : null}
+      <GoalBrowseCardIllustration src={illustrationSrc} />
       <div className="min-w-0">
-        <h3 className="font-serif text-base font-semibold leading-snug tracking-[-0.015em] text-balance text-foreground transition-colors group-hover:text-primary sm:text-lg">
+        <h3 className={GOAL_BROWSE_CARD_TITLE_CLASS_NAME}>
           {title}
         </h3>
       </div>

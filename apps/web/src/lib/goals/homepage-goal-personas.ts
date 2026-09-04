@@ -50,6 +50,9 @@ export const HOMEPAGE_GOAL_PERSONAS = [
 export type HomepageGoalPersonaId =
   (typeof HOMEPAGE_GOAL_PERSONAS)[number]["id"];
 
+// The pill that is selected before anyone clicks.
+export const DEFAULT_HOMEPAGE_GOAL_PERSONA_ID: HomepageGoalPersonaId = "live-long";
+
 export interface HomepageGoalLink {
   href: string;
   illustrationSrc: string | null;

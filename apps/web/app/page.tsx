@@ -29,6 +29,8 @@ import { TrustSection } from "@/src/components/homepage/trust-section";
 import type { HomepageSignupCta } from "@/src/components/homepage/types";
 import { HomepageAuthRuntimeProvider } from "@/src/components/hosted-onboarding/homepage-auth-runtime-provider";
 import { scheduleHomepageBrowserVaultPreparation } from "@/src/lib/browser-vault/homepage-preparation";
+import { resolveGoalIllustrationSrc } from "@/src/lib/goals/goal-illustrations";
+import { createGoalSearchItem } from "@/src/lib/goals/goal-search";
 import { resolveHomepageGoalPersonas } from "@/src/lib/goals/homepage-goal-personas";
 import { listHealthCommonsGoalEntries } from "@/src/lib/health-commons/goal-projections";
 import { fetchHeroContactInfo } from "@/src/lib/hero-contact-info";
@@ -122,6 +124,10 @@ export default async function HomePage() {
   const messengerChannel = resolveHeroMessengerChannel(country);
   const murphHeadshotSrc = pickRandomMurphHeadshotSrc();
   const goalEntries = listHealthCommonsGoalEntries();
+  const searchGoals = goalEntries.map((goal) => ({
+    ...createGoalSearchItem(goal),
+    illustrationSrc: resolveGoalIllustrationSrc(goal.routeId),
+  }));
   const referralRewards = getAvailableHostedPublicReferralRewards();
   const installCommandUrl =
     resolveHostedInstallScriptUrl() ?? "https://www.withmurph.ai/install.sh";
@@ -169,6 +175,9 @@ export default async function HomePage() {
           murphHeadshotSrc={murphHeadshotSrc}
         />
         <GoalsSection
+          contactInfo={heroContactInfo}
+          goals={searchGoals}
+          messengerChannel={messengerChannel}
           personas={resolveHomepageGoalPersonas(goalEntries)}
           totalGoalCount={goalEntries.length}
         />
