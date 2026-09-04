@@ -1,8 +1,8 @@
 # Remove Blacksmith runner spend
 
-Status: active
+Status: completed
 Created: 2026-09-03
-Updated: 2026-09-03
+Updated: 2026-09-04
 
 ## Goal
 
@@ -94,11 +94,24 @@ Updated: 2026-09-03
 - Local public-repository proof is green: focused dispatcher and static-core
   tests, CLI audit-packaging tests, syntax checks, `pnpm complexity:diff`, and
   full `pnpm typecheck`.
-- Local private-cloud focused workflow-contract tests and YAML parsing are
-  green. The full `pnpm verify` gate is still running.
-- Pending: exact-head pull requests, CI and applicable ReviewGPT gates, merges,
-  default-branch reinventory, GitHub App revocation, and vendor-side account or
-  data-deletion confirmation.
+- Local private-cloud workflow parsing, contract tests, typecheck, build, and
+  built-worker tests are green. The broad verification run passed all stages
+  through its 646-test coverage suite, then reported two unchanged Temporal
+  deploy timing failures out of 126 tests; one passed alone and one reproduced
+  alone. Exact-head GitHub-hosted CI remains the merge authority.
+- Public final ReviewGPT passed with no findings. Private-cloud preliminary
+  review found a missing permanent runner-label invariant; the existing
+  repository-wide workflow gate now covers all eleven migrated jobs and a
+  deliberate negative control fails as expected. Private-cloud final round 1
+  identified the smaller standard-runner resource envelope; the pull request
+  now discloses that intentional cost tradeoff. Final round 2 passed with no
+  findings, and no accepted review finding remains unresolved.
+- Parent final review found no remaining live provider path, personal identifier
+  leak, merge-tree conflict, or proof gap within either repository diff.
+- Pending external completion after merge: default-branch reinventory, GitHub
+  App revocation through the organization-owner control, and vendor-side billing
+  or data-deletion confirmation. These controls are intentionally not encoded
+  in the repository and remain part of the final operational handoff.
 
 ## Decisions
 
@@ -109,6 +122,10 @@ Updated: 2026-09-03
   configuration, current docs, and external access.
 - No active affected workflow run existed at inventory time, so no run needed
   cancellation.
+- Standard GitHub-hosted Ubuntu is intentionally smaller than the retired paid
+  runner class. Preserve current concurrency and deadlines while exact-head
+  target runs are green; change only a pressure point demonstrated by those
+  runs rather than pre-allocating another paid runner class.
 
 ## Verification
 
@@ -120,3 +137,4 @@ Updated: 2026-09-03
   retain valid workflow structure; no live owned Blacksmith reference or
   runner label remains; both default branches and the app-installation
   inventory confirm the spending path is closed.
+Completed: 2026-09-04
