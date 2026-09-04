@@ -1,6 +1,6 @@
 # Retained device-wake ownership
 
-Status: active
+Status: completed
 Created: 2026-09-04
 Updated: 2026-09-04
 
@@ -88,10 +88,18 @@ Updated: 2026-09-04
    changelog contracts for the lifecycle-complete design.
 5. Completed: reran focused and package verification, the isolated PostgreSQL
    proof, documentation checks, and the complexity ratchet.
-6. Remaining: commit and push the exact candidate, run ReviewGPT on the new head
-   concurrently with CI, address any findings, archive this plan, verify the
-   current-base merge tree, merge, and verify Web before immediate runner rollout. The current
-   user explicitly authorized shipping and deployment.
+6. Completed: pushed the simplified candidate and started substantive round 4
+   concurrently with CI. CI exposed two unchanged assistant prompt expectations
+   already corrected on main; a conflict-free normal base merge brought in
+   those corrections without changing the reviewed mailbox implementation. The
+   two test files pass all 104 tests and assistant-engine typecheck passes.
+7. Completed: round 4 returned PASS with zero findings; the captured response
+   matches its exact committed user turn and model-evidence hash. Full CI passed
+   on the reviewed implementation after the first base merge.
+8. Completed: the authorized final base reconciliation preserves the current
+   main index verbatim and changes no reviewed non-Markdown file. Close this
+   implementation plan; final-head CI, merge, and production rollout remain
+   external shipping gates under the existing task authorization.
 
 ## Resumed correction
 
@@ -130,8 +138,8 @@ Updated: 2026-09-04
   provider work is recreated and no alternate scheduler is introduced.
 - Result: local tests pass for two exact owners, another connection's blocker,
   legacy restore, the pending-to-recording-to-completion lifecycle, and
-  whole-projection failure for ambiguity or overflow. Exact-head gates remain
-  pending.
+  whole-projection failure for ambiguity or overflow. Product UX verdict: Ready.
+  ReviewGPT passed; the final documentation/base update retains its normal CI.
 
 ## Changelog
 
@@ -154,4 +162,17 @@ Updated: 2026-09-04
 - Passed: changelog archive proof (9 tests) for the reused item.
 - Passed: documentation drift/gardening, complexity ratchet, privacy scan, and
   diff check.
-- Remaining: exact pushed-head ReviewGPT and CI gates.
+- Passed: substantive ReviewGPT round 4, zero findings. Exact response and model
+  evidence hashes match; the reviewed production files survive both base merges.
+- Passed: full CI on the previously pushed implementation head.
+- Remaining external gates: final-head CI, merge, managed Web deployment,
+  immediate runner convergence, and live recovery verification.
+
+## Final base reconciliation
+
+- The current user authorized resolving the new documentation-only conflict.
+- Kept current main's simplified index exactly; the detailed ownership and
+  rollout contracts remain in their existing reliability/protocol owners.
+- No reviewed production, test, configuration, or changelog file changed.
+- Merge and deployment are not claimed complete by this implementation archive.
+Completed: 2026-09-04
