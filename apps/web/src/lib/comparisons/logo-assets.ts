@@ -1,4 +1,4 @@
-// Generated from reviewed public brand assets on 2026-09-01.
+// Generated from reviewed public brand assets on 2026-09-03.
 // Assets are stored locally; source URLs are provenance only and are never fetched at render time.
 export const COMPARISON_LOGO_ASSETS = {
   "whoop": {"alt":"WHOOP logo","height":512,"path":"/compare/logos/whoop.png","sourceKind":"official","sourceUrl":"https://apps.apple.com/us/app/whoop/id933944389","width":512},
@@ -103,6 +103,16 @@ export const COMPARISON_LOGO_ASSETS = {
   "hume-health": {"alt":"Hume Health logo","height":36,"path":"/compare/logos/hume-health.png","sourceKind":"official","sourceUrl":"https://humehealth.com/cdn/shop/files/hume_health_logo.png?v=1697520680\\u0026width=267","width":267},
   "humanity": {"alt":"Humanity logo","height":24,"path":"/compare/logos/humanity.svg","sourceKind":"official","sourceUrl":"https://cdn.prod.website-files.com/66451ef81f7cd0f029179bf1/66451ef81f7cd0f029179bf4_Humanity%20logo.svg","width":301},
   "healthily": {"alt":"Healthily logo","height":512,"path":"/compare/logos/healthily.jpg","sourceKind":"official","sourceUrl":"https://apps.apple.com/us/app/health-tracker-healthily/id1491316446","width":512},
+  "tempo": {"alt":"Tempo logo","height":1920,"path":"/compare/logos/tempo.png","sourceKind":"official","sourceUrl":"https://jointempo.app/assets/tempo-icon.png","width":1920},
+  "nudge": {"alt":"Nudge logo","height":1000,"path":"/compare/logos/nudge.png","sourceKind":"official","sourceUrl":"https://www.nudge.gs/favicon.png","width":1000},
+  "matcha": {"alt":"Matcha logo","height":1024,"path":"/compare/logos/matcha.jpg","sourceKind":"official","sourceUrl":"https://heymatcha.app/assets/logomark.jpg","width":1024},
+  "iris": {"alt":"Iris logo","height":272,"path":"/compare/logos/iris.svg","sourceKind":"official","sourceUrl":"https://chatwithiris.com/iris-logo-mark.svg","width":272},
+  "sam-by-sunflower": {"alt":"Sam by Sunflower logo","height":180,"path":"/compare/logos/sam-by-sunflower.png","sourceKind":"official","sourceUrl":"https://sunflowersober.com/apple-icon.png","width":180},
+  "bo": {"alt":"Bo logo","height":180,"path":"/compare/logos/bo.png","sourceKind":"official","sourceUrl":"https://getbo.com/icons/apple-icon-180x180.png","width":180},
+  "capy": {"alt":"Capy by MeAgain logo","height":180,"path":"/compare/logos/capy.png","sourceKind":"official","sourceUrl":"https://meagain.com/apple-touch-icon.png","width":180},
+  "mochi": {"alt":"Mochi logo","height":512,"path":"/compare/logos/mochi.png","sourceKind":"official","sourceUrl":"https://mochitext.com/android-chrome-512x512.png","width":512},
+  "askpetal": {"alt":"AskPetal logo","height":512,"path":"/compare/logos/askpetal.png","sourceKind":"official","sourceUrl":"https://askpetal.com/favicon.png","width":512},
+  "miora": {"alt":"miora logo","height":1024,"path":"/compare/logos/miora.png","sourceKind":"official","sourceUrl":"https://getmiora.com/favicon.png","width":1024},
 } as const;
 
 export type ComparisonLogoSlug = keyof typeof COMPARISON_LOGO_ASSETS;

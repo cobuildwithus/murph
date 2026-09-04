@@ -46,6 +46,19 @@ const HUMAN_COPY_FIELDS = [
 
 const QUICK_STATUS_RANK = { connected: 2, limited: 1, no: 0, yes: 3 } as const;
 
+const NEW_MESSAGING_HEALTH_GUIDES = [
+  "askpetal",
+  "bo",
+  "capy",
+  "iris",
+  "matcha",
+  "miora",
+  "mochi",
+  "nudge",
+  "sam-by-sunflower",
+  "tempo",
+] as const;
+
 // Guides whose data Murph can read through a connection it actually offers
 // (direct integrations plus Apple Health relays for iPhone-paired devices).
 const CONNECTED_GUIDES = new Set([
@@ -179,7 +192,7 @@ describe("comparison catalog", () => {
   });
 
   it("publishes a substantial, unique, source-backed catalog", () => {
-    expect(COMPARISONS.length).toBeGreaterThanOrEqual(60);
+    expect(COMPARISONS.length).toBeGreaterThanOrEqual(112);
 
     assert.deepEqual(
       Object.keys(MURPH_COMPARISON_EVIDENCE).sort(),
@@ -372,6 +385,12 @@ describe("comparison catalog", () => {
     expect(categories).toEqual(
       new Set(COMPARISON_CATEGORIES.map((category) => category.id)),
     );
+  });
+
+  it("publishes the ten messaging health guides", () => {
+    for (const slug of NEW_MESSAGING_HEALTH_GUIDES) {
+      expect(comparisonBySlug(slug).lastVerified).toBe("2026-09-03");
+    }
   });
 
   it("keeps every guide's ten rows to ten distinct decisions", () => {
