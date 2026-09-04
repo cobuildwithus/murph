@@ -1,10 +1,11 @@
 import type {
   HostedExecutionSnapshotRefState,
 } from "./bundles.ts";
-import type {
-  HostedExecutionDeviceSyncRuntimeApplyRequest,
-  HostedExecutionDeviceSyncRuntimeSnapshotRequest,
-  HostedExecutionDeviceSyncWakeHint,
+import {
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT,
+  type HostedExecutionDeviceSyncRuntimeApplyRequest,
+  type HostedExecutionDeviceSyncRuntimeSnapshotRequest,
+  type HostedExecutionDeviceSyncWakeHint,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
   AssistantRuntimeIssueRecord,
@@ -3759,6 +3760,8 @@ export type HostedRuntimeRedactedValue =
   | HostedRuntimeRedactedObject[];
 export type HostedRuntimeRedactedJson = Record<string, HostedRuntimeRedactedValue>;
 export const HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH = 16;
+export const HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT =
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT;
 
 export interface HostedRuntimeLogEntry {
   at: string;

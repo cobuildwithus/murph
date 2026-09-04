@@ -124,7 +124,7 @@ describe.skipIf(!runPostgresProof)(
         firstPendingSeq: null,
         importedSeq: "1",
         memberIds,
-        retainedDeviceRetrySeqs: ["1"],
+        deviceSyncContinuationSeqs: ["1"],
       });
       const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
@@ -146,7 +146,7 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
-    it("accepts retained owners independently from another connection's blocking wake", async () => {
+    it("keeps continuation ownership exact through recording and completion", async () => {
       const client = requirePrisma(prisma);
       const firstRetained = await seedRetiredScheduledWake({
         client,
@@ -156,7 +156,7 @@ describe.skipIf(!runPostgresProof)(
         laneSeq: 4n,
         memberIds,
         nextSeq: 10n,
-        retainedDeviceRetrySeqs: ["4", "6"],
+        deviceSyncContinuationSeqs: ["4", "6"],
       });
       const secondRetained = await insertRetiredScheduledWake({
         client,
@@ -190,6 +190,73 @@ describe.skipIf(!runPostgresProof)(
           });
         }
 
+        const recordingCheckpoint = await checkpointHostedWorkspace({
+          checkpointedAt: "2026-09-04T12:00:00.000Z",
+          expectedVersion: "0",
+          prisma: client,
+          reason: "idle_shutdown",
+          redactedStatusJson: {
+            hostedMailboxSystemDeviceSyncContinuationSeqs: ["4", "6"],
+            hostedMailboxSystemFirstPendingSeq: "9",
+            hostedMailboxSystemHandledThroughSeq: "8",
+            hostedMailboxSystemImportedSeq: "9",
+          },
+          snapshotRef: null,
+          userId: firstRetained.memberId,
+        });
+        expect(recordingCheckpoint.status).toBe("updated");
+        await expect(client.$transaction((tx) =>
+          appendHostedScheduledDeviceSyncWakeEnvelopeTx({
+            envelope: firstRetained.wake,
+            tx,
+          })
+        )).resolves.toMatchObject({
+          dedupeConflict: false,
+          duplicate: true,
+          inserted: false,
+          runtimeOwnedRetiredDuplicate: true,
+        });
+
+        const completedCheckpoint = await checkpointHostedWorkspace({
+          checkpointedAt: "2026-09-04T12:01:00.000Z",
+          expectedVersion: "1",
+          prisma: client,
+          reason: "idle_shutdown",
+          redactedStatusJson: {
+            hostedMailboxSystemDeviceSyncContinuationSeqs: ["6"],
+            hostedMailboxSystemFirstPendingSeq: "9",
+            hostedMailboxSystemHandledThroughSeq: "8",
+            hostedMailboxSystemImportedSeq: "9",
+          },
+          snapshotRef: null,
+          userId: firstRetained.memberId,
+        });
+        expect(completedCheckpoint.status).toBe("updated");
+        await expect(client.$transaction((tx) =>
+          appendHostedScheduledDeviceSyncWakeEnvelopeTx({
+            envelope: firstRetained.wake,
+            tx,
+          })
+        )).resolves.toMatchObject({
+          dedupeConflict: true,
+          duplicate: true,
+          inserted: false,
+          runtimeOwnedRetiredDuplicate: false,
+        });
+        for (const fixture of [secondRetained, blocking]) {
+          await expect(client.$transaction((tx) =>
+            appendHostedScheduledDeviceSyncWakeEnvelopeTx({
+              envelope: fixture.wake,
+              tx,
+            })
+          )).resolves.toMatchObject({
+            dedupeConflict: false,
+            duplicate: true,
+            inserted: false,
+            runtimeOwnedRetiredDuplicate: true,
+          });
+        }
+
         await expect(client.$transaction((tx) =>
           appendHostedScheduledDeviceSyncWakeEnvelopeTx({
             envelope: completed.wake,
@@ -201,7 +268,7 @@ describe.skipIf(!runPostgresProof)(
           inserted: false,
           runtimeOwnedRetiredDuplicate: false,
         });
-        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn).toHaveBeenCalledTimes(2);
       } finally {
         warn.mockRestore();
       }
@@ -402,14 +469,14 @@ describe.skipIf(!runPostgresProof)(
         firstPendingSeq: null,
         importedSeq: "1",
         label: "a retained-owner list that omits the handled wake",
-        retainedDeviceRetrySeqs: ["2"],
+        deviceSyncContinuationSeqs: ["2"],
       },
       {
         consumedSeq: 1n,
         firstPendingSeq: null,
         importedSeq: "1",
         label: "a malformed retained-owner claim",
-        retainedDeviceRetrySeqs: "1",
+        deviceSyncContinuationSeqs: "1",
       },
       {
         importedSeq: "1",
@@ -429,7 +496,7 @@ describe.skipIf(!runPostgresProof)(
       laneSeq,
       nextSeq,
       occurredAtOffsetMs,
-      retainedDeviceRetrySeqs,
+      deviceSyncContinuationSeqs,
       sidecar,
     }) => {
       const client = requirePrisma(prisma);
@@ -443,7 +510,7 @@ describe.skipIf(!runPostgresProof)(
         memberIds,
         nextSeq,
         occurredAtOffsetMs,
-        retainedDeviceRetrySeqs,
+        deviceSyncContinuationSeqs,
         sidecar,
       });
       const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -483,7 +550,7 @@ async function seedRetiredScheduledWake(input: {
   memberIds: string[];
   nextSeq?: bigint;
   occurredAtOffsetMs?: number;
-  retainedDeviceRetrySeqs?: string[] | string | null;
+  deviceSyncContinuationSeqs?: string[] | string | null;
   sidecar?: boolean;
 }) {
   const suffix = randomUUID().replaceAll("-", "");
@@ -504,11 +571,11 @@ async function seedRetiredScheduledWake(input: {
         hostedMailboxSystemHandledThroughSeq:
           (input.consumedSeq ?? 0n).toString(),
         hostedMailboxSystemImportedSeq: input.importedSeq,
-        ...(input.retainedDeviceRetrySeqs === undefined
+        ...(input.deviceSyncContinuationSeqs === undefined
           ? {}
           : {
-              hostedMailboxSystemRetainedDeviceRetrySeqs:
-                input.retainedDeviceRetrySeqs,
+              hostedMailboxSystemDeviceSyncContinuationSeqs:
+                input.deviceSyncContinuationSeqs,
             }),
       },
       userId: memberId,

@@ -8590,8 +8590,8 @@ async function withHostedMailboxProgressStatus(input: {
       systemMailboxProgress.handledThroughSeq,
     hostedMailboxSystemFirstPendingSeq:
       systemMailboxProgress.firstPendingSeq,
-    hostedMailboxSystemRetainedDeviceRetrySeqs:
-      systemMailboxProgress.retainedDeviceRetrySeqs,
+    hostedMailboxSystemDeviceSyncContinuationSeqs:
+      systemMailboxProgress.deviceSyncContinuationSeqs,
   };
 }
 

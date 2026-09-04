@@ -13,7 +13,7 @@ import {
 import {
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_EVENT_ID_PREFIX,
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS,
-  HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH,
+  HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT,
 } from "@murphai/hosted-execution/runtime-control";
 import { parseMemberActionOutcomeV1 } from "@murphai/contracts";
 import {
@@ -89,6 +89,7 @@ export type HostedSystemMailboxRouteAction =
 
 export interface HostedSystemMailboxPendingItem {
   attemptCount: number;
+  deviceSyncContinuationOwner?: true;
   itemId: string;
   lastAttemptAt: string | null;
   lastErrorCode: string | null;
@@ -152,9 +153,9 @@ export async function readHostedSystemMailboxProgress(input: {
 }
 
 export interface HostedSystemMailboxProgress {
+  deviceSyncContinuationSeqs: string[];
   firstPendingSeq: string | null;
   handledThroughSeq: string;
-  retainedDeviceRetrySeqs: string[];
 }
 
 export function resolveHostedSystemMailboxHandledThroughSeq(input: {
@@ -176,7 +177,10 @@ export function resolveHostedSystemMailboxProgress(input: {
 
   const importedSeq = BigInt(input.importedSeq);
   let earliestPendingSeq: bigint | null = null;
-  const retainedDeviceRetrySeqs = new Set<bigint>();
+  const deviceSyncContinuation = resolveHostedDeviceSyncContinuationProjection({
+    importedSeq,
+    state: input.state,
+  });
   const now = input.now ?? new Date().toISOString();
   for (const item of input.state.pending) {
     if (isHostedDeviceSyncDenseRawRetentionMailboxItem(item)) {
@@ -186,19 +190,16 @@ export function resolveHostedSystemMailboxProgress(input: {
       continue;
     }
 
-    // Retained device retries are local continuations of handled mailbox
-    // items. Report their exact owners without holding back lane progress.
-    if (isHostedRetainedDeviceJobRetry(item)) {
-      if (item.mailboxLaneSeq !== null) {
-        retainedDeviceRetrySeqs.add(BigInt(item.mailboxLaneSeq));
-      }
+    // A marked device item is a runtime-owned continuation until the existing
+    // mailbox owner removes it. Its status transitions do not change ownership.
+    if (deviceSyncContinuation?.itemIds.has(item.itemId)) {
       continue;
     }
     if (item.mailboxLaneSeq === null) {
       return {
+        deviceSyncContinuationSeqs: [],
         firstPendingSeq: null,
         handledThroughSeq: "0",
-        retainedDeviceRetrySeqs: [],
       };
     }
     const pendingSeq = BigInt(item.mailboxLaneSeq);
@@ -207,18 +208,63 @@ export function resolveHostedSystemMailboxProgress(input: {
     }
   }
 
-  const retainedSeqs = [...retainedDeviceRetrySeqs]
-    .sort((left, right) => left < right ? -1 : left > right ? 1 : 0)
-    .slice(0, HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH)
-    .map((seq) => seq.toString());
   const handledBeforePending = earliestPendingSeq === null
     ? importedSeq
     : earliestPendingSeq - 1n;
   return {
+    deviceSyncContinuationSeqs:
+      deviceSyncContinuation?.seqs.map((seq) => seq.toString()) ?? [],
     firstPendingSeq: earliestPendingSeq?.toString() ?? null,
     handledThroughSeq:
       (handledBeforePending < importedSeq ? handledBeforePending : importedSeq).toString(),
-    retainedDeviceRetrySeqs: retainedSeqs,
+  };
+}
+
+function resolveHostedDeviceSyncContinuationProjection(
+  input: {
+    importedSeq: bigint;
+    state: HostedSystemMailboxState;
+  },
+): { itemIds: Set<string>; seqs: bigint[] } | null {
+  const candidates = input.state.pending.filter((item) =>
+    item.deviceSyncContinuationOwner === true
+  );
+  if (
+    candidates.length
+      > HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT
+  ) {
+    return null;
+  }
+
+  const connectionIds = new Set<string>();
+  const itemIds = new Set<string>();
+  const seqs = new Set<bigint>();
+  for (const item of candidates) {
+    const connectionId = item.wake.kind === "device-sync.wake"
+      ? item.wake.connectionId ?? null
+      : null;
+    if (
+      item.routeAction !== "run-device-sync-wake"
+      || connectionId === null
+      || item.mailboxLaneSeq === null
+      || item.mailboxDedupeKey !== item.wake.eventId
+      || connectionIds.has(connectionId)
+      || itemIds.has(item.itemId)
+    ) {
+      return null;
+    }
+    const seq = BigInt(item.mailboxLaneSeq);
+    if (seq > input.importedSeq || seqs.has(seq)) {
+      return null;
+    }
+    connectionIds.add(connectionId);
+    itemIds.add(item.itemId);
+    seqs.add(seq);
+  }
+
+  return {
+    itemIds,
+    seqs: [...seqs].sort((left, right) => left < right ? -1 : left > right ? 1 : 0),
   };
 }
 
@@ -693,6 +739,24 @@ function isHostedRetainedDeviceJobRetry(
   ) === true;
 }
 
+function isHostedLegacyDeviceSyncContinuationOwner(
+  item: HostedSystemMailboxPendingItem,
+): boolean {
+  return item.routeAction === "run-device-sync-wake"
+    && item.mailboxLaneSeq !== null
+    && item.mailboxDedupeKey === item.wake.eventId
+    && isHostedRetainedDeviceJobRetry(item);
+}
+
+function withHostedLegacyDeviceSyncContinuationOwnership(
+  item: HostedSystemMailboxPendingItem,
+): HostedSystemMailboxPendingItem {
+  return item.deviceSyncContinuationOwner === undefined
+      && isHostedLegacyDeviceSyncContinuationOwner(item)
+    ? { ...item, deviceSyncContinuationOwner: true }
+    : item;
+}
+
 function findNextHostedSystemMailboxQueueItemByOrder(input: {
   allowedRouteActions: readonly HostedSystemMailboxRouteAction[] | null;
   now: string;
@@ -981,7 +1045,15 @@ function parseHostedSystemMailboxPendingItem(value: unknown): HostedSystemMailbo
     throw new TypeError("hosted system mailbox wake must be a system wake.");
   }
 
-  return {
+  const item: HostedSystemMailboxPendingItem = {
+    ...(record.deviceSyncContinuationOwner === undefined
+      ? {}
+      : {
+          deviceSyncContinuationOwner: readRequiredTrue(
+            record.deviceSyncContinuationOwner,
+            "hosted system mailbox deviceSyncContinuationOwner",
+          ),
+        }),
     itemId: readRequiredString(record.itemId, "hosted system mailbox itemId"),
     attemptCount: readNonNegativeInteger(
       record.attemptCount ?? 0,
@@ -1025,6 +1097,7 @@ function parseHostedSystemMailboxPendingItem(value: unknown): HostedSystemMailbo
       : parseHostedSystemMailboxStatus(record.status),
     wake,
   };
+  return withHostedLegacyDeviceSyncContinuationOwnership(item);
 }
 
 function parseHostedSystemMailboxRouteAction(value: unknown): HostedSystemMailboxRouteAction {
@@ -1468,6 +1541,7 @@ function hostedSystemMailboxPendingItemsMatch(
   right: HostedSystemMailboxPendingItem,
 ): boolean {
   return left.itemId === right.itemId
+    && left.deviceSyncContinuationOwner === right.deviceSyncContinuationOwner
     && left.attemptCount === right.attemptCount
     && left.lastAttemptAt === right.lastAttemptAt
     && left.mailboxDedupeKey === right.mailboxDedupeKey
@@ -1485,6 +1559,13 @@ function readRequiredString(value: unknown, label: string): string {
     throw new TypeError(`${label} must be a non-empty string.`);
   }
   return value;
+}
+
+function readRequiredTrue(value: unknown, label: string): true {
+  if (value !== true) {
+    throw new TypeError(`${label} must be true when present.`);
+  }
+  return true;
 }
 
 function readOptionalPositiveIntegerString(value: unknown, label: string): string | null {

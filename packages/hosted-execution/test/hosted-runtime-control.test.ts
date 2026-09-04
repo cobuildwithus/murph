@@ -38,6 +38,7 @@ import {
   HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_REASON_STATUS_KEY,
   HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_STATUS_KEY,
   HOSTED_RUNTIME_LOG_EVENT_CODES,
+  HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT,
   HOSTED_RUNTIME_ORCHESTRATION_LATENCY_DIAGNOSTICS_HEADER,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
   HOSTED_WORKSPACE_INVOCATION_STATUSES,
@@ -2866,6 +2867,29 @@ describe("hosted runtime control contracts", () => {
     expect(() => parseHostedRuntimeRedactedJson({
       source: "retrying hosted-user-runtime:opaque-test",
     }, "Hosted runtime redacted JSON")).toThrow(/direct identifier/u);
+  });
+
+  it("bounds device-sync continuation owners to the runtime connection authority", () => {
+    const continuationSeqs = Array.from(
+      { length: HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT },
+      (_, index) => String(index + 1),
+    );
+    expect(parseHostedRuntimeRedactedJson({
+      hostedMailboxSystemDeviceSyncContinuationSeqs: continuationSeqs,
+    }, "Hosted runtime redacted JSON")).toEqual({
+      hostedMailboxSystemDeviceSyncContinuationSeqs: continuationSeqs,
+    });
+    expect(() => parseHostedRuntimeRedactedJson({
+      hostedMailboxSystemDeviceSyncContinuationSeqs: [
+        ...continuationSeqs,
+        String(HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT + 1),
+      ],
+    }, "Hosted runtime redacted JSON")).toThrow(
+      new RegExp(
+        `at most ${HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT} redacted values`,
+        "u",
+      ),
+    );
   });
 
   it("accepts retired device-sync environment logs from warm runners", () => {

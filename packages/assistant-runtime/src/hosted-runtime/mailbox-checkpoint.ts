@@ -177,8 +177,8 @@ export async function importHostedMailboxPrefixAndCheckpoint(
         systemMailboxProgress.handledThroughSeq,
       hostedMailboxSystemFirstPendingSeq:
         systemMailboxProgress.firstPendingSeq,
-      hostedMailboxSystemRetainedDeviceRetrySeqs:
-        systemMailboxProgress.retainedDeviceRetrySeqs,
+      hostedMailboxSystemDeviceSyncContinuationSeqs:
+        systemMailboxProgress.deviceSyncContinuationSeqs,
     };
     const checkpointRequest = await input.createCheckpointRequest({
       importResult,

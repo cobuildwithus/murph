@@ -2696,16 +2696,27 @@ the schedule identity and the runtime checkpoint supplies one of two exact
 sequence proofs. A first-unhandled row must equal both the lane counter's next
 sequence and `hostedMailboxSystemFirstPendingSeq`. A row already at or behind
 the handled frontier must appear in
-`hostedMailboxSystemRetainedDeviceRetrySeqs`, the sorted set of up to 16 oldest
-sequenced device retries still retained by the runtime. The same checkpoint's
+`hostedMailboxSystemDeviceSyncContinuationSeqs`, the sorted exact set of
+sequenced device continuations still owned by the runtime. Ownership begins only
+when post-checkpoint retention transfers the imported wake to that local owner,
+persists on the existing mailbox item across pending, sending, recording,
+retryable recording, and preemption transitions, and ends when existing
+completion removes the item. Restore promotes the exact legacy pending
+retained-job shape to the marker once so rollout does not strand an existing
+owner; projection after that compatibility read is marker-based. The set admits
+at most one owner per connection and is capped by the existing 100-connection
+complete-snapshot hydration authority.
+Malformed structure, a duplicate connection, item, or sequence, a sequence past
+the imported watermark, or overflow invalidates the whole projection: the
+runtime publishes an empty owner set and treats every marked item as an ordinary
+frontier blocker. The same checkpoint's
 canonical system imported watermark must cover the sequence without exceeding
 the allocated high-water mark. The row must have no inline ciphertext, sidecar,
 payload reference, byte count, or hash. A missing, malformed, or different
 owner proof—including when supported legacy unsequenced work makes the frontier
 ambiguous—a skipped-ahead or never-imported row, malformed watermark, remaining
 payload surface, or structural mismatch stays a dedupe conflict and fails
-recovery closed. A retained owner beyond the 16-item projection also fails
-closed until earlier retained retries leave the set.
+recovery closed.
 Runtime-owned retry state remains the sole continuation owner for an accepted
 retired duplicate. Corrected runtimes overwrite the owner set on every
 checkpoint. Deploy and drain those runtime containers before Web accepts

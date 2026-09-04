@@ -87,7 +87,7 @@ describe("hosted mailbox import checkpoint wrapper", () => {
             hostedMailboxSystemFirstPendingSeq: null,
             hostedMailboxSystemHandledThroughSeq: "0",
             hostedMailboxSystemImportedSeq: "0",
-            hostedMailboxSystemRetainedDeviceRetrySeqs: [],
+            hostedMailboxSystemDeviceSyncContinuationSeqs: [],
           });
           Object.assign(input.redactedStatus, {
             hostedMailboxImportedCount: 999,
@@ -154,7 +154,7 @@ describe("hosted mailbox import checkpoint wrapper", () => {
         hostedMailboxSystemFirstPendingSeq: null,
         hostedMailboxSystemHandledThroughSeq: "0",
         hostedMailboxSystemImportedSeq: "0",
-        hostedMailboxSystemRetainedDeviceRetrySeqs: [],
+        hostedMailboxSystemDeviceSyncContinuationSeqs: [],
       });
       assert.equal(
         JSON.stringify(checkpointRequests).includes("ciphertext_inline_synthetic_checkpoint"),
@@ -318,7 +318,7 @@ describe("hosted mailbox import checkpoint wrapper", () => {
         hostedMailboxSystemFirstPendingSeq: null,
         hostedMailboxSystemHandledThroughSeq: "0",
         hostedMailboxSystemImportedSeq: "2",
-        hostedMailboxSystemRetainedDeviceRetrySeqs: [],
+        hostedMailboxSystemDeviceSyncContinuationSeqs: [],
       });
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });

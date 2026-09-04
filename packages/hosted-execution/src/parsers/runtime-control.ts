@@ -62,6 +62,7 @@ import {
   HOSTED_RUNTIME_LOG_PHASES,
   HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
   HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH,
+  HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   sanitizeHostedProductFeedbackSummary,
@@ -9889,9 +9890,12 @@ function parseHostedRuntimeRedactedValue(
   }
 
   if (Array.isArray(value)) {
-    if (value.length > HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH) {
+    const maxLength = key === "hostedMailboxSystemDeviceSyncContinuationSeqs"
+      ? HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT
+      : HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH;
+    if (value.length > maxLength) {
       throw new TypeError(
-        `${label} must contain at most ${HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH} redacted values.`,
+        `${label} must contain at most ${maxLength} redacted values.`,
       );
     }
 

@@ -6,69 +6,132 @@ Updated: 2026-09-04
 
 ## Goal
 
-- Let the scheduled device-sync recovery sweep recognize a payload-retired wake that is still owned by an exact runtime retry after the canonical handled frontier advances past it.
+- Let scheduled device-sync recovery recognize a payload-retired wake for the
+  entire lifetime of its exact runtime-owned continuation, without weakening
+  the ordinary mailbox frontier.
 
 ## Success criteria
 
-- Runtime checkpoint progress preserves the first blocking mailbox sequence and separately reports every bounded retained device-retry owner.
-- Web accepts a structurally exact scheduled-v3 duplicate only when that row is either the exact first blocking item or an exact retained owner already behind the handled frontier, and the imported watermark covers it.
-- Missing, different, malformed, never-imported, or payload-bearing ownership claims continue to fail closed.
-- Focused runtime and PostgreSQL tests reproduce the composed retained-retry state and pass.
-- Package typechecks and required exact-head PR checks pass.
+- Ownership begins at the existing post-checkpoint retention transfer, remains
+  stable through every current pending/sending/recording retry transition, and
+  ends through the existing item-removal path.
+- Runtime checkpoints preserve the first ordinary blocking sequence and
+  separately report every valid device-sync continuation owner.
+- Web accepts a structurally exact scheduled-v3 duplicate only when it is the
+  exact first unhandled item or an exact continuation owner already behind the
+  handled frontier, with a covering imported watermark.
+- Missing, completed, different, malformed, never-imported, payload-bearing,
+  duplicate, or over-cap ownership fails closed.
+- Focused runtime and real-PostgreSQL tests reproduce the composed lifecycle and
+  pass, followed by package typechecks and required exact-head PR gates.
 
 ## Architecture and ownership
 
-- Runtime remains the sole owner of retained retry state and derives the blocking frontier plus retained-owner set from its existing system-mailbox state.
-- Web remains the mailbox and schedule-admission owner and consumes those exact sequence projections; it does not infer retry ownership from the handled watermark.
-- No canonical state, schema, queue, scheduler, repair job, or second retry owner is added.
+- Runtime remains the sole continuation owner. The existing versioned local
+  system-mailbox item gains one optional literal-true lineage marker, assigned
+  only by the existing post-checkpoint retention transition.
+- Existing item-copying transitions preserve the marker through pending,
+  sending, recording, retryable recording, and preemption. Existing completion
+  removes the item and therefore its ownership; there is no separate cleanup.
+- Restore promotes only the exact legacy pending retained-job shape to the
+  marker, preserving owners created before rollout without keeping a second
+  status-derived projection path.
+- Checkpoint projection derives both views from that one mailbox state: marked
+  valid continuations do not pin the ordinary frontier, while all other items do.
+- Projection is all-or-nothing, sorted, limited to one owner per connection, and
+  capped by the existing 100-connection complete-snapshot hydration authority.
+  Any invalid, duplicate, impossible, or excess owner makes every marked item an
+  ordinary blocker and publishes an empty continuation set.
+- Web remains the mailbox and schedule-admission owner. It consumes only the
+  exact checkpoint sequences and never infers ownership from the handled
+  watermark.
+- No canonical table, queue, scheduler, repair job, service, or second retry
+  state machine is added.
 
 ## Evidence
 
-- Production-safe aggregates showed payload-retired scheduled-v3 rows covered by the imported and handled watermarks while their checkpoint first-pending sequence had advanced, causing deterministic dedupe conflicts.
-- Runtime currently excludes retained device retries from both `firstPendingSeq` and handled-frontier calculation.
-- Web currently requires both exact `firstPendingSeq` equality and `lane_seq = consumed_seq + 1`, coupling ownership proof back to the handled frontier.
+- Production-safe aggregates showed payload-retired scheduled-v3 rows covered
+  by imported and handled watermarks while the checkpoint's first-pending
+  sequence had advanced, producing deterministic dedupe conflicts.
+- The first candidate overloaded one global first-pending scalar. Review found
+  that one retained connection could mask another connection's valid blocker.
+- The second candidate separated pending retained retries, but review found that
+  the same owner disappeared from that status-derived set after entering durable
+  recording. This plan accepts that finding and models ownership as lineage
+  across the complete existing item lifecycle instead of as a transient status.
 
 ## Risks and mitigations
 
 1. Risk: Web could accept a completed or unrelated retired row.
-   Mitigation: require exact first-pending equality at the next sequence or exact retained-owner membership behind the frontier, plus imported/high-water bounds, scheduled-v3 identity checks, and the complete payload-retirement shape.
-2. Risk: retained retries could pin ordinary system-mailbox progress again.
-   Mitigation: keep retained retries out of the existing first-blocking accumulation and project their exact sequences separately.
-3. Risk: mixed runtime/Web versions could preserve a stale retained-owner list.
-   Mitigation: every corrected runtime checkpoint overwrites the bounded list, deploy and drain runtime containers before Web, and roll Web back before runtime if rollback is needed.
+   Mitigation: require exact first-unhandled equality or exact continuation
+   membership, imported/high-water bounds, scheduled-v3 identity, and complete
+   payload-retirement shape. Completion removes the owning item and projection.
+2. Risk: corrupt continuation metadata could advance the ordinary frontier.
+   Mitigation: validate route, wake, event/dedupe identity, connection, item,
+   sequence, imported bound, uniqueness, and cardinality before excluding any
+   marked item from the frontier; otherwise fail the whole projection closed.
+3. Risk: mixed runtime/Web versions could preserve a stale owner list.
+   Mitigation: corrected runtimes overwrite the list on every checkpoint;
+   deployment order remains runtime-and-drain before Web, with Web rolled back
+   first if rollback is required.
 
 ## Tasks
 
-1. Completed: the first candidate proved the production state but incorrectly overloaded one global first-pending scalar; final review found that one retained connection could mask another connection's valid first-blocking owner.
-2. Completed: preserved first-pending as the blocking frontier and published a separate bounded exact retained-owner set.
-3. Completed: added multi-connection runtime, PostgreSQL, sweeper, and signal regressions.
-4. Completed: updated the durable runtime protocol, reliability contract, and verification map for the corrected design.
-5. Completed locally: reran focused runtime/Web tests, the real-PostgreSQL replay, all three owner typechecks, documentation checks, and the complexity ratchet.
-6. Remaining: parent final review, exact-head CI, ReviewGPT round 2, merge, coordinated deployment, and production convergence proof.
+1. Completed: reproduced the production ownership mismatch and proved the
+   global-first-pending masking failure.
+2. Completed: accepted ReviewGPT's lifecycle finding and replaced the
+   status-derived retry list with one durable marker on the existing mailbox
+   item.
+3. Completed: added lifecycle, transition, invalid-cardinality, parser-bound,
+   legacy-restore, multi-connection, completion, and Web PostgreSQL regressions.
+4. Completed: updated the reliability, protocol, index, and testing contracts
+   for the lifecycle-complete design.
+5. Completed: reran focused and package verification, the isolated PostgreSQL
+   proof, documentation checks, and the complexity ratchet.
+6. Remaining: commit and push the exact candidate, run ReviewGPT on the new head
+   concurrently with CI, address any findings, archive this plan, verify the
+   current-base merge tree, and merge. Deployment is a separate authorization.
 
 ## Product UX
 
 - Effort: Patch.
-- Outcome: an existing connected device can resume its already-owned retry instead of the settings request failing because recovery rejected the same durable wake.
-- Recovery remains bounded and invisible; the fix does not create a new provider request owner or user-facing workflow.
+- Outcome: an existing connected device resumes its already-owned continuation
+  instead of a settings request failing because recovery rejected the same
+  durable wake.
+- Recovery remains bounded and invisible; the fix creates no new provider
+  request owner or user-facing workflow.
 
 ## Product UX walkthrough
 
-- Person and path: an existing member saves device settings while the scheduled recovery sweep encounters a payload-retired wake that the runtime still owns as a local retry.
-- Expected experience: the exact duplicate is treated as already accepted, the sweep does not convert it into a request failure, and the existing device retry remains responsible for completion.
-- Failure and recovery: a missing or inconsistent runtime ownership projection still fails closed; no provider work is recreated and no alternate scheduler is introduced.
-- Result: Pass locally. The production-shaped PostgreSQL cases accept two exact retained owners independently from another connection's blocking wake, and the 206-test Web wake/recovery slice preserves the route and sweeper behavior without recreating Temporal or device-sync signals. Production convergence remains a post-deploy gate.
+- Person and path: an existing member saves device settings while scheduled
+  recovery encounters a payload-retired wake whose runtime continuation is
+  pending, recording progress, or retrying that recording.
+- Expected experience: the exact duplicate is treated as already accepted, the
+  sweep does not convert it into a request failure, and the existing continuation
+  remains responsible for completion.
+- Failure and recovery: missing or inconsistent ownership fails closed; no
+  provider work is recreated and no alternate scheduler is introduced.
+- Result: local tests pass for two exact owners, another connection's blocker,
+  legacy restore, the pending-to-recording-to-completion lifecycle, and
+  whole-projection failure for ambiguity or overflow. Exact-head gates remain
+  pending.
 
 ## Changelog
 
-- Not applicable: this is an internal recovery correction that restores the existing connected-device promise without new copy, surface, capability, or member-visible behavior.
+- Not applicable: this internal recovery correction restores the existing
+  connected-device promise without new copy, surface, capability, or
+  member-visible behavior.
 
 ## Verification
 
-- Passed: `pnpm exec vitest run packages/assistant-runtime/test/hosted-runtime-mailbox-state.test.ts packages/assistant-runtime/test/hosted-runtime-mailbox-checkpoint.test.ts` (31 tests).
-- Passed: local PostgreSQL migrations plus the focused `device-sync-scheduled-wake-retention-postgres.test.ts` command from the testing map (20 tests).
-- Passed: focused Web wake and recovery slice (206 tests).
-- Passed: the production-shaped canonical schedule-event runtime replay (1 focused test).
-- Passed: `pnpm --dir packages/hosted-execution typecheck`, `pnpm --dir packages/assistant-runtime typecheck`, and `pnpm --dir apps/web typecheck`.
-- Passed: `pnpm complexity:diff`, `pnpm docs:drift`, `pnpm docs:gardening`, and `git diff --check`.
-- Remaining: exact-head CI and ReviewGPT.
+- Passed: hosted-execution parser suite (36 tests).
+- Passed: assistant-runtime mailbox state, checkpoint, and lifecycle suites (104
+  tests), including legacy-owner promotion.
+- Passed: assistant-runtime restore, scheduling, system-mailbox, and preemption
+  entrypoint suites (147 tests).
+- Passed: focused Web wake, due-reconcile, and recovery slice (206 tests).
+- Passed: isolated migrated PostgreSQL recovery suite (20 tests).
+- Passed: hosted-execution, assistant-runtime, and Web typechecks.
+- Passed: documentation drift/gardening, complexity ratchet, privacy scan, and
+  diff check.
+- Remaining: exact pushed-head ReviewGPT and CI gates.
