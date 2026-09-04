@@ -4663,6 +4663,24 @@ describe("RunnerContainer", () => {
     expect(destroy).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps the Codex shell diagnostic budget separate from runtime readiness", async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    try {
+      const { container } = createContainerDouble({
+        env: {
+          HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "20000",
+        },
+      });
+
+      await container.smokeHealth();
+
+      expect(timeoutSpy).toHaveBeenCalledWith(20_000);
+      expect(timeoutSpy).toHaveBeenCalledWith(60_000);
+    } finally {
+      timeoutSpy.mockRestore();
+    }
+  });
+
   it("can extend deploy smoke to run a direct R2 presigned PUT probe", async () => {
     const presignedPutUrl =
       "https://example-account.r2.cloudflarestorage.com/test-bucket/snapshot.enc?X-Amz-Signature=test";
