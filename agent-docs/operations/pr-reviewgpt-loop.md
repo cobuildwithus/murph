@@ -1,6 +1,6 @@
 # PR ReviewGPT Completion Loops
 
-Last verified: 2026-08-31
+Last verified: 2026-09-04
 
 This document owns the managed-browser `pr-review` loop: the final
 cross-cutting gate for eligible PR-lane work and the replacement for local
@@ -158,7 +158,7 @@ Use the ordinary turn-ending pause when an accepted finding does not qualify,
 the correction expands beyond the proven boundary, requested behavior or the
 intended outcome would change, scope or authority would expand, or a destructive
 or external action needs new approval. Neither exception bypasses an anomaly
-retrospective or the seven-round hard cap.
+retrospective or the three-round hard cap.
 
 `INVALID` and `RETROSPECTIVE_REQUIRED` retain their existing stop behavior
 rather than using this disposition path.
@@ -627,13 +627,13 @@ worktree active, and stop. Do not poll for a quiet base.
   the round counter; correct the gap and retry the same substantive round.
 - `ROUND_OUTCOME: RETROSPECTIVE_REQUIRED` pauses tactical remediation until the
   requirement-level retrospective is recorded. It is not a structural verdict.
-- Hard cap: 7 rounds per PR. There is no automatic eighth substantive round. An
-  accepted round-seven finding may still be reproduced and fixed; do not leave a
-  known bug in place merely because the review counter reached seven. After that
+- Hard cap: 3 rounds per PR. There is no automatic fourth substantive round. An
+  accepted round-three finding may still be reproduced and fixed; do not leave a
+  known bug in place merely because the review counter reached three. After that
   fix, pause the ReviewGPT loop and confirm parent final review, verification,
   and PR CI are all complete. Record the cap
   retrospective and obtain an explicit continuation decision before starting
-  round eight; the answer may be delete, revert, shrink, split, redesign,
+  round four; the answer may be delete, revert, shrink, split, redesign,
   continue, or abandon. A green non-ReviewGPT gate does not make the PR
   merge-ready without the required later resolved result.
 - Report a per-round summary at handoff: findings received, accepted, rejected
