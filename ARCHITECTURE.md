@@ -3915,7 +3915,7 @@ the digest and MP4/QuickTime/WebM signature, and only then permits external
 egress.
 
 The tool makes one inline legacy `generateContent` request to the fixed
-`gemini-3.7-flash` model. Murph chooses one semantic sampling mode before
+`gemini-3.8-flash` model. Murph chooses one semantic sampling mode before
 egress: omitted or `standard` maps to `videoMetadata.fps = 1`, while
 `detailed_motion` maps to 5 FPS for rapid movement, exercise phases, quick
 scene changes, or brief events. Both modes use medium thinking and new requests
@@ -3957,11 +3957,13 @@ Hosted execution carries only the Gemini sentinel in the runner. The exact
 Google host, model path, method, JSON shape, MIME set, sampling profile,
 thinking level, request/response limits, and manual redirect posture are
 revalidated by the Cloudflare egress interceptor before the Worker substitutes
-its credential. During the rollout compatibility window, that reader also
-admits only the exact previously deployed 1 FPS, low-thinking,
-1,800-output-token profile from a warm old runner. New runners never emit that
-legacy shape; remove the reader branch only after warm runners and the rollback
-floor have advanced.
+its credential. During the model rollout compatibility window, that reader also
+admits the exact previous `gemini-3.7-flash` path with either current request
+profile or the previously deployed 1 FPS, low-thinking, 1,800-output-token
+profile from an older warm runner. The capped profile remains invalid on the
+3.8 path. Usage records retain the model derived from the admitted path. New
+runners emit only the 3.8 path and current profiles; remove the 3.7 reader only
+after warm runners and the rollback floor have advanced.
 The narrow raw HTTP owner is intentional: the Google SDK does not expose the
 request-scoped fetch injection required by Murph's identity-bound provider
 boundary, while the current Interactions API cannot explicitly set video FPS.

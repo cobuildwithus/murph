@@ -90,6 +90,7 @@ import {
 import { parseHostedXaiRequestBody } from "../src/runner-egress-xai.ts";
 import {
   HOSTED_GEMINI_VIDEO_ANALYSIS_PATH,
+  HOSTED_GEMINI_VIDEO_ANALYSIS_PREVIOUS_MODEL_PATH,
 } from "../src/runner-egress-gemini.ts";
 import {
   sealHostedInferenceRuntimeTarget,
@@ -2201,7 +2202,16 @@ describe("hostedRunnerIntercept", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("injects Gemini credentials, preserves the fixed request, and records token usage", async () => {
+  it.each([
+    {
+      model: "gemini-3.8-flash",
+      path: HOSTED_GEMINI_VIDEO_ANALYSIS_PATH,
+    },
+    {
+      model: "gemini-3.7-flash",
+      path: HOSTED_GEMINI_VIDEO_ANALYSIS_PREVIOUS_MODEL_PATH,
+    },
+  ])("injects Gemini credentials and records $model usage", async ({ model, path }) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(PROVIDER_REQUEST_STARTED_AT));
     const upstreamPayload = {
@@ -2239,7 +2249,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request(
-        `https://generativelanguage.googleapis.com${HOSTED_GEMINI_VIDEO_ANALYSIS_PATH}`,
+        `https://generativelanguage.googleapis.com${path}`,
         {
           body: JSON.stringify(requestBody),
           headers: {
@@ -2294,7 +2304,7 @@ describe("hostedRunnerIntercept", () => {
       providerName: "Google Gemini",
       providerRequestId: "gemini-req-1",
       reasoningTokens: 7,
-      requestedModel: "gemini-3.7-flash",
+      requestedModel: model,
       totalTokens: 345,
       triggerKind: "analyze-video",
       usageExtractionSourcePath: "gemini.generateContent.usageMetadata",

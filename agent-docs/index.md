@@ -304,7 +304,7 @@ specified by `agent-docs/SECURITY.md`,
 `agent-docs/references/testing-ci-map.md`, and
 `agent-docs/exec-plans/active/2026-08-12-provider-request-guard.md`.
 
-On-demand hosted video analysis is one turn-scoped Gemini 3.7 Flash call over
+On-demand hosted video analysis is one turn-scoped Gemini 3.8 Flash call over
 an exact accepted-message attachment authority. The tool is offered on
 private-direct turns and authenticated Linq/Telegram group turns with accepted
 user-action input and a configured Worker credential. Any participant in an
