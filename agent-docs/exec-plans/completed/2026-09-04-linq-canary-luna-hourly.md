@@ -1,6 +1,6 @@
 # Linq production canary Luna and hourly cadence
 
-Status: candidate ready
+Status: completed
 Created: 2026-09-04
 Updated: 2026-09-04
 
@@ -78,3 +78,4 @@ Updated: 2026-09-04
   verification.
 - `actionlint .github/workflows/linq-production-canary.yml` and
   `git diff --check` passed.
+Completed: 2026-09-04
