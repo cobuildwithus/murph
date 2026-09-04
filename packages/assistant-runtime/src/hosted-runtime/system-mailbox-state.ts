@@ -739,20 +739,14 @@ function isHostedRetainedDeviceJobRetry(
   ) === true;
 }
 
-function isHostedLegacyDeviceSyncContinuationOwner(
-  item: HostedSystemMailboxPendingItem,
-): boolean {
-  return item.routeAction === "run-device-sync-wake"
-    && item.mailboxLaneSeq !== null
-    && item.mailboxDedupeKey === item.wake.eventId
-    && isHostedRetainedDeviceJobRetry(item);
-}
-
 function withHostedLegacyDeviceSyncContinuationOwnership(
   item: HostedSystemMailboxPendingItem,
 ): HostedSystemMailboxPendingItem {
   return item.deviceSyncContinuationOwner === undefined
-      && isHostedLegacyDeviceSyncContinuationOwner(item)
+      && item.routeAction === "run-device-sync-wake"
+      && item.mailboxLaneSeq !== null
+      && item.mailboxDedupeKey === item.wake.eventId
+      && isHostedRetainedDeviceJobRetry(item)
     ? { ...item, deviceSyncContinuationOwner: true }
     : item;
 }

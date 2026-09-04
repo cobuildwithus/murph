@@ -1369,8 +1369,8 @@ Last verified: 2026-09-04
   duplicate connection or sequence, impossible imported sequence, or overflow
   invalidates the whole projection: marked items remain ordinary blockers and
   Web receives no continuation owner set. A payload-retired duplicate is
-  recoverable behind the handled frontier only when that exact fail-closed owner
-  set names its sequence. A later due webhook for that same connection may
+  recoverable when that exact owner set names its sequence, independently of
+  another connection's position in the global frontier. A later due webhook for that same connection may
   admit the older exact retained mailbox item so newly dirty data can enter the
   local worker without waiting behind a historical retry. That webhook remains
   available for an exact continuation only when post-checkpoint

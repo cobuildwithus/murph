@@ -3631,8 +3631,7 @@ async function hasHostedMailboxRuntimeImportedRetiredDuplicateTx(input: {
               = to_jsonb(item."lane_seq"::text)
           )
           OR (
-            item."lane_seq" <= lane_counter."consumed_seq"
-            AND jsonb_typeof(
+            jsonb_typeof(
               workspace."redacted_status_json"
                 -> 'hostedMailboxSystemDeviceSyncContinuationSeqs'
             ) = 'array'

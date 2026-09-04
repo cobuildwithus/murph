@@ -1,11 +1,10 @@
 import type {
   HostedExecutionSnapshotRefState,
 } from "./bundles.ts";
-import {
-  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT,
-  type HostedExecutionDeviceSyncRuntimeApplyRequest,
-  type HostedExecutionDeviceSyncRuntimeSnapshotRequest,
-  type HostedExecutionDeviceSyncWakeHint,
+import type {
+  HostedExecutionDeviceSyncRuntimeApplyRequest,
+  HostedExecutionDeviceSyncRuntimeSnapshotRequest,
+  HostedExecutionDeviceSyncWakeHint,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
   AssistantRuntimeIssueRecord,
@@ -3760,8 +3759,6 @@ export type HostedRuntimeRedactedValue =
   | HostedRuntimeRedactedObject[];
 export type HostedRuntimeRedactedJson = Record<string, HostedRuntimeRedactedValue>;
 export const HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH = 16;
-export const HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT =
-  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT;
 
 export interface HostedRuntimeLogEntry {
   at: string;
@@ -3851,6 +3848,8 @@ export const HOSTED_WORKSPACE_INVOCATION_STATUSES = [
 export type HostedWorkspaceInvocationStatus = (typeof HOSTED_WORKSPACE_INVOCATION_STATUSES)[number];
 
 export const HOSTED_WORKSPACE_INVOCATION_MAX_MAILBOX_ITEMS = 100;
+export const HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT =
+  HOSTED_WORKSPACE_INVOCATION_MAX_MAILBOX_ITEMS;
 
 export interface HostedWorkspaceInvocationBudget {
   maxMailboxItems?: number | null;

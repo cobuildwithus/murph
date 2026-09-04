@@ -337,17 +337,32 @@ describe("hosted runtime system mailbox state", () => {
     });
   });
 
-  it("keeps one device continuation owner stable across status transitions", () => {
+  it.each([
+    { blocker: "9", handled: "8", owner: "4", owners: ["4", "6"] },
+    { blocker: "4", handled: "3", owner: "9", owners: ["6", "9"] },
+  ])("keeps owner $owner stable across status transitions beside blocker $blocker", ({ blocker, handled, owner, owners }) => {
     const retryAt = "2026-04-28T00:00:00.000Z";
     const retainedDeviceRetry = buildRetainedDeviceSyncMailboxItem({
       itemId: "retained_device_retry",
-      mailboxLaneSeq: "4",
+      mailboxLaneSeq: owner,
       retryAt,
     });
-    const pendingSuccessor = buildPendingSystemMailboxItem({
-      itemId: "pending_successor",
-      mailboxLaneSeq: "9",
-    });
+    const pendingBlocker = {
+      ...buildPendingDeviceSyncMailboxItem({
+        itemId: "pending_blocker",
+        mailboxLaneSeq: blocker,
+      }),
+      nextAttemptAt: "2026-04-29T00:00:00.000Z",
+      wake: buildHostedExecutionDeviceSyncWake({
+        connectionId: "dsc_pending_blocker",
+        eventId: "device-sync.wake:pending_blocker",
+        expectedConnectedAt: "2026-04-01T00:00:00.000Z",
+        occurredAt: "2026-04-27T00:00:00.000Z",
+        provider: "junction",
+        reason: "reconcile_due",
+        userId: "member_123",
+      }),
+    };
     const secondRetainedDeviceRetry = buildRetainedDeviceSyncMailboxItem({
       itemId: "second_retained_device_retry",
       mailboxLaneSeq: "6",
@@ -358,12 +373,12 @@ describe("hosted runtime system mailbox state", () => {
       importedSeq: "9",
       now: "2026-04-27T00:00:00.000Z",
       state: {
-        pending: [pendingSuccessor, secondRetainedDeviceRetry, retainedDeviceRetry],
+        pending: [pendingBlocker, secondRetainedDeviceRetry, retainedDeviceRetry],
       },
     })).toEqual({
-      deviceSyncContinuationSeqs: ["4", "6"],
-      firstPendingSeq: "9",
-      handledThroughSeq: "8",
+      deviceSyncContinuationSeqs: owners,
+      firstPendingSeq: blocker,
+      handledThroughSeq: handled,
     });
     for (const item of [
       retainedDeviceRetry,
@@ -388,11 +403,11 @@ describe("hosted runtime system mailbox state", () => {
       expect(resolveHostedSystemMailboxProgress({
         importedSeq: "9",
         now: retryAt,
-        state: { pending: [pendingSuccessor, item] },
+        state: { pending: [pendingBlocker, item] },
       })).toEqual({
-        deviceSyncContinuationSeqs: ["4"],
-        firstPendingSeq: "9",
-        handledThroughSeq: "8",
+        deviceSyncContinuationSeqs: [owner],
+        firstPendingSeq: blocker,
+        handledThroughSeq: handled,
       });
     }
   });

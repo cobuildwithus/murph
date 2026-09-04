@@ -18,8 +18,8 @@ Updated: 2026-09-04
 - Runtime checkpoints preserve the first ordinary blocking sequence and
   separately report every valid device-sync continuation owner.
 - Web accepts a structurally exact scheduled-v3 duplicate only when it is the
-  exact first unhandled item or an exact continuation owner already behind the
-  handled frontier, with a covering imported watermark.
+  exact first unhandled item or an exact continuation owner, independent of the
+  global handled frontier, with a covering imported watermark.
 - Missing, completed, different, malformed, never-imported, payload-bearing,
   duplicate, or over-cap ownership fails closed.
 - Focused runtime and real-PostgreSQL tests reproduce the composed lifecycle and
@@ -72,8 +72,8 @@ Updated: 2026-09-04
    marked item from the frontier; otherwise fail the whole projection closed.
 3. Risk: mixed runtime/Web versions could preserve a stale owner list.
    Mitigation: corrected runtimes overwrite the list on every checkpoint;
-   deployment order remains runtime-and-drain before Web, with Web rolled back
-   first if rollback is required.
+   initial deployment is compatible Web first, then immediate runner rollout;
+   any runtime rollback after ownership publication requires Web rollback first.
 
 ## Tasks
 
@@ -90,7 +90,24 @@ Updated: 2026-09-04
    proof, documentation checks, and the complexity ratchet.
 6. Remaining: commit and push the exact candidate, run ReviewGPT on the new head
    concurrently with CI, address any findings, archive this plan, verify the
-   current-base merge tree, and merge. Deployment is a separate authorization.
+   current-base merge tree, merge, and verify Web before immediate runner rollout. The current
+   user explicitly authorized shipping and deployment.
+
+## Resumed correction
+
+- Round 3's accepted finding reproduces in PostgreSQL: a continuation at
+  sequence 9 is rejected while another connection blocks at sequence 4.
+- Delete the global consumed-frontier predicate from exact continuation
+  admission; preserve structural identity, imported/high-water, and retirement
+  checks. Parameterize the existing lifecycle proof for both orderings.
+- Collapse the legacy-upgrade predicate into its only adapter caller.
+- Remove the Node-only runtime value import from Hosted Execution; derive the
+  cap from its browser-safe admission bound and verify equality with device
+  connection hydration in tests.
+- Initial rollout is consumer-first: old Web accepts at most 16 array values;
+  the new runtime can publish 100. Deploy compatible Web before the immediate
+  runner rollout. Missing ownership retains existing behavior during this
+  window; convergence is required before declaring the recovery fixed.
 
 ## Product UX
 
@@ -125,13 +142,15 @@ Updated: 2026-09-04
 ## Verification
 
 - Passed: hosted-execution parser suite (36 tests).
-- Passed: assistant-runtime mailbox state, checkpoint, and lifecycle suites (104
+- Passed: assistant-runtime mailbox state, checkpoint, and lifecycle suites (105
   tests), including legacy-owner promotion.
 - Passed: assistant-runtime restore, scheduling, system-mailbox, and preemption
   entrypoint suites (147 tests).
 - Passed: focused Web wake, due-reconcile, and recovery slice (206 tests).
-- Passed: isolated migrated PostgreSQL recovery suite (20 tests).
+- Passed: isolated migrated PostgreSQL recovery suite (21 tests), including both
+  sequence orderings and composed recovery with no new provider-work signals.
 - Passed: hosted-execution, assistant-runtime, and Web typechecks.
+- Passed: direct browser bundle of Hosted Execution runtime control.
 - Passed: changelog archive proof (9 tests) for the reused item.
 - Passed: documentation drift/gardening, complexity ratchet, privacy scan, and
   diff check.

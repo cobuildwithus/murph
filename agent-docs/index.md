@@ -11,8 +11,9 @@ Hosted system-mailbox checkpoints preserve one ordinary blocking frontier and
 separately project the exact device-sync continuations transferred to the local
 runtime owner. Ownership stays on the existing mailbox item through every retry
 and recording transition, while malformed or over-cap projections fail closed.
-That split lets Web recognize each payload-retired continuation without making
-one connection mask another connection's blocking item.
+That split lets Web recognize each payload-retired continuation regardless of
+another connection's global mailbox position. Initial rollout is compatible Web
+first, followed by immediate runner convergence.
 The contract and failure boundaries are
 specified by `agent-docs/RELIABILITY.md` and
 `agent-docs/references/hosted-runtime-protocol.md`.

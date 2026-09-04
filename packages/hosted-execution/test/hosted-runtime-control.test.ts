@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT,
+} from "@murphai/device-syncd/hosted-runtime";
 
 import {
   ASSISTANT_RUNTIME_ISSUE_SCHEMA,
@@ -2870,6 +2873,9 @@ describe("hosted runtime control contracts", () => {
   });
 
   it("bounds device-sync continuation owners to the runtime connection authority", () => {
+    expect(HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT).toBe(
+      HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT,
+    );
     const continuationSeqs = Array.from(
       { length: HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT },
       (_, index) => String(index + 1),

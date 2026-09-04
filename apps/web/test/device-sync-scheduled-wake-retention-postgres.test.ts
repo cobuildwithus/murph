@@ -4,6 +4,10 @@ import type { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { buildHostedDeviceSyncWake } from "@/src/lib/device-sync/wake";
+import { runHostedDeviceSyncDueReconcileSweeper } from "@/src/lib/device-sync/due-reconcile-sweeper";
+import { runHostedDeviceSyncRecoverySweep } from "@/src/lib/device-sync/recovery-sweeper";
+import * as runtimeSignal from "@/src/lib/hosted-orchestration/signal-runtime";
+import * as prismaModule from "@/src/lib/prisma";
 import {
   appendHostedMailboxEnvelopeTx,
   appendHostedScheduledDeviceSyncWakeEnvelopeTx,
@@ -146,17 +150,20 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
-    it("keeps continuation ownership exact through recording and completion", async () => {
+    it.each([
+      { blocker: 9n, consumed: 8n, owner: 4n },
+      { blocker: 4n, consumed: 3n, owner: 9n },
+    ])("keeps owner $owner exact through recording and completion beside blocker $blocker", async ({ blocker, consumed, owner }) => {
       const client = requirePrisma(prisma);
       const firstRetained = await seedRetiredScheduledWake({
         client,
-        consumedSeq: 8n,
-        firstPendingSeq: "9",
+        consumedSeq: consumed,
+        firstPendingSeq: String(blocker),
         importedSeq: "9",
-        laneSeq: 4n,
+        laneSeq: owner,
         memberIds,
         nextSeq: 10n,
-        deviceSyncContinuationSeqs: ["4", "6"],
+        deviceSyncContinuationSeqs: [String(owner), "6"],
       });
       const secondRetained = await insertRetiredScheduledWake({
         client,
@@ -170,10 +177,13 @@ describe.skipIf(!runPostgresProof)(
       });
       const blocking = await insertRetiredScheduledWake({
         client,
-        laneSeq: 9n,
+        laneSeq: blocker,
         memberId: firstRetained.memberId,
       });
       const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const getPrisma = vi.spyOn(prismaModule, "getPrisma").mockReturnValue(client);
+      const signal = vi.spyOn(runtimeSignal, "signalHostedDeviceSyncMailboxRuntime")
+        .mockImplementation(async () => { throw new Error("Unexpected runtime signal"); });
 
       try {
         for (const fixture of [firstRetained, secondRetained, blocking]) {
@@ -190,15 +200,50 @@ describe.skipIf(!runPostgresProof)(
           });
         }
 
+        const recovery = await runHostedDeviceSyncRecoverySweep({
+          runDueReconcileSweeper: () => runHostedDeviceSyncDueReconcileSweeper({
+            logger: { info: () => {}, warn: console.warn },
+            now: new Date("2026-09-04T12:00:00.000Z"),
+            store: {
+              listDueReconcileConnectionsForSweep: async () =>
+                [firstRetained, secondRetained, blocking].map(({ wake }) => ({
+                  connectionId: wake.connectionId!,
+                  connectedAt: wake.expectedConnectedAt!,
+                  nextReconcileAt: wake.hint!.nextReconcileAt!,
+                  provider: wake.provider!,
+                  userId: wake.userId,
+                })),
+            },
+          }),
+          runPreferenceHandoffSweeper: async () => ({
+            candidateUsers: 0,
+            handoffAccepted: 0,
+            handoffAttempted: 0,
+            handoffFailed: 0,
+            handoffLimit: 25,
+            handoffSkippedInactive: 0,
+            skippedCandidateUsers: 0,
+          }),
+        });
+        expect(recovery.dueReconcileSweeper).toMatchObject({
+          wakeAccepted: 3,
+          wakeFailed: 0,
+          wakeNotAccepted: 0,
+        });
+        expect(signal).not.toHaveBeenCalled();
+        expect(await client.deviceSyncSignal.count({
+          where: { userId: firstRetained.memberId },
+        })).toBe(0);
+
         const recordingCheckpoint = await checkpointHostedWorkspace({
           checkpointedAt: "2026-09-04T12:00:00.000Z",
           expectedVersion: "0",
           prisma: client,
           reason: "idle_shutdown",
           redactedStatusJson: {
-            hostedMailboxSystemDeviceSyncContinuationSeqs: ["4", "6"],
-            hostedMailboxSystemFirstPendingSeq: "9",
-            hostedMailboxSystemHandledThroughSeq: "8",
+            hostedMailboxSystemDeviceSyncContinuationSeqs: [String(owner), "6"],
+            hostedMailboxSystemFirstPendingSeq: String(blocker),
+            hostedMailboxSystemHandledThroughSeq: String(consumed),
             hostedMailboxSystemImportedSeq: "9",
           },
           snapshotRef: null,
@@ -224,8 +269,8 @@ describe.skipIf(!runPostgresProof)(
           reason: "idle_shutdown",
           redactedStatusJson: {
             hostedMailboxSystemDeviceSyncContinuationSeqs: ["6"],
-            hostedMailboxSystemFirstPendingSeq: "9",
-            hostedMailboxSystemHandledThroughSeq: "8",
+            hostedMailboxSystemFirstPendingSeq: String(blocker),
+            hostedMailboxSystemHandledThroughSeq: String(consumed),
             hostedMailboxSystemImportedSeq: "9",
           },
           snapshotRef: null,
@@ -270,6 +315,8 @@ describe.skipIf(!runPostgresProof)(
         });
         expect(warn).toHaveBeenCalledTimes(2);
       } finally {
+        signal.mockRestore();
+        getPrisma.mockRestore();
         warn.mockRestore();
       }
     });
