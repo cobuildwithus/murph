@@ -1117,7 +1117,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           },
           prompt: [
             "I've already seen your welcome and I'm ready to continue.",
-            "I'd like Murph's help building a steadier evening routine.",
+            "I'd like help building a healthier sleep routine.",
           ].join(' '),
         })
         const actions = readCapabilityRoutingActions(result.jsonEvents)
