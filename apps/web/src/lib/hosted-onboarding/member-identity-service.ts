@@ -661,7 +661,7 @@ export async function reconcileHostedPrivyIdentityOnMemberResolutionTx(input: {
   identity: HostedPrivyIdentity;
   member: HostedMemberCoreState;
 }> {
-  const emailIdentityForLock = input.preparedLiveIdentity ?? input.identity;
+  const emailIdentityForLock = resolveHostedPrivyIdentityForLock(input);
   const emailLockContact = await acquireHostedPrivyEmailIdentityLockTx({
     enabled: shouldAcquireHostedPrivyEmailIdentityLock({
       authMethod: input.authMethod,
@@ -836,6 +836,13 @@ async function acquireHostedPrivyEmailIdentityLockTx(input: {
     tx: input.prisma,
   });
   return contact;
+}
+
+function resolveHostedPrivyIdentityForLock(input: {
+  identity: HostedPrivyIdentity;
+  preparedLiveIdentity?: HostedPrivyIdentity;
+}): HostedPrivyIdentity {
+  return input.preparedLiveIdentity ?? input.identity;
 }
 
 function shouldAcquireHostedPrivyEmailIdentityLock(input: {
