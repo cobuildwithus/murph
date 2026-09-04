@@ -2475,6 +2475,16 @@ describe("hosted runtime control contracts", () => {
     });
     expect(() => parseHostedWorkspaceReadResponse({
       fetchedAt: "2026-04-26T00:00:02.000Z",
+      hostedAssistantAstraAllowed: "true",
+      workspace: null,
+    })).toThrow(/hostedAssistantAstraAllowed/u);
+    expect(parseHostedWorkspaceReadResponse({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      hostedAssistantAstraAllowed: true,
+      workspace: null,
+    }).hostedAssistantAstraAllowed).toBe(true);
+    expect(() => parseHostedWorkspaceReadResponse({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
       hostedAssistantSubagentModelOverridesAllowed: "true",
       workspace: null,
     })).toThrow(/hostedAssistantSubagentModelOverridesAllowed/u);

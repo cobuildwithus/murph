@@ -46,7 +46,23 @@ homes failed before any provider action. The failure wrapper labels this a
 cache-probe failure; that label alone does not establish its underlying cause.
 The existing Frog cache-probe entry covers this diagnostic failure.
 
-PR #2823 links the changelog and reviewed phone/desktop screenshots. A hosted
-preview is building; final external review and broad CI remain outstanding.
+PR #2823 links the changelog, reviewed phone/desktop screenshots, and the ready
+hosted settings preview. CI exposed a missing Astra entry in the pinned Linux
+Codex catalog; a legacy-only compatibility entry now passes native Linux loading.
+The image retains a default three-model catalog and a separate Astra catalog,
+selected from Web's canonical Max/OpenAI workspace authority. This closes the
+delegated-task entitlement gap reported by the diagnostic external review while
+preserving existing Edge/group child choices. The settings save announcement also
+now names Astra correctly. Five native scripted delegation checks pass, including
+Astra rejection without authority and an Astra provider request with authority.
+The exact Docker catalog commands load both profiles in the pinned Linux image.
+Composed Web eligibility/workspace, settings, and preference checks pass (136),
+as do runtime configuration (47), shared control contracts (35), and container
+catalog/preflight checks (96). Affected typechecks and the complexity guard pass.
+
+The first external review was rejected by model verification: ChatGPT selected
+GPT-6 Pro while the wrapper expected GPT-5.6 Sol. Its returned findings were
+treated as diagnostic input and verified locally, not accepted as a completed
+gate. A valid pushed-head review and broad CI remain outstanding.
 Complete provider-visible input measurement is also unresolved. No production
 deployment performed.

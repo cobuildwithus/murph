@@ -936,10 +936,11 @@ function ModelOptionBadge({ children }: { children: React.ReactNode }) {
 }
 
 function readModelName(model: HostedAssistantProductModel): string {
-  return `GPT-5.6 ${readProductModelName(model)}`;
+  return `${model === HOSTED_ASSISTANT_ASTRA_MODEL ? "GPT-6" : "GPT-5.6"} ${readProductModelName(model)}`;
 }
 
 function readProductModelName(model: HostedAssistantProductModel): string {
+  if (model === HOSTED_ASSISTANT_ASTRA_MODEL) return "Astra";
   if (model === HOSTED_ASSISTANT_LUNA_MODEL) {
     return "Luna";
   }

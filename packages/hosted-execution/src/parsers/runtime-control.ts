@@ -8631,6 +8631,9 @@ export function parseHostedWorkspaceReadResponse(
           record.hostedAssistantSubagentModelOverridesAllowed,
           "Hosted workspace read response hostedAssistantSubagentModelOverridesAllowed",
         );
+  const hostedAssistantAstraAllowed = record.hostedAssistantAstraAllowed === undefined
+    ? null
+    : requireBoolean(record.hostedAssistantAstraAllowed, "Hosted workspace read response hostedAssistantAstraAllowed");
 
   return {
     fetchedAt: requireString(
@@ -8650,6 +8653,7 @@ export function parseHostedWorkspaceReadResponse(
     ...(hostedAssistantSubagentModelOverridesAllowed === null
       ? {}
       : { hostedAssistantSubagentModelOverridesAllowed }),
+    ...(hostedAssistantAstraAllowed === null ? {} : { hostedAssistantAstraAllowed }),
     ...(platformAiUsageAllowed === null ? {} : { platformAiUsageAllowed }),
     workspace:
       record.workspace === null

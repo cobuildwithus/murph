@@ -32,14 +32,20 @@ USER root
 
 ENV MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON="/usr/local/share/murph/codex-model-catalog.openai-flex.json"
 
+# Codex 0.151.0 on Linux omits Astra. Reuse its compatible Sol transport
+# capabilities only when absent; Murph supplies the base instructions per turn.
+# Remove this compatibility branch once the pinned Linux catalog includes Astra.
 RUN mkdir -p /usr/local/share/murph \
   && chmod a-w /app \
   && chmod a+rX /app \
   && codex debug models --bundled \
-    | jq 'def add_flex: (.service_tiers) |= ((. // []) | if any(.[]?; .id == "flex") then . else . + [{"id":"flex","name":"Flex","description":"Lower-cost flexible processing"}] end); .models |= map(select(.slug == "gpt-6-astra" or .slug == "gpt-5.6-sol" or .slug == "gpt-5.6-terra" or .slug == "gpt-5.6-luna") | add_flex)' \
+    | jq 'def add_astra: .models |= (if any(.[]?; .slug == "gpt-6-astra") then . else . + [(.[] | select(.slug == "gpt-5.6-sol") | . + {slug:"gpt-6-astra",display_name:"GPT-6-Astra",description:"Our most capable model for complex, demanding work.",context_window:272000,service_tiers:[{id:"priority",name:"Fast",description:"2x speed, increased usage"}]})] end); def add_flex: (.service_tiers) |= ((. // []) | if any(.[]?; .id == "flex") then . else . + [{"id":"flex","name":"Flex","description":"Lower-cost flexible processing"}] end); add_astra | .models |= map(select(.slug == "gpt-6-astra" or .slug == "gpt-5.6-sol" or .slug == "gpt-5.6-terra" or .slug == "gpt-5.6-luna") | add_flex)' \
     > /tmp/murph-codex-model-catalog.openai-flex.json \
   && jq -s -e 'length == 1 and (.[0] as $catalog | ([$catalog.models[]?.slug] | sort) == (["gpt-6-astra","gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna"] | sort) and any($catalog.models[]?; .slug == "gpt-6-astra" and (.context_window | type) == "number" and .context_window > 0 and .context_window <= 272000) and all(["gpt-6-astra","gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna"][]; . as $slug | ($catalog | any(.models[]?; .slug == $slug and any(.service_tiers[]?; .id == "flex")))))' /tmp/murph-codex-model-catalog.openai-flex.json >/dev/null \
-  && install -m 0444 /tmp/murph-codex-model-catalog.openai-flex.json "${MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON}" \
+  && install -m 0444 /tmp/murph-codex-model-catalog.openai-flex.json "${MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON}.astra" \
+  && jq '.models |= map(select(.slug != "gpt-6-astra"))' /tmp/murph-codex-model-catalog.openai-flex.json > /tmp/murph-codex-model-catalog.standard.json \
+  && install -m 0444 /tmp/murph-codex-model-catalog.standard.json "${MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON}" \
+  && rm -f /tmp/murph-codex-model-catalog.standard.json \
   && rm -f /tmp/murph-codex-model-catalog.openai-flex.json \
   && rm -f /usr/local/bin/codex
 
