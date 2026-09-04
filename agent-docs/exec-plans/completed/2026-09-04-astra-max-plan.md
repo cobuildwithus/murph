@@ -63,6 +63,29 @@ catalog/preflight checks (96). Affected typechecks and the complexity guard pass
 The first external review was rejected by model verification: ChatGPT selected
 GPT-6 Pro while the wrapper expected GPT-5.6 Sol. Its returned findings were
 treated as diagnostic input and verified locally, not accepted as a completed
-gate. A valid pushed-head review and broad CI remain outstanding.
-Complete provider-visible input measurement is also unresolved. No production
-deployment performed.
+gate. The recovered round-two review of 0de2a4a0ff4586e52ba5b685c02a6478071867ce
+returned `ROUND_OUTCOME: PASS` and `REVIEW_COMPLETE`, with no merge-veto findings.
+All required CI checks passed on that reviewed head.
+
+Continuation reconciled main at 88eef98e75 through one ordinary merge. The
+Docker conflict combines Astra authority/catalog selection with main's mixed
+Code Mode. The existing native test transform moved to main's shared catalog
+helper; obsolete inline helper and narrative-doc assertions stayed deleted.
+Architecture prose preserves both behaviors, and the index retains main's
+compact routing descriptions. No new product behavior was authored by the
+resolution, so the resolved review carries forward under the base-update rule.
+
+After reconciliation, the container/preflight suite passes all 96 tests; seven
+native scripted cases prove direct/group Luna delegation, authorized Astra,
+unauthorized/unknown-model rejection, and Terra schema discovery. Assistant-engine
+and Cloudflare typechecks and the complexity guard pass. The final pushed head
+still requires CI; its results belong in PR #2823. The task-owned ReviewGPT alias
+friction note is included in the completion commit.
+
+Product verdict: Settings/API and conversational model selection are Ready.
+Actual Astra provider execution, full provider-visible input measurement,
+production API-account access, mixed-version rollout, and warm-container adoption
+remain unverified. No production deployment or merge of the PR was performed.
+Status: completed
+Updated: 2026-09-04
+Completed: 2026-09-04
