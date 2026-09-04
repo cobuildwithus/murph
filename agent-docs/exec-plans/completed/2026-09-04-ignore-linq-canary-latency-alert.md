@@ -1,6 +1,6 @@
 # Exclude Linq production canary from reply latency alerts
 
-Status: active
+Status: completed
 Created: 2026-09-04
 Updated: 2026-09-04
 
@@ -76,5 +76,16 @@ Updated: 2026-09-04
   unchanged for its canonical CI lane.
 - Passed: Web typecheck, repository lint with existing warnings only,
   `git diff --check`, and `pnpm complexity:diff` with no added complexity debt.
-- Pending: exact-head ReviewGPT, PR CI, current-base mergeability, and final
-  plan closure.
+- Passed: exact-head ReviewGPT round 1 returned `ROUND_OUTCOME: PASS` with no
+  qualifying findings.
+- Passed: required public PR checks, every release Web test shard, Web build,
+  build/typecheck, package coverage, and corrected PR evidence on the reviewed
+  behavior head.
+- The private Temporal compatibility run completed both supported readers and
+  its attestation successfully, but the public receipt controller rejected the
+  successful run as a malformed proof job on both its original attempt and one
+  unchanged-head retry. This diff changes no Temporal contract; the repeated
+  non-required failure is an unrelated controller-integration gap.
+- Pending: final plan closure, exact final-head CI, and current-base
+  mergeability.
+Completed: 2026-09-04
