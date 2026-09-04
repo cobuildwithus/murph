@@ -75,19 +75,19 @@ for (const [field, alias] of [
 ] as const) {
   test(`Junction glucose identity preserves ${field} precedence over ${alias}`, async () => {
     const rows: Record<string, unknown>[] = [];
-    for (const [index, value] of ["", 0, false, "selected"].entries()) {
-      const common = { ...baseRow, value: undefined, unit: undefined, id: `row-${index}` };
+    for (const value of ["", 0, false, "selected"]) {
+      const common = { ...baseRow, value: undefined, unit: undefined, id: "same-row" };
       rows.push(
         { ...common, [field]: value, [alias]: "ignored" },
         { ...common, [field]: value, [alias]: "different-ignored" },
       );
     }
     assert.equal((await importTimeseriesRows("glucose", rows)).length, 4);
-    const fallback = { ...baseRow, value: undefined, unit: undefined, [alias]: "selected" };
+    const fallback = { ...baseRow, id: "same-row", value: undefined, unit: undefined, [alias]: "selected" };
     assert.equal((await importTimeseriesRows("glucose", [
       { ...fallback, [field]: null },
-      { ...fallback, [field]: undefined },
-    ])).length, 1);
+      { ...fallback, [field]: undefined, [alias]: "different" },
+    ])).length, 2);
   });
 }
 
@@ -104,8 +104,8 @@ for (const resource of ["caffeine", "water", "mindfulness_minutes"]) {
     const valueAlias = resource === "mindfulness_minutes" ? "mindfulness_minutes" : resource;
     const interval = { timestamp, start: timestamp, end: "2026-04-02T12:05:00.000Z" };
     const records: Record<string, unknown>[] = [];
-    for (const [index, value] of ["", 0, false, 12].entries()) {
-      const row = { ...interval, id: `interval-${index}`, value, unit: "" };
+    for (const value of ["", 0, false, 12]) {
+      const row = { ...interval, id: "same-interval", value, unit: "" };
       records.push(
         { ...row, [valueAlias]: 100, valueUnit: "ignored" },
         { ...row, [valueAlias]: 200, valueUnit: "different-ignored" },
