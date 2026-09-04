@@ -165,14 +165,24 @@ test("wearable trend image leads each row with its average and neutral direction
   expect(markup.match(/<path\b/gu)).toHaveLength(3);
   expect(markup.match(/data-day-value="observed"/gu)).toHaveLength(21);
   expect(markup).not.toContain('data-day-value="missing"');
-  // The highest day of each row touches the top inset and the lowest the
-  // bottom inset, so a metric's own range fills the chart.
-  const pointHeights = Array.from(
-    markup.matchAll(/cy="([\d.]+)"/gu),
-    (match) => Number(match[1]),
-  );
-  expect(Math.min(...pointHeights)).toBe(14);
-  expect(Math.max(...pointHeights)).toBe(136);
+  // A week that moves more than the metric's minimum span fills the chart
+  // (steps: 3,400 of a 3,000 floor), while a quiet week stays near the
+  // middle so small differences are not exaggerated (sleep: 13 minutes of a
+  // 90-minute floor draws within a fraction of the height).
+  const rowPointHeights = (metricKey: string): number[] => {
+    const start = markup.indexOf(`data-metric-key="${metricKey}"`);
+    const rest = markup.slice(start + 1);
+    const next = rest.indexOf('data-metric-key="');
+    const row = next === -1 ? rest : rest.slice(0, next);
+    return Array.from(row.matchAll(/cy="([\d.]+)"/gu), (match) => Number(match[1]));
+  };
+  const stepHeights = rowPointHeights("steps");
+  expect(Math.min(...stepHeights)).toBe(14);
+  expect(Math.max(...stepHeights)).toBe(136);
+  const sleepHeights = rowPointHeights("total-sleep-minutes");
+  expect(Math.max(...sleepHeights) - Math.min(...sleepHeights)).toBeLessThan(0.2 * 122);
+  expect(Math.min(...sleepHeights)).toBeGreaterThan(14);
+  expect(Math.max(...sleepHeights)).toBeLessThan(136);
   expect(markup).toContain("data-sparkline=\"▁▃▆▅█▂▇\"");
   expect(markup.match(/data-sparkline=/gu)).toHaveLength(3);
   expect(markup).toContain('data-murph-card-badge="svg"');

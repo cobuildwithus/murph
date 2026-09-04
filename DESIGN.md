@@ -275,9 +275,12 @@ on the same line by one neutral arrow (`↑`, `↓`, or `→`) for the
 week-over-week direction; the unit and arrow are vertically centered against
 the number. Never spell the direction out as a word. A row with too few
 observed days to compare shows no arrow at all, and no surface names a comparison basis; the accessibility label reads the trend word only. The seven days are one
-line in a neutral warm stroke with a point on each observed day, fitted to
-that metric's own observed range so the highest day touches the top and the
-lowest the bottom and a flat week draws a level line; there are no value
+line in a neutral warm stroke with a point on each observed day, fitted to a
+window centered on that metric's observed range but never narrower than a
+metric-specific minimum span (steps 3,000; sleep 90 minutes; resting heart
+rate 8 bpm; HRV 15 ms), so a week that really moves fills the chart while a
+quiet week draws a nearly level line instead of exaggerating small
+differences; there are no value
 labels, so the average is the only number in the row and the text recovery
 carries every day value. A missing day breaks the line and keeps its column
 as a faint baseline stub with no text placeholder. A metric with no observed

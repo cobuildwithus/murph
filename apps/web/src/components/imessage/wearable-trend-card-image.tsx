@@ -50,6 +50,18 @@ const NO_DATA_FONT_SIZE = 34;
 
 const CHART_INSET = 14;
 const LINE_WIDTH = 4;
+/**
+ * Smallest peak-to-peak span each chart shows, in the metric's own unit, so a
+ * quiet week draws a nearly level line instead of being stretched to fill the
+ * chart. A week that moves more than this still fills the chart.
+ */
+const CHART_MINIMUM_SPAN_BY_METRIC: Record<WearableTrendMetricKey, number> = {
+  "hrv-rmssd": 15,
+  "hrv-sdnn": 15,
+  "resting-heart-rate": 8,
+  "steps": 3_000,
+  "total-sleep-minutes": 90,
+};
 const POINT_RADIUS = 7;
 const MISSING_STUB_WIDTH = 40;
 const MISSING_STUB_HEIGHT = 6;
@@ -273,6 +285,7 @@ function MetricRow({
       <DayChart
         height={average === null ? EMPTY_CHART_HEIGHT : CHART_HEIGHT}
         localDates={localDates}
+        metricKey={metric.metricKey}
         sparkline={sparkline}
         values={metric.values}
       />
@@ -391,15 +404,17 @@ function MetricSummary({
 function DayChart({
   height,
   localDates,
+  metricKey,
   sparkline,
   values,
 }: {
   height: number;
   localDates: WearableTrendResponseCardV1["localDates"];
+  metricKey: WearableTrendMetricKey;
   sparkline: string;
   values: readonly (number | null)[];
 }) {
-  const levels = normalizeLevels(values);
+  const levels = normalizeLevels(values, CHART_MINIMUM_SPAN_BY_METRIC[metricKey]);
   const points = levels.map((level, index) =>
     level === null
       ? null
@@ -470,23 +485,24 @@ function DayChart({
 }
 
 /**
- * Each metric is fitted to its own observed range: the lowest day sits at the
- * bottom of the chart, the highest at the top, and a flat week draws a level
- * line through the middle. Missing days stay null.
+ * Each metric is fitted to a window that is at least `minimumSpan` wide and
+ * centered on its observed range. A week that moves more than the minimum
+ * fills the chart; a quieter week stays near the middle so small differences
+ * are not exaggerated. Missing days stay null.
  */
-function normalizeLevels(values: readonly (number | null)[]): (number | null)[] {
+function normalizeLevels(
+  values: readonly (number | null)[],
+  minimumSpan: number,
+): (number | null)[] {
   const observed = values.filter((value): value is number => value !== null);
   if (observed.length === 0) {
     return values.map(() => null);
   }
   const minimum = Math.min(...observed);
   const maximum = Math.max(...observed);
-  return values.map((value) => {
-    if (value === null) {
-      return null;
-    }
-    return maximum === minimum ? 0.5 : (value - minimum) / (maximum - minimum);
-  });
+  const span = Math.max(maximum - minimum, minimumSpan);
+  const low = (minimum + maximum) / 2 - span / 2;
+  return values.map((value) => value === null ? null : (value - low) / span);
 }
 
 /** SVG path data for each run of adjacent observed days. */
