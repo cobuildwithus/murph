@@ -53,6 +53,7 @@ const response = {
 
 type DirectEnsureInput = {
   commandTimeoutMs: number;
+  onRequestDispatched: () => void;
   onTiming: (timing:
     & {
       directEnsureRequestStartedAtEpochMs: number;
@@ -74,7 +75,7 @@ type DirectEnsureInput = {
 };
 
 type MailboxSignalInput = {
-  onReadyToSignal?: () => void;
+  onReadyToSignal?: () => Promise<void> | void;
 };
 
 function buildWakeHandoff(
@@ -104,17 +105,22 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     mocks.signalHostedMailboxAppendRuntime.mockImplementation(async (
       input: MailboxSignalInput,
     ) => {
-      input.onReadyToSignal?.();
+      await input.onReadyToSignal?.();
       return {
         signalAccepted: true,
         workflowId: "hosted-user-runtime:member_123",
       };
     });
-    mocks.ensureRuntimeProcessing.mockResolvedValue({
-      action: "woken",
-      kind: "runtime_processing_accepted",
-      recommendedRecheckAt: "2026-07-02T00:03:00.000Z",
-      runtimeAttemptId: "runtime-attempt-test",
+    mocks.ensureRuntimeProcessing.mockImplementation(async (
+      input: DirectEnsureInput,
+    ) => {
+      input.onRequestDispatched();
+      return {
+        action: "woken",
+        kind: "runtime_processing_accepted",
+        recommendedRecheckAt: "2026-07-02T00:03:00.000Z",
+        runtimeAttemptId: "runtime-attempt-test",
+      };
     });
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       ensureRuntimeProcessing: mocks.ensureRuntimeProcessing,
@@ -129,17 +135,18 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       signalAccepted: true;
       workflowId: string;
     }) => void;
-    mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce((
+    mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(async (
       input: MailboxSignalInput,
     ) => {
-      input.onReadyToSignal?.();
+      await input.onReadyToSignal?.();
       wakeOrder.push("temporal");
-      return new Promise((resolve) => {
+      return await new Promise((resolve) => {
         resolveTemporalSignal = resolve;
       });
     });
     mocks.ensureRuntimeProcessing.mockImplementationOnce(async (input: DirectEnsureInput) => {
-      wakeOrder.push("direct");
+      input.onRequestDispatched();
+      wakeOrder.push("direct-dispatched");
       input.onTiming({
         directEnsureAction: "woken",
         tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
@@ -184,7 +191,9 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     expect(mocks.readHostedExecutionControlClientIfConfigured).toHaveBeenCalledTimes(1);
     expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
     expect(afterResponseTasks).toHaveLength(1);
-    expect(wakeOrder).toEqual(["direct", "temporal"]);
+    await vi.waitFor(() => {
+      expect(wakeOrder).toEqual(["direct-dispatched", "temporal"]);
+    });
     expect(handoffSettled).toBe(false);
 
     resolveTemporalSignal({
@@ -199,10 +208,11 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     });
 
     expect(handoffSettled).toBe(true);
-    expect(wakeOrder).toEqual(["direct", "temporal"]);
+    expect(wakeOrder).toEqual(["direct-dispatched", "temporal"]);
     expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(1);
     expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledWith({
       commandTimeoutMs: 25_000,
+      onRequestDispatched: expect.any(Function),
       onTiming: expect.any(Function),
       orchestrationAttemptId: expect.stringMatching(/^web-ingress-[0-9a-f-]{36}$/u),
       signal: expect.any(AbortSignal),
@@ -248,6 +258,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const afterResponseTasks: Array<() => Promise<void>> = [];
     mocks.ensureRuntimeProcessing.mockImplementationOnce(async (input: DirectEnsureInput) => {
+      input.onRequestDispatched();
       input.onTiming({
         tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
         tokenAcquiredAtEpochMs: 1_777_000_000_010,
@@ -314,6 +325,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       unmatchedCount: 1,
     });
     mocks.ensureRuntimeProcessing.mockImplementationOnce(async (input: DirectEnsureInput) => {
+      input.onRequestDispatched();
       input.onTiming({
         directEnsureAction: "woken",
         directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
@@ -365,6 +377,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     const afterResponseTasks: Array<() => Promise<void>> = [];
     mocks.ensureRuntimeProcessing
       .mockImplementationOnce(async (input: DirectEnsureInput) => {
+        input.onRequestDispatched();
         input.onTiming({
           directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
           directEnsureResponseReceivedAtEpochMs: 1_777_000_000_020,
@@ -379,6 +392,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
         };
       })
       .mockImplementationOnce(async (input: DirectEnsureInput) => {
+        input.onRequestDispatched();
         input.onTiming({
           directEnsureAction: "woken",
           directEnsureRequestStartedAtEpochMs: 1_777_000_003_012,
@@ -456,6 +470,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     const afterResponseTasks: Array<() => Promise<void>> = [];
     mocks.ensureRuntimeProcessing
       .mockImplementationOnce(async (input: DirectEnsureInput) => {
+        input.onRequestDispatched();
         await new Promise<void>((resolve) => setTimeout(resolve, 18_000));
         input.onTiming({
           directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
@@ -471,6 +486,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
         };
       })
       .mockImplementationOnce(async (input: DirectEnsureInput) => {
+        input.onRequestDispatched();
         input.onTiming({
           directEnsureAction: "woken",
           directEnsureRequestStartedAtEpochMs: 1_777_000_021_012,
@@ -597,7 +613,10 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
 
   it("never puts the direct ensure on the webhook response path, even with no scheduler", async () => {
     // A control endpoint that never responds must not delay the handoff.
-    mocks.ensureRuntimeProcessing.mockReturnValue(new Promise(() => undefined));
+    mocks.ensureRuntimeProcessing.mockImplementation((input: DirectEnsureInput) => {
+      input.onRequestDispatched();
+      return new Promise(() => undefined);
+    });
 
     await expect(maybeHandoffHostedExecutionWebhookWake({
       response,
@@ -636,6 +655,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     const afterResponseTasks: Array<() => Promise<void>> = [];
     mocks.ensureRuntimeProcessing.mockImplementationOnce(
       (input: DirectEnsureInput) => new Promise((_resolve, reject) => {
+        input.onRequestDispatched();
         input.signal.addEventListener("abort", () => reject(input.signal.reason), {
           once: true,
         });
@@ -681,11 +701,14 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
   });
 
   it("keeps the authorized direct ensure when the Temporal signal fails", async () => {
-    mocks.ensureRuntimeProcessing.mockReturnValue(new Promise(() => undefined));
+    mocks.ensureRuntimeProcessing.mockImplementation((input: DirectEnsureInput) => {
+      input.onRequestDispatched();
+      return new Promise(() => undefined);
+    });
     mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(async (
       input: MailboxSignalInput,
     ) => {
-      input.onReadyToSignal?.();
+      await input.onReadyToSignal?.();
       throw new Error("temporal down");
     });
 
@@ -785,11 +808,11 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
   it("bounds an omitted-timeout Temporal handoff that never settles", async () => {
     vi.useFakeTimers();
     try {
-      mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce((
+      mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(async (
         input: MailboxSignalInput,
       ) => {
-        input.onReadyToSignal?.();
-        return new Promise(() => {});
+        await input.onReadyToSignal?.();
+        return await new Promise(() => {});
       });
 
       const handoff = maybeHandoffHostedExecutionWebhookWake({
@@ -814,10 +837,12 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
         workflowId: string;
       }) => void;
       mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(
-        (input: MailboxSignalInput) => new Promise((resolve) => {
-          input.onReadyToSignal?.();
-          resolveTemporalSignal = resolve;
-        }),
+        async (input: MailboxSignalInput) => {
+          await input.onReadyToSignal?.();
+          return await new Promise((resolve) => {
+            resolveTemporalSignal = resolve;
+          });
+        },
       );
 
       const handoff = maybeHandoffHostedExecutionWebhookWake({

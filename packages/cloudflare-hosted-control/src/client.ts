@@ -269,6 +269,7 @@ export interface CloudflareHostedControlClient {
   }): Promise<void>;
   ensureRuntimeProcessing(input: {
     commandTimeoutMs?: number;
+    onRequestDispatched?: () => void;
     onTiming?: (timing: CloudflareHostedControlRuntimeEnsureProcessingTiming) => void;
     orchestrationAttemptId: string;
     signal?: AbortSignal;
@@ -639,6 +640,7 @@ export function createCloudflareHostedControlClient(
         fetchImpl,
         getAuthorizationHeader,
         label: "runtime ensure-processing",
+        onRequestDispatched: input.onRequestDispatched,
         onRuntimeEnsureProcessingTiming: input.onTiming,
         parse: parseCloudflareHostedControlRuntimeEnsureProcessingResponse,
         readRuntimeEnsureProcessingTimingResult:
@@ -2313,6 +2315,7 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   onRuntimeEnsureProcessingTiming?: (
     timing: CloudflareHostedControlRuntimeEnsureProcessingTiming,
   ) => void;
+  onRequestDispatched?: () => void;
   onRequestAttempted?: () => Promise<void> | void;
   runtimeEnsureProcessingOrchestrationAttemptId?: string;
   parse: (value: unknown) => TResponse;
@@ -2385,13 +2388,15 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
     signal: input.signal,
     timeoutMs: input.timeoutMs,
   });
-  const response = await input.fetchImpl(url.toString(), {
+  const responsePromise = input.fetchImpl(url.toString(), {
     ...(input.request.body === undefined ? {} : { body: input.request.body }),
     headers,
     method: input.request.method,
     redirect: "error",
     signal: requestSignal,
   });
+  notifyHostedExecutionRequestDispatched(input.onRequestDispatched);
+  const response = await responsePromise;
   const directEnsureResponseReceivedAtEpochMs = directEnsureRequestStartedAtEpochMs === null
     ? null
     : Date.now();
@@ -2428,6 +2433,12 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   }
 
   return parsed;
+}
+
+function notifyHostedExecutionRequestDispatched(
+  callback: (() => void) | undefined,
+): void {
+  callback?.();
 }
 
 function createHostedExecutionRequestSignal(input: {

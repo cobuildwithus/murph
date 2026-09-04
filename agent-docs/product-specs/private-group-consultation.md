@@ -541,7 +541,8 @@ requests drain or expire for ten minutes, then rolls back consumers.
     first-person group reads, and it never appears in output.
 13. A typed `cannot_answer` delivers only the fixed unavailable-evidence copy
     and cannot be restated as expiry or failure.
-14. Request and completion direct wakes start only after Temporal acceptance;
+14. Request and completion direct wakes start after pointer/access validation;
+    Web waits only for dispatch or a one-second fallback before Temporal, while
     dirty-runtime admission bypasses the idle checkpoint only for the exact safe
     joined-group shapes and never overtakes older personal input.
 15. Question and answer content stays out of normalized rows, logs, and

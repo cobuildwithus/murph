@@ -104,7 +104,7 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
         ...(knownCheckpoint ? { knownCheckpoint } : {}),
         mailboxItemId,
         ...(directEnsureEligible ? {
-          onReadyToSignal: () => {
+          onReadyToSignal: async () => {
             const wake = startHostedDirectRuntimeWakeBestEffort({
               onTiming: async (timing) => {
                 await recordHostedDirectEnsureWakeTimingBestEffort({
@@ -118,18 +118,19 @@ export async function maybeHandoffHostedExecutionWebhookWake(input: {
               source: "linq",
               userId,
             });
-            directEnsureWake = wake;
+            directEnsureWake = wake.completion;
             if (input.scheduleAfterResponse) {
               // Keep the in-flight request alive past the response without
               // putting its latency on the provider success path.
               try {
-                input.scheduleAfterResponse(() => wake);
+                input.scheduleAfterResponse(() => wake.completion);
               } catch {
-                void wake;
+                void wake.completion;
               }
             } else {
-              void wake;
+              void wake.completion;
             }
+            await wake.readyForTemporal;
           },
         } : {}),
       }),

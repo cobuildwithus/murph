@@ -82,7 +82,7 @@ export interface SignalHostedMailboxAppendInput {
   };
   mailboxItemId: string;
   // The mailbox owner has been validated and active access has been proved.
-  onReadyToSignal?: () => void;
+  onReadyToSignal?: () => Promise<void> | void;
   prisma?: PrismaClient;
 }
 
@@ -168,7 +168,7 @@ export async function signalHostedMailboxAppendRuntime(
     laneSeq: mailboxItem.laneSeq,
     mailboxItemId: input.mailboxItemId,
   });
-  input.onReadyToSignal?.();
+  await input.onReadyToSignal?.();
 
   return signalHostedUserRuntimeWorkflow({
     abortSignal: input.abortSignal,

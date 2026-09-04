@@ -415,9 +415,11 @@ retains route authority. Leaving and rejoining creates a new membership id, so
 an older clarification is a stale generation.
 Ask and handoff replay remain pinned to the stored membership id; no title or
 participant matcher, target digest, directory, or selector state exists.
-After Temporal accepts each pointer-only mailbox signal, Web starts the
-same payloadless, no-retry direct `ensure-processing` latency hint used by Linq;
-Temporal remains the only durable wake and reconciliation owner. The target
+After validating each pointer and active access, Web starts the same
+payloadless direct `ensure-processing` latency hint used by Linq. It waits only
+until the request is actually dispatched, safely finishes before dispatch, or
+the one-second dispatch barrier expires, then sends the pointer-only Temporal
+signal; Temporal remains the only durable wake and reconciliation owner. The target
 child receives the server-bound requester membership `participantId`, which
 must exactly match the `read_shared` member used for first-person references;
 display names, handles, and member order are never identity fallbacks. The
@@ -3187,11 +3189,13 @@ signal remains the only durable wake authority for hosted runtime work. For a
 committed known-checkpoint Linq message, Web first verifies the checkpoint owner
 and canonical participant-aware live access as part of the unconditional
 Temporal pointer signal. Assistant Ask request and completion handlers likewise
-append their encrypted mailbox item before signaling Temporal. Only after
-Temporal accepts the applicable durable signal does Web
-start one best-effort direct `ensure-processing` request to Cloudflare (Vercel
-OIDC, fire and forget, no retries, no mailbox payload). Access denial, expiry,
-or Temporal acceptance failure starts no direct wake. The direct request exists
+append their encrypted mailbox item before starting the wake handoff. Web starts
+one best-effort direct `ensure-processing` request to Cloudflare (Vercel OIDC,
+no mailbox payload) after that validation and waits only for actual fetch
+dispatch, safe pre-dispatch completion, or a one-second dispatch-only budget
+before sending the applicable durable Temporal signal. Access denial or expiry
+starts no direct wake; a later Temporal acceptance failure remains visible while
+the already-authorized request continues. The direct request exists
 only to cut wake latency and may be dropped at any time with no correctness
 impact: accepted Linq reply delivery stamps the exact mailbox item with
 `consumedAt`, while Assistant Ask has deterministic request/completion identity,
@@ -3200,8 +3204,8 @@ fence coalesces runners that overlap in the same invocation. An established
 Linq message starts the same shell hint as soon as pre-transaction routing
 preparation resolves an active member, before KMS and transaction work. That
 request-local hint is advisory and may be dropped;
-the transaction repeats every authority check and the post-Temporal direct
-ensure remains the immediate processing owner. The separate
+the transaction repeats every authority check and the post-commit direct
+ensure remains the immediate processing path. The separate
 first-contact instant-start shell hint obtains the named `UserRunner` stub
 without binding durable state, enters the same per-user consent-mutation barrier
 as authoritative ensures and withdrawal, and re-reads live Web-owned admission.
@@ -3218,7 +3222,8 @@ fence. Web admits the hint only for an extant, non-suspended member whose
 health-data grant is not revoked; this preserves legacy missing-grant
 compatibility without letting a hint queued behind account deletion recreate
 runner state. The hint creates no workspace or processing authority; the later
-post-Temporal direct ensure remains authoritative.
+post-commit direct ensure remains authoritative for immediate processing while
+Temporal owns durable recovery.
 
 Hosted Linq message edits are immutable correction inputs, not mutations of an
 accepted mailbox item or transcript. Each accepted inbound Linq conversation

@@ -202,6 +202,10 @@ describe("hosted runtime Temporal signaling", () => {
 
   it("runs the foreground hint after active access and before Temporal dispatch", async () => {
     const order: string[] = [];
+    let releaseForegroundHint!: () => void;
+    const foregroundHintReady = new Promise<void>((resolve) => {
+      releaseForegroundHint = resolve;
+    });
     mocks.hostedMemberFindUnique.mockImplementationOnce(async () => {
       order.push("access");
       return buildActiveMemberRecord();
@@ -210,7 +214,7 @@ describe("hosted runtime Temporal signaling", () => {
       order.push("temporal");
     });
 
-    await signalHostedMailboxAppendRuntime({
+    const signal = signalHostedMailboxAppendRuntime({
       client: buildClient(),
       expectedUserId: "member_123",
       knownCheckpoint: {
@@ -219,12 +223,25 @@ describe("hosted runtime Temporal signaling", () => {
         userId: "member_123",
       },
       mailboxItemId: "mailbox_123",
-      onReadyToSignal: () => {
-        order.push("direct");
+      onReadyToSignal: async () => {
+        order.push("direct-started");
+        await foregroundHintReady;
+        order.push("direct-ready");
       },
     });
 
-    expect(order).toEqual(["access", "direct", "temporal"]);
+    await vi.waitFor(() => {
+      expect(order).toEqual(["access", "direct-started"]);
+    });
+    expect(mocks.signalWithStart).not.toHaveBeenCalled();
+    releaseForegroundHint();
+    await signal;
+    expect(order).toEqual([
+      "access",
+      "direct-started",
+      "direct-ready",
+      "temporal",
+    ]);
   });
 
   it("signals planner lane facts for participant-authorized thread containers", async () => {

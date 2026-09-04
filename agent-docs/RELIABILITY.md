@@ -792,7 +792,9 @@ Last verified: 2026-09-02
   overlap or fail without changing the plan: it creates no fence or mailbox
   owner. After the canonical mailbox append, the signal owner rechecks active
   access and then starts the payload-free direct ensure immediately before
-  dispatching the Temporal signal. Access failure starts no direct wake;
+  dispatching the Temporal signal. The handoff waits only for actual fetch
+  dispatch, safe pre-dispatch completion, or a one-second dispatch-only budget,
+  never for the Cloudflare response. Access failure starts no direct wake;
   Temporal failure still fails the handoff while the already-authorized direct
   hint remains best-effort. Temporal remains the durable recovery owner.
   A definite route-read or route-projection failure after generation confirms
@@ -2213,10 +2215,12 @@ Last verified: 2026-09-02
   drain through exact-source private admission. The undeployed dual URL marker
   and destination dialect are rejected. Caller cancellation, exhausted
   deadlines, authority failures, and other `4xx` responses do not replay.
-- Assistant Ask request and completion appends first signal the existing Temporal
-  workflow, then may issue the shared payloadless, no-retry direct
-  `ensure-processing` latency hint. Temporal acceptance failure starts no direct
-  wake. A dirty runtime admits the exact joined-group request and every
+- Assistant Ask request and completion appends validate active access, start the
+  shared payloadless direct `ensure-processing` latency hint, and wait only for
+  actual fetch dispatch, safe pre-dispatch completion, or the one-second
+  dispatch-only budget before signaling the existing Temporal workflow. A later
+  Temporal acceptance failure remains visible while the authorized hint stays
+  best-effort. A dirty runtime admits the exact joined-group request and every
   accepted-input completion through the pre-checkpoint-safe system prefix;
   consented-member requests remain checkpoint-gated. Completion ordering uses
   the existing pending-input occurrence proof, and incomplete or invalid index

@@ -19,11 +19,17 @@ export type HostedDirectRuntimeWakeSource =
 const HOSTED_DIRECT_RUNTIME_WAKE_DEADLINE_MS = 29_000;
 const HOSTED_DIRECT_RUNTIME_WAKE_COMMAND_TIMEOUT_MS = 25_000;
 const HOSTED_DIRECT_RUNTIME_WAKE_MAX_ATTEMPTS = 2;
+const HOSTED_DIRECT_RUNTIME_WAKE_DISPATCH_WAIT_MS = 1_000;
+
+export interface HostedDirectRuntimeWake {
+  completion: Promise<void>;
+  readyForTemporal: Promise<void>;
+}
 
 /**
  * Issues a consent-serialized container start hint and always settles. This
  * does not create a write fence, resolve processing ownership, or invoke
- * workspace work; the ordinary post-Temporal ensure remains authoritative for
+ * workspace work; the ordinary post-commit ensure remains authoritative for
  * all of those steps.
  */
 export function startHostedRuntimeShellPrewarmBestEffort(input: {
@@ -85,9 +91,11 @@ export function startHostedRuntimeShellPrewarmBestEffort(input: {
 }
 
 /**
- * Starts the payloadless Cloudflare latency hint and always settles. Callers
- * invoke it only after the corresponding mailbox work has committed; Temporal
- * remains the durable recovery owner and may be signaled concurrently.
+ * Starts the payloadless Cloudflare latency hint after the corresponding
+ * mailbox work has committed. `readyForTemporal` settles after the first
+ * request dispatches, the wake safely completes without dispatching, or the
+ * short dispatch-only wait expires. `completion` always settles independently;
+ * Temporal remains the durable recovery owner.
  */
 export function startHostedDirectRuntimeWakeBestEffort(input: {
   onTiming?: (
@@ -95,7 +103,7 @@ export function startHostedDirectRuntimeWakeBestEffort(input: {
   ) => Promise<void> | void;
   source: HostedDirectRuntimeWakeSource;
   userId: string;
-}): Promise<void> {
+}): HostedDirectRuntimeWake {
   const wakeSource = input.source;
   let client: ReturnType<typeof readHostedExecutionControlClientIfConfigured>;
   try {
@@ -105,25 +113,40 @@ export function startHostedDirectRuntimeWakeBestEffort(input: {
       errorName: describeHostedExecutionSafeLogErrorCode(error),
       source: wakeSource,
     });
-    return Promise.resolve();
+    return completedHostedDirectRuntimeWake();
   }
   if (!client) {
-    return Promise.resolve();
+    return completedHostedDirectRuntimeWake();
   }
 
   try {
-    return runHostedDirectRuntimeWakeBestEffort({
+    let resolveRequestDispatched!: () => void;
+    const requestDispatched = new Promise<void>((resolve) => {
+      resolveRequestDispatched = resolve;
+    });
+    const completion = runHostedDirectRuntimeWakeBestEffort({
       client,
       input,
+      onRequestDispatched: resolveRequestDispatched,
       wakeSource,
     });
+    void completion.then(resolveRequestDispatched, resolveRequestDispatched);
+    return {
+      completion,
+      readyForTemporal: waitForHostedDirectRuntimeWakeDispatch(requestDispatched),
+    };
   } catch (error) {
     console.warn("Hosted direct ensure wake failed.", {
       errorName: describeHostedExecutionSafeLogErrorCode(error),
       source: wakeSource,
     });
-    return Promise.resolve();
+    return completedHostedDirectRuntimeWake();
   }
+}
+
+function completedHostedDirectRuntimeWake(): HostedDirectRuntimeWake {
+  const completion = Promise.resolve();
+  return { completion, readyForTemporal: completion };
 }
 
 async function runHostedDirectRuntimeWakeBestEffort(input: {
@@ -135,6 +158,7 @@ async function runHostedDirectRuntimeWakeBestEffort(input: {
     source: HostedDirectRuntimeWakeSource;
     userId: string;
   };
+  onRequestDispatched: () => void;
   wakeSource: HostedDirectRuntimeWakeSource;
 }): Promise<void> {
   const client = input.client;
@@ -172,6 +196,7 @@ async function runHostedDirectRuntimeWakeBestEffort(input: {
       timing = null;
       const ensureResult = await client.ensureRuntimeProcessing({
         commandTimeoutMs,
+        onRequestDispatched: input.onRequestDispatched,
         onTiming: (value) => {
           timing = value;
         },
@@ -252,6 +277,27 @@ async function runHostedDirectRuntimeWakeBestEffort(input: {
       }
     }
   }
+}
+
+function waitForHostedDirectRuntimeWakeDispatch(
+  requestDispatched: Promise<void>,
+): Promise<void> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      resolve();
+    };
+    const timeout = setTimeout(
+      finish,
+      HOSTED_DIRECT_RUNTIME_WAKE_DISPATCH_WAIT_MS,
+    );
+    void requestDispatched.then(finish, finish);
+  });
 }
 
 function waitForHostedDirectRuntimeWakeRetry(

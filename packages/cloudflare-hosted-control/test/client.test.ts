@@ -366,6 +366,57 @@ describe("createCloudflareHostedControlClient", () => {
     });
   });
 
+  it("reports runtime ensure dispatch after authorization without waiting for the response", async () => {
+    let resolveBearerToken!: (token: string) => void;
+    const bearerToken = new Promise<string>((resolve) => {
+      resolveBearerToken = resolve;
+    });
+    let resolveResponse!: (response: Response) => void;
+    const heldResponse = new Promise<Response>((resolve) => {
+      resolveResponse = resolve;
+    });
+    const order: string[] = [];
+    const fetchImpl = vi.fn(() => {
+      order.push("fetch");
+      return heldResponse;
+    }) as typeof fetch;
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl,
+      getBearerToken: () => bearerToken,
+    });
+    const onRequestDispatched = vi.fn(() => {
+      order.push("dispatched");
+    });
+
+    let ensureSettled = false;
+    const ensure = client.ensureRuntimeProcessing({
+      onRequestDispatched,
+      orchestrationAttemptId: "web-ingress-attempt-test",
+      userId: "user_123",
+    });
+    void ensure.then(
+      () => {
+        ensureSettled = true;
+      },
+      () => {
+        ensureSettled = true;
+      },
+    );
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(onRequestDispatched).not.toHaveBeenCalled();
+    resolveBearerToken("token-123");
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledOnce());
+    expect(order).toEqual(["fetch", "dispatched"]);
+    expect(onRequestDispatched).toHaveBeenCalledOnce();
+    expect(ensureSettled).toBe(false);
+
+    resolveResponse(createJsonResponse({ accepted: true }, { status: 202 }));
+    await expect(ensure).resolves.toEqual({ accepted: true });
+    expect(ensureSettled).toBe(true);
+  });
+
   it("posts runtime health-data consent reconciliation and validates the bound result", async () => {
     const fetchImpl = vi.fn(async () => createJsonResponse({
       activeInvocationPreempted: true,

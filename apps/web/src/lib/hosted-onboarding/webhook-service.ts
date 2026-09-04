@@ -933,7 +933,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         // The member row is committed, so issue only the deterministic
         // container start command while enrollment runs. This does not resolve
         // a runtime owner, inspect workspace state, create a fence, or process
-        // mailbox work; the ordinary post-Temporal ensure owns those steps.
+        // mailbox work; the ordinary post-commit ensure owns those steps.
         void startHostedRuntimeShellPrewarmBestEffort({
           source: "linq-instant-start",
           userId: instantStartEnrollment.memberId,
