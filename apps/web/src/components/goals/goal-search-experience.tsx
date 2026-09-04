@@ -79,15 +79,17 @@ export function GoalSearchExperience({
             Hey Murph, help me…
           </h1>
         </div>
-        <div className="mx-auto mt-10 max-w-2xl" data-goal-search="full-width">
-          <GoalComposer
-            autoFocusOnView
-            inputRef={inputRef}
-            onQueryChange={setQuery}
-            placeholders={GOAL_SEARCH_PLACEHOLDERS}
-            query={query}
-            startOption={startOption}
-          />
+        <div className="mx-auto mt-10 max-w-2xl">
+          <div data-goal-search="full-width">
+            <GoalComposer
+              autoFocusOnView
+              inputRef={inputRef}
+              onQueryChange={setQuery}
+              placeholders={GOAL_SEARCH_PLACEHOLDERS}
+              query={query}
+              startOption={startOption}
+            />
+          </div>
           <p className="mt-4 text-center text-sm leading-6 text-muted-foreground">
             Try:{" "}
             {GOAL_SEARCH_EXAMPLES.map((example, index) => (
@@ -238,6 +240,8 @@ function GoalSearchGrid({
           <GoalBrowseCard
             className="h-full"
             href={`/goals/${goal.routeId}`}
+            // Two-column results on phones need the full card for the title.
+            illustrationClassName="sm:block min-[360px]:hidden"
             illustrationSrc={goal.illustrationSrc}
             prefetch={false}
             title={goal.title}

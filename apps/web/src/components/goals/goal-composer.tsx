@@ -248,7 +248,7 @@ export function GoalComposer({
           aria-describedby={hintId}
           autoCapitalize="none"
           autoComplete="off"
-          className="border-border bg-card pl-5 pr-14 text-foreground"
+          className="border-border bg-card pl-5 pr-14 text-foreground [&::-webkit-search-cancel-button]:hidden"
           data-goal-composer-input
           enterKeyHint="go"
           id={inputId}
@@ -272,7 +272,7 @@ export function GoalComposer({
           }}
           ref={setInputNode}
           spellCheck={false}
-          type="text"
+          type="search"
           value={query}
         />
         {query ? null : (
