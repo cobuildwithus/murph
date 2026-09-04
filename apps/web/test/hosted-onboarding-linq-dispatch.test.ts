@@ -8152,7 +8152,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       userId: memberId,
     });
     const typingResult = createDeferred<{ ok: boolean; status: number }>();
-    const ensureRuntimeProcessing = vi.fn();
+    const ensureRuntimeProcessing = vi.fn(async () => ({ accepted: true as const }));
     const prewarmRuntimeShell = vi.fn<
       (request: {
         source: "linq-instant-start" | "linq-message-routing" | "linq-typing-started";
@@ -8186,7 +8186,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         };
       },
     );
-    mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(async () => {
+    mocks.signalHostedMailboxAppendRuntime.mockImplementationOnce(async (input: {
+      onReadyToSignal?: () => void;
+    }) => {
+      input.onReadyToSignal?.();
       callOrder.push("conversation-signal");
       return {
         signalAccepted: true,
@@ -8333,6 +8336,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         userId: memberId,
       },
       mailboxItemId: "mailbox_instant_first_turn_outbound",
+      onReadyToSignal: expect.any(Function),
     });
 
     typingResult.resolve({ ok: false, status: 503 });
