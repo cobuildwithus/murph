@@ -1,6 +1,6 @@
 # Recover workout context from saved reminders
 
-Status: active
+Status: completed
 
 ## Outcome and root cause
 
@@ -58,8 +58,19 @@ saved definition and then continue the exact created event. Unreported sets and
 older records remain untouched. No member transcript or production identifiers
 are included in the fixture or changelog.
 
-Complete the scoped PR, required CI and ReviewGPT, then deploy through the
-protected private hosted workflow. Verify the immutable public release, bundle,
+ReviewGPT round 1 passed on cf53ada0e9e90b0fc087be8f80059e8ba23f9f42
+with no findings. Explicit gpt-6-pro selection and response metadata matched;
+the full-snapshot review exceeded ten minutes and independently checked 35
+boundary cases. The first stale-model-alias attempt was recovered, rejected as
+a gate result, and not used for approval. The repository integration friction
+is recorded separately. Parent disposition accepts the final PASS, with local
+reply/card and archive-copy review supplying presentation evidence.
+
+Only this completed plan and the public-safe friction record change after the
+reviewed behavior. Required CI on the final PR head and production rollout are
+remaining release gates tracked by PR #2837, not claimed complete here.
+Deploy through the protected private hosted workflow. Verify the immutable public release, bundle,
 live-model smoke, and managed-container convergence. No production member record
-mutation is part of diagnosis or validation. Archive through scripts/finish-task
-once the candidate and review disposition are complete.
+mutation is part of diagnosis or validation. Archive through scripts/finish-task after the candidate and review disposition.
+Updated: 2026-09-04
+Completed: 2026-09-04
