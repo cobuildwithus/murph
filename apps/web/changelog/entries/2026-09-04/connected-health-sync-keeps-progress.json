@@ -9,6 +9,6 @@
     "summary": "Connected-health refreshes keep their saved progress as new sync details arrive.",
     "details": "This fixes a case where a refresh could repeatedly retry instead of finishing.",
     "relevanceTags": ["wearables", "reliability"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [2824]
   }
 }
