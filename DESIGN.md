@@ -179,6 +179,14 @@ No drop shadows for cards. No elevation tokens. If something needs to "come forw
 
 Every component lives on cream paper, wears warm hairline borders, and speaks in Fraunces numbers + DM Sans copy + DM Mono labels. Touches are restrained — motion serves hierarchy, never decoration.
 
+### Dialogs
+
+Dialogs initially focus their neutral container instead of their first link or
+control. This keeps keyboard navigation inside the modal without making an
+arbitrary action appear selected. Purpose-built flows may set an explicit
+initial focus target when a loading, recovery, or safety interaction requires it;
+normal keyboard navigation retains the visible focus ring.
+
 ### Buttons
 
 - **Shape:** rounded-2xl (20px) for primary CTA; rounded-lg (12px) for secondary.

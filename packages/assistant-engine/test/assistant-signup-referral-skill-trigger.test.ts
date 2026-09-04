@@ -41,7 +41,7 @@ describe('assistant signup link guidance', () => {
     expect(buildAssistantSkillFileRef('signup-link')).toBe(
       '$MURPH_ASSISTANT_SKILLS_ROOT/signup-link/SKILL.md',
     )
-    expect(buildPrompt()).toMatch(/^- Setup: .*\bsignup-link\b/mu)
+    expect(buildPrompt()).toMatch(/^- Setup:.*\bsignup-link\b/mu)
     expect(lowUsage?.triggerHint).not.toContain('signup link')
     expect(lowUsage?.triggerHint).not.toContain('invite link')
   })

@@ -1391,6 +1391,13 @@ Last verified: 2026-09-04
   `device-sync.maintenance_failed`, and activity scheduling uses
   `assistant.device_activity_automation_failed`; none increments the
   failed-attempt metric.
+  Junction sync-result metadata preserves the existing historical progress and
+  coverage keys before optional diagnostics when the 16-entry envelope fills.
+  The provider owner supplies that priority to the shared sanitized merge for
+  success, failure, and coverage composition. Patch values and explicit null
+  clearing remain authoritative; secret filtering and size limits still apply.
+  This prevents local metadata eviction from manufacturing a canonical apply
+  conflict, without weakening Web's version or historical-progress fences.
   Every hosted device-sync lane also enqueues a best-effort
   `device-sync.pass_started` marker before snapshot/provider work and a paired
   `device-sync.pass_finished` marker before returning or rethrowing. Both use

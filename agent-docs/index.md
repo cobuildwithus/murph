@@ -4,6 +4,9 @@ Last verified: 2026-09-04
 
 ## Purpose
 
+Device-sync metadata priority within the existing bounded envelope is specified
+by `agent-docs/RELIABILITY.md`; Junction's progress keys remain provider-owned.
+
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists only live architecture, product, verification, and package-boundary docs.
 
