@@ -1271,6 +1271,17 @@ describe('assistant execution prompt contract', () => {
     )
   })
 
+  it('preserves native Murph tool results in the composed code-mode instructions', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+    const composedPrompt = `${MURPH_CODEX_BASE_INSTRUCTIONS}\n${prompt}`
+
+    expect(composedPrompt.split('Murph dynamic tools return text through code mode'))
+      .toHaveLength(2)
+    expect(composedPrompt).toContain('Pass the returned value directly to `text(result)`')
+    expect(composedPrompt).toContain('read it before deciding the tool failed')
+    expect(composedPrompt).toContain('do not assume an MCP `.content` envelope')
+  })
+
   it('keeps only Murph-specific behavior outside the Codex base kernel', () => {
     const text = buildAssistantExecutionBehaviorText({
       profile: 'default',
