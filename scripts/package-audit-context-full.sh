@@ -437,14 +437,6 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
   export COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS
 fi
 
-# Root dotfiles are not discovered by the ordinary source scan, but Crabbox
-# reviews depend on this provider/ref trust-root configuration even when the
-# current patch changes only its consumers.
-if [[ "$review_gpt_context_mode" != "same_thread_delta" ]]; then
-  COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"$'\n'".crabbox.yaml"
-fi
-export COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS
-
 if [[ "$review_gpt_context_mode" == "same_thread_delta" ]]; then
   export COBUILD_AUDIT_CONTEXT_INCLUDE_TESTS_DEFAULT='0'
   export COBUILD_AUDIT_CONTEXT_INCLUDE_DOCS_DEFAULT='0'
