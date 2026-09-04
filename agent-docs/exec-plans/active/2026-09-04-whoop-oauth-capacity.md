@@ -17,17 +17,16 @@ Updated: 2026-09-04
   direct WHOOP and Junction-backed WHOOP connections.
 - Existing WHOOP members can still reconnect when the shared allowance is full.
 - A successful WHOOP callback still opens the existing completion dialog and
-  its App Store setup guide, now explicitly explaining that WHOOP OAuth does not
-  provide steps and Apple Health supplies them.
+  its unchanged App Store and Apple Health setup guide.
 - The 101st new member still receives the existing Apple Health fallback rather
   than a failed or misleading OAuth handoff.
-- Focused tests, hosted-Web typecheck, rendered phone/desktop proof, exact-head
-  CI, and the required cross-cutting review gate pass.
+- Focused tests, hosted-Web typecheck, exact-head CI, and the required
+  cross-cutting review gate pass.
 
 ## Scope
 
-- In scope: WHOOP capacity policy, WHOOP completion/setup-guide copy, the
-  existing design-catalog representation, focused tests, and one member-facing
+- In scope: WHOOP capacity policy, focused boundary/route tests, verification
+  that the existing post-connect guide remains intact, and one member-facing
   changelog item.
 - Out of scope: provider credentials, OAuth scopes/endpoints, stored connection
   state, Apple Health ingestion, device-sync scheduling, and deployment or
@@ -44,35 +43,33 @@ Updated: 2026-09-04
 
 ### Product UX Patch
 
-- Outcome: New WHOOP members can authorize direct sync again, then receive one
-  clear next step for importing step data through Apple Health.
-- Reaches: The existing signed-in `/connect` WHOOP start, successful callback,
-  and capacity-full fallback journeys.
-- Proof: Focused capacity and completion tests plus the existing
-  `/design?tab=components#whoop-completion-dialog` representation at phone and
-  desktop widths.
+- Outcome: New WHOOP members can authorize direct sync again without changing
+  the existing post-connect experience.
+- Reaches: The existing signed-in `/connect` WHOOP start and capacity-full
+  fallback journeys.
+- Proof: Focused capacity and route tests plus direct comparison of the
+  completion/setup-guide owners against `main`.
 
 ## Risks and mitigations
 
-1. Risk: Raising the gate accidentally bypasses the post-connect Apple Health
+1. Risk: Raising the gate accidentally changes the post-connect Apple Health
    guidance.
-   Mitigation: Keep callback completion independent of the capacity error and
-   assert the steps-specific setup guide on successful WHOOP completion.
+   Mitigation: Leave the completion/setup-guide owners byte-for-byte identical
+   to `main` and retain their existing tests.
 2. Risk: The larger count broadens an unbounded database read.
    Mitigation: Preserve the current per-branch and final SQL limits and update
    their exact bound to 100.
-3. Risk: Copy overstates what either provider shares.
-   Mitigation: Bound the claim to the current WHOOP developer API, which exposes
-   recovery, cycle, workout, sleep, profile, and body-measurement scopes but no
-   steps endpoint; WHOOP documents exporting steps through Apple Health.
+3. Risk: The limit changes but `/connect` still chooses the fallback before the
+   100th slot.
+   Mitigation: Exercise the real route owner at 99 and 100 active members.
 
 ## Tasks
 
 1. Characterize the current `/connect`, capacity, and completion flows and
    confirm current official WHOOP data availability.
 2. Raise the existing WHOOP member limit to 100 and update exact-bound tests.
-3. Make the preserved post-connect guide explicitly explain the steps gap, then
-   align the design representation and focused assertions.
+3. Verify the existing post-connect App Store and Apple Health guide remains
+   intact, without changing its copy or design representation.
 4. Add the member-visible changelog item, run focused tests/typecheck/rendered
    proof, review the final diff, close the plan, commit, and open the draft PR.
 5. Push the exact candidate, run ReviewGPT concurrently with required CI, and
@@ -89,11 +86,9 @@ Updated: 2026-09-04
 
 ## Verification
 
-- Commands to run: focused Vitest files for capacity, connect-page interaction,
-  and completion; hosted-Web typecheck; `pnpm complexity:diff`; a task-scoped
-  Playwright capture of the existing design state at phone and desktop; exact
-  PR-head CI; ReviewGPT.
+- Commands to run: focused Vitest files for capacity, route interaction, and
+  unchanged completion behavior; hosted-Web typecheck; `pnpm complexity:diff`;
+  exact PR-head CI; ReviewGPT.
 - Expected outcomes: 99 current members admits the next OAuth start, 100 blocks
-  only a new member, existing members remain admitted, successful completion
-  renders the steps-specific Apple Health/App Store handoff, and the design
-  state remains usable at both viewports.
+  only a new member, existing members remain admitted, and successful
+  completion retains the existing Apple Health/App Store handoff.
