@@ -7,7 +7,7 @@
     "priority": 4,
     "title": "Telegram sign-in works again",
     "summary": "Telegram sign-in and account linking now use Telegram's current secure authorization flow.",
-    "details": "Returning from Telegram restores the sign-in or connection step so you can finish without restarting. Phone and email sign-in are unchanged.",
+    "details": "Returning from Telegram now finishes through the Telegram path instead of showing unrelated phone recovery. Phone and email sign-in are unchanged.",
     "relevanceTags": ["telegram", "onboarding", "reliability"],
     "sourcePullRequests": [2816]
   }

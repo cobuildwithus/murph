@@ -8,6 +8,11 @@ const TELEGRAM_OAUTH_DIALOG_INTENT_KEY =
 
 const mocks = vi.hoisted(() => ({
   initOAuth: vi.fn(),
+  oauthCallbacks: null as null | {
+    onComplete?: () => void;
+    onError?: (error: unknown) => void;
+  },
+  onAuthenticated: vi.fn(),
   onNoticeChange: vi.fn(),
   useLoginWithOAuth: vi.fn(),
   usePrivy: vi.fn(),
@@ -24,11 +29,15 @@ let cleanupRender: (() => Promise<void>) | null = null;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.oauthCallbacks = null;
   mocks.usePrivy.mockReturnValue({ ready: true });
-  mocks.useLoginWithOAuth.mockReturnValue({
-    initOAuth: mocks.initOAuth,
-    loading: false,
-    state: { status: "initial" },
+  mocks.useLoginWithOAuth.mockImplementation((callbacks) => {
+    mocks.oauthCallbacks = callbacks;
+    return {
+      initOAuth: mocks.initOAuth,
+      loading: false,
+      state: { status: "initial" },
+    };
   });
   mocks.initOAuth.mockResolvedValue(undefined);
 });
@@ -47,6 +56,7 @@ function HomepageTelegramAuthButtonHarness() {
     <HostedTelegramAuthButton
       active={active}
       onActivate={() => setActive(true)}
+      onAuthenticated={mocks.onAuthenticated}
       onNoticeChange={mocks.onNoticeChange}
     />
   );
@@ -70,11 +80,32 @@ test("HomepageTelegramAuthButton starts Telegram OAuth and preserves the dialog 
   ).toBe("1");
 });
 
+test("HomepageTelegramAuthButton completes an OAuth return as Telegram and consumes the redirect intent", async () => {
+  const rendered = await renderClientComponent(
+    createElement(HomepageTelegramAuthButtonHarness),
+  );
+  cleanupRender = rendered.cleanup;
+  rendered.window.sessionStorage.setItem(TELEGRAM_OAUTH_DIALOG_INTENT_KEY, "1");
+
+  await act(async () => {
+    mocks.oauthCallbacks?.onComplete?.();
+    await Promise.resolve();
+  });
+
+  expect(mocks.onAuthenticated).toHaveBeenCalledWith({
+    authMethod: "telegram",
+  });
+  expect(
+    rendered.window.sessionStorage.getItem(TELEGRAM_OAUTH_DIALOG_INTENT_KEY),
+  ).toBeNull();
+});
+
 test("HomepageTelegramAuthButton forwards the no-signup boundary to Telegram OAuth", async () => {
   const rendered = await renderClientComponent(
     createElement(HostedTelegramAuthButton, {
       disableSignup: true,
       onActivate: () => {},
+      onAuthenticated: mocks.onAuthenticated,
     }),
   );
   cleanupRender = rendered.cleanup;
@@ -98,6 +129,7 @@ test("HomepageTelegramAuthButton waits until Privy can start OAuth", async () =>
     createElement(HostedTelegramAuthButton, {
       onActivate: () => {},
       onAuthStart: startAuth,
+      onAuthenticated: mocks.onAuthenticated,
     }),
   );
   cleanupRender = rendered.cleanup;
@@ -117,6 +149,7 @@ test("HomepageTelegramAuthButton respects shared auth ownership", async () => {
     createElement(HostedTelegramAuthButton, {
       onActivate: () => {},
       onAuthStart: startAuth,
+      onAuthenticated: mocks.onAuthenticated,
     }),
   );
   cleanupRender = rendered.cleanup;
@@ -137,6 +170,7 @@ test("HomepageTelegramAuthButton keeps account completion on the active CTA", as
       active: true,
       completionPending: true,
       onActivate: () => {},
+      onAuthenticated: mocks.onAuthenticated,
     }),
   );
   cleanupRender = rendered.cleanup;
@@ -175,6 +209,7 @@ test("HomepageTelegramAuthButton softens cancellation and clears the redirect in
     createElement(HostedTelegramAuthButton, {
       onActivate: () => {},
       onAuthCancel: cancelAuth,
+      onAuthenticated: mocks.onAuthenticated,
       onNoticeChange: mocks.onNoticeChange,
     }),
   );

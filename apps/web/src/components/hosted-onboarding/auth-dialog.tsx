@@ -13,7 +13,7 @@ import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/t
 import { cn } from "@/src/lib/utils";
 
 import type { HostedAuthPanelView } from "./hosted-auth-panel";
-import { consumeHostedTelegramOAuthDialogIntent } from "./hosted-telegram-oauth-intent";
+import { hasHostedTelegramOAuthDialogIntent } from "./hosted-telegram-oauth-intent";
 import type { HostedAuthRuntimeState } from "./hosted-auth-runtime";
 
 type HostedAuthPanelModule = typeof import(
@@ -199,13 +199,19 @@ export function AuthDialog({
   const dialogContentRef = useRef<HTMLDivElement | null>(null);
   const loadedPanelRef = useRef<HTMLDivElement | null>(null);
   const restorePanelFocusRef = useRef(false);
+  const telegramOAuthRestoreRequestedRef = useRef(false);
   const readyAuthPanelModule = AuthPanelModule ?? hostedAuthPanelModule;
 
   useEffect(() => {
-    if (open || !consumeHostedTelegramOAuthDialogIntent()) {
+    if (
+      open
+      || telegramOAuthRestoreRequestedRef.current
+      || !hasHostedTelegramOAuthDialogIntent()
+    ) {
       return;
     }
 
+    telegramOAuthRestoreRequestedRef.current = true;
     onOpenChange(true);
   }, [onOpenChange, open]);
 
