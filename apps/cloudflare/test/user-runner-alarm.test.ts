@@ -1552,6 +1552,7 @@ describe("HostedUserRunner execution coordination", () => {
 
     await vi.waitFor(() => expect(ensureReadyForProcessing).toHaveBeenCalledOnce());
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      orchestrationAttemptId: "test-orchestration-attempt",
       timeoutMs: 15_000,
       userId: TEST_USER_ID,
     });
@@ -2495,6 +2496,7 @@ describe("HostedUserRunner execution coordination", () => {
     );
     await vi.waitFor(() => expect(ensureReadyForProcessing).toHaveBeenCalledOnce());
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      orchestrationAttemptId: "test-orchestration-attempt",
       timeoutMs: 15_000,
       userId: TEST_USER_ID,
     });
@@ -2689,6 +2691,7 @@ describe("HostedUserRunner execution coordination", () => {
       ([input]) => input.path === HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
     )).toHaveLength(1);
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      orchestrationAttemptId: "test-orchestration-attempt",
       timeoutMs: 3_000,
       userId: TEST_USER_ID,
     });
@@ -2722,6 +2725,7 @@ describe("HostedUserRunner execution coordination", () => {
 
     expect(workspaceReadTimeouts).toEqual([29_000]);
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      orchestrationAttemptId: "test-orchestration-attempt",
       timeoutMs: 15_000,
       userId: TEST_USER_ID,
     });
@@ -2748,6 +2752,7 @@ describe("HostedUserRunner execution coordination", () => {
       userId: TEST_USER_ID,
     });
     await vi.waitFor(() => expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      orchestrationAttemptId: "test-orchestration-attempt",
       timeoutMs: 15_000,
       userId: TEST_USER_ID,
     }));
@@ -2781,6 +2786,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
     await vi.waitFor(() => expect(ensureReadyForProcessing).toHaveBeenCalledOnce());
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      orchestrationAttemptId: "default-budget-tail-readiness",
       timeoutMs: 15_000,
       userId: TEST_USER_ID,
     });
@@ -2818,6 +2824,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      orchestrationAttemptId: "test-orchestration-attempt",
       timeoutMs: 8_000,
       userId: TEST_USER_ID,
     });
@@ -2914,6 +2921,7 @@ describe("HostedUserRunner execution coordination", () => {
       retryAt: "2026-04-27T00:00:19.000Z",
     });
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      orchestrationAttemptId: "test-orchestration-attempt",
       timeoutMs: 8_000,
       userId: TEST_USER_ID,
     });
@@ -2958,6 +2966,7 @@ describe("HostedUserRunner execution coordination", () => {
       kind: "runtime_processing_accepted",
     });
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      orchestrationAttemptId: "test-orchestration-attempt",
       timeoutMs: 8_000,
       userId: TEST_USER_ID,
     });
@@ -3136,6 +3145,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      orchestrationAttemptId: "test-orchestration-attempt",
       timeoutMs: 15_000,
       userId: TEST_USER_ID,
     });
@@ -3232,6 +3242,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
     expect(workspaceReadStarted).toBe(true);
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      orchestrationAttemptId: "test-orchestration-attempt",
       timeoutMs: 15_000,
       userId: TEST_USER_ID,
     });
@@ -3334,6 +3345,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      orchestrationAttemptId: "test-orchestration-attempt",
       timeoutMs: 15_000,
       userId: TEST_USER_ID,
     });
@@ -3360,6 +3372,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      orchestrationAttemptId: "test-orchestration-attempt",
       timeoutMs: 15_000,
       userId: TEST_USER_ID,
     });
@@ -3547,6 +3560,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      orchestrationAttemptId: "test-orchestration-attempt",
       timeoutMs: 15_000,
       userId: TEST_USER_ID,
     });
@@ -3561,7 +3575,9 @@ describe("HostedUserRunner execution coordination", () => {
     expect(readStructuredLogDetails(
       "Hosted runner runtime processing startup confirmation failed.",
     )).toMatchObject({
+      orchestrationAttemptId: "test-orchestration-attempt",
       runtimeProcessingRetryReason: "container_rpc_timeout",
+      runtimeStartupConfirmTimeoutMs: 15_000,
       runtimeStartupFailureElapsedMs: 0,
       runtimeStartupFailureStage: "rpc_unattributed",
       transportFailureFenceCleared: true,
@@ -3599,6 +3615,7 @@ describe("HostedUserRunner execution coordination", () => {
       responseSettled = true;
     });
     await vi.waitFor(() => expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      orchestrationAttemptId: "test-cleanup-settlement",
       timeoutMs: 15_000,
       userId: TEST_USER_ID,
     }));
@@ -3669,7 +3686,9 @@ describe("HostedUserRunner execution coordination", () => {
     expect(readStructuredLogDetails(
       "Hosted runner runtime processing startup cleanup did not settle.",
     )).toMatchObject({
+      orchestrationAttemptId: "test-unsettled-cleanup",
       runtimeProcessingRetryReason: "container_rpc_timeout",
+      runtimeStartupConfirmTimeoutMs: 15_000,
       runtimeStartupCleanupUnsettled: true,
       runtimeStartupFailureElapsedMs: 0,
       runtimeStartupFailureStage: "rpc_unattributed",
@@ -3733,7 +3752,9 @@ describe("HostedUserRunner execution coordination", () => {
     expect(readStructuredLogDetails(
       "Hosted runner runtime processing startup confirmation guard elapsed.",
     )).toMatchObject({
+      orchestrationAttemptId: "test-orchestration-attempt",
       runtimeProcessingRetryReason: "container_rpc_timeout",
+      runtimeStartupConfirmTimeoutMs: expect.any(Number),
       runtimeStartupFailureElapsedMs: 8_950,
       runtimeStartupFailureStage: "caller_deadline",
       runtimeStartupWriteFencePreserved: true,
@@ -3785,14 +3806,17 @@ describe("HostedUserRunner execution coordination", () => {
         }),
       }),
     );
-    expect(readStructuredLogDetails(
+    const failureDetails = readStructuredLogDetails(
       "Hosted runner runtime processing startup confirmation failed.",
-    )).toMatchObject({
+    );
+    expect(failureDetails).toMatchObject({
+      orchestrationAttemptId: "pre-dispatch-budget-expired",
       runtimeProcessingRetryReason: "command_budget_exhausted",
       runtimeStartupFailureElapsedMs: 60_000,
       runtimeStartupFailureStage: "caller_deadline",
       transportFailureFenceCleared: true,
     });
+    expect(failureDetails).not.toHaveProperty("runtimeStartupConfirmTimeoutMs");
   });
 
   it("invokes startup readiness directly on the container stub", async () => {
@@ -3807,6 +3831,7 @@ describe("HostedUserRunner execution coordination", () => {
     ) {
       readinessReceiver = this;
       expect(input).toEqual({
+        orchestrationAttemptId: "test-orchestration-attempt",
         timeoutMs: 15_000,
         userId: TEST_USER_ID,
       });
@@ -3861,6 +3886,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      orchestrationAttemptId: "test-orchestration-attempt",
       timeoutMs: 15_000,
       userId: TEST_USER_ID,
     });
