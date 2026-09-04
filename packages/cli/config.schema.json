@@ -3579,6 +3579,62 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
+                "goal": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "commands": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "list": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "query": {
+                                  "description": "Optional text filter over title, goal phrase, summary, aliases, and category.",
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "category": {
+                                  "description": "Optional goal category. Repeat --category for multiple values.",
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "enum": [
+                                      "sleep",
+                                      "nutrition",
+                                      "cardio",
+                                      "strength",
+                                      "mind",
+                                      "biomarkers",
+                                      "life-stages"
+                                    ]
+                                  }
+                                },
+                                "limit": {
+                                  "default": 10,
+                                  "description": "Maximum number of public goal guides to return.",
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 500
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "show": {
+                          "type": "object",
+                          "additionalProperties": false
+                        }
+                      }
+                    }
+                  }
+                },
                 "protocol": {
                   "type": "object",
                   "additionalProperties": false,
@@ -14157,6 +14213,21 @@
                             "type": "string",
                             "minLength": 1
                           }
+                        },
+                        "commonsGoalKey": {
+                          "description": "Public Health Commons goal_template key used to create this private goal.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "commonsPageRevisionId": {
+                          "description": "Exact Health Commons goal page sha256 revision id.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "commonsWorkflowRevisionId": {
+                          "description": "Exact Health Commons goal workflow sha256 revision id.",
+                          "type": "string",
+                          "minLength": 1
                         },
                         "domain": {
                           "description": "Optional goal domain. Repeat --domain for multiple values.",

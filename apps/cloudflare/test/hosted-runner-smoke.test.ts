@@ -12,6 +12,7 @@ import {
   HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT,
+  HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_MUTATION_DENIED_COUNT,
   HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_READ_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_LOCAL_MUTATION_PROOF_COUNT,
@@ -131,6 +132,8 @@ describe("runHostedRunnerSmokeDetailed", () => {
             codexHostedShellVaultCliLlmsBytes: 4096,
             codexVersion: "codex-cli 0.125.0",
             healthCommonsCatalogHash: "sha256:catalog",
+            healthCommonsCliGoalProofCount:
+              HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT,
             healthCommonsCliProtocolListBytes: 768,
             healthCommonsFinnishDrySaunaTitle: "Finnish Dry Sauna",
             healthCommonsRuntimeProtocolHitKeys: [
@@ -206,6 +209,9 @@ describe("runHostedRunnerSmokeDetailed", () => {
       expect(result.codexHostedShellPythonVersion).toBe("Python 3.11.2");
       expect(result.codexHostedShellVaultCliLlmsBytes).toBe(4096);
       expect(result.codexVersion).toBe("codex-cli 0.125.0");
+      expect(result.healthCommonsCliGoalProofCount).toBe(
+        HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT,
+      );
       expect(result.healthCommonsFinnishDrySaunaTitle).toBe("Finnish Dry Sauna");
       expect(result.murphCommandDiscovered).toBe(true);
       expect(result.audioNormalizedMp3Bytes).toBe(9216);

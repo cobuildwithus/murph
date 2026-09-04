@@ -456,6 +456,78 @@ test("next.config uses Workflow lazy discovery to avoid eager dev rebuild loops"
 
 test("next.config traces generated Health Commons route files without the monolithic catalog", () => {
   assert.deepEqual(
+    productionNextConfig.outputFileTracingIncludes?.["/goals"],
+    [
+      "../../packages/health-commons/generated/web/browse/goals.json",
+    ],
+  );
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingIncludes?.["/goals/[goalId]"],
+    [
+      "../../packages/health-commons/generated/web/browse/goals.json",
+      "../../packages/health-commons/generated/web/routes/index.json",
+      "../../packages/health-commons/generated/web/pages/goals/**/*.json",
+    ],
+  );
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingIncludes?.["/api/goals/contact"],
+    [
+      "../../packages/health-commons/generated/web/browse/goals.json",
+    ],
+  );
+  for (const route of [
+    "/api/hosted-onboarding/linq/webhook",
+    "/api/hosted-onboarding/telegram/webhook",
+  ]) {
+    assert.deepEqual(
+      productionNextConfig.outputFileTracingIncludes?.[route],
+      ["../../packages/health-commons/generated/web/browse/goals.json"],
+    );
+  }
+  const expectedGoalTraceExcludes = [
+    "../../packages/health-commons/generated/web/browse/biomarkers.json",
+    "../../packages/health-commons/generated/web/browse/experiments.json",
+    "../../packages/health-commons/generated/web/bundles/**/*.json",
+    "../../packages/health-commons/generated/web/pages/biomarkers/**/*.json",
+    "../../packages/health-commons/generated/web/shell/**/*.json",
+    "../../packages/health-commons/generated/web/tabs/**/*.json",
+  ];
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingExcludes?.["/goals"],
+    expectedGoalTraceExcludes,
+  );
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingExcludes?.["/goals/[goalId]"],
+    expectedGoalTraceExcludes,
+  );
+  const expectedGoalIndexOnlyTraceExcludes = [
+    "../../packages/health-commons/generated/web/pages/goals/**/*.json",
+    "../../packages/health-commons/generated/web/routes/index.json",
+  ];
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingExcludes?.["/goals!(/**)"],
+    expectedGoalIndexOnlyTraceExcludes,
+  );
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingExcludes?.["/api/goals/contact"],
+    [
+      ...expectedGoalTraceExcludes,
+      ...expectedGoalIndexOnlyTraceExcludes,
+    ],
+  );
+  for (const route of [
+    "/api/hosted-onboarding/linq/webhook",
+    "/api/hosted-onboarding/telegram/webhook",
+  ]) {
+    assert.deepEqual(
+      productionNextConfig.outputFileTracingExcludes?.[route],
+      [
+        ...expectedGoalTraceExcludes,
+        ...expectedGoalIndexOnlyTraceExcludes,
+      ],
+    );
+  }
+  assert.deepEqual(
     productionNextConfig.outputFileTracingIncludes?.["/measurement-methods/[measurementMethodId]"],
     [
       "../../packages/health-commons/generated/web/routes/index.json",

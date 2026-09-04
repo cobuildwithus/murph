@@ -2,6 +2,7 @@ export const HOSTED_RUNNER_SMOKE_RESULT_SCHEMA = "murph.cloudflare-hosted-runner
 export const HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT = 5;
 export const HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT = 12;
 export const HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT = 2;
+export const HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT = 6;
 export const HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_MUTATION_DENIED_COUNT = 5;
 export const HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_READ_PROOF_COUNT = 2;
 export const HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_LOCAL_MUTATION_PROOF_COUNT = 5;
@@ -44,6 +45,7 @@ export interface HostedRunnerSmokeResult {
   codexHostedShellVaultCliLlmsBytes: number;
   codexVersion: string;
   healthCommonsCatalogHash: string;
+  healthCommonsCliGoalProofCount: number;
   healthCommonsCliProtocolListBytes: number;
   healthCommonsFinnishDrySaunaTitle: string;
   healthCommonsRuntimeProtocolHitKeys: readonly string[];
@@ -94,6 +96,7 @@ const HOSTED_RUNNER_SMOKE_RESULT_KEYS = new Set([
   "codexHostedShellVaultCliLlmsBytes",
   "codexVersion",
   "healthCommonsCatalogHash",
+  "healthCommonsCliGoalProofCount",
   "healthCommonsCliProtocolListBytes",
   "healthCommonsFinnishDrySaunaTitle",
   "healthCommonsRuntimeProtocolHitKeys",
@@ -269,6 +272,11 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
       record.healthCommonsCatalogHash,
       "Hosted runner smoke result.healthCommonsCatalogHash",
     ),
+    healthCommonsCliGoalProofCount: readExactInteger(
+      record.healthCommonsCliGoalProofCount,
+      "Hosted runner smoke result.healthCommonsCliGoalProofCount",
+      HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT,
+    ),
     healthCommonsCliProtocolListBytes: readFiniteNumber(
       record.healthCommonsCliProtocolListBytes,
       "Hosted runner smoke result.healthCommonsCliProtocolListBytes",
@@ -358,7 +366,7 @@ const assistantCliSurfaceHotPathProofs: readonly {
   {
     command: "goal save",
     snippets: [
-      "args <title>",
+      "args [title]",
       "--status=active|paused|completed|abandoned",
       "--horizon=short_term|medium_term|long_term|ongoing",
       "--priority=integer",
@@ -428,6 +436,15 @@ function readMinimumFiniteNumber(value: unknown, label: string, minimum: number)
   const parsed = readFiniteNumber(value, label);
   if (parsed < minimum) {
     throw new TypeError(`${label} must be at least ${minimum}.`);
+  }
+
+  return parsed;
+}
+
+function readExactInteger(value: unknown, label: string, expected: number): number {
+  const parsed = readFiniteNumber(value, label);
+  if (!Number.isInteger(parsed) || parsed !== expected) {
+    throw new TypeError(`${label} must be the integer ${expected}.`);
   }
 
   return parsed;
