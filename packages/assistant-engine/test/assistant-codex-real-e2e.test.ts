@@ -117,6 +117,7 @@ import {
   MURPH_MEMBER_MEMORY_TOOL,
   MURPH_PERSONALIZATION_TOOL,
   MURPH_PLAN_USAGE_TOOL,
+  MURPH_SELECT_REPLY_TARGET_TOOL,
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
   MURPH_SUBSCRIPTION_TOOL,
@@ -26134,6 +26135,80 @@ describeRealCodex('real Codex latest-context nutrition-card e2e', () => {
       )
     } finally {
       await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  })
+})
+
+describeRealCodex('real Codex live native reply prefix e2e', () => {
+  it('selects an earlier accepted message after later live input', {
+    timeout: 480_000,
+  }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-native-reply-prefix-real-e2e-'),
+    )
+    const earlierRef = 'ain_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    const laterRef = 'ain_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    const steerCompleted = createDeferred<void>()
+    const steerOutcome = steerCompleted.promise.then(
+      () => null,
+      (error: unknown) => error,
+    )
+    const selections: Array<{ deliveryContextOrdinal: number; messageRef: string }> = []
+
+    try {
+      // The local-service regression owns admission and canonical route checks.
+      // This opt-in journey checks real model selection across a live steer.
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        authorizeAcceptedMessageTarget: async (selection) => {
+          if (selection.action !== 'native-reply' ||
+              selection.deliveryContextOrdinal !== 1 ||
+              selection.messageRef !== earlierRef) return null
+          selections.push({ deliveryContextOrdinal: 1, messageRef: earlierRef })
+          return { targetInputId: earlierRef }
+        },
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+          ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildGroupPointOfViewDeveloperInstructions(),
+        dynamicTools: [MURPH_SELECT_REPLY_TARGET_TOOL],
+        env: config.env,
+        excludeResumeTurns: true,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        onLiveTurn: (turn) => {
+          void turn.steer({
+            prompt: [
+              `Message ref: ${laterRef}`,
+              'Another group participant: Please attach your answer to the earlier',
+              'arithmetic question, not this follow-up, so the group can follow it.',
+            ].join('\n'),
+          }).then(
+            () => steerCompleted.resolve(),
+            (error) => steerCompleted.reject(error),
+          )
+        },
+        prompt: [
+          `Message ref: ${earlierRef}`,
+          'A group participant: Murph, what is 13 plus 28?',
+        ].join('\n'),
+        reasoningEffort: 'low',
+        sandbox: 'read-only',
+        workingDirectory,
+      })
+      const steerError = await steerOutcome
+      if (steerError) throw steerError
+      process.stdout.write(`Synthetic earlier-message reply: ${result.finalMessage}\n`)
+      expect(selections).toEqual([{ deliveryContextOrdinal: 1, messageRef: earlierRef }])
+      expect(result.responseDeliveryContextOrdinal).toBe(1)
+      expect(result.targetInputId).toBe(earlierRef)
+      expect(result.precedingAgentMessageSegments).toEqual([])
+      expect(result.finalMessage).toContain('41')
+      expect(result.finalMessage).not.toContain('ain_')
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }
   })
 })
