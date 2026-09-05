@@ -1,6 +1,6 @@
 # Simplify clinical records import and recovery
 
-Status: active
+Status: completed
 Created: 2026-09-05
 Updated: 2026-09-05
 
@@ -49,7 +49,7 @@ The authorized September FHIR refactor covers correctness, policy/contract delet
 - The new unresolved-finalization cases fail on the reviewed head and pass with the two cleanup-query corrections. Already-finalized outcomes remain unchanged.
 - Workspace build and affected typechecks pass, including the additional production Next TypeScript check. Boundary, crypto and complexity guards pass. Clinical domain branch coverage is 78%.
 - Real-component phone (390 px) and desktop (1280 px) studies and signed-out route inspected; Playwright overflow and keyboard proof passes. Branch preview is deployed and the design study returns HTTP 200. No live provider journey has been exercised.
-- CI is green on the prior correction head; the latest cleanup correction requires its own exact-head CI and second ReviewGPT round.
+- CI is green on the prior correction head. Final-head CI remains a merge gate; the latest Web build, typecheck and Web test lanes pass.
 
 ## Progress
 
@@ -60,4 +60,6 @@ The authorized September FHIR refactor covers correctness, policy/contract delet
 - ReviewGPT round one on c83331087764b8ccbfe154c767f16309f3b17c4a reported one high-severity original-PR finding. Parent accepted: disconnect/withdrawal could strand a timestamped needs_reauth run with no saved outcome. User resumed the required disposition boundary.
 - The fix extends cancellation at the two existing cleanup owners to unresolved authorization-ended runs. It adds no state owner, dependency or abstraction. Finalized outcomes and generation/patient fences remain intact.
 - CI corrections before the review result fixed obsolete fixture expectations, sharded test package resolution, direct predicate coverage and React selection state. The prior correction head passed all 33 non-skipped checks.
-- Parent candidate review and focused proof pass. Next: push the cleanup correction, run second ReviewGPT concurrently with exact-head CI, close the plan and merge when gates pass.
+- ReviewGPT round two passed on d43b4ce33ad1162f4c7c52d4a74ac06683848d79 with verified GPT-6 Pro identity and exact response digest. It confirmed the accepted reconnect finding is resolved and reported no additional qualifying bugs or Complexity Collapse.
+- Parent final review confirms the requested outcome, ownership, privacy, source deletion and proof. No accepted findings or implementation work remain. This closure changes only the historical plan; exact-head CI and mergeability still gate landing.
+Completed: 2026-09-05
