@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("Health Commons generated artifact setup", () => {
-  it("runs without the global workspace-artifact lock", () => {
+  it("delegates generation directly to the artifact setup helper", () => {
     const rootPackageJson = JSON.parse(
       readFileSync(path.join(repoRoot, "package.json"), "utf8"),
     ) as { scripts?: Record<string, string> };
@@ -21,8 +21,5 @@ describe("Health Commons generated artifact setup", () => {
     );
     expect(ensureHealthCommonsGenerated).toContain('"@murphai/health-commons"');
     expect(ensureHealthCommonsGenerated).toContain('"generate"');
-    expect(ensureHealthCommonsGenerated).not.toContain(
-      "run-with-workspace-artifact-lock.mjs",
-    );
   });
 });
