@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { hostedConnectedAppStartedIntentOwnerCutoff } from "../connected-apps/connect-intent-ownership";
 import { getPrisma } from "../prisma";
+import { HOSTED_OPERATOR_TASK_RESULT_RETENTION_MS } from "../hosted-ops/operator-task-retention";
 import {
   HOSTED_MAILBOX_PENDING_CURRENT_SENDER_ASK_RETENTION_DISPOSITION,
   HOSTED_MAILBOX_RETENTION_MS,
@@ -32,8 +33,8 @@ export const HOSTED_RETENTION_MAX_BATCHES = 4;
 export const HOSTED_CALLBACK_REQUEST_NONCE_RETENTION_MAX_BATCHES =
   HOSTED_RETENTION_MAX_BATCHES * 100;
 // Short-lived control artifacts are normally tiny and should never inherit the
-// high-volume diagnostic drain budget. Across the seven owners below this caps
-// one hourly pass at 14 statements and 3,500 deleted rows.
+// high-volume diagnostic drain budget. Across the eight owners below this caps
+// one hourly pass at 16 statements and 4,000 deleted or compacted rows.
 export const HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE = 250;
 export const HOSTED_CONTROL_ARTIFACT_RETENTION_MAX_BATCHES = 2;
 // Clinical Records started intents remain the completion owner after their
@@ -66,6 +67,7 @@ export interface HostedControlPlaneRetentionCleanupResult {
   expiredIngressLatencyTracesDeleted: number;
   expiredMailboxContentRetired: number;
   expiredMailboxTombstonesDeleted: number;
+  expiredOperatorTaskResultsRetired: number;
   expiredSensitiveActionChallengesDeleted: number;
   expiredSignupNotificationContextsRetired: number;
   staleWebSessionsDeleted: number;
@@ -101,6 +103,8 @@ export async function runHostedControlPlaneRetentionCleanup(input: {
     await deleteExpiredEmailPublicBootstrapAttempts({ now, prisma });
   const expiredSignupNotificationContextsRetired =
     await retireExpiredSignupNotificationContexts({ now, prisma });
+  const expiredOperatorTaskResultsRetired =
+    await retireExpiredOperatorTaskResults({ now, prisma });
   const expiredMailboxItems = await retireExpiredMailboxContent({
     now,
     prisma,
@@ -147,6 +151,7 @@ export async function runHostedControlPlaneRetentionCleanup(input: {
     expiredIngressLatencyTracesDeleted,
     expiredMailboxContentRetired: expiredMailboxItems.retired,
     expiredMailboxTombstonesDeleted: expiredMailboxItems.tombstonesDeleted,
+    expiredOperatorTaskResultsRetired,
     expiredSensitiveActionChallengesDeleted,
     expiredSignupNotificationContextsRetired,
     staleWebSessionsDeleted,
@@ -170,6 +175,31 @@ export async function runHostedRuntimeSignalRetentionCleanup(input: {
     inboxMediaRetentionRuntimeSignalFailures: mediaRetentionSignals.failures,
     inboxMediaRetentionRuntimeSignalsSent: mediaRetentionSignals.sent,
   };
+}
+
+// Keep task identity/status as the durable duplicate gate; only results expire.
+export async function retireExpiredOperatorTaskResults(input: {
+  now: Date;
+  prisma: Pick<PrismaClient, "$executeRaw">;
+}): Promise<number> {
+  const cutoff = new Date(
+    input.now.getTime() - HOSTED_OPERATOR_TASK_RESULT_RETENTION_MS,
+  );
+  return await runControlArtifactRetentionBatches(() => input.prisma.$executeRaw`
+    WITH expired AS MATERIALIZED (
+      SELECT task."id"
+      FROM "hosted_operator_task" AS task
+      WHERE task."result_encrypted" IS NOT NULL
+        AND task."completed_at" <= ${cutoff}
+      ORDER BY task."completed_at" ASC, task."id" ASC
+      LIMIT ${HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE}
+      FOR UPDATE OF task SKIP LOCKED
+    )
+    UPDATE "hosted_operator_task" AS task
+    SET "result_encrypted" = NULL
+    FROM expired
+    WHERE task."id" = expired."id"
+  `);
 }
 
 // Signup context is optional notification projection data, not member history.
