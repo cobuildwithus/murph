@@ -11,7 +11,9 @@
     "relevanceTags": [
       "connected-apps"
     ],
-    "sourcePullRequests": [],
+    "sourcePullRequests": [
+      2886
+    ],
     "tryIt": {
       "label": "Ask Murph",
       "prompt": "What is the weather like today?"
