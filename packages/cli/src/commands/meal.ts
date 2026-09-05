@@ -377,7 +377,29 @@ const mealNutritionDaySchema = z.object({
   totals: mealNutritionTotalsSchema,
 })
 
+const nutritionTargetResolutionSchema = z.object({
+  status: z.enum(['resolved', 'missing', 'conflict', 'incompatible']),
+  target: z.number().nullable(),
+  provenance: z.array(z.object({
+    goalId: z.string(), targetId: z.string(), metricKey: z.string(), unit: z.string(),
+    window: z.object({ startAt: localDateSchema.optional(), targetAt: localDateSchema.optional() }),
+    startAt: localDateSchema.optional(), targetAt: localDateSchema.optional(),
+  })),
+})
+const mealNutritionGoalContextSchema = z.object({
+  localDate: localDateSchema,
+  status: z.enum(['ready', 'missing', 'conflict', 'incompatible', 'capacity']),
+  activeGoalCount: z.number().int().nonnegative(),
+  compatibility: z.enum(['canonical', 'historical-selected', 'historical-rolling-mean']),
+  targets: z.object({
+    calories: nutritionTargetResolutionSchema, proteinGrams: nutritionTargetResolutionSchema,
+    carbsGrams: nutritionTargetResolutionSchema, fatGrams: nutritionTargetResolutionSchema,
+    fiberGrams: nutritionTargetResolutionSchema,
+  }),
+})
+
 const mealNutritionTotalsResultSchema = z.object({
+  goalContext: mealNutritionGoalContextSchema.optional(),
   vault: pathSchema,
   filters: z.object({
     from: localDateSchema.nullable(),
@@ -697,6 +719,7 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
         hint:
           'Use `meal totals --from YYYY-MM-DD --to YYYY-MM-DD` when you need practical calories/protein/carbs/fat/fiber totals without a broader reporting layer.',
         options: {
+          resolveGoals: z.boolean().optional().describe('Resolve applicable nutrition goal points with conflicts and provenance. Requires identical explicit from/to dates; read-only and never approves suitability or activates proposals.'),
           from: localDateSchema
             .optional()
             .describe('Optional inclusive lower date bound in YYYY-MM-DD form.'),
@@ -709,11 +732,19 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
           const from = typeof options.from === 'string' ? options.from : undefined
           const to = typeof options.to === 'string' ? options.to : undefined
           assertOrderedDateRange(from, to)
+          if (options.resolveGoals === true && (!from || from !== to)) {
+            throw new VaultCliError('invalid_payload', 'Goal resolution requires identical explicit from and to dates.', {
+              hint: 'Pass --from YYYY-MM-DD --to the same date with --resolve-goals.',
+              retryable: false,
+              stage: 'validation',
+            })
+          }
           return services.query.showMealNutritionTotals({
             vault: String(options.vault ?? ''),
             requestId: typeof requestId === 'string' ? requestId : null,
             from,
             to,
+            resolveGoals: options.resolveGoals === true,
           })
         },
       },

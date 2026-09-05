@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT Pro alias rejects current GPT-6 Pro response metadata'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2880'
 ---
 
 ## Expected Behavior

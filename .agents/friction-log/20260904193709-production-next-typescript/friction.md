@@ -1,6 +1,7 @@
 ---
 title: 'Production Next TypeScript check exceeds its fixed cold-check heap'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2847'
 ---
 
 ## Expected Behavior

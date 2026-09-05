@@ -1,6 +1,7 @@
 ---
 title: 'Foreground-priority E2E times out before the configured idle checkpoint'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2760'
 ---
 
 ## Expected Behavior

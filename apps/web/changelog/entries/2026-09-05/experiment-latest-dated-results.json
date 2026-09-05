@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-05",
+  "order": 100,
+  "item": {
+    "id": "experiment-latest-dated-results",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "See the latest result in your experiment",
+    "summary": "Experiment results now show the latest dated result alongside the statistic used to compare the experiment windows.",
+    "details": "Available results remain visible when a baseline is missing. Before-and-during changes still appear only when there is enough data to compare.",
+    "relevanceTags": [
+      "experiments",
+      "results"
+    ],
+    "sourcePullRequests": [
+      2889
+    ]
+  }
+}

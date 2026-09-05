@@ -1,6 +1,7 @@
 ---
 title: 'Fresh Web typecheck requires an undeclared device-syncd service build'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2914'
 ---
 
 ## Expected Behavior

@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT lock refresh drops the patched Incur resolution'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2755'
 ---
 
 ## Context

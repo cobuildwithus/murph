@@ -7059,7 +7059,10 @@ if (!tool) {
       const discovered = scenario.stub.requestSummariesSinceBaseline()[1]?.toolSearchOutputTools
       expect(JSON.stringify(discovered)).toContain('compact_table')
       expect(JSON.stringify(discovered)).toContain('daily_nutrition')
-      expect(JSON.stringify(discovered)).toContain('goal list --status active')
+      expect(JSON.stringify(discovered)).toContain(
+        'meal totals --from <date> --to <same-date> --resolve-goals --format json',
+      )
+      expect(JSON.stringify(discovered)).not.toContain('goal list --status active')
       expect(result.runtimeIssueInputs).toEqual([])
       if ('workout' in card) {
         expect(result.responseCard).toMatchObject({

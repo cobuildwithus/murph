@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT snapshot listing exceeds the default spawnSync buffer on large repositories'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2799'
 ---
 
 ## Expected Behavior

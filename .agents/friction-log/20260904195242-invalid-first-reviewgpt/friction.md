@@ -1,6 +1,7 @@
 ---
 title: 'Invalid first ReviewGPT attempt prevents review after an authorized head change'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2856'
 ---
 
 ## Expected Behavior

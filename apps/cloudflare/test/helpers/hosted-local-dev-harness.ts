@@ -147,6 +147,7 @@ export interface HostedLocalDevHarness {
 }
 
 export async function startHostedLocalDevHarness(input: {
+  abortSignal?: AbortSignal;
   env: NodeJS.ProcessEnv;
   persistDirOverride?: string | null;
   persistDirPrefix: string;
@@ -219,6 +220,7 @@ export async function startHostedLocalDevHarness(input: {
     stack = await startHostedLocalDevStack({
       env: runtimeEnv,
       pipeOutput: streamLogs,
+      ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
       ...(input.webProcessEnvOverrides
         ? { webProcessEnvOverrides: input.webProcessEnvOverrides }
         : {}),
@@ -244,6 +246,7 @@ export async function startHostedLocalDevHarness(input: {
           stderr,
         ));
     }
+    input.abortSignal?.throwIfAborted();
 
     return {
       ageActiveRuntimeFenceForTest: async (

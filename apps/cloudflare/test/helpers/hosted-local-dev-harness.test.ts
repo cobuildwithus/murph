@@ -47,7 +47,7 @@ const hostedLocalDevConfig: HostedLocalDevConfig = {
 };
 
 const stopHostedLocalDevStack = vi.fn(async () => {});
-const startHostedLocalDevStack = vi.fn(async () => ({
+const createHostedLocalDevStack = (ready: Promise<void> = Promise.resolve()) => ({
   config: hostedLocalDevConfig,
   oidcIdentity: {
     environment: "development" as const,
@@ -69,7 +69,7 @@ const startHostedLocalDevStack = vi.fn(async () => ({
     web: null,
   },
   linqWebhookTargetUrl: null,
-  ready: Promise.resolve(),
+  ready,
   stop: stopHostedLocalDevStack,
   stderrTail: () => "",
   stdoutTail: () => "",
@@ -77,7 +77,8 @@ const startHostedLocalDevStack = vi.fn(async () => ({
   webBaseUrl: "http://127.0.0.1:3000",
   workerBaseUrl: "http://127.0.0.1:8787",
   workerRuntimeEnv: null,
-}));
+});
+const startHostedLocalDevStack = vi.fn(async () => createHostedLocalDevStack());
 
 vi.mock("@murphai/hosted-local-harness/dev-hosted-local/config", () => ({
   resolveHostedLocalDevConfig: vi.fn(() => hostedLocalDevConfig),
@@ -121,6 +122,38 @@ it("passes host-only web overrides with the harness process pid", async () => {
       LINQ_API_BASE_URL: "http://127.0.0.1:4011",
     },
   });
+});
+
+it("forwards setup cancellation and stops a stack that becomes ready after cancellation", async () => {
+  let resolveReady = (): void => {};
+  const ready = new Promise<void>((resolve) => {
+    resolveReady = resolve;
+  });
+  startHostedLocalDevStack.mockResolvedValueOnce(createHostedLocalDevStack(ready));
+  const abortController = new AbortController();
+  const { startHostedLocalDevHarness } = await import("./hosted-local-dev-harness.js");
+
+  const startup = startHostedLocalDevHarness({
+    abortSignal: abortController.signal,
+    env: {
+      DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/murph_test",
+      MURPH_HOSTED_LOCAL_PROFILE: "e2e:stub",
+      NEXT_DIST_DIR_MODE: "smoke",
+    },
+    persistDirPrefix: "murph-hosted-local-test-",
+  });
+  await vi.waitFor(() => {
+    expect(startHostedLocalDevStack).toHaveBeenCalledOnce();
+  });
+
+  abortController.abort();
+  resolveReady();
+
+  await expect(startup).rejects.toMatchObject({ name: "AbortError" });
+  expect(startHostedLocalDevStack).toHaveBeenCalledWith(expect.objectContaining({
+    abortSignal: abortController.signal,
+  }));
+  expect(stopHostedLocalDevStack).toHaveBeenCalledOnce();
 });
 
 it("preserves a prebuilt production web dist across E2E prod stack stops", async () => {

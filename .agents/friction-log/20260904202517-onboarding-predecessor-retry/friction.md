@@ -1,6 +1,7 @@
 ---
 title: 'Onboarding predecessor retry assertion fails for a zero-jitter schedule'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2862'
 ---
 
 ## Expected Behavior
