@@ -1234,6 +1234,21 @@ handoffs, and every hosted E2E assertion.
 
 When real source code, CI, or deployment automation is added, update this file and `agent-docs/operations/verification-and-runtime.md` in the same change.
 
+## Hosted consent persistence
+
+`legal-consent-postgres.test.ts` runs in the existing host-support Web test shards
+when `MURPH_CONSENT_TEST_DB_URL` points to their separate `murph_consent_test`
+database. The shard prepares the current Prisma schema with `prisma db push`;
+supplement search retains its own database and transactional fixtures. This
+proves decline uniqueness under real PostgreSQL contention, immutable retry audit
+values, accepted-scope exclusion, event/grant coherence, sequential withdrawal
+replay, and rollback after real event and grant writes. Existing opt-in
+`MURPH_TEST_POSTGRES_CONCURRENCY` suites are not enabled by this CI change.
+
+For local proof, prepare an isolated loopback `murph_dev_<slug>` database with the
+same schema command, then run
+`MURPH_CONSENT_TEST_DB_URL="$LOCAL_POSTGRES_URL" pnpm --dir apps/web test:prepared test/legal-consent-postgres.test.ts`.
+
 ## Hosted Stripe Billing Lanes
 
 `.github/workflows/hosted-stripe-billing.yml` separates proof from authority:

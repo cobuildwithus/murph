@@ -271,6 +271,14 @@ function inspectHostSupportReleaseGraph(source) {
     webTests,
     /^      MURPH_SUPPLEMENT_SEARCH_TEST_DB_URL: postgresql:\/\/postgres:postgres@127\.0\.0\.1:5432\/murph_search_test$/mu,
   );
+  assert.match(
+    webTests,
+    /^      MURPH_CONSENT_TEST_DB_URL: postgresql:\/\/postgres:postgres@127\.0\.0\.1:5432\/murph_consent_test$/mu,
+  );
+  assert.match(
+    webTests,
+    /^        run: DATABASE_URL="\$MURPH_CONSENT_TEST_DB_URL" pnpm --dir apps\/web exec prisma db push$/mu,
+  );
   assert.match(webTests, /^        run: pnpm --dir apps\/web verify$/mu);
 
   assert.deepEqual(jobNeeds(cloudflare, "release-cloudflare-verification-linux"), [
@@ -466,6 +474,8 @@ test("Host Support graph drift cannot skip, duplicate, overlap, or de-aggregate 
       "      fail-fast: false\n      matrix: ${{ fromJSON(needs.release-verification-plan-linux.outputs.hosted_web_test_matrix) }}",
       "      fail-fast: true\n      matrix: ${{ fromJSON(needs.release-verification-plan-linux.outputs.hosted_web_test_matrix) }}",
     ),
+    host.replace("      MURPH_CONSENT_TEST_DB_URL:", "      UNUSED_CONSENT_TEST_DB_URL:"),
+    host.replace('DATABASE_URL="$MURPH_CONSENT_TEST_DB_URL" pnpm --dir apps/web exec prisma db push', "echo skipped consent database"),
     host.replace("      - release-web-tests-linux\n", ""),
   ];
 
