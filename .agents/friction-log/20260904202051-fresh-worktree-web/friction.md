@@ -1,6 +1,7 @@
 ---
 title: 'Fresh worktree Web typecheck requires an undeclared device-syncd service artifact'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2907'
 ---
 
 ## Expected Behavior

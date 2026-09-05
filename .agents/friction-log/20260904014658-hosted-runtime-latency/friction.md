@@ -1,6 +1,7 @@
 ---
 title: 'Hosted runtime latency PostgreSQL correctness proof is coupled to a large stress fixture'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2804'
 ---
 
 ## Expected Behavior

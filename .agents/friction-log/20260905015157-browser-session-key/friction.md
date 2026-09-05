@@ -1,6 +1,7 @@
 ---
 title: 'Browser session key tamper test can preserve ciphertext'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2920'
 ---
 
 ## Expected Behavior

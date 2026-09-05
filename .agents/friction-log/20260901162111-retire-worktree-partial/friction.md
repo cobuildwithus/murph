@@ -1,6 +1,7 @@
 ---
 title: 'retire-worktree partial removal leaves quarantined checkout dirty'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2900'
 ---
 
 ## Expected Behavior

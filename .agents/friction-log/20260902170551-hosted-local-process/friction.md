@@ -1,6 +1,7 @@
 ---
 title: 'Hosted-local process integration masks fresh-checkout child import failure'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2744'
 ---
 
 ## Expected Behavior

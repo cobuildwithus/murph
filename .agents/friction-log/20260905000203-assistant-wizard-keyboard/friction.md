@@ -1,6 +1,7 @@
 ---
 title: 'Assistant wizard keyboard test races rendered provider selection'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2901'
 ---
 
 ## Expected Behavior

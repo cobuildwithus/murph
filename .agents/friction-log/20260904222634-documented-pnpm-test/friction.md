@@ -1,6 +1,7 @@
 ---
 title: 'Documented pnpm test separator drops Vitest file filters'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2917'
 ---
 
 ## Expected Behavior
