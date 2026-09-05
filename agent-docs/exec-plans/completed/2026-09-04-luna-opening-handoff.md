@@ -1,6 +1,6 @@
 # Two-reply opening and background identity persistence
 
-Status: active
+Status: completed
 Created: 2026-09-04
 Updated: 2026-09-05
 
@@ -86,7 +86,7 @@ review completed for the opening behavior.
   assembled instruction message changes; tools and other input are identical
   after normalizing fixture paths and generated ids.
 
-## Remaining PR gates
+## Resumption and final review
 
 - Continuation resumption found and reproduced an admission error: the second
   Web reply expected a self-owned thread-container route, while personal chats
@@ -118,8 +118,18 @@ review completed for the opening behavior.
   gpt-6-pro target. Preserve the original reviewed-head lineage in the new full
   snapshot review.
 
-- Push the scoped candidate, update PR evidence, and run the required
-  cross-cutting ReviewGPT/CI gates. PR remains draft; no merge is authorized.
+- Pushed candidate `feae3ccbda2d4a80a90272faf8a8f07327baade1` received a
+  validated full ReviewGPT PASS with gpt-6-pro in round 2. The response confirms
+  the accepted direct-route finding and access correction are resolved; it
+  identified no qualifying Critical/High bug or Complexity Collapse. Response
+  hash: `f95d18f5ac65bcc4c5ea949d88825d7f10d2672ff32d6e8fefa8f2b108a0e7ba`.
+  Parent final review agrees. The plan-close commit changes documentation only
+  and is exempt from repeating the source review.
+- PR #2802 is Ready with complete evidence. Exact-head CI remains a separate
+  PR completion gate and is tracked in the PR; the final documentation commit
+  must receive its own required checks. Current-base merge-tree proof passed.
+  This closes implementation and source review; no merge or deploy is authorized.
 - Full deployed opening-sequence timing with actual provider delivery remains
   unproven. The broader returning-member routing failure is independently
   reproducible on main and is not attributed to this change.
+Completed: 2026-09-05
