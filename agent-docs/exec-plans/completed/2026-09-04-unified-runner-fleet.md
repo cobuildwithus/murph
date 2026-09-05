@@ -1,6 +1,6 @@
 # Unified global runner fleet and configurable warm inventory
 
-Status: active
+Status: completed
 Created: 2026-09-04
 Updated: 2026-09-05
 
@@ -88,3 +88,8 @@ Proof: Coordinator concurrency tests plus real controller/binding tests; focused
 - Final review tooling needs both unchanged canonical guarded snapshots. Initial private attempts were invalid because the configured model alias did not match the current Pro model; the final packet also lacked companion producer source. Correct per-run model selection and canonical two-snapshot staging retain preflight, capture identity, and one waited completion owner. The existing Pro-alias Frog entry covers model selection; the task-owned hosted-runtime-review entry records missing companion-snapshot support.
 
 - Resumed the owned PR worktree at the reviewed head and reproduced both Cloudflare CI failures. Corrected isolated route and deletion fixtures for the shared binding lifecycle and exact-target retirement contract; production source is unchanged. Both full affected test files pass (139 tests), and Cloudflare typecheck passes after these corrections. Final public and private review captures retain their existing completion owners.
+
+- Refreshed public CI passed on the isolated-fixture correction: all applicable checks green, including Cloudflare build/typecheck, 3,032 Node tests (two intentional skips), 15 Worker tests, six container-helper tests, Web shards, package coverage, bundle budgets, and the final release-check rollup.
+- Final public and private round-one reviews both passed with zero findings on the exact canonical companion snapshots. Original capture processes exited without persisting their completed responses; exact-thread recovery preserved the accepted turns and response hashes. Authenticated conversation metadata independently confirms the requested model and elapsed review times above the 270-second minimum (public 529.672 seconds; private 783.189 seconds). Archive hashes, manifests, reviewed Git blobs, immutable baselines, and complete response markers all match. The private preliminary specialist gate also passed.
+- Parent final review confirms atomic ready-slot handoff, bounded refill, background exclusion, exact pending-target recovery, and conserved deployment capacity. Later public changes are isolated fixtures and explanatory documentation, so the completed production review remains applicable. Implementation is complete; merge, private integration against updated public main, and deployment remain separate rollout steps. No production settings, merges, or deployments were changed.
+Completed: 2026-09-05
