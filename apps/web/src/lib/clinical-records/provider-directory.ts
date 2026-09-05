@@ -25,16 +25,9 @@ export type ClinicalProviderClientIdEnvironmentKey =
 
 export type ClinicalProviderFacility = ClinicalProviderFacilityContract;
 
-export interface ClinicalProviderCapabilityOverride {
-  evidenceVersion: string;
-  queryScopeId: string;
-  support: "unsupported" | "verified";
-}
-
 export interface ClinicalProviderDirectoryEntry {
   aliases: readonly string[];
   brandName: string;
-  capabilityOverrides: readonly ClinicalProviderCapabilityOverride[];
   clientIdEnvironmentKey: ClinicalProviderClientIdEnvironmentKey;
   facilities: readonly ClinicalProviderFacility[];
   fhirBaseUrl: string;
@@ -203,7 +196,6 @@ function parseDirectoryEntry(
   return {
     aliases: parseUniqueStrings(record.aliases, `Clinical provider directory entry ${index} aliases`, 20, 120),
     brandName: requireBoundedString(record.brandName, `Clinical provider directory entry ${index} brand`, 160),
-    capabilityOverrides: parseCapabilityOverrides(record.capabilityOverrides, index),
     clientIdEnvironmentKey: record.clientIdEnvironmentKey,
     facilities: locations.map((location, locationIndex) =>
       parseLocationTuple(location, index, locationIndex)
@@ -215,59 +207,6 @@ function parseDirectoryEntry(
     resourceTypes: EPIC_BETA_RESOURCE_TYPES,
     sourceSystem: EPIC_ACQUISITION_POLICY.sourceSystem,
   };
-}
-
-function parseCapabilityOverrides(
-  value: unknown,
-  entryIndex: number,
-): ClinicalProviderCapabilityOverride[] {
-  if (value === undefined) return [];
-  const rawOverrides = requireArray(
-    value,
-    `Clinical provider directory entry ${entryIndex} capability overrides`,
-  );
-  if (rawOverrides.length > EPIC_ACQUISITION_POLICY.queryScopes.length) {
-    throw new RangeError(
-      `Clinical provider directory entry ${entryIndex} has too many capability overrides.`,
-    );
-  }
-  const queryScopeIds = new Set(
-    EPIC_ACQUISITION_POLICY.queryScopes.map((query) => query.queryScopeId),
-  );
-  const overrides = rawOverrides.map((item, overrideIndex): ClinicalProviderCapabilityOverride => {
-    const record = requireRecord(
-      item,
-      `Clinical provider directory entry ${entryIndex} capability override ${overrideIndex}`,
-    );
-    const queryScopeId = requireIdentifier(
-      record.queryScopeId,
-      `Clinical provider directory entry ${entryIndex} capability override ${overrideIndex} query scope`,
-    );
-    if (!queryScopeIds.has(queryScopeId)) {
-      throw new TypeError(
-        `Clinical provider directory entry ${entryIndex} capability override ${overrideIndex} references an unknown query scope.`,
-      );
-    }
-    if (record.support !== "verified" && record.support !== "unsupported") {
-      throw new TypeError(
-        `Clinical provider directory entry ${entryIndex} capability override ${overrideIndex} support is invalid.`,
-      );
-    }
-    return {
-      evidenceVersion: requireBoundedString(
-        record.evidenceVersion,
-        `Clinical provider directory entry ${entryIndex} capability override ${overrideIndex} evidence version`,
-        120,
-      ),
-      queryScopeId,
-      support: record.support,
-    };
-  });
-  assertStrictlySorted(
-    overrides.map((override) => override.queryScopeId),
-    `Clinical provider directory entry ${entryIndex} capability overrides`,
-  );
-  return overrides;
 }
 
 function parseLocationTuple(
@@ -356,10 +295,13 @@ function scoreDirectoryEntry(input: {
 }
 
 function normalizeSearchText(value: string | null | undefined): string {
+  return normalizeDirectoryText(value?.trim().slice(0, MAX_SEARCH_TEXT_LENGTH));
+}
+
+function normalizeDirectoryText(value: string | null | undefined): string {
   if (typeof value !== "string") return "";
   return value
     .trim()
-    .slice(0, MAX_SEARCH_TEXT_LENGTH)
     .toLocaleLowerCase("en-US")
     .replace(/[^a-z0-9]+/gu, " ")
     .trim()
@@ -367,7 +309,7 @@ function normalizeSearchText(value: string | null | undefined): string {
 }
 
 function searchTextContainsEveryToken(value: string, query: string): boolean {
-  const normalizedValue = normalizeSearchText(value);
+  const normalizedValue = normalizeDirectoryText(value);
   const tokens = normalizeSearchText(query).split(" ").filter(Boolean);
   const words = new Set(normalizedValue.split(" ").filter(Boolean));
   return tokens.length > 0 && tokens.every((token) =>

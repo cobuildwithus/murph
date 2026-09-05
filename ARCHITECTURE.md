@@ -852,11 +852,11 @@ current-user assistant turn can create the same short-lived first-party link
 through the existing Clinical Records runtime port and signed Web control
 boundary. That tool accepts no member, provider, patient, recipient, URL, or
 scope argument, so provider selection and SMART consent remain browser-owned.
-The initial lane permits one retrieval
-generation per unique member/provider connection; later retry, reconnect, or
-refresh requires a bounded raw-evidence retention lifecycle. The Epic beta
-requests only Patient read, laboratory Observation search, and DiagnosticReport
-search, with no offline-access scope. Each retrieval run also freezes the exact
+Each unique member/provider connection admits at most eight immutable snapshots
+across fresh authorizations, bounded to twenty sources per member. Reconnect
+keeps the same encrypted patient/base binding and increments the existing
+credential epoch and run generation. The ordered Epic catalog contains 24
+queries across 17 resource families, with no offline-access scope. Each retrieval run also freezes the exact
 adapter-owned query plan in additive operational JSON. Stable `queryScopeId`
 and deterministic `sliceId` values distinguish repeated resource-type queries
 and bounded history windows, but they are acquisition identity only and never
@@ -1906,18 +1906,16 @@ Clinical retrieval ownership is intentionally split across existing layers.
 FHIR pagination, opaque cursor/request replay, run state, and the signed
 read/fetch/outcome routes. Its durable system-mailbox handoff is exactly
 `{runId, generation}` and uses the existing per-user Temporal workflow.
-The member/provider unique connection owns one initial retrieval generation,
-which bounds immutable raw-evidence directories until a future retention owner
-can preserve canonical raw references across refreshes.
+The member/provider connection retains at most eight immutable snapshots,
+preserving every canonical raw reference without another retention service.
 `apps/cloudflare` supplies only the typed signed-web-control transport adapter.
 `packages/assistant-runtime` performs finite preemptible background iteration,
 resuming from the vault-owned operational checkpoint after preemption. The
-versioned runtime contract accepts either the current resource-family descriptor
-or explicit query slices; query-aware raw pages and completion state remain
-grouped by query/slice through the checkpoint and v3 raw manifest. Existing v2
-manifests and v1 checkpoints remain readable. Each run pins its retrieval
-protocol at creation: existing nullable-protocol rows remain legacy for their
-entire lifecycle, while new runs emit `query-slices-v2`. Query-aware page
+runtime contract carries only the frozen query slices and completed-slice
+references. The v3 checkpoint and v3 manifest preserve that same grouping.
+Only the external importer reads legacy v2 manifests; hosted legacy descriptors,
+cursors, duplicate completion lists and outgoing next-link metadata are gone.
+Query-aware page
 requests, opaque cursors, durable request claims, and terminal outcomes bind
 the frozen query-scope and slice identities so they cannot be swapped across
 the same resource type. Epic's active policy expands 24 primary query scopes

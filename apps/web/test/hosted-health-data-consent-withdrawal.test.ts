@@ -3,6 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
+  lockMember: vi.fn(),
+  connections: vi.fn(),
+  runs: vi.fn(),
+  sessions: vi.fn(),
+  intents: vi.fn(),
   disconnectAllHostedDeviceSyncConnectionsForUser: vi.fn(),
   readHostedConsentStatus: vi.fn(),
   readHostedHealthDataConsentState: vi.fn(),
@@ -19,7 +24,16 @@ vi.mock("@/src/lib/device-sync/meal-photo-capture", () => ({
     mocks.revokeAllMealPhotoCaptureEnrollmentsForMember,
 }));
 vi.mock("@/src/lib/prisma", () => ({
-  getPrisma: () => ({ label: "test-prisma" }),
+  getPrisma: () => {
+    const tx = {
+      $queryRaw: mocks.lockMember,
+      clinicalRecordConnection: { updateMany: mocks.connections },
+      clinicalRecordRetrievalRun: { updateMany: mocks.runs },
+      clinicalRecordOauthSession: { deleteMany: mocks.sessions },
+      clinicalRecordConnectIntent: { deleteMany: mocks.intents },
+    };
+    return { ...tx, $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx) };
+  },
 }));
 vi.mock("@/src/lib/legal/consent", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/legal/consent")>(
@@ -107,6 +121,28 @@ describe("withdrawHostedHealthDataConsent", () => {
     ).toBeLessThan(
       mocks.revokeAllMealPhotoCaptureEnrollmentsForMember.mock.invocationCallOrder[0] ?? 0,
     );
+  });
+
+  it("erases clinical credentials and cancels unfinished work under the member lock", async () => {
+    mocks.readHostedHealthDataConsentState.mockResolvedValue("revoked");
+    await cleanupWithdrawnHostedHealthDataConsent({ memberId: "member_123", prisma,
+      request: new Request("https://app.example.test/api/legal/consent/revoke") });
+    expect(mocks.lockMember).toHaveBeenCalledTimes(1);
+    expect(mocks.lockMember.mock.invocationCallOrder[0]).toBeLessThan(mocks.readHostedHealthDataConsentState.mock.invocationCallOrder[0]!);
+    expect(mocks.connections).toHaveBeenCalledWith({ where: { memberId: "member_123" },
+      data: { accessTokenEncrypted: null, accessTokenExpiresAt: null, patientIdEncrypted: null, disconnectedAt: expect.any(Date), status: "disconnected" } });
+    expect(mocks.runs).toHaveBeenCalledWith({ where: { memberId: "member_123", completedAt: null }, data: { completedAt: expect.any(Date), status: "canceled" } });
+    expect(mocks.sessions).toHaveBeenCalledWith({ where: { memberId: "member_123" } });
+    expect(mocks.intents).toHaveBeenCalledWith({ where: { memberId: "member_123" } });
+  });
+
+  it("preserves clinical connections created under a newer consent grant", async () => {
+    await cleanupWithdrawnHostedHealthDataConsent({ memberId: "member_123", prisma,
+      request: new Request("https://app.example.test/api/legal/consent/revoke") });
+    expect(mocks.connections).not.toHaveBeenCalled();
+    expect(mocks.runs).not.toHaveBeenCalled();
+    expect(mocks.sessions).not.toHaveBeenCalled();
+    expect(mocks.intents).not.toHaveBeenCalled();
   });
 
   it("continues best-effort cleanup when a provider is unavailable", async () => {

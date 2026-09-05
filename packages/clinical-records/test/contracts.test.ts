@@ -2,7 +2,6 @@ import {
   CLINICAL_FHIR_RESOURCE_TYPES,
   CLINICAL_FHIR_MAX_RETRIEVAL_SLICES,
   CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES,
-  clinicalFacetSlug,
   clinicalFhirManifestPathSchema,
   clinicalFhirRetrievalPlanSchema,
   clinicalImportDecisionSchema,
@@ -364,7 +363,7 @@ describe("clinical records contracts", () => {
       hashClinicalFhirPageUrl(`${FHIR_BASE_URL}/Observation?page=2`),
     );
     expect(fhirResourceTypeToSlug("DiagnosticReport")).toBe("diagnostic-report");
-    expect(clinicalFacetSlug("Systolic BP (mmHg)")).toBe("systolic-bp-mm-hg");
+    expect(fhirResourceTypeToSlug("Systolic BP (mmHg)")).toBe("systolic-bp-mm-hg");
 
     expect(externalRefForFhir({
       fhirBaseUrlHash: FHIR_BASE_URL_HASH,
@@ -499,6 +498,7 @@ describe("clinical records contracts", () => {
       },
       {
         action: "review",
+        disposition: "raw-only",
         resourceType: "Condition",
         resourceId: "condition-1",
         reason: "condition registry import not implemented",
@@ -600,6 +600,7 @@ describe("clinical records contracts", () => {
       source: planSource,
       decisions: [{
         action: "review",
+        disposition: "raw-only",
         resourceType: "Condition",
         resourceId: "condition-1",
         reason: "condition registry import not implemented",

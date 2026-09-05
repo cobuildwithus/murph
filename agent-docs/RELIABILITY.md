@@ -2636,14 +2636,21 @@ Last verified: 2026-09-04
   replaced stale claimant from double-counting, settling, or releasing its
   successor. Completed recovery replays remain bounded and charged without
   incrementing logical page progress. Credential-version compare and swap
-  prevents stale refresh failures from clearing a newer token. Preemption
-  requeues the same run and preserves page progress. The initial backend lane
-  permits one retrieval generation per member/provider connection; retry,
-  reconnect, and refresh remain closed until immutable raw references have a
-  bounded retention lifecycle. The existing Temporal recovery schedule's
+  prevents stale authorization failures from clearing a newer token. Preemption
+  requeues the same run and preserves page progress. Repeat imports reuse the same source with a new generation only after the
+  previous run is finalized. Eight immutable snapshots per source and twenty
+  sources per member bound retained evidence while preserving all references.
+  The existing Temporal recovery schedule's
   shared mailbox handoff sweep may select at most one exact pending item per
   user; a Clinical Records candidate must be the unconsumed wake for an active
   queued generation. It creates no replacement work or generation.
+- Later page/byte/resource bounds retain validated completed slices and exclude
+  the unfinished slice without refunding historical charges. Meaningful search
+  warnings mark clinical coverage incomplete even after transport completion.
+  Partial received-page counts may be below Web served counts, never above.
+  Same-generation saved counts can finalize an authorization-ended run without
+  restoring access. Permanent outcome conflicts terminate through the existing
+  mailbox owner; transient failures retain their normal retry.
 - Clinical provider calls use manual redirects, 20-second FHIR timeouts,
   15-second token timeouts, bounded streaming reads, 5 MiB/page, 500 provider
   fetch attempts, 32 MiB charged egress/run, and exact-family pagination. The

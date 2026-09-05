@@ -6,12 +6,12 @@ const mocks = vi.hoisted(() => ({
   connectionFindMany: vi.fn(),
   connectionUpdateMany: vi.fn(),
   oauthUpdateMany: vi.fn(),
-  requireActiveHostedAppSessionFromRequest: vi.fn(),
+  requireHostedAppSessionFromRequest: vi.fn(),
   runUpdateMany: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
-  requireActiveHostedAppSessionFromRequest: mocks.requireActiveHostedAppSessionFromRequest,
+  requireHostedAppSessionFromRequest: mocks.requireHostedAppSessionFromRequest,
 }));
 vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
   assertHostedOnboardingMutationOrigin: mocks.assertHostedOnboardingMutationOrigin,
@@ -26,6 +26,7 @@ vi.mock("@/src/lib/prisma", () => ({
     return {
       clinicalRecordConnection,
       $transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback({
+        $queryRaw: vi.fn().mockResolvedValue([]),
         clinicalRecordConnection,
       clinicalRecordOauthSession: { updateMany: mocks.oauthUpdateMany },
       clinicalRecordRetrievalRun: { updateMany: mocks.runUpdateMany },
@@ -43,7 +44,7 @@ import {
 describe("Clinical Records connection lifecycle", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue({
+    mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
       member: { id: "member_clinical_1" },
     });
     mocks.connectionFindFirst.mockResolvedValue({
@@ -72,7 +73,6 @@ describe("Clinical Records connection lifecycle", () => {
       data: expect.objectContaining({
         accessTokenEncrypted: null,
         patientIdEncrypted: null,
-        refreshTokenEncrypted: null,
         status: "disconnected",
       }),
       where: { id: "crc_1", memberId: "member_clinical_1" },
@@ -123,6 +123,7 @@ describe("Clinical Records connection lifecycle", () => {
             completedAt: true,
             id: true,
             importedCount: true,
+            outcomeCountsJson: true,
             reviewCount: true,
             status: true,
           },
@@ -130,7 +131,7 @@ describe("Clinical Records connection lifecycle", () => {
         }),
       }),
       take: 100,
-      where: { memberId: "member_clinical_1", status: { not: "disconnected" } },
+      where: { memberId: "member_clinical_1" },
     }));
     expect(mocks.connectionFindMany.mock.calls[0]?.[0]).not.toHaveProperty("include");
     expect(connections).toEqual([expect.objectContaining({
@@ -148,9 +149,9 @@ describe("Clinical Records connection lifecycle", () => {
       listClinicalRecordConnectionsForMember("member_server_page"),
     ).resolves.toEqual([]);
 
-    expect(mocks.requireActiveHostedAppSessionFromRequest).not.toHaveBeenCalled();
+    expect(mocks.requireHostedAppSessionFromRequest).not.toHaveBeenCalled();
     expect(mocks.connectionFindMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { memberId: "member_server_page", status: { not: "disconnected" } },
+      where: { memberId: "member_server_page" },
     }));
   });
 

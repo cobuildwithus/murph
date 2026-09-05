@@ -217,6 +217,9 @@ vi.mock("@/src/lib/hosted-crypto/gcp-kms", async (importOriginal) => {
   };
 });
 
+vi.mock("@/src/lib/device-sync/public-ingress-service", () => ({ disconnectAllHostedDeviceSyncConnectionsForUser: vi.fn() }));
+vi.mock("@/src/lib/device-sync/meal-photo-capture", () => ({ revokeAllMealPhotoCaptureEnrollmentsForMember: vi.fn() }));
+import { cleanupWithdrawnHostedHealthDataConsent, withdrawHostedHealthDataConsent } from "@/src/lib/hosted-privacy/health-data-consent-withdrawal";
 import { GET as clinicalRecordsCallbackGet } from "../app/api/clinical-records/oauth/callback/route";
 import {
   buildClinicalRetrievalWakeEventId,
@@ -355,6 +358,59 @@ afterEach(() => {
 describe.skipIf(!runPostgresConcurrencyProof)(
   "Clinical Records callback/account-deletion PostgreSQL concurrency",
   () => {
+    it("rejects a callback when withdrawal commits during credential preparation", async () => {
+      const fixture = await createClinicalFixture();
+      const barrier = createIngressDecryptBarrier();
+      boundary.ingressDecryptBarrier = barrier;
+      boundary.callbackPrisma = wrapCallbackPrismaClient(fixture.callbackBaseClient, createCallbackProbe());
+      let callback: Promise<Response> | null = null;
+      try {
+        callback = invokeClinicalRecordsCallback(fixture);
+        await bounded(barrier.started.promise, BLOCKING_TIMEOUT_MS, "callback preparation");
+        await withdrawHostedHealthDataConsent({ memberId: fixture.memberId, prisma: fixture.deletionBaseClient });
+        barrier.release.resolve();
+        expectFailedRedirect(await bounded(callback, CALLBACK_TIMEOUT_MS, "withdrawn callback"));
+        await expectNoClinicalPersistence(fixture);
+      } finally {
+        barrier.release.resolve();
+        await settleOperations([callback]);
+        await cleanupClinicalFixture(fixture);
+      }
+    }, TEST_TIMEOUT_MS);
+
+    it("serializes withdrawal behind callback persistence then removes its clinical access", async () => {
+      const fixture = await createClinicalFixture();
+      const callbackProbe = createCallbackProbe({ pauseAfterConnectionCreate: true });
+      const withdrawalProbe = createDeletionProbe();
+      boundary.callbackPrisma = wrapCallbackPrismaClient(fixture.callbackBaseClient, callbackProbe);
+      const withdrawalClient = wrapDeletionPrismaClient(fixture.deletionBaseClient, withdrawalProbe);
+      let callback: Promise<Response> | null = null;
+      let withdrawal: ReturnType<typeof withdrawHostedHealthDataConsent> | null = null;
+      try {
+        callback = invokeClinicalRecordsCallback(fixture);
+        await bounded(callbackProbe.createPause!.reached.promise, BLOCKING_TIMEOUT_MS, "callback persistence");
+        withdrawal = withdrawHostedHealthDataConsent({ memberId: fixture.memberId, prisma: withdrawalClient });
+        await waitForBlockedBackend({ observer: fixture.observer,
+          blockerPid: await bounded(callbackProbe.persistenceBackendPid.promise, BLOCKING_TIMEOUT_MS, "callback backend"),
+          waiterPid: await bounded(withdrawalProbe.firstTransactionBackendPid.promise, BLOCKING_TIMEOUT_MS, "withdrawal backend"),
+        });
+        callbackProbe.createPause!.release.resolve();
+        expectConnectedRedirect(await bounded(callback, CALLBACK_TIMEOUT_MS, "callback winner"));
+        await bounded(withdrawal, CALLBACK_TIMEOUT_MS, "withdrawal contender");
+        await cleanupWithdrawnHostedHealthDataConsent({ memberId: fixture.memberId, prisma: fixture.deletionBaseClient, request: new Request(`${CALLBACK_ORIGIN}/settings/privacy`) });
+        const connection = await fixture.observer.clinicalRecordConnection.findFirst({ where: { memberId: fixture.memberId } });
+        expect(connection).toMatchObject({ accessTokenEncrypted: null, patientIdEncrypted: null, status: "disconnected" });
+        const run = await fixture.observer.clinicalRecordRetrievalRun.findFirst({ where: { memberId: fixture.memberId } });
+        expect(run).toMatchObject({ status: "canceled", completedAt: expect.any(Date) });
+        expect(await fixture.observer.clinicalRecordOauthSession.count({ where: { memberId: fixture.memberId } })).toBe(0);
+        expect(await fixture.observer.clinicalRecordConnectIntent.count({ where: { memberId: fixture.memberId } })).toBe(0);
+      } finally {
+        callbackProbe.createPause?.release.resolve();
+        await settleOperations([callback, withdrawal]);
+        await cleanupClinicalFixture(fixture);
+      }
+    }, TEST_TIMEOUT_MS);
+
     it(
       "prewarms ingress before persistence and reuses that root for the atomic mailbox append",
       async () => {
@@ -637,8 +693,8 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           expect(warning).toHaveBeenCalledWith(
             "Clinical Records OAuth callback failed.",
             expect.objectContaining({
-              code: "UNEXPECTED",
-              errorType: "unexpected",
+              code: "CLINICAL_RECORD_MEMBER_UNAVAILABLE",
+              errorType: "clinical-records",
             }),
           );
           await expectMemberAndClinicalPersistenceDeleted(fixture);
@@ -1234,6 +1290,12 @@ function expectAtomicClinicalDurableSet(
     lane: "clinical-records-patient-id",
   });
   expect(
+    parseSerializedHostedSecureBoxEnvelope(connection.patientBindingEncrypted!),
+  ).toMatchObject({
+    domain: "device",
+    lane: "clinical-records-patient-id",
+  });
+  expect(
     parseSerializedHostedSecureBoxEnvelope(connection.accessTokenEncrypted!),
   ).toMatchObject({
     domain: "device",
@@ -1442,11 +1504,11 @@ function configureLocalCryptoAndPublicOrigin(): () => void {
       JSON.stringify(automationKey.publicKey),
     HOSTED_CRYPTO_ENV: "test",
     HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION:
-      "projects/test/locations/global/keyRings/test/cryptoKeys/authority/cryptoKeyVersions/1",
+      "projects/clinical-proof/locations/global/keyRings/test/cryptoKeys/authority/cryptoKeyVersions/1",
     HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM: authorityKey.publicKey,
     HOSTED_CRYPTO_GCP_KMS_API_ROOT: "local://murph-hosted-kms",
     HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME:
-      "projects/test/locations/global/keyRings/test/cryptoKeys/web-wrap",
+      "projects/clinical-proof/locations/global/keyRings/test/cryptoKeys/web-wrap",
     HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK:
       JSON.stringify(authorityKey.privateKey),
     HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY:
