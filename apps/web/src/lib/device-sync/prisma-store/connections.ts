@@ -161,6 +161,7 @@ async function requireExactOAuthClaimResolutionTx(
 
 export interface HostedMemberDeviceConnectionStatus {
   id: string;
+  setupPhase: HostedDeviceConnectionSetupPhase | null;
   status: HostedStaticDeviceSyncConnectionRecord["status"];
 }
 
@@ -876,7 +877,7 @@ export class PrismaHostedConnectionStore {
   async listMemberConnectionStatuses(input: {
     limit: number;
     provider: string;
-    status: "active" | "not_disconnected";
+    status: "active" | "all" | "not_disconnected";
     userId: string;
   }): Promise<HostedMemberDeviceConnectionStatus[]> {
     const provider = normalizeNullableString(input.provider);
@@ -891,15 +892,20 @@ export class PrismaHostedConnectionStore {
     const records = await this.prisma.deviceConnection.findMany({
       where: {
         provider,
-        status: input.status === "active"
-          ? "active"
-          : { not: "disconnected" },
+        ...(input.status === "all"
+          ? {}
+          : {
+              status: input.status === "active"
+                ? "active"
+                : { not: "disconnected" },
+            }),
         userId,
       },
       orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
       take: input.limit + 1,
       select: {
         id: true,
+        setupPhase: true,
         status: true,
       },
     });
@@ -915,6 +921,7 @@ export class PrismaHostedConnectionStore {
 
     return records.map((record) => ({
       id: record.id,
+      setupPhase: normalizeHostedDeviceSyncSetupPhase(record.setupPhase),
       status: normalizeHostedDeviceSyncLifecycleStatus(record.status),
     }));
   }

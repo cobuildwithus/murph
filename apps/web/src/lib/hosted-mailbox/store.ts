@@ -1820,6 +1820,10 @@ export async function readHostedMailboxMaxSeqByLane(input: {
       orderBy: {
         laneSeq: "desc",
       },
+      select: {
+        laneSeq: true,
+        updatedAt: true,
+      },
       where: {
         ...buildHostedMailboxLiveItemWhere(now),
         lane,
