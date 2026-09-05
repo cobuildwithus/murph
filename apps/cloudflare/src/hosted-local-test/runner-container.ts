@@ -258,8 +258,8 @@ export type HostedLocalShutdownCheckpointPublicationBarrierState =
 interface HostedLocalShutdownCheckpointPublicationBarrier {
   entered: boolean;
   target: "canonical_runtime_commit" | "idle_shutdown" | "snapshot_start";
-  release(): void;
-  released: Promise<void>;
+  releaseWaiters: Array<() => void>;
+  released: boolean;
 }
 
 const shutdownCheckpointPublicationBarriers =
@@ -393,15 +393,11 @@ function armCheckpointPublicationBarrier(
     );
   }
 
-  let release = () => {};
-  const released = new Promise<void>((resolve) => {
-    release = resolve;
-  });
   shutdownCheckpointPublicationBarriers.set(normalizedUserId, {
     entered: false,
     target,
-    release,
-    released,
+    releaseWaiters: [],
+    released: false,
   });
 }
 
@@ -425,7 +421,15 @@ export function releaseShutdownCheckpointPublicationBarrier(userId: string): boo
   }
 
   shutdownCheckpointPublicationBarriers.delete(normalizedUserId);
-  barrier.release();
+  barrier.released = true;
+  for (const release of barrier.releaseWaiters.splice(0)) release();
+  emitHostedExecutionStructuredLog({
+    component: "runner",
+    details: { barrierKind: barrier.target, checkpointBarrierStage: "released" },
+    message: "Hosted-local test released checkpoint publication.",
+    phase: "checkpoint",
+    userId: normalizedUserId,
+  });
   return true;
 }
 
@@ -458,7 +462,24 @@ export function wrapShutdownCheckpointPublicationBarrierForTest(
       phase: "checkpoint",
       userId,
     });
-    await barrier.released;
+    // The idle control object can hibernate while this request stays active.
+    // A promise created when arming belongs to that discarded request context;
+    // create each wait here so workerd can resume the live checkpoint owner.
+    await new Promise<void>((resolve) => {
+      if (barrier.released) resolve();
+      else barrier.releaseWaiters.push(resolve);
+    });
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        barrierKind: barrier.target,
+        checkpointBarrierStage: "resumed",
+        requestAborted: request.signal.aborted,
+      },
+      message: "Hosted-local checkpoint request resumed after its test barrier.",
+      phase: "checkpoint",
+      userId,
+    });
     if (request.signal.aborted) {
       throw request.signal.reason instanceof Error
         ? request.signal.reason

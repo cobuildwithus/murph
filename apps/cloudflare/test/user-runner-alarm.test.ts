@@ -7010,6 +7010,37 @@ describe("HostedUserRunner execution coordination", () => {
     expect(alarms).toEqual([]);
   });
 
+  it.each([false, true])("seeds a stuck invocation on its retained opaque target (same version: %s)", async (sameWorkerVersion) => {
+    const { alarms, invoke, runner, sql } = createRunnerHarness({
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        CF_VERSION_METADATA: { id: "current" },
+      },
+      workspace: createWorkspaceState({ version: "7" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const retainedTarget = `runner--v-current--${"a".repeat(32)}`;
+    sql.exec(
+      "UPDATE runner_meta SET active_runner_container_name = ? WHERE singleton = 1",
+      retainedTarget,
+    );
+
+    const stuck = await runner.startStuckInvocationForTest({
+      sameWorkerVersion,
+      startedAgoMs: 35_000,
+      userId: TEST_USER_ID,
+    });
+
+    await expect(runner.readActiveRuntimeFenceForTest({ userId: TEST_USER_ID }))
+      .resolves.toEqual({
+        attemptId: stuck.attemptId,
+        processingMode: "default",
+        runnerContainerName: retainedTarget,
+      });
+    expect(invoke).not.toHaveBeenCalled();
+    expect(alarms).toEqual([]);
+  });
+
   it("can age an existing active fence without replacing its attempt", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));

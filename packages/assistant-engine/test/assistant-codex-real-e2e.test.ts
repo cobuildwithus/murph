@@ -1,3 +1,6 @@
+import { resolveAssistantStatePaths } from '../src/assistant/store/paths.js'
+import { getAssistantCronAutomationInspection } from '../src/assistant/cron/inspection.js'
+import { appendAssistantCronRun } from '../src/assistant/cron/store.js'
 import { WORKFLOW_SKILL_REFERENCES } from './support/workflow-skill-policy.js'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -9,6 +12,7 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
 import {
+  MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS,
   AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
   AUTOMATION_SUPPORT_SERIES_TAG_PREFIX,
   buildAutomationSupportSeriesTag,
@@ -20,6 +24,7 @@ import {
   parseCalendarEventPayload,
   regimenFrontmatterSchema,
   resolveFloatingIsoTimestampInTimeZone,
+  toLocalDayKey,
   workoutSessionSchema,
 } from '@murphai/contracts'
 import {
@@ -273,6 +278,15 @@ import {
 import { createDeferred } from './test-helpers.ts'
 import { isAssistantGeneratedDeliveryRef } from '../src/assistant/generated-delivery-files.ts'
 
+import { MURPH_ATTACH_FOLLOW_UP_TOOL } from '../src/assistant-codex/dynamic-tools/automation.ts'
+import {
+  readAssistantFollowUpSourceContext, registerDeliveredAssistantFollowUp,
+} from '../src/assistant/follow-ups.ts'
+import {
+  createAssistantOutboxIntent, saveAssistantOutboxIntent,
+} from '../src/assistant/outbox.ts'
+import { listAutomations as listFollowUpAutomations } from '@murphai/query'
+
 const RUN_REAL_CODEX_E2E = process.env.MURPH_RUN_REAL_CODEX_E2E === '1'
 const execFileAsync = promisify(execFile)
 const REAL_CODEX_E2E_TAG = 'real-codex-live'
@@ -353,12 +367,8 @@ const REAL_CODEX_ONBOARDING_ALLOWED_POLICY_PATHS = {
     ONBOARDING_POLICY_PATHS[0][1],
     ONBOARDING_POLICY_PATHS[1][1],
   ],
-  minimal_identity_answer: [
-    ONBOARDING_POLICY_PATHS[0][1],
-    ONBOARDING_POLICY_PATHS[1][1],
-    ONBOARDING_POLICY_PATHS[2][1],
-  ],
-  minimal_identity_prompt: [ONBOARDING_POLICY_PATHS[0][1]],
+  minimal_identity_answer: [],
+  minimal_identity_prompt: [],
   wearable_connection_offer: [
     ONBOARDING_POLICY_PATHS[0][1],
     ONBOARDING_POLICY_PATHS[1][1],
@@ -1049,6 +1059,138 @@ describeRealCodex('real Codex child model selection e2e', () => {
 
 describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
   it(
+    'continues the opening while one native child saves real canonical identity',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await prepareRealCodexOnboardingDirectory()
+      const childUsages: AssistantProviderUsageDraft[] = []
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+      const actionTimings: Array<{ elapsedMs: number; phase: string; type: string; tool: string | null }> = []
+      const commandLogPath = path.join(workingDirectory, 'identity-commands.log')
+      try {
+        await initializeVault({ vaultRoot: workingDirectory, timezone: 'America/New_York' })
+        // The executable and loader remain environment values, never copied
+        // machine-specific paths in a generated fixture.
+        await writeFile(path.join(workingDirectory, 'vault-cli'), [
+          '#!/bin/sh',
+          'set -eu',
+          `printf '%s\\n' "$*" >> "$MURPH_ONBOARDING_TEST_COMMAND_LOG"`,
+          'exec "$MURPH_ONBOARDING_TEST_NODE" --import "$MURPH_ONBOARDING_TEST_LOADER" "$MURPH_ONBOARDING_TEST_CLI" "$@" --vault "$MURPH_ONBOARDING_TEST_VAULT"',
+          '',
+        ].join('\n'), { mode: 0o700 })
+        const turnInput = buildRealCodexOnboardingTurnInput({ config, workingDirectory })
+        const startedAt = Date.now()
+        const result = await executeRealCodexAppServerTurn({
+          ...turnInput,
+          configOverrides: CHILD_MODEL_SELECTION_CONFIG_OVERRIDES,
+          developerInstructions: buildDirectConversationDeveloperInstructions(true, [
+            'Visible direct conversation imported from confirmed Web replies:',
+            `Murph: ${ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE}`,
+            'Member: Yes, ready.',
+            `Murph: ${MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.formal}`,
+          ].join('\n\n'), [], new Date(startedAt).toISOString()),
+          dynamicTools: [MURPH_AUTOMATION_TOOL],
+          env: {
+            ...turnInput.env,
+            MURPH_ONBOARDING_TEST_COMMAND_LOG: commandLogPath,
+            MURPH_ONBOARDING_TEST_NODE: process.execPath,
+            MURPH_ONBOARDING_TEST_LOADER: path.resolve(path.dirname(HABITAT_VOICE_E2E_TSX_BIN), '../tsx/dist/loader.mjs'),
+            MURPH_ONBOARDING_TEST_CLI: HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
+            MURPH_ONBOARDING_TEST_VAULT: workingDirectory,
+            TSX_TSCONFIG_PATH: path.resolve(path.dirname(HABITAT_VOICE_E2E_CLI_ENTRYPOINT), '../../../tsconfig.base.json'),
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            automationTool: {
+              request: async (request) => {
+                if (request.action !== 'save' || request.schedule.kind !== 'at') {
+                  throw new Error('Expected one opening check-in save.')
+                }
+                automationRequests.push(request)
+                const saved = await upsertAutomation({
+                  vaultRoot: workingDirectory,
+                  slug: request.slug,
+                  title: request.title,
+                  summary: request.summary,
+                  instructions: request.instructions,
+                  schedule: request.schedule,
+                  tags: [...(request.tags ?? [])],
+                  status: 'active',
+                  continuityPolicy: 'fresh',
+                  route: {
+                    channel: 'linq', deliveryTarget: 'synthetic-opening', identityId: null,
+                    participantId: null, threadId: 'synthetic-opening', threadIsDirect: true,
+                  },
+                })
+                return {
+                  action: 'save', automationId: saved.record.automationId, created: saved.created,
+                  effectiveTimeZone: 'America/New_York', lookupId: saved.record.slug,
+                  occurrenceProjection: { nextOccurrenceAt: request.schedule.at, status: 'resolved' },
+                  routeBinding: 'current_conversation', schedule: request.schedule,
+                  status: 'active', updatedAt: saved.record.updatedAt,
+                }
+              },
+            },
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => { throw new Error('No file sends in onboarding proof.') },
+            vaultFileSendAvailable: false,
+          },
+          onTraceEvent: (event) => {
+            const raw = readRecord(event.rawEvent)
+            const phase = readString(raw?.method)
+            const item = readRecord(readRecord(raw?.params)?.item)
+            if (phase === 'item/started' || phase === 'item/completed') {
+              actionTimings.push({ elapsedMs: Date.now() - startedAt, phase,
+                type: readString(item?.type) ?? 'unknown', tool: readString(item?.tool) })
+            }
+          },
+          onAdditionalUsage: async (usage) => { childUsages.push(usage) },
+          prompt: "Call me Robin. I'm 34 and a guy.",
+        })
+        const replyMs = Date.now() - startedAt
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        process.stdout.write(`[onboarding-opening-e2e] ${JSON.stringify({
+          replyMs, providerActionCount: result.providerActionCount, reply: result.finalMessage.trim(),
+          actionTimings,
+        })}\n`)
+        expect(result.finalMessage).toMatch(/Robin/iu)
+        expect(result.finalMessage).toMatch(/what.*health/iu)
+        expect(result.finalMessage).not.toMatch(/saved|recorded|subagent|checkpoint|still working/iu)
+        expect(await readOnboardingPolicyFiles(actions, path.join(workingDirectory, 'skills'))).toEqual([])
+        expect(actions.filter((action) => action.kind === 'command' && /memory (?:set-name|upsert|update)/u.test(action.command))).toEqual([])
+        expect(automationRequests).toHaveLength(1)
+        expect(automationRequests[0]).toMatchObject({ action: 'save', slug: 'onboarding-early-stall-check-in' })
+        const checkIn = automationRequests[0]
+        expect(checkIn?.action).toBe('save')
+        if (checkIn?.action !== 'save' || checkIn.schedule.kind !== 'at') {
+          throw new Error('Expected the opening one-shot schedule.')
+        }
+        expect(Math.abs(Date.parse(checkIn.schedule.at) - (startedAt + 15 * 60_000))).toBeLessThan(60_000)
+        await waitForWarmCodexBackgroundWork()
+        const memory = await readMemoryDocument(workingDirectory)
+        const identity = memory.records.map((record) => record.text).join('\n')
+        expect(childUsages).toHaveLength(1)
+        expect(identity).toMatch(/Robin/u)
+        expect(identity).toMatch(/34/u)
+        expect(identity).toMatch(/guy|male|man/iu)
+        const commands = await readFile(commandLogPath, 'utf8')
+        expect(commands).toMatch(/memory set-name/u)
+        expect((await showAutomation({ vaultRoot: workingDirectory, slug: 'onboarding-early-stall-check-in' }))?.status).toBe('active')
+        process.stdout.write(`[onboarding-opening-saved-e2e] ${JSON.stringify({
+          replyMs, allWritesVerifiedMs: Date.now() - startedAt,
+          childCount: childUsages.length, memoryRecordCount: memory.records.length, checkInCount: automationRequests.length,
+        })}\n`)
+      } finally {
+        await stopWarmCodexAppServer('onboarding-opening-e2e-complete')
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'routes fresh, ordinary-record, incomplete-resume, and later turns through only their relevant onboarding policy',
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -1107,8 +1249,16 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           scenario: 'minimal_identity_prompt',
         })
         expect(
-          minimalIdentity.policyFiles.filter((file) => file !== 'SKILL.md'),
-          'minimal-identity prompt stage policy reads',
+          minimalIdentity.policyFiles,
+          'minimal-identity first-reply policy reads',
+        ).toEqual([])
+        expect(
+          readSuccessfulOnboardingResumeContexts(minimalIdentity.actions),
+          'minimal-identity first-reply resume-context evidence',
+        ).toEqual([])
+        expect(
+          minimalIdentity.actions,
+          'minimal-identity first-reply actions',
         ).toEqual([])
         expect(minimalIdentity.finalMessage.trim(), 'preferred-name question').toMatch(
           /what should i call you/iu,
@@ -1123,10 +1273,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         expect(
           identityAnswer.policyFiles.filter((file) => file !== 'SKILL.md'),
           'minimal-identity answer stage policy reads',
-        ).toEqual([
-          'aspiration-foundation-delegation.md',
-          'persistence-recovery-follow-up.md',
-        ])
+        ).toEqual([])
         expect(identityAnswer.finalMessage.trim(), 'aspiration question').toMatch(
           /what would you most like from your health|what do you want to (?:improve|understand|handle)|what.*health/iu,
         )
@@ -1243,7 +1390,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
   )
 
   it(
-    'answers a fresh routine-goal onboarding turn without a progress update',
+    'uses the visible-welcome first-reply fast path without tools or a progress update',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const temporaryPaths = [...config.temporaryPaths]
@@ -1256,10 +1403,19 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           config,
           workingDirectory,
         })
-        const result = await executeRealCodexAppServerTurn({
+        const welcome = await executeRealCodexOnboardingProbe({
+          ...turnInput,
+          excludeResumeTurns: true,
+          prompt: 'Hey',
+          scenario: 'fresh_greeting',
+        })
+        expect(welcome.finalMessage.trim()).toBe(
+          ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
+        )
+
+        const result = await executeRealCodexOnboardingProbe({
           ...turnInput,
           dynamicTools: [MURPH_SEND_PROGRESS_UPDATE_TOOL],
-          excludeResumeTurns: true,
           progressDelivery: {
             async send(text) {
               progressUpdates.push(text)
@@ -1267,11 +1423,13 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
             },
           },
           prompt: [
-            "I've already seen your welcome and I'm ready to continue.",
-            "I'd like help building a healthier sleep routine.",
+            "Yeah, I'm ready to continue.",
+            "I'd like Murph's help building a steadier evening routine.",
           ].join(' '),
+          resumeSessionId: welcome.sessionId,
+          scenario: 'minimal_identity_prompt',
         })
-        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const actions = result.actions
         const progressCalls = actions.filter((action) =>
           action.kind === 'dynamic'
           && action.tool === MURPH_SEND_PROGRESS_UPDATE_TOOL.name
@@ -1285,6 +1443,17 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
 
         process.stdout.write(
           `[onboarding-fresh-routine-goal-e2e] ${JSON.stringify({
+            actions: actions.map((action) =>
+              action.kind === 'command'
+                ? {
+                    command: redactRealCodexDiagnosticText(action.command),
+                    kind: action.kind,
+                  }
+                : {
+                    kind: action.kind,
+                    tool: action.tool,
+                  }
+            ),
             policyFiles,
             progressUpdateCount: progressUpdates.length,
             reply,
@@ -1294,8 +1463,9 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
 
         expect(progressUpdates).toEqual([])
         expect(progressCalls).toEqual([])
-        expect(resumeContexts).toHaveLength(1)
-        expect(policyFiles).toContain('SKILL.md')
+        expect(actions).toEqual([])
+        expect(resumeContexts).toEqual([])
+        expect(policyFiles).toEqual([])
         expect(reply).toMatch(/what should i call you/iu)
         expect(reply).toMatch(/how old|age/iu)
         expect(reply).toMatch(/gender/iu)
@@ -1800,7 +1970,7 @@ describe('onboarding policy read detection', () => {
     const skillsRoot = resolveAssistantSkillsRoot()
     const broadOutput = [
       'Hosted onboarding must have capacity for at least three concurrent children.',
-      'Setup drop-off is most likely in these first minutes, so in the same turn',
+      'Route useful answers to their existing canonical owner in the same turn. The',
       'After the foundation is resolved, close it warmly before asking for anything',
     ].join('\n')
     expect(await readOnboardingPolicyFiles([{
@@ -14720,6 +14890,90 @@ describeRealCodex('real Codex independent scheduled reminder authority e2e', () 
   }, 360_000)
 })
 
+describeRealCodex('real Codex durable follow-up e2e', () => {
+  it.each([
+    { label: 'reminder', prompt: 'Send a short reminder to water the herb pots. Attach one optional check in 20 minutes, skipping if watering is already done or the member declines.', afterMinutes: 20, topic: /herb|water/iu },
+    { label: 'important question', prompt: 'Ask which arrival window to reserve, morning or afternoon. This is the one important unresolved decision. Attach one optional check in 60 minutes if it remains unanswered; skip if resolved, declined, or no longer useful.', afterMinutes: 60, topic: /morning|afternoon|arrival/iu },
+  ])('durable follow-up attaches exactly one $label check', async (scenario) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-durable-attachment-e2e-'))
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexHome: config.codexHome, env: config.env, model: config.model,
+        modelProvider: config.modelProvider, reasoningEffort: 'low',
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        dynamicTools: [MURPH_ATTACH_FOLLOW_UP_TOOL], followUpAttachmentAllowed: true,
+        groupConversation: false, sandbox: 'read-only', workingDirectory,
+        prompt: scenario.prompt,
+      })
+      const calls = readCapabilityRoutingActions(result.jsonEvents)
+        .filter((action) => action.kind === 'dynamic')
+      expect(calls).toHaveLength(1)
+      expect(result.followUpRequest).toMatchObject({ afterMinutes: scenario.afterMinutes })
+      expect(result.followUpRequest?.instructions).toMatch(/skip|answered|done|completed|declin|resolv/iu)
+      expect(result.finalMessage).toMatch(scenario.topic)
+      expect(result.finalMessage).not.toMatch(/automation|outbox|primitive|you failed|you ignored/iu)
+      process.stdout.write(`[real-codex durable follow-up ${scenario.label}] ${result.finalMessage?.replaceAll(/\s+/gu, ' ').trim()}\n`)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
+  it.each([
+    { label: 'unanswered reminder', original: 'Time to water the herb pots.', instructions: 'Check whether the herb pots were watered for this reminder; skip if completed, declined, or no longer useful.', history: 'No later human message has arrived.', kind: 'send_message' },
+    { label: 'answered reminder', original: 'Time to water the herb pots.', instructions: 'Check whether the herb pots were watered for this reminder; skip if completed, declined, or no longer useful.', history: 'After the reminder, the member said: I watered the herb pots already. Then they asked an unrelated question about music.', kind: 'skip' },
+    { label: 'older unanswered question', original: 'Which arrival window should I reserve, morning or afternoon?', instructions: 'Check the unresolved arrival-window choice. Skip if resolved, declined, or no longer useful.', history: 'Three later messages discussed music and a book. None addressed the arrival window.', kind: 'send_message' },
+    { label: 'incomplete history', original: 'Time to water the herb pots.', instructions: 'Check whether the herb pots were watered; skip if resolved or relevant history is incomplete.', history: 'The committed conversation history is incomplete because retention omitted messages after the original reminder. Whether the member answered is unknown.', kind: 'skip' },
+    { label: 'older answered question', original: 'Which arrival window should I reserve, morning or afternoon?', instructions: 'Check the unresolved arrival-window choice. Skip if resolved, declined, or no longer useful.', history: 'The member answered: Reserve the afternoon window. Two later messages discussed a book.', kind: 'skip' },
+  ])('durable follow-up reconsiders $label', async (scenario) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-durable-evaluation-e2e-'))
+    try {
+      await initializeVault({ vaultRoot: workingDirectory })
+      const now = new Date(Date.now() - 20 * 60_000).toISOString()
+      const source = await createAssistantOutboxIntent({
+        vault: workingDirectory, channel: 'linq', threadId: 'synthetic-durable-thread',
+        threadIsDirect: true, sessionId: 'session-durable-live', turnId: 'turn-source',
+        message: scenario.original,
+        followUpRequest: { afterMinutes: 20, instructions: scenario.instructions },
+      })
+      const delivered = await saveAssistantOutboxIntent(workingDirectory, {
+        ...source, status: 'sent', sentAt: now, updatedAt: now,
+        delivery: { channel: 'linq', target: 'synthetic-durable-thread', targetKind: 'explicit',
+          sentAt: now, messageLength: scenario.original.length, idempotencyKey: null, providerMessageId: 'synthetic-message', providerThreadId: 'synthetic-durable-thread' },
+      })
+      await registerDeliveredAssistantFollowUp({ vault: workingDirectory, intent: delivered })
+      const [child] = await listFollowUpAutomations(workingDirectory)
+      const context = await readAssistantFollowUpSourceContext({ vault: workingDirectory, record: child })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexHome: config.codexHome, env: config.env, model: config.model,
+        modelProvider: config.modelProvider, reasoningEffort: 'low',
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        developerInstructions: buildScheduledAutomationDeveloperInstructions('direct', 'none')
+          .replaceAll('2026-08-05T13:00:00.000Z', new Date().toISOString())
+          .replaceAll('2026-08-05', new Date().toISOString().slice(0, 10)),
+        dynamicTools: [], followUpAttachmentAllowed: false, groupConversation: false,
+        sandbox: 'read-only', workingDirectory,
+        prompt: [child.instructions, context, 'The follow-up is due now. Current conversation after the original delivered message:', scenario.history].join('\n\n'),
+      })
+      const decision = parseAssistantNotificationDecision(result.finalMessage)
+      expect(decision.kind, decision.privateSummary).toBe(scenario.kind)
+      expect(result.followUpRequest).toBeNull()
+      expect(readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'dynamic')).toHaveLength(0)
+      expect(await listFollowUpAutomations(workingDirectory)).toHaveLength(1)
+      if (decision.kind === 'send_message') {
+        expect(decision.text.length).toBeLessThan(240)
+        expect(decision.text).not.toMatch(/automation|outbox|primitive|you failed|you ignored|why haven.t you/iu)
+      }
+      process.stdout.write(`[real-codex durable follow-up ${scenario.label}] ${decision.kind === 'send_message' ? decision.text.replaceAll(/\s+/gu, ' ').trim() : 'skip'}\n`)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
 describeRealCodex('real Codex recurring reminder conversation e2e', () => {
   it('sends only the first ordinary cue from production notification composition', async () => {
     const config = await resolveRealCodexE2eConfig()
@@ -24287,9 +24541,9 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
     360_000,
   )
 
-  it(
-    'confirms an active device trigger without claiming future delivery is exhausted',
-    async () => {
+  it.each(['WHOOP', 'Garmin', 'Oura', 'Fitbit'] as const)(
+    'confirms an active %s device trigger without claiming future delivery is exhausted',
+    async (provider) => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
         path.join(tmpdir(), 'murph-next-workout-trigger-e2e-'),
@@ -24344,7 +24598,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           model: config.model,
           modelProvider: config.modelProvider,
           prompt: [
-            'After my next WHOOP workout recorded after',
+            `After my next ${provider} workout recorded after`,
             '2026-08-10T12:00:00.000Z, ask me here how it felt.',
             'Save that event-triggered check-in now.',
           ].join(' '),
@@ -24353,6 +24607,19 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           workingDirectory,
         })
 
+        process.stdout.write(`${JSON.stringify({
+          scenario: `${provider} device activity source selection`,
+          reply: result.finalMessage,
+          requestedSchedules: readCapabilityRoutingActions(result.jsonEvents)
+            .filter((action) => action.kind === 'dynamic'
+              && action.tool === MURPH_AUTOMATION_TOOL.name)
+            .map((action) => action.kind === 'dynamic'
+              ? action.argumentsValue?.schedule
+              : undefined),
+          savedSchedule: automationRequests[0]?.action === 'save'
+            ? automationRequests[0].schedule
+            : undefined,
+        })}\n`)
         expect(automationRequests).toHaveLength(1)
         expect(automationRequests[0]).toMatchObject({
           action: 'save',
@@ -24360,10 +24627,12 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
             activityKind: expect.stringMatching(/workout/iu),
             after: '2026-08-10T12:00:00.000Z',
             kind: 'deviceActivity',
-            source: expect.stringMatching(/^whoop(?:_v2)?$/u),
+            source: provider === 'WHOOP'
+              ? expect.stringMatching(/^whoop(?:_v2)?$/u)
+              : provider.toLowerCase(),
           },
         })
-        expect(result.finalMessage).toMatch(/whoop|workout/iu)
+        expect(result.finalMessage).toMatch(new RegExp(provider, 'iu'))
         expect(result.finalMessage).toMatch(
           /active|created|saved|scheduled|set(?: up)?/iu,
         )
@@ -24373,7 +24642,11 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         expect(result.finalMessage).not.toMatch(
           /could not verify|couldn't verify|unable to verify|inspect or update/iu,
         )
-        expect(result.finalMessage).not.toMatch(
+        const replyWithoutRequestedCutoff = result.finalMessage.replace(
+          /\brecorded after August 10 at 12:00 PM UTC\b/giu,
+          'recorded after the requested cutoff',
+        )
+        expect(replyWithoutRequestedCutoff).not.toMatch(
           /\bat\s+\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)|new time|reschedul|tomorrow|tonight/iu,
         )
       } finally {
@@ -33916,6 +34189,7 @@ function buildDirectConversationDeveloperInstructions(
   assistantContextSnapshotPrompt: string | null = null,
   assistantHostedDeviceConnectProviders:
     readonly AssistantHostedDeviceConnectProvider[] = [],
+  currentInstant: string | null = null,
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
@@ -33930,7 +34204,8 @@ function buildDirectConversationDeveloperInstructions(
       setupCommand: 'murph',
     },
     conversationScope: 'direct',
-    currentLocalDate: '2026-07-29',
+    currentInstant: currentInstant ?? undefined,
+    currentLocalDate: currentInstant ? toLocalDayKey(currentInstant, 'America/New_York') : '2026-07-29',
     currentTimeZone: 'America/New_York',
     hostedRuntime: true,
     modelBehaviorProfile: 'gpt5-agentic',
@@ -35809,5 +36084,56 @@ describeRealCodex('real Codex Murph service discovery e2e', () => {
       expect(result.finalMessage).toMatch(/clear/iu)
       expect(result.finalMessage).not.toMatch(/connect.*(?:account|weather)|API key|credentials|sign in/iu)
     } finally { await rm(workingDirectory, { force: true, recursive: true }) }
+  }, 720_000)
+})
+
+describeRealCodex('real Codex reminder execution inspection e2e', () => {
+  it('explains a consumed failed reminder without claiming delivery or recreating it', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-reminder-inspection-e2e-'))
+    const automationId = 'automation_stretch_break'
+    const requests: AssistantHostedAutomationToolRequest[] = []
+    try {
+      const paths = resolveAssistantStatePaths(workingDirectory)
+      await appendAssistantCronRun(paths, {
+        schema: 'murph.assistant-cron-run.v1', runId: 'cronrun_stretch_break', jobId: automationId,
+        trigger: 'scheduled', outcome: 'failed', reason: 'provider_unavailable',
+        startedAt: '2026-07-28T20:00:00.000Z', finishedAt: '2026-07-28T20:01:00.000Z',
+        scheduledOccurrenceAt: '2026-07-28T20:00:00.000Z', sessionId: null,
+        response: null, responseLength: 0, error: 'The assistant service was temporarily unavailable.',
+      })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, developerInstructions: buildMidnightLinqReminderDeveloperInstructions(),
+        dynamicTools: [MURPH_AUTOMATION_TOOL], env: config.env, excludeResumeTurns: true,
+        hostedToolContext: {
+          computerToolsAvailable: false,
+          automationTool: { request: async (request) => {
+            requests.push(request)
+            if (request.action !== 'inspect' || request.lookup !== automationId) throw new Error('Inspection only; no changes authorized.')
+            return {
+              action: 'inspect', automationId, lookupId: automationId, effectiveTimeZone: null,
+              executionInspection: await getAssistantCronAutomationInspection(workingDirectory, automationId),
+              occurrenceProjection: { status: 'resolved', nextOccurrenceAt: null },
+              routeBinding: 'preserved', schedule: { kind: 'at', at: '2026-07-28T20:00:00.000Z' },
+              status: 'active', updatedAt: '2026-07-28T18:00:00.000Z',
+            }
+          } },
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => { throw new Error('No file send authorized.') }, vaultFileSendAvailable: false,
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'What happened to my stretch-break reminder yesterday? Please just check it. Current automation inventory: stretch-break reminder, automationId=automation_stretch_break.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      process.stdout.write(JSON.stringify({ scenario: 'consumed failed reminder inspection', reply: result.finalMessage }) + '\n')
+      expect(requests).toEqual([{ action: 'inspect', lookup: automationId }])
+      expect(result.finalMessage).toMatch(/fail|couldn.t|unavailable|didn.t/iu)
+      expect(result.finalMessage).toMatch(/reschedul|another time|new time|set.*again/iu)
+      expect(result.finalMessage).not.toMatch(/(?:was|has been|successfully) delivered|I.ve (?:created|rescheduled)|will (?:retry|automatically send)|no reminder was sent/iu)
+    } finally {
+      await rm(workingDirectory, { force: true, recursive: true })
+    }
   }, 720_000)
 })

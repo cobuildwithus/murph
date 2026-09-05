@@ -1,3 +1,4 @@
+import { listAutomations } from '@murphai/query'
 import {
   AVAILABILITY_CONFLICT_BLOCK_END,
   AVAILABILITY_CONFLICT_BLOCK_START,
@@ -42,11 +43,17 @@ export async function prepareAssistantCronNotificationInput(
     return input
   }
 
+  const paths = resolveAssistantStatePaths(input.vault)
+  const linkedFollowUps = input.recurringReminderConversation
+    ? (await listAutomations(input.vault)).filter((record) =>
+        record.followUpParentAutomationId === scope.automationId
+        && Date.parse(record.createdAt) >= Date.parse(scope.updatedAt))
+      .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt)).slice(0, 2)
+    : []
+  const histories = await Promise.all([scope.automationId, ...linkedFollowUps.map((record) => record.automationId)]
+    .map((automationId) => readAssistantCronRuns(paths, automationId)))
   const outputs = selectAssistantCronRecentOutputs(
-    await readAssistantCronRuns(
-      resolveAssistantStatePaths(input.vault),
-      scope.automationId,
-    ),
+    histories.flat().sort((left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt)),
     {
       sessionId: selection.sessionId,
       startedAtOrAfter: scope.updatedAt,

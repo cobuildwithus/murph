@@ -1375,7 +1375,10 @@
                           "type": "string",
                           "enum": [
                             "whoop",
-                            "whoop_v2"
+                            "whoop_v2",
+                            "garmin",
+                            "oura",
+                            "fitbit"
                           ]
                         },
                         "activityKind": {
@@ -1622,7 +1625,10 @@
                           "type": "string",
                           "enum": [
                             "whoop",
-                            "whoop_v2"
+                            "whoop_v2",
+                            "garmin",
+                            "oura",
+                            "fitbit"
                           ]
                         },
                         "activityKind": {

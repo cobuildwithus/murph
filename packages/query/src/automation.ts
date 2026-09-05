@@ -64,6 +64,8 @@ export interface AutomationQueryRecord {
   status: AutomationStatus;
   summary: string | null;
   activeUntil: string | null;
+  followUpSourceIntentId?: string;
+  followUpParentAutomationId?: string;
   schedule: AutomationSchedule;
   route: AutomationRoute;
   assistantTargetOverride: AutomationAssistantTargetOverride | null;
@@ -536,6 +538,10 @@ function parseAutomationRecord(
     plannedOccurrenceOffsetMs: normalizeAutomationPlannedOccurrenceOffsetMs(
       attributes.plannedOccurrenceOffsetMs,
     ),
+    ...(typeof attributes.followUpParentAutomationId === "string"
+      ? { followUpParentAutomationId: attributes.followUpParentAutomationId } : {}),
+    ...(typeof attributes.followUpSourceIntentId === "string"
+      ? { followUpSourceIntentId: attributes.followUpSourceIntentId } : {}),
     contextReferences: normalizeAutomationContextReferences(
       attributes.contextReferences,
     ),

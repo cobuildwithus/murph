@@ -1865,6 +1865,11 @@ Last verified: 2026-09-04
   new successors never write the envelope or consult its completed-resource
   names. Every partial continuation preserves `lastSyncCompletedAt`; only
   terminal current full work may advance it.
+- Junction summary and workout import preparation share their fresh post-provider
+  source read with historical evidence evaluation through pure admission helpers.
+  Empty historical segments retain their post-fetch authority without a second
+  read; actual canonical imports still recheck authority afterward. Reads are
+  never reused across provider fetches, stream candidates, or job executions.
 - Junction workout streams stay inside that existing resource/day continuation
   owner. Before the workout index, the existing control-plane current-import
   admission predicate intersects with the current Junction provider inventory
@@ -2843,6 +2848,17 @@ Last verified: 2026-09-04
   justifies the table.
 
 ## Scheduled tool parity and replay
+
+Optional private follow-ups register under required outbox terminal confirmation.
+A failed canonical write retries confirmation without repeating the source send;
+source-key lookup under the registry lock prevents duplicate or resurrected work.
+Live finite children protect source dispatch evidence from terminal retention.
+Before the first transport attempt, a changed accepted-input cursor fails the
+unsent child intent and leaves its occurrence retryable. Existing failed-intent
+deduplication rules admit reconsidered output under the same occurrence token;
+provider-entered ambiguity still belongs to the original intent. Parent edits
+retire children before changing parent authority, while ordinary one-shot
+consumption explicitly preserves the delivered occurrence’s child.
 
 Canonical scheduled turns receive composable tools through one exact-occurrence
 resolver rather than per-tool cron exceptions. Each owner derives a deterministic

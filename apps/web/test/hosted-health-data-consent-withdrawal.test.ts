@@ -9,11 +9,9 @@ const mocks = vi.hoisted(() => ({
   runs: vi.fn(),
   sessions: vi.fn(),
   intents: vi.fn(),
-  disconnectAllHostedDeviceSyncConnectionsForUser: vi.fn(),
-  readHostedConsentStatus: vi.fn(),
   readHostedHealthDataConsentState: vi.fn(),
+  disconnectAllHostedDeviceSyncConnectionsForUser: vi.fn(),
   revokeAllMealPhotoCaptureEnrollmentsForMember: vi.fn(),
-  revokeHostedConsentScope: vi.fn(),
 }));
 
 vi.mock("@/src/lib/device-sync/public-ingress-service", () => ({
@@ -36,43 +34,26 @@ vi.mock("@/src/lib/prisma", () => ({
     return { ...tx, $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx) };
   },
 }));
-vi.mock("@/src/lib/legal/consent", async () => {
-  const actual = await vi.importActual<typeof import("@/src/lib/legal/consent")>(
-    "@/src/lib/legal/consent",
-  );
-  return {
-    ...actual,
-    readHostedConsentStatus: mocks.readHostedConsentStatus,
-    readHostedHealthDataConsentState: mocks.readHostedHealthDataConsentState,
-    revokeHostedConsentScope: mocks.revokeHostedConsentScope,
-  };
-});
+
+// Clinical cleanup rechecks consent after acquiring the member lock. Grant and
+// event persistence are exercised with real PostgreSQL in legal-consent-postgres.
+vi.mock("@/src/lib/legal/consent", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/legal/consent")>(),
+  readHostedHealthDataConsentState: mocks.readHostedHealthDataConsentState,
+}));
 
 import {
   cleanupWithdrawnHostedHealthDataConsent,
   reconcileHostedHealthDataRuntimeConsent,
-  withdrawHostedHealthDataConsent,
 } from "@/src/lib/hosted-privacy/health-data-consent-withdrawal";
-import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
 
-const status: HostedConsentStatus = {
-  documents: [],
-  generatedAt: "2026-07-30T12:00:00.000Z",
-  launchGranted: false,
-  launchScopes: [],
-  ok: true,
-  schema: "murph.hosted-consent-status.v1",
-  scopes: [],
-};
 const prisma = getPrisma();
 
-describe("withdrawHostedHealthDataConsent", () => {
+describe("cleanupWithdrawnHostedHealthDataConsent", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.readHostedHealthDataConsentState.mockResolvedValue("granted");
-    mocks.readHostedConsentStatus.mockResolvedValue(status);
-    mocks.revokeHostedConsentScope.mockResolvedValue(status);
     mocks.disconnectAllHostedDeviceSyncConnectionsForUser.mockResolvedValue({
       attemptedCount: 1,
       disconnectedCount: 1,
@@ -81,23 +62,6 @@ describe("withdrawHostedHealthDataConsent", () => {
     mocks.revokeAllMealPhotoCaptureEnrollmentsForMember.mockResolvedValue({
       revokedCount: 1,
     });
-  });
-
-  it("returns the committed revocation without waiting for cleanup", async () => {
-    await expect(withdrawHostedHealthDataConsent({
-      memberId: "member_123",
-      prisma,
-      source: "settings-health-data",
-    })).resolves.toBe(status);
-
-    expect(mocks.revokeHostedConsentScope).toHaveBeenCalledWith({
-      memberId: "member_123",
-      prisma,
-      scope: "launch.health-data",
-      source: "settings-health-data",
-    });
-    expect(mocks.disconnectAllHostedDeviceSyncConnectionsForUser).not.toHaveBeenCalled();
-    expect(mocks.revokeAllMealPhotoCaptureEnrollmentsForMember).not.toHaveBeenCalled();
   });
 
   it("runs both independently guarded provider cleanup owners", async () => {
@@ -162,37 +126,6 @@ describe("withdrawHostedHealthDataConsent", () => {
     expect(mocks.revokeAllMealPhotoCaptureEnrollmentsForMember).toHaveBeenCalledTimes(1);
     expect(errorLog).toHaveBeenCalled();
     errorLog.mockRestore();
-  });
-
-  it("retries cleanup without appending another event after withdrawal", async () => {
-    mocks.readHostedHealthDataConsentState.mockResolvedValue("revoked");
-
-    await expect(withdrawHostedHealthDataConsent({
-      memberId: "member_123",
-      prisma,
-    })).resolves.toBe(status);
-
-    expect(mocks.revokeHostedConsentScope).not.toHaveBeenCalled();
-    expect(mocks.readHostedConsentStatus).toHaveBeenCalledWith({
-      memberId: "member_123",
-      prisma,
-    });
-    expect(mocks.disconnectAllHostedDeviceSyncConnectionsForUser).not.toHaveBeenCalled();
-  });
-
-  it("does not reinterpret a missing legacy grant as withdrawal", async () => {
-    mocks.readHostedHealthDataConsentState.mockResolvedValue("missing");
-
-    await expect(withdrawHostedHealthDataConsent({
-      memberId: "member_123",
-      prisma,
-    })).rejects.toMatchObject({
-      code: "HOSTED_CONSENT_REQUIRED",
-      httpStatus: 409,
-    });
-
-    expect(mocks.revokeHostedConsentScope).not.toHaveBeenCalled();
-    expect(mocks.disconnectAllHostedDeviceSyncConnectionsForUser).not.toHaveBeenCalled();
   });
 });
 

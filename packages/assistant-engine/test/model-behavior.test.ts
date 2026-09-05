@@ -3045,10 +3045,28 @@ describe('assistant Murph onboarding guidance', () => {
       "The user's immediate health or safety need still comes first.",
     )
     expect(prompt).toContain(
-      'before interpreting or acting on any onboarding answer or decision to advance, pause, defer, skip, decline, or complete onboarding',
+      'When the canonical Murph welcome is visible in this direct conversation, treat it as authoritative evidence that onboarding just began.',
     )
     expect(prompt).toContain(
-      'That skill is the single owner of resume behavior, aspiration capture and parking, foundation checkpoints, the contextual return, persistence, generic defer and skip meaning, and completion.',
+      'For that first-reply fast path, do not read the onboarding skill and do not run `vault-cli assistant onboarding resume-context --format json`.',
+    )
+    expect(prompt).toContain('Use the host-rendered current clock in these instructions; only if it is absent, read the current clock once.')
+    expect(prompt).not.toContain('Read the current clock once and use `murph.automation`')
+    expect(prompt).toContain('This injected recipe is the explicit exception to requiring a loaded skill for its stable slug.')
+    expect(prompt).toContain('localAt: { date: <target YYYY-MM-DD>, time: <target HH:MM>, timeZone: <current clock IANA timezone> }')
+    expect(prompt).not.toContain('at: <now + 15 minutes, ISO with offset>')
+
+    expect(prompt).toContain(
+      'hey — what should i call you?',
+    )
+    expect(prompt).toContain(
+      "What should I call you?",
+    )
+    expect(prompt).toContain(
+      'Outside these visible opening exchanges—missing or ambiguous history, established later stages, an immediate request, or an overall pause or decline—read and follow',
+    )
+    expect(prompt).toContain(
+      'That skill is the single owner of resume behavior, aspiration capture and parking, foundation checkpoints, the contextual return, later-stage persistence, generic defer and skip meaning, and completion.',
     )
     expect(prompt).toContain(
       'During discovery, a stated health goal is context, not an action request.',
@@ -3073,7 +3091,7 @@ describe('assistant Murph onboarding guidance', () => {
       'A pause, defer, or overall decline stops advancement; a category skip resolves only that checkpoint and may advance onboarding, but never selects a thread or authorizes behavior work.',
     )
     expect(prompt).toContain(
-      'Do not reproduce or substitute a second onboarding flow from this overlay.',
+      'Keep later-stage rules in that skill.',
     )
     expect(prompt).toContain(
       "When the skill's completion criteria are satisfied, run `vault-cli assistant onboarding complete` with the correct reason and verify the output reports completed.",
@@ -3082,13 +3100,16 @@ describe('assistant Murph onboarding guidance', () => {
       'Until then, leave onboarding open.',
     )
     expect(prompt).toContain(
-      'Ask at most one onboarding question or checkpoint in a reply; the skill\'s bundled minimal-identity prompt counts as one checkpoint.',
+      'Ask at most one onboarding question or checkpoint in a reply; the opening instructions\' bundled minimal-identity prompt counts as one checkpoint.',
     )
     expect(prompt).toContain(
       "Use the current prompt's date, timezone, channel, delivery route, and available tool guidance as runtime context whenever the onboarding skill is used",
     )
+    expect(prompt.match(
+      /vault-cli assistant onboarding resume-context --format json/gu,
+    )).toHaveLength(1)
     expect(prompt).not.toContain(
-      'vault-cli assistant onboarding resume-context --format json',
+      'Read and follow `$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md` before interpreting or acting on any onboarding answer',
     )
     expect(prompt).not.toContain('all six foundation checkpoints')
     expect(prompt).not.toContain('first-value proof')

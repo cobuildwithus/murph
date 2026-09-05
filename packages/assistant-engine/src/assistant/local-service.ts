@@ -2292,6 +2292,7 @@ export async function sendAssistantMessageLocal(
               continue
             }
             precedingResponseSegments.push({
+              followUpRequest: segment.followUpRequest,
               ...(segment.contextReferences === undefined
                 ? {}
                 : {
@@ -2543,6 +2544,7 @@ export async function sendAssistantMessageLocal(
                 }
               : await dispatchAssistantReply({
                   input: finalDeliveryInput,
+                  followUpRequest: providerResult.followUpRequest,
                   card: providerResult.responseCard ?? null,
                   media: providerResult.responseMedia ?? [],
                   response: rawFinalResponseText ?? '',

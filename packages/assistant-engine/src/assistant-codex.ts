@@ -525,6 +525,7 @@ export interface CodexAppServerTurnInput {
   onProviderRequestStarted?: ((event: AssistantProviderRequestStartedEvent) => Promise<void> | void) | null
   onAdditionalUsage?: ((usage: AssistantProviderUsageDraft) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
+  followUpAttachmentAllowed?: boolean | null
   groupConversation?: boolean | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
   memberMemoryMaintenanceAuthorized?: boolean | null
@@ -649,6 +650,7 @@ export interface CodexAppServerTurnResult {
   targetInputId: string | null
   additionalUsages: AssistantProviderUsageDraft[]
   responseMedia: AssistantResponseMedia[]
+  followUpRequest: AssistantProviderTurnExecutionResult["followUpRequest"]
   responseCard: AssistantResponseCard | null
   jsonEvents: unknown[]
   providerActionCount: number
@@ -662,6 +664,7 @@ export interface CodexAppServerTurnResult {
 }
 
 export interface CodexAppServerResponseSegment {
+  followUpRequest?: AssistantProviderTurnExecutionResult["followUpRequest"]
   contextReferences?: AssistantProviderResponseSegment['contextReferences']
   deliveryContextOrdinal: number
   media: AssistantResponseMedia[]
@@ -3477,6 +3480,15 @@ async function runCodexAppServerTurnOnProcess(
   let lastEventError: string | null = null
   let lastEventErrorInfo: CodexStructuredErrorInfo | null = null
   let responseMedia: AssistantResponseMedia[] = []
+  const followUpRequests = new Map<number, NonNullable<AssistantProviderTurnExecutionResult["followUpRequest"]>>()
+  const attachFollowUpRequest = (
+    ordinal: number, request: AssistantProviderTurnExecutionResult["followUpRequest"],
+  ): void => {
+    if (request) followUpRequests.set(ordinal, request)
+  }
+  const finalFollowUpRequest = (ordinal: number, deliverable: boolean) =>
+    deliverable ? followUpRequests.get(ordinal) ?? null : null
+
   let responseCard: AssistantResponseCard | null = null
   let responseCardTextFallback: CompactTableWorkoutResponseCardV1 | null = null
   const assistantStyleSettingsOverlay: AssistantStyleTurnSettingsOverlay = {
@@ -4071,6 +4083,7 @@ async function runCodexAppServerTurnOnProcess(
             contextReferences: trailingSteerCandidate.contextReferences,
           }),
       deliveryContextOrdinal: trailingSteerCandidate.deliveryContextOrdinal,
+      followUpRequest: trailingSteerCandidate.followUpRequest,
       media: [...trailingSteerCandidate.media],
       response,
       ...(transcriptResponse === response ? {} : { transcriptResponse }),
@@ -4917,6 +4930,7 @@ async function runCodexAppServerTurnOnProcess(
           fetchImpl: input.fetchImpl,
           hostedToolContext,
           materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
+          followUpAttachmentAllowed: input.followUpAttachmentAllowed === true,
           currentResponseMedia: responseMedia,
           currentResponseCard: responseCard ?? responseCardTextFallback,
           groupChallengeResponseCardAllowed:
@@ -5041,6 +5055,7 @@ async function runCodexAppServerTurnOnProcess(
           dynamicToolRequestDeliveryContextOrdinal,
         )
       }
+      attachFollowUpRequest(dynamicToolRequestDeliveryContextOrdinal, result.followUpRequestPatch)
       if (result.responseCardPatch) {
         try {
           applyResponseCardPatch(
@@ -5391,6 +5406,7 @@ async function runCodexAppServerTurnOnProcess(
           response: completedFinalAgentMessage,
           media: [...responseMedia],
           card: responseCard,
+          followUpRequest: followUpRequests.get(completedResponseDeliveryContextOrdinal),
           cardTextFallback: responseCardTextFallback,
           ...(completedResponseTargetInputId
             ? { targetInputId: completedResponseTargetInputId }
@@ -6271,6 +6287,7 @@ async function runCodexAppServerTurnOnProcess(
       ...(segment.transcriptResponse === undefined
         ? {}
         : { transcriptResponse: segment.transcriptResponse }),
+      followUpRequest: segment.followUpRequest,
       media: [...segment.media],
       ...(segment.targetInputId
         ? { targetInputId: segment.targetInputId }
@@ -6284,6 +6301,7 @@ async function runCodexAppServerTurnOnProcess(
       resolveReplyTargetPatch(finalDeliveryContextOrdinal)?.targetInputId ?? null,
     additionalUsages: [...additionalUsages, ...buildSubagentUsageDrafts()],
     responseMedia: finalHasDeliverableOutput ? [...finalResponseMedia] : [],
+    followUpRequest: finalFollowUpRequest(finalDeliveryContextOrdinal, finalHasDeliverableOutput),
     responseCard: finalHasDeliverableOutput ? deliveredFinalResponseCard : null,
     jsonEvents,
     providerActionCount,

@@ -1,3 +1,4 @@
+import { MURPH_ATTACH_FOLLOW_UP_TOOL } from '../src/assistant-codex/dynamic-tools/automation.ts'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createServer, type Server, type ServerResponse } from 'node:http'
@@ -282,6 +283,7 @@ async function prepareGroupChallengeVault(
 }
 
 interface ScriptedResponseRoute {
+  beforeRespond?: () => Promise<void>
   completionLabel?: string
   delayMs?: number
   requestExcludes?: readonly string[]
@@ -617,6 +619,21 @@ afterAll(async () => {
 }, 180_000)
 
 describe('real codex app-server with scripted provider', () => {
+  it.each([true, false])('enforces follow-up attachment authority through real App Server (%s)', async (allowed) => {
+    const scenario = await prepareScriptedTurnScenario()
+    const request = { action: 'attach_follow_up', afterMinutes: 20, instructions: 'Check the pending choice; skip if resolved.' }
+    scenario.stub.queue({ functionCall: { name: 'automation', namespace: 'murph', arguments: request } }, { text: 'Which arrival window works?' })
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput, dynamicTools: [MURPH_ATTACH_FOLLOW_UP_TOOL],
+      followUpAttachmentAllowed: allowed, groupConversation: false,
+      prompt: 'Ask the pending arrival-window question.',
+    })
+    expect(result.followUpRequest).toEqual(allowed
+      ? { afterMinutes: 20, instructions: request.instructions } : null)
+    expect(result.finalMessage).toBe('Which arrival window works?')
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
   it('streams a scripted turn through the real app-server protocol', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
@@ -633,6 +650,42 @@ describe('real codex app-server with scripted provider', () => {
     expect(result.turnId).toEqual(expect.any(String))
     expect(result.sessionId).toEqual(expect.any(String))
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+  })
+
+  it('preserves native Astra async-question text and additive app-server fields', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario({ model: 'gpt-6-astra' })
+    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
+      astraAllowed: true,
+      codexCommand: scenario.turnInput.codexCommand,
+      directory: scenario.turnInput.codexHome,
+    })
+    const questions = [{ title: 'Which day works?', options: ['Monday', 'Tuesday'] }]
+    scenario.stub.queue(
+      { functionCall: { name: 'request_user_input_async', arguments: { questions } } },
+      { text: '' },
+    )
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [],
+      env: {
+        ...scenario.turnInput.env,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+      },
+      prompt: 'Ask which day works using the asynchronous question tool.',
+    })
+    expect(result.finalMessage).toBe('Which day works?\n- Monday\n- Tuesday')
+    expect(result.transcriptMessage).toBe(result.finalMessage)
+    expect(result.jsonEvents).toContainEqual(expect.objectContaining({
+      method: 'item/completed',
+      params: expect.objectContaining({
+        item: expect.objectContaining({
+          type: 'agentMessage', delivery: 'async', questions,
+        }),
+      }),
+    }))
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
   it('executes the unfamiliar workout CSV skill with exact-byte batch safety', {
@@ -2456,6 +2509,9 @@ text(result.output);
         },
       },
       {
+        requestIncludes: [
+          'accept any self-description, partial answer, or skip without pressing or inferring missing details.',
+        ],
         text: ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
       },
     )
@@ -2481,7 +2537,7 @@ text(result.output);
       .join('\n')
     expect(toolOutputs).toContain('## Progressive disclosure')
     expect(toolOutputs).toContain(
-      'Never re-ask solely for optional demographics.',
+      'The injected onboarding instructions own the visible opening exchanges:',
     )
     expect(toolOutputs).toContain('"hasPriorSetupContext":false')
     expect(toolOutputs).not.toContain(laterStageMarker)
@@ -4723,6 +4779,14 @@ text(JSON.stringify(result));
       title: 'Gap reminder',
     }
     const recoveryKey = buildTestAutomationLocalAtRecoveryKey(failedRequest)
+    let markResponseStarted!: () => void
+    const responseStarted = new Promise<void>((resolve) => {
+      markResponseStarted = resolve
+    })
+    let releaseResponse!: () => void
+    const responseReleased = new Promise<void>((resolve) => {
+      releaseResponse = resolve
+    })
     let steered: Promise<void> | null = null
     scenario.stub.queue(
       {
@@ -4735,7 +4799,10 @@ text(JSON.stringify(result));
         },
       },
       {
-        delayMs: 4_000,
+        beforeRespond: async () => {
+          markResponseStarted()
+          await responseReleased
+        },
         text: 'That time does not exist on March 8. What should I do?',
       },
       {
@@ -4776,14 +4843,19 @@ text(JSON.stringify(result));
         vaultFileSendAvailable: false,
       },
       onLiveTurn: (turn: CodexAppServerLiveTurn) => {
-        steered = delay(1_000).then(() =>
-          turn.steer({
-            prompt: 'Never mind. Do not create that reminder.',
-            relativeDateReferenceWindow: {
-              earliestAt: '2026-03-08T05:01:00.000Z',
-              latestAt: '2026-03-08T05:01:00.000Z',
-            },
-          }))
+        steered = responseStarted.then(async () => {
+          try {
+            await turn.steer({
+              prompt: 'Never mind. Do not create that reminder.',
+              relativeDateReferenceWindow: {
+                earliestAt: '2026-03-08T05:01:00.000Z',
+                latestAt: '2026-03-08T05:01:00.000Z',
+              },
+            })
+          } finally {
+            releaseResponse()
+          }
+        })
       },
       prompt: 'Remind me tomorrow at 2:30 AM in New York.',
     })
@@ -10305,6 +10377,8 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
       }))
       return
     }
+
+    await scripted.beforeRespond?.()
 
     if (scripted.delayMs) {
       await new Promise((resolve) => {

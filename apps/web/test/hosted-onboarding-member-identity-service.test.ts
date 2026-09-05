@@ -191,11 +191,8 @@ describe("hosted-onboarding member-identity-service", () => {
       }),
       skipDuplicates: true,
     });
-    expect(memberCreate).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        assistantModelPreference: "gpt-5.6-luna",
-      }),
-    }));
+    expect(memberCreate.mock.calls[0]?.[0]?.data)
+      .not.toHaveProperty("assistantModelPreference");
     expect(participantContactLock).toHaveBeenCalledTimes(1);
     expect(participantContactLock.mock.invocationCallOrder[0])
       .toBeLessThan(identityCreateMany.mock.invocationCallOrder[0] ?? 0);

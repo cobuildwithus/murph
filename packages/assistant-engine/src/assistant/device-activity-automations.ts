@@ -407,6 +407,12 @@ function deviceActivitySourceMatches(
       return provider === 'whoop' || provider === 'whoop-v2'
     case 'whoop_v2':
       return provider === 'whoop-v2'
+    case 'garmin':
+    case 'oura':
+      return provider === source
+    case 'fitbit':
+      // Junction's current Fitbit connection imports google_health; retain legacy fitbit.
+      return provider === 'fitbit' || provider === 'google-health'
   }
 }
 

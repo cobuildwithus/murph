@@ -830,6 +830,23 @@ test("Personal Patterns reveals factors after the first 15 on request", async ()
   }
 });
 
+test("PatternsPage renders its prepared report without scanning unrelated vault entities", () => {
+  mocks.useBrowserVault.mockReturnValue({
+    client: {
+      ...clientFixture,
+      replica: {
+        ...clientFixture.replica,
+        get entities() { throw new Error("Patterns must not rebuild the overview."); },
+      },
+    },
+    refresh: mocks.refresh,
+    refreshPending: false,
+    status: "ready",
+  });
+  const markup = renderToStaticMarkup(createElement(PatternsPageClient));
+  assert.match(markup, /patterns/iu);
+});
+
 test("PatternsPage explains the bounded wait when a legacy replica has no patterns projection", async () => {
   const legacyReplica = { ...clientFixture.replica };
   delete legacyReplica.personalPatterns;

@@ -61,19 +61,9 @@ question in this shape:
 What would you most like from your health—something you want to improve, understand, handle, or be able to do?
 ```
 
-When this question directly follows the user's minimal-identity answer, start
-the same reply by greeting them by the name they just gave, then give a short
-two- or three-sentence bridge on how Murph works before the question. Keep
-close to this wording, changing little more than the greeting:
-
-```text
-Good to meet you. You might already know what you want to improve about your health. Following through is often the hard part. That's where I can help.
-```
-
-Do not frame the bridge around getting healthy, as if the user is starting
-from unhealthy. Do not turn it into a capability tour, tool list, or
-experience claim, and do not add another question with it. The bridge plus the
-anchor question may run slightly longer than the usual short bubble.
+The injected onboarding instructions own the bridge and this first question
+immediately after minimal identity. This reference begins when interpreting
+an aspiration answer or when visible context already supplied an aspiration.
 
 This makes room for four entry modes:
 

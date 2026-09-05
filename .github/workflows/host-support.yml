@@ -450,6 +450,7 @@ jobs:
       MURPH_HOSTED_WEB_VERIFY_LANE: test-shard
       MURPH_HOSTED_WEB_VERIFY_SKIP_TYPECHECK: "1"
       MURPH_SUPPLEMENT_SEARCH_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_search_test
+      MURPH_CONSENT_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_consent_test
     steps:
       - name: Reject draft pull request proof
         if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
@@ -473,6 +474,9 @@ jobs:
 
       - name: Install deps
         run: pnpm install --frozen-lockfile
+
+      - name: Prepare isolated consent proof database
+        run: DATABASE_URL="$MURPH_CONSENT_TEST_DB_URL" pnpm --dir apps/web exec prisma db push
 
       - name: Run hosted-Web test shard
         run: pnpm --dir apps/web verify
