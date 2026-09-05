@@ -1,6 +1,6 @@
 # Astra access on Edge and spiral galaxy artwork
 
-Status: active
+Status: completed
 Created: 2026-09-04
 Updated: 2026-09-04
 
@@ -30,4 +30,9 @@ Passed: settings/preferences/API/workspace proof (171 tests including the four E
 
 Real-Codex command: `pnpm test:assistant:live -- --test "saves Astra exactly once for the next Edge query"`, default `gpt-5.6-terra`, local subscription. The initial run duplicated the update. Main now includes the dynamic-tool return-text handling correction in the shared base instructions; the temporary local instruction was removed in favor of that owner. Final post-merge live verification passed with exactly one update and a truthful future-query confirmation; provider and reasoning stayed unchanged. Reply review: Ready.
 
-Main reconciled at `4d75adb347` with the current main review policy preserved verbatim. Post-merge proof: 171 Web tests, 15 assistant contract tests, 36 runtime contract tests, Web/assistant-engine/assistant-runtime typechecks. Pending: exact-head CI and ReviewGPT on the eligibility change, then shipping through the existing release path. Existing production-provider execution, complete initial-input measurement, and deployment limitations remain inherited from PR 2823.
+Main reconciled at `4d75adb347` with the current main review policy preserved verbatim. Post-merge proof: 171 Web tests, 15 assistant contract tests, 36 runtime contract tests, Web/assistant-engine/assistant-runtime typechecks. All four required CI gates passed on `37905a29c81fe495b17550de2290c9e2413168f8`. ReviewGPT round 3 passed on that exact head with zero findings and zero accepted issues; the full snapshot used GPT-6 Pro on Eragon. Exact-turn capture, model identity, attachment scope, ancestry, completion marker, and a review duration above the trust floor were verified. The parent independently verified rendered evidence. Implementation is complete; the final documentation commit and protected release remain separate gates. Existing production-provider execution, complete initial-input measurement, and deployment limitations remain inherited from PR 2823.
+
+## Release handoff
+
+Promote the compatible runtime before Web exposure and verify warm-container convergence. Production Web currently assigns domains automatically, so hold automatic domain assignment during this release, restore its prior setting after the runtime is verified, and promote the compatible Web candidate. Do not bypass protected CI or deployment checks. No production rollout has been claimed by this implementation record.
+Completed: 2026-09-04
