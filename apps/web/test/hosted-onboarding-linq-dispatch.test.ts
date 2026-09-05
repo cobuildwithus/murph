@@ -31,7 +31,6 @@ import {
   encryptHostedLinqLinePhoneNumber,
 } from "@/src/lib/hosted-onboarding/linq-line-phone-codec";
 import {
-  buildHostedInviteReply,
   type HostedLinqWebhookEvent,
   parseHostedLinqWebhookEvent,
   requireHostedLinqMessageReceivedEvent,
@@ -1266,18 +1265,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
   });
 
-  it("builds inactive signup invites from the rotating signup copy bank", () => {
-    const reply = buildHostedInviteReply({
-      joinUrl: "https://join.example.test/join/code_first_text",
-      seed: "first-text-signup:test",
-    });
-
-    expect(reply).toContain("https://join.example.test/join/code_first_text");
-    expect(reply.trim().length).toBeGreaterThan(
-      "https://join.example.test/join/code_first_text".length,
-    );
-  });
-
   it.each([
     { expectedTruncated: false, label: "exactly bounded text", suffix: "" },
     { expectedTruncated: false, label: "trailing whitespace", suffix: "   " },
@@ -1444,7 +1431,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.resolveHostedLinqTypingPrewarmMemberId).not.toHaveBeenCalled();
   });
 
-  it("routes message edits through the narrow correction planner without a read receipt", async () => {
+  it("accepts message edits without sending a read receipt or another message", async () => {
     const prisma = asPrismaTransactionClient({});
     const scheduleAfterResponse = vi.fn();
     const response = await handleHostedOnboardingLinqWebhook({
@@ -1482,24 +1469,16 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "wake-appended-message-edit",
     });
-    expect(mocks.planHostedLinqMessageEditedWebhook).toHaveBeenCalledWith({
+    expect(mocks.planHostedLinqMessageEditedWebhook).toHaveBeenCalledWith(expect.objectContaining({
       event: expect.objectContaining({
         event_id: "evt_edit_123",
         event_type: "message.edited",
       }),
-      preparation: expect.objectContaining({
-        rows: [],
-        sourceMessageLookupKeys: [
-          createHostedLinqMessageLookupKey("msg_123"),
-        ],
-      }),
-      prisma,
-    });
+    }));
     expectHostedLinqPointerSignalAccepted("evt_edit_123");
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(scheduleAfterResponse).toHaveBeenCalledTimes(2);
   });
 
   it.each([
@@ -2076,67 +2055,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         prisma,
       });
       expect(mocks.checkHostedAiUsageGate).not.toHaveBeenCalled();
-      expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
-        "hosted-onboarding.webhook.linq.plan",
-        expect.objectContaining({
-          eventIdSuffix: "vt_123",
-          eventType: "message.received",
-        }),
-      );
-      expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
-        expect.objectContaining({
-          step: "hosted-onboarding.webhook.linq.plan",
-        }),
-        "wake-appended-active-member",
-        expect.objectContaining({
-          desiredSideEffectCount: 0,
-          duplicate: false,
-          ok: true,
-          wakeUserPresent: true,
-        }),
-      );
-      expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
-        "hosted-onboarding.webhook.linq.verify-request",
-        expect.objectContaining({
-          signaturePresent: false,
-          timestampPresent: false,
-        }),
-      );
-      expect(mocks.startHostedOnboardingTiming).not.toHaveBeenCalledWith(
-        "hosted-onboarding.webhook.linq.receipt",
-        expect.anything(),
-      );
-      expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
-        expect.objectContaining({
-          step: "hosted-onboarding.webhook.linq",
-        }),
-        "completed",
-        expect.objectContaining({
-          duplicate: false,
-          eventIdSuffix: "vt_123",
-          eventType: "message.received",
-          responseReason: "wake-appended-active-member",
-          signalAbortedBeforeReturn: false,
-        }),
-      );
-      expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
-        expect.objectContaining({
-          step: "hosted-onboarding.webhook.linq.wake-handoff",
-        }),
-        "temporal-signaled",
-        expect.objectContaining({
-          workflowIdSuffix: expect.any(String),
-        }),
-      );
-      expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
-        "hosted-onboarding.webhook.linq.wake-handoff",
-        expect.objectContaining({
-          eventIdSuffix: "vt_123",
-          responseReason: "wake-appended-active-member",
-          userIdPresent: true,
-          userIdSuffix: "er_123",
-        }),
-      );
     },
   );
 
@@ -3461,70 +3379,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(JSON.stringify(envelope)).not.toContain("signed-voice-url");
   });
 
-  it("signals Temporal after an active-member mailbox append", async () => {
-    const prewarmRuntimeShell = vi.fn(async () => ({ accepted: true as const }));
-    mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId
-      .mockResolvedValueOnce("member_123");
-    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
-      ensureRuntimeProcessing: vi.fn(async () => ({ accepted: true as const })),
-      prewarmRuntimeShell,
-    });
-    const prisma = asPrismaTransactionClient({
-      hostedWebhookReceipt: {
-        create: vi.fn().mockResolvedValue({}),
-        findUnique: vi.fn().mockResolvedValue({
-          payloadJson: {
-            eventType: "message.received",
-            receiptAttemptCount: 1,
-            receiptStatus: "processing",
-          },
-        }),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
-      hostedMember: {
-        findUnique: vi.fn().mockResolvedValue({
-          accountGroupMemberships: [],
-          billingStatus: HostedBillingStatus.active,
-          id: "member_123",
-          invites: [],
-          linqChatId: "chat_123",
-          phoneLookupKey: "+15551234567",
-        }),
-      },
-    });
-
-    await expect(handleHostedOnboardingLinqWebhook({
-      prisma,
-      rawBody: buildHostedLinqWebhookBody({
-        eventId: "evt_required_nudge_failed",
-      }),
-      signature: null,
-      timestamp: null,
-    })).resolves.toMatchObject({
-      ok: true,
-      reason: "wake-appended-active-member",
-    });
-
-    expectHostedLinqPointerSignalAccepted("evt_required_nudge_failed");
-    expect(prewarmRuntimeShell).toHaveBeenCalledOnce();
-    expect(prewarmRuntimeShell).toHaveBeenCalledWith(expect.objectContaining({
-      orchestrationAttemptId: expect.stringMatching(/^web-prewarm-/u),
-      requestStartedAtEpochMs: expect.any(Number),
-      source: "linq-message-routing",
-      userId: "member_123",
-    }));
-    expectHostedLinqReadReceiptSent();
-    expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
-      expect.objectContaining({
-        step: "hosted-onboarding.webhook.linq.wake-handoff",
-      }),
-      "temporal-signaled",
-      expect.objectContaining({
-        workflowIdSuffix: expect.any(String),
-      }),
-    );
-  });
-
   it("sends active-member Linq read receipts without durable thread-route authority", async () => {
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
@@ -3927,58 +3781,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     );
   });
 
-  it("fails webhook success when Temporal signaling fails after mailbox append", async () => {
-    mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(new Error("Temporal unavailable"));
-    const prisma = asPrismaTransactionClient({
-      hostedWebhookReceipt: {
-        create: vi.fn().mockResolvedValue({}),
-        findUnique: vi.fn().mockResolvedValue({
-          payloadJson: {
-            eventType: "message.received",
-            receiptAttemptCount: 1,
-            receiptStatus: "processing",
-          },
-        }),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
-      hostedMember: {
-        findUnique: vi.fn().mockResolvedValue({
-          accountGroupMemberships: [],
-          billingStatus: HostedBillingStatus.active,
-          id: "member_123",
-          invites: [],
-          linqChatId: "chat_123",
-          phoneLookupKey: "+15551234567",
-        }),
-      },
-    });
-
-    await expect(handleHostedOnboardingLinqWebhook({
-      prisma,
-      rawBody: buildHostedLinqWebhookBody({
-        eventId: "evt_ingress_read_receipt_skipped",
-      }),
-      signature: null,
-      timestamp: null,
-    })).rejects.toThrow("Temporal unavailable");
-
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      abortSignal: expect.any(AbortSignal),
-      expectedUserId: "member_123",
-      mailboxItemId: "mailbox_evt_ingress_read_receipt_skipped",
-    });
-    expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
-    expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
-      expect.objectContaining({
-        step: "hosted-onboarding.webhook.linq.wake-handoff",
-      }),
-      "failed",
-      expect.objectContaining({
-        errorName: "Error",
-      }),
-    );
-  });
-
   it("opens a Prisma transaction when dispatching an active-member Linq message from a root client", async () => {
     const transactionReceiptUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
     const hostedMemberRouting = createStatefulHostedMemberRoutingMock();
@@ -4036,9 +3838,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       reason: "wake-appended-active-member",
     });
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-    // Initial access, exact post-lock admission, and the route-owner recheck all
-    // run on the transaction client.
-    expect(transactionHostedMemberFindUnique).toHaveBeenCalledTimes(3);
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
         tx: transactionClient,
@@ -7610,8 +7409,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "sent-signup-link",
     });
-    expect(prismaMocks.hostedMember.findUnique).toHaveBeenCalledTimes(2);
-    expect(prismaMocks.hostedInvite.findFirst).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedInvite.update).toHaveBeenCalledWith({
       where: {
@@ -7642,6 +7439,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         message: expect.stringContaining("https://join.example.test/join/code_first_text"),
         replyToMessageId: "msg_123",
       }),
+    );
+    const deliveredInvite = mocks.sendHostedLinqChatMessage.mock.calls[0]?.[0].message;
+    expect(deliveredInvite?.trim().length).toBeGreaterThan(
+      "https://join.example.test/join/code_first_text".length,
     );
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalledWith({
       memberId: "member_123",

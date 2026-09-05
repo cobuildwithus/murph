@@ -155,7 +155,7 @@ Use the ordinary turn-ending pause when an accepted finding does not qualify,
 the correction expands beyond the proven boundary, requested behavior or the
 intended outcome would change, scope or authority would expand, or a destructive
 or external action needs new approval. Neither exception bypasses a required
-scope decision or the seven-round hard cap.
+scope decision or the three-round hard cap.
 
 `INVALID` stops for an evidence gap. Older review results may contain
 `RETROSPECTIVE_REQUIRED`; triage their concrete evidence under the current
@@ -424,21 +424,18 @@ the current user explicitly asks for it.
    round. Correct its evidence or invocation gap and retry the same round number
    against the same pushed head.
 
-   Treat 7.5 minutes as the default final-gate trust floor, not an absolute
-   stopwatch verdict. A marked concrete-model response below 6.5 minutes is too
-   fast and does not count. A response from 6.5 minutes up to the 7.5-minute
-   default is near-threshold and may count at local discretion when inspection
-   confirms the exact turn, attachment, requested model selection, completion
-   marker, and a substantive review proportionate to the requested scope. Record
-   the elapsed time, selected lane/model evidence, artifact-quality judgment,
-   and acceptance reason in the round handoff. ReviewGPT's package-level
-   five-minute attestation threshold does not replace this stricter final-gate
-   judgment. Responses at or above 7.5 minutes still require all ordinary
-   evidence checks and are not trusted by duration alone.
+   Require at least 4.5 minutes (270 seconds) for a marked concrete-model final
+   response. The repository wrapper passes `--minimum-marked-response-time 270s`
+   to align the tool's attestation fallback with this final-gate minimum. Below
+   that minimum, the response does not count. At or above it, inspect the exact
+   turn, attachment, requested model selection, completion marker, and a
+   substantive review proportionate to the requested scope. Record the elapsed
+   time, selected lane/model evidence, artifact-quality judgment, and acceptance
+   reason in the round handoff. Duration alone never establishes a valid review.
 
-   If a too-fast response is not accepted under this narrow exception, preserve
-   it only as diagnostic output and retry the same substantive round number
-   against the same pushed head. Browser, model, capture, attachment, and
+   Preserve a too-fast response only as diagnostic output and retry the same
+   substantive round number against the same pushed head. Browser, model,
+   capture, attachment, and
    too-fast-response retries never advance the round counter. If evidence shows
    a different or downgraded model, incomplete response, missing snapshot, or
    shallow/templated output, discard the round regardless of duration, correct
@@ -588,13 +585,13 @@ worktree active, and stop. Do not poll for a quiet base.
 - A concrete requirement or authority gap pauses dependent remediation until
   the parent resolves the scope decision under step 5. The reviewer reports
   qualifying findings or evidence gaps, not escalation by size or round number.
-- Hard cap: 7 rounds per PR. There is no automatic eighth substantive round. An
-  accepted round-seven finding may still be reproduced and fixed; do not leave a
-  known bug in place merely because the review counter reached seven. After that
+- Hard cap: 3 rounds per PR. There is no automatic fourth substantive round. An
+  accepted round-three finding may still be reproduced and fixed; do not leave a
+  known bug in place merely because the review counter reached three. After that
   fix, pause the ReviewGPT loop and confirm parent final review, verification,
   and PR CI are all complete. Record the cap
   retrospective and obtain an explicit continuation decision before starting
-  round eight; the answer may be delete, revert, shrink, split, redesign,
+  round four; the answer may be delete, revert, shrink, split, redesign,
   continue, or abandon. A green non-ReviewGPT gate does not make the PR
   merge-ready without the required later resolved result.
 - Report a per-round summary at handoff: findings received, accepted, rejected
