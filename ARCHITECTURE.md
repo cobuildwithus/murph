@@ -200,6 +200,22 @@ that narrow state tool through canonical core memory operations. The turn uses
 the shared restricted maintenance configuration and needs no separate
 permission profile or filesystem mutation path; native controls are not an
 additional memory owner, and the host suppresses their effects in this lane.
+The evidence owner distinguishes a successfully empty bounded conversation
+window from collection failures. An empty member-memory window skips before
+provider admission. An empty group window skips only when its room-model page
+is also genuinely missing; existing pages remain eligible for cleanup, and
+unavailable evidence or pages keep the ordinary maintenance path. The rolling
+evidence window remains intact so corrections and late committed events are
+not hidden behind a last-run timestamp.
+
+The canonical cron lifecycle skips a managed Journal connected-context pass
+only when its ledger is genuinely missing and its complete connected-account
+inventory is empty. Existing ledgers, new accounts, unavailable ports, and
+failed reads keep the normal pass, preserving notices and due follow-ups.
+The account inventory owner rejects malformed pages instead of presenting them
+as empty. Journal and Personal Patterns retain the common hosted cron policy:
+eligible first attempts request Flex; failed-attempt retries use Standard, and
+the provider boundary validates model and catalog support before selecting Flex.
 Reminder availability uses no
 model turn or separate automation: the existing hosted background automation
 pass deterministically scans active private automations that explicitly store
@@ -1130,7 +1146,14 @@ field. Provider and reasoning stay fixed to OpenAI and `low`; no participant
 identity, plan state, or private preference enters the room path.
 Idle maintenance attributes compaction usage to the model actually bound to the
 warm thread, not a future preference, and skips provider work when that model
-cannot be priced. The
+cannot be priced. On fresh threads, pinned Codex raw completion notifications
+provide exact idle-compaction token buckets, deduplicated by provider response
+identity in the existing usage ledger. A successful compaction without usable
+raw evidence retains the explicit context-size estimate; cold-resumed threads
+cannot opt into raw events in Codex 0.151.0. Measured responses remain billable
+when the encompassing compaction fails. Raw provider content is excluded from
+persisted turn events and stdout. Automatic compaction accounting is unchanged.
+The
 runtime and web control plane
 accept only the input-bound update shape; approval-shaped configuration
 callbacks are rejected. The personalization response

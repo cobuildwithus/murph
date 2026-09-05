@@ -786,3 +786,19 @@ test('knowledge reads expose bounded degradation and a typed invalid-target reco
   assert.equal(missing.envelope.ok, false)
   assert.equal(missing.envelope.error.code, 'knowledge_page_not_found')
 })
+
+test('missing wiki page recovery survives the production CLI error bridge', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext('murph-knowledge-missing-recovery-')
+  cleanupPaths.push(parentRoot)
+  const missing = await runInProcessJsonCli(createVaultCli(), [
+    'knowledge', 'show', 'missing-page', '--vault', vaultRoot,
+  ])
+  assert.equal(missing.exitCode, 1)
+  assert.equal(missing.envelope.ok, false)
+  assert.equal(missing.envelope.error.code, 'knowledge_page_not_found')
+  assert.equal(missing.envelope.error.retryable, false)
+  assert.equal(missing.envelope.error.stage, 'read')
+  assert.match(missing.envelope.error.hint ?? '', /Do not retry the same missing slug/u)
+  assert.match(missing.envelope.error.hint ?? '', /authorized write/u)
+  assert.match(missing.envelope.error.hint ?? '', /continue without the page/u)
+})
