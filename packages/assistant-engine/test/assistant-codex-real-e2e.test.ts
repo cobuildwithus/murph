@@ -74,6 +74,7 @@ import {
   startLiveWorkout,
 } from '@murphai/vault-usecases/workouts'
 import { afterAll, describe, expect, it } from 'vitest'
+import { upsertKnowledgePage } from '../src/knowledge/service.ts'
 import { requestAssistantVaultFileSend } from '../src/assistant/vault-file-send.ts'
 import { listAssistantOutboxIntents } from '../src/assistant/outbox.ts'
 
@@ -2544,6 +2545,63 @@ describe('real Codex live fixture contracts', () => {
       await removeRealCodexTemporaryPath(workingDirectory)
     }
   })
+})
+
+describeRealCodex('real Codex missing knowledge recovery e2e', () => {
+  it('finishes a stale wiki lookup without retrying the missing page or inventing its contents', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-missing-wiki-e2e-'))
+    try {
+      await initializeVault({ title: 'Synthetic wiki recovery', timezone: 'UTC', vaultRoot: workingDirectory })
+      const saved = await upsertKnowledgePage({
+        vault: workingDirectory, slug: 'weekend-packing', title: 'Weekend packing',
+        body: '# Weekend packing\n\n' + 'Saved list of personal packing reminders. '.repeat(10)
+          + '\n\nA silver compass and a striped notebook.',
+      })
+      // Reproduce a stale catalog with the actual page absent; every read still
+      // goes through the production CLI and knowledge service.
+      await rm(path.join(workingDirectory, saved.page.pagePath))
+      expect(await readFile(path.join(workingDirectory, saved.indexPath), 'utf8'))
+        .not.toMatch(/silver compass|striped notebook/u)
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLogPath = path.join(workingDirectory, 'commands.log')
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false, channel: 'linq',
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'direct', currentLocalDate: '2026-09-04', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+          turnTrigger: null,
+        }),
+        dynamicTools: [],
+        env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
+        excludeResumeTurns: true, model: config.model, modelProvider: config.modelProvider,
+        prompt: 'What does my saved Weekend packing wiki page say? Its slug is weekend-packing.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8')).split('\n').filter(Boolean)
+      const knowledgeActions = readCapabilityRoutingActions(result.jsonEvents)
+        .filter((action) => action.kind === 'command' && action.command.includes('knowledge'))
+      process.stdout.write(`[missing-wiki-recovery-e2e] ${JSON.stringify({ finalMessage: result.finalMessage })}\n`)
+      expect(knowledgeActions.some((action) => action.output.includes('knowledge_page_not_found')
+        && action.output.includes('Do not retry the same missing slug.')
+        && action.output.includes('before an authorized write'))).toBe(true)
+      expect(commands.filter((command) => /^knowledge show weekend-packing(?:\s|$)/u.test(command))).toHaveLength(1)
+      expect(commands.filter((command) => /^knowledge (?:upsert|append-section|index)/u.test(command))).toHaveLength(0)
+      expect(result.finalMessage).toMatch(/couldn.t find|could not find|can.t find|missing|not (?:currently )?(?:saved|available|there)|isn.t|unavailable/iu)
+      expect(result.finalMessage).not.toMatch(/silver compass|striped notebook/iu)
+      expect(result.finalMessage.length).toBeLessThan(700)
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 300_000)
 })
 
 describeRealCodex('real Codex workout capture default e2e', () => {
