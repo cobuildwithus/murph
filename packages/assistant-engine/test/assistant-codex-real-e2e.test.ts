@@ -1,6 +1,7 @@
 import { WORKFLOW_SKILL_REFERENCES } from './support/workflow-skill-policy.js'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
@@ -24498,7 +24499,7 @@ describe('real Codex app-server cache usage e2e harness', () => {
     ])
   })
 
-  it('preserves explicit fixture PATH through the login-shell launch pipeline', async () => {
+  it.skipIf(!existsSync('/bin/zsh'))('preserves explicit fixture PATH through the login-shell launch pipeline', async () => {
     const directory = await mkdtemp(path.join(tmpdir(), 'murph-fixture-path-'))
     const home = path.join(directory, 'home')
     const ambientBin = path.join(directory, 'ambient-bin')
@@ -24555,6 +24556,49 @@ describe('real Codex app-server cache usage e2e harness', () => {
       expect(observedOverrides?.at(-1)).toBe('features.shell_tool=false')
       if (!observedProfile) throw new Error('Expected an owned fixture profile.')
       expect(path.dirname(observedProfile)).toBe(directory)
+      expect(env).toEqual(originalEnv)
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
+
+  it('preserves fixture profile quoting and provider-key exclusion without zsh', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'murph-portable-profile-'))
+    try {
+      const fixtureBin = path.join(directory, "fixture bin ' $literal")
+      await mkdir(fixtureBin)
+      await writeFile(path.join(fixtureBin, 'fixture-tool'),
+        '#!/bin/sh\nprintf fixture\n', { mode: 0o755 })
+      const env = buildRealCodexE2eEnv({
+        apiKeyEnv: 'PROVIDER_AUTH',
+        sourceEnv: { PATH: '/usr/bin:/bin', PROVIDER_AUTH: 'synthetic-provider-value' },
+      })
+      const originalEnv = { ...env }
+      let shellOutput: string | undefined
+      let observedOverrides: readonly string[] | undefined
+      await expect(executeRealCodexAppServerTurn({
+        configOverrides: ['features.shell_tool=false'],
+        dynamicTools: [],
+        env,
+        fixtureBinDirectory: fixtureBin,
+        prompt: 'Exercise the generated fixture profile.',
+        workingDirectory: directory,
+      }, async (input) => {
+        observedOverrides = input.configOverrides
+        const includeOnly = input.configOverrides?.find((value) =>
+          value.startsWith('shell_environment_policy.include_only='))
+        if (!includeOnly) throw new Error('Expected an explicit shell environment policy.')
+        const keys: string[] = JSON.parse(includeOnly.slice(includeOnly.indexOf('=') + 1))
+        const shellEnv = Object.fromEntries(
+          Object.entries(input.env ?? {}).filter(([key]) => keys.includes(key)),
+        )
+        shellOutput = (await execFileAsync('/bin/sh', ['-c',
+          'PATH=/usr/bin:/bin; . "$ZDOTDIR/.zprofile"; fixture-tool; printf ":%s" "${PROVIDER_AUTH-unset}"',
+        ], { env: shellEnv })).stdout
+        throw new Error('Stop after the portable profile proof.')
+      })).rejects.toThrow('Real Codex turn failed')
+      expect(shellOutput).toBe('fixture:unset')
+      expect(observedOverrides?.at(-1)).toBe('features.shell_tool=false')
       expect(env).toEqual(originalEnv)
     } finally {
       await rm(directory, { force: true, recursive: true })

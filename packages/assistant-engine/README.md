@@ -267,5 +267,7 @@ that directory to PATH and creates a private login profile beneath the journey's
 working directory, whose existing cleanup owns it. Ordinary calls retain their
 supplied environment. An explicit caller `ZDOTDIR` remains caller-owned and
 cannot be combined with automatic fixture-profile preparation. Deterministic
-harness tests exercise actual `zsh -lc` selection and retain provider-key
-exclusion without starting Codex or making a model request.
+harness tests exercise actual `zsh -lc` selection when zsh is installed; that
+integration case explicitly skips when the executable is absent. Portable
+profile quoting, provider-key exclusion, and caller-profile ownership remain
+covered without zsh. These tests do not start Codex or make a model request.
