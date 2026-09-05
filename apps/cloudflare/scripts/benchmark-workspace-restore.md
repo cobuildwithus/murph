@@ -188,5 +188,6 @@ Snapshot-local, interruption, and runner-platform suites passed 232 tests,
 including both decoder and extractor early-exit preservation scenarios.
 Cloudflare typecheck and the complexity guard passed. A small paired run also
 exercises the documented source command and even-count median calculation.
-This is a local, unshipped optimization candidate. Production timing still needs
-a quiet native Linux run; no deployment or PR acceptance gates are claimed here.
+These measurements are local evidence. Production timing still needs a quiet
+native Linux run. PR acceptance and deployment are tracked separately from
+the benchmark results.
