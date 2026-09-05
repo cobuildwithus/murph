@@ -461,8 +461,10 @@ Last verified: 2026-08-31
   after Stripe returns and before decrypting a Checkout URL or projecting retry
   permission, so membership removal during provider I/O degrades to
   status/cancel-only recovery; fulfillment remains bound to the frozen purchase.
-  Family admission first binds the
-  opaque selector to the owner's roster before locking the beneficiary. A
+  Family admission locks the owner before a distinct beneficiary, matching
+  Family subscription reconciliation. It binds the opaque selector to that
+  owner's roster before taking the beneficiary lock. Hosted-group sponsorship
+  remains on its separate beneficiary-first ledger protocol. A
   payer-wide conflict with another frozen target may be inspected or canceled
   but must never return a payable URL or retry permission, regardless of the
   requested or frozen target kind. Active-purchase projection releases a
