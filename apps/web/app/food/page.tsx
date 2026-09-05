@@ -52,7 +52,6 @@ export default async function FoodPage() {
       <StickyNav
         authenticated={authenticated}
         githubStarCount={githubStarCount}
-        preloadAuthPanel
         splitUnauthenticatedAuth={false}
         unauthenticatedAuthLabel="Ask Murph"
       />
