@@ -5791,15 +5791,13 @@ export function validateMurphAgeWearableActivityBenchmarkCard(
       message: `${subject} output boundary must block rows, identifiers, split memberships, predictions, coefficients, model parameters, local paths, source text, and product display egress.`,
     });
   }
-  if (artifactBoundary) {
-    appendUnknownObjectKeyWarnings({
-      allowedKeys: MURPH_AGE_INCREMENT_EVALUATION_OUTPUT_BOUNDARY_KEYS,
-      label: "output boundary",
-      object: artifactBoundary,
-      subject,
-      warnings,
-    });
-  }
+  appendUnknownObjectKeyWarnings({
+    allowedKeys: MURPH_AGE_INCREMENT_EVALUATION_OUTPUT_BOUNDARY_KEYS,
+    label: "output boundary",
+    object: artifactBoundary,
+    subject,
+    warnings,
+  });
   if (denominatorPolicy) {
     appendUnknownObjectKeyWarnings({
       allowedKeys: MURPH_AGE_WEARABLE_ACTIVITY_BENCHMARK_DENOMINATOR_POLICY_KEYS,
@@ -5830,86 +5828,77 @@ export function validateMurphAgeWearableActivityBenchmarkCard(
         });
       }
     }
-    for (const key of [
-      "eligibleLinkedMortalityRequired",
-      "labBodyAnchorDenominatorRequired",
-      "objectiveActivityWindowRequired",
-      "publicUseRowsOnly",
-      "sameDenominatorRequired",
-    ]) {
-      if (denominatorPolicy[key] !== true) {
-        warnings.push({
-          code: "MODEL_CARD_POLICY_VIOLATION",
-          message: `${subject} denominator policy ${key} must be true.`,
-        });
-      }
-    }
+    appendFrozenBooleanWarnings({
+      object: denominatorPolicy,
+      label: "denominator policy",
+      expected: [
+        ["eligibleLinkedMortalityRequired", true],
+        ["labBodyAnchorDenominatorRequired", true],
+        ["objectiveActivityWindowRequired", true],
+        ["publicUseRowsOnly", true],
+        ["sameDenominatorRequired", true],
+      ],
+      subject,
+      warnings,
+    });
   }
   if (endpoint) {
     validateWearableLabAggregateReceiptEndpoint({ endpoint, subject, warnings });
   }
-  if (splitPolicy) {
-    appendUnknownObjectKeyWarnings({
-      allowedKeys: MURPH_AGE_WEARABLE_ACTIVITY_BENCHMARK_SPLIT_POLICY_KEYS,
-      label: "split policy",
-      object: splitPolicy,
-      subject,
-      warnings,
-    });
-    for (const [key, expected] of [
+  appendUnknownObjectKeyWarnings({
+    allowedKeys: MURPH_AGE_WEARABLE_ACTIVITY_BENCHMARK_SPLIT_POLICY_KEYS,
+    label: "split policy",
+    object: splitPolicy,
+    subject,
+    warnings,
+  });
+  appendFrozenBooleanWarnings({
+    object: splitPolicy,
+    label: "split policy",
+    expected: [
       ["aggregateSplitCountsExportOnly", true],
       ["frozenBeforeScoring", true],
       ["participantIdsExportAllowed", false],
       ["splitMembershipExportAllowed", false],
-    ] as const) {
-      if (splitPolicy[key] !== expected) {
-        warnings.push({
-          code: "MODEL_CARD_POLICY_VIOLATION",
-          message: `${subject} split policy ${key} must be ${String(expected)}.`,
-        });
-      }
-    }
-  }
-  if (negativeControlPolicy) {
-    appendUnknownObjectKeyWarnings({
-      allowedKeys: MURPH_AGE_WEARABLE_ACTIVITY_BENCHMARK_NEGATIVE_CONTROL_POLICY_KEYS,
-      label: "negative control policy",
-      object: negativeControlPolicy,
-      subject,
-      warnings,
-    });
-    for (const key of MURPH_AGE_WEARABLE_ACTIVITY_BENCHMARK_NEGATIVE_CONTROL_POLICY_KEYS) {
-      if (negativeControlPolicy[key] !== true) {
-        warnings.push({
-          code: "MODEL_CARD_POLICY_VIOLATION",
-          message: `${subject} negative control policy ${key} must be true.`,
-        });
-      }
-    }
-  }
-  if (selectionPolicy) {
-    appendUnknownObjectKeyWarnings({
-      allowedKeys: MURPH_AGE_WEARABLE_ACTIVITY_BENCHMARK_SELECTION_POLICY_KEYS,
-      label: "selection policy",
-      object: selectionPolicy,
-      subject,
-      warnings,
-    });
-    for (const [key, expected] of [
+    ],
+    subject,
+    warnings,
+  });
+  appendUnknownObjectKeyWarnings({
+    allowedKeys: MURPH_AGE_WEARABLE_ACTIVITY_BENCHMARK_NEGATIVE_CONTROL_POLICY_KEYS,
+    label: "negative control policy",
+    object: negativeControlPolicy,
+    subject,
+    warnings,
+  });
+  appendFrozenBooleanWarnings({
+    object: negativeControlPolicy,
+    label: "negative control policy",
+    expected: [...MURPH_AGE_WEARABLE_ACTIVITY_BENCHMARK_NEGATIVE_CONTROL_POLICY_KEYS]
+      .map((key) => [key, true] as const),
+    subject,
+    warnings,
+  });
+  appendUnknownObjectKeyWarnings({
+    allowedKeys: MURPH_AGE_WEARABLE_ACTIVITY_BENCHMARK_SELECTION_POLICY_KEYS,
+    label: "selection policy",
+    object: selectionPolicy,
+    subject,
+    warnings,
+  });
+  appendFrozenBooleanWarnings({
+    object: selectionPolicy,
+    label: "selection policy",
+    expected: [
       ["calibrationFirst", true],
       ["discriminationOnlySelectionAllowed", false],
       ["properScoresRequired", true],
       ["sameDenominatorComparisonsRequired", true],
       ["testSetMutationAuthorized", false],
-    ] as const) {
-      if (selectionPolicy[key] !== expected) {
-        warnings.push({
-          code: "MODEL_CARD_POLICY_VIOLATION",
-          message: `${subject} selection policy ${key} must be ${String(expected)}.`,
-        });
-      }
-    }
-  }
+    ],
+    subject,
+    warnings,
+  });
   validateWearableActivityBenchmarkArrayField({
     allowedValues: MURPH_AGE_ORDINARY_LAB_WEARABLE_EVIDENCE_TEMPLATE_DELTA_FIELDS,
     key: "acceptedAggregateMetricDeltaFields",
@@ -6456,43 +6445,28 @@ export function validateMurphAgeWearableShadowIncrementResultCard(
     object: card,
     warnings,
   });
-  if (evaluation) {
-    appendUnknownObjectKeyWarnings({
-      allowedKeys: MURPH_AGE_WEARABLE_SHADOW_RESULT_EVALUATION_KEYS,
-      label: "evaluation",
-      object: evaluation,
-      warnings,
-    });
-  }
-  if (aggregateMetricDeltas) {
-    appendUnknownObjectKeyWarnings({
-      allowedKeys: MURPH_AGE_WEARABLE_SHADOW_RESULT_DELTA_KEYS,
-      label: "aggregate metric deltas",
-      object: aggregateMetricDeltas,
-      warnings,
-    });
-    appendAggregateMetricDeltaValueWarnings({ deltas: aggregateMetricDeltas, warnings });
-  }
-  if (aggregateSample) {
-    appendUnknownObjectKeyWarnings({
-      allowedKeys: MURPH_AGE_WEARABLE_SHADOW_RESULT_SAMPLE_KEYS,
-      label: "aggregate sample",
-      object: aggregateSample,
-      warnings,
-    });
-    appendAggregateSampleValueWarnings({
-      sample: aggregateSample,
-      warnings,
-    });
-  }
-  if (outputBoundary) {
-    appendUnknownObjectKeyWarnings({
-      allowedKeys: MURPH_AGE_WEARABLE_SHADOW_OUTPUT_BOUNDARY_KEYS,
-      label: "output boundary",
-      object: outputBoundary,
-      warnings,
-    });
-  }
+  appendUnknownObjectKeyWarnings({
+    allowedKeys: MURPH_AGE_WEARABLE_SHADOW_RESULT_EVALUATION_KEYS,
+    label: "evaluation",
+    object: evaluation,
+    warnings,
+  });
+  appendAggregateMetricDeltaWarnings({
+    allowedKeys: MURPH_AGE_WEARABLE_SHADOW_RESULT_DELTA_KEYS,
+    deltas: aggregateMetricDeltas,
+    warnings,
+  });
+  appendAggregateSampleWarnings({
+    allowedKeys: MURPH_AGE_WEARABLE_SHADOW_RESULT_SAMPLE_KEYS,
+    sample: aggregateSample,
+    warnings,
+  });
+  appendUnknownObjectKeyWarnings({
+    allowedKeys: MURPH_AGE_WEARABLE_SHADOW_OUTPUT_BOUNDARY_KEYS,
+    label: "output boundary",
+    object: outputBoundary,
+    warnings,
+  });
 
   if (schemaVersion !== MURPH_AGE_WEARABLE_SHADOW_RESULT_CARD_SCHEMA_VERSION) {
     warnings.push({
@@ -6526,7 +6500,7 @@ export function validateMurphAgeWearableShadowIncrementResultCard(
       message: "Wearable shadow result card risk effect is not supported.",
     });
   }
-  if (riskEffect === "aggregate-estimated" && (!aggregateMetricDeltas || !hasFiniteAggregateMetricDelta(aggregateMetricDeltas))) {
+  if (riskEffect === "aggregate-estimated" && (!aggregateMetricDeltas || !hasFiniteIncrementEvaluationMetricDelta(aggregateMetricDeltas))) {
     warnings.push({
       code: "MODEL_CARD_POLICY_VIOLATION",
       message: "Aggregate-estimated wearable shadow result cards require at least one finite aggregate metric delta.",
@@ -6744,64 +6718,44 @@ export function validateMurphAgeIncrementEvaluationCard(
     subject,
     warnings,
   });
-  if (evaluation) {
-    appendUnknownObjectKeyWarnings({
-      allowedKeys: MURPH_AGE_INCREMENT_EVALUATION_KEYS,
-      label: "evaluation",
-      object: evaluation,
-      subject,
-      warnings,
-    });
-  }
-  if (aggregateMetricDeltas) {
-    appendUnknownObjectKeyWarnings({
-      allowedKeys: MURPH_AGE_INCREMENT_EVALUATION_DELTA_KEYS,
-      label: "aggregate metric deltas",
-      object: aggregateMetricDeltas,
-      subject,
-      warnings,
-    });
-    appendIncrementEvaluationMetricDeltaValueWarnings({ deltas: aggregateMetricDeltas, subject, warnings });
-  }
-  if (aggregateSample) {
-    appendUnknownObjectKeyWarnings({
-      allowedKeys: MURPH_AGE_INCREMENT_EVALUATION_SAMPLE_KEYS,
-      label: "aggregate sample",
-      object: aggregateSample,
-      subject,
-      warnings,
-    });
-    appendIncrementEvaluationAggregateSampleValueWarnings({ sample: aggregateSample, subject, warnings });
-  }
-  if (anchorMetrics) {
-    appendUnknownObjectKeyWarnings({
-      allowedKeys: MURPH_AGE_INCREMENT_EVALUATION_METRIC_KEYS,
-      label: "anchor metrics",
-      object: anchorMetrics,
-      subject,
-      warnings,
-    });
-    appendIncrementEvaluationAggregateMetricValueWarnings({ metrics: anchorMetrics, subject, warnings });
-  }
-  if (candidateMetrics) {
-    appendUnknownObjectKeyWarnings({
-      allowedKeys: MURPH_AGE_INCREMENT_EVALUATION_METRIC_KEYS,
-      label: "candidate metrics",
-      object: candidateMetrics,
-      subject,
-      warnings,
-    });
-    appendIncrementEvaluationAggregateMetricValueWarnings({ metrics: candidateMetrics, subject, warnings });
-  }
-  if (outputBoundary) {
-    appendUnknownObjectKeyWarnings({
-      allowedKeys: MURPH_AGE_INCREMENT_EVALUATION_OUTPUT_BOUNDARY_KEYS,
-      label: "output boundary",
-      object: outputBoundary,
-      subject,
-      warnings,
-    });
-  }
+  appendUnknownObjectKeyWarnings({
+    allowedKeys: MURPH_AGE_INCREMENT_EVALUATION_KEYS,
+    label: "evaluation",
+    object: evaluation,
+    subject,
+    warnings,
+  });
+  appendAggregateMetricDeltaWarnings({
+    allowedKeys: MURPH_AGE_INCREMENT_EVALUATION_DELTA_KEYS,
+    deltas: aggregateMetricDeltas,
+    subject,
+    warnings,
+  });
+  appendAggregateSampleWarnings({
+    allowedKeys: MURPH_AGE_INCREMENT_EVALUATION_SAMPLE_KEYS,
+    sample: aggregateSample,
+    subject,
+    warnings,
+  });
+  appendIncrementEvaluationAggregateMetricValueWarnings({
+    label: "anchor metrics",
+    metrics: anchorMetrics,
+    subject,
+    warnings,
+  });
+  appendIncrementEvaluationAggregateMetricValueWarnings({
+    label: "candidate metrics",
+    metrics: candidateMetrics,
+    subject,
+    warnings,
+  });
+  appendUnknownObjectKeyWarnings({
+    allowedKeys: MURPH_AGE_INCREMENT_EVALUATION_OUTPUT_BOUNDARY_KEYS,
+    label: "output boundary",
+    object: outputBoundary,
+    subject,
+    warnings,
+  });
 
   if (schemaVersion !== MURPH_AGE_INCREMENT_EVALUATION_CARD_SCHEMA_VERSION) {
     warnings.push({
@@ -9928,16 +9882,35 @@ function readBooleanField(input: {
 function appendUnknownObjectKeyWarnings(input: {
   allowedKeys: ReadonlySet<string>;
   label: string;
-  object: object;
+  object: object | null;
   subject?: string;
   warnings: MurphAgeWarning[];
 }): void {
+  if (input.object === null) return;
   for (const key of Object.keys(input.object)) {
     if (input.allowedKeys.has(key)) continue;
     input.warnings.push({
       code: "MODEL_CARD_POLICY_VIOLATION",
       message: `${input.subject ?? "Wearable shadow result card"} ${input.label} contains unsupported field ${key}.`,
     });
+  }
+}
+
+function appendFrozenBooleanWarnings(input: {
+  object: Readonly<Record<string, unknown>> | null;
+  label: string;
+  expected: readonly (readonly [string, boolean])[];
+  subject: string;
+  warnings: MurphAgeWarning[];
+}): void {
+  if (input.object === null) return;
+  for (const [key, expected] of input.expected) {
+    if (input.object[key] !== expected) {
+      input.warnings.push({
+        code: "MODEL_CARD_POLICY_VIOLATION",
+        message: `${input.subject} ${input.label} ${key} must be ${String(expected)}.`,
+      });
+    }
   }
 }
 
@@ -10204,14 +10177,8 @@ function validateWearableLabAggregateReceiptModels(input: {
       warnings: input.warnings,
     });
     if (metrics) {
-      appendUnknownObjectKeyWarnings({
-        allowedKeys: MURPH_AGE_INCREMENT_EVALUATION_METRIC_KEYS,
-        label: "model metrics",
-        object: metrics,
-        subject: input.subject,
-        warnings: input.warnings,
-      });
       appendIncrementEvaluationAggregateMetricValueWarnings({
+        label: "model metrics",
         metrics,
         subject: input.subject,
         warnings: input.warnings,
@@ -10240,26 +10207,46 @@ function hasWearableLabAggregateReceiptProperScore(
     || typeof metrics.logLoss === "number" && Number.isFinite(metrics.logLoss);
 }
 
-function appendAggregateMetricDeltaValueWarnings(input: {
-  deltas: Readonly<Record<string, unknown>>;
+function appendAggregateMetricDeltaWarnings(input: {
+  allowedKeys: ReadonlySet<string>;
+  deltas: Readonly<Record<string, unknown>> | null;
+  subject?: string;
   warnings: MurphAgeWarning[];
 }): void {
-  for (const key of MURPH_AGE_WEARABLE_SHADOW_RESULT_DELTA_KEYS) {
+  if (input.deltas === null) return;
+  appendUnknownObjectKeyWarnings({
+    allowedKeys: input.allowedKeys,
+    label: "aggregate metric deltas",
+    object: input.deltas,
+    subject: input.subject,
+    warnings: input.warnings,
+  });
+  for (const key of input.allowedKeys) {
     const value = input.deltas[key];
     if (value === undefined) continue;
     if (typeof value === "number" && Number.isFinite(value)) continue;
     input.warnings.push({
       code: "INVALID_INPUT",
-      message: `Wearable shadow result card aggregate metric delta ${key} must be a finite number.`,
+      message: `${input.subject ?? "Wearable shadow result card"} aggregate metric delta ${key} must be a finite number.`,
     });
   }
 }
 
-function appendAggregateSampleValueWarnings(input: {
-  sample: Readonly<Record<string, unknown>>;
+function appendAggregateSampleWarnings(input: {
+  allowedKeys: ReadonlySet<string>;
+  sample: Readonly<Record<string, unknown>> | null;
+  subject?: string;
   warnings: MurphAgeWarning[];
 }): void {
-  for (const key of MURPH_AGE_WEARABLE_SHADOW_RESULT_SAMPLE_KEYS) {
+  if (input.sample === null) return;
+  appendUnknownObjectKeyWarnings({
+    allowedKeys: input.allowedKeys,
+    label: "aggregate sample",
+    object: input.sample,
+    subject: input.subject,
+    warnings: input.warnings,
+  });
+  for (const key of input.allowedKeys) {
     const value = input.sample[key];
     if (value === undefined) continue;
     if (typeof value === "number" && Number.isFinite(value) && Number.isInteger(value) && value >= 0) {
@@ -10267,32 +10254,25 @@ function appendAggregateSampleValueWarnings(input: {
     }
     input.warnings.push({
       code: "INVALID_INPUT",
-      message: `Wearable shadow result card aggregate sample ${key} must be a nonnegative integer.`,
-    });
-  }
-}
-
-function appendIncrementEvaluationMetricDeltaValueWarnings(input: {
-  deltas: Readonly<Record<string, unknown>>;
-  subject: string;
-  warnings: MurphAgeWarning[];
-}): void {
-  for (const key of MURPH_AGE_INCREMENT_EVALUATION_DELTA_KEYS) {
-    const value = input.deltas[key];
-    if (value === undefined) continue;
-    if (typeof value === "number" && Number.isFinite(value)) continue;
-    input.warnings.push({
-      code: "INVALID_INPUT",
-      message: `${input.subject} aggregate metric delta ${key} must be a finite number.`,
+      message: `${input.subject ?? "Wearable shadow result card"} aggregate sample ${key} must be a nonnegative integer.`,
     });
   }
 }
 
 function appendIncrementEvaluationAggregateMetricValueWarnings(input: {
-  metrics: Readonly<Record<string, unknown>>;
+  metrics: Readonly<Record<string, unknown>> | null;
+  label: string;
   subject: string;
   warnings: MurphAgeWarning[];
 }): void {
+  if (input.metrics === null) return;
+  appendUnknownObjectKeyWarnings({
+    allowedKeys: MURPH_AGE_INCREMENT_EVALUATION_METRIC_KEYS,
+    label: input.label,
+    object: input.metrics,
+    subject: input.subject,
+    warnings: input.warnings,
+  });
   for (const key of MURPH_AGE_INCREMENT_EVALUATION_METRIC_KEYS) {
     const value = input.metrics[key];
     if (value === undefined) continue;
@@ -10301,24 +10281,6 @@ function appendIncrementEvaluationAggregateMetricValueWarnings(input: {
     input.warnings.push({
       code: "INVALID_INPUT",
       message: `${input.subject} aggregate metric ${key} must be a finite number${MURPH_AGE_INCREMENT_EVALUATION_NULLABLE_METRIC_KEYS.has(key) ? " or null" : ""}.`,
-    });
-  }
-}
-
-function appendIncrementEvaluationAggregateSampleValueWarnings(input: {
-  sample: Readonly<Record<string, unknown>>;
-  subject: string;
-  warnings: MurphAgeWarning[];
-}): void {
-  for (const key of MURPH_AGE_INCREMENT_EVALUATION_SAMPLE_KEYS) {
-    const value = input.sample[key];
-    if (value === undefined) continue;
-    if (typeof value === "number" && Number.isFinite(value) && Number.isInteger(value) && value >= 0) {
-      continue;
-    }
-    input.warnings.push({
-      code: "INVALID_INPUT",
-      message: `${input.subject} aggregate sample ${key} must be a nonnegative integer.`,
     });
   }
 }
@@ -10362,19 +10324,6 @@ function isLockedSourceRouteArtifactBoundary(
     && boundary.rowMaterializationAuthorized === false
     && boundary.rowValueExportAllowed === false
     && boundary.sourceTextStorageAllowed === false;
-}
-
-function hasFiniteAggregateMetricDelta(
-  deltas: Readonly<Record<string, unknown>>,
-): boolean {
-  return [
-    deltas.aucDelta,
-    deltas.brierDelta,
-    deltas.calibrationInterceptDelta,
-    deltas.calibrationSlopeDelta,
-    deltas.cIndexDelta,
-    deltas.logLossDelta,
-  ].some((value) => value !== undefined && Number.isFinite(value));
 }
 
 function hasFiniteIncrementEvaluationMetricDelta(

@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-
 import type {
   Prisma,
   PrismaClient,
@@ -54,7 +52,6 @@ import {
   readHostedLinqMessageEditPreparation,
   resolveHostedLinqDirectPreparationMemberId,
   resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
-  resolveHostedLinqTypingPrewarmMemberId,
   type HostedLinqMessageEditPreparation,
   type HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq";
@@ -74,6 +71,9 @@ import {
 import {
   ingestHostedLinqProviderEventTx,
 } from "./linq-provider-event-store";
+import {
+  retryHostedLinqTerminalSendForEvent,
+} from "./linq-terminal-retry";
 import {
   parseHostedLinqProviderEvent,
 } from "./linq-provider-events";
@@ -149,9 +149,6 @@ import {
 import {
   maybeHandoffHostedExecutionWebhookWake,
 } from "./webhook-service-wake";
-import {
-  startHostedRuntimeShellPrewarmBestEffort,
-} from "../hosted-execution/direct-runtime-wake";
 import {
   signalHostedPhoneCallResultNotificationRecovery,
 } from "../phone-calls/reconciliation-workflow-start";
@@ -266,6 +263,12 @@ type HostedLinqCurrentInboundReplyProof = {
 
 const HOSTED_LINQ_CHAT_CLASSIFICATION_TIMEOUT_MS = 1_500;
 
+function isModelAllowedFirstContactAdmission(
+  decision: HostedLinqFirstContactAdmissionDecision | null,
+): boolean {
+  return decision?.kind === "allow" && decision.source === "model";
+}
+
 export async function handleHostedOnboardingLinqWebhook(input: {
   rawBody: string;
   scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
@@ -286,24 +289,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
   let messagePartsInspection: HostedLinqMessageReceivedPartsInspection | null = null;
   let responseReason: string | null = null;
   let instantStartTypingHint: HostedLinqInstantStartTypingHint | null = null;
-  const messageRoutingShellPrewarm: {
-    current: {
-      orchestrationAttemptId: string;
-      userId: string;
-    } | null;
-  } = { current: null };
-  const startMessageRoutingShellPrewarm = (userId: string): void => {
-    if (messageRoutingShellPrewarm.current?.userId === userId) {
-      return;
-    }
-    const orchestrationAttemptId = `web-prewarm-${randomUUID()}`;
-    messageRoutingShellPrewarm.current = { orchestrationAttemptId, userId };
-    void startHostedRuntimeShellPrewarmBestEffort({
-      orchestrationAttemptId,
-      source: "linq-message-routing",
-      userId,
-    });
-  };
   let pendingInstantStartActivationWake: {
     continuation: HostedLinqInstantStartDeferredActivationWake;
     prisma: PrismaClient;
@@ -342,11 +327,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
 
     if (event.event_type === "chat.typing_indicator.started") {
-      scheduleHostedLinqTypingShellPrewarmBestEffort({
-        event: requireHostedLinqTypingIndicatorStartedEvent(event),
-        prisma: input.prisma,
-        scheduleAfterResponse: input.scheduleAfterResponse,
-      });
+      requireHostedLinqTypingIndicatorStartedEvent(event);
       const response: HostedOnboardingLinqWebhookResponse = {
         ignored: true,
         ok: true,
@@ -493,6 +474,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         prisma,
         scheduleAfterResponse: input.scheduleAfterResponse,
       });
+      await retryHostedLinqTerminalSendForEvent({ event: providerEvent, prisma });
       const response: HostedOnboardingLinqWebhookResponse = {
         duplicate: providerResult.duplicate || undefined,
         ignored: true,
@@ -614,6 +596,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     let instantFirstTurnGeneration:
       Promise<HostedLinqInstantFirstTurnGeneration> | null = null;
     let instantFirstTurnOwnsFinalPlan = false;
+    let instantOpeningContinuation = false;
     let firstContactAdmissionDecision: HostedLinqFirstContactAdmissionDecision | null = null;
     const abandonInstantFirstTurn = async (reason: string): Promise<void> => {
       if (!instantFirstTurnCandidate) {
@@ -640,7 +623,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
             prisma,
           })
         : null;
-      const startInstantFirstTurnGeneration = async (): Promise<void> => {
+      const startInstantFirstTurnGeneration = async (continuationOnly = false): Promise<void> => {
         if (
           instantFirstTurnGeneration
           || !instantFirstTurnCandidate
@@ -657,6 +640,12 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           participantContact: context.participantContact,
         });
         const claim = await claimHostedLinqInstantFirstTurn({
+          ...(continuationOnly ? {
+            continuationMemberId: await resolveHostedLinqDirectPreparationMemberId({
+              event: planningEvent,
+              prisma,
+            }),
+          } : {}),
           linqChatId: context.summary.chatId,
           prisma,
           request,
@@ -664,6 +653,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         if (claim.kind === "unavailable") {
           return;
         }
+        instantOpeningContinuation = claim.openingTone !== undefined;
         const generation = startHostedLinqInstantFirstTurnGeneration({
           claim,
           request,
@@ -679,11 +669,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       let requiredPendingGroupSetupCandidateId: string | null = null;
       const runPlan = async (options: {
         instantStartAllowed?: boolean;
-        messageRoutingShellPrewarmAllowed?: boolean;
       } = {}) => {
         const {
           instantStartAllowed = true,
-          messageRoutingShellPrewarmAllowed = true,
         } = options;
         let reusableDirectCryptoDomainRoots: {
           memberId: string;
@@ -779,9 +767,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           prepare: async ({ attempt }) => {
             const preparation = await prepareHostedLinqThreadRoutingCrypto({
               event: planningEvent,
-              ...(messageRoutingShellPrewarmAllowed
-                ? { onEligibleMember: startMessageRoutingShellPrewarm }
-                : {}),
               participantMemberIds:
                 planningResolution.pendingGroupParticipantMemberIds ?? [],
               pendingGroupRosterUnavailable:
@@ -833,6 +818,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       if (firstContactAdmissionDecision?.kind === "block") {
         plan = await planAfterBlockedAdmission();
       } else {
+        // Claim before the planner appends input visible to a warm runtime.
+        // The existing ledger fences runtime egress for this exact inbound.
+        await startInstantFirstTurnGeneration(true);
         plan = await runPlan();
       }
 
@@ -930,14 +918,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         instantStartTypingHint = startHostedLinqInstantStartTypingHintBestEffort({
           event: planningEvent,
         });
-        // The member row is committed, so issue only the deterministic
-        // container start command while enrollment runs. This does not resolve
-        // a runtime owner, inspect workspace state, create a fence, or process
-        // mailbox work; the ordinary post-Temporal ensure owns those steps.
-        void startHostedRuntimeShellPrewarmBestEffort({
-          source: "linq-instant-start",
-          userId: instantStartEnrollment.memberId,
-        });
         let enrollmentFailed = false;
         try {
           const enrollment = await ensureHostedLinqInstantStartStarterUsageEnrollment({
@@ -973,7 +953,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         }
         plan = await runPlan({
           instantStartAllowed: !enrollmentFailed,
-          messageRoutingShellPrewarmAllowed: false,
         });
         if (plan.instantStartEnrollment) {
           logHostedOnboardingDiagnostic(
@@ -984,7 +963,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           );
           plan = await runPlan({
             instantStartAllowed: false,
-            messageRoutingShellPrewarmAllowed: false,
           });
         }
       }
@@ -1028,8 +1006,10 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     }
     instantFirstTurnOwnsFinalPlan = Boolean(
       instantFirstTurnGeneration
-      && firstContactAdmissionDecision?.kind === "allow"
-      && firstContactAdmissionDecision.source === "model"
+      && (
+        instantOpeningContinuation
+        || isModelAllowedFirstContactAdmission(firstContactAdmissionDecision)
+      )
       && plan.wakeHandoffs?.[0],
     );
     if (!instantFirstTurnOwnsFinalPlan) {
@@ -1188,17 +1168,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       }
     }
 
-    if (
-      wakeHandoff
-      && messageRoutingShellPrewarm.current?.userId === wakeHandoff.userId
-    ) {
-      wakeHandoff = {
-        ...wakeHandoff,
-        runtimeShellPrewarmOrchestrationAttemptId:
-          messageRoutingShellPrewarm.current.orchestrationAttemptId,
-      };
-    }
-
     scheduleHostedLinqProviderEventIngestionBestEffort({
       event: providerEvent,
       prisma,
@@ -1329,62 +1298,6 @@ function classifyHostedLinqWebhookVersion(
   return value ? "other" : "missing";
 }
 
-function scheduleHostedLinqTypingShellPrewarmBestEffort(input: {
-  event: ReturnType<typeof requireHostedLinqTypingIndicatorStartedEvent>;
-  prisma?: PrismaClient;
-  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
-}): void {
-  const task = async (): Promise<void> => {
-    try {
-      const memberId = await resolveHostedLinqTypingPrewarmMemberId({
-        event: input.event,
-        prisma: input.prisma ?? getPrisma(),
-      });
-      if (!memberId) {
-        logHostedOnboardingDiagnostic(
-          "linq-typing-shell-prewarm",
-          { outcome: "target-not-found" },
-        );
-        return;
-      }
-
-      logHostedOnboardingDiagnostic(
-        "linq-typing-shell-prewarm",
-        { outcome: "target-resolved" },
-      );
-      await startHostedRuntimeShellPrewarmBestEffort({
-        source: "linq-typing-started",
-        userId: memberId,
-      });
-    } catch (error) {
-      logHostedOnboardingDiagnostic(
-        "linq-typing-shell-prewarm",
-        {
-          errorName: deriveHostedOnboardingTimingErrorName(error),
-          outcome: "failed",
-        },
-      );
-    }
-  };
-
-  if (input.scheduleAfterResponse) {
-    try {
-      input.scheduleAfterResponse(task);
-      return;
-    } catch (error) {
-      logHostedOnboardingDiagnostic(
-        "linq-typing-shell-prewarm",
-        {
-          errorName: deriveHostedOnboardingTimingErrorName(error),
-          outcome: "schedule-failed",
-        },
-      );
-    }
-  }
-
-  void task();
-}
-
 interface HostedLinqPlanningEventResolution {
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   initialGroupDisplayName?: string;
@@ -1411,43 +1324,6 @@ async function resolveHostedLinqPlanningEvent(input: {
   const webhookIsGroup = messageEvent.data.chat?.is_group;
   if (webhookIsGroup === true) {
     logHostedLinqChatClassification("webhook-group");
-    const threadRoute = await readHostedThreadRouteByThreadIdentity({
-      channel: "linq",
-      prisma: input.prisma,
-      threadId: messageEvent.data.chat_id,
-    });
-    const pendingGroupRoster =
-      !messageEvent.data.is_from_me && !threadRoute
-        ? await resolveHostedLinqPendingGroupParticipantMemberIds({
-            chatId: messageEvent.data.chat_id,
-            prisma: input.prisma,
-            signal: input.signal,
-          })
-        : null;
-    return {
-      event: messageEvent,
-      ...(pendingGroupRoster?.initialGroupDisplayName
-        ? { initialGroupDisplayName: pendingGroupRoster.initialGroupDisplayName }
-        : {}),
-      ...(pendingGroupRoster?.participantMemberIds == null
-        ? {}
-        : {
-            pendingGroupParticipantMemberIds:
-              pendingGroupRoster.participantMemberIds,
-          }),
-      ...(pendingGroupRoster?.unavailable === true
-        ? { pendingGroupRosterUnavailable: true }
-        : {}),
-      ...(pendingGroupRoster?.handles == null
-        ? {}
-        : {
-            requestLocalGroupRoster: {
-              chatId: messageEvent.data.chat_id,
-              handles: pendingGroupRoster.handles,
-            },
-          }),
-      threadRoute,
-    };
   }
 
   const threadRoute = await readHostedThreadRouteByThreadIdentity({
@@ -1464,7 +1340,9 @@ async function resolveHostedLinqPlanningEvent(input: {
 
   let resolvedIsGroup: boolean;
   let canonicalSummary: HostedLinqChatSummary | null = null;
-  if (threadRoute) {
+  if (webhookIsGroup === true) {
+    resolvedIsGroup = true;
+  } else if (threadRoute) {
     logHostedLinqChatClassification("thread-route-group");
     resolvedIsGroup = true;
   } else {
@@ -1515,17 +1393,19 @@ async function resolveHostedLinqPlanningEvent(input: {
         })
       : null;
   return {
-    event: {
-      ...messageEvent,
-      data: {
-        ...messageEvent.data,
-        chat: {
-          id: messageEvent.data.chat_id,
-          ...(messageEvent.data.chat ?? {}),
-          is_group: resolvedIsGroup,
+    event: webhookIsGroup === true
+      ? messageEvent
+      : {
+          ...messageEvent,
+          data: {
+            ...messageEvent.data,
+            chat: {
+              id: messageEvent.data.chat_id,
+              ...(messageEvent.data.chat ?? {}),
+              is_group: resolvedIsGroup,
+            },
+          },
         },
-      },
-    },
     ...(pendingGroupRoster?.initialGroupDisplayName
       ? { initialGroupDisplayName: pendingGroupRoster.initialGroupDisplayName }
       : {}),
@@ -2389,7 +2269,6 @@ async function prepareHostedThreadDeliveryRouteAndWarmMailbox(input: {
 
 async function prepareHostedLinqThreadRoutingCrypto(input: {
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
-  onEligibleMember?: (memberId: string) => void;
   participantMemberIds: readonly string[];
   pendingGroupRosterUnavailable: boolean;
   prisma: PrismaClient;
@@ -2494,7 +2373,6 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
       preparedDirectMailboxPayloadRoot:
         await prepareHostedLinqDirectMailboxPayloadRoot({
           event: input.event,
-          onEligibleMember: input.onEligibleMember,
           prisma: input.prisma,
           ...(input.reusableDirectCryptoDomainRoots
             ? {
@@ -3005,7 +2883,6 @@ export async function warmHostedLinqMailboxPayloadRoot(input: {
 
 async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
-  onEligibleMember?: (memberId: string) => void;
   prisma: PrismaClient;
   reusableDirectCryptoDomainRoots?: {
     memberId: string;
@@ -3035,11 +2912,6 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
   const activeMemberAccess = readActiveHostedMemberAccess({
     memberId,
     prisma: input.prisma,
-  }).then((accessAllowed) => {
-    if (accessAllowed) {
-      input.onEligibleMember?.(memberId);
-    }
-    return accessAllowed;
   });
   const [identityRecord, routingRecord, accessAllowed, preparedFamilyInvite] =
     await Promise.all([

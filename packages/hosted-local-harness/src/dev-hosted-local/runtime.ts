@@ -6,6 +6,7 @@ import net from "node:net";
 import path from "node:path";
 import process from "node:process";
 import { PassThrough } from "node:stream";
+import { setTimeout as delay } from "node:timers/promises";
 
 import {
   signalOwnedChildProcess,
@@ -1441,10 +1442,12 @@ export async function waitForHealthyHttpEndpoint(input: {
   path: string;
   port: number;
   protocol: "http" | "https";
+  signal?: AbortSignal;
 }): Promise<void> {
   const startedAt = Date.now();
 
   while (Date.now() - startedAt < HEALTH_TIMEOUT_MS) {
+    throwIfAbortSignalAborted(input.signal);
     try {
       const statusCode = await requestStatus(input);
       if (statusCode === 200) {
@@ -1454,7 +1457,8 @@ export async function waitForHealthyHttpEndpoint(input: {
       // Wait for the service to come up.
     }
 
-    await sleep(HEALTH_POLL_INTERVAL_MS);
+    throwIfAbortSignalAborted(input.signal);
+    await delay(HEALTH_POLL_INTERVAL_MS, undefined, { signal: input.signal });
   }
 
   throw new Error(
@@ -1662,6 +1666,7 @@ async function requestStatus(input: {
   path: string;
   port: number;
   protocol: "http" | "https";
+  signal?: AbortSignal;
 }): Promise<number | undefined> {
   const requestImpl = input.protocol === "https" ? https.request : http.request;
 
@@ -1673,6 +1678,7 @@ async function requestStatus(input: {
         path: input.path,
         port: input.port,
         rejectUnauthorized: false,
+        signal: input.signal,
       },
       (response) => {
         response.resume();

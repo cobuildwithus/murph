@@ -390,9 +390,10 @@ const assistantCliSurfaceHotPathProofs: readonly {
   {
     command: "wearables activity list",
     snippets: [
+      "--includeWorkoutSummaries",
       "--includeWorkoutDetails",
-      "One data read only. Day totals (`sessionCount`, `sessionMinutes`, distinct `activityTypes`): omit detail; no false flag or schema read.",
-      "Workout/subset facts: include detail first.",
+      "One read: day totals omit flags; workout facts use --include-workout-summaries; lap/split facts use --include-workout-details.",
+      "Choose first; never probe and retry.",
     ],
   },
 ];

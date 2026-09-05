@@ -43,6 +43,8 @@ import {
   createHostedRunnerContainerNamespaceRouter,
   HOSTED_STANDBY_CLAIM_TIMEOUT_MS,
   HOSTED_STANDBY_REGION,
+  readHostedRunnerTargetIdentity,
+  type HostedRunnerRegion,
   type HostedStandbyClaimRequest,
   type HostedStandbyClaimResult,
   type HostedStandbyCoordinatorNamespaceLike,
@@ -58,6 +60,7 @@ import {
   HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
   type HostedExecutionWorkspaceInvocationJobInput,
 } from "../src/runner-job-transport.js";
+import { RunnerSlotBindingStore } from "../src/runner-slot-binding.js";
 import {
   RunnerSecretsService,
 } from "../src/user-runner/runner-secrets.js";
@@ -116,6 +119,17 @@ describe("hosted runner container identity", () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     mocks.emitHostedExecutionStructuredLog.mockReset();
+  });
+
+  it("does not interpret opaque fleet targets as member identities", () => {
+    for (const prefix of ["runner", "standby"]) {
+      for (const source of [{}, { CF_VERSION_METADATA: { id: "release_1" } }]) {
+        expect(readHostedRunnerContainerIdentity({
+          containerName: `${prefix}--v-release_1--0123456789abcdef0123456789abcdef`,
+          source,
+        })).toBeNull();
+      }
+    }
   });
 
   it("round-trips a versioned runner container identity", () => {
@@ -181,7 +195,7 @@ describe("hosted runner container identity", () => {
     })).toBeNull();
   });
 
-  it("stores the helper-derived versioned runner container name in the runtime write fence", async () => {
+  it("stores one opaque release-scoped runner target in both preparation and the write fence", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const durable = createRunnerDurableState();
@@ -190,7 +204,7 @@ describe("hosted runner container identity", () => {
     const readyContainerNames: string[] = [];
     const runnerRuntimeEnvSource = {
       CF_VERSION_METADATA: {
-        id: "worker version/current",
+        id: "worker_version-current",
       },
     };
     const controller = new RuntimeProcessingController({
@@ -215,10 +229,10 @@ describe("hosted runner container identity", () => {
       throw new Error("Expected runtime processing acceptance.");
     }
 
-    const expectedRunnerContainerName = "member_123--v-worker-version-current";
+    const expectedRunnerContainerName = invocationService.prepareTokens[0]?.runnerContainerName;
+    expect(expectedRunnerContainerName).toMatch(/^runner--v-worker_version-current--[a-f0-9]{32}$/u);
+    expect(expectedRunnerContainerName).not.toContain(TEST_USER_ID);
     expect(invocationService.prepareTokens).toHaveLength(1);
-    expect(invocationService.prepareTokens[0]?.runnerContainerName)
-      .toBe(expectedRunnerContainerName);
     expect(readyContainerNames).toEqual([expectedRunnerContainerName]);
     await expect(stateStore.readWriteFenceToken()).resolves.toEqual(
       expect.objectContaining({
@@ -240,7 +254,7 @@ describe("hosted runner container identity", () => {
     );
   });
 
-  it("fails closed when runtime start parses a different user from the helper-derived name", async () => {
+  it("rejects a noncanonical member before allocating or starting a runner", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const durable = createRunnerDurableState();
@@ -265,7 +279,7 @@ describe("hosted runner container identity", () => {
       orchestrationAttemptId: "orchestration_attempt_1",
       userId: " member_123 ",
     })).rejects.toThrow(
-      "Hosted runner container identity did not match the runtime start user.",
+      "Hosted runner runtime user id must be canonical.",
     );
 
     expect(invocationService.prepareTokens).toHaveLength(0);
@@ -918,15 +932,30 @@ describe("hosted runner container identity", () => {
     expect(invokedContainerNames).toEqual([]);
   });
 
-  it("persists an opaque stop target before binding a claimed standby and opening the write fence", async () => {
+  it.each([
+    {
+      label: "Web direct",
+      request: {
+        orchestration: { triggeredByWebDirect: true },
+        orchestrationAttemptId: "web-ingress-11111111-1111-4111-8111-111111111111",
+      },
+    },
+    {
+      label: "Temporal conversation",
+      request: {
+        conversationWorkPending: true,
+        orchestrationAttemptId: "temporal-conversation-standby",
+      },
+    },
+  ] as const)("persists an opaque stop target before binding a claimed standby and opening the write fence for $label", async ({ request }) => {
     const durable = createRunnerDurableState();
     const stateStore = new RunnerStateStore(durable.state);
     const slotName =
-      "standby--v-release_1--0123456789abcdef0123456789abcdef";
+      "runner--v-release_1--0123456789abcdef0123456789abcdef";
     const standby = createAllocatingStandbyHarness({ slotName, stateStore });
     const runnerContainerNamespace = createHostedRunnerContainerNamespaceRouter({
-      exactUser: createRunnerContainerNamespace({}),
-      standby: standby.namespace,
+      exactUser: standby.namespace,
+      standby: null,
     });
     const claimReadyStandby = vi.fn(async (_request: HostedStandbyClaimRequest) => ({
       outcome: "claimed" as const,
@@ -951,15 +980,12 @@ describe("hosted runner container identity", () => {
         CF_VERSION_METADATA: { id: "release_1" },
         HOSTED_EXECUTION_STANDBY_MODE: "allocate",
       },
-      standbyContainerNamespace: standby.namespace,
       standbyCoordinatorNamespace: coordinatorNamespace,
       stateStore,
     });
 
     const response = await controller.ensureForUser({
-      orchestration: { triggeredByWebDirect: true },
-      orchestrationAttemptId:
-        "web-ingress-11111111-1111-4111-8111-111111111111",
+      ...request,
       userId: TEST_USER_ID,
     });
     expect(response).toMatchObject({
@@ -979,8 +1005,7 @@ describe("hosted runner container identity", () => {
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         details: expect.objectContaining({
-          orchestrationAttemptId:
-            "web-ingress-11111111-1111-4111-8111-111111111111",
+          orchestrationAttemptId: request.orchestrationAttemptId,
           standbyAllocationElapsedMs: expect.any(Number),
           standbyAllocationOutcome: "claimed",
           standbyAllocationReason: "bind_completed",
@@ -994,6 +1019,8 @@ describe("hosted runner container identity", () => {
       standbyAllocationOutcome: "claimed",
       standbyAllocationReason: "bind_completed",
     });
+    expect(invocationService.invokedInputs[0]?.orchestration?.triggeredByWebDirect)
+      .toBe("orchestration" in request ? true : false);
   });
 
   it.each([
@@ -1040,8 +1067,26 @@ describe("hosted runner container identity", () => {
       },
       "processing_mode_not_default",
     ],
+    [
+      "conversation marker on system-mailbox work",
+      {
+        conversationWorkPending: true,
+        orchestrationAttemptId: "temporal-conversation-system-mailbox",
+        processingMode: "system_mailbox",
+      },
+      "processing_mode_not_default",
+    ],
+    [
+      "conversation marker on retention work",
+      {
+        conversationWorkPending: true,
+        orchestrationAttemptId: "temporal-conversation-retention",
+        processingMode: "inbox_media_retention",
+      },
+      "processing_mode_not_default",
+    ],
   ] as const)(
-    "uses the exact-user container without claiming standby for %s",
+    "cold-binds a new fleet target without claiming inventory for %s",
     async (_label, ensureInput, expectedReason) => {
       const durable = createRunnerDurableState();
       const stateStore = new RunnerStateStore(durable.state);
@@ -1064,8 +1109,7 @@ describe("hosted runner container identity", () => {
           CF_VERSION_METADATA: { id: "release_1" },
           HOSTED_EXECUTION_STANDBY_MODE: "allocate",
         },
-        standbyContainerNamespace: standby.namespace,
-        standbyCoordinatorNamespace: {
+          standbyCoordinatorNamespace: {
           getByName() {
             return {
               claimReadyStandby,
@@ -1088,12 +1132,13 @@ describe("hosted runner container identity", () => {
 
       expect(claimReadyStandby).not.toHaveBeenCalled();
       expect(standby.bindStandbySlot).not.toHaveBeenCalled();
-      expect(readyContainerNames).toEqual([
-        resolveHostedExecutionRunnerContainerName({
-          source: { CF_VERSION_METADATA: { id: "release_1" } },
-          userId: TEST_USER_ID,
-        }),
-      ]);
+      expect(readyContainerNames).toHaveLength(1);
+      expect(readyContainerNames[0]).toMatch(/^runner--v-release_1--[a-f0-9]{32}$/u);
+      expect(readyContainerNames[0]).not.toContain(TEST_USER_ID);
+      await expect(stateStore.readWriteFenceToken()).resolves.toMatchObject({
+        runnerContainerName: readyContainerNames[0],
+        userId: TEST_USER_ID,
+      });
       expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
         expect.objectContaining({
           details: expect.objectContaining({
@@ -1129,10 +1174,6 @@ describe("hosted runner container identity", () => {
             CF_VERSION_METADATA: { id: "release_1" },
             HOSTED_EXECUTION_STANDBY_MODE: "allocate",
           },
-          standbyContainerNamespace: createStandbyNamespace({
-            slotName,
-            userId: TEST_USER_ID,
-          }),
           standbyCoordinatorNamespace: {
             getByName() {
               return {
@@ -1251,13 +1292,16 @@ describe("hosted runner container identity", () => {
     ).toBeGreaterThanOrEqual(HOSTED_STANDBY_CLAIM_TIMEOUT_MS - 1);
   });
 
-  it("keeps a late standby bind as the exact retry target", async () => {
+  it.each([
+    { processingMode: "system_mailbox" },
+    { conversationWorkPending: true },
+  ] as const)("keeps a late standby bind as the exact retry target for %j", async (retryRequest) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const durable = createRunnerDurableState();
     const stateStore = new RunnerStateStore(durable.state);
     const slotName =
-      "standby--v-release_1--0123456789abcdef0123456789abcdef";
+      "runner--v-release_1--0123456789abcdef0123456789abcdef";
     const claimDelayMs = 100;
     const bindDelayMs = 200;
     const standby = createAllocatingStandbyHarness({
@@ -1277,14 +1321,13 @@ describe("hosted runner container identity", () => {
       env: createHostedExecutionEnvironment(),
       invocationService: new RecordingRuntimeInvocationService(),
       runnerContainerNamespace: createHostedRunnerContainerNamespaceRouter({
-        exactUser: createRunnerContainerNamespace({}),
-        standby: standby.namespace,
+        exactUser: standby.namespace,
+        standby: null,
       }),
       runnerRuntimeEnvSource: {
         CF_VERSION_METADATA: { id: "release_1" },
         HOSTED_EXECUTION_STANDBY_MODE: "allocate",
       },
-      standbyContainerNamespace: standby.namespace,
       standbyCoordinatorNamespace: {
         getByName() {
           return {
@@ -1321,8 +1364,8 @@ describe("hosted runner container identity", () => {
       claimDelayMs + bindDelayMs - HOSTED_STANDBY_CLAIM_TIMEOUT_MS,
     );
     const retained = controller.ensureForUser({
+      ...retryRequest,
       orchestrationAttemptId: "temporal-standby-bind-retained",
-      processingMode: "system_mailbox",
       userId: TEST_USER_ID,
     });
     await vi.waitFor(() =>
@@ -1346,7 +1389,7 @@ describe("hosted runner container identity", () => {
     const stoppedSlotName =
       "standby--v-release_1--11111111111111111111111111111111";
     const freshSlotName =
-      "standby--v-release_1--22222222222222222222222222222222";
+      "runner--v-release_1--22222222222222222222222222222222";
     await stateStore.reserveRunnerContainerStopTarget({
       runnerContainerName: stoppedSlotName,
       userId: TEST_USER_ID,
@@ -1385,14 +1428,13 @@ describe("hosted runner container identity", () => {
       env: createHostedExecutionEnvironment(),
       invocationService,
       runnerContainerNamespace: createHostedRunnerContainerNamespaceRouter({
-        exactUser: createRunnerContainerNamespace({}),
+        exactUser: fresh.namespace,
         standby: standbyContainerNamespace,
       }),
       runnerRuntimeEnvSource: {
         CF_VERSION_METADATA: { id: "release_1" },
         HOSTED_EXECUTION_STANDBY_MODE: "allocate",
       },
-      standbyContainerNamespace,
       standbyCoordinatorNamespace: {
         getByName() {
           return {
@@ -1460,6 +1502,7 @@ describe("hosted runner container identity", () => {
       state: durable.state,
       stateStore,
     });
+    await stateStore.reserveRunnerContainerStopTarget({ runnerContainerName: slotName, userId: TEST_USER_ID });
     const token = await stateStore.beginWriteFence({
       runnerContainerName: slotName,
       userId: TEST_USER_ID,
@@ -1689,10 +1732,10 @@ function createRuntimeInvocationService(input: {
           }),
       workspace: input.workspace ?? null,
     }),
-    runnerContainerNamespace: createRunnerContainerNamespace({
-      invokedContainerNames: input.invokedContainerNames,
+    runnerContainerNamespace: createHostedRunnerContainerNamespaceRouter({
+      exactUser: createRunnerContainerNamespace({ invokedContainerNames: input.invokedContainerNames }),
+      standby: input.standbyContainerNamespace ?? null,
     }),
-    standbyContainerNamespace: input.standbyContainerNamespace ?? null,
     runnerRuntimeEnvSource: input.runnerRuntimeEnvSource,
     runnerStoreCache: new TestRunnerStoreCache(input.runnerRuntimeEnvSource),
     stateStore: input.stateStore,
@@ -1785,7 +1828,7 @@ function createAllocatingStandbyHarness(input: {
   let binding: HostedStandbySlotBinding = {
     claimId: null,
     releaseId: "release_1",
-    region: HOSTED_STANDBY_REGION,
+    region: readHostedRunnerTargetIdentity(input.slotName)?.region ?? HOSTED_STANDBY_REGION,
     slotName: input.slotName,
     state: "unbound" as const,
     userId: null,
@@ -1793,7 +1836,7 @@ function createAllocatingStandbyHarness(input: {
   const bindStandbySlot = vi.fn(async (claim: {
     claimId: string;
     releaseId: string;
-    region: typeof HOSTED_STANDBY_REGION;
+    region: HostedRunnerRegion;
     slotName: string;
     userId: string;
   }) => {
@@ -1909,14 +1952,19 @@ function createRunnerContainerNamespace(input: {
   invokedContainerNames?: string[];
   readyContainerNames?: string[];
 }): HostedExecutionContainerNamespaceLike {
+  const stubs = new Map<string, HostedExecutionContainerStubLike>();
   return {
     getByName(name) {
-      return createRunnerContainerStub({
+      const existing = stubs.get(name);
+      if (existing) return existing;
+      const stub = createRunnerContainerStub({
         ensuredContainerNames: input.ensuredContainerNames,
         name,
         invokedContainerNames: input.invokedContainerNames,
         readyContainerNames: input.readyContainerNames,
       });
+      stubs.set(name, stub);
+      return stub;
     },
   };
 }
@@ -1927,9 +1975,41 @@ function createRunnerContainerStub(input: {
   name: string;
   readyContainerNames?: string[];
 }): HostedExecutionContainerStubLike {
+  const bindings = new RunnerSlotBindingStore(createTestSqlStorage());
+  let warm = false;
   return {
-    destroyInstance: async () => {},
+    async bindStandbySlot(claim) {
+      bindings.initialize(claim);
+      bindings.bind(claim);
+      return { bound: true, ...claim };
+    },
+    async prepareStandbySlot(preparation) {
+      bindings.initialize(preparation);
+      warm = true;
+      return { prepared: true, ...preparation };
+    },
+    async readStandbySlotBinding() { return bindings.read(); },
+    async readStandbySlotCoordinatorState() {
+      const binding = bindings.read();
+      return { coordinatorOwned: binding.userId === null, releaseId: binding.releaseId, slotName: binding.slotName, state: binding.state };
+    },
+    async resolveRetainedStandbySlot(request) {
+      const binding = bindings.read();
+      if (binding.state === "bound" && warm && binding.releaseId === request.currentReleaseId) return binding;
+      bindings.beginRetirement(binding.claimId === null ? {} : { claimId: binding.claimId });
+      bindings.finishRetirement();
+      return bindings.read();
+    },
+    async retireStandbySlot(request) {
+      const binding = bindings.read();
+      bindings.beginRetirement(request.claimId ? { claimId: request.claimId } : binding.claimId ? { claimId: binding.claimId } : {});
+      bindings.finishRetirement();
+      warm = false;
+      return { retired: true };
+    },
+    destroyInstance: async () => { warm = false; },
     ensureReadyForProcessing: async () => {
+      warm = true;
       input.readyContainerNames?.push(input.name);
       return { kind: "ready" };
     },

@@ -187,6 +187,7 @@ export type HostedRuntimeControlMailboxKind =
   (typeof HOSTED_RUNTIME_CONTROL_MAILBOX_KINDS)[number];
 
 export const HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS = [
+  "gpt-6-astra",
   "gpt-5.6-sol",
   "gpt-5.6-terra",
   "gpt-5.6-luna",
@@ -2244,7 +2245,7 @@ export type HostedRuntimeAssistantConfigurationToolResponse =
       action: "update";
       result: HostedRuntimeAssistantConfigurationSnapshot & {
         appliesAt: "next_turn";
-        requiredPlan: "edge" | null;
+        requiredPlan: "edge" | "max" | null;
         status: HostedRuntimeAssistantConfigurationUpdateStatus;
       };
     };
@@ -3549,6 +3550,7 @@ export interface HostedWorkspaceState {
 
 export interface HostedWorkspaceReadResponse {
   fetchedAt: string;
+  hostedAssistantAstraAllowed?: boolean;
   hostedAssistantCustomInferenceOverride?: HostedAssistantCustomInferenceOverride;
   hostedAssistantModelOverride?: HostedAssistantModelOverride;
   hostedAssistantProviderOverride?: HostedAssistantProviderOverride;
@@ -3761,6 +3763,7 @@ export type HostedRuntimeRedactedValue =
   | HostedRuntimeRedactedScalar[]
   | HostedRuntimeRedactedObject[];
 export type HostedRuntimeRedactedJson = Record<string, HostedRuntimeRedactedValue>;
+export const HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH = 16;
 
 export interface HostedRuntimeLogEntry {
   at: string;
@@ -3850,6 +3853,8 @@ export const HOSTED_WORKSPACE_INVOCATION_STATUSES = [
 export type HostedWorkspaceInvocationStatus = (typeof HOSTED_WORKSPACE_INVOCATION_STATUSES)[number];
 
 export const HOSTED_WORKSPACE_INVOCATION_MAX_MAILBOX_ITEMS = 100;
+export const HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT =
+  HOSTED_WORKSPACE_INVOCATION_MAX_MAILBOX_ITEMS;
 
 export interface HostedWorkspaceInvocationBudget {
   maxMailboxItems?: number | null;

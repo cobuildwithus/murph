@@ -124,6 +124,10 @@ import {
   type CodexTokenUsageBreakdown,
 } from './assistant-codex/app-server-protocol.js'
 import {
+  collectCodexCompactionResponseUsage,
+  type CodexCompactionResponseUsage,
+} from './assistant-codex/compaction-usage.js'
+import {
   resolveCodexChildEnv,
   withHostedCodexModelCatalogConfigOverride,
 } from './assistant-codex/config.js'
@@ -522,6 +526,7 @@ export interface CodexAppServerTurnInput {
   onProviderRequestStarted?: ((event: AssistantProviderRequestStartedEvent) => Promise<void> | void) | null
   onAdditionalUsage?: ((usage: AssistantProviderUsageDraft) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
+  followUpAttachmentAllowed?: boolean | null
   groupConversation?: boolean | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
   memberMemoryMaintenanceAuthorized?: boolean | null
@@ -646,6 +651,7 @@ export interface CodexAppServerTurnResult {
   targetInputId: string | null
   additionalUsages: AssistantProviderUsageDraft[]
   responseMedia: AssistantResponseMedia[]
+  followUpRequest: AssistantProviderTurnExecutionResult["followUpRequest"]
   responseCard: AssistantResponseCard | null
   jsonEvents: unknown[]
   providerActionCount: number
@@ -659,6 +665,7 @@ export interface CodexAppServerTurnResult {
 }
 
 export interface CodexAppServerResponseSegment {
+  followUpRequest?: AssistantProviderTurnExecutionResult["followUpRequest"]
   contextReferences?: AssistantProviderResponseSegment['contextReferences']
   deliveryContextOrdinal: number
   media: AssistantResponseMedia[]
@@ -1840,7 +1847,6 @@ class CodexAppServerProcess {
   }
 
   private handleStdoutData(text: string): void {
-    this.activeTurn?.onStdoutText(text)
     this.stdoutBuffer += text
     this.stdoutBuffer = consumeCompleteLines(this.stdoutBuffer, (line) => {
       this.handleStdoutLine(line)
@@ -2008,6 +2014,10 @@ class CodexAppServerProcess {
 
   private handleStdoutLine(line: string): void {
     const parsed = tryParseJsonLine(line)
+    if (!parsed.ok || (parsed.value.method !== 'rawResponseItem/completed'
+      && parsed.value.method !== 'rawResponse/completed')) {
+      this.activeTurn?.onStdoutText(`${line}\n`)
+    }
     if (parsed.ok) {
       this.observeDetachedChildLifecycle(parsed.value)
       this.observeThreadTokenUsage(parsed.value)
@@ -2876,19 +2886,16 @@ export interface CodexWarmThreadCompactionUsage {
   cachedInputTokens: number | null
   inputTokens: number
   outputTokens: number | null
-  source: 'estimated'
+  source: 'estimated' | 'measured'
   totalTokens: number
+  responses?: readonly CodexCompactionResponseUsage[]
 }
-
 function estimateCodexWarmThreadCompactionUsage(
   threadContextTokensBefore: number,
 ): CodexWarmThreadCompactionUsage {
-  // Codex idle compaction consumes the provider response without
-  // surfacing ResponseEvent::Completed.token_usage, then emits a recomputed
-  // post-compact context-size update whose request input/output buckets are
-  // zero. Until Codex surfaces real compact request usage, store the
-  // pre-compact thread context as an explicit lower-bound input/total estimate
-  // so idle compaction spend is not recorded as 0/0/0.
+  // Older/cold-resumed threads do not emit rawResponse/completed. Keep the
+  // existing explicit estimate when actual compact operation usage is absent;
+  // pre-compact context is not a lower bound on provider dollar cost.
   return {
     cachedInputTokens: null,
     inputTokens: threadContextTokensBefore,
@@ -2896,6 +2903,18 @@ function estimateCodexWarmThreadCompactionUsage(
     source: 'estimated',
     totalTokens: threadContextTokensBefore,
   }
+}
+
+function buildMeasuredCodexCompactionUsage(
+  responses: readonly CodexCompactionResponseUsage[],
+): CodexWarmThreadCompactionUsage | null {
+  if (responses.length === 0) return null
+  const inputTokens = responses.reduce((sum, usage) => sum + usage.inputTokens, 0)
+  const outputTokens = responses.reduce((sum, usage) => sum + usage.outputTokens, 0)
+  const cachedInputTokens = responses.reduce((sum, usage) => sum + usage.cachedInputTokens, 0)
+  const totalTokens = inputTokens + outputTokens
+  if (!Number.isSafeInteger(totalTokens)) return null
+  return { cachedInputTokens, inputTokens, outputTokens, responses, source: 'measured', totalTokens }
 }
 
 export type CodexWarmThreadCompactionOutcome =
@@ -2913,6 +2932,9 @@ export type CodexWarmThreadCompactionOutcome =
       reason: 'aborted' | 'process_exit' | 'rpc_error' | 'timeout'
       threadContextTokensBefore: number
       threadId: string
+      model?: string | null
+      serviceTier?: AssistantProviderServiceTier | null
+      usage?: CodexWarmThreadCompactionUsage
     }
   | {
       kind: 'skipped'
@@ -2997,6 +3019,8 @@ export async function compactWarmCodexThread(input: {
   let compactRequestSubmitted = false
   let compactRequestAccepted = false
   let compactStartedItemId: string | null = null
+  let compactTurnId: string | null = null
+  const compactResponses = new Map<string, CodexCompactionResponseUsage>()
   let compactCompletionBuffered = false
   type CompactionSettleReason = 'aborted' | 'compacted' | 'process_exit' | 'rpc_error' | 'timeout'
   let compactionSettleReason: CompactionSettleReason | null = null
@@ -3056,6 +3080,10 @@ export async function compactWarmCodexThread(input: {
         return
       }
 
+      collectCodexCompactionResponseUsage(
+        message, { threadId: vitals.threadId, turnId: compactTurnId }, compactResponses,
+      )
+
       const update = readCodexThreadTokenUsageUpdate(message)
       if (update) {
         return
@@ -3068,6 +3096,7 @@ export async function compactWarmCodexThread(input: {
         const itemId = readCodexContextCompactionItemId(message)
         if (itemId !== null && compactStartedItemId === null) {
           compactStartedItemId = itemId
+          compactTurnId = extractCodexTurnIdFromMessage(message)
         }
         return
       }
@@ -3143,14 +3172,17 @@ export async function compactWarmCodexThread(input: {
         threadContextTokensBefore: vitals.lastInputTokens,
         threadId: vitals.threadId,
         serviceTier: vitals.serviceTier,
-        usage: estimateCodexWarmThreadCompactionUsage(vitals.lastInputTokens),
+        usage: buildMeasuredCodexCompactionUsage([...compactResponses.values()])
+          ?? estimateCodexWarmThreadCompactionUsage(vitals.lastInputTokens),
       }
     }
 
+    const measuredUsage = buildMeasuredCodexCompactionUsage([...compactResponses.values()])
     await processInstance.poison('idle-compaction-failed')
     return {
       kind: 'failed',
       reason: settledReason,
+      ...(measuredUsage ? { usage: measuredUsage, model: vitals.model, serviceTier: vitals.serviceTier } : {}),
       threadContextTokensBefore: vitals.lastInputTokens,
       threadId: vitals.threadId,
     }
@@ -3462,6 +3494,15 @@ async function runCodexAppServerTurnOnProcess(
   let lastEventError: string | null = null
   let lastEventErrorInfo: CodexStructuredErrorInfo | null = null
   let responseMedia: AssistantResponseMedia[] = []
+  const followUpRequests = new Map<number, NonNullable<AssistantProviderTurnExecutionResult["followUpRequest"]>>()
+  const attachFollowUpRequest = (
+    ordinal: number, request: AssistantProviderTurnExecutionResult["followUpRequest"],
+  ): void => {
+    if (request) followUpRequests.set(ordinal, request)
+  }
+  const finalFollowUpRequest = (ordinal: number, deliverable: boolean) =>
+    deliverable ? followUpRequests.get(ordinal) ?? null : null
+
   let responseCard: AssistantResponseCard | null = null
   let responseCardTextFallback: CompactTableWorkoutResponseCardV1 | null = null
   const assistantStyleSettingsOverlay: AssistantStyleTurnSettingsOverlay = {
@@ -4062,6 +4103,7 @@ async function runCodexAppServerTurnOnProcess(
             contextReferences: trailingSteerCandidate.contextReferences,
           }),
       deliveryContextOrdinal: trailingSteerCandidate.deliveryContextOrdinal,
+      followUpRequest: trailingSteerCandidate.followUpRequest,
       media: [...trailingSteerCandidate.media],
       response,
       ...(transcriptResponse === response ? {} : { transcriptResponse }),
@@ -4908,6 +4950,7 @@ async function runCodexAppServerTurnOnProcess(
           fetchImpl: input.fetchImpl,
           hostedToolContext,
           materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
+          followUpAttachmentAllowed: input.followUpAttachmentAllowed === true,
           currentResponseMedia: responseMedia,
           currentResponseCard: responseCard ?? responseCardTextFallback,
           groupChallengeResponseCardAllowed:
@@ -5032,6 +5075,7 @@ async function runCodexAppServerTurnOnProcess(
           dynamicToolRequestDeliveryContextOrdinal,
         )
       }
+      attachFollowUpRequest(dynamicToolRequestDeliveryContextOrdinal, result.followUpRequestPatch)
       if (result.responseCardPatch) {
         try {
           applyResponseCardPatch(
@@ -5232,30 +5276,13 @@ async function runCodexAppServerTurnOnProcess(
       currentTurnStartedNotificationObserved =
         turnId !== null && extractCodexTurnIdFromMessage(message) === turnId
     }
-    const shouldCaptureTurnStartedNotification =
-      providerRequestStartedAtMs !== null &&
-      isTurnStartedNotification &&
-      codexTimingTurnStartedNotificationElapsedMs === null
-    const shouldCaptureTurnCompletedNotification =
-      providerRequestStartedAtMs !== null &&
-      isTurnCompletedNotification &&
-      codexTimingTurnCompletedNotificationElapsedMs === null
-    if (
-      providerRequestStartedAtMs !== null &&
-      (shouldCaptureTurnStartedNotification ||
-        shouldCaptureTurnCompletedNotification)
-    ) {
-      if (shouldCaptureTurnStartedNotification) {
-        codexTimingTurnStartedNotificationElapsedMs = Math.max(
-          0,
-          observedAtMs - providerRequestStartedAtMs,
-        )
+    if (providerRequestStartedAtMs !== null) {
+      const elapsedMs = Math.max(0, observedAtMs - providerRequestStartedAtMs)
+      if (isTurnStartedNotification) {
+        codexTimingTurnStartedNotificationElapsedMs ??= elapsedMs
       }
-      if (shouldCaptureTurnCompletedNotification) {
-        codexTimingTurnCompletedNotificationElapsedMs = Math.max(
-          0,
-          observedAtMs - providerRequestStartedAtMs,
-        )
+      if (isTurnCompletedNotification) {
+        codexTimingTurnCompletedNotificationElapsedMs ??= elapsedMs
       }
     }
     lastEventError = extractCodexErrorMessage(message) ?? lastEventError
@@ -5399,6 +5426,7 @@ async function runCodexAppServerTurnOnProcess(
           response: completedFinalAgentMessage,
           media: [...responseMedia],
           card: responseCard,
+          followUpRequest: followUpRequests.get(completedResponseDeliveryContextOrdinal),
           cardTextFallback: responseCardTextFallback,
           ...(completedResponseTargetInputId
             ? { targetInputId: completedResponseTargetInputId }
@@ -5415,20 +5443,19 @@ async function runCodexAppServerTurnOnProcess(
     }
 
     const progressEvent = extractCodexProgressEventFromNormalized(normalizedEvent)
-    if (progressEvent) {
-      if (suppressDeliveryContext && progressEvent.kind === 'message') {
-        // A completed no-reply context must not leak later text progress.
-      } else {
-        if (progressEvent.kind === 'message') {
-          if (
-            input.onProgress &&
-            normalizeStreamingText(progressEvent.text)
-          ) {
-            markExternallyVisibleAssistantOutput(deliveryContextOrdinal)
-          }
-        }
-        input.onProgress?.(progressEvent)
+    // A completed no-reply context must not leak later text progress.
+    if (
+      progressEvent &&
+      !(suppressDeliveryContext && progressEvent.kind === 'message')
+    ) {
+      if (
+        progressEvent.kind === 'message' &&
+        input.onProgress &&
+        normalizeStreamingText(progressEvent.text)
+      ) {
+        markExternallyVisibleAssistantOutput(deliveryContextOrdinal)
       }
+      input.onProgress?.(progressEvent)
     }
 
     if (isTurnStartedNotification) {
@@ -6158,18 +6185,12 @@ async function runCodexAppServerTurnOnProcess(
   }
   const selectedFinalMessage =
     finalTrailingSteerCandidate?.response ?? extractedFinalMessage
-  const finalResponseMedia =
-    latestFinalActionPatch?.kind === 'none'
-      ? responseMedia
-      : suppressTrailingSteerCandidateForEarlierNoReply
-        ? responseMedia
-        : finalTrailingSteerCandidate?.media ?? responseMedia
-  const finalResponseCard =
-    latestFinalActionPatch?.kind === 'none'
-      ? responseCard
-      : suppressTrailingSteerCandidateForEarlierNoReply
-        ? responseCard
-        : finalTrailingSteerCandidate?.card ?? responseCard
+  // A latest-context no-reply already promoted and cleared the candidate above.
+  const finalResponseCandidate = suppressTrailingSteerCandidateForEarlierNoReply
+    ? null
+    : finalTrailingSteerCandidate
+  const finalResponseMedia = finalResponseCandidate?.media ?? responseMedia
+  const finalResponseCard = finalResponseCandidate?.card ?? responseCard
   if (finalResponseCard !== null && finalResponseMedia.length > 0) {
     throw new VaultCliError(
       'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
@@ -6177,19 +6198,9 @@ async function runCodexAppServerTurnOnProcess(
     )
   }
   const finalDeliveryContextOrdinal =
-    latestFinalActionPatch?.kind === 'none'
-      ? latestDeliveryContextOrdinal
-      : suppressTrailingSteerCandidateForEarlierNoReply
-        ? latestDeliveryContextOrdinal
-        : finalTrailingSteerCandidate?.deliveryContextOrdinal ??
-          latestDeliveryContextOrdinal
+    finalResponseCandidate?.deliveryContextOrdinal ?? latestDeliveryContextOrdinal
   const finalResponseCardTextFallback =
-    latestFinalActionPatch?.kind === 'none'
-      ? responseCardTextFallback
-      : suppressTrailingSteerCandidateForEarlierNoReply
-        ? responseCardTextFallback
-        : finalTrailingSteerCandidate?.cardTextFallback
-          ?? responseCardTextFallback
+    finalResponseCandidate?.cardTextFallback ?? responseCardTextFallback
   if (finalResponseCardTextFallback !== null && finalResponseMedia.length > 0) {
     throw new VaultCliError(
       'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
@@ -6303,6 +6314,7 @@ async function runCodexAppServerTurnOnProcess(
       ...(segment.transcriptResponse === undefined
         ? {}
         : { transcriptResponse: segment.transcriptResponse }),
+      followUpRequest: segment.followUpRequest,
       media: [...segment.media],
       ...(segment.targetInputId
         ? { targetInputId: segment.targetInputId }
@@ -6316,6 +6328,7 @@ async function runCodexAppServerTurnOnProcess(
       resolveReplyTargetPatch(finalDeliveryContextOrdinal)?.targetInputId ?? null,
     additionalUsages: [...additionalUsages, ...buildSubagentUsageDrafts()],
     responseMedia: finalHasDeliverableOutput ? [...finalResponseMedia] : [],
+    followUpRequest: finalFollowUpRequest(finalDeliveryContextOrdinal, finalHasDeliverableOutput),
     responseCard: finalHasDeliverableOutput ? deliveredFinalResponseCard : null,
     jsonEvents,
     providerActionCount,

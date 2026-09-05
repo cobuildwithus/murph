@@ -1,6 +1,7 @@
 ---
 title: 'Hosted-local no-bundle E2E accepts stale workspace package artifacts'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2717'
 ---
 
 ## Expected Behavior

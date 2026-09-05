@@ -65,6 +65,7 @@ import {
 } from "./usage-credit-purchase-status-service";
 import {
   lockHostedUsageCreditPurchaseReservationOwnersTx,
+  readHostedUsageCreditTargetMemberLockOrder,
 } from "./usage-credit-purchase-reservation-lock";
 import {
   assertHostedUsageCreditStripePriceMatchesPurchase,
@@ -524,8 +525,11 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
         : null;
     let lockedBeneficiary: LockedHostedUsageCreditBeneficiary;
     try {
-      lockedBeneficiary = await lockHostedUsageCreditBeneficiaryTx({
+      lockedBeneficiary = await lockHostedUsageCreditPurchaseReservationOwnersTx({
         beneficiaryMemberId: input.target.beneficiaryMemberId,
+        memberLockOrder:
+          readHostedUsageCreditTargetMemberLockOrder(input.target.kind),
+        payerMemberId: input.target.payerMemberId,
         tx,
       });
     } catch (error) {
@@ -537,12 +541,6 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
         throw buildHostedUsageCreditNotEligibleError(input.target.kind);
       }
       throw error;
-    }
-    if (
-      input.target.payerMemberId
-        !== lockedBeneficiary.beneficiaryMemberId
-    ) {
-      await lockHostedMemberRow(tx, input.target.payerMemberId);
     }
     const payer = await tx.hostedMember.findUnique({
       select: {
@@ -1613,6 +1611,7 @@ async function bindHostedUsageCreditCheckoutSession(input: {
     if (providerFinalNoPayment) {
       await lockHostedUsageCreditPurchaseReservationOwnersTx({
         beneficiaryMemberId: input.purchase.beneficiaryMemberId,
+        memberLockOrder: readHostedUsageCreditTargetMemberLockOrder(target.kind),
         payerMemberId,
         tx,
       });

@@ -82,6 +82,7 @@ import {
   HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS,
   prepareHostedCodexRuntimeEnvironment,
   projectHostedRuntimeProcessEnvironment,
+  resolveHostedCodexModelCatalogPath,
 } from "./hosted-runtime/codex-config.ts";
 import {
   HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
@@ -243,7 +244,6 @@ import {
   isHostedApprovedContinuationSystemMailboxItem,
   isHostedSystemMailboxModelFreeExactNotificationItem,
   readHostedSystemMailboxState,
-  readHostedSystemMailboxHandledThroughSeq,
   readHostedSystemMailboxProgress,
   type HostedSystemMailboxPendingItem,
 } from "./hosted-runtime/system-mailbox-state.ts";
@@ -1954,8 +1954,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       nextWakeAt: workspaceRead.workspace?.nextWakeAt ?? null,
       nextWakeReason: workspaceRead.workspace?.nextWakeReason ?? null,
     });
-    const imageCodexModelCatalogJson =
-      process.env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]?.trim();
+    const imageCodexModelCatalogJson = resolveHostedCodexModelCatalogPath({
+      imageCatalogPath: process.env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV],
+      astraAllowed: workspaceRead.hostedAssistantAstraAllowed,
+    });
     const imageHealthCommonsPackageRoot =
       process.env["MURPH_HEALTH_COMMONS_PACKAGE_ROOT"]?.trim();
     const baseRuntimeEnv = {
@@ -3975,7 +3977,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       }
       return response.result.provider;
     };
-    const resolveInvocationAssistantProviderAuthority = async (): Promise<
+    // Provider preference changes require a fresh provider-specific invocation.
+    // This check preserves accepted work for handoff; it does not reauthorize it.
+    const resolveInvocationAssistantProviderConsistency = async (): Promise<
       "current" | "handoff"
     > => {
       const liveAssistantProvider = await readLiveAssistantProvider();
@@ -4181,7 +4185,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                   acceptedInputs,
                 }) => {
                   if (
-                    await resolveInvocationAssistantProviderAuthority()
+                    await resolveInvocationAssistantProviderConsistency()
                       === "handoff"
                   ) {
                     throw new AssistantActiveTurnInputUnavailableError(
@@ -4503,7 +4507,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         options.runtimeWakeSignal?.notify();
       },
       resolveProviderAuthority:
-        resolveInvocationAssistantProviderAuthority,
+        resolveInvocationAssistantProviderConsistency,
       ...(ordinaryConsentedAssistantAskSelected
         ? {
             selectNextExactItemId:
@@ -5611,12 +5615,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             wakeInput.providerStartCriticalPath,
             "foregroundPassStartedAtMonotonicMs",
           );
-        const resolveForegroundRerunAssistantInputBatch = (
-          passResult: HostedWorkspaceRunnerResult,
-        ): HostedWorkspaceRunnerAssistantInputBatch | null =>
-          hostedAssistantInputBatchHasWork(passResult.latestAssistantInputBatch)
-            ? passResult.latestAssistantInputBatch
-            : null;
         const shouldContinueForegroundCausalPass = (
           passResult: HostedWorkspaceRunnerResult,
         ): boolean =>
@@ -5680,36 +5678,15 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           );
           return result;
         };
-
-        let passResult = await runSingleForegroundPass(
-          providerStartAtForegroundPass
-            ? {
-                ...wakeInput,
-                providerStartCriticalPath: providerStartAtForegroundPass,
-              }
-            : wakeInput,
-        );
-        // Generation can finish during a provider pass. Stage it before
-        // choosing the rerun batch so it enters the next Codex context ahead
-        // of conversation input captured by the live foreground watcher.
-        await flushImageGenerationWork();
-        // irreducible: "late foreground input during system work runs before idle checkpointing" fails without this.
-        let rerunAssistantInputBatch =
-          runtimeOwnerHandoffRequested
-            ? null
-            : prependReadyImageCompletionInputs(
-                resolveForegroundRerunAssistantInputBatch(passResult),
-              );
-        let continueForegroundCausalPass =
-          !runtimeOwnerHandoffRequested
-          && shouldContinueForegroundCausalPass(passResult);
-        const requestDueRuntimeOwnerHandoffIfForegroundIdle = (): void => {
+        const requestDueRuntimeOwnerHandoffIfForegroundIdle = (
+          passResult: HostedWorkspaceRunnerResult,
+          foregroundWorkPending: boolean,
+        ): void => {
           if (
-            runtimeOwnerHandoffRequested
-            || rerunAssistantInputBatch !== null
-            || continueForegroundCausalPass
-            || (input.request.processingMode ?? "default") !== "default"
-            || !hostedRuntimeForegroundIdleWakeRequestsOwnerHandoff({
+            !runtimeOwnerHandoffRequested
+            && !foregroundWorkPending
+            && (input.request.processingMode ?? "default") === "default"
+            && hostedRuntimeForegroundIdleWakeRequestsOwnerHandoff({
               assistantProgressed:
                 passResult.assistantPhaseResult?.progressed === true,
               nextWakeReason: pendingWake.nextWakeReason,
@@ -5717,18 +5694,37 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                 passResult.assistantPhaseResult
                   ?.runtimeProjectionCheckpointRequested === true,
             })
-            || !hostedRuntimeWakeIsDue(pendingWake.nextWakeAt)
+            && hostedRuntimeWakeIsDue(pendingWake.nextWakeAt)
           ) {
-            return;
+            runtimeOwnerHandoffRequested = true;
+            markIdleCheckpointTimerAfterDirtyWork();
           }
-          runtimeOwnerHandoffRequested = true;
-          markIdleCheckpointTimerAfterDirtyWork();
         };
-        requestDueRuntimeOwnerHandoffIfForegroundIdle();
-        while (
-          options.shutdownSignal?.aborted !== true
-          && (rerunAssistantInputBatch || continueForegroundCausalPass)
-        ) {
+        let singleWakeInput: typeof wakeInput = providerStartAtForegroundPass
+          ? { ...wakeInput, providerStartCriticalPath: providerStartAtForegroundPass }
+          : wakeInput;
+        while (true) {
+          const passResult = await runSingleForegroundPass(singleWakeInput);
+          // Stage generation completed during this pass ahead of conversation
+          // input captured by the live foreground watcher.
+          await flushImageGenerationWork();
+          // irreducible: "late foreground input during system work runs before idle checkpointing" fails without this.
+          const rerunAssistantInputBatch = runtimeOwnerHandoffRequested
+            ? null
+            : prependReadyImageCompletionInputs(
+                hostedAssistantInputBatchHasWork(passResult.latestAssistantInputBatch)
+                  ? passResult.latestAssistantInputBatch
+                  : null,
+              );
+          const continueForegroundCausalPass =
+            !runtimeOwnerHandoffRequested
+            && shouldContinueForegroundCausalPass(passResult);
+          const foregroundWorkPending =
+            rerunAssistantInputBatch !== null || continueForegroundCausalPass;
+          requestDueRuntimeOwnerHandoffIfForegroundIdle(passResult, foregroundWorkPending);
+          if (options.shutdownSignal?.aborted === true || !foregroundWorkPending) {
+            return passResult;
+          }
           const projectedPendingEffectsContinuationWakeKey =
             rerunAssistantInputBatch === null
             && continueForegroundCausalPass
@@ -5740,7 +5736,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               : null;
           // The mailbox-import boundary belongs only to the first foreground
           // pass. A rerun is a new causal pass and must not inherit that tick.
-          passResult = await runSingleForegroundPass({
+          singleWakeInput = {
             foregroundCausalOnly:
               rerunAssistantInputBatch === null
               && continueForegroundCausalPass,
@@ -5758,20 +5754,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             projectedAssistantWakeKey: projectedPendingEffectsContinuationWakeKey,
             requestIdKind: "checkpoint-interrupt",
             signal: wakeInput.signal,
-          });
-          await flushImageGenerationWork();
-          rerunAssistantInputBatch =
-            runtimeOwnerHandoffRequested
-              ? null
-              : prependReadyImageCompletionInputs(
-                  resolveForegroundRerunAssistantInputBatch(passResult),
-                );
-          continueForegroundCausalPass =
-            !runtimeOwnerHandoffRequested
-            && shouldContinueForegroundCausalPass(passResult);
-          requestDueRuntimeOwnerHandoffIfForegroundIdle();
+          };
         }
-        return passResult;
       };
       const runForegroundMailboxWakeIfWork = async (input: {
         includeReadyImageCompletion?: boolean;
@@ -5795,6 +5779,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         const runtimeStateDirtyBeforeMailboxImport = runtimeStateDirty;
         let invocationLocalAssistantInputBatch:
           HostedWorkspaceRunnerAssistantInputBatch | null = null;
+        let foregroundProviderStartCriticalPath:
+          AssistantProviderStartCriticalPathContext | null = null;
         const stageMailboxImportWake = async (
           mailboxImport: HostedMailboxImportCheckpointResult,
         ): Promise<void> => {
@@ -5883,7 +5869,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           const runtimeStateDirtyAfterMailboxImport = runtimeStateDirty;
           runtimeStateDirty = runtimeStateDirtyBeforeMailboxImport;
           try {
-            return await runForegroundPass(wakeInput);
+            return await runForegroundPass({
+              ...wakeInput,
+              providerStartCriticalPath: foregroundProviderStartCriticalPath,
+            });
           } finally {
             runtimeStateDirty ||= runtimeStateDirtyAfterMailboxImport;
           }
@@ -5953,6 +5942,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             signal: importSignal,
             workspace: passWorkspace,
           });
+          // Hot wakes need their own import boundary; the invocation's initial
+          // timing context predates these inputs and must not be reused.
+          foregroundProviderStartCriticalPath =
+            (result.initialMailboxImport.importResult.assistantInputIds?.length ?? 0) > 0
+              ? createAssistantProviderStartCriticalPathContext()
+              : null;
           invocationLocalAssistantInputBatch =
             result.latestAssistantInputBatch
             ?? invocationLocalAssistantInputBatch;
@@ -6123,13 +6118,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           && options.shutdownSignal?.aborted !== true
         ) {
           try {
-            if (await resolveInvocationAssistantProviderAuthority() === "handoff") {
+            if (await resolveInvocationAssistantProviderConsistency() === "handoff") {
               markIdleCheckpointTimerAfterDirtyWork();
               return false;
             }
           } catch {
             // A runtime wake is only a handoff hint. The provider-entry gate
-            // remains the fail-closed authority when the live read is
+            // still checks the saved provider when this hint read is
             // temporarily unavailable.
           }
         }
@@ -6468,7 +6463,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           workspace: committedWorkspace,
         });
         const runtimeDirtyAfterForeground = result.runtimeStateDirty
-          || hostedVaultStartupPreparation.mutated;
+          || hostedVaultStartupPreparation.mutated
+          || await hasRestoredSystemMailboxProgressAheadOfWorkspace({
+            importedSeq: result.latestMailboxImport.state.watermarks.system,
+            redactedStatus: committedWorkspace?.redactedStatus ?? null,
+            vaultRoot: restored.vaultRoot,
+          });
         runtimeStateDirty ||=
           runtimeDirtyAfterForeground || committedInboxMediaRetentionWakeDue;
         if (runtimeDirtyAfterForeground) {
@@ -8548,17 +8548,22 @@ async function hasRestoredSystemMailboxProgressAheadOfWorkspace(input: {
   }
 
   const localImportedSeq = BigInt(input.importedSeq);
-  const localHandledThroughSeq = BigInt(
-    await readHostedSystemMailboxHandledThroughSeq({
-      importedSeq: input.importedSeq,
-      vaultRoot: input.vaultRoot,
-    }),
-  );
+  const localProgress = await readHostedSystemMailboxProgress({
+    importedSeq: input.importedSeq,
+    vaultRoot: input.vaultRoot,
+  });
+  const localHandledThroughSeq = BigInt(localProgress.handledThroughSeq);
+  const canonicalContinuationSeqs =
+    input.redactedStatus?.hostedMailboxSystemDeviceSyncContinuationSeqs;
   return localImportedSeq >= canonicalImportedSeq
     && localHandledThroughSeq >= canonicalHandledThroughSeq
     && (
       localImportedSeq > canonicalImportedSeq
       || localHandledThroughSeq > canonicalHandledThroughSeq
+      || localProgress.deviceSyncContinuationSeqs.some((seq) =>
+        !Array.isArray(canonicalContinuationSeqs)
+        || !canonicalContinuationSeqs.some((owner) => owner === seq)
+      )
     );
 }
 
@@ -8590,6 +8595,8 @@ async function withHostedMailboxProgressStatus(input: {
       systemMailboxProgress.handledThroughSeq,
     hostedMailboxSystemFirstPendingSeq:
       systemMailboxProgress.firstPendingSeq,
+    hostedMailboxSystemDeviceSyncContinuationSeqs:
+      systemMailboxProgress.deviceSyncContinuationSeqs,
   };
 }
 

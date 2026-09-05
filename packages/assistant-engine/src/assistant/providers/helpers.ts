@@ -28,6 +28,7 @@ import {
 } from '@murphai/operator-config/vault-cli-contracts'
 import {
   resolveCodexCommandFamily,
+  resolveCodexVaultCliCommandArgv,
 } from '../../assistant-codex/command-family.js'
 import {
   isCodexActionStructurallyFailed,
@@ -37,6 +38,8 @@ import {
   ASSISTANT_TURN_PROFILE_MAX_REQUESTS,
   ASSISTANT_TURN_PROFILE_MAX_TOOLS,
   ASSISTANT_TURN_PROFILE_SCHEMA,
+  ASSISTANT_TURN_PROFILE_KNOWLEDGE_COUNT_KEYS,
+  type AssistantTurnProfileKnowledgeCounts,
   type AssistantUsageTokenPricingBasis,
 } from '@murphai/hosted-execution/assistant-usage'
 import {
@@ -497,6 +500,7 @@ interface AssistantTurnProfileToolAggregate {
   label: string
   outputBytesMax: number
   outputBytesTotal: number
+  knowledgeCounts?: AssistantTurnProfileKnowledgeCounts
 }
 
 interface AssistantTurnProfileToolAggregateRead {
@@ -602,6 +606,7 @@ export function buildAssistantCodexTurnProfileJson(input: {
       label: tool.label,
       outputBytesMax: tool.outputBytesMax,
       outputBytesTotal: tool.outputBytesTotal,
+      ...(tool.knowledgeCounts ? { knowledgeCounts: tool.knowledgeCounts } : {}),
     })),
     toolsTruncated:
       toolAttributionTruncated
@@ -636,17 +641,28 @@ function readAssistantTurnProfileToolAggregates(
 
     const durationMs = readAssistantProviderInteger(item, 'durationMs')
     const outputBytes = readAssistantTurnProfileUtf8Bytes(aggregatedOutput)
+    const failed = isCodexActionStructurallyFailed({ item })
 
     return {
       aggregates: [{
         calls: 1,
         durationKnownCalls: durationMs === null ? 0 : 1,
         durationMs: durationMs ?? 0,
-        failedCalls: isCodexActionStructurallyFailed({ item }) ? 1 : 0,
+        failedCalls: failed ? 1 : 0,
         kind: 'command',
         label,
         outputBytesMax: outputBytes,
         outputBytesTotal: outputBytes,
+        ...(label === 'vault-cli knowledge' ? {
+          knowledgeCounts: readAssistantKnowledgeCounts(
+            resolveCodexVaultCliCommandArgv({
+              allowKnownShellWrapper: true,
+              commandLabel: readAssistantProviderString(item.command),
+            })?.[2],
+            failed,
+            failed ? readAssistantKnowledgeErrorCode(aggregatedOutput) : undefined,
+          ),
+        } : {}),
       }],
       attributionTruncated: label === 'vault-cli batch',
     }
@@ -768,7 +784,60 @@ function mergeAssistantTurnProfileToolAggregate(
   target.failedCalls = failedCalls
   target.outputBytesMax = Math.max(target.outputBytesMax, source.outputBytesMax)
   target.outputBytesTotal = outputBytesTotal
+  if (target.knowledgeCounts && source.knowledgeCounts) {
+    for (const key of ASSISTANT_TURN_PROFILE_KNOWLEDGE_COUNT_KEYS) {
+      target.knowledgeCounts[key] += source.knowledgeCounts[key]
+    }
+  }
   return true
+}
+
+function readAssistantKnowledgeCounts(
+  operation: string | undefined,
+  failed: boolean,
+  code: unknown,
+): AssistantTurnProfileKnowledgeCounts {
+  const counts: AssistantTurnProfileKnowledgeCounts = {
+    showCalls: 0, listCalls: 0, searchCalls: 0, writeCalls: 0, otherCalls: 0,
+    notFoundFailures: 0, invalidFailures: 0, conflictFailures: 0, otherFailures: 0,
+  }
+  switch (operation) {
+    case 'show': counts.showCalls = 1; break
+    case 'list': counts.listCalls = 1; break
+    case 'search': counts.searchCalls = 1; break
+    case 'upsert':
+    case 'append-section': counts.writeCalls = 1; break
+    default: counts.otherCalls = 1
+  }
+  if (!failed) {
+    return counts
+  }
+  switch (code) {
+    case 'knowledge_page_not_found': counts.notFoundFailures = 1; break
+    case 'knowledge_page_invalid': counts.invalidFailures = 1; break
+    case 'knowledge_page_conflict':
+    case 'knowledge_duplicate_slug': counts.conflictFailures = 1; break
+    default: counts.otherFailures = 1
+  }
+  return counts
+}
+
+function readAssistantKnowledgeErrorCode(output: unknown): unknown {
+  // Inspect only a bounded complete JSON error envelope. Unknown errors stay
+  // numeric; no command argument, page content, path, or error string persists.
+  if (typeof output === 'string' && output.length <= 65_536) {
+    try {
+      const envelope = readCodexRecord(JSON.parse(output))
+      if (envelope?.ok === false) {
+        return readCodexRecord(envelope.error)?.code
+      } else if (envelope?.ok === undefined && typeof envelope?.retryable === 'boolean') {
+        return envelope.code
+      }
+    } catch {
+      // Non-JSON and truncated output remain unknown failures.
+    }
+  }
+  return undefined
 }
 
 function safeAssistantTurnProfileIntegerSum(

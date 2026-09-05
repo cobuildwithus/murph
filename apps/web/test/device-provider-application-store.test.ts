@@ -274,7 +274,10 @@ describe("member-owned device provider application store", () => {
       },
     });
     expect(tx.deviceOauthSession.deleteMany).toHaveBeenCalledWith({
-      where: { providerApplicationId: "dpa_123" },
+      where: {
+        consumedAt: null,
+        providerApplicationId: "dpa_123",
+      },
     });
     expect(
       tx.deviceConnection.updateMany.mock.invocationCallOrder[0],

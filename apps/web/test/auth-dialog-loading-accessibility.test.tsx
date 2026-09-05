@@ -347,7 +347,7 @@ test("uses a panel preloaded after a closed dialog mounts without suppressing ph
   expect(rendered.container.querySelector('[aria-busy="true"]')).toBeNull();
 });
 
-test("reopens a closed dialog so Privy can finish Telegram OAuth after redirect", async () => {
+test("reopens a closed dialog and preserves the intent until Privy finishes Telegram OAuth", async () => {
   const { AuthDialog } = await import(
     "@/src/components/hosted-onboarding/auth-dialog"
   );
@@ -382,7 +382,7 @@ test("reopens a closed dialog so Privy can finish Telegram OAuth after redirect"
     rendered.window.sessionStorage.getItem(
       "murph:telegram-oauth-dialog-intent:v1",
     ),
-  ).toBeNull();
+  ).toBe("claimed");
 });
 
 async function renderPendingAuthDialog() {

@@ -73,6 +73,7 @@ import {
 } from "./internal-hosts.ts";
 import { json, jsonError, methodNotAllowed, notFound, readJsonObject, unauthorized } from "./json.ts";
 import {
+  HOSTED_RUNTIME_ARTIFACT_UPLOAD_DEADLINE_HEADER,
   readHostedRuntimeArtifactFetchTelemetry,
 } from "./runner-outbound/headers.ts";
 import {
@@ -382,6 +383,49 @@ function readRunnerOutboundOperation(url: URL, method: string): string {
   return operation === "unknown_internal_operation" ? "unknown_operation" : operation;
 }
 
+// A short request-local recovery window, not a timeout for an in-flight binding PUT.
+const RUNNER_ARTIFACT_PUT_RECOVERY_WINDOW_MS = 1_000;
+const RUNNER_ARTIFACT_PUT_RETRY_DELAY_MS = 100;
+
+function readRunnerArtifactPutServiceCode(error: unknown): 10001 | 10043 | null {
+  // Workers R2 binding errors end with a numeric code. Do not infer retryability
+  // from arbitrary prose, HTTP status, nested causes, or generic fetch/TypeError.
+  if (!(error instanceof Error) || error.name !== "Error" || !error.message.startsWith("put: ")) {
+    return null;
+  }
+  const match = /\((10001|10043)\)$/u.exec(error.message);
+  return match ? (match[1] === "10001" ? 10001 : 10043) : null;
+}
+
+function readRunnerArtifactPutRetryDeadline(request: Request, startedAt: number): number {
+  const localDeadline = startedAt + RUNNER_ARTIFACT_PUT_RECOVERY_WINDOW_MS;
+  const value = request.headers.get(HOSTED_RUNTIME_ARTIFACT_UPLOAD_DEADLINE_HEADER);
+  // Older callers still have their original fetch cancellation signal. Never
+  // grant more than the short local window; a malformed supplied budget opts out.
+  if (value === null) {
+    return localDeadline;
+  }
+  const deadline = Number(value);
+  return /^[0-9]{1,16}$/u.test(value) && Number.isSafeInteger(deadline)
+    ? Math.min(localDeadline, deadline)
+    : startedAt;
+}
+
+function waitForRunnerArtifactPutRetry(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    signal.throwIfAborted();
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, RUNNER_ARTIFACT_PUT_RETRY_DELAY_MS);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 async function handleRunnerArtifactRequest(input: {
   bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
   env: RunnerOutboundEnvironmentSource;
@@ -391,6 +435,8 @@ async function handleRunnerArtifactRequest(input: {
   userId: string;
 }): Promise<Response> {
   const startedAt = Date.now();
+  const retryDeadline = readRunnerArtifactPutRetryDeadline(input.request, startedAt);
+  const recoveryDetails: Record<string, boolean | number | string | null> = {};
   const method = readHostedRunnerDiagnosticMethod(input.request.method);
   const operation = input.request.method === "PUT" ? "artifact_upload" : "artifact_fetch";
   const fetchTelemetry = input.request.method === "GET"
@@ -465,6 +511,9 @@ async function handleRunnerArtifactRequest(input: {
   }
 
   try {
+    if (input.request.method === "PUT") {
+      input.request.signal.throwIfAborted();
+    }
     const cryptoStartedAt = Date.now();
     emitPhase("Hosted runner artifact crypto context started.");
     const crypto = await resolveRunnerOutboundUserCryptoContext({
@@ -523,8 +572,49 @@ async function handleRunnerArtifactRequest(input: {
       artifactAuthorized: true,
       artifactByteLength: bytes.byteLength,
     });
-    await artifactStore.writeArtifact(input.sha256, bytes);
+    await artifactStore.writeArtifact(input.sha256, bytes, {
+      signal: input.request.signal,
+      beforeRetry: async (error) => {
+        const code = readRunnerArtifactPutServiceCode(error);
+        if (code === null) {
+          return false;
+        }
+        Object.assign(recoveryDetails, {
+          artifactR2Code: code,
+          artifactStorageStage: "r2_put",
+          artifactWriteAttempt: 1,
+          artifactWriteDisposition: "budget_exhausted",
+        });
+        input.request.signal.throwIfAborted();
+        // Leave at least one backoff-sized margin for the repeat effect. Include
+        // initial fence, crypto, body, encryption and first-PUT time in admission.
+        if (Date.now() + 2 * RUNNER_ARTIFACT_PUT_RETRY_DELAY_MS >= retryDeadline) {
+          return false;
+        }
+        recoveryDetails.artifactWriteDisposition = "backoff";
+        emitPhase("Hosted runner artifact write recovery backoff.", recoveryDetails, "warn");
+        await waitForRunnerArtifactPutRetry(input.request.signal);
+        input.request.signal.throwIfAborted();
+        recoveryDetails.artifactWriteDisposition = "budget_exhausted";
+        if (Date.now() + RUNNER_ARTIFACT_PUT_RETRY_DELAY_MS >= retryDeadline) {
+          return false;
+        }
+        await requireRunnerRuntimeWriteFenceWrite(input);
+        input.request.signal.throwIfAborted();
+        if (Date.now() + RUNNER_ARTIFACT_PUT_RETRY_DELAY_MS >= retryDeadline) {
+          return false;
+        }
+        recoveryDetails.artifactWriteAttempt = 2;
+        recoveryDetails.artifactWriteDisposition = "exhausted";
+        return true;
+      },
+    });
+    input.request.signal.throwIfAborted();
+    if (recoveryDetails.artifactR2Code !== undefined) {
+      recoveryDetails.artifactWriteDisposition = "recovered";
+    }
     emitPhase("Hosted runner artifact write completed.", {
+      ...recoveryDetails,
       artifactAuthorized: true,
       artifactByteLength: bytes.byteLength,
       artifactWriteDurationMs: Date.now() - writeStartedAt,
@@ -539,10 +629,18 @@ async function handleRunnerArtifactRequest(input: {
       size: bytes.byteLength,
     });
   } catch (error) {
+    if (recoveryDetails.artifactR2Code !== undefined) {
+      if (input.request.signal.aborted) {
+        recoveryDetails.artifactWriteDisposition = "cancelled";
+      } else if (error instanceof RunnerRuntimeWriteFenceError) {
+        recoveryDetails.artifactWriteDisposition = "unauthorized";
+      }
+    }
     emitHostedExecutionStructuredLog({
       component: "runner",
       details: {
         ...logDetails,
+        ...recoveryDetails,
         durationMs: Date.now() - startedAt,
         errorCode: deriveHostedExecutionErrorCode(error),
         errorMessagePresent: error instanceof Error && error.message.trim().length > 0,
@@ -554,6 +652,10 @@ async function handleRunnerArtifactRequest(input: {
       message: "Hosted runner artifact request failed.",
       phase: "wake.running",
     });
+    if (recoveryDetails.artifactR2Code !== undefined && error instanceof RunnerRuntimeWriteFenceError) {
+      emitCompleted({ artifactAuthorized: false }, 401);
+      return unauthorized();
+    }
     if (
       input.request.method === "GET"
       && error instanceof HostedEncryptedR2PayloadUnreadableError

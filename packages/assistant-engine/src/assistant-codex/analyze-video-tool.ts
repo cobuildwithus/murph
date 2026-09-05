@@ -28,8 +28,8 @@ import type {
   AssistantWorkspaceArtifactMaterializer,
 } from '../assistant/execution-context.js'
 import {
-  readAssistantInputEvent,
   type AssistantInputAttachmentEvidenceItem,
+  type AssistantInputEventRecord,
 } from '../assistant/input-store.js'
 
 export interface AnalyzeVideoToolArgs {
@@ -109,52 +109,41 @@ export function createAnalyzeVideoTurnState(): AnalyzeVideoTurnState {
   }
 }
 
-export async function snapshotAnalyzeVideoAttachmentAuthorities(input: {
-  acceptedInputIds: readonly string[]
-  vaultRoot?: string | null
-}): Promise<AnalyzeVideoAttachmentAuthority[]> {
-  const vaultRoot = normalizeNullableString(input.vaultRoot)
-  if (!vaultRoot) return []
-
+export function snapshotAnalyzeVideoAttachmentAuthorities(
+  events: readonly AssistantInputEventRecord[],
+): AnalyzeVideoAttachmentAuthority[] {
   const authorities: AnalyzeVideoAttachmentAuthority[] = []
-  for (const messageRef of input.acceptedInputIds) {
-    try {
-      const event = await readAssistantInputEvent({ inputId: messageRef, vault: vaultRoot })
+  for (const event of events) {
+    if (
+      event.attachmentEvidence.status !== 'available'
+      && event.attachmentEvidence.status !== 'partial'
+    ) {
+      continue
+    }
+    for (const attachment of event.attachmentEvidence.attachments) {
+      if (attachment.kind !== 'video') continue
+      const rawPath = normalizeAssistantRawAttachmentArtifactPath(
+        attachment.raw?.path ?? null,
+      )
+      const byteSize = attachment.raw?.byteSize ?? null
+      const sha256 = attachment.raw?.sha256 ?? null
+      const mimeType = normalizeVideoMimeType(attachment)
       if (
-        !event
-        || event.inputId !== messageRef
-        || (event.attachmentEvidence.status !== 'available'
-          && event.attachmentEvidence.status !== 'partial')
+        !rawPath
+        || typeof byteSize !== 'number'
+        || !Number.isSafeInteger(byteSize)
+        || byteSize <= 0
       ) {
         continue
       }
-      for (const attachment of event.attachmentEvidence.attachments) {
-        if (attachment.kind !== 'video') continue
-        const rawPath = normalizeAssistantRawAttachmentArtifactPath(
-          attachment.raw?.path ?? null,
-        )
-        const byteSize = attachment.raw?.byteSize ?? null
-        const sha256 = attachment.raw?.sha256 ?? null
-        const mimeType = normalizeVideoMimeType(attachment)
-        if (
-          !rawPath
-          || typeof byteSize !== 'number'
-          || !Number.isSafeInteger(byteSize)
-          || byteSize <= 0
-        ) {
-          continue
-        }
-        authorities.push({
-          byteSize,
-          messageRef,
-          mimeType,
-          ordinal: attachment.ordinal,
-          rawPath,
-          sha256,
-        })
-      }
-    } catch {
-      // Invalid or unavailable evidence cannot grant cross-provider egress.
+      authorities.push({
+        byteSize,
+        messageRef: event.inputId,
+        mimeType,
+        ordinal: attachment.ordinal,
+        rawPath,
+        sha256,
+      })
     }
   }
   return authorities

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-04",
+  "order": 100,
+  "item": {
+    "id": "replies-stay-with-earlier-messages",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Replies stay with the intended message",
+    "summary": "Murph can keep a reply attached to an earlier question when another message arrives while it is answering.",
+    "details": "This works in supported private and group iMessage and Telegram conversations for messages received during the same active exchange.",
+    "relevanceTags": ["conversation"],
+    "sourcePullRequests": [2882]
+  }
+}

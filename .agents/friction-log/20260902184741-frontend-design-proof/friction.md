@@ -1,6 +1,7 @@
 ---
 title: 'Frontend design-proof fixture conflicts with privacy commit hook'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2768'
 ---
 
 ## Expected Behavior

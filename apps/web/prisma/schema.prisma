@@ -346,15 +346,12 @@ model ClinicalRecordConnection {
   displayName              String                           @map("display_name")
   fhirBaseUrlEncrypted     String                           @map("fhir_base_url_encrypted")
   fhirBaseHash             String                           @map("fhir_base_hash")
-  tokenEndpoint            String                           @map("token_endpoint")
-  clientId                 String                           @map("client_id")
   status                   String                           @default("active")
+  patientBindingEncrypted  String?                          @map("patient_binding_encrypted")
   patientIdEncrypted       String?                          @map("patient_id_encrypted")
   accessTokenEncrypted     String?                          @map("access_token_encrypted")
-  refreshTokenEncrypted    String?                          @map("refresh_token_encrypted")
   accessTokenExpiresAt     DateTime?                        @map("access_token_expires_at")
   requestedScopesJson      Json                             @map("requested_scopes_json")
-  grantedScopesJson        Json                             @map("granted_scopes_json")
   tokenVersion             Int                              @default(1) @map("token_version")
   retrievalGeneration      Int                              @default(0) @map("retrieval_generation")
   connectedAt              DateTime                         @map("connected_at")
@@ -379,7 +376,6 @@ model ClinicalRecordRetrievalRun {
   connectionId         String                           @map("connection_id")
   generation           Int
   status               String                           @default("queued")
-  resourceTypesJson    Json                             @map("resource_types_json")
   retrievalPlanJson    Json?                            @map("retrieval_plan_json")
   retrievalProtocol    String?                          @map("retrieval_protocol")
   grantedScopesJson    Json                             @map("granted_scopes_json")
@@ -1008,6 +1004,9 @@ model HostedPhysicalNoteRecovery {
 
 model HostedMemberIdentity {
   memberId                            String       @unique @map("member_id")
+  /// Blinded provider-observed iMessage email handle. This is routing identity, not verified email authorization.
+  linqEmailHandleLookupKey            String?      @unique @map("linq_email_handle_lookup_key")
+  linqEmailHandleEncrypted            String?      @map("linq_email_handle_encrypted")
   maskedPhoneNumberHint               String?      @map("masked_phone_number_hint")
   phoneLookupKey                      String?      @unique @map("phone_lookup_key")
   phoneNumberEncrypted                String?      @map("phone_number_encrypted")
@@ -2290,6 +2289,8 @@ model HostedLinqDeliveryMessage {
   deliveryId          String   @map("delivery_id")
   ordinal             Int
   messageLookupKey    String   @unique @map("message_lookup_key")
+  terminalRetryAttemptedAt DateTime? @map("terminal_retry_attempted_at")
+  terminalRetryOriginalMessageLookupKey String? @unique(map: "hosted_linq_delivery_message_terminal_retry_key") @map("terminal_retry_original_message_lookup_key")
   messageIdSuffix     String?  @map("message_id_suffix")
   status              String   @default("accepted")
   acceptedAt          DateTime @map("accepted_at")

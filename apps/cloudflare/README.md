@@ -46,14 +46,11 @@ Internal control routes:
   failed, or unavailable child abort keeps the existing fail-closed outer
   cancellation. Callback-signed Temporal/default work retains the cooperative
   wake-and-retry behavior.
-- `POST /internal/users/:userId/runtime/shell-prewarm` is the optional
-  Vercel OIDC-authenticated typing, direct-message-routing, or instant-start shell
-  hint. Its bounded source and UUID-shaped attempt id distinguish those
-  callers and correlate only diagnostic phase stamps; a legacy request without
-  correlation fields remains accepted but cannot enter an exact-id cohort. It
-  rechecks live admission and returns after the named
-  container registers an asynchronous start attempt; it does not wait for
-  readiness or create runtime authority.
+- `POST /internal/users/:userId/runtime/shell-prewarm` remains a Vercel
+  OIDC-authenticated compatibility receiver for older Web deployments. It
+  accepts the existing request contract but does not create a container or
+  member binding. Current Web no longer sends typing, routing, or instant-start
+  hints; the coordinator owns pristine global prewarming.
 - `POST /internal/users/:userId/browser-vault/session` creates an encrypted browser-vault read session for the latest web-owned replica ref
 - `GET /internal/users/:userId/status`
 - `GET /internal/temporal-worker/binding-admission` authenticates the existing
@@ -66,53 +63,48 @@ The supported worker HTTP surface stops at those narrow control routes, the
 binding-admission and deploy-smoke callbacks, and the public banner and health
 checks.
 
-### ENAM runner standby
+### Unified runner fleet and ready inventory
 
-The optional runner standby is internal Durable Object coordination, not a new
-HTTP route. `HOSTED_EXECUTION_STANDBY_MODE` has three strict values:
+All fresh member execution uses globally eligible `RunnerContainer` instances.
+Warm and cold allocations use the same opaque target identity and lifecycle.
+`HOSTED_EXECUTION_STANDBY_TARGET` selects the number of pristine ready slots:
+its default is `2`, and valid values are integers from `0` through `32`. This is
+one global inventory, not a separate target in every region.
 
-- `off` (the default) advertises no slot and retires any still-unclaimed slot.
-- `shadow` keeps one release-scoped ENAM slot ready but never gives it to real
-  processing.
-- `allocate` lets only a fence-free, authenticated Web-direct `default` request
-  claim that one ready slot, immediately starts a replacement in background
-  work, and falls back to the ordinary exact-user container when the claim does
-  not finish within 250 ms. Temporal requests and background modes do not claim
-  it. A trusted foreground replacement may claim it after clearing an
-  exact-user background fence so it does not reuse a child that is still
-  shutting down. In `allocate` mode the standby coordinator is the only
-  shell-prewarm owner: the exact-user prewarm hint is skipped so it cannot
-  reserve a competing stop target before the claim. An unsuccessful claim
-  still uses the ordinary exact-user fallback.
+`HOSTED_EXECUTION_STANDBY_MODE` controls inventory only:
 
-The public banner and health response report the canonical effective mode.
-Deployment smoke pins the newly deployed Worker version and requires its live
-mode to match the rendered config before the deploy workflow publishes that
-mode in its summary.
+- `off` (the default) retires coordinator-owned slots and advertises none.
+- `shadow` maintains and measures the configured inventory without allocating it.
+- `allocate` offers ready slots to authenticated foreground conversation work.
 
-A slot is ready only after its exact Worker release, bundle/source
-fingerprints, architecture, ENAM placement, heavy runtime hydration, pristine
-job counters, and a content-free Codex App Server initialize-and-stop probe all
-match. No member, workspace, provider credential, or canonical data enters the
-standby during this phase. Codex's reusable production App Server is still
-created only after claim and encrypted-workspace restore because its launch
-identity and home are member-specific.
+Only fence-free `default` work from validated Web-direct ingress or an
+authenticated request carrying `conversationWorkPending: true` may claim a slot.
+Temporal derives that fact from fresh admitted conversation lag. Background-only
+work reuses its own warm target or starts a cold target in the same fleet.
+A missed or unavailable claim falls back to that same cold allocation lifecycle.
+The coordinator fills a deficit in bounded parallel work; it owns only pristine
+inventory and abandoned handoff cleanup, not member execution or capacity leases.
+The public banner and health response expose the effective mode, and deployment
+smoke checks the newly deployed Worker version against the rendered mode.
 
-The coordinator receives no member id. `UserRunner` first persists the opaque
-slot as its exact stop target, then binds the slot once to that member and
-claim, opens the normal write fence, restores the workspace, and invokes the
-ordinary runner path. "Retained" means the standby-container owner validated
-the exact slot, release, and member and proved in the same bounded RPC that the
-native container is still warm; a durable `bound` row alone is not retention
-proof. A warm proof renews the handoff idle window and the same member may reuse
-the slot repeatedly. A stopped or prior-release slot instead follows the
-existing one-way retirement and scrub path. Only after retirement settles does
-`UserRunner` clear that exact stop target, allowing the same eligible trusted
-foreground request to try the ordinary fresh-claim path. Unknown liveness,
-foreign identity, contradictory release authority, or unsettled retirement
-keeps the exact target pending for retry and starts no second container. A
-claimed slot is never rebound or returned to the shared pool, and a group chat
-never owns it; allocation remains attached to the member's `UserRunner`.
+Readiness verifies the exact release, bundle/source fingerprints, architecture,
+heavy runtime hydration, pristine job counters, and a disposable content-free
+Codex initialization probe. Global eligibility imposes no ENAM health requirement.
+No member, workspace, or provider credential enters a slot before binding.
+The member-specific resident Codex process starts after encrypted-workspace restore.
+
+`UserRunner` persists the exact opaque target before binding it once to the
+member and handoff. It then owns the normal write fence and workspace execution.
+A durable binding alone is not reuse proof: the container must validate the exact
+identity and prove native warmth in the same bounded RPC. Unknown binding,
+foreign identity, or unsettled retirement keeps the target pending and starts
+no successor. Terminal retirement stops the native container and scrubs member
+identity. A used target never returns to inventory or changes members.
+
+Existing exact-user and ENAM standby targets retain their original namespace and
+identity for recovery. New allocations do not create either legacy target shape.
+Deployment uses one total fleet budget and an explicit temporary reservation for
+the legacy standby application; see [deployment migration](DEPLOY.md#unified-fleet-migration-and-rollback).
 
 Hosted assistant delivery recovery comes from the encrypted local runtime outbox state inside the workspace checkpoint plus web-owned hosted-runtime logs/status.
 The runner container sends runtime internal Worker requests to normal virtual hosts such as `results.worker`, `runner-control.worker`, and `web-control.worker`. Cloudflare Container outbound interception routes those requests back into Worker-owned handlers, using the runtime write-fence headers as authority. After a successful invocation, the container entrypoint clears the invocation's wake and abort pointers, decrements active work, and cleans request transport before it sends the exact result, attempt, and generation through `runner-control.worker` to the durable `UserRunner`. `UserRunner` applies the existing exact completion compare-and-swap, so an activation reset cannot strand a completed write fence and a successor cannot race a process that still reports busy. The ordinary outer result remains the normal completion path; the one-second best-effort receipt logs `recorded` or `not_recorded` and never changes that result. No recovery queue, alarm, poller, persisted promise, or second state owner is added.
@@ -563,7 +555,8 @@ murph-prod-psql-ro -f apps/cloudflare/scripts/cold-start-latency-report.sql
 ```
 
 Pass `-v window_hours=6` (or another integer) before `-f` to change the UTC
-window. The first result groups uniquely matched Web-direct Linq runtime
+window. Its prewarm cohorts describe historical hints from older deployments;
+current Web no longer produces them. The first result groups uniquely matched Web-direct Linq runtime
 attempts by a chronology-safe typing observation or an exact attempt-id-matched
 message-routing shell-prewarm observation consumed by their container readiness
 call. It shows causal-hint lead time plus
@@ -678,7 +671,7 @@ handlers. The runner does not run a separate post-request PID sweep over the
 native Codex App Server; warm lifecycle is owned by the existing Codex
 app-server slot and explicit runner cleanup paths.
 
-The shell-prewarm, direct cold-start, and deploy-smoke paths give each native
+The pristine-inventory, direct cold-start, and deploy-smoke paths give each native
 TCP readiness request a 1.5 second deadline and retry sequentially on the
 existing 250 ms interval. The overall readiness budget is unchanged. A probe
 timeout cannot publish `healthy`, call workspace code, or fail the container by
@@ -744,3 +737,27 @@ retry or result mutation.
 Deploy smoke pins the 100% Worker version, verifies the response-reported version metadata, and, when enabled by the workflow, runs a signed managed-container smoke that compares the live runner bundle/source fingerprints and public Murph release SHA with `.deploy/runner-bundle/.murph-runner-bundle-manifest.json`. The release SHA identifies the checked-out public base commit even when the protected private workflow composes its private runtime assets into that checkout; the source and bundle fingerprints identify the resulting composed artifact. A missing or malformed public release SHA is rejected. A Cloudflare version id or the private deployment-workflow commit is not release provenance. The same smoke can mint an actual R2 S3 presigned PUT URL, upload a payload larger than 150 MiB from the container, verify the object size through the Worker R2 binding, and delete the smoke object.
 
 See [DEPLOY.md](./DEPLOY.md) for the exact GitHub environment surface, lifecycle rules, and smoke workflow.
+
+### Astra model catalog
+
+The native runner image has a default Luna/Terra/Sol catalog and an expanded
+`.astra` catalog with `gpt-6-astra` and OpenAI Flex support. The runtime chooses
+the latter only from Web's explicit Max/OpenAI workspace authorization. Missing
+authority, Edge, group, and Venice runtimes retain the default catalog and its
+existing delegation choices. The
+pinned Linux Codex 0.151.0 catalog omits Astra, so the image adds a compatibility
+entry using Sol's shared Responses capabilities when Astra is absent. Murph
+supplies its own base instructions for each turn. Existing native Astra metadata
+is preserved; remove the compatibility branch when the Linux catalog includes it.
+The Astra context window remains at most 272,000 tokens, verified while building the
+image. This bound lets allowance accounting price cumulative Codex turn and
+subagent usage without mistaking multiple requests for one long-context request.
+Changing this bound requires request-level long-context metering first. Astra
+selection remains owned by the Web Max-plan eligibility check. Venice mappings
+remain limited to Luna, Terra, and Sol.
+
+## Workspace restore benchmark
+
+See [the restore benchmark](scripts/benchmark-workspace-restore.md) for a
+synthetic 50 MiB encrypted snapshot, real local HTTP transport, production
+restore timings, content verification, and a fixed-resource Linux command.

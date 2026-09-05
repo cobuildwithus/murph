@@ -101,7 +101,9 @@ import {
   type HostedWorkspaceInvocationRequest,
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
+import { buildHostedExecutionLayeredSnapshotRef } from "@murphai/hosted-execution/parsers";
 import { describe, expect, test, vi } from "vitest";
+import { writeHostedMailboxImportState } from "../src/hosted-runtime/mailbox-state.ts";
 import {
   createCoalescingRuntimeWakeSignal,
   HostedRuntimeCheckpointInterruptedByWakeError,
@@ -234,6 +236,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reports mailbox bud
           hostedMailboxSystemFirstPendingSeq: null,
           hostedMailboxSystemHandledThroughSeq: "0",
           hostedMailboxSystemImportedSeq: "0",
+          hostedMailboxSystemDeviceSyncContinuationSeqs: [],
         },
         status: "budget_exhausted",
       });
@@ -1114,6 +1117,115 @@ describe("hosted workspace runtime entrypoint", () => {test("reports mailbox bud
       await removeTempRoot(vaultRoot);
     }
   });
+
+  for (const processingMode of ["default", "system_mailbox"] as const) {
+    for (const projectionPresent of [false, true]) {
+      test(`idle ${processingMode} restore preserves future retained ownership (published=${projectionPresent})`, async () => {
+        const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+        const retryAt = "2026-04-28T00:00:00.000Z";
+        const events: string[] = [];
+        const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+        const item = createMailboxItem({
+          dedupeKey: "device-sync.wake:restored-owner",
+          id: "mailbox_item_restored_owner",
+          kind: "device-sync.wake",
+          lane: "system",
+          laneSeq: "4",
+        });
+        vi.useFakeTimers({ toFake: ["Date"] });
+        try {
+          vi.setSystemTime(new Date(TEST_NOW));
+          await initializeVault({ vaultRoot });
+          await writeHostedMailboxImportState({
+            state: { recentStatuses: [], watermarks: { conversation: "0", system: "4" } },
+            vaultRoot,
+          });
+          await enqueueDeviceSyncSystemMailboxItemForTest({ item, vaultRoot });
+          await updateHostedSystemMailboxState(vaultRoot, (state) => ({
+            pending: state.pending.map((pending) => ({
+              ...pending,
+              attemptCount: 1,
+              lastAttemptAt: TEST_NOW,
+              nextAttemptAt: retryAt,
+              wake: {
+                ...pending.wake,
+                kind: "device-sync.wake",
+                connectionId: "device_connection_synthetic",
+                expectedConnectedAt: "2026-04-01T00:00:00.000Z",
+                provider: "junction",
+                reason: "reconcile_due",
+                hint: { jobs: [{
+                  availableAt: retryAt,
+                  dedupeKey: "retained-job:restored-owner",
+                  kind: "resource",
+                  maxAttempts: 1,
+                  payload: {},
+                }] },
+              },
+            })),
+          }));
+          const baseBundle = await snapshotHostedBundleRoots({
+            kind: "vault", roots: [{ root: vaultRoot, rootKey: "vault" }],
+          });
+          assert.ok(baseBundle);
+          const hotSnapshot = await snapshotHostedAssistantRuntimeHotState({ vaultRoot });
+          const baseHash = sha256HostedBundleHex(baseBundle);
+          const hotHash = sha256HostedBundleHex(hotSnapshot.bundle);
+          const snapshotRef = buildHostedExecutionLayeredSnapshotRef({
+            base: createBundleRef({ hash: baseHash, key: "users/bundles/member-synthetic/owner-base.bundle.json", size: baseBundle.byteLength }),
+            hot: createBundleRef({ hash: hotHash, key: "users/bundles/member-synthetic/owner-hot.bundle.json", size: hotSnapshot.bundle.byteLength }),
+          });
+          const result = await runHostedWorkspaceRuntimeJobInProcess(
+            createWorkspaceRuntimeJobInput({ request: { idleCheckpointDelayMs: 1, processingMode } }),
+            {
+              async createCheckpointSnapshot() {
+                return { snapshotRef: createBundleRef({
+                  hash: "7".repeat(64),
+                  key: "users/bundles/member-synthetic/restored-owner.bundle.json",
+                  size: 512,
+                }) };
+              },
+              async importItem() { throw new Error("Restored owner must not reimport retired payload."); },
+              platform: createPlatform({
+                artifactBytesByHash: new Map([[baseHash, baseBundle], [hotHash, hotSnapshot.bundle]]),
+                mailboxPort: createMailboxPort({ events, items: [] }),
+                workspacePort: createWorkspacePort({
+                  checkpointRequests,
+                  events,
+                  workspace: createWorkspaceState({
+                    nextWakeAt: retryAt,
+                    nextWakeReason: "device-sync.reconcile",
+                    snapshotRef,
+                    redactedStatus: {
+                      hostedMailboxSystemImportedSeq: "4",
+                      hostedMailboxSystemHandledThroughSeq: "4",
+                      hostedMailboxSystemFirstPendingSeq: null,
+                      ...(projectionPresent ? { hostedMailboxSystemDeviceSyncContinuationSeqs: ["4"] } : {}),
+                    },
+                  }),
+                }),
+              }),
+              async runAssistantPhase() { return { progressed: false }; },
+              vaultRoot,
+            },
+          );
+          assert.equal(checkpointRequests.length, processingMode === "default" && projectionPresent ? 0 : 1);
+          if (checkpointRequests.length > 0) {
+            assert.deepEqual(checkpointRequests[0]?.redactedStatus?.hostedMailboxSystemDeviceSyncContinuationSeqs, ["4"]);
+            assert.equal(checkpointRequests[0]?.nextWakeAt, retryAt);
+          }
+          assert.equal(result.nextWakeAt, retryAt);
+          const pending = (await readHostedSystemMailboxState(vaultRoot)).pending;
+          assert.equal(pending.length, 1);
+          assert.equal(pending[0]?.nextAttemptAt, retryAt);
+          assert.equal(pending[0]?.attemptCount, 1);
+        } finally {
+          vi.useRealTimers();
+          await removeTempRoot(vaultRoot);
+        }
+      });
+    }
+  }
 
   test("idle checkpoint retains an earlier future device-sync mailbox wake over the assistant scalar", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));

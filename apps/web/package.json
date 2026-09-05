@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "vercel env run -- pnpm dev:local-env",
     "dev:local-env": "bash -c 'pnpm legal:pdf && pnpm changelog:generate && pnpm health-commons:generate && pnpm prisma:generate && pnpm --dir ../.. exec tsx apps/web/scripts/dev-local.ts \"$@\"' --",
-    "dev:prepared-local-env": "bash -c 'pnpm changelog:generate && pnpm --dir ../.. exec tsx apps/web/scripts/dev-local.ts \"$@\"' --",
+    "dev:prepared-local-env": "bash -c 'pnpm --dir ../.. exec tsx apps/web/scripts/dev-local.ts \"$@\"' --",
     "prebuild": "pnpm --dir ../../packages/runtime-state build",
     "build": "pnpm public-routes:waf-check && pnpm product-labels:env-check && pnpm hosted-crypto:env-check && pnpm legal:pdf && pnpm changelog:generate && pnpm health-commons:generate && pnpm prisma:generate:build && pnpm typecheck:prepared && bash scripts/run-production-next-build.sh && pnpm --dir ../.. workflow:clean-web-artifacts -- --quiet && pnpm health-commons:trace-check && pnpm og-assets:trace-check && pnpm og-assets:runtime-check",
     "changelog:generate": "pnpm --dir ../.. exec tsx apps/web/scripts/generate-changelog-fragments.ts",
@@ -39,7 +39,7 @@
     "typecheck:watch": "pnpm changelog:generate && pnpm health-commons:generate && pnpm prisma:generate && pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts apps/web && node ../../scripts/run-typescript.mjs watch -p tsconfig.json --pretty false --watch --tsBuildInfoFile typecheck.watch.tsbuildinfo",
     "test": "pnpm health-commons:generate && pnpm test:prepared",
     "test:prepared": "pnpm changelog:generate && pnpm --dir ../.. exec tsx apps/web/scripts/run-hosted-web-vitest.mts",
-    "test:viewport-overflow": "playwright test e2e/viewport-overflow.spec.ts e2e/group-sponsorship-management-alert-dialog.spec.ts",
+    "test:viewport-overflow": "pnpm legal:pdf && pnpm changelog:generate && pnpm health-commons:generate && pnpm prisma:generate && MURPH_PLAYWRIGHT_GENERATED_INPUTS_PREPARED=1 playwright test e2e/viewport-overflow.spec.ts e2e/group-sponsorship-management-alert-dialog.spec.ts",
     "prisma:generate": "prisma generate && pnpm --dir ../.. exec tsx apps/web/scripts/ensure-prisma-client-link.ts",
     "prisma:generate:build": "pnpm --dir ../.. exec tsx apps/web/scripts/prepare-prisma-client-for-build.ts",
     "prisma:validate": "prisma validate --config prisma.config.ts",
@@ -106,7 +106,9 @@
   },
   "devDependencies": {
     "@murphai/assistant-runtime": "workspace:*",
+    "@murphai/core": "workspace:*",
     "@murphai/hosted-local-harness": "workspace:*",
+    "@murphai/vault-usecases": "workspace:*",
     "@playwright/test": "^1.59.1",
     "@spectrum-ts/core": "12.8.0",
     "@spectrum-ts/imessage": "12.8.0",

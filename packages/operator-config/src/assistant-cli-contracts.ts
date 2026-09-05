@@ -3,6 +3,7 @@ import * as z from '@murphai/contracts/zod-runtime'
 import {
   assistantReasoningEffortValues as contractAssistantReasoningEffortValues,
   automationContextReferencesSchema,
+  automationFollowUpRequestSchema,
   automationRouteSchema,
   automationScheduleAtSchema,
   automationScheduleCronSchema,
@@ -991,6 +992,16 @@ const assistantPrivateCompletionContinuitySchema = z.discriminatedUnion(
       .strict(),
   ],
 )
+export const assistantInputCursorSchema = z
+  .object({
+    createdAt: isoTimestampSchema.nullable(),
+    inputId: z.string().min(1),
+    occurredAt: isoTimestampSchema,
+    sourceKind: z.enum(['inbox-capture', 'hosted-mailbox']),
+    sourcePosition: z.string().min(1).nullable().optional(),
+  })
+  .strict()
+
 export const assistantOutboxIntentSchema = z
   .object({
     schema: z.literal('murph.assistant-outbox-intent.v1'),
@@ -1026,6 +1037,8 @@ export const assistantOutboxIntentSchema = z
     nativeReplyRequested: z.literal(true).optional(),
     bindingDelivery: assistantBindingDeliverySchema.nullable(),
     deliverySource: assistantDeliverySourceSchema.nullable().default(null),
+    followUpRequest: automationFollowUpRequestSchema.optional(),
+    followUpEvaluatedThrough: assistantInputCursorSchema.nullable().optional(),
     automationAuthority: assistantOutboxAutomationAuthoritySchema
       .nullable()
       .optional(),
@@ -1880,15 +1893,7 @@ export const assistantStopResultSchema = z.object({
   message: z.string().min(1),
 })
 
-export const assistantInputCursorSchema = z
-  .object({
-    createdAt: isoTimestampSchema.nullable(),
-    inputId: z.string().min(1),
-    occurredAt: isoTimestampSchema,
-    sourceKind: z.enum(['inbox-capture', 'hosted-mailbox']),
-    sourcePosition: z.string().min(1).nullable().optional(),
-  })
-  .strict()
+
 
 export const assistantAutoReplyChannelStateSchema = z
   .object({

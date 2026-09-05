@@ -31,7 +31,7 @@ import {
   ensureAssistantState,
   appendTranscriptEntries,
   inspectAssistantSessionStorage,
-  loadAndPersistResolvedSession,
+  loadResolvedSession,
   readAssistantRecentSessionIds,
   readAssistantSession,
   readAssistantSessionRouting,
@@ -115,6 +115,25 @@ export async function runAssistantTranscriptContentRetention(input: {
 export async function resolveAssistantSession(
   input: ResolveAssistantSessionInput,
 ): Promise<ResolvedAssistantSession> {
+  return resolveAssistantSessionWithPersistence(input, true)
+}
+
+// Preflight observes the same candidate and routing validation as admission,
+// without committing speculative binding changes. The lock still protects
+// routing-projection recovery and corrupt-session quarantine during reads.
+export async function lookupAssistantSession(
+  input: Omit<ResolveAssistantSessionInput, 'createIfMissing'>,
+): Promise<ResolvedAssistantSession> {
+  return resolveAssistantSessionWithPersistence({
+    ...input,
+    createIfMissing: false,
+  }, false)
+}
+
+async function resolveAssistantSessionWithPersistence(
+  input: ResolveAssistantSessionInput,
+  persistBinding: boolean,
+): Promise<ResolvedAssistantSession> {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
     const requestedProviderOptions =
@@ -138,7 +157,8 @@ export async function resolveAssistantSession(
       resolveLegacyAssistantConversationLookupKeyEntries(input)
 
     if (sessionId) {
-      const resolved = await loadAndPersistResolvedSession({
+      const resolved = await loadResolvedSession({
+        persistBinding,
         paths,
         persistenceInput: {
           ...persistenceInput,
@@ -179,7 +199,8 @@ export async function resolveAssistantSession(
     if (manualAlias) {
       const sessionId = routing.aliasSessionId
       if (sessionId) {
-        const resolved = await loadAndPersistResolvedSession({
+        const resolved = await loadResolvedSession({
+          persistBinding,
           expectedAlias: manualAlias,
           paths,
           sessionId,
@@ -204,7 +225,8 @@ export async function resolveAssistantSession(
       const sessionId =
         routing.conversationKeySessionIds.get(conversationLookupEntry.key)
       if (sessionId) {
-        const resolved = await loadAndPersistResolvedSession({
+        const resolved = await loadResolvedSession({
+          persistBinding,
           expectedConversationKey: conversationLookupEntry.key,
           paths,
           sessionId,
@@ -250,7 +272,8 @@ export async function resolveAssistantSession(
         bindingPatch,
         session: legacySession,
       })) {
-        const resolved = await loadAndPersistResolvedSession({
+        const resolved = await loadResolvedSession({
+          persistBinding,
           expectedConversationKey: legacyLookupEntry.key,
           paths,
           sessionId,

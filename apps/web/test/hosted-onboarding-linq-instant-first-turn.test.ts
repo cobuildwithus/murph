@@ -1,5 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
-import { MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE } from "@murphai/contracts";
+import { MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE, MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS } from "@murphai/contracts";
 import type { Response as OpenAiResponse } from "openai/resources/responses/responses";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -16,6 +16,11 @@ const mocks = vi.hoisted(() => ({
   hasConflictingHostedLinqInstantFirstTurnForChatTx: vi.fn(),
   hostedMemberRoutingRecordsEqual: vi.fn(),
   hostedLinqDeliveryFindUnique: vi.fn(),
+  hostedLinqDeliveryFindMany: vi.fn(),
+  hostedMemberFindUnique: vi.fn(),
+  hostedThreadRouteFindMany: vi.fn(),
+  readHostedMailboxRecentLiveConversationItemIds: vi.fn(),
+  readHostedMailboxWakeByItemId: vi.fn(),
   hostedLinqDeliveryUpdate: vi.fn(),
   hostedLinqDeliveryUpdateMany: vi.fn(),
   hostedMailboxItemUpdateMany: vi.fn(),
@@ -27,9 +32,9 @@ const mocks = vi.hoisted(() => ({
   prepareHostedMailboxEnvelopeAppend: vi.fn(),
   projectHostedMemberRoutingState: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
+  readHostedRuntimeAiAccessDecision: vi.fn(),
   readHostedMemberRoutingRecord: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
-  readHostedThreadRouteByThreadIdentity: vi.fn(),
   recordHostedAiUsageRecords: vi.fn(),
   resolveHostedMemberDirectRoute: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
@@ -38,11 +43,6 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/src/lib/hosted-routing/linq-chat-ownership-lock", () => ({
   acquireHostedLinqChatOwnershipLockTx:
     mocks.acquireHostedLinqChatOwnershipLockTx,
-}));
-
-vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
-  readHostedThreadRouteByThreadIdentity:
-    mocks.readHostedThreadRouteByThreadIdentity,
 }));
 
 vi.mock("@/src/lib/hosted-routing/member-direct-route", () => ({
@@ -56,8 +56,10 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   readHostedMemberRoutingRecord: mocks.readHostedMemberRoutingRecord,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
+vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/hosted-onboarding/member-access")>(),
   readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
+  readHostedRuntimeAiAccessDecision: mocks.readHostedRuntimeAiAccessDecision,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -85,6 +87,8 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
     mocks.prepareHostedMailboxEnvelopeAppend,
   readHostedMailboxItemByDedupeKey:
     mocks.readHostedMailboxItemByDedupeKey,
+  readHostedMailboxRecentLiveConversationItemIds: mocks.readHostedMailboxRecentLiveConversationItemIds,
+  readHostedMailboxWakeByItemId: mocks.readHostedMailboxWakeByItemId,
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage", () => ({
@@ -121,8 +125,16 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-observability-identifiers", () => ({
+  createHostedLinqDeliverySourceRefLookupKey: (value: string) => `source:${value}`,
   createHostedLinqDeliveryIdempotencyLookupKey: (value: string) =>
     `lookup:${value}`,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/contact-privacy", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/hosted-onboarding/contact-privacy")>(),
+  createHostedExternalThreadIdentityLookupKeyReadCandidates: (input: { threadId: string }) => [`thread:${input.threadId}`],
+  createHostedLinqChatLookupKeyReadCandidates: (value: string) => [`chat:${value}`],
+  createHostedLinqMessageLookupKeyReadCandidates: (value: string) => [`message:${value}`],
 }));
 
 import {
@@ -156,8 +168,10 @@ const WAKE_HANDOFF = {
 
 function createPrisma(): PrismaClient {
   const transaction = {
+    hostedThreadRoute: { findMany: mocks.hostedThreadRouteFindMany },
     hostedLinqDelivery: {
       findUnique: mocks.hostedLinqDeliveryFindUnique,
+      findMany: mocks.hostedLinqDeliveryFindMany,
       update: mocks.hostedLinqDeliveryUpdate,
       updateMany: mocks.hostedLinqDeliveryUpdateMany,
     },
@@ -166,10 +180,13 @@ function createPrisma(): PrismaClient {
     },
   };
   const prisma = {
+    hostedThreadRoute: { findMany: mocks.hostedThreadRouteFindMany },
+    hostedMember: { findUnique: mocks.hostedMemberFindUnique },
     $transaction: vi.fn(async (operation: (tx: typeof transaction) => unknown) =>
       operation(transaction)),
     hostedLinqDelivery: {
       findUnique: mocks.hostedLinqDeliveryFindUnique,
+      findMany: mocks.hostedLinqDeliveryFindMany,
       updateMany: mocks.hostedLinqDeliveryUpdateMany,
     },
   };
@@ -180,7 +197,7 @@ function createPrisma(): PrismaClient {
 }
 
 function buildOpenAiResponse(input: {
-  kind: "answer" | "welcome";
+  kind: "answer" | "welcome" | "handoff";
   message: string;
 }): globalThis.Response {
   return new Response(JSON.stringify({
@@ -232,6 +249,16 @@ function buildUsageResponse(): OpenAiResponse {
 describe("hosted Linq instant first turn", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.hostedLinqDeliveryFindMany.mockResolvedValue([]);
+    mocks.hostedMemberFindUnique.mockResolvedValue({ assistantTone: "formal" });
+    mocks.readHostedMailboxRecentLiveConversationItemIds.mockResolvedValue(["mailbox_welcome"]);
+    mocks.readHostedMailboxWakeByItemId.mockResolvedValue({
+      eventId: "welcome_event", kind: "conversation.message", userId: WAKE_HANDOFF.userId,
+      message: { channel: "linq", linqMessage: {
+        chatId: "chat_123", messageId: "welcome_message", isFromMe: true, threadIsDirect: true,
+        parts: [{ type: "text", value: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE }],
+      } },
+    });
     mocks.environment.linqFirstContactAdmissionModel = "gpt-5.6-luna";
     mocks.environment.linqFirstContactAdmissionOpenAiApiKey = "test-openai-key";
     mocks.hasConflictingHostedLinqInstantFirstTurnForChatTx.mockResolvedValue(
@@ -255,10 +282,11 @@ describe("hosted Linq instant first turn", () => {
     mocks.hostedMailboxItemUpdateMany.mockResolvedValue({ count: 2 });
     mocks.projectHostedMemberRoutingState.mockResolvedValue({ route: "linq" });
     mocks.readActiveHostedMemberAccess.mockResolvedValue({ id: "access_123" });
+    mocks.readHostedRuntimeAiAccessDecision.mockResolvedValue({ allowed: true });
     mocks.readHostedMemberRoutingRecord.mockResolvedValue({
       memberId: WAKE_HANDOFF.userId,
     });
-    mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue(null);
+    mocks.hostedThreadRouteFindMany.mockResolvedValue([]);
     mocks.resolveHostedMemberDirectRoute.mockReturnValue({
       channel: "linq",
       threadId: "chat_123",
@@ -292,14 +320,197 @@ describe("hosted Linq instant first turn", () => {
     });
   });
 
+  function prepareContinuation() {
+    mocks.hostedLinqDeliveryFindMany.mockResolvedValue([
+      { acceptedAt: new Date("2026-09-01T12:00:00Z"), messageLookupKey: "message:welcome_message" },
+    ]);
+  }
+
+  it("admits a second opening reply for an ordinary private chat without a thread container", async () => {
+    prepareContinuation();
+    const prisma = createPrisma();
+    const request = { ...REQUEST, text: "Yes, ready." };
+    const claim = await claimHostedLinqInstantFirstTurn({
+      continuationMemberId: WAKE_HANDOFF.userId,
+      linqChatId: "chat_123",
+      prisma,
+      request,
+    });
+    expect(claim).toEqual({ kind: "generate", openingTone: "formal" });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(buildOpenAiResponse({
+      kind: "answer", message: "Ignored model wording",
+    })));
+    const generation = await startHostedLinqInstantFirstTurnGeneration({ claim, request });
+    await expect(completeHostedLinqInstantFirstTurn({
+      generation,
+      inboundMessageId: "inbound_message",
+      participantContact: { kind: "phone", lookupKey: "phone_lookup", value: "+15555550199" },
+      prisma,
+      recipientPhoneNumber: "+15555550199",
+      service: "imessage",
+      wakeHandoff: WAKE_HANDOFF,
+    })).resolves.toMatchObject({ kind: "accepted" });
+    expect(mocks.hostedThreadRouteFindMany).toHaveBeenCalledTimes(3);
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      chatId: "chat_123",
+      message: MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.formal,
+    }));
+    expect(mocks.appendPreparedHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
+    expect(mocks.prepareHostedMailboxEnvelopeAppend).toHaveBeenCalledWith(expect.objectContaining({
+      envelope: expect.objectContaining({
+        userId: WAKE_HANDOFF.userId,
+        message: expect.objectContaining({
+          linqMessage: expect.objectContaining({
+            chatId: "chat_123",
+            parts: [{ type: "text", value: MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.formal }],
+          }),
+        }),
+      }),
+    }));
+  });
+
+  it("leaves an unresolved direct member to the runtime without claiming a first reply", async () => {
+    await expect(claimHostedLinqInstantFirstTurn({
+      continuationMemberId: null,
+      linqChatId: "chat_123", prisma: createPrisma(), request: REQUEST,
+    })).resolves.toEqual({ kind: "unavailable" });
+    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+  });
+
+  it.each(["health_data_consent_withdrawn", "hosted_access_inactive"])("does not start a continuation model call when %s", async (reason) => {
+    prepareContinuation();
+    mocks.readHostedRuntimeAiAccessDecision.mockResolvedValue({ allowed: false, reason });
+    const claim = await claimHostedLinqInstantFirstTurn({
+      continuationMemberId: WAKE_HANDOFF.userId,
+      linqChatId: "chat_123", prisma: createPrisma(), request: REQUEST,
+    });
+    expect(claim).toEqual({ kind: "unavailable" });
+    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+    expect(mocks.readHostedMailboxWakeByItemId).not.toHaveBeenCalled();
+  });
+
+  it("uses the prior confirmed welcome for one second reply and the existing ledger for the cap", async () => {
+    prepareContinuation();
+    const claim = await claimHostedLinqInstantFirstTurn({
+      continuationMemberId: WAKE_HANDOFF.userId, linqChatId: "chat_123", prisma: createPrisma(), request: { ...REQUEST, text: "yes" },
+    });
+    expect(claim).toEqual({ kind: "generate", openingTone: "formal" });
+    expect(mocks.hostedLinqDeliveryFindMany).toHaveBeenCalledWith(expect.objectContaining({ take: 2 }));
+    mocks.hostedLinqDeliveryFindMany.mockResolvedValue([
+      { acceptedAt: new Date(), messageLookupKey: "message:welcome_message" },
+      { acceptedAt: new Date(), messageLookupKey: "message:identity_message" },
+    ]);
+    await expect(claimHostedLinqInstantFirstTurn({
+      continuationMemberId: WAKE_HANDOFF.userId, linqChatId: "chat_123", prisma: createPrisma(), request: REQUEST,
+    })).resolves.toEqual({ kind: "unavailable" });
+    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledOnce();
+  });
+
+  it("recovers the exact accepted second reply after later messages without regenerating", async () => {
+    prepareContinuation();
+    mocks.hostedLinqDeliveryFindUnique.mockResolvedValue({
+      template: "instant_first_turn_v1", linqChatLookupKey: "chat:chat_123",
+      acceptedAt: new Date(), payloadCiphertext: null,
+    });
+    mocks.readHostedMailboxWakeByItemId.mockResolvedValue(null);
+    mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValue({ claimed: false, outcome: "completed" });
+    const claim = await claimHostedLinqInstantFirstTurn({
+      continuationMemberId: WAKE_HANDOFF.userId, linqChatId: "chat_123", prisma: createPrisma(), request: REQUEST,
+    });
+    expect(claim.kind).toBe("completed");
+    expect(mocks.readHostedMailboxWakeByItemId).not.toHaveBeenCalled();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await startHostedLinqInstantFirstTurnGeneration({ claim, request: REQUEST });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rechecks the two-reply cap under the existing chat lock", async () => {
+    prepareContinuation();
+    mocks.hostedLinqDeliveryFindMany.mockResolvedValueOnce([
+      { acceptedAt: new Date(), messageLookupKey: "message:welcome_message" },
+    ]).mockResolvedValueOnce([
+      { acceptedAt: new Date(), messageLookupKey: "message:welcome_message" },
+      { acceptedAt: null, messageLookupKey: null },
+    ]);
+    await expect(claimHostedLinqInstantFirstTurn({
+      continuationMemberId: WAKE_HANDOFF.userId, linqChatId: "chat_123", prisma: createPrisma(), request: REQUEST,
+    })).resolves.toEqual({ kind: "unavailable" });
+    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("rejects a group route at continuation admission, including a concurrent conversion %s", async (concurrent) => {
+    prepareContinuation();
+    if (concurrent) mocks.hostedThreadRouteFindMany.mockResolvedValueOnce([]);
+    mocks.hostedThreadRouteFindMany.mockResolvedValue([{
+      channel: "linq", containerMemberId: "group_container",
+      container: { member: { id: "group_container" }, owner: { id: "group_owner" } },
+    }]);
+    await expect(claimHostedLinqInstantFirstTurn({
+      continuationMemberId: WAKE_HANDOFF.userId, linqChatId: "chat_123", prisma: createPrisma(), request: REQUEST,
+    })).resolves.toEqual({ kind: "unavailable" });
+    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+  });
+
+  it("leaves returning, missing-history, and non-welcome conversations to the runtime", async () => {
+    prepareContinuation();
+    mocks.readHostedMailboxWakeByItemId.mockResolvedValue(null);
+    await expect(claimHostedLinqInstantFirstTurn({
+      continuationMemberId: WAKE_HANDOFF.userId, linqChatId: "chat_123", prisma: createPrisma(), request: REQUEST,
+    })).resolves.toEqual({ kind: "unavailable" });
+    mocks.readHostedMailboxWakeByItemId.mockResolvedValue({
+      eventId: "earlier_inbound", kind: "conversation.message", userId: WAKE_HANDOFF.userId,
+      message: { channel: "linq", linqMessage: { isFromMe: false } },
+    });
+    await expect(claimHostedLinqInstantFirstTurn({
+      continuationMemberId: WAKE_HANDOFF.userId, linqChatId: "chat_123", prisma: createPrisma(), request: REQUEST,
+    })).resolves.toEqual({ kind: "unavailable" });
+    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+  });
+
+  it.each(["casual", "formal"] as const)("renders the canonical %s identity question on acceptance", async (openingTone) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(buildOpenAiResponse({
+      kind: "answer", message: "Ignored model wording",
+    })));
+    await expect(startHostedLinqInstantFirstTurnGeneration({
+      claim: { kind: "generate", openingTone }, request: { ...REQUEST, text: "yes" },
+    })).resolves.toMatchObject({
+      kind: "reply", message: MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS[openingTone],
+    });
+  });
+
+  it.each(["Call me Robin", "I would rather skip setup", "Can you help with a symptom first?"])("hands off %s from an ordinary private chat and accounts for the Luna call", async (text) => {
+    prepareContinuation();
+    const request = { ...REQUEST, text };
+    const claim = await claimHostedLinqInstantFirstTurn({
+      continuationMemberId: WAKE_HANDOFF.userId,
+      linqChatId: "chat_123", prisma: createPrisma(), request,
+    });
+    expect(claim).toEqual({ kind: "generate", openingTone: "formal" });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(buildOpenAiResponse({ kind: "handoff", message: "" })));
+    const generation = await startHostedLinqInstantFirstTurnGeneration({
+      claim, request,
+    });
+    expect(generation.kind).toBe("unavailable");
+    await expect(completeHostedLinqInstantFirstTurn({
+      generation, inboundMessageId: "inbound_message", participantContact: { kind: "phone", lookupKey: "phone_lookup", value: "+15555550199" },
+      prisma: createPrisma(), recipientPhoneNumber: "+15555550199", service: "imessage", wakeHandoff: WAKE_HANDOFF,
+    })).resolves.toEqual({ kind: "fallback" });
+    expect(mocks.recordHostedAiUsageRecords).toHaveBeenCalledOnce();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
   it("limits the web path to a direct, plain-text-only iMessage", () => {
     expect(isHostedLinqInstantFirstTurnRequestEligible(REQUEST)).toBe(true);
+    expect(isHostedLinqInstantFirstTurnRequestEligible({
+      ...REQUEST,
+      participantContactKind: "email",
+    })).toBe(true);
     for (const request of [
       { ...REQUEST, partTypes: ["text", "text"] },
       { ...REQUEST, partTypes: ["text", "image"] },
       { ...REQUEST, partTypes: ["image"] },
       { ...REQUEST, service: "sms" as const },
-      { ...REQUEST, participantContactKind: "email" as const },
       { ...REQUEST, text: "   " },
       { ...REQUEST, textWasTruncated: true },
     ]) {

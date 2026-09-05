@@ -1396,7 +1396,9 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
       phoneNumberLookupKey: createHostedPhoneLookupKey("+15550000000"),
     };
-    prisma.hostedLinqDelivery.findMany.mockResolvedValueOnce([outreach]);
+    prisma.hostedLinqDelivery.findMany.mockImplementation(async (query: {
+      where?: { template?: string };
+    }) => query.where?.template === "group_join_outreach" ? [outreach] : []);
     prisma.hostedGroupJoinOutreach.findFirst.mockResolvedValue({
       offer: outreach.groupJoinOutreach.offer,
     });
@@ -1469,7 +1471,9 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
       phoneNumberLookupKey: createHostedPhoneLookupKey("+15550000000"),
     };
-    prisma.hostedLinqDelivery.findMany.mockResolvedValueOnce([outreach]);
+    prisma.hostedLinqDelivery.findMany.mockImplementation(async (query: {
+      where?: { template?: string };
+    }) => query.where?.template === "group_join_outreach" ? [outreach] : []);
     prisma.hostedGroupMember.findUnique.mockResolvedValueOnce({
       id: "hgrpm_web_joined",
     });
@@ -2269,6 +2273,7 @@ function createPrismaStub() {
       }),
     },
     hostedMemberIdentity: {
+      findMany: vi.fn().mockResolvedValue([]),
       findUnique: vi.fn().mockResolvedValue(null),
     },
     hostedMemberRouting: {

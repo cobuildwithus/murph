@@ -48,12 +48,12 @@ function canonicalShape(schema: JsonSchemaObject): {
       throw new TypeError('Expected an action literal.')
     }
     actions.push(action)
-    allowedByAction.set(action, Object.keys(branchProperties))
+    allowedByAction.set(action, Object.keys(branchProperties).sort())
     requiredByAction.set(action, asStringArray(branch.required))
   }
   return {
     actions,
-    properties: [...properties],
+    properties: [...properties].sort(),
     allowedByAction,
     requiredByAction,
   }
@@ -76,12 +76,12 @@ function modelShape(schema: JsonSchemaObject): {
     if (typeof action !== 'string') {
       throw new TypeError('Expected an action literal.')
     }
-    allowedByAction.set(action, Object.keys(branchProperties))
+    allowedByAction.set(action, Object.keys(branchProperties).sort())
     requiredByAction.set(action, asStringArray(branch.required))
   }
   return {
     actions,
-    properties: Object.keys(properties),
+    properties: Object.keys(properties).sort(),
     allowedByAction,
     requiredByAction,
   }
