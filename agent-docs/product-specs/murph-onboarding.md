@@ -142,7 +142,9 @@ privacy, authorization, or provider boundaries.
 - For eligible new direct text-only iMessage conversations, the existing Web
   Luna path may send at most two replies: the welcome and the bundled identity
   question. The second requires the immediately preceding confirmed canonical
-  welcome and exactly one earlier opening delivery. Existing delivery rows
+  welcome and exactly one earlier opening delivery. Resolve its member through
+  the existing direct identity/home-chat lookup; a thread-container route
+  excludes this private-chat path. Existing delivery rows
   enforce the cap under the chat lock; there is no stage counter. Supplied
   identity, a skip, or a concrete request goes directly to the normal runtime.
   Existing encrypted conversation import carries both sides and suppresses

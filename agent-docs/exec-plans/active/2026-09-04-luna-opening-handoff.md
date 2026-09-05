@@ -88,6 +88,21 @@ review completed for the opening behavior.
 
 ## Remaining PR gates
 
+- Continuation resumption found and reproduced an admission error: the second
+  Web reply expected a self-owned thread-container route, while personal chats
+  have no thread route. The correction supplies the existing direct-member
+  resolution and preserves group vetoes, delivery cap, and final egress checks.
+  The regression uses the real route reader with empty thread-route rows and
+  exercises claim, generation, send, and outgoing mailbox append.
+  All 280 focused continuation, dispatch, direct-member target, and mailbox
+  preparation tests pass. Web typecheck, workspace boundaries, complexity,
+  and diff checks pass. Existing live prompt evidence is unchanged.
+- The original ReviewGPT response identified that error, but its capture failed
+  model validation because the configured current-Pro alias disagreed with
+  response metadata. Recovered exact-turn output is diagnostic evidence, not a
+  passing final gate. Preserve the original reviewed-head lineage when sending
+  the corrected full snapshot with a supported explicit Pro target.
+
 - Push the scoped candidate, update PR evidence, and run the required
   cross-cutting ReviewGPT/CI gates. PR remains draft; no merge is authorized.
 - Full deployed opening-sequence timing with actual provider delivery remains

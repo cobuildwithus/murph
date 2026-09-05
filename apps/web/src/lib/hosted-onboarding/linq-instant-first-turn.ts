@@ -272,7 +272,7 @@ If they supply identity details, skip or decline setup, raise a concrete request
 }
 
 export async function claimHostedLinqInstantFirstTurn(input: {
-  continuationOnly?: boolean;
+  continuationMemberId?: string | null;
   linqChatId: string;
   prisma?: PrismaClient;
   request: HostedLinqFirstContactAdmissionRequest;
@@ -289,15 +289,15 @@ export async function claimHostedLinqInstantFirstTurn(input: {
     prisma,
     threadId: input.linqChatId,
   });
-  if (!route && input.continuationOnly) return { kind: "unavailable" };
-  const openingTone = route && route.owner.id === route.containerMemberId
+  if (route) return { kind: "unavailable" };
+  const openingTone = input.continuationMemberId
     ? await readHostedLinqOpeningContinuationTone({
         ...input,
-        memberId: route.containerMemberId,
+        memberId: input.continuationMemberId,
         prisma,
       })
     : undefined;
-  if (route && !openingTone) {
+  if (input.continuationMemberId !== undefined && !openingTone) {
     return { kind: "unavailable" };
   }
   try {
@@ -311,10 +311,7 @@ export async function claimHostedLinqInstantFirstTurn(input: {
         prisma: tx,
         threadId: input.linqChatId,
       });
-      if (
-        currentRoute?.containerMemberId !== route?.containerMemberId
-        || currentRoute?.owner.id !== route?.owner.id
-      ) {
+      if (currentRoute) {
         return { kind: "unavailable" } as const;
       }
       // The same chat lock serializes the second claim with another inbound.

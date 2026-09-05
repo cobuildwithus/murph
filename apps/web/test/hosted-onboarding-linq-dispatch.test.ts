@@ -2144,6 +2144,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     const supportedLongText = continuation ? "Yes, ready." : `${"Context ".repeat(290)}Final question?`;
     if (continuation) {
       mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
+      mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValueOnce("member_123");
       mocks.claimHostedLinqInstantFirstTurn.mockImplementationOnce(async () => {
         expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
         return { kind: "generate", openingTone: "formal" };
@@ -2234,7 +2235,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(outboxCall?.envelope.message).not.toHaveProperty("routeAuthority");
     if (continuation) {
       expect(mocks.claimHostedLinqInstantFirstTurn).toHaveBeenCalledExactlyOnceWith({
-        continuationOnly: true,
+        continuationMemberId: "member_123",
         linqChatId: "chat_123",
         prisma,
         request: expect.objectContaining({ text: "Yes, ready." }),

@@ -664,7 +664,12 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           participantContact: context.participantContact,
         });
         const claim = await claimHostedLinqInstantFirstTurn({
-          ...(continuationOnly ? { continuationOnly } : {}),
+          ...(continuationOnly ? {
+            continuationMemberId: await resolveHostedLinqDirectPreparationMemberId({
+              event: planningEvent,
+              prisma,
+            }),
+          } : {}),
           linqChatId: context.summary.chatId,
           prisma,
           request,
