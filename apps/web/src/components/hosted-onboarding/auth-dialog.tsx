@@ -20,14 +20,6 @@ type HostedAuthPanelModule = typeof import(
   "@/src/components/hosted-onboarding/hosted-auth-panel-island"
 );
 
-type WindowWithIdleCallback = typeof window & {
-  cancelIdleCallback?: (handle: number) => void;
-  requestIdleCallback?: (
-    callback: () => void,
-    options?: { timeout?: number },
-  ) => number;
-};
-
 let hostedAuthPanelModule: HostedAuthPanelModule | null = null;
 let hostedAuthPanelLoadPromise: Promise<HostedAuthPanelModule> | null = null;
 
@@ -132,38 +124,6 @@ export function preloadHostedAuthPanelIsland() {
   }
 
   void loadHostedAuthPanelModule().catch(() => {});
-}
-
-export function useHostedAuthPanelIslandIdlePreload(enabled: boolean) {
-  useEffect(() => {
-    if (!enabled || typeof window === "undefined" || hostedAuthPanelModule) {
-      return;
-    }
-
-    let cancelled = false;
-    const preload = () => {
-      if (!cancelled) {
-        preloadHostedAuthPanelIsland();
-      }
-    };
-    const idleWindow = window as WindowWithIdleCallback;
-
-    if (idleWindow.requestIdleCallback) {
-      const handle = idleWindow.requestIdleCallback(preload, { timeout: 2500 });
-
-      return () => {
-        cancelled = true;
-        idleWindow.cancelIdleCallback?.(handle);
-      };
-    }
-
-    const handle = window.setTimeout(preload, 1200);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(handle);
-    };
-  }, [enabled]);
 }
 
 export function AuthDialog({

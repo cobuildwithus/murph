@@ -631,6 +631,23 @@ export async function runHostedLocalE2eSuite(
         await runAdmittedStep(async () => {
           await prepareHostedLocalRunnerBundle({ env: suiteEnv, scenarios });
         });
+      } else {
+        await runAdmittedStep(async () => {
+          await runForegroundCommand({
+            args: [
+              `--workspace-concurrency=${suiteEnv.MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY ?? "1"}`,
+              "--fail-if-no-match",
+              "--filter-prod",
+              "@murphai/cloudflare-runner^...",
+              "run",
+              "build",
+            ],
+            command: "pnpm",
+            cwd: hostedLocalHarnessRepoRoot,
+            env: suiteEnv,
+            label: "Hosted local Worker workspace preparation",
+          });
+        });
       }
       assertWorkAdmission();
       prepareHostedLocalRunnerSmokeEnv(suiteEnv);

@@ -1678,6 +1678,7 @@ describe("buildWranglerLocalDevConfig", () => {
     expect(config.compatibility_flags).toEqual([
       "nodejs_compat",
       "containers_pid_namespace",
+      "enable_request_signal",
     ]);
     for (const entry of containers) {
       expect(entry.ssh).toEqual({ enabled: false });
