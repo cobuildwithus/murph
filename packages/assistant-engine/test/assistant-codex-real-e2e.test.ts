@@ -25982,11 +25982,12 @@ describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
     try {
       const result = await runRealNutritionCardAuthorityScenario({ config, conditionRecovery: 'none', goalScenario, realVault: true })
       process.stdout.write(`[nutrition-context-e2e] ${JSON.stringify({ scenario: goalScenario, reply: result.finalMessage, card: result.card ? renderAssistantResponseCardText(result.card) : null })}\n`)
-      expect(result.commands.filter((command) => command.startsWith('meal totals '))).toEqual([
-        'meal totals --from 2026-07-30 --to 2026-07-30 --resolve-goals --format json',
+      const commands = expandRecordedVaultCommands(result.commands)
+      expect(commands.filter((command) => command.startsWith('meal totals '))).toEqual([
+        'meal totals --from 2026-07-30 --to 2026-07-30 --resolve-goals',
       ])
-      expect(result.commands.filter((command) => command.startsWith('goal '))).toEqual([])
-      expect(readNutritionGoalMutationCommands(result.commands)).toEqual([])
+      expect(commands.filter((command) => command.startsWith('goal '))).toEqual([])
+      expect(readNutritionGoalMutationCommands(commands)).toEqual([])
       expect(result.progressUpdates).toEqual([])
       expect(result.attachCallCount).toBe(cardExpected ? 1 : 0)
       if (cardExpected) {
@@ -28062,11 +28063,14 @@ describe('recorded vault command parsing', () => {
     expect(expandRecordedVaultCommands([
       '--format json meal edit meal_example --nutrition-source inherited',
       '--format json batch --compact --command ["memory","show","--compact","--format","json"] --command ["meal","show","meal_example"] --command ["meal","edit","meal_example","--nutrition-source-detail","copied [verified]"]',
+      'batch --compact --format json --command ["memory","show","--compact","--format","json"] --command ["meal","totals","--from","2030-01-15","--to","2030-01-15","--resolve-goals","--format","json"]',
     ])).toEqual([
       'meal edit meal_example --nutrition-source inherited',
       'memory show --compact',
       'meal show meal_example',
       'meal edit meal_example --nutrition-source-detail copied [verified]',
+      'memory show --compact',
+      'meal totals --from 2030-01-15 --to 2030-01-15 --resolve-goals',
     ])
   })
 })
@@ -28510,7 +28514,7 @@ async function runRealNutritionCardAuthorityScenario(input: {
         onboardingGuidance: false,
         ordinaryInboundTurn: true,
         turnTrigger: 'automation-auto-reply',
-      }),
+      }) + '\n\nLocal fixture transport: For exec_command and write_stdin, print the complete returned object with text(result), never only result.output. Preserve session_id and continue that session until exit_code is present; never restart a command whose session is still running.',
       dynamicTools: [
         MURPH_ATTACH_RESPONSE_CARD_TOOL,
         MURPH_SEND_PROGRESS_UPDATE_TOOL,

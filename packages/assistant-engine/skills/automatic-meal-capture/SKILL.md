@@ -297,7 +297,7 @@ scheduled-question exception; its answer uses the existing-meal recovery above.
    or this responsible first-run proposal candidate remains, apply the concise
    known-context numeric-suitability rule in the
    `murph.attach_response_card` prompt before deriving or presenting numeric
-   values, any Goal write, totals, or a card. Do not run a universal medical
+   values, any Goal write, or a card. Do not run a universal medical
    history or measurement checklist. When known context suppresses numeric
    output or suitability remains unresolved, keep the ordinary compact closeout,
    perform no Goal or measurement mutation, ask no question, and attach no card.
