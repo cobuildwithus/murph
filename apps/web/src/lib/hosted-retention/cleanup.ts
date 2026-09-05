@@ -498,27 +498,30 @@ export async function retireExpiredMailboxContent(input: {
         SELECT
           conversation_users."user_id",
           COALESCE(
-            MIN(blocker."lane_seq") - 1,
+            blocker."lane_seq" - 1,
             counter."next_seq" - 1
           ) AS "lane_seq"
         FROM conversation_users
         JOIN "hosted_mailbox_lane_counter" AS counter
           ON counter."user_id" = conversation_users."user_id"
           AND counter."lane" = 'conversation'
-        LEFT JOIN "hosted_mailbox_item" AS blocker
-          ON blocker."user_id" = conversation_users."user_id"
-          AND blocker."lane" = 'conversation'
-          AND blocker."consumed_at" IS NULL
-          AND NOT EXISTS (
-            SELECT 1
-            FROM retired AS policy_non_reply
-            WHERE policy_non_reply."id" = blocker."id"
-              AND policy_non_reply."retention_disposition"
-                = 'policy_non_reply.content_expired'
-          )
-        GROUP BY
-          conversation_users."user_id",
-          counter."next_seq"
+        LEFT JOIN LATERAL (
+          SELECT blocker."lane_seq"
+          FROM "hosted_mailbox_item" AS blocker
+          WHERE blocker."user_id" = conversation_users."user_id"
+            AND blocker."lane" = 'conversation'
+            AND blocker."lane_seq" > counter."consumed_seq"
+            AND blocker."consumed_at" IS NULL
+            AND NOT EXISTS (
+              SELECT 1
+              FROM retired AS policy_non_reply
+              WHERE policy_non_reply."id" = blocker."id"
+                AND policy_non_reply."retention_disposition"
+                  = 'policy_non_reply.content_expired'
+            )
+          ORDER BY blocker."lane_seq" ASC
+          LIMIT 1
+        ) AS blocker ON TRUE
       ),
       advanced AS (
         UPDATE "hosted_mailbox_lane_counter" AS counter
