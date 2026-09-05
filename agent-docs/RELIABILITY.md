@@ -2125,8 +2125,14 @@ Last verified: 2026-09-04
   an active purchase and map a different target to status/cancel-only recovery.
   The server projects a departed Family beneficiary as status/cancel-only and
   does not decrypt or serialize its Checkout URL, including when membership
-  changes while a Stripe request is in flight. Family admission and terminal
-  reservation release acquire the owner member before a distinct beneficiary,
+  changes while a Stripe request is in flight. Stripe Checkout expiry chooses
+  the frozen Family owner at its outer transaction boundary before locking a
+  distinct beneficiary, then revalidates purchase ownership and reconciliation
+  version under those locks. Choosing owner-first only inside a nested release
+  helper cannot reorder a beneficiary lock already acquired by its caller.
+  Detached-payer replay and financial events retain beneficiary ownership.
+  Family admission and terminal reservation release acquire the owner member
+  before a distinct beneficiary,
   matching subscription reconciliation's owner-then-roster order; the separate
   hosted-group sponsorship ledger keeps beneficiary-first ordering.
 - Usage-credit fulfillment reuses the Stripe event receipt as its retry owner.

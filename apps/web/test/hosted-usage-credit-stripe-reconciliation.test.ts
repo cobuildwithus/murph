@@ -143,6 +143,7 @@ type MutableUsageCreditPurchase = ReturnType<typeof makeUsageCreditPurchase>;
 type UsageCreditStripeLookupFilter = string | { in: string[] };
 
 type UsageCreditStripePrismaHarnessClient = {
+  $queryRaw: () => Promise<unknown[]>;
   $transaction: <T>(
     callback: (tx: UsageCreditStripePrismaHarnessClient) => Promise<T>,
   ) => Promise<T>;
@@ -815,6 +816,31 @@ describe("hosted usage-credit Stripe reconciliation", () => {
       harness.client.hostedUsageCreditPurchase.updateMany,
     );
     expect(updateMany).toHaveBeenCalledOnce();
+    expect(mocks.grantUsageCredit).not.toHaveBeenCalled();
+  });
+
+  it("retries when Family payer detachment changes the prepared lock owner", async () => {
+    const successUrl = "https://murph.example/settings?usageFamily=return&usageMember=member_beneficiary";
+    const harness = createUsageCreditStripePrismaHarness({
+      checkoutSuccessUrl: successUrl,
+    }, {
+      beforeTransaction: () => {
+        harness.purchase.payerMemberId = null;
+      },
+    });
+    mocks.stripe.checkout.sessions.retrieve.mockResolvedValue({
+      ...makeCheckoutSession({
+        paymentIntentId: null, paymentStatus: "unpaid", status: "expired",
+      }),
+      success_url: successUrl,
+    });
+
+    await expect(reconcileHostedUsageCreditStripeEvent({
+      event: makeCheckoutEvent("checkout.session.expired"),
+      prisma: harness.client,
+    })).rejects.toSatisfy(isHostedUsageCreditStripeRetryableError);
+    expect(harness.client.hostedUsageCreditPurchase.updateMany).not.toHaveBeenCalled();
+    expect(mocks.lockPurchaseReservationOwners).not.toHaveBeenCalled();
     expect(mocks.grantUsageCredit).not.toHaveBeenCalled();
   });
 
@@ -1903,6 +1929,7 @@ function createUsageCreditStripePrismaHarness(
   const purchaseExists = options?.purchaseExists ?? true;
   let transactionCall = 0;
   const client: UsageCreditStripePrismaHarnessClient = {
+    $queryRaw: vi.fn(async () => []),
     $transaction: vi.fn(async (callback) => {
       transactionCall += 1;
       await options?.beforeTransaction?.(transactionCall);

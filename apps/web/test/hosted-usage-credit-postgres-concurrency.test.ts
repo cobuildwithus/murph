@@ -13,6 +13,12 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 
 const usageCreditFinancialStripeMocks = vi.hoisted(() => ({
   stripe: {
+    checkout: {
+      sessions: {
+        retrieve: vi.fn(),
+        listLineItems: vi.fn(),
+      },
+    },
     charges: {
       retrieve: vi.fn(),
     },
@@ -83,6 +89,7 @@ import {
   createHostedPhoneLookupKey,
   createHostedStripeBillingEventLookupKey,
   createHostedStripeCustomerLookupKey,
+  createHostedStripeCheckoutSessionLookupKey,
   createHostedStripePriceLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
@@ -91,10 +98,13 @@ import {
 import {
   upsertHostedMemberHomeLinqBindingTx,
 } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
-import { assertHostedUsageCreditPurchasesReadyForAccountDeletionTx } from "@/src/lib/hosted-onboarding/usage-credit-purchase-account-deletion";
+import { assertHostedUsageCreditPurchasesReadyForAccountDeletionTx, closeHostedUsageCreditPurchasesForAccountDeletion } from "@/src/lib/hosted-onboarding/usage-credit-purchase-account-deletion";
 import {
   lockHostedUsageCreditPurchaseReservationOwnersTx,
 } from "@/src/lib/hosted-onboarding/usage-credit-purchase-reservation-lock";
+import { requireHostedUsageCreditLookupKey } from "@/src/lib/hosted-onboarding/usage-credit-purchase-stripe";
+import { expireHostedUsageCreditCheckout } from "@/src/lib/hosted-onboarding/usage-credit-purchase-status-service";
+import { persistHostedAccountDeletionCleanupTx } from "@/src/lib/hosted-privacy/account-deletion-cleanup";
 import { bindHostedUsageCreditStripeReferencesTx } from "@/src/lib/hosted-onboarding/usage-credit-stripe-reconciliation-context";
 import {
   isHostedUsageCreditStripeRetryableError,
@@ -5336,6 +5346,213 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await observer.$disconnect();
       }
     });
+
+    it.each(["cancellation", "account deletion"] as const)(
+      "serializes full Stripe expiry with Family %s and releases once",
+      async (closureKind) => {
+        const fixture = await createUsageCreditFixture({ crossOwner: true });
+        const closurePrepared = createDeferred();
+        const allowClosureProvider = createDeferred();
+        const stripeLocked = createDeferred();
+        const allowStripe = createDeferred();
+        const now = new Date("2026-07-16T12:31:00.000Z");
+        const sessionId = `cs_family_${randomUUID()}`;
+        const customerId = `cus_family_${randomUUID()}`;
+        const priceId = `price_family_${randomUUID()}`;
+        const cleanupId = `hbadc_family_${randomUUID()}`;
+        const successUrl = new URL("https://example.test/settings");
+        successUrl.searchParams.set("usageFamily", "return");
+        successUrl.searchParams.set("usageMember", fixture.beneficiaryMemberId);
+        let operations: Promise<PromiseSettledResult<unknown>[]> | undefined;
+        setHostedSecureBoxStringTestCodecForTests({
+          decrypt: (input) => input.value,
+          encrypt: (input) => input.value,
+        });
+        try {
+          const purchase = await fixture.observer.hostedUsageCreditPurchase.update({
+            data: {
+              id: `hucp_${randomUUID().replaceAll("-", "").slice(0, 16)}`,
+              checkoutSuccessUrl: successUrl.href,
+              status: "checkout_open",
+              stripeCheckoutSessionIdEncrypted: sessionId,
+              stripeCheckoutSessionLookupKey:
+                createHostedStripeCheckoutSessionLookupKey(sessionId),
+              stripeCustomerIdEncrypted: customerId,
+              stripeCustomerLookupKey: requireHostedUsageCreditLookupKey(
+                createHostedStripeCustomerLookupKey(customerId), "customer",
+              ),
+              stripePriceIdEncrypted: priceId,
+              stripePriceLookupKey: requireHostedUsageCreditLookupKey(
+                createHostedStripePriceLookupKey(priceId), "price",
+              ),
+            },
+            where: { id: fixture.purchaseId },
+          });
+          fixture.purchaseId = purchase.id;
+          const session = defineStripeFixture<Stripe.Checkout.Session>({
+            adaptive_pricing: { enabled: false },
+            amount_subtotal: 500,
+            amount_total: 500,
+            cancel_url: purchase.checkoutCancelUrl,
+            client_reference_id: purchase.id,
+            currency: "usd",
+            customer: customerId,
+            expires_at: Math.floor(purchase.checkoutExpiresAt.getTime() / 1000),
+            id: sessionId,
+            livemode: false,
+            metadata: {
+              policyVersion: purchase.checkoutRequestPolicyVersion,
+              purchaseId: purchase.id,
+              purpose: "hosted_usage_credit",
+            },
+            mode: "payment",
+            object: "checkout.session",
+            payment_intent: null,
+            payment_status: "unpaid",
+            status: "expired",
+            success_url: purchase.checkoutSuccessUrl,
+          });
+          usageCreditFinancialStripeMocks.stripe.checkout.sessions.retrieve
+            .mockReset()
+            .mockResolvedValue(session)
+            .mockImplementationOnce(async () => {
+              closurePrepared.resolve();
+              await allowClosureProvider.promise;
+              return session;
+            });
+          usageCreditFinancialStripeMocks.stripe.checkout.sessions.listLineItems
+            .mockResolvedValue({
+              data: [{ quantity: 1, price: { id: priceId } }],
+              has_more: false,
+              object: "list",
+              url: "/v1/checkout/sessions/line_items",
+            });
+          const event = defineStripeFixture<Stripe.Event>({
+            created: Math.floor(now.getTime() / 1000),
+            data: { object: session },
+            id: `evt_family_${randomUUID()}`,
+            livemode: false,
+            object: "event",
+            type: "checkout.session.expired",
+          });
+          // Pause after the real wrapper's first lock, without substituting any
+          // SQL or lock owner. The old wrapper holds the beneficiary here.
+          const stripeClient = new Proxy(fixture.secondClient, {
+            get(target, property) {
+              if (property === "$transaction") {
+                return (run: (tx: Prisma.TransactionClient) => Promise<unknown>) =>
+                  target.$transaction(async (tx) => {
+                    let firstQuery = true;
+                    return run(new Proxy(tx, {
+                      get(transaction, key) {
+                        if (key === "$queryRaw") {
+                          return async (...args: Parameters<typeof tx.$queryRaw>) => {
+                            const rows = await transaction.$queryRaw(...args);
+                            if (firstQuery) {
+                              firstQuery = false;
+                              stripeLocked.resolve();
+                              await allowStripe.promise;
+                            }
+                            return rows;
+                          };
+                        }
+                        const value = Reflect.get(transaction, key, transaction);
+                        return typeof value === "function" ? value.bind(transaction) : value;
+                      },
+                    }));
+                  }, transactionOptions);
+              }
+              const value = Reflect.get(target, property, target);
+              return typeof value === "function" ? value.bind(target) : value;
+            },
+          });
+          if (closureKind === "account deletion") {
+            await fixture.observer.hostedMember.update({
+              data: { suspendedAt: now },
+              where: { id: fixture.payerMemberId },
+            });
+          }
+          const closurePid = await readBackendPid(fixture.firstClient);
+          const closure = closureKind === "account deletion"
+            ? closeHostedUsageCreditPurchasesForAccountDeletion({
+                memberIds: [fixture.payerMemberId], now, prisma: fixture.firstClient,
+              })
+            : expireHostedUsageCreditCheckout({
+                now, payerMemberId: fixture.payerMemberId,
+                prisma: fixture.firstClient, purchaseId: fixture.purchaseId,
+              });
+          operations = Promise.allSettled([closure]);
+          await Promise.race([closurePrepared.promise, closure]);
+          const reconciliation = reconcileHostedUsageCreditStripeEvent({
+            event, prisma: stripeClient,
+          });
+          operations = Promise.allSettled([closure, reconciliation]);
+          await Promise.race([stripeLocked.promise, reconciliation]);
+          allowClosureProvider.resolve();
+          await waitForBlockedBackend({ observer: fixture.observer, pid: closurePid });
+          allowStripe.resolve();
+          const results = await operations;
+          expect(results).toEqual([
+            expect.objectContaining({ status: "fulfilled" }),
+            expect.objectContaining({ status: "fulfilled" }),
+          ]);
+          const released = await fixture.observer.hostedUsageCreditPurchase.findUniqueOrThrow({
+            where: { id: purchase.id },
+          });
+          expect(released.status).toBe("expired");
+          expect(released.grantSlotReleasedAt).toBeInstanceOf(Date);
+          expect(released.reconciliationVersion).toBe(1n);
+          await reconcileHostedUsageCreditStripeEvent({ event, prisma: fixture.secondClient });
+          expect(await fixture.observer.hostedUsageCreditPurchase.findUniqueOrThrow({
+            select: { grantSlotReleasedAt: true, reconciliationVersion: true },
+            where: { id: purchase.id },
+          })).toEqual({ grantSlotReleasedAt: released.grantSlotReleasedAt, reconciliationVersion: 1n });
+
+          if (closureKind === "account deletion") {
+            // Exercise the production deletion guard and receipt persistence in
+            // the same final commit as member deletion; only KMS output is synthetic.
+            await fixture.firstClient.$transaction(async (tx) => {
+              await assertHostedUsageCreditPurchasesReadyForAccountDeletionTx({
+                memberIds: [fixture.payerMemberId], now, prisma: tx,
+              });
+              await persistHostedAccountDeletionCleanupTx({
+                cleanup: {
+                  cloudflareCompletedAt: null, environment: "test", id: cleanupId,
+                  kmsKeyName: "projects/test/locations/global/keyRings/test/cryptoKeys/test",
+                  nextAttemptAt: now, payloadCiphertext: "synthetic-kms-ciphertext",
+                  privyCompletedAt: now, privyUserLookupKey: null,
+                  runtimeLogsCompletedAt: null, runtimeMemberIds: [fixture.payerMemberId],
+                  stripeCustomerIds: [customerId], stripeCompletedAt: null,
+                  stripeSubscriptionIds: [], temporalCompletedAt: null, temporalNextRuntimeIndex: 0,
+                },
+                prisma: tx,
+              });
+              await tx.hostedMember.delete({ where: { id: fixture.payerMemberId } });
+            }, transactionOptions);
+            expect(await fixture.observer.hostedMember.findUnique({
+              where: { id: fixture.payerMemberId },
+            })).toBeNull();
+            expect(await fixture.observer.hostedAccountDeletionCleanup.findUnique({
+              select: { id: true }, where: { id: cleanupId },
+            })).toEqual({ id: cleanupId });
+            await expect(reconcileHostedUsageCreditStripeEvent({
+              event, prisma: fixture.secondClient,
+            })).resolves.toMatchObject({ handled: true, granted: false });
+          }
+        } finally {
+          allowClosureProvider.resolve();
+          allowStripe.resolve();
+          await operations;
+          setHostedSecureBoxStringTestCodecForTests(null);
+          await fixture.observer.hostedAccountDeletionCleanup.updateMany({
+            data: { runtimeLogsCompletedAt: now, temporalCompletedAt: now },
+            where: { id: cleanupId },
+          });
+          await fixture.observer.hostedAccountDeletionCleanup.deleteMany({ where: { id: cleanupId } });
+          await cleanupUsageCreditFixture(fixture);
+        }
+      },
+    );
 
     it("serializes Family reservation release behind owner-first subscription locking", async () => {
       const fixtureId = randomUUID();
