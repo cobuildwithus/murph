@@ -880,10 +880,15 @@ Last verified: 2026-09-04
 - Short-lived connected-app, sensitive-action, device-connect, device OAuth,
   Clinical Records connect, and Clinical Records OAuth rows never trigger a
   global expiry sweep from foreground creation or provider admission. Exact
-  reads and consumes fail closed when the addressed row is expired; exact OAuth
-  consumers lock their addressed state row before replay classification and
-  consume, so retention skips a live consumer instead of fabricating replay
-  evidence. The hourly retention owner owns backlog deletion. Started
+  reads and consumes fail closed when the addressed row is expired. A
+  member-bound device OAuth consumer reads only its owner hint before the
+  transaction, locks that member before the exact state row, and revalidates
+  the owner under both locks. Credential replacement and account deletion use
+  the same member-before-state order; unowned device state and Clinical OAuth
+  consumers require only their exact state lock. If retention wins an expired
+  unconsumed device row before its callback obtains that lock, the callback
+  fails missing without replay evidence or provider work. The hourly retention
+  owner owns backlog deletion. Started
   connected-app, device-connect, and Clinical Records intents retain their
   exact completion row for one bounded 30-minute grace past link expiry.
   Consumed device OAuth claims remain with exact callback finalization and

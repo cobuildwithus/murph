@@ -255,10 +255,23 @@ export class PrismaHostedOAuthSessionStore {
     now: string;
     state: string;
   }): Promise<ConsumeOAuthStateResult> {
+    const ownerHint = await this.prisma.deviceOauthSession.findUnique({
+      select: { userId: true },
+      where: { state: input.state },
+    });
+    if (!ownerHint) {
+      return { status: "missing" };
+    }
+
     return this.prisma.$transaction(async (tx) => {
+      if (ownerHint.userId) {
+        await lockHostedMemberRow(tx, ownerHint.userId);
+      }
+
       // The hourly retention owner skips locked rows. Own this exact state
-      // before classifying it so cleanup cannot turn a first consume into a
-      // fabricated replay between the read and the conditional update.
+      // after the member lock so every member-bound OAuth mutation follows
+      // member-then-state ordering. The locked reread below rejects a deleted
+      // and recreated state instead of trusting the unlocked owner hint.
       await tx.$queryRaw<Array<{ state: string }>>`
         SELECT oauth_session."state"
         FROM "device_oauth_session" AS oauth_session
@@ -268,6 +281,7 @@ export class PrismaHostedOAuthSessionStore {
       const record = await tx.deviceOauthSession.findUnique({
         where: {
           state: input.state,
+          userId: ownerHint.userId,
         },
       });
 
@@ -352,7 +366,6 @@ export class PrismaHostedOAuthSessionStore {
       }
 
       if (record.userId) {
-        await lockHostedMemberRow(tx, record.userId);
         const ownerStatus = await readHostedMemberSuspensionAfterLockTx(
           tx,
           record.userId,
