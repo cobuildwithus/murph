@@ -44,8 +44,8 @@ rejects WHOOP notices it cannot validate. Web owns admission and dispatch.
 
 - [x] Extend shared policy and carry canonical error code through notice checks.
 - [x] Add neutral WHOOP copy and expose existing conversation preference control.
-- [ ] Prove behavior with focused tests, typechecks, and real Codex journey.
-- [ ] Review complexity and copy; add durable documentation and changelog.
+- [x] Prove behavior with focused tests, typechecks, and real Codex journey.
+- [x] Review complexity and copy; add durable documentation and changelog.
 - [ ] Scoped commit, PR, required review and CI.
 
 ## Verification so far
@@ -57,5 +57,42 @@ rejects WHOOP notices it cannot validate. Web owns admission and dispatch.
   touched runtime authority test to use the declared public store export.
 - Complexity guard passes; candidate selection debt fell by four and the
   dispatch predicate became simpler. Existing unrelated hotspots are unchanged.
-- Live WHOOP preference proof is pending local subscription startup recovery.
+- Live WHOOP preference proof passed on gpt-5.6-terra with local subscription
+  auth. Exactly one WHOOP opt-out write; no connection or sync change. Parent
+  reviewed the actual concise, truthful reply: Ready.
 - No production messages, provider calls, or state mutations performed.
+
+## Provider input proof
+
+Captured complete first Responses request content from the production prompt
+builder and tool catalogue through the real Codex binary into a loopback-only
+synthetic provider. No upstream request or authentication material was used.
+Same direct/group fixtures at base and head; normalized generated UUIDs and the
+shared temporary fixture root. Counted serialized `input`, `tool_choice`, and
+`text` (the request has no separate `instructions` or `tools`; code-mode guidance
+is in `input`), excluding non-content transport metadata and generation settings.
+Tokenizer: installed gpt-tokenizer 3.4.0, o200k_base for gpt-5.6-terra.
+
+- Individual: 26,029 to 26,039 tokens (+10; +0.0384%); 120,162 to 120,196 bytes (+34).
+- Group: 22,029 tokens and 102,024 bytes at both revisions (device tool absent).
+- Scope is representative fixtures, not every production member context.
+- Changelog archive test: 9 passed; content-only production study is the existing
+  changelog archive. No renderer or UI component changed.
+
+## Candidate handoff
+
+Resumed from the original session with the explicit task handoff. Local and
+remote PR head both matched the original implementation commit; the remaining
+plan and changelog edits matched the original session. Draft PR: #2850.
+
+Parent walkthrough: stale connected sources and confirmed refresh failures
+use one five-day silence episode; resumed delivery, disconnect, opt-out, and
+ineligible conversations suppress the notice. The focused synthetic final
+dispatch tests prove the existing egress boundary. Real-Codex WHOOP opt-out
+proof confirms one preference write and one accurate acknowledgement. Ready.
+
+Implementation and local evidence are complete. Required ReviewGPT and exact
+head CI remain PR completion gates; this archived plan is not deployment proof.
+Status: completed
+Updated: 2026-09-04
+Completed: 2026-09-04
