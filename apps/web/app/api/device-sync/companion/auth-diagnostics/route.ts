@@ -21,7 +21,15 @@ export const POST = withJsonError(async (request: Request) => {
     await readAuthDiagnosticBody(request),
   );
 
-  console.warn("Companion auth diagnostic.", diagnostic);
+  // Client reports are spoofable operational signals, never an auth audit trail.
+  const log = diagnostic.diagnosticCode === "session_restored"
+    || diagnostic.diagnosticCode === "explicit_sign_out"
+    || (diagnostic.stage === "session_restore" && diagnostic.diagnosticCode === "session_signed_out")
+    ? console.info : console.warn;
+  log("Companion auth diagnostic.", {
+    eventCode: "companion_auth_diagnostic",
+    ...diagnostic,
+  });
 
   return jsonOk({ ok: true });
 });
