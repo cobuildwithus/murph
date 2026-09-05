@@ -750,6 +750,7 @@ export async function sendAssistantMessageLocal(
         const snapshottedAnalyzeVideoInputIds = new Set<string>()
         const snapshotAnalyzeVideoAuthorities = async (
           acceptedInputIds: readonly string[],
+          includeConversationHistory = false,
         ): Promise<void> => {
           const newInputIds = acceptedInputIds.filter((acceptedInputId) => {
             if (snapshottedAnalyzeVideoInputIds.has(acceptedInputId)) {
@@ -761,6 +762,7 @@ export async function sendAssistantMessageLocal(
           if (newInputIds.length === 0) return
           const authorities = await snapshotAnalyzeVideoAttachmentAuthorities({
             acceptedInputIds: newInputIds,
+            includeConversationHistory,
             vaultRoot: input.vault,
           })
           for (const authority of authorities) {
@@ -849,6 +851,7 @@ export async function sendAssistantMessageLocal(
         })
         await snapshotAnalyzeVideoAuthorities(
           initialAcceptedInputJournal.inputIds,
+          true,
         )
         const threadScope = resolveAssistantCodexThreadScope({})
         const turnTimingStartedAt = lockAcquiredAt

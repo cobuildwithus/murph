@@ -1176,7 +1176,7 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
 - `packages/importers`: workspace-private ingestion adapters that parse external files or provider API snapshots, normalize them behind registry-based adapters, and delegate all writes to core. It owns the bounded, non-writing workout CSV planner, including explicit Strong/Hevy dialect selection, exact-signature/provider-marker inference, fail-closed shared-header and provider-conflict handling, vault-timezone normalization, explicit unit gates, aggregate repair/omission reporting, provider-neutral privacy-safe source-session keys for snapshot overlap, and provider-scoped public source identities. The clinical FHIR adapter validates each raw page exactly once for file integrity, declared resource family, manifest patient plus FHIR-base binding, same-base root-reachable pagination, and FHIR modifier semantics before emitting one upsert, retract, or review decision per resource
 - `packages/device-syncd`: workspace-private local device OAuth/webhook/reconcile runtime with an authenticated localhost control plane, optional separate public callback/webhook ingress, a reusable shared public-ingress core for future hosted/tunneled callback surfaces, the canonical `@murphai/device-syncd/client` control-plane client/contracts surface for workspace or bundled callers, and durable local operational state under `.runtime/operations/device-sync/**` split explicitly into connection identity/config, credential authority state, and observation/reconcile state while normalized provider snapshot imports still flow through importers/core. Provider-owned modules keep auth, refresh, scheduling, webhook-preflight/admin specifics, and bounded product-needed resource windows; shared ingress/config surfaces stay provider-agnostic, and the provider registry/config/env/job-schema/hint/serialization seams now derive from one shared provider-manifest registry.
 - `packages/messaging-ingress`: workspace-private shared stateless messaging-provider ingress package that owns provider webhook parsing/verification, target grammar, supported-message extraction, summary helpers, and sparse raw minimization for transports such as Telegram and Linq without taking on polling drivers, hosted policy, or runtime persistence
-- `packages/inboxd`: workspace-private inbox capture ingestion/runtime package that owns the first-class append-only inbox-capture and inbox-attachment-retention ledgers, raw inbox attachment bytes, and bounded text projection while keeping inbox-only cursors, source-specific checkpoints, capture indexes, and audio/video transcription job state in a rebuildable local SQLite projection under `.runtime/projections/inboxd.sqlite`, with inbox daemon/config JSON state under `.runtime/operations/inbox/**`. The current inbox-capture v2 ledger record is the sole committed metadata owner; new captures do not retain a duplicate raw envelope. Message text is bounded to 20,000 characters inline and 64 MiB total; a longer body is one immutable hash/size-verified content artifact under the capture's raw directory, so routine ledger scans do not reread sender-controlled historical bodies. The explicit repair path can prove a legacy envelope equivalent, write any required text content, append its v2 replacement, and receipt-guard delete it atomically. Static hosted callers consume the narrow `@murphai/inboxd/retention` and `@murphai/inboxd/checkpoint` entrypoints so capture persistence remains outside the runner's pre-listen bundle closure. Image attachment bytes are normalized before canonical inbox storage so downstream assistant evidence refs see the bounded canonical image rather than the connector-original image bytes; image inputs that cannot be normalized to an allowed static raster WebP are left unstored. Raw inbox image/audio bytes expire after 14 days unless protected by active work or explicit durable save/pin evidence. In hosted execution, an ordinary inbound video may exist in the warm container while accepted input still needs it, but its canonical video path is excluded from every new encrypted workspace snapshot and becomes immediately eligible for the same atomic retention pass once unprotected; only an explicit durable raw reference is a persistence exception. Invalid capture metadata fails snapshot construction closed rather than risking an unclassified video archive. Expiration preserves attachment descriptors and parser derivatives through `ledger/inbox-attachment-retention/**` and projects `retention_expired` to readers instead of treating missing bytes as corruption. Canonical inbox raw metadata also drops size-like provider fields so original attachment or raw-message byte sizes do not survive in the ledger. Inbox is a projection/enrichment surface for search, display, audio/video transcript evidence, raw attachment paths, and debugging context; Codex admission does not stage hidden runtime-only inbox rows. It consumes `@murphai/messaging-ingress` for stateless Telegram/Linq ingress semantics while continuing to own the Telegram polling connector, local capture persistence, generic parsed-email normalization for hosted ingress, and the optional inbox-plus-parser daemon composition helpers layered on top of parser-owned runtime contracts
+- `packages/inboxd`: workspace-private inbox capture ingestion/runtime package that owns the first-class append-only inbox-capture and inbox-attachment-retention ledgers, raw inbox attachment bytes, and bounded text projection while keeping inbox-only cursors, source-specific checkpoints, capture indexes, and audio/video transcription job state in a rebuildable local SQLite projection under `.runtime/projections/inboxd.sqlite`, with inbox daemon/config JSON state under `.runtime/operations/inbox/**`. The current inbox-capture v2 ledger record is the sole committed metadata owner; new captures do not retain a duplicate raw envelope. Message text is bounded to 20,000 characters inline and 64 MiB total; a longer body is one immutable hash/size-verified content artifact under the capture's raw directory, so routine ledger scans do not reread sender-controlled historical bodies. The explicit repair path can prove a legacy envelope equivalent, write any required text content, append its v2 replacement, and receipt-guard delete it atomically. Static hosted callers consume the narrow `@murphai/inboxd/retention` and `@murphai/inboxd/checkpoint` entrypoints so capture persistence remains outside the runner's pre-listen bundle closure. Image attachment bytes are normalized before canonical inbox storage so downstream assistant evidence refs see the bounded canonical image rather than the connector-original image bytes; image inputs that cannot be normalized to an allowed static raster WebP are left unstored. Raw inbox image/audio/video bytes expire after 14 days unless protected by active work or explicit durable save/pin evidence. Hosted snapshots retain ordinary video bytes alongside other inbox media so subsequent turns and cold restores can use the clip. Expiration preserves attachment descriptors and parser derivatives through `ledger/inbox-attachment-retention/**` and projects `retention_expired` to readers instead of treating missing bytes as corruption. Canonical inbox raw metadata also drops size-like provider fields so original attachment or raw-message byte sizes do not survive in the ledger. Inbox is a projection/enrichment surface for search, display, audio/video transcript evidence, raw attachment paths, and debugging context; Codex admission does not stage hidden runtime-only inbox rows. It consumes `@murphai/messaging-ingress` for stateless Telegram/Linq ingress semantics while continuing to own the Telegram polling connector, local capture persistence, generic parsed-email normalization for hosted ingress, and the optional inbox-plus-parser daemon composition helpers layered on top of parser-owned runtime contracts
   The media pass may preserve parser evidence temporarily, but unpromoted inbound message content has one inclusive receipt-plus-14-day maximum. The content pass clears capture text/raw fields, out-of-line text, parser bundles, and SQLite/FTS content, and redacts paired legacy/current records after the envelope migrator proves equivalence. Active pending work cannot extend that deadline.
 - `packages/parsers`: workspace-private local-first audio/video attachment transcription (local whisper.cpp when installed, plus a config-driven remote transcription HTTP provider used by hosted execution), parser-service helpers, parser-owned runtime/store contracts for media transcription, and one versioned `result.json` bundle per derived attempt under `derived/inbox/**`; it also owns the strict bundle decoder and explicit legacy-attempt compactor, and does not own inbox daemon orchestration or depend upward on `@murphai/inboxd`
 - `packages/query`: workspace-private read helpers, export-pack generation, query-local event display-identity derivation, the semantic wearable day-summary and provider-neutral sleep-pattern read models over imported device evidence, and the rebuildable local query projection over canonical vault data under `.runtime/projections/query.sqlite` that now backs both `readVault()` and lexical search. Projection generation 25 reads event shards through core's logical dual-format source, omits canonical audit rows from ordinary entity/search/FTS copies, and drops four proven-unused entity/metric-source indexes; explicit audit commands, stats, and exports continue to read canonical audit JSONL. It also owns stable reference-graph readers for `bank/library/**`, pure parser/search/index helpers for derived knowledge pages under `derived/knowledge/**`, and read-side adapters that consume shared MetricPoint contracts from `@murphai/health-metrics` plus shared health registry projection metadata, event lifecycle/revision collapse helpers, and static lookup-ID family classification from `@murphai/contracts` instead of maintaining duplicate query-local copies. Experiment progress-card sentiment accepts an injected snapshot of canonical biomarker desired directions and keeps that health interpretation separate from experiment-hypothesis agreement.
@@ -3828,12 +3828,12 @@ cards already in transcripts remain readable but cannot open the direct editor.
 ## On-demand Gemini video analysis
 
 `murph.analyze_video` is an explicit, turn-scoped assistant capability for one
-video attached to an accepted message. It is offered in a private direct turn
+video attached to a current or retained earlier message in the same conversation. It is offered in a private direct turn
 or an authenticated Linq/Telegram group turn with accepted user-action input
 when the Worker-held credential is configured. Any participant in an
 authenticated group may explicitly request analysis of a video sent by any
-participant in that same accepted group turn. The call names only the exact
-accepted video message; current group-route authority, accepted-input membership,
+participant in that same group conversation, including an earlier turn. The call
+names the exact video message; current group-route authority, conversation identity,
 and the frozen attachment record bind it to the active group before any bytes
 are materialized or read. No requester/uploader identity comparison exists.
 Unverified external groups continue to omit the tool.
@@ -3841,14 +3841,18 @@ Unverified external groups continue to omit the tool.
 An eligible turn may receive the schema before its accepted input has video
 authority because the provider tool set freezes at turn start. Keeping the tool
 available lets the first live-steered video be drained, frozen, and authorized
-by the `beforeToolExecution` boundary in that same turn; the consumed steer is
-not carried forward as next-turn authority. Before Codex can act on the initial
-input, the turn owner snapshots each eligible attachment's normalized raw path,
-byte count, SHA-256 digest, MIME type, message ref, and ordinal into process
-memory. For active steering it freezes new attachments in the accepted-input
-validator before forwarding the steer to Codex. Existing keys are never
-refreshed from model-writable runtime files, and the tool sees only snapshots
-whose message refs remain in the current user-action scope. At invocation,
+by the `beforeToolExecution` boundary in that same turn. Before provider execution,
+the turn owner reads retained input history once and freezes eligible video
+metadata from the same source, account, thread, direct/group audience, and
+optional session. Direct history also matches the participant; authenticated
+group history allows other participants in that group. Unknown conversation
+identity, future input, and retired content provide no historical authority.
+Existing input-history retention and pruning bound this lookup; it adds no
+new persisted state. The frozen record contains normalized raw path, byte count,
+SHA-256, MIME type, message ref, and ordinal. Live steering freezes new input
+before forwarding it. Existing attachment keys are never refreshed from
+model-writable files. Historical references do not become current accepted
+input or grant unrelated tool or delivery authority. At invocation,
 Murph materializes the exact path, opens it without following the final
 symlink, reads exactly the snapshotted byte count with an EOF probe, verifies
 the digest and MP4/QuickTime/WebM signature, and only then permits external
@@ -3911,16 +3915,15 @@ Gemini response text never enter operational logs, usage rows, diagnostics, or
 derived vault artifacts. The bounded, one-way-framed tool result may enter the
 authorized assistant transcript like other tool output.
 
-Hosted video materialization is intentionally non-durable by default. The
-accepted-input owner may keep exact verified bytes in the warm container long
-enough to analyze the message, but snapshot planning derives every ordinary
-video path from the validated canonical capture ledger and excludes it before
-archive construction. Idle maintenance gives unprotected video a zero-length
-retention window and commits the tombstone plus file deletion atomically. These
-are independent boundaries: cleanup failure may request another retention wake
-but cannot copy the video into the replacement snapshot. A canonical event raw
-reference is the explicit durable-save exception and retains its existing
-lifecycle.
+Hosted inbox videos use the ordinary 14-day media retention window and remain
+in encrypted workspace snapshots. The existing atomic inbox-retention pass
+expires unprotected media and preserves retention descriptors. Explicit
+canonical event raw references retain their separately authorized lifecycle.
+Already-expired or previously snapshot-excluded clips cannot be recovered by
+this change. Deploy the current runner bundle before relying on retained video:
+an older runner can still discard it on its next cleanup or checkpoint. Web
+and the Worker egress protocol are unchanged; verify a video checkpoint and
+subsequent cold-restored follow-up after runner convergence.
 
 ## Scheduled assistant tool authority
 

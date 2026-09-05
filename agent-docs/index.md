@@ -291,13 +291,13 @@ specified by `agent-docs/SECURITY.md`,
 `agent-docs/exec-plans/active/2026-08-12-provider-request-guard.md`.
 
 On-demand hosted video analysis is one turn-scoped Gemini 3.7 Flash call over
-an exact accepted-message attachment authority. The tool is offered on
+an exact current or retained same-conversation attachment authority. The tool is offered on
 private-direct turns and authenticated Linq/Telegram group turns with accepted
 user-action input and a configured Worker credential. Any participant in an
 authenticated group may explicitly request analysis of any participant's video
-in that same accepted group turn. Current route authority, accepted-input
-membership, and frozen attachment evidence bind the selected video to the
-active group; no requester/uploader identity comparison exists. Unverified
+in that same group conversation, including retained earlier input. Current route
+authority, conversation identity, and frozen attachment evidence bind the selected
+video to the active group; no requester/uploader identity comparison exists. Unverified
 external groups omit it. The tool may be present before the input has video
 authority because provider tools freeze at turn start and the first video may
 arrive through live steering. Murph freezes attachment metadata before Codex
@@ -305,10 +305,11 @@ can act on each initial or live-steered input, verifies the exact bytes before
 cross-provider egress, maps standard and detailed-motion intent to allowlisted
 1 or 5 FPS profiles with medium thinking, bounds delivered output without an
 explicit request token cap, and keeps credentials at the Worker boundary.
-Ordinary inbound hosted video bytes stay outside workspace
-snapshots and become immediately retention-eligible when active input no longer
-needs them; explicit canonical durable references are the exception. The first
-completed provider result remains bound in turn memory to its accepted message,
+Ordinary inbound hosted video bytes remain in encrypted workspace snapshots
+and share the existing 14-day image/audio retention window. Frozen historical
+references remain scoped to the same conversation and existing input-history
+retention; explicit canonical durable references keep their owning lifecycle.
+The first completed provider result remains bound in turn memory to its accepted message,
 attachment ordinal, complete question, and sampling mode across group-draft
 reconsideration. Exact repeats reuse it without another Gemini call; distinct
 later requests remain explicitly unanalyzed and cannot inherit its evidence.

@@ -28,8 +28,12 @@ import type {
   AssistantWorkspaceArtifactMaterializer,
 } from '../assistant/execution-context.js'
 import {
+  listAssistantInputEvents,
   readAssistantInputEvent,
+  resolveAssistantInputEventReferenceAt,
   type AssistantInputAttachmentEvidenceItem,
+  type AssistantInputConversationRef,
+  type AssistantInputEventRecord,
 } from '../assistant/input-store.js'
 
 export interface AnalyzeVideoToolArgs {
@@ -111,18 +115,18 @@ export function createAnalyzeVideoTurnState(): AnalyzeVideoTurnState {
 
 export async function snapshotAnalyzeVideoAttachmentAuthorities(input: {
   acceptedInputIds: readonly string[]
+  includeConversationHistory?: boolean
   vaultRoot?: string | null
 }): Promise<AnalyzeVideoAttachmentAuthority[]> {
   const vaultRoot = normalizeNullableString(input.vaultRoot)
   if (!vaultRoot) return []
 
+  const events = await readAnalyzeVideoConversationEvents({ ...input, vaultRoot })
   const authorities: AnalyzeVideoAttachmentAuthority[] = []
-  for (const messageRef of input.acceptedInputIds) {
+  for (const event of events) {
     try {
-      const event = await readAssistantInputEvent({ inputId: messageRef, vault: vaultRoot })
       if (
-        !event
-        || event.inputId !== messageRef
+        event.contentRetiredAt
         || (event.attachmentEvidence.status !== 'available'
           && event.attachmentEvidence.status !== 'partial')
       ) {
@@ -146,7 +150,7 @@ export async function snapshotAnalyzeVideoAttachmentAuthorities(input: {
         }
         authorities.push({
           byteSize,
-          messageRef,
+          messageRef: event.inputId,
           mimeType,
           ordinal: attachment.ordinal,
           rawPath,
@@ -158,6 +162,56 @@ export async function snapshotAnalyzeVideoAttachmentAuthorities(input: {
     }
   }
   return authorities
+}
+
+async function readAnalyzeVideoConversationEvents(input: {
+  acceptedInputIds: readonly string[]
+  includeConversationHistory?: boolean
+  vaultRoot: string
+}): Promise<AssistantInputEventRecord[]> {
+  const vaultRoot = input.vaultRoot
+  const events = new Map<string, AssistantInputEventRecord>()
+  for (const messageRef of input.acceptedInputIds) {
+    try {
+      const event = await readAssistantInputEvent({ inputId: messageRef, vault: vaultRoot })
+      if (event?.inputId === messageRef) events.set(messageRef, event)
+    } catch {
+      // Invalid or unavailable evidence cannot grant cross-provider egress.
+    }
+  }
+  if (input.includeConversationHistory && events.size > 0) {
+    const currentEvents = [...events.values()]
+    const history = await listAssistantInputEvents({
+      limit: Number.MAX_SAFE_INTEGER,
+      skipInvalidRecords: true,
+      vault: vaultRoot,
+    }).catch(() => ({ events: [] }))
+    for (const event of history.events) {
+      if (currentEvents.some((current) =>
+        resolveAssistantInputEventReferenceAt(event) <= resolveAssistantInputEventReferenceAt(current)
+        && sameVideoConversation(event.conversation, current.conversation)
+      )) {
+        events.set(event.inputId, event)
+      }
+    }
+  }
+
+  return [...events.values()]
+}
+
+function sameVideoConversation(
+  earlier: AssistantInputConversationRef | null,
+  current: AssistantInputConversationRef | null,
+): boolean {
+  if (!earlier || !current || !current.source || !current.threadId) return false
+  return earlier.source === current.source
+    && earlier.accountId === current.accountId
+    && earlier.threadId === current.threadId
+    && earlier.threadIsDirect === current.threadIsDirect
+    && (earlier.sessionId ?? null) === (current.sessionId ?? null)
+    && !earlier.actorIsSelf
+    && (current.threadIsDirect === false
+      || (current.threadIsDirect === true && earlier.actorId === current.actorId))
 }
 
 export const ANALYZE_VIDEO_GEMINI_URL =

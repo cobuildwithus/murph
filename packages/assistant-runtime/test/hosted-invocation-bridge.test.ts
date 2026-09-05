@@ -1587,7 +1587,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     await expectPresent(path.join(vaultRoot, uncheckpointedCommittedStageRoot));
   });
 
-  it("excludes transient inbox videos from v2 snapshots without deleting live bytes", async () => {
+  it("retains inbox videos alongside audio in v2 snapshots for later turns", async () => {
     const vaultRoot = await createVaultRoot();
     const now = "2026-06-10T00:00:00.000Z";
     await initializeVault({ createdAt: now, vaultRoot });
@@ -1644,7 +1644,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         .archiveEntries ?? [];
     expect(archiveEntries.some((entry) =>
       entry.root === "vault" && entry.relativePath === videoPath
-    )).toBe(false);
+    )).toBe(true);
     expect(archiveEntries.some((entry) =>
       entry.root === "vault" && entry.relativePath === audioPath
     )).toBe(true);

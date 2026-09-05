@@ -334,7 +334,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         protectedStoredPaths: undefined,
         signal: expect.any(AbortSignal),
         vaultRoot: "/vault",
-        videoRetentionWindowMs: 0,
       });
       expect(outcome).toEqual({
         kind: "skipped",
@@ -424,7 +423,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         protectedStoredPaths: undefined,
         signal: expect.any(AbortSignal),
         vaultRoot: "/vault",
-        videoRetentionWindowMs: 0,
       });
       expect(compactWarmCodexThread).not.toHaveBeenCalled();
     } finally {
@@ -471,7 +469,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       protectedStoredPaths: ["raw/inbox/linq/self/2026/06/cap_pending/attachments/01__photo.webp"],
       signal: expect.any(AbortSignal),
       vaultRoot: "/vault",
-      videoRetentionWindowMs: 0,
     });
     expect(runGeneratedImageCaptureRetention).toHaveBeenCalledWith({
       materializeCandidatePaths: materializeRetentionCandidatePaths,
@@ -1492,7 +1489,6 @@ describe("runHostedIdleCheckpointMaintenance", () => {
         protectedStoredPaths: undefined,
         signal: expect.any(AbortSignal),
         vaultRoot: "/vault",
-        videoRetentionWindowMs: 0,
       });
       expect(runGeneratedImageCaptureRetention).toHaveBeenCalledWith({
         maxCaptures: 1,

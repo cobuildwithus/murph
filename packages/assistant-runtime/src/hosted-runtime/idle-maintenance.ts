@@ -65,7 +65,6 @@ export {
 // idle shutdown can compact large-but-below-ceiling threads before the next
 // wake pays the full resend cost.
 export const HOSTED_INBOX_MEDIA_RETENTION_RETRY_DELAY_MS = 5 * 60 * 1000;
-const HOSTED_INBOX_VIDEO_RETENTION_WINDOW_MS = 0;
 
 type HostedIdleMaintenanceWake = {
   nextWakeAt?: string;
@@ -169,7 +168,6 @@ export async function runHostedIdleCheckpointMaintenance(input: {
           protectedStoredPaths: input.protectedStoredPaths,
           signal: abortController.signal,
           vaultRoot: input.vaultRoot,
-          videoRetentionWindowMs: HOSTED_INBOX_VIDEO_RETENTION_WINDOW_MS,
         });
         retentionWake = mergeInboxRetentionWakes(
           retentionWake,

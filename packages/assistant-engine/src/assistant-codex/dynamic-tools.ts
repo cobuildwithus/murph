@@ -3650,12 +3650,12 @@ export async function executeMurphDynamicToolRequest(
           'video analysis requires a verified direct or authenticated group conversation',
         )
       }
+      const attachmentAuthorities = input.hostedToolContext
+        ?.currentAnalyzeVideoAttachmentAuthorities?.() ?? []
       return await executeAnalyzeVideoDynamicTool({
         abortSignal: input.abortSignal ?? null,
-        acceptedInputIds: userActionScope.acceptedInputIds,
-        attachmentAuthorities:
-          input.hostedToolContext
-            ?.currentAnalyzeVideoAttachmentAuthorities?.() ?? null,
+        acceptedInputIds: attachmentAuthorities.map((authority) => authority.messageRef),
+        attachmentAuthorities,
         args: input.request.args,
         materializeWorkspaceArtifacts:
           input.materializeWorkspaceArtifacts ?? null,
