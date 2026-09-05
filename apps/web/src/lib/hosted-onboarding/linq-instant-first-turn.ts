@@ -135,8 +135,7 @@ export type HostedLinqInstantFirstTurnCompletion =
 export function isHostedLinqInstantFirstTurnRequestEligible(
   request: HostedLinqFirstContactAdmissionRequest,
 ): boolean {
-  return request.participantContactKind === "phone"
-    && request.service === "imessage"
+  return request.service === "imessage"
     && request.partTypes.length === 1
     && request.partTypes[0] === "text"
     && !request.textWasTruncated

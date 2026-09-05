@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { constants, existsSync, readdirSync, readFileSync } from "node:fs";
 import { access, chmod, copyFile, cp, mkdir, mkdtemp, readFile, rename, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -2319,7 +2319,7 @@ async function findDockerCliPluginSourceDir(input: {
     }
 
     try {
-      await access(candidate);
+      await access(path.join(candidate, "docker-buildx"), constants.X_OK);
       return candidate;
     } catch {
       continue;

@@ -1919,7 +1919,7 @@ production `next build` in a root-level cgroup-v2 child for accounting only. It
 does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`.
 
 The production runner first performs route type generation and an explicit
-app-local generated-contract TypeScript check with a 3.5 GiB limit. It marks
+app-local generated-contract TypeScript check with a 6 GiB limit. It marks
 only that prepared check complete before starting Webpack. The Next CLI parent
 uses a 1 GiB old-space limit and the isolated Webpack worker uses 3 GiB. The
 worker exits and releases compiler memory before static-generation workers

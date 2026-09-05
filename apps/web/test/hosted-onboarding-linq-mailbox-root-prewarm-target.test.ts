@@ -309,7 +309,7 @@ describe("hosted Linq mailbox-root prewarm target", () => {
     expect(accessMocks.hasActiveHostedCryptoDomainRootsForUserTx).not.toHaveBeenCalled();
   });
 
-  it("uses only verified email blind indexes for an active email participant", async () => {
+  it("checks handle and verified email blind indexes for an active email participant", async () => {
     const prisma = buildPrisma({
       emailMemberIds: ["member_email"],
     });
@@ -345,7 +345,27 @@ describe("hosted Linq mailbox-root prewarm target", () => {
         },
       },
     });
-    expect(prisma.hostedMemberIdentity.findMany).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberIdentity.findMany).toHaveBeenCalledExactlyOnceWith({
+      select: {
+        member: {
+          select: {
+            billingStatus: true,
+            createdAt: true,
+            id: true,
+            suspendedAt: true,
+            updatedAt: true,
+          },
+        },
+        memberId: true,
+      },
+      where: {
+        linqEmailHandleLookupKey: {
+          in: expect.arrayContaining([
+            expect.stringMatching(/^hbidx:email:/u),
+          ]),
+        },
+      },
+    });
   });
 
   it("fails the speculative prewarm closed on an ambiguous identity lookup", async () => {

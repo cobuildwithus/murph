@@ -1008,6 +1008,9 @@ model HostedPhysicalNoteRecovery {
 
 model HostedMemberIdentity {
   memberId                            String       @unique @map("member_id")
+  /// Blinded provider-observed iMessage email handle. This is routing identity, not verified email authorization.
+  linqEmailHandleLookupKey            String?      @unique @map("linq_email_handle_lookup_key")
+  linqEmailHandleEncrypted            String?      @map("linq_email_handle_encrypted")
   maskedPhoneNumberHint               String?      @map("masked_phone_number_hint")
   phoneLookupKey                      String?      @unique @map("phone_lookup_key")
   phoneNumberEncrypted                String?      @map("phone_number_encrypted")

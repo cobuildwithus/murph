@@ -1079,6 +1079,11 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('vault-cli memory upsert')
     expect(raw).toContain('Do not create a memory record for routine success')
     expect(raw).toContain('Finite-supply replenishment check-ins')
+    const replenishment = raw.split('## Finite-supply replenishment check-ins')[1]!.split('## Supplement order completion')[0]!
+    expect(replenishment).toContain('schedule.localAt.timeZone')
+    expect(replenishment).toContain('Omit `slug`; the host generates the automation identity')
+    expect(replenishment).not.toContain('"at": "<ISO')
+    expect(replenishment).not.toContain('`slug`: a stable value')
     expect(raw).toMatch(
       /Treat the browser task as complete only when the site or tool result verifies the\s+requested outcome\./u,
     )

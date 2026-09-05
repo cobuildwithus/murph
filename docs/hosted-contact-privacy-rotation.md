@@ -37,6 +37,9 @@ Do not stage future or extra historical versions in the runtime keyring. Rotate 
 The encrypted owner-table fields already preserve the raw values needed to re-derive these canonical lookup-key columns in a future rotation-specific migration:
 
 - `HostedMemberIdentity.phoneLookupKey`
+- `HostedMemberIdentity.linqEmailHandleLookupKey`, re-derived from
+  `linqEmailHandleEncrypted` using the existing participant-contact encryption
+  context, independently of verified-email authorization
 - `HostedMemberIdentity.privyUserLookupKey`
 - `HostedMemberIdentity.walletAddressLookupKey`
 - `HostedMemberRouting.linqChatLookupKey`
@@ -52,6 +55,24 @@ The encrypted owner-table fields already preserve the raw values needed to re-de
   group-owned encrypted permission text and owning group id
 
 ## Current Guidance
+
+- Linq email identity retains the original
+  `hosted-member-routing.pending-linq-participant-contact` encryption context.
+  Both storage locations represent the same normalized participant and use the
+  same authenticated member binding. The additive identity migration may copy
+  that exact same-member ciphertext without decrypting it; it rejects a route
+  lacking a matching, non-empty pending source. Active-only history or a
+  ciphertext from another field requires a separately reviewed protected
+  migration. Never guess a handle from its blind index or substitute another
+  member's source. SQL copying does not authenticate ciphertext; ordinary
+  reads and any re-derivation must authenticate it before use.
+- Deploy the additive schema before the new Web writer. Drain older email
+  mutation writers before admitting the new durable email authority: those
+  writers cannot revoke or check it. The new Web writer is the rollback floor
+  once those identities exist. Verify migration completion and same-member
+  routing, linking, and exact unlink after deployment. No Cloudflare change is
+  required. Prior-key retirement still requires re-derivation of every retained
+  handle; no background migration service or extra lookup column is introduced.
 
 - Treat `HOSTED_CONTACT_PRIVACY_KEYS` plus `HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION` as the durable seam that preserves future rotation options.
 - Keep the lookup-key storage model at one canonical stored key per field. During one rotation, writes and conflict checks scan only current plus one prior so a legacy key cannot silently coexist on another member without making runtime work depend on keyring history.
