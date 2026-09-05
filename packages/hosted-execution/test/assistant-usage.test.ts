@@ -93,6 +93,25 @@ test("maintenance usage records parse, attribute, and dedupe like turn usage", (
   );
 });
 
+test("measured maintenance identities isolate members, providers, and response operations", () => {
+  const input = {
+    assistantSessionId: "asst_123", codexThreadId: "thread_abc", credentialSource: "platform" as const,
+    featureKey: "assistant_idle_compact", memberId: "member_123", model: "gpt-5.6-terra",
+    occurredAt: PROVIDER_REQUEST_STARTED_AT, providerName: "hosted-openai",
+    providerRequestId: "response_compact_fixture", triggerKind: "automation_idle_compact",
+    usage: { inputTokens: 100, cachedInputTokens: 50, cacheWriteTokens: 10,
+      outputTokens: 20, reasoningTokens: 5, totalTokens: 120 },
+  };
+  const record = buildAssistantMaintenanceUsageRecord(input);
+  assert.deepEqual(buildAssistantMaintenanceUsageRecord(input), record);
+  for (const changed of [{ memberId: "member_other" }, { providerName: "venice" }, { providerRequestId: "response_retry_fixture" }]) {
+    assert.notEqual(buildAssistantMaintenanceUsageRecord({ ...input, ...changed }).usageId, record.usageId);
+  }
+  assert.equal(record.cacheWriteTokens, 10);
+  assert.equal(record.reasoningTokens, 5);
+  assert.equal(record.providerRequestId, input.providerRequestId);
+});
+
 test("native Codex memory usage is exact and replay-idempotent", () => {
   const input = {
     apiKeyEnv: "OPENAI_API_KEY",

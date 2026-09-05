@@ -521,6 +521,8 @@ export function buildAssistantMaintenanceUsageRecord(input: {
   assistantSessionId: string;
   // Provider-side correlation handle, stored as providerRequestId.
   codexThreadId: string | null;
+  providerRequestId?: string;
+  providerRequestOutcome?: AssistantProviderRequestOutcome;
   credentialSource: AssistantUsageCredentialSource;
   featureKey: string;
   memberId: string;
@@ -530,6 +532,9 @@ export function buildAssistantMaintenanceUsageRecord(input: {
   tokenPricingBasis?: AssistantUsageTokenPricingBasis;
   triggerKind: string;
   usage: {
+    cacheWriteTokens?: number | null;
+    reasoningTokens?: number | null;
+    rawUsageJson?: Record<string, unknown> | null;
     cachedInputTokens: number | null;
     inputTokens: number | null;
     outputTokens: number | null;
@@ -538,10 +543,19 @@ export function buildAssistantMaintenanceUsageRecord(input: {
   usageExtractionSourcePath?: string | null;
   usageExtractionVersion?: string | null;
 }): AssistantUsageRecord {
-  const turnId = `turn_maintenance_${randomUUID().replaceAll("-", "")}`;
+  const identity = input.providerRequestId
+    ? createHash("sha256").update(JSON.stringify([
+        "murph.idle-compaction-usage.v1", input.memberId, input.providerName,
+        input.providerRequestId,
+      ])).digest("hex").slice(0, 32)
+    : randomUUID().replaceAll("-", "");
+  const turnId = `turn_maintenance_${identity}`;
 
   return parseAssistantUsageRecord({
     attemptCount: 1,
+    cacheWriteTokens: input.usage.cacheWriteTokens ?? null,
+    reasoningTokens: input.usage.reasoningTokens ?? null,
+    rawUsageJson: input.usage.rawUsageJson ?? null,
     cachedInputTokens: input.usage.cachedInputTokens,
     credentialSource: input.credentialSource,
     featureKey: input.featureKey,
@@ -551,7 +565,8 @@ export function buildAssistantMaintenanceUsageRecord(input: {
     outputTokens: input.usage.outputTokens,
     provider: "codex-cli",
     ...(input.providerName === undefined ? {} : { providerName: input.providerName }),
-    providerRequestId: input.codexThreadId,
+    providerRequestId: input.providerRequestId ?? input.codexThreadId,
+    ...(input.providerRequestOutcome ? { providerRequestOutcome: input.providerRequestOutcome } : {}),
     requestedModel: input.model,
     schema: ASSISTANT_USAGE_SCHEMA,
     sessionId: input.assistantSessionId,
