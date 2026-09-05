@@ -1,6 +1,6 @@
 # Prepare device connection keys before member locks
 
-Status: active
+Status: completed
 Created: 2026-09-05
 Updated: 2026-09-05
 
@@ -44,3 +44,9 @@ The create and replacement tests fail on the original source with the explicit
 assertion that kms.decrypt ran inside the transaction. The same tests pass on
 the correction. Missing-root behavior remains fail-closed; preparation never
 creates an absent device root.
+
+After stacking on #2908, 115 focused crypto/connection and PostgreSQL reconnect
+progress tests pass, together with Web typecheck. The resolved write boundary
+commits pending annotations first, then revalidates the prepared root only when
+credentials are ready to persist. The PR owns final ReviewGPT and exact-head CI.
+Completed: 2026-09-05
