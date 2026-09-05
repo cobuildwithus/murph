@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 import { expect, it, vi } from "vitest";
 import { unstable_dev } from "wrangler";
 
-it("resumes a checkpoint after its separate barrier-control object hibernates", async () => {
+it("resumes Worker and Durable Object checkpoints after their control object hibernates", async () => {
   // The Workers Vitest pool forces no_handle_cross_request_promise_resolution.
   // Use an ordinary local Worker so this regression keeps production semantics.
   const worker = await unstable_dev(fileURLToPath(new URL("./fixtures/checkpoint-barrier-worker.ts", import.meta.url)), {
@@ -27,7 +27,9 @@ it("resumes a checkpoint after its separate barrier-control object hibernates", 
     expect(await (await worker.fetch("/arm?target=control")).text()).toBe("armed");
     const publications = Promise.all([
       worker.fetch("/wait?target=opaque").then((response) => response.text()),
+      worker.fetch("/wait?target=worker").then((response) => response.text()),
       worker.fetch("/wait?target=opaque").then((response) => response.text()),
+      worker.fetch("/wait?target=worker").then((response) => response.text()),
     ]);
     await vi.waitFor(async () => {
       expect(await (await worker.fetch("/status?target=opaque")).text()).toBe("entered");
@@ -39,7 +41,7 @@ it("resumes a checkpoint after its separate barrier-control object hibernates", 
     await expect(Promise.race([
       publications,
       new Promise<string[]>((resolve) => setTimeout(() => resolve(["checkpoint did not resume"]), 1_000)),
-    ])).resolves.toEqual(["checkpoint resumed", "checkpoint resumed"]);
+    ])).resolves.toEqual(Array(4).fill("checkpoint resumed"));
   } finally {
     await worker.stop();
   }

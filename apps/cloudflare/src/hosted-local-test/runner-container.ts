@@ -258,7 +258,6 @@ export type HostedLocalShutdownCheckpointPublicationBarrierState =
 interface HostedLocalShutdownCheckpointPublicationBarrier {
   entered: boolean;
   target: "canonical_runtime_commit" | "idle_shutdown" | "snapshot_start";
-  releaseWaiters: Array<() => void>;
   released: boolean;
 }
 
@@ -396,7 +395,6 @@ function armCheckpointPublicationBarrier(
   shutdownCheckpointPublicationBarriers.set(normalizedUserId, {
     entered: false,
     target,
-    releaseWaiters: [],
     released: false,
   });
 }
@@ -422,7 +420,6 @@ export function releaseShutdownCheckpointPublicationBarrier(userId: string): boo
 
   shutdownCheckpointPublicationBarriers.delete(normalizedUserId);
   barrier.released = true;
-  for (const release of barrier.releaseWaiters.splice(0)) release();
   emitHostedExecutionStructuredLog({
     component: "runner",
     details: { barrierKind: barrier.target, checkpointBarrierStage: "released" },
@@ -462,13 +459,12 @@ export function wrapShutdownCheckpointPublicationBarrierForTest(
       phase: "checkpoint",
       userId,
     });
-    // The idle control object can hibernate while this request stays active.
-    // A promise created when arming belongs to that discarded request context;
-    // create each wait here so workerd can resume the live checkpoint owner.
-    await new Promise<void>((resolve) => {
-      if (barrier.released) resolve();
-      else barrier.releaseWaiters.push(resolve);
-    });
+    // Outbound Worker requests need pending I/O to avoid workerd's hung-request
+    // cancellation. Create timers in this live request, never in the separate
+    // control object whose request context may have already hibernated.
+    while (!barrier.released && !request.signal.aborted) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    }
     emitHostedExecutionStructuredLog({
       component: "runner",
       details: {

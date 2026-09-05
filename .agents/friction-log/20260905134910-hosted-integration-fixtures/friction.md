@@ -20,3 +20,5 @@ Run the four Telegram/Linq planner concurrency cases with PostgreSQL and the for
 ## Context
 
 Synchronize the Linq-first fixture after the real member-row lock and before mailbox writes. Preserve the exact new fence, canonical progress, delivery, and untouched pristine inventory assertions. Create checkpoint waits in each live waiting request, and use an ordinary local Worker to prove they resume after the control object hibernates. The signed reply requirement remains unchanged.
+
+The ordinary Worker regression originally delegated every request to a Durable Object. That missed outbound Worker hung-request detection: a request-owned deferred promise without pending I/O is canceled immediately. Reproduce with the same actual barrier called directly by Worker fetch as well as by a Durable Object, then hold both beyond the control owner's hibernation window. A request-owned timer wait preserves liveness while the shared release flag retains explicit test control.
