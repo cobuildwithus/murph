@@ -5,11 +5,11 @@
  * source-tree review rather than trusting one platform's binary layout.
  */
 export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
-  upstreamCommit: "78c290807ce710180111df227df3b7a4fe845452",
+  upstreamCommit: "3d2ee51ca2d5db578f328aa75e20aa22c0197c9a",
   upstreamSourceRoot: "codex-rs/codex-api/src",
-  upstreamSourceTree: "e8397c0f448c6975be857ebf3d77be00537d3c9d",
-  upstreamTag: "rust-v0.151.0",
-  version: "0.151.0",
+  upstreamSourceTree: "f89292b9cf6a6f0c316c7d88a47f111a20dc0015",
+  upstreamTag: "rust-v0.153.4",
+  version: "0.153.4",
   baseRelativeProviderRoutes: [
     "alpha/search",
     "guardian",

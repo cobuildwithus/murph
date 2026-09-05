@@ -282,6 +282,7 @@ async function prepareGroupChallengeVault(
 }
 
 interface ScriptedResponseRoute {
+  beforeRespond?: () => Promise<void>
   completionLabel?: string
   delayMs?: number
   requestExcludes?: readonly string[]
@@ -633,6 +634,42 @@ describe('real codex app-server with scripted provider', () => {
     expect(result.turnId).toEqual(expect.any(String))
     expect(result.sessionId).toEqual(expect.any(String))
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+  })
+
+  it('preserves native Astra async-question text and additive app-server fields', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario({ model: 'gpt-6-astra' })
+    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
+      astraAllowed: true,
+      codexCommand: scenario.turnInput.codexCommand,
+      directory: scenario.turnInput.codexHome,
+    })
+    const questions = [{ title: 'Which day works?', options: ['Monday', 'Tuesday'] }]
+    scenario.stub.queue(
+      { functionCall: { name: 'request_user_input_async', arguments: { questions } } },
+      { text: '' },
+    )
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [],
+      env: {
+        ...scenario.turnInput.env,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+      },
+      prompt: 'Ask which day works using the asynchronous question tool.',
+    })
+    expect(result.finalMessage).toBe('Which day works?\n- Monday\n- Tuesday')
+    expect(result.transcriptMessage).toBe(result.finalMessage)
+    expect(result.jsonEvents).toContainEqual(expect.objectContaining({
+      method: 'item/completed',
+      params: expect.objectContaining({
+        item: expect.objectContaining({
+          type: 'agentMessage', delivery: 'async', questions,
+        }),
+      }),
+    }))
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
   it('executes the unfamiliar workout CSV skill with exact-byte batch safety', {
@@ -4723,6 +4760,14 @@ text(JSON.stringify(result));
       title: 'Gap reminder',
     }
     const recoveryKey = buildTestAutomationLocalAtRecoveryKey(failedRequest)
+    let markResponseStarted!: () => void
+    const responseStarted = new Promise<void>((resolve) => {
+      markResponseStarted = resolve
+    })
+    let releaseResponse!: () => void
+    const responseReleased = new Promise<void>((resolve) => {
+      releaseResponse = resolve
+    })
     let steered: Promise<void> | null = null
     scenario.stub.queue(
       {
@@ -4735,7 +4780,10 @@ text(JSON.stringify(result));
         },
       },
       {
-        delayMs: 4_000,
+        beforeRespond: async () => {
+          markResponseStarted()
+          await responseReleased
+        },
         text: 'That time does not exist on March 8. What should I do?',
       },
       {
@@ -4776,14 +4824,19 @@ text(JSON.stringify(result));
         vaultFileSendAvailable: false,
       },
       onLiveTurn: (turn: CodexAppServerLiveTurn) => {
-        steered = delay(1_000).then(() =>
-          turn.steer({
-            prompt: 'Never mind. Do not create that reminder.',
-            relativeDateReferenceWindow: {
-              earliestAt: '2026-03-08T05:01:00.000Z',
-              latestAt: '2026-03-08T05:01:00.000Z',
-            },
-          }))
+        steered = responseStarted.then(async () => {
+          try {
+            await turn.steer({
+              prompt: 'Never mind. Do not create that reminder.',
+              relativeDateReferenceWindow: {
+                earliestAt: '2026-03-08T05:01:00.000Z',
+                latestAt: '2026-03-08T05:01:00.000Z',
+              },
+            })
+          } finally {
+            releaseResponse()
+          }
+        })
       },
       prompt: 'Remind me tomorrow at 2:30 AM in New York.',
     })
@@ -10300,6 +10353,8 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
       }))
       return
     }
+
+    await scripted.beforeRespond?.()
 
     if (scripted.delayMs) {
       await new Promise((resolve) => {
