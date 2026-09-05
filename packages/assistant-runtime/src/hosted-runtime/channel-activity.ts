@@ -195,7 +195,12 @@ export function createHostedAssistantChannelTypingDependencies(input: {
   };
 }
 
-function claimHostedLinqTypingTarget(target: string): string | null {
+type HostedLinqTypingClaim = {
+  target: string;
+  state: HostedLinqTypingTargetState;
+};
+
+function claimHostedLinqTypingTarget(target: string): HostedLinqTypingClaim | null {
   const normalized = target.trim();
   if (!normalized) {
     return null;
@@ -213,46 +218,51 @@ function claimHostedLinqTypingTarget(target: string): string | null {
     return null;
   }
 
-  hostedLinqTypingTargets.set(normalized, {
+  const state = {
     activeUntilMs: now + HOSTED_LINQ_TYPING_MAX_SESSION_MS,
     cooldownUntilMs: now + HOSTED_LINQ_TYPING_MAX_SESSION_MS
       + HOSTED_LINQ_TYPING_RESTART_COOLDOWN_MS,
-  });
-  return normalized;
+  };
+  hostedLinqTypingTargets.set(normalized, state);
+  return { target: normalized, state };
 }
 
 function wrapHostedLinqTypingHandle(input: {
   handle: NonNullable<Awaited<ReturnType<typeof startLinqTypingIndicator>>>;
-  target: string;
+  target: HostedLinqTypingClaim;
 }): NonNullable<Awaited<ReturnType<typeof startLinqTypingIndicator>>> {
+  let released = false;
   return {
     ...input.handle,
     stop: async (options) => {
-      const state = hostedLinqTypingTargets.get(input.target);
-      const completedMaxSession = Boolean(state && Date.now() >= state.activeUntilMs);
+      const ownsTarget = !released
+        && hostedLinqTypingTargets.get(input.target.target) === input.target.state;
+      const completedMaxSession = Date.now() >= input.target.state.activeUntilMs;
       try {
-        await input.handle.stop(options);
+        await input.handle.stop(ownsTarget ? options : { ...options, providerStop: false });
       } finally {
-        releaseHostedLinqTypingTarget(input.target, {
-          completedMaxSession,
-        });
+        if (ownsTarget) {
+          released = true;
+          releaseHostedLinqTypingTarget(input.target, { completedMaxSession });
+        }
       }
     },
   };
 }
 
-function releaseHostedLinqTypingTarget(input: string, options: {
+function releaseHostedLinqTypingTarget(input: HostedLinqTypingClaim, options: {
   completedMaxSession: boolean;
 }): void {
+  if (hostedLinqTypingTargets.get(input.target) !== input.state) {
+    return;
+  }
   if (!options.completedMaxSession) {
-    hostedLinqTypingTargets.delete(input);
+    hostedLinqTypingTargets.delete(input.target);
     return;
   }
 
-  hostedLinqTypingTargets.set(input, {
-    activeUntilMs: Date.now(),
-    cooldownUntilMs: Date.now() + HOSTED_LINQ_TYPING_RESTART_COOLDOWN_MS,
-  });
+  input.state.activeUntilMs = Date.now();
+  input.state.cooldownUntilMs = Date.now() + HOSTED_LINQ_TYPING_RESTART_COOLDOWN_MS;
 }
 
 function pickHostedChannelEnv(

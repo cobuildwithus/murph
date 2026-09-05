@@ -82,7 +82,9 @@ immutable historical evidence, never current operating instructions.
   `.agents/skills/frog/SKILL.md`; commit each created entry with the task.
 - The completion workflow owns candidate review, PR evidence, and final gates.
   Start required ReviewGPT on the stable pushed head concurrently with CI.
-  Use one completion owner and the review loop's finding-disposition policy.
+  Keep one completion owner in the original session/thread, preferring `--wait`
+  or paced polling. Reserve detached wake for deliberate handoffs; follow the
+  review loop's waiting and finding-disposition policies.
 - Run checks appropriate to the changed behavior. Once they pass, broaden or
   repeat only for new changes, failures, or a material evidence gap. Required
   exact-head CI remains a completion gate; report blockers honestly.

@@ -38,6 +38,7 @@ import {
   projectHostedMemberStripeBillingRefSnapshot,
 } from "./hosted-member-billing-store";
 import {
+  assertHostedMemberLinqEmailHandleOwnerTx,
   type HostedMemberIdentityState,
   projectHostedMemberIdentityState,
 } from "./hosted-member-identity-store";
@@ -58,6 +59,7 @@ import {
   type HostedOnboardingReadClient,
 } from "./shared";
 import { readHostedMemberIdentityPhoneNumber } from "./member-private-codecs";
+import { acquireHostedLinqParticipantEmailLockTx } from "./linq-participant-contact";
 
 const HOSTED_MEMBER_EMAIL_AUTH_VERIFIED_EMAIL_FIELD =
   "hosted-member-email-authorization.verified-email";
@@ -991,6 +993,15 @@ async function upsertHostedMemberVerifiedEmailAuthorizationTx(
     prisma: Prisma.TransactionClient;
   },
 ): Promise<HostedMemberEmailAuthorizationState> {
+  await acquireHostedLinqParticipantEmailLockTx({
+    emailAddress: input.address,
+    tx: input.prisma,
+  });
+  await assertHostedMemberLinqEmailHandleOwnerTx({
+    emailAddress: input.address,
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
   await lockHostedMemberRow(input.prisma, input.memberId);
 
   const currentAuthorization = await input.prisma.hostedMemberEmailAuthorization.findUnique({
