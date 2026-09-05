@@ -1001,32 +1001,33 @@ async function readHostedGrowthGroupMessages(input: {
     const primaryWindow = input.primaryWindow;
 
     while (true) {
-      const rows = await input.prisma.hostedMailboxItem.findMany({
-        ...(cursorId
-          ? {
-              cursor: { id: cursorId },
-              skip: 1,
-            }
-          : {}),
-        orderBy: [
-          { createdAt: "asc" },
-          { id: "asc" },
-        ],
-        select: hostedGrowthGroupMailboxSelect,
-        take: HOSTED_GROWTH_GROUP_MAILBOX_PAGE_SIZE,
-        where: {
-          kind: INBOUND_MESSAGE_MAILBOX_KIND,
-          member: {
-            threadContainer: {
-              isNot: null,
+      const rows: HostedGrowthGroupMailboxRow[] =
+        await input.prisma.hostedMailboxItem.findMany({
+          ...(cursorId
+            ? {
+                cursor: { id: cursorId },
+                skip: 1,
+              }
+            : {}),
+          orderBy: [
+            { createdAt: "asc" },
+            { id: "asc" },
+          ],
+          select: hostedGrowthGroupMailboxSelect,
+          take: HOSTED_GROWTH_GROUP_MAILBOX_PAGE_SIZE,
+          where: {
+            kind: INBOUND_MESSAGE_MAILBOX_KIND,
+            member: {
+              threadContainer: {
+                isNot: null,
+              },
+            },
+            createdAt: {
+              gte: input.start,
+              lt: input.end,
             },
           },
-          createdAt: {
-            gte: input.start,
-            lt: input.end,
-          },
-        },
-      });
+        });
       const primaryRows = primaryWindow
         ? rows.filter((row) =>
             row.createdAt >= primaryWindow.start
