@@ -8,6 +8,7 @@ import path from "node:path";
 import { expect, test, vi } from "vitest";
 import {
   addCapture,
+  applyCanonicalWriteBatch,
   appendJsonlRecord,
   initializeVault,
   withHostedCanonicalWritePort,
@@ -23,6 +24,13 @@ import {
   sha256HostedBundleHex,
   snapshotHostedBundleRoots,
 } from "@murphai/runtime-state/node";
+import { normalizeParsedEmailMessage, persistCanonicalInboxCapture } from "@murphai/inboxd";
+import {
+  appendHostedCanonicalWriteReceiptToArtifactLog,
+  hostedCanonicalWriteReceiptLogStatusFields,
+} from "../src/hosted-runtime/canonical-write-receipt-log.ts";
+import { restoreHostedWorkspaceRuntimeJobWorkspace } from "../src/hosted-runtime/workspace-restore.ts";
+import { createWorkspaceState } from "./hosted-runtime-workspace-entrypoint.harness.ts";
 
 import {
   createHostedArtifactMaterializer,
@@ -616,6 +624,106 @@ test("acknowledged capture receipts recover media references without a newer sna
     assert.equal(getCalls.length, 1);
     await materialize([relativePath]);
     assert.equal(getCalls.length, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test.each([
+  { videoMime: "application/octet-stream", withImage: true, external: true },
+  { videoMime: null, withImage: true, external: true },
+  { videoMime: "video/mp4", withImage: true, external: true },
+  { videoMime: "application/octet-stream", withImage: false, external: true },
+  { videoMime: "application/octet-stream", withImage: true, external: false },
+])("real inbox media receipts recover after workspace loss: %j", async (scenario) => {
+  const root = await mkdtemp(path.join(tmpdir(), "murph-inbox-media-replay-"));
+  const vaultRoot = path.join(root, "live");
+  const restoredRoot = path.join(root, "restored");
+  const now = new Date().toISOString();
+  const { artifactStore } = createHostedRuntimeArtifactStoreStub();
+  const { mediaStore, getCalls } = createHostedRuntimeMediaStoreStub();
+  let status: ReturnType<typeof hostedCanonicalWriteReceiptLogStatusFields> = {};
+  const receipts: HostedCanonicalWritePersistenceInput[] = [];
+  const videoBytes = Buffer.from("synthetic video receipt payload");
+  const imageBytes = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+cGfoAAAAASUVORK5CYII=",
+    "base64",
+  );
+  try {
+    await initializeVault({ vaultRoot, createdAt: now });
+    const snapshot = await snapshotHostedBundleRoots({
+      kind: "vault", roots: [{ root: vaultRoot, rootKey: "vault" }],
+    });
+    assert.ok(snapshot);
+    const snapshotHash = sha256HostedBundleHex(snapshot);
+    await artifactStore.put({ bytes: snapshot, sha256: snapshotHash });
+    const input = await normalizeParsedEmailMessage({
+      message: {
+        attachments: [
+          ...(scenario.withImage ? [{ fileName: "photo.png", contentType: "image/png", data: imageBytes }] : []),
+          { fileName: "clip.mp4", contentType: scenario.videoMime, data: videoBytes },
+        ].map((attachment) => ({
+          ...attachment, contentDisposition: "attachment", contentId: null,
+          contentTransferEncoding: null,
+        })),
+        bcc: [], cc: [], from: "sender@example.test", to: ["assistant@example.test"],
+        headers: {}, html: null, inReplyTo: null, messageId: "media-receipt@example.test",
+        occurredAt: now, receivedAt: now, rawHash: "a".repeat(64), rawSize: 0,
+        references: [], replyTo: [], subject: "Media references", text: "Keep these attachments.",
+      },
+    });
+    assert.equal(input.attachments?.at(-1)?.kind, "video");
+    const capture = await withHostedCanonicalWritePort({
+      async persistCanonicalWrite(persistence) {
+        const externalized = await externalizeHostedCanonicalWriteMediaPayloads({
+          persistence, vaultRoot, mediaStore: scenario.external ? mediaStore : null,
+        });
+        if (!scenario.external) assert.equal(externalized, persistence);
+        receipts.push(externalized);
+        const update = await appendHostedCanonicalWriteReceiptToArtifactLog({
+          ...externalized, artifactStore, previousStatus: status,
+        });
+        status = hostedCanonicalWriteReceiptLogStatusFields(update);
+      },
+    }, async () => {
+      const persisted = await persistCanonicalInboxCapture({
+        vaultRoot, input, storedAt: now, captureId: "cap_mixed_receipt",
+        eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2W3",
+      });
+      await applyCanonicalWriteBatch({
+        vaultRoot, operationType: "receipt_followup", summary: "Persist a later note",
+        audit: { action: "event_upsert", commandName: "test.mediaReceipt", summary: "Persist a later note" },
+        textWrites: [{ relativePath: "bank/receipt-note.md", content: "Later durable note.\n" }],
+      });
+      return persisted;
+    });
+    const videoPath = capture.stored.attachments.at(-1)?.storedPath;
+    assert.ok(videoPath);
+    await rm(vaultRoot, { recursive: true, force: true });
+    const restored = await restoreHostedWorkspaceRuntimeJobWorkspace({
+      vaultRoot: restoredRoot,
+      platform: { artifactStore, logPort: null, mediaStore: scenario.external ? mediaStore : null },
+      workspace: createWorkspaceState({
+        redactedStatus: status,
+        snapshotRef: { hash: snapshotHash, key: "synthetic/media-base.bundle", size: snapshot.byteLength, updatedAt: now },
+      }),
+    });
+    assert.equal(restored.canonicalWriteReceiptRecoveryFailed, false);
+    assert.equal(restored.canonicalWriteReceiptCount, receipts.length);
+    assert.deepEqual(getCalls, []);
+    assert.equal(await readFile(path.join(restoredRoot, "bank/receipt-note.md"), "utf8"), "Later durable note.\n");
+    const ledger = await readFile(path.join(restoredRoot, capture.capture.relativePath), "utf8");
+    assert.ok(ledger.includes(videoPath));
+    if (scenario.external) {
+      await assert.rejects(readFile(path.join(restoredRoot, videoPath)), { code: "ENOENT" });
+      const reference = (await readHostedMediaReferenceCatalogue({ vaultRoot: restoredRoot }))
+        .entries.find((entry) => entry.relativePath === videoPath);
+      assert.equal(reference?.mediaKind, "video");
+      assert.ok(receipts.every(({ payloads }) => payloads.every((payload) => !Buffer.from(payload.bytes).equals(videoBytes))));
+    }
+    await restored.materializeWorkspaceArtifacts([videoPath]);
+    assert.deepEqual(await readFile(path.join(restoredRoot, videoPath)), videoBytes);
+    assert.equal(getCalls.length, scenario.external ? 1 : 0);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

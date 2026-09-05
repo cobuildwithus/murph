@@ -4013,7 +4013,9 @@ images keep the 14-day image/audio window. Encrypted workspace snapshots
 externalize image/video bytes through owner-scoped hosted media references
 before excluding them from the archive, and hosted canonical write receipts omit
 matching image/video raw payload artifacts only when the same durable raw-write
-receipt carries their media identity and lifetime. Receipt recovery reconstructs
+receipt carries their media identity, explicit image/video kind, and lifetime.
+Original MIME is descriptive metadata and may be generic or absent at ingress;
+receipt publication and recovery use the catalogue's explicit kind. Receipt recovery reconstructs
 that catalogue entry without fetching media. Ordinary canonical captures remain
 nonexpiring while their holder exists; only captures identified by core's
 generated-image provenance predicate receive the generated-media TTL. The runner

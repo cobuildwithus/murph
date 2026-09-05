@@ -187,20 +187,23 @@ function isRawUpsertEffect(value: unknown): value is "copy" | "reuse" {
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
+
 function parseHostedCanonicalWriteMediaRef(raw: unknown):
   Extract<HostedCanonicalWriteReceiptAction, { kind: "raw_upsert" }>["mediaRef"] {
   if (raw === undefined) return undefined;
-  if (!isPlainObject(raw) || !isSha256(raw.id) || !isIsoDate(raw.recordedAt)
+  if (!isPlainObject(raw) || !isSha256(raw.id)
+    || (raw.mediaKind !== "image" && raw.mediaKind !== "video") || !isIsoDate(raw.recordedAt)
     || (raw.expiresAt !== null && !isIsoDate(raw.expiresAt))) {
     throw new Error("Hosted canonical media reference is invalid.");
   }
-  return { id: raw.id, recordedAt: raw.recordedAt, expiresAt: raw.expiresAt };
+  return { id: raw.id, mediaKind: raw.mediaKind, recordedAt: raw.recordedAt, expiresAt: raw.expiresAt };
 }
 
 function isIsoDate(value: unknown): value is string {
   return typeof value === "string" && Number.isFinite(Date.parse(value))
     && new Date(value).toISOString() === value;
 }
+
 function parseHostedCanonicalRawWriteReceiptAction(
   raw: Record<string, unknown>,
   targetRelativePath: string,
@@ -216,7 +219,7 @@ function parseHostedCanonicalRawWriteReceiptAction(
   }
   const contentRef = parseHostedCanonicalWriteReceiptContentRef(raw.contentRef);
   const mediaRef = parseHostedCanonicalWriteMediaRef(raw.mediaRef);
-  if (mediaRef && (contentRef || !/^(image|video)\//iu.test(raw.mediaType))) {
+  if (mediaRef && contentRef) {
     throw new Error("Hosted canonical media receipt conflicts with its raw action.");
   }
   return {

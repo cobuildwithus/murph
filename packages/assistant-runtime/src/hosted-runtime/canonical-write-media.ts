@@ -20,7 +20,7 @@ export async function externalizeHostedCanonicalWriteMediaPayloads(input: {
   persistence: HostedCanonicalWritePersistenceInput;
   vaultRoot: string;
 }): Promise<HostedCanonicalWritePersistenceInput> {
-  if (!input.mediaStore || !receiptHasHostedMediaPayload(input.persistence)) {
+  if (!input.mediaStore || !receiptHasRawPayload(input.persistence)) {
     return input.persistence;
   }
 
@@ -53,6 +53,7 @@ export async function externalizeHostedCanonicalWriteMediaPayloads(input: {
       ...withoutContentRef,
       mediaRef: {
         id: mediaRef.mediaId,
+        mediaKind: mediaRef.mediaKind,
         expiresAt: mediaRef.expiresAt,
         recordedAt: mediaRef.recordedAt,
       },
@@ -83,16 +84,12 @@ export async function externalizeHostedCanonicalWriteMediaPayloads(input: {
   };
 }
 
-function receiptHasHostedMediaPayload(
+function receiptHasRawPayload(
   persistence: HostedCanonicalWritePersistenceInput,
 ): boolean {
   return persistence.receipt.actions.some((action) =>
     action.kind === "raw_upsert"
     && Boolean(action.contentRef)
-    && (
-      action.mediaType.toLowerCase().startsWith("image/")
-      || action.mediaType.toLowerCase().startsWith("video/")
-    )
   );
 }
 
@@ -109,6 +106,7 @@ function toHostedCanonicalWriteContentRefKey(
 ): string {
   return `${ref.sha256}:${ref.byteSize}`;
 }
+
 // Rebuild only metadata after applying the durable receipt. Media bytes remain
 // absent until a consumer requests them; later receipt actions supersede earlier ones.
 async function restoreHostedCanonicalWriteMediaReferences(input: {
@@ -121,12 +119,11 @@ async function restoreHostedCanonicalWriteMediaReferences(input: {
   let changed = false;
   for (const action of input.receipt.actions) {
     if (action.kind === "raw_upsert" && action.mediaRef) {
-      const mediaKind = action.mediaType.toLowerCase().startsWith("image/") ? "image" : "video";
       entries.set(action.targetRelativePath, {
         byteSize: action.byteLength,
         expiresAt: action.mediaRef.expiresAt,
         mediaId: action.mediaRef.id,
-        mediaKind,
+        mediaKind: action.mediaRef.mediaKind,
         mimeType: action.mediaType,
         recordedAt: action.mediaRef.recordedAt,
         relativePath: action.targetRelativePath,
@@ -149,6 +146,7 @@ async function restoreHostedCanonicalWriteMediaReferences(input: {
     });
   }
 }
+
 export async function applyHostedCanonicalWriteReceiptWithMedia(
   input: Parameters<typeof applyHostedCanonicalWriteReceipt>[0],
 ): Promise<void> {

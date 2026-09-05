@@ -127,6 +127,7 @@ export type HostedCanonicalWriteReceiptAction =
       contentRef?: HostedCanonicalWriteReceiptContentRef;
       mediaRef?: {
         id: string;
+        mediaKind: "image" | "video";
         expiresAt: string | null;
         recordedAt: string;
       };

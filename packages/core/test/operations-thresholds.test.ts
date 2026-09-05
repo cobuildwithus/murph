@@ -795,7 +795,7 @@ test("hosted raw media receipt replay accepts an already materialized target wit
       effect: "copy",
       kind: "raw_upsert",
       mediaType: "image/png",
-      mediaRef: { id: "a".repeat(64), expiresAt: null, recordedAt: "2026-07-09T00:00:00.000Z" },
+      mediaRef: { id: "a".repeat(64), mediaKind: "image", expiresAt: null, recordedAt: "2026-07-09T00:00:00.000Z" },
       originalFileName: "photo.png",
       sha256,
       targetRelativePath,
