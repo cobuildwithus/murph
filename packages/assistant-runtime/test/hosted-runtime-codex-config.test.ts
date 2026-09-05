@@ -58,12 +58,22 @@ import {
   HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS,
   HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS,
   prepareHostedCodexRuntimeEnvironment,
+  resolveHostedCodexModelCatalogPath,
 } from "../src/hosted-runtime/codex-config.ts";
 import {
   HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY,
 } from "../src/hosted-runtime/codex-shell-env-policy.ts";
 
 const temporaryPaths: string[] = [];
+
+test("selects the expanded catalog only with explicit workspace Astra authority", () => {
+  const imageCatalogPath = "/opt/murph/models.json";
+  for (const astraAllowed of [false, undefined]) {
+    assert.equal(resolveHostedCodexModelCatalogPath({ imageCatalogPath, astraAllowed }), imageCatalogPath);
+  }
+  assert.equal(resolveHostedCodexModelCatalogPath({ imageCatalogPath, astraAllowed: true }), `${imageCatalogPath}.astra`);
+  assert.equal(resolveHostedCodexModelCatalogPath({ imageCatalogPath: undefined, astraAllowed: true }), undefined);
+});
 const RUN_HOSTED_CODEX_AUTH_E2E = process.env.MURPH_RUN_HOSTED_CODEX_AUTH_E2E === "1";
 const RUN_HOSTED_CODEX_AUTOCOMPACTION_E2E =
   process.env.MURPH_RUN_HOSTED_CODEX_AUTOCOMPACTION_E2E === "1";

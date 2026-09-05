@@ -38,6 +38,7 @@ import {
   setLinqMessageReaction,
   sendLinqVoiceMemoMessage,
   sendTelegramImageMessage,
+  sendTelegramFileMessage,
   sendTelegramRichMessage,
   prepareTelegramVoiceMemoMessage,
   sendPreparedTelegramVoiceMemoMessage,
@@ -68,7 +69,7 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   resolveDeliveryTransportIdempotent() {
     return false
   },
-  supportedResponseMediaKinds: ['image', 'vault_image', 'voice_memo'],
+  supportedResponseMediaKinds: ['image', 'vault_image', 'voice_memo', 'vault_file'],
   targetRequiredMessage:
     'Telegram delivery requires an explicit target or a stored delivery binding.',
   async startTypingIndicator({ candidate, dependencies }) {
@@ -78,7 +79,20 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       target: candidate.target,
     })) ?? null
   },
-  async sendMessage({ candidate, card, dependencies, idempotencyKey, media, message, replyToMessageId }) {
+  async sendMessage({ candidate, card, dependencies, idempotencyKey, media, message, replyToMessageId, threadIsDirect }) {
+    const file = media.find((item) => item.kind === 'vault_file')
+    if (file) {
+      if (media.length !== 1 || threadIsDirect !== true) {
+        throw new VaultCliError(
+          'ASSISTANT_VAULT_FILE_MEDIA_INVALID',
+          'Telegram file delivery requires one file in a private conversation.',
+        )
+      }
+      const request = { file, replyToMessageId, target: candidate.target }
+      return dependencies.sendTelegramFile
+        ? await dependencies.sendTelegramFile(request)
+        : await sendTelegramFileMessage(request, { signal: dependencies.signal })
+    }
     if (hasVoiceMemoMedia(media)) {
       return await sendTelegramVoiceMemoDelivery({
         candidate,

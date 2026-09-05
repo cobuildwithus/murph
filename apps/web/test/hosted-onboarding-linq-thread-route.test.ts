@@ -6517,6 +6517,10 @@ describe("Linq group chat auto-provision", () => {
 
   it.each([
     {
+      description: "reported group",
+      webhookIsGroup: true,
+    },
+    {
       description: "reported direct",
       webhookIsGroup: false,
     },
@@ -6580,7 +6584,7 @@ describe("Linq group chat auto-provision", () => {
           "Hosted onboarding diagnostic: hosted-onboarding.webhook.linq.chat-classification.",
           {
             diagnostic: "hosted-onboarding.webhook.linq.chat-classification",
-            outcome: "thread-route-group",
+            outcome: webhookIsGroup === true ? "webhook-group" : "thread-route-group",
           },
         );
       } finally {
@@ -6734,6 +6738,11 @@ describe("Linq group chat auto-provision", () => {
 
   it.each([
     {
+      description: "says group",
+      service: "iMessage",
+      webhookIsGroup: true,
+    },
+    {
       description: "incorrectly says direct",
       service: "iMessage",
       webhookIsGroup: false,
@@ -6753,7 +6762,7 @@ describe("Linq group chat auto-provision", () => {
       service: "RCS",
       webhookIsGroup: null,
     },
-  ] as const)("uses canonical chat metadata when a $service webhook $description", async ({
+  ] as const)("uses group roster metadata when a $service webhook $description", async ({
     service,
     webhookIsGroup,
   }) => {
@@ -6795,6 +6804,7 @@ describe("Linq group chat auto-provision", () => {
         chatId: "chat_group_123",
         timeoutMs: 1_500,
       });
+      expect(linqClient.getHostedLinqChatSummary).toHaveBeenCalledTimes(1);
       expect(
         memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx,
       ).toHaveBeenCalledWith({
@@ -6833,7 +6843,7 @@ describe("Linq group chat auto-provision", () => {
         "Hosted onboarding diagnostic: hosted-onboarding.webhook.linq.chat-classification.",
         {
           diagnostic: "hosted-onboarding.webhook.linq.chat-classification",
-          outcome: "canonical-group",
+          outcome: webhookIsGroup === true ? "webhook-group" : "canonical-group",
         },
       );
     } finally {
@@ -9247,16 +9257,32 @@ describe("Linq group chat auto-provision", () => {
     }
   });
 
-  it("ignores group messages received on an unknown unmanaged recipient", async () => {
+  it.each([
+    ["unmanaged", "recipient-line-unmanaged"],
+    ["conflicting", "recipient-line-conflicting"],
+    ["structurally_unavailable", "recipient-line-structurally-unavailable"],
+    ["degraded_unavailable", "recipient-line-degraded-unavailable"],
+  ] as const)("ignores group messages on a %s recipient line", async (kind, reason) => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const prisma = createStatefulThreadRoutePrisma();
-    prisma.seedActiveManagedLinqLine("+15550000000");
+    const recipient = "+15558889999";
+    if (kind === "conflicting") {
+      // The production line-state reader rejects ambiguous row cardinality
+      // before it inspects either row's fields.
+      prisma.hostedLinqLine.findMany.mockResolvedValueOnce([{}, {}]);
+    } else if (kind !== "unmanaged") {
+      prisma.seedActiveManagedLinqLine(recipient, {
+        egressPolicy: kind === "structurally_unavailable" ? "disabled" : "enabled",
+        healthStatus: "degraded",
+        providerReputationStatus: "HEALTHY",
+      });
+    }
     mockSenderLookup(senderCore);
 
     try {
       const plan = await planHostedOnboardingLinqWebhook({
         event: buildLinqMessageReceivedEvent({
-          recipient: "+15558889999",
+          recipient,
         }),
         prisma: prisma as never,
       });
@@ -9266,16 +9292,18 @@ describe("Linq group chat auto-provision", () => {
         ok: true,
         reason: "group-chat-line-unavailable",
       });
-      expectManagedLineAuthorityLookup(prisma, "+15558889999");
+      expectManagedLineAuthorityLookup(prisma, recipient);
+      expect(plan.desiredSideEffects).toEqual([]);
       expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
       expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+      expect(prisma.hostedLinqLine.updateMany).not.toHaveBeenCalled();
 
       const plannerDetails = info.mock.calls.find(
         ([message]) => message === "Hosted Linq webhook planner decision.",
       )?.[1];
       expect(plannerDetails).toMatchObject({
         existingMemberMatch: "phone-identity",
-        reason: "recipient-line-unmanaged",
+        reason,
         responseReason: "group-chat-line-unavailable",
         routeStage: "new-group-admission-ignored",
       });
@@ -9284,20 +9312,26 @@ describe("Linq group chat auto-provision", () => {
     }
   });
 
-  it("ignores echoed own messages in unbound group threads without provisioning", async () => {
+  it.each([true, false, null] as const)("ignores unbound own-message echoes without provider reads when group flag is %s", async (isGroup) => {
     const prisma = createStatefulThreadRoutePrisma();
+    vi.mocked(prismaModule.getPrisma).mockReturnValue(prisma as never);
+    vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest)
+      .mockReturnValue(buildLinqMessageReceivedEvent({ isFromMe: true, isGroup }) as never);
 
-    const plan = await planHostedOnboardingLinqWebhook({
-      event: buildLinqMessageReceivedEvent({ isFromMe: true }),
-      prisma: prisma as never,
+    const response = await handleHostedOnboardingLinqWebhook({
+      rawBody: "{}",
+      signature: null,
+      timestamp: null,
     });
 
-    expect(plan.response).toMatchObject({
+    expect(response).toMatchObject({
       ignored: true,
       ok: true,
-      reason: "group-chat",
+      reason: isGroup === true ? "group-chat" : "own-message",
     });
-    expect(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber).not.toHaveBeenCalled();
+    expect(linqClient.getHostedLinqChatSummary).not.toHaveBeenCalled();
+    expect(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber)
+      .toHaveBeenCalledTimes(isGroup === true ? 0 : 1);
     expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });

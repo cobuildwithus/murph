@@ -1556,6 +1556,7 @@ function buildAssistantJournalCaptureGuidanceText(
 function buildAssistantVaultFileSendGuidanceText(): string {
   return [
     "Vault file sends:",
+    "- When `send_vault_file` is available, use it for requested attachments in this conversation. For an existing saved file, pass its current vault-relative ref directly; do not copy it into generated-delivery staging.",
     "- Export requested vault files. ZIPs may read originals in place. Inspect before refusing.",
     `- For a newly generated file requested for sending now, write its final bytes directly to \`${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename>\` and pass that ref. Never stage possible later sends or move or copy existing files there.`,
     "- On `status: \"pending\"`: say approval is required and the file is not attached; the runtime adds the exact approval link outside model context. Never invent or print a link, or call `finish_without_reply`.",

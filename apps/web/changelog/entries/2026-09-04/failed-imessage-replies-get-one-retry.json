@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-04",
+  "order": 100,
+  "item": {
+    "id": "failed-imessage-replies-get-one-retry",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Failed iMessage replies get one retry",
+    "summary": "Murph can resend a reply once when iMessage confirms that the original send failed.",
+    "details": "Recovery keeps the same conversation and content, respects current messaging restrictions, and stops after one attempt. It covers text, links, and non-audio attachments; voice memos, interactive cards, and uncertain delivery failures keep their existing behavior.",
+    "relevanceTags": ["imessage", "reliability"],
+    "sourcePullRequests": [2857]
+  }
+}

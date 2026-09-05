@@ -306,12 +306,21 @@ export function buildHostedWebTurbopackConfig(): NextConfig["turbopack"] {
 export function configureHostedWebWebpack(
   config: HostedWebWebpackConfig,
   context: HostedWebWebpackContext,
+  environment: NodeJS.ProcessEnv = process.env,
 ): HostedWebWebpackConfig {
-  if (!context.dev) {
-    // The production runner deliberately starts every Webpack compile cold, so
-    // a generated filesystem cache can never produce a later hit. Do not spend
-    // several gigabytes of memory and page cache writing that dead artifact.
+  if (!context.dev && environment.MURPH_HOSTED_WEB_WEBPACK_CACHE !== "1") {
+    // Vercel keeps cold compilation. CI jobs that persist the compiler cache
+    // explicitly opt in and let Webpack validate its source dependencies.
     config.cache = false;
+  } else if (
+    !context.dev
+    && config.cache
+    && typeof config.cache === "object"
+    && "type" in config.cache
+    && config.cache.type === "filesystem"
+  ) {
+    // Disk reuse must fit the same bounded compiler heap as cold compilation.
+    Object.assign(config.cache, { maxMemoryGenerations: 0 });
   }
 
   if (!hasOptionalModule("@farcaster/mini-app-solana")) {
@@ -480,7 +489,7 @@ export function buildHostedWebNextConfig(
           === HOSTED_WEB_PREPARED_TYPECHECK_COMPLETE,
       tsconfigPath: HOSTED_WEB_NEXT_TSCONFIG_PATH,
     },
-    webpack: configureHostedWebWebpack,
+    webpack: (config, context) => configureHostedWebWebpack(config, context, environment),
     headers: async () => [
       {
         source: HOSTED_WEB_HEADER_SOURCE,
