@@ -70,6 +70,71 @@ import {
 } from '../src/assistant-codex-events.ts'
 
 describe('assistant codex event shaping', () => {
+  it('accepts new thread metadata and excludes raw provider usage metadata from persisted events', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-protocol-upgrade-work-')
+    const codexHome = await createTempDir('assistant-codex-protocol-upgrade-home-')
+    const traces: unknown[] = []
+    const children: MockChildProcess[] = []
+    mockWarmCodexProcess(children, 31_990, async (child) => {
+      const initialize = await waitForRpcMethod(child, 'initialize')
+      child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+      const threadStart = await waitForRpcMethod(child, 'thread/start')
+      child.stdout.write(jsonLine({
+        id: threadStart.id,
+        result: { thread: { id: 'thread-153', model: null, reasoningEffort: null } },
+      }))
+      const turnStart = await waitForRpcMethod(child, 'turn/start')
+      child.stdout.write(jsonLine({ id: turnStart.id, result: { turn: { id: 'turn-153' } } }))
+      writeStartedTurn(child, 'thread-153', 'turn-153')
+      for (const method of ['modelProvider/authRecoveryStarted', 'modelProvider/authRecoveryCompleted']) {
+        child.stdout.write(jsonLine({
+          method,
+          params: { threadId: 'thread-153', turnId: 'turn-153', provider: 'openai', message: 'Authentication recovery status.' },
+        }))
+      }
+      child.stdout.write(jsonLine({
+        method: 'rawResponse/completed',
+        params: {
+          threadId: 'thread-153', turnId: 'turn-153', responseId: 'response-153', usage: null,
+          usageMetadata: { amount: null, metadata: { privatePayload: 'SYNTHETIC_RAW_USAGE_MARKER' } },
+        },
+      }))
+      child.stdout.write(jsonLine({
+        method: 'item/completed',
+        params: {
+          threadId: 'thread-153', turnId: 'turn-153',
+          item: { type: 'agentMessage', id: 'message-153', text: 'Done.', phase: 'final_answer', delivery: null, questions: null },
+        },
+      }))
+      writeCompletedTurn(child, 'thread-153', 'turn-153')
+    })
+    const result = await executeCodexAppServerTurn({
+      codexHome, workingDirectory, prompt: 'Reply once.',
+      model: 'gpt-5.6-terra', reasoningEffort: 'low', sandbox: 'workspace-write',
+      onTraceEvent: (event) => { traces.push(event) },
+    })
+    expect(result.finalMessage).toBe('Done.')
+    expect(result.threadId).toBe('thread-153')
+    expect(result.turnId).toBe('turn-153')
+    expect(JSON.stringify({ events: result.jsonEvents, traces })).not.toContain('SYNTHETIC_RAW_USAGE_MARKER')
+    expect(children).toHaveLength(1)
+  })
+
+  it.each(['modelProvider/authRecoveryStarted', 'modelProvider/authRecoveryCompleted'])(
+    'keeps %s informational instead of treating it as a turn failure',
+    (method) => {
+      const event = {
+        method,
+        params: {
+          threadId: 'thread-153', turnId: 'turn-153', provider: 'openai',
+          message: 'Recovering from an authentication error.',
+        },
+      }
+      expect(extractCodexErrorMessage(event)).toBeNull()
+      expect(normalizeCodexEvent(event)).toMatchObject({ kind: 'unknown', eventType: method })
+    },
+  )
+
   it('normalizes exact Codex 0.147 notifications across the consumed item families', () => {
     const modelRerouted = {
       method: 'model/rerouted',
