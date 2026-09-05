@@ -157,6 +157,9 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
 
     const store = new PrismaDeviceSyncControlPlaneStore({
       prisma: {
+        deviceOauthSession: {
+          findUnique: async () => ({ userId: session.userId }),
+        },
         $transaction: async <TResult>(
           callback: (transaction: {
             $queryRaw: typeof queryRaw;
