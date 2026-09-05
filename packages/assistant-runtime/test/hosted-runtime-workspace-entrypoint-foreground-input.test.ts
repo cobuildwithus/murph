@@ -4067,6 +4067,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
     let checkpointCount = 0;
     let classifierFailures = 0;
     let pendingConversationInputId: string | null = null;
+    let conversationImportedAtMonotonicMs: number | null = null;
 
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
@@ -4123,6 +4124,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
               item: item.item,
               vaultRoot,
             });
+            conversationImportedAtMonotonicMs = Math.floor(performance.now());
             return {
               assistantInputId: pendingConversationInputId,
               status: "imported",
@@ -4172,8 +4174,25 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             }),
           }),
           runtimeWakeSignal,
-          async runAssistantPhase() {
+          async runAssistantPhase(phaseInput) {
             if (pendingConversationInputId) {
+              const timing = phaseInput.providerStartCriticalPath;
+              assert.ok(timing, "a hot imported input must receive detailed admission timing");
+              assert.notEqual(conversationImportedAtMonotonicMs, null);
+              const boundaries = [
+                conversationImportedAtMonotonicMs,
+                timing.mailboxImportDoneAtMonotonicMs,
+                timing.foregroundPassStartedAtMonotonicMs,
+                timing.workspaceForegroundPassStartedAtMonotonicMs,
+                timing.assistantPhaseCallbackStartedAtMonotonicMs,
+              ];
+              for (let index = 1; index < boundaries.length; index += 1) {
+                const previous = boundaries[index - 1];
+                const current = boundaries[index];
+                assert.ok(typeof previous === "number");
+                assert.ok(typeof current === "number");
+                assert.ok(current >= previous, "hot admission boundaries must stay ordered");
+              }
               admittedConversationInputId = pendingConversationInputId;
               pendingConversationInputId = null;
               await writeSyntheticAssistantAutoReplyTerminalEvidence({

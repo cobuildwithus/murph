@@ -828,6 +828,24 @@ async function revalidatePreparedHostedLinqDirectIngressRootTx(input: {
   prepared: PreparedHostedLinqDirectMailboxPayloadRoot;
   prisma: Prisma.TransactionClient;
 }): Promise<void> {
+  const preparedIngressRoot = requirePreparedHostedLinqDirectIngressRoot(input);
+  try {
+    await revalidatePreparedHostedDomainRootForWebTx({
+      prepared: preparedIngressRoot,
+      tx: input.prisma,
+    });
+  } catch (error) {
+    if (error instanceof HostedDomainRootPreparationMismatchError) {
+      throw hostedLinqDirectMailboxPreparationRequired("ingress-root");
+    }
+    throw error;
+  }
+}
+
+function requirePreparedHostedLinqDirectIngressRoot(input: {
+  memberId: string;
+  prepared: PreparedHostedLinqDirectMailboxPayloadRoot;
+}) {
   const preparedIngressRoot = input.prepared.preparedIngressRoot;
   if (
     !preparedIngressRoot
@@ -836,10 +854,27 @@ async function revalidatePreparedHostedLinqDirectIngressRootTx(input: {
   ) {
     throw hostedLinqDirectMailboxPreparationRequired("ingress-root");
   }
+  return preparedIngressRoot;
+}
+
+async function appendHostedLinqDirectMailboxEnvelopeTx(input: {
+  envelope: ReturnType<typeof buildHostedLinqConversationWakeForMailbox>;
+  prepared: PreparedHostedLinqDirectMailboxPayloadRoot | null;
+  sourceMessageLookupKey: string;
+  tx: Prisma.TransactionClient;
+}) {
+  if (!input.prepared) {
+    return appendHostedMailboxEnvelopeWithSourceMessageTx(input);
+  }
+  const prepared = requirePreparedHostedLinqDirectIngressRoot({
+    memberId: input.envelope.userId,
+    prepared: input.prepared,
+  });
   try {
-    await revalidatePreparedHostedDomainRootForWebTx({
-      prepared: preparedIngressRoot,
-      tx: input.prisma,
+    // Mailbox append owns the root lock; Linq owns its preparation retry code.
+    return await appendHostedMailboxEnvelopeWithPreparedCryptoTx({
+      ...input,
+      prepared,
     });
   } catch (error) {
     if (error instanceof HostedDomainRootPreparationMismatchError) {
@@ -2651,25 +2686,12 @@ async function planHostedLinqActiveMemberDirectWebhook(input: {
   const sourceMessageLookupKey = requireHostedLinqSourceMessageLookupKey(
     summary.messageId,
   );
-  if (preparedDirectMailbox) {
-    await revalidatePreparedHostedLinqDirectIngressRootTx({
-      memberId: existingMember.id,
-      prepared: preparedDirectMailbox,
-      prisma: plannerInput.prisma,
-    });
-  }
-  const mailboxAppend = preparedDirectMailbox?.preparedIngressRoot
-    ? await appendHostedMailboxEnvelopeWithPreparedCryptoTx({
-        envelope: mailboxWake,
-        prepared: preparedDirectMailbox.preparedIngressRoot,
-        sourceMessageLookupKey,
-        tx: plannerInput.prisma,
-      })
-    : await appendHostedMailboxEnvelopeWithSourceMessageTx({
-        envelope: mailboxWake,
-        sourceMessageLookupKey,
-        tx: plannerInput.prisma,
-      });
+  const mailboxAppend = await appendHostedLinqDirectMailboxEnvelopeTx({
+    envelope: mailboxWake,
+    prepared: preparedDirectMailbox,
+    sourceMessageLookupKey,
+    tx: plannerInput.prisma,
+  });
 
   return logHostedLinqWebhookPlannerDecisionAndReturn(
     buildActiveMemberDirectPlan({

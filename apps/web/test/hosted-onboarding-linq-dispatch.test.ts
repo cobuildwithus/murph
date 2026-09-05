@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   prepareHostedCryptoDomainRootCandidates,
+  revalidatePreparedHostedDomainRootForWebTx,
   prewarmPreparedHostedCryptoDomainRootForWeb,
   type PreparedHostedCryptoDomainRootCandidates,
   unwrapHostedDomainRootForWeb,
@@ -1222,11 +1223,16 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         }),
     );
     mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mockImplementation(
-      async (input: { envelope: { eventId: string }; tx: unknown }) =>
-        mocks.appendHostedMailboxEnvelopeTx({
+      async (input: Parameters<typeof import("@/src/lib/hosted-mailbox/store").appendHostedMailboxEnvelopeWithPreparedCryptoTx>[0]) => {
+        await revalidatePreparedHostedDomainRootForWebTx({
+          prepared: input.prepared,
+          tx: input.tx,
+        });
+        return mocks.appendHostedMailboxEnvelopeTx({
           envelope: input.envelope,
           tx: input.tx,
-        }),
+        });
+      },
     );
     mocks.planHostedLinqMessageEditedWebhook.mockResolvedValue({
       desiredSideEffects: [],
@@ -16265,7 +16271,8 @@ function isFullHostedMemberRoutingRecordQuery(query: unknown): boolean {
   return Boolean(
     select
     && typeof select === "object"
-    && "pendingLinqParticipantContactEncrypted" in select,
+    && "pendingLinqParticipantContactEncrypted" in select
+    && "telegramUserIdEncrypted" in select,
   );
 }
 

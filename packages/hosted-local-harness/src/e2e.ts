@@ -65,6 +65,7 @@ export type HostedLocalE2eScenarioName =
   | "all"
   | "analyze-video-roundtrip"
   | "active-turn-latency"
+  | "hot-admission-latency"
   | "canonical-receipt-lost-ack-recovery"
   | "checkpoint-baseline"
   | "cold-start-benchmark"
@@ -148,6 +149,12 @@ export interface HostedLocalE2eScenario {
 }
 
 export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
+  {
+    file: "apps/cloudflare/test/hosted-local-hot-admission-latency-e2e.test.ts",
+    manualOnly: true,
+    name: "hot-admission-latency",
+    testControls: true,
+  },
   {
     file: "apps/cloudflare/test/hosted-local-active-turn-latency-e2e.test.ts",
     manualOnly: true,

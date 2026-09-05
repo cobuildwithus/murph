@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import assert from 'node:assert/strict'
 
@@ -1968,6 +1968,105 @@ test('sendAssistantMessageLocal persists late manual accepted-input transcript r
     prompt: 'Late follow up',
     response: 'final after late input',
   })
+})
+
+test('sendAssistantMessageLocal derives video authority from validated inputs without another event read', async () => {
+  const context = await createTempVaultContext('assistant-local-service-input-read-bound-')
+  tempRoots.push(context.parentRoot)
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    realAcceptedInputPersistence: true,
+  })
+  const inputStore = await import('../src/assistant/input-store.ts')
+  const event = await inputStore.upsertAssistantInputEvent({
+    event: {
+      content: { text: 'A fresh text message' },
+      occurredAt: '2026-04-22T10:00:00.000Z',
+      sourceRef: createHostedMailboxSourceRef({
+        eventId: 'evt_input_read_bound',
+        laneSeq: '1',
+      }),
+    },
+    vault: context.vaultRoot,
+  })
+  const readEvent = vi.spyOn(inputStore, 'readAssistantInputEvent')
+  const executeProvider = mocks.executeCodexTurnWithRecovery.getMockImplementation()
+  assert(executeProvider)
+  let readsBeforeProvider = 0
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
+    readsBeforeProvider = readEvent.mock.calls.filter(([query]) =>
+      query.inputId === event.inputId
+    ).length
+    return executeProvider(providerInput)
+  })
+
+  await sendAssistantMessageLocal({
+    acceptedTurnInput: {
+      initialInputs: [{
+        acceptedAt: event.receivedAt ?? event.occurredAt,
+        contentRef: {
+          kind: 'assistant-input-event',
+          refId: event.inputId,
+          version: 'murph.assistant-input-event.v1',
+        },
+        id: event.inputId,
+        source: 'assistant-input',
+      }],
+    },
+    prompt: 'A fresh text message',
+    vault: context.vaultRoot,
+  })
+
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledOnce()
+  // Entry validation, transcript received time, and post-lock journal validation.
+  expect(readsBeforeProvider).toBe(3)
+})
+
+test('sendAssistantMessageLocal revalidates accepted inputs after waiting for the turn lock', async () => {
+  const context = await createTempVaultContext('assistant-local-service-input-lock-revalidation-')
+  tempRoots.push(context.parentRoot)
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    realAcceptedInputPersistence: true,
+  })
+  const inputStore = await import('../src/assistant/input-store.ts')
+  const event = await inputStore.upsertAssistantInputEvent({
+    event: {
+      content: { text: 'A message removed before the turn lock' },
+      occurredAt: '2026-04-22T10:00:00.000Z',
+      sourceRef: createHostedMailboxSourceRef({
+        eventId: 'evt_input_lock_revalidation',
+        laneSeq: '1',
+      }),
+    },
+    vault: context.vaultRoot,
+  })
+  mocks.withAssistantTurnLock.mockImplementationOnce(async ({ run }) => {
+    await rm(inputStore.resolveAssistantInputEventPath({
+      inputId: event.inputId,
+      paths: resolveAssistantStatePaths(context.vaultRoot),
+    }))
+    return run()
+  })
+
+  await expect(sendAssistantMessageLocal({
+    acceptedTurnInput: {
+      initialInputs: [{
+        acceptedAt: event.receivedAt ?? event.occurredAt,
+        contentRef: {
+          kind: 'assistant-input-event',
+          refId: event.inputId,
+          version: 'murph.assistant-input-event.v1',
+        },
+        id: event.inputId,
+        source: 'assistant-input',
+      }],
+    },
+    prompt: 'A message removed before the turn lock',
+    vault: context.vaultRoot,
+  })).rejects.toMatchObject({
+    code: 'ASSISTANT_TURN_INPUT_JOURNAL_MISSING_ASSISTANT_INPUT_EVENT',
+  })
+  expect(mocks.withAssistantTurnLock).toHaveBeenCalledOnce()
+  expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
 })
 
 test('sendAssistantMessageLocal rejects initial assistant-input refs before provider execution when the event is missing', async () => {

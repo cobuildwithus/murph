@@ -151,8 +151,7 @@ import {
   resolveAssistantVaultFileSendTargetFingerprint,
 } from './vault-file-send.js'
 import {
-  assertAssistantAcceptedTurnInputAssistantInputEventsExist,
-  assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist,
+  readAssistantAcceptedTurnInputEvents,
   type AssistantAcceptedTurnInputJournal,
   type AssistantAcceptedTurnInputItemInput,
   type AssistantAcceptedTurnInputTranscriptRef,
@@ -165,7 +164,7 @@ import {
 import {
   normalizeNullableString,
 } from './shared.js'
-import { readAssistantInputEvent } from './input-store.js'
+import { readAssistantInputEvent, type AssistantInputEventRecord } from './input-store.js'
 import {
   resolveAssistantAcceptedMessageParticipant,
   resolveAssistantAcceptedMessageTarget,
@@ -601,7 +600,7 @@ export async function sendAssistantMessageLocal(
       input.providerStartCriticalPath,
       'assistantServiceStartedAtMonotonicMs',
     )
-  await assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist({
+  await readAssistantAcceptedTurnInputEvents({
     inputs: input.acceptedTurnInput?.initialInputs ?? [],
     vault: input.vault,
   })
@@ -748,21 +747,17 @@ export async function sendAssistantMessageLocal(
         >()
         const analyzeVideoTurnState = createAnalyzeVideoTurnState()
         const snapshottedAnalyzeVideoInputIds = new Set<string>()
-        const snapshotAnalyzeVideoAuthorities = async (
-          acceptedInputIds: readonly string[],
-        ): Promise<void> => {
-          const newInputIds = acceptedInputIds.filter((acceptedInputId) => {
-            if (snapshottedAnalyzeVideoInputIds.has(acceptedInputId)) {
+        const snapshotAnalyzeVideoAuthorities = (
+          events: readonly AssistantInputEventRecord[],
+        ): void => {
+          const newEvents = events.filter((event) => {
+            if (snapshottedAnalyzeVideoInputIds.has(event.inputId)) {
               return false
             }
-            snapshottedAnalyzeVideoInputIds.add(acceptedInputId)
+            snapshottedAnalyzeVideoInputIds.add(event.inputId)
             return true
           })
-          if (newInputIds.length === 0) return
-          const authorities = await snapshotAnalyzeVideoAttachmentAuthorities({
-            acceptedInputIds: newInputIds,
-            vaultRoot: input.vault,
-          })
+          const authorities = snapshotAnalyzeVideoAttachmentAuthorities(newEvents)
           for (const authority of authorities) {
             const key = JSON.stringify([
               authority.messageRef,
@@ -779,13 +774,11 @@ export async function sendAssistantMessageLocal(
         >()
         const turnInputController = createAssistantActiveTurnInputController({
           acceptedInputValidator: async ({ acceptedInputs }) => {
-            await assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist({
+            const events = await readAssistantAcceptedTurnInputEvents({
               inputs: acceptedInputs,
               vault: input.vault,
             })
-            await snapshotAnalyzeVideoAuthorities(
-              acceptedInputs.map((acceptedInput) => acceptedInput.id),
-            )
+            snapshotAnalyzeVideoAuthorities(events)
           },
           admissionHook: input.activeTurnInput,
           beforeProviderSteer: input.beforeProviderAcceptedInputs
@@ -796,13 +789,11 @@ export async function sendAssistantMessageLocal(
                     sessionId: resolved.session.sessionId,
                     turnId: receipt.turnId,
                   })
-                await assertAssistantAcceptedTurnInputAssistantInputEventsExist({
-                  journal: acceptedInputJournal,
+                const events = await readAssistantAcceptedTurnInputEvents({
+                  inputs: acceptedInputJournal.inputs,
                   vault: input.vault,
                 })
-                await snapshotAnalyzeVideoAuthorities(
-                  acceptedInputJournal.inputIds,
-                )
+                snapshotAnalyzeVideoAuthorities(events)
                 const releaseProviderAcceptedInputs =
                   await input.beforeProviderAcceptedInputs?.({
                     ...event,
@@ -843,13 +834,11 @@ export async function sendAssistantMessageLocal(
             sessionId: resolved.session.sessionId,
             turnId: receipt.turnId,
           })
-        await assertAssistantAcceptedTurnInputAssistantInputEventsExist({
-          journal: initialAcceptedInputJournal,
+        const initialAcceptedEvents = await readAssistantAcceptedTurnInputEvents({
+          inputs: initialAcceptedInputJournal.inputs,
           vault: input.vault,
         })
-        await snapshotAnalyzeVideoAuthorities(
-          initialAcceptedInputJournal.inputIds,
-        )
+        snapshotAnalyzeVideoAuthorities(initialAcceptedEvents)
         const threadScope = resolveAssistantCodexThreadScope({})
         const turnTimingStartedAt = lockAcquiredAt
         let currentInput = input
@@ -1276,8 +1265,8 @@ export async function sendAssistantMessageLocal(
           preProviderSteerAcceptedInputJournals.delete(
             preProviderSteerJournalKey,
           )
-          await assertAssistantAcceptedTurnInputAssistantInputEventsExist({
-            journal: acceptedInputJournal,
+          await readAssistantAcceptedTurnInputEvents({
+            inputs: acceptedInputJournal.inputs,
             vault: currentInput.vault,
           })
           if (holdGroupReplyDraft) {

@@ -17,7 +17,7 @@ import {
 import {
   appendTranscriptEntries,
   ensureAssistantState,
-  loadAndPersistResolvedSession,
+  loadResolvedSession,
   persistResolvedSession,
   resolveAssistantSessionPath,
   resolveAssistantTranscriptPath,
@@ -413,7 +413,7 @@ describe('assistant infra final coverage', () => {
     })
 
     await expect(
-      loadAndPersistResolvedSession({
+      loadResolvedSession({
         maxSessionAgeMs: 1,
         now: new Date('2027-01-01T00:00:00.000Z'),
         paths,
