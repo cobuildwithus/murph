@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-04",
+  "order": 100,
+  "item": {
+    "id": "quiet-background-checks-use-less-usage",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Quiet background checks use less usage",
+    "summary": "Murph skips empty background checks so more of your usage stays available for useful help.",
+    "details": "Memory checks can stay idle when there is no conversation to review, and Journal checks can stay idle when no accounts are connected and no earlier Journal work needs follow-up. Existing context, new connections, and scheduled support keep their normal checks.",
+    "relevanceTags": [
+      "assistant",
+      "usage",
+      "personal-context",
+      "journal"
+    ],
+    "sourcePullRequests": []
+  }
+}

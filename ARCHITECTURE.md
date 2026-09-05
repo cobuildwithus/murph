@@ -192,6 +192,22 @@ that narrow state tool through canonical core memory operations. The turn uses
 the shared restricted maintenance configuration and needs no separate
 permission profile or filesystem mutation path; native controls are not an
 additional memory owner, and the host suppresses their effects in this lane.
+The evidence owner distinguishes a successfully empty bounded conversation
+window from collection failures. An empty member-memory window skips before
+provider admission. An empty group window skips only when its room-model page
+is also genuinely missing; existing pages remain eligible for cleanup, and
+unavailable evidence or pages keep the ordinary maintenance path. The rolling
+evidence window remains intact so corrections and late committed events are
+not hidden behind a last-run timestamp.
+
+The canonical cron lifecycle skips a managed Journal connected-context pass
+only when its ledger is genuinely missing and its complete connected-account
+inventory is empty. Existing ledgers, new accounts, unavailable ports, and
+failed reads keep the normal pass, preserving notices and due follow-ups.
+The account inventory owner rejects malformed pages instead of presenting them
+as empty. Journal and Personal Patterns retain the common hosted cron policy:
+eligible first attempts request Flex; failed-attempt retries use Standard, and
+the provider boundary validates model and catalog support before selecting Flex.
 Reminder availability uses no
 model turn or separate automation: the existing hosted background automation
 pass deterministically scans active private automations that explicitly store
