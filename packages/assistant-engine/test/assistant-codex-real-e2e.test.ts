@@ -5568,6 +5568,8 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           })
           const actions = readCapabilityRoutingActions(result.jsonEvents)
 
+          process.stdout.write(`[routine-presentation-e2e] ${JSON.stringify({ model: config.model, scenario: scenario.label, card: result.responseCard, reply: result.providerAuthoredFinalMessage, actions: actions.filter((action) => action.kind === 'dynamic'), commandCount: actions.filter((action) => action.kind === 'command').length })}\n`)
+
           if (scenario.expected === 'card') {
             expect(
               actions.filter((action) =>
@@ -22285,10 +22287,104 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
     360_000,
   )
 
+  it('discovers the deferred comparison card with compact production instructions', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-compact-card-e2e-'))
+    try {
+      const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? 'codex',
+        directory: workingDirectory,
+      })
+      const codeOnlyCatalog = readRecord(JSON.parse(await readFile(modelCatalogJson, 'utf8')))
+      if (!codeOnlyCatalog || !Array.isArray(codeOnlyCatalog.models)) {
+        throw new Error('Expected a bundled model catalog for discovery-mode coverage.')
+      }
+      for (const candidate of codeOnlyCatalog.models) {
+        const model = readRecord(candidate)
+        if (model) model.tool_mode = 'code_mode_only'
+      }
+      const codeOnlyCatalogJson = path.join(workingDirectory, 'codex-model-catalog.code-only.json')
+      await writeFile(codeOnlyCatalogJson, JSON.stringify(codeOnlyCatalog), 'utf8')
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null, assistantHostedAutomationAvailable: false,
+        assistantHostedGroupToolSurface: 'none', assistantProgressUpdatesAvailable: false,
+        assistantStyleSettingsAvailable: false, channel: 'linq',
+        cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope: 'direct', currentLocalDate: '2026-09-06',
+        currentInstant: '2026-09-06T16:00:00.000Z', currentTimeZone: 'America/New_York',
+        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        onboardingGuidance: false, ordinaryInboundTurn: true,
+      })
+      for (const [toolMode, catalogPath] of [['native', modelCatalogJson], ['code-only', codeOnlyCatalogJson]] as const) {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n'),
+          dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL],
+          env: { ...config.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalogPath },
+          excludeResumeTurns: true, groupConversation: false, model: config.model, modelProvider: config.modelProvider,
+          prompt: [layers.dynamicTurnContextPrompt, 'Make a small comparison card using only these facts: a short walk takes 10 minutes; a longer walk takes 20 minutes. Show the two options and durations. I only want the card.'].join('\n\n'),
+          reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const cardCalls = actions.filter((action) => action.kind === 'dynamic' && action.tool === MURPH_ATTACH_RESPONSE_CARD_TOOL.name)
+        process.stdout.write(`[compact-card-e2e] ${JSON.stringify({ model: config.model, toolMode, card: result.responseCard, reply: result.providerAuthoredFinalMessage, actions: actions.filter((action) => action.kind === 'dynamic'), commandCount: actions.filter((action) => action.kind === 'command').length })}\n`)
+        expect(cardCalls).toHaveLength(1)
+        expect(cardCalls[0]).toMatchObject({ success: true })
+        expect(result.responseCard).toMatchObject({ kind: 'compact_table', rows: expect.any(Array) })
+        expect(JSON.stringify(result.responseCard)).toMatch(/10/u)
+        expect(JSON.stringify(result.responseCard)).toMatch(/20/u)
+        expect(actions.filter((action) => action.kind === 'command')).toEqual([])
+        expect(actions.filter((action) => action.kind === 'dynamic' && action.tool !== MURPH_ATTACH_RESPONSE_CARD_TOOL.name)).toEqual([])
+        expect(result.providerAuthoredFinalMessage?.trim() ?? '').toBe('')
+      }
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
+  it('keeps compact group-email instructions conversational without unauthorized actions', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-compact-email-e2e-'))
+    try {
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null, assistantHostedAutomationAvailable: false,
+        assistantHostedGroupToolSurface: 'none', assistantProgressUpdatesAvailable: false,
+        assistantStyleSettingsAvailable: false, channel: 'email',
+        cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope: 'group', currentLocalDate: '2026-09-06', currentTimeZone: 'America/New_York',
+        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+        ordinaryInboundTurn: true,
+      })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n'),
+        dynamicTools: [], env: config.env, excludeResumeTurns: true, groupConversation: true,
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: [layers.dynamicTurnContextPrompt, 'I have a familiar chronic-pain flare and very little energy today, with no new symptoms. What is one low-effort way to handle today? Also, rename this group to Morning Walkers and set a daily 9 AM reminder for us to walk.'].join('\n\n'),
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      process.stdout.write(`[compact-email-e2e] ${JSON.stringify({ model: config.model, reply: result.finalMessage, actions: actions.filter((action) => action.kind === 'dynamic'), commandCount: actions.filter((action) => action.kind === 'command').length })}\n`)
+      expect(actions.filter((action) => action.kind === 'dynamic' || action.kind === 'command')).toEqual([])
+      expect(result.finalMessage).toMatch(/email/iu)
+      expect(result.finalMessage).toMatch(/pain|flare/iu)
+      expect(result.finalMessage).toMatch(/small|one|prioriti|rest|break|task|gentle/iu)
+      expect(result.finalMessage).toMatch(/Linq|Telegram|authenticated|verified|group chat/iu)
+      expect(result.finalMessage).not.toMatch(/renamed|reminder is set|I(?:'ve| have)? set|done[.!]/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
   it('preserves appointment timing and single-write readback with compact shared instructions', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-compact-appointment-e2e-'))
     const requests: AssistantHostedAutomationToolRequest[] = []
+    let paused = false
     const layers = buildAssistantSystemPromptLayers({
       assistantCliContract: null,
       assistantHostedAutomationAvailable: true,
@@ -22309,7 +22405,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
     })
 
     try {
-      const result = await executeRealCodexAppServerTurn({
+      const turnInput: Parameters<typeof executeRealCodexAppServerTurn>[0] = {
         approvalPolicy: 'never',
         baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
@@ -22326,6 +22422,20 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           automationTool: {
             request: async (request) => {
               requests.push(request)
+              if (paused) {
+                if (request.action !== 'inspect' || request.lookup !== 'automation-compact-appointment') {
+                  throw new Error('A timing-only follow-up requires one current inspection and no mutation.')
+                }
+                return {
+                  action: 'inspect', automationId: 'automation-compact-appointment',
+                  routeBinding: 'preserved',
+                  lookupId: 'automation-compact-appointment',
+                  effectiveTimeZone: 'America/New_York',
+                  occurrenceProjection: { status: 'resolved' as const, nextOccurrenceAt: null },
+                  schedule: { kind: 'at', at: '2026-09-07T12:00:00.000Z' },
+                  status: 'paused', updatedAt: '2026-09-07T00:01:00.000Z',
+                }
+              }
               if (request.action !== 'save' || request.schedule.kind !== 'at') {
                 throw new Error('Expected one appointment reminder save, without follow-up inspection.')
               }
@@ -22363,7 +22473,8 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         reasoningEffort: 'low',
         sandbox: 'workspace-write',
         workingDirectory,
-      })
+      }
+      const result = await executeRealCodexAppServerTurn(turnInput)
       process.stdout.write(`[compact-appointment-e2e] ${JSON.stringify({ model: config.model, requests, reply: result.finalMessage })}\n`)
       expect(requests).toHaveLength(1)
       expect(requests[0]).toMatchObject({
@@ -22387,6 +22498,24 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
       expect(result.finalMessage).toMatch(/remind|reminder/iu)
       expect(result.finalMessage).toMatch(/8(?::00)?\s*a\.?m\.?/iu)
       expect(result.finalMessage).not.toMatch(/would you like|want me to|shall I|unconfirmed|could not|couldn't|failed|8(?::00)?\s*p\.?m\.?/iu)
+      expect(result.sessionId).toBeTruthy()
+      paused = true
+      const followUp = await executeRealCodexAppServerTurn({
+        ...turnInput,
+        excludeResumeTurns: false,
+        resumeSessionId: result.sessionId,
+        prompt: [layers.dynamicTurnContextPrompt, 'Is that reminder still tomorrow morning? Just tell me its current timing; do not change it.'].join('\n\n'),
+      })
+      const followUpActions = readCapabilityRoutingActions(followUp.jsonEvents)
+        .filter((action) => action.kind === 'dynamic' && action.tool === MURPH_AUTOMATION_TOOL.name)
+      process.stdout.write(`[compact-reminder-read-e2e] ${JSON.stringify({ model: config.model, requests: requests.slice(1), reply: followUp.finalMessage })}\n`)
+      expect(requests).toHaveLength(2)
+      expect(requests[1]).toMatchObject({ action: 'inspect', lookup: 'automation-compact-appointment' })
+      expect(followUpActions).toHaveLength(1)
+      expect(followUpActions[0]).toMatchObject({ success: true })
+      expect(readCapabilityRoutingActions(followUp.jsonEvents).filter((action) => action.kind === 'command')).toEqual([])
+      expect(followUp.finalMessage).toMatch(/paused|inactive/iu)
+      expect(followUp.finalMessage).not.toMatch(/I(?:'ve| have)? (?:paused|rescheduled|changed)|will (?:send|remind|notify)/iu)
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }

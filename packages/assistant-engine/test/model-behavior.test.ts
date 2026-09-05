@@ -115,6 +115,9 @@ describe('assistant execution prompt contract', () => {
       'Complete cards replace text.',
     )
     expect(prompt).toContain(
+      "After attachment, do not call `murph.finish_without_reply`; end an attended turn without final text, or use the scheduled turn's required terminal decision.",
+    )
+    expect(prompt).toContain(
       'Response media comes with concise text for order, dose, timing, cues, safety, and fallback',
     )
     expect(prompt).toContain(
@@ -500,11 +503,14 @@ describe('assistant execution prompt contract', () => {
     expect(groupPrompt.match(/Late child results for ordinary inbound turns:/g) ?? [])
       .toHaveLength(1)
     expect(nonHostedGroupPrompt).not.toContain('Late child results')
-    expect(scheduledPrompt).not.toContain('Late child results')
+    expect(scheduledPrompt).toContain('Never perform this recheck during a scheduled automation, maintenance, system-notification, or output-only turn.')
+    expect(scheduledPrompt).not.toContain('Turn kind: ordinary inbound. Apply')
     expect(autoReplyPrompt.match(/Late child results for ordinary inbound turns:/g) ?? [])
       .toHaveLength(1)
-    expect(outputOnlyAutoReplyPrompt).not.toContain('Late child results')
-    expect(manualDeliveryPrompt).not.toContain('Late child results')
+    expect(outputOnlyAutoReplyPrompt).toContain('Never perform this recheck during a scheduled automation, maintenance, system-notification, or output-only turn.')
+    expect(outputOnlyAutoReplyPrompt).not.toContain('Turn kind: ordinary inbound. Apply')
+    expect(manualDeliveryPrompt).toContain('Never perform this recheck during a scheduled automation, maintenance, system-notification, or output-only turn.')
+    expect(manualDeliveryPrompt).not.toContain('Turn kind: ordinary inbound. Apply')
     expect(unverifiedPrompt).not.toContain('Late child results')
     expect(prompt).toContain(
       'V2: proactively delegate bounded self-contained work not needed for reply',
@@ -2487,7 +2493,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '78ab3e952f1071c1482495860ed1577a36a288be7abe8a723f1cbea5873bd2a7',
+      '342590e44e893ca097ebc908bf949d1bf4fcfea408107cd9f0edbc4fa327fd79',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -3518,7 +3524,7 @@ describe('assistant conversation scope', () => {
       'preserve tolerated movement while clarifying a decision-changing fact.',
     )
     expect(prompt).toContain(
-      'In group email, where filesystem reads are forbidden, do not attempt the read; apply the resident group Understand before recommending rules instead.',
+      'Group-email health guidance: apply the resident Understand before recommending rules.',
     )
     expect(prompt).toContain(
       'Group email has no filesystem access. Do not try to read a usage skill.',
@@ -3536,7 +3542,7 @@ describe('assistant conversation scope', () => {
       'Read `$MURPH_ASSISTANT_SKILLS_ROOT/hosted-low-usage/SKILL.md`',
     )
     expect(prompt).not.toContain(
-      'Read the full current description and schema of `murph.automation`',
+      'For automation creation, inspection, changes, or reconciliation',
     )
     expect(prompt).not.toContain('vault-cli automation')
     expect(prompt).not.toContain('Create the newsletter cron through `murph.automation`')
@@ -3556,57 +3562,16 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain(
       'Scheduled automation changes for this conversation are available through `murph.automation`.',
     )
-    for (const contract of [
-      "Read the full current description and schema of `murph.automation` before calling it",
-      "omit `slug` so the host generates a new `automationId`, even for the same title",
-      "Only a loaded skill's exact stable recipe key",
-      "Inspect that key, then patch the returned id; patches preserve the key",
-      "`schedule.localAt` with `time`, `timeZone`, and exactly one of `date` or `relativeDay`",
-      "never raw ISO `schedule.at`",
-      "Preserve today/tonight as `relativeDay: today` and tomorrow as `relativeDay: tomorrow`",
-      "the host resolves the date in that timezone",
-      "Use `date` only for an explicit calendar date in the request or established context",
-      "state the tool's resolved date; ask for another time (gap) or earlier/later occurrence (fold)",
-      "Retry with that explicit date, the exact `localAtRecoveryKey`, and `schedule.localAt.fold` for a fold",
-      "Only if the member withdraws or supersedes the request",
-      "`action: dismiss_local_at_recovery` with its exact key and `resolvedLocalDate`",
-      "omitting the key leaves recovery pending and starts an independent request",
-      "`{\"kind\":\"every\",\"everyMs\":3600000}`",
-      "`{\"kind\":\"cron\",\"expression\":\"0 9 * * 1-5\",\"timeZone\":\"America/Chicago\"}`",
-      "`{\"kind\":\"dailyLocal\",\"localTime\":\"09:00\",\"timeZone\":\"America/Chicago\"}`",
-      "Keep the requested wall-clock time and IANA `schedule.timeZone`, never convert to UTC",
-      "never invent `timezone`, `schedule.timezone`, or top-level `timeZone`",
-      "Before relative-date claims, `action: inspect`",
-      "Failed read means no timing claim",
-      "`action: patch` (never update) with exact `lookup` and current `updatedAt` as `expectedUpdatedAt`",
-      "A conflict requires fresh inspection and a new decision, never replaying the stale patch",
-      "Patch `status` to pause/reactivate/archive",
-      "Omitting recurring `schedule.timeZone` preserves the stored explicit zone; do not ask again or guess",
-      "`schedule`, `status`, `updatedAt`, `effectiveTimeZone`, and `occurrenceProjection`",
-      "never issue a second inspection or recovery write",
-      "`record_readback_mismatch` means that returned state supersedes the requested mutation",
-      "Resolved null means no later deliverable clock occurrence, never a retry/cutoff wake",
-      "say an active one-shot is no longer deliverable and offer to reschedule it",
-      "For active `deviceActivity`, null instead means waiting for a matching event",
-      "never invent a time or offer timing recovery",
-      "active every/cron/dailyLocal remains active",
-      "will project the next occurrence automatically, with no member action needed",
-      "the edit may not affect the occurrence in progress",
-      "promise neither delivery nor another automatic occurrence",
-      "offer rescheduling if its time passes without delivery",
-      "Other pending results permit no timing/delivery promise",
-      "Pending does not mean unconfirmed timing or failed repair",
-      "the write succeeded but the next occurrence could not be confirmed",
-      "`stale_recurring_occurrence`, say it is overdue",
-      "never describe current scheduler work, promise automatic recovery, or say no member action is needed",
-      "contextReferences: [{\"entityKind\":\"<kind>\",\"entityId\":\"<id>\"}]",
-      "never proof or mutation authority",
-      "Inspect referenced records and use ordinary domain tools for writes",
-      "`supportSeriesId`, `supportKind`, and finite `activeUntil`",
-      "`action: reconcile` with exact `desiredAutomationIds`",
-    ]) {
-      expect(prompt).toContain(contract)
-    }
+    expect(prompt).toContain('discover `murph.automation` through native `tool_search` or code-mode `ALL_TOOLS`')
+    expect(prompt).toContain('read its full current description and schema before calling it')
+    expect(prompt).toContain('omit `slug` unless a loaded skill supplies its exact stable recipe key')
+    expect(prompt).toContain('`updatedAt` as `expectedUpdatedAt`')
+    expect(prompt).toContain('`schedule.localAt`, never raw `schedule.at`')
+    expect(prompt).toContain('keep today/tonight/tomorrow as `relativeDay`')
+    expect(prompt).toContain('do not issue another inspect or write merely to verify the returned result')
+    expect(prompt).toContain('distinguish resolved, pending, and unavailable timing using the tool\'s rules')
+    expect(prompt).toContain('they never prove facts or authorize writes')
+    expect(prompt).not.toContain('DST gap/fold:')
     expect(prompt).not.toContain('Automation schedules execute while')
     expect(prompt).not.toContain('Interpret `runtime_state_pending`')
     expect(prompt).not.toContain('inspect-or-update recovery action')
@@ -3637,12 +3602,10 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain(
       'Scheduled automation changes for this group room are available through `murph.automation`.',
     )
-    expect(prompt).toContain('`schedule.localAt` with `time`, `timeZone`')
-    expect(prompt).toContain('omit `slug` so the host generates a new `automationId`')
-    expect(prompt).toContain('Preserve today/tonight as `relativeDay: today`')
-    expect(prompt).toContain('ask for another time (gap) or earlier/later occurrence (fold)')
-    expect(prompt).toContain('Before relative-date claims, `action: inspect`')
-    expect(prompt).toContain('current `updatedAt` as `expectedUpdatedAt`')
+    expect(prompt).toContain('discover `murph.automation` through native `tool_search` or code-mode `ALL_TOOLS`')
+    expect(prompt).toContain('`schedule.localAt`, never raw `schedule.at`')
+    expect(prompt).toContain('keep today/tonight/tomorrow as `relativeDay`')
+    expect(prompt).toContain('`updatedAt` as `expectedUpdatedAt`')
     expect(prompt).toContain(
       'A save always binds to the trusted current group room.',
     )
@@ -3753,7 +3716,7 @@ describe('assistant conversation scope', () => {
     expect(prompt).not.toContain(
       'Scheduled automation changes for this conversation are available through `murph.automation`.',
     )
-    expect(prompt).not.toContain('Read the full current description and schema of `murph.automation`')
+    expect(prompt).not.toContain('For automation creation, inspection, changes, or reconciliation')
     expect(prompt).not.toContain('vault-cli automation')
   })
 

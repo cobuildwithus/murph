@@ -53,7 +53,6 @@ import {
   type AssistantDiagnosticsPolicy,
 } from '../issue-reporting.js'
 import {
-  buildAssistantResearchScoutCapabilityText,
   resolveAssistantModelBehaviorProfile,
 } from '../model-behavior.js'
 import {
@@ -731,9 +730,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const assistantDynamicContextPrompts = [
     ...hostedDynamicContextPrompts,
     ...(groupRoomModelPrompt ? [groupRoomModelPrompt] : []),
-    ...(assistantResearchAvailable
-      ? [buildAssistantResearchScoutCapabilityText()]
-      : []),
   ]
   const voiceMemoDeliveryChannel = outputOnlyTurn
     ? null
@@ -874,6 +870,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       assistantKnowledgeToolsAvailable:
         promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
       assistantProgressUpdatesAvailable: input.progressDelivery != null,
+      assistantResearchAvailable,
       assistantToolNameAliases,
       assistantPersona: explicitAssistantPersona,
       assistantPersonality:
