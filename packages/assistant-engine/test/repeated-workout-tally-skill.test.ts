@@ -1,3 +1,4 @@
+import { readWorkflowSkillPolicy } from './support/workflow-skill-policy.js'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 
@@ -10,6 +11,9 @@ import {
 import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
 
 async function readSkill(slug: string) {
+  if (slug === 'experiment-onboarding') {
+    return readWorkflowSkillPolicy(slug)
+  }
   return readFile(
     path.join(resolveAssistantSkillsRoot(), slug, 'SKILL.md'),
     'utf8',
