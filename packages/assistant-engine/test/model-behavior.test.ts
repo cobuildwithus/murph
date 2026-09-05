@@ -2183,8 +2183,8 @@ describe('assistant system prompt cache stability', () => {
     // cross-route CLI error-recovery contract, and shared exact-versus-vague
     // one-shot reminder timing policy, Apple Health stale-data recovery, and
     // wearable-summary freshness contract plus the public goal workflow owner
-    // set this exact ceiling.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(67_682)
+    // plus the 212-character existing-file attachment guidance set this exact ceiling.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(67_894)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
