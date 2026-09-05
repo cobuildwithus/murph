@@ -1,6 +1,6 @@
 # Commit bounded reconnect classification progress
 
-Status: active
+Status: completed
 Created: 2026-09-05
 Updated: 2026-09-05
 
@@ -46,4 +46,5 @@ scoped commit, PR, ReviewGPT concurrent with CI.
 - 89 focused OAuth-connection, dirty-store, reconnect progress and retention tests pass, plus four consent/acknowledgement PostgreSQL scenarios.
 - Web typecheck passes after generating public workspace service declarations; scoped ESLint and diff/privacy checks pass. Complexity debt decreases by two in the connection owner; dirty-store debt is unchanged.
 - The unrelated build-memory assertion now matches the existing 6144 MiB production policy; its migration guard suite passes.
-- Changelog and final PR review/CI remain before completion.
+- The reconnect recovery changelog renders through the existing archive; all seven focused archive tests pass. PR #2908 owns final ReviewGPT and exact-head CI.
+Completed: 2026-09-05
