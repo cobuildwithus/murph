@@ -41,7 +41,7 @@ not a guarantee that every claim was checked in this cleanup.
 | `agent-docs/product-marketing-context.md` | Product/marketing decisions. | Product/marketing decisions | High | 2026-07-15 |
 | `agent-docs/user-interviews.md` | User research method. | User research method | Medium | 2026-07-12 |
 | `agent-docs/QUALITY_SCORE.md` | Current quality posture by area. | Current repo quality posture | Medium | 2026-04-06 |
-| `agent-docs/RELIABILITY.md` | Reliability guardrails and failure-mode expectations. | Runtime reliability policy | High | 2026-09-03 |
+| `agent-docs/RELIABILITY.md` | Reliability guardrails, failure modes, and accepted-mailbox progress evidence. | Runtime reliability policy | High | 2026-09-04 |
 | `agent-docs/operations/stripe-effect-compatibility-cutover.md` | Hosted billing operations. | Hosted billing operations | High | 2026-08-28 |
 | `agent-docs/SECURITY.md` | Security constraints, trust boundaries, and escalation rules. | Security policy | High | 2026-09-03 |
 | `agent-docs/compliance/README.md` | Compliance reference-pack overview, launch minimums, and official source links for consumer health-data obligations. | Compliance docs index | High | 2026-04-29 |
@@ -108,7 +108,7 @@ not a guarantee that every claim was checked in this cleanup.
 | `agent-docs/references/repo-scope.md` | Concrete repo scope and routing boundaries. | Repo ownership boundary | High | 2026-04-06 |
 | `agent-docs/references/testing-ci-map.md` | Verification map for packages, apps, smoke flows, exact-head PR CI, protected-main runtime proof, canonical executors, and current coverage owners. | Testing and CI truth | High | 2026-09-02 |
 | `agent-docs/references/health-entity-taxonomy-seam.md` | Shared owner seam for health taxonomy metadata. | Health taxonomy seam | Medium | 2026-04-06 |
-| `agent-docs/references/hosted-runtime-protocol.md` | Hosted mailbox/workspace checkpoint protocol. Includes exact mailbox ownership and idle restore checkpoint publication (verified by layered restore regression). | Hosted execution architecture | High | 2026-09-01 |
+| `agent-docs/references/hosted-runtime-protocol.md` | Hosted mailbox/workspace checkpoints, exact ownership and idle restore publication, and accepted-work monitoring boundaries. | Hosted execution architecture | High | 2026-09-04 |
 | `agent-docs/references/hosted-temporal-orchestration.md` | Hosted Temporal orchestration target. | Hosted Temporal orchestration target | High | 2026-09-03 |
 | `agent-docs/references/data-model-seams.md` | Current shared-owner notes for high-leverage data-model seams. | Data-model seam guidance | Medium | 2026-04-07 |
 | `agent-docs/references/giant-file-composability-seams.md` | Paused giant-file cleanup planning guidance and current worth-planning/keep-together notes for oversized multi-responsibility files. | Giant-file composability seam guidance | Medium | 2026-06-03 |
@@ -129,7 +129,7 @@ not a guarantee that every claim was checked in this cleanup.
 | `agent-docs/operations/imessage-deliverability.md` | Phone-number messaging policy. | Phone-number messaging policy | High | 2026-08-11 |
 | `agent-docs/operations/local-storage-lifecycle.md` | Local rebuildable-storage lifecycle. | Local rebuildable-storage lifecycle | High | 2026-08-10 |
 | `agent-docs/operations/hosted-local-worktree-dev.md` | Local hosted runtime workflow. | Local hosted runtime workflow | Medium | 2026-08-20 |
-| `agent-docs/operations/pr-reviewgpt-loop.md` | PR review for realistic serious bugs and material Complexity Collapse. | Final PR ReviewGPT loop | Medium | 2026-09-02 |
+| `agent-docs/operations/pr-reviewgpt-loop.md` | PR review for realistic serious bugs and material Complexity Collapse, with a three-round cap. | Final PR ReviewGPT loop | Medium | 2026-09-04 |
 | `agent-docs/operations/device-sync-ingestion-invariants.md` | Device-sync push/pull ingestion invariants. | Device-sync ingestion contract | High | 2026-08-20 |
 | `agent-docs/PLANS.md` | Execution-plan lifecycle and storage rules. | Plan workflow | Medium | 2026-03-31 |
 | `agent-docs/exec-plans/completed/README.md` | Completed-plan archive interpretation. | Completed-plan archive interpretation | Medium | 2026-07-22 |
