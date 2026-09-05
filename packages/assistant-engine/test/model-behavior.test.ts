@@ -1103,17 +1103,19 @@ describe('assistant execution prompt contract', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain('Vault file sends:')
+    expect(prompt).toContain('Export requested vault files.')
+    expect(prompt).toContain('ZIPs may read originals in place. Inspect before refusing.')
     expect(prompt).toContain(
-      'Only after this turn establishes an obligation to send a newly generated file now',
+      'For a newly generated file requested for sending now',
     )
     expect(prompt).toContain(
       '.runtime/operations/assistant/generated-deliveries/<flat-filename>',
     )
     expect(prompt).toContain(
-      'Do not use runtime staging for "prepare now, maybe send later,"',
+      'Never stage possible later sends',
     )
     expect(prompt).toContain(
-      'never move or copy existing, user-owned, canonical, or durable files there.',
+      'or move or copy existing files there.',
     )
     expect(prompt).toContain(
       'say approval is required and the file is not attached',
