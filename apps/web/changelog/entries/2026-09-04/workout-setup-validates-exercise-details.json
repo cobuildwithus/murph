@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-04",
+  "order": 100,
+  "item": {
+    "id": "workout-setup-validates-exercise-details",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Workout setup catches misplaced exercise details",
+    "summary": "Workout setup now rejects misplaced set counts and other exercise details before saving a plan.",
+    "details": "This catches cases where a set count became part of an exercise name and left the plan at one set. Valid exercise names, notes, and optional set defaults keep their existing behavior.",
+    "relevanceTags": [
+      "workouts",
+      "training"
+    ],
+    "sourcePullRequests": []
+  }
+}
