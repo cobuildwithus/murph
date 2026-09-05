@@ -2642,7 +2642,11 @@ Last verified: 2026-09-04
   cron and its UTC-date upsert; it has no second scheduler or retry owner. Each
   run computes the completed prior-day and trailing-seven-day distinct-sender
   windows from direct and attributable group messages by durable mailbox receipt
-  time, not provider event time. A provider delivery that arrives after capture
+  time, not provider event time. Retained group-message ciphertext is selected
+  in stable `(created_at, id)` pages of at most 100 rows and decoded one page at
+  a time under the request-local root cache; the decoded attribution evidence
+  may then be combined across the bounded 14- or 30-day reporting window. A
+  provider delivery that arrives after capture
   therefore belongs to the open receipt window instead of mutating a closed day.
   A same-date rerun may
   replace the aggregate, but retired group evidence makes the affected value
