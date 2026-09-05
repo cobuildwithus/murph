@@ -66,6 +66,8 @@ import {
 import {
   parsePersonalPatternVocabulary,
   readVaultRawTolerant,
+  resolveMealNutritionGoals,
+  type CanonicalEntity,
 } from '@murphai/query'
 import { showAssistantPersonality } from '@murphai/vault-usecases/preferences'
 import {
@@ -311,7 +313,7 @@ const COMPACT_SUPPORT_KEEP_AUTOMATION_ID =
 const COMPACT_SUPPORT_STALE_AUTOMATION_ID =
   'automation_01JNV447V6K3SW1Q9NJ7XVQZ7V'
 const WEARABLE_ACTIVITY_DETAIL_OPTION_DESCRIPTION =
-  'Include bounded workoutFeatures and splits (up to 32 workouts per day and 64 splits per workout). Choose compact or detailed output from the question before the first and only activity-list data read; never use compact output as a probe before retrying with detail. Omit this option only when the answer is entirely available from day-level sessionCount, sessionMinutes, and distinct activityTypes. Pass it truthy whenever selecting, comparing, grouping, ordering, or attributing individual workouts, including type-specific count, duration, distance, start time, provider, heart rate, cadence, power, speed, or splits.'
+  'Include bounded workoutFeatures and splits (up to 32 workouts per day and 64 splits per workout). Use when the question needs lap or split rows. Prefer --include-workout-summaries for individual workout facts without splits; omit both options for day totals. Choose the required level before the first and only activity-list data read; never use a smaller output as a probe before retrying with detail.'
 const REPEATED_SET_ALPHA_EVENT_IDS = Array.from(
   { length: 5 },
   (_, index) => `evt_01JNV447V6K3SW1Q9NJ7XVQZ7${index + 1}`,
@@ -1891,6 +1893,31 @@ describe('onboarding policy read detection', () => {
 })
 
 describe('real Codex live fixture contracts', () => {
+  it('executes canonical single-read nutrition fixtures through the real CLI', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-nutrition-cli-fixture-'))
+    const binDirectory = path.join(root, 'bin')
+    const commandLog = path.join(root, 'commands.log')
+    const vaultRoot = path.join(root, 'vault')
+    const executablePath = path.join(binDirectory, 'vault-cli')
+    try {
+      await mkdir(binDirectory)
+      await writeFile(commandLog, '')
+      await materializeNutritionCardVaultCli({ vaultRoot, executablePath, commandLog,
+        conditionRecovery: 'none', goalScenario: 'rolling-legacy' })
+      const fixture = await readFile(executablePath, 'utf8')
+      expect(fixture).not.toContain('goalContext')
+      expect(fixture).not.toContain(homedir())
+      const result = await execFileAsync(executablePath, ['meal', 'totals', '--from', '2026-07-30', '--to', '2026-07-30', '--resolve-goals', '--format', 'json'], {
+        env: { PATH: process.env.PATH, ...buildNutritionFixtureEnvironment({ vaultRoot, commandLog }) },
+      })
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        mealCount: 3, goalContext: { status: 'ready', compatibility: 'historical-rolling-mean',
+          targets: { calories: { target: 1800 } } }, totals: { calories: { total: 1760, mealCount: 3 } },
+      })
+      expect((await readFile(commandLog, 'utf8')).trim().split('\n')).toHaveLength(1)
+    } finally { await removeRealCodexTemporaryPath(root) }
+  }, 120_000)
+
   it('recognizes both wearable workout-detail option spellings in the compact fixture', async () => {
     const workingDirectory = await mkdtemp(
       path.join(tmpdir(), 'murph-wearable-activity-compact-fixture-'),
@@ -13428,6 +13455,74 @@ describeRealCodex('real Codex on-demand updates after product-note retirement e2
   )
 })
 
+describeRealCodex('real Codex memory compact receipt e2e', () => {
+  it('updates one known memory with a compact receipt and exact record verification', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-memory-receipt-e2e-'))
+    try {
+      await initializeVault({ timezone: 'UTC', vaultRoot: workingDirectory })
+      const saved = await upsertMemory(workingDirectory, {
+        section: 'Preferences', text: 'Weekly summaries should be one paragraph.',
+      })
+      for (let index = 0; index < 12; index += 1) {
+        await upsertMemory(workingDirectory, {
+          section: 'Context', text: `Synthetic unrelated context item ${index}.`,
+        })
+      }
+      const before = await readMemoryDocument(workingDirectory)
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLogPath = path.join(workingDirectory, 'commands.log')
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory })
+      const manifest = await readAssistantCliLlmsFullManifest({
+        timeoutMs: 5 * 60_000,
+        workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
+      })
+      const assistantCliContract = buildAssistantCliSurfaceContract(manifest)
+      expect(assistantCliContract).not.toBeNull()
+      const promptTimeContext = await resolveAssistantPromptTimeContext(workingDirectory)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract,
+          assistantContextSnapshotPrompt: `Canonical saved memory: ${JSON.stringify(saved.record)}`,
+          canonicalTimeZoneAvailable: true, channel: 'linq',
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'direct', currentLocalDate: promptTimeContext.currentLocalDate,
+          currentTimeZone: 'UTC', hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+          onboardingGuidance: false, turnTrigger: null,
+        }),
+        dynamicTools: [],
+        env: { ...config.env, PATH: `${binDirectory}${path.delimiter}${config.env.PATH ?? ''}` },
+        excludeResumeTurns: true, model: config.model, modelProvider: config.modelProvider,
+        prompt: 'Replace my saved weekly-summary preference: use exactly three concise bullets instead of a paragraph. Verify the saved change, then confirm briefly.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8')).trim().split('\n').filter(Boolean)
+      process.stdout.write(`[memory-compact-receipt-e2e] ${JSON.stringify({ commands, reply: result.finalMessage })}\n`)
+      const dataCommands = commands.filter((command) => !command.includes('--schema') && !command.includes('--help'))
+      const writes = dataCommands.filter((command) => command.startsWith('memory update '))
+      expect(writes).toHaveLength(1)
+      expect(writes[0]).toContain(saved.record.id)
+      expect(writes[0]).toContain('--compact')
+      expect(dataCommands.some((command) => /memory (?:upsert|forget|set-name)/u.test(command))).toBe(false)
+      const exactReads = dataCommands.filter((command) => command.startsWith('memory show '))
+      expect(exactReads.length).toBeGreaterThanOrEqual(1)
+      expect(exactReads.every((command) => command.includes(saved.record.id) && /--record(?:-only|Only)/u.test(command))).toBe(true)
+      const after = await readMemoryDocument(workingDirectory)
+      const updated = after.records.find((record) => record.id === saved.record.id)
+      expect(updated?.text).toMatch(/(?:three|3).+bullets?/iu)
+      expect(after.records.filter((record) => record.id !== saved.record.id)).toEqual(before.records.filter((record) => record.id !== saved.record.id))
+      expect(result.finalMessage).toMatch(/(?:three|3).+bullets?/iu)
+      expect(result.finalMessage).not.toContain(saved.record.id)
+      process.stdout.write(`[memory-compact-receipt-e2e] ${JSON.stringify({ commandCount: commands.length, reply: result.finalMessage })}\n`)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 720_000)
+})
+
 describeRealCodex('real Codex wearable activity compact read e2e', () => {
   it(
     'answers same-day workout count and duration without loading bounded split detail',
@@ -13575,9 +13670,12 @@ describeRealCodex('real Codex wearable activity compact read e2e', () => {
     720_000,
   )
 
-  it(
-    'answers one run duration and distance from detailed workout data',
-    async () => {
+  it.each([
+    { detail: false, label: 'workout summaries', question: 'How long and how far was my run?' },
+    { detail: true, label: 'full split detail', question: 'How long and how far was my run, and how long and far was its first split?' },
+  ])(
+    'answers one run duration and distance from $label',
+    async ({ detail, question }) => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
         path.join(tmpdir(), 'murph-wearable-activity-selection-e2e-'),
@@ -13624,7 +13722,7 @@ describeRealCodex('real Codex wearable activity compact read e2e', () => {
                 distanceKm: 6.8,
                 durationMinutes: 42,
                 provider: 'garmin',
-                splits: [],
+                splits: [{ index: 1, durationSeconds: 300, distanceMeters: 1000, endedAt: '2026-08-31T07:05:00.000Z' }],
                 startedAt: '2026-08-31T07:00:00.000Z',
               },
               {
@@ -13651,7 +13749,7 @@ describeRealCodex('real Codex wearable activity compact read e2e', () => {
         const prompt = await buildWearableArrivalPrompt({
           occurredAt: '2026-08-31T20:00:00.000Z',
           promptTimeContext,
-          text: 'How long and how far was my run?',
+          text: question,
           vaultRoot: workingDirectory,
         })
         const inheritedPath = normalizeEnvString(config.env.PATH)
@@ -13706,7 +13804,7 @@ describeRealCodex('real Codex wearable activity compact read e2e', () => {
           activityListActions[0]?.kind === 'command'
             ? activityListActions[0].command
             : '',
-        )).toBe(true)
+        )).toBe(detail)
 
         const activityListReads = loggedCommands.filter(
           (command) =>
@@ -13715,11 +13813,17 @@ describeRealCodex('real Codex wearable activity compact read e2e', () => {
             && !command.includes('--help'),
         )
         expect(activityListReads).toHaveLength(1)
+        if (!detail) {
+          expect(activityListReads[0]).toMatch(/--include(?:-workout-summaries|WorkoutSummaries)/u)
+        } else {
+          expect(result.finalMessage).toMatch(/(?:5\s*(?:min|minutes)|300\s*(?:sec|seconds))/iu)
+          expect(result.finalMessage).toMatch(/(?:1\s*(?:km|kilomet)|1[,.]?000\s*(?:m|met))/iu)
+        }
         expect(activityListReads[0]).toContain('--date')
         expect(activityListReads[0]).toContain('2026-08-31')
         expect(commandIncludesTruthyWearableActivityWorkoutDetailOption(
           activityListReads[0] ?? '',
-        )).toBe(true)
+        )).toBe(detail)
         expect(
           loggedCommands.some(
             (command) =>
@@ -26745,6 +26849,37 @@ describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
 })
 
 describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
+  it.each([
+    ['rolling-legacy', true],
+    ['date-window', true],
+    ['conflicting-targets', false],
+    ['incompatible-unit', false],
+    ['activity-only', false],
+  ] as const)('uses one canonical nutrition context read for %s', {
+    timeout: 1_800_000,
+  }, async (goalScenario, cardExpected) => {
+    const config = await resolveRealCodexE2eConfig()
+    try {
+      const result = await runRealNutritionCardAuthorityScenario({ config, conditionRecovery: 'none', goalScenario, realVault: true })
+      process.stdout.write(`[nutrition-context-e2e] ${JSON.stringify({ scenario: goalScenario, reply: result.finalMessage, card: result.card ? renderAssistantResponseCardText(result.card) : null })}\n`)
+      const commands = expandRecordedVaultCommands(result.commands)
+      expect(commands.filter((command) => command.startsWith('meal totals '))).toEqual([
+        'meal totals --from 2026-07-30 --to 2026-07-30 --resolve-goals',
+      ])
+      expect(commands.filter((command) => command.startsWith('goal '))).toEqual([])
+      expect(readNutritionGoalMutationCommands(commands)).toEqual([])
+      expect(result.progressUpdates).toEqual([])
+      expect(result.attachCallCount).toBe(cardExpected ? 1 : 0)
+      if (cardExpected) {
+        expect(result.card).toMatchObject({ kind: 'daily_nutrition', version: 2, localDate: '2026-07-30',
+          goals: { calories: { target: 1800 }, proteinGrams: { target: 140 }, fiberGrams: { target: 25 } } })
+      } else {
+        expect(result.card).toBeNull()
+        expect(result.finalMessage).not.toMatch(/(?:saved|updated|activated|changed) (?:your |the )?(?:goal|target)/iu)
+      }
+    } finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
+  })
+
   it('lets the model resolve legacy calories and recover only complete same-id safety records', {
     timeout: 1_800_000,
   }, async () => {
@@ -28812,11 +28947,14 @@ describe('recorded vault command parsing', () => {
     expect(expandRecordedVaultCommands([
       '--format json meal edit meal_example --nutrition-source inherited',
       '--format json batch --compact --command ["memory","show","--compact","--format","json"] --command ["meal","show","meal_example"] --command ["meal","edit","meal_example","--nutrition-source-detail","copied [verified]"]',
+      'batch --compact --format json --command ["memory","show","--compact","--format","json"] --command ["meal","totals","--from","2030-01-15","--to","2030-01-15","--resolve-goals","--format","json"]',
     ])).toEqual([
       'meal edit meal_example --nutrition-source inherited',
       'memory show --compact',
       'meal show meal_example',
       'meal edit meal_example --nutrition-source-detail copied [verified]',
+      'memory show --compact',
+      'meal totals --from 2030-01-15 --to 2030-01-15 --resolve-goals',
     ])
   })
 })
@@ -29148,6 +29286,9 @@ type NutritionConditionRecovery =
   | 'wrong-id'
 
 type NutritionGoalScenario =
+  | 'conflicting-targets'
+  | 'incompatible-unit'
+  | 'date-window'
   | 'activity-only'
   | 'activity-same-goal'
   | 'canonical-with-activity'
@@ -29156,10 +29297,22 @@ type NutritionGoalScenario =
   | 'rolling-legacy-incompatible-statistic'
   | 'rolling-legacy-mixed'
 
+function buildNutritionFixtureEnvironment(input: { vaultRoot: string; commandLog: string }): NodeJS.ProcessEnv {
+  return {
+    NUTRITION_E2E_NODE: process.execPath,
+    NUTRITION_E2E_LOADER: HABITAT_VOICE_E2E_TSX_LOADER,
+    NUTRITION_E2E_ENTRY: HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
+    NUTRITION_E2E_TSCONFIG: path.resolve(path.dirname(HABITAT_VOICE_E2E_CLI_ENTRYPOINT), '../../../tsconfig.base.json'),
+    NUTRITION_E2E_VAULT: input.vaultRoot,
+    NUTRITION_E2E_COMMAND_LOG: input.commandLog,
+  }
+}
+
 async function runRealNutritionCardAuthorityScenario(input: {
   config: RealCodexE2eConfig
   conditionRecovery: NutritionConditionRecovery
   goalScenario: NutritionGoalScenario
+  realVault?: boolean
   initialPrompt?: string
   liveSteerPrompt?: string
 }): Promise<{
@@ -29189,13 +29342,17 @@ async function runRealNutritionCardAuthorityScenario(input: {
           { recursive: true },
         )),
     ])
+    const vaultRoot = path.join(workingDirectory, 'vault')
     await materializeNutritionCardVaultCli({
+      vaultRoot: input.realVault ? vaultRoot : undefined,
       commandLog,
       conditionRecovery: input.conditionRecovery,
       executablePath: path.join(binDirectory, 'vault-cli'),
       goalScenario: input.goalScenario,
     })
 
+    const goalsBefore = input.realVault ? await listGoals(vaultRoot) : null
+    const eventsBefore = input.realVault ? (await readVaultRawTolerant(vaultRoot)).events : null
     const progressUpdates: string[] = []
     const inheritedPath = normalizeEnvString(input.config.env.PATH)
     const liveSteer = input.liveSteerPrompt
@@ -29212,6 +29369,12 @@ async function runRealNutritionCardAuthorityScenario(input: {
       codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
         ?? undefined,
       codexHome: input.config.codexHome,
+      configOverrides: input.realVault ? [
+        'allow_login_shell=false',
+        'shell_environment_policy.inherit="all"',
+        'shell_environment_policy.ignore_default_excludes=false',
+        `shell_environment_policy.include_only=["PATH","TMPDIR","${MURPH_ASSISTANT_SKILLS_ROOT_ENV}","NUTRITION_E2E_NODE","NUTRITION_E2E_LOADER","NUTRITION_E2E_ENTRY","NUTRITION_E2E_TSCONFIG","NUTRITION_E2E_VAULT","NUTRITION_E2E_COMMAND_LOG"]`,
+      ] : undefined,
       developerInstructions: buildAssistantSystemPrompt({
         assistantCliContract: [
           'Use vault-cli for canonical member data.',
@@ -29235,13 +29398,14 @@ async function runRealNutritionCardAuthorityScenario(input: {
         onboardingGuidance: false,
         ordinaryInboundTurn: true,
         turnTrigger: 'automation-auto-reply',
-      }),
+      }) + '\n\nLocal fixture transport: For exec_command and write_stdin, print the complete returned object with text(result), never only result.output. Preserve session_id and continue that session until exit_code is present; never restart a command whose session is still running.',
       dynamicTools: [
         MURPH_ATTACH_RESPONSE_CARD_TOOL,
         MURPH_SEND_PROGRESS_UPDATE_TOOL,
       ],
       env: {
         ...input.config.env,
+        ...(input.realVault ? buildNutritionFixtureEnvironment({ vaultRoot, commandLog }) : {}),
         [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
         PATH: inheritedPath
           ? `${binDirectory}${path.delimiter}${inheritedPath}`
@@ -29277,6 +29441,8 @@ async function runRealNutritionCardAuthorityScenario(input: {
     if (liveSteerError) {
       throw liveSteerError
     }
+    if (goalsBefore) expect(await listGoals(vaultRoot)).toEqual(goalsBefore)
+    if (eventsBefore) expect((await readVaultRawTolerant(vaultRoot)).events).toEqual(eventsBefore)
     const commandText = (await readFile(commandLog, 'utf8')).trim()
     const attachCallCount = readCapabilityRoutingActions(result.jsonEvents)
       .filter((action) =>
@@ -29298,6 +29464,7 @@ async function runRealNutritionCardAuthorityScenario(input: {
 }
 
 async function materializeNutritionCardVaultCli(input: {
+  vaultRoot?: string
   commandLog: string
   conditionRecovery: NutritionConditionRecovery
   executablePath: string
@@ -29483,7 +29650,31 @@ async function materializeNutritionCardVaultCli(input: {
       title: 'Accepted macro targets',
     },
   }
-  const activeGoals = input.goalScenario === 'legacy'
+  const conflictingGoal = {
+    ...canonicalNutritionGoal,
+    entity: { ...canonicalNutritionGoal.entity, id: 'goal_conflicting_protein',
+      data: { ...canonicalNutritionGoal.entity.data,
+        metricTargets: [pointTarget('other-protein', 'protein-grams', 'g', 90)] } },
+  }
+  const incompatibleGoal = {
+    ...canonicalNutritionGoal,
+    entity: { ...canonicalNutritionGoal.entity,
+      data: { ...canonicalNutritionGoal.entity.data,
+        metricTargets: canonicalNutritionGoal.entity.data.metricTargets.map((target) =>
+          target.metricKey === 'dietary-calories' ? { ...target, unit: 'kJ' } : target) } },
+  }
+  const futureGoal = {
+    ...conflictingGoal,
+    entity: { ...conflictingGoal.entity,
+      data: { ...conflictingGoal.entity.data, windowStartAt: '2026-08-01' } },
+  }
+  const activeGoals = input.goalScenario === 'conflicting-targets'
+    ? [canonicalNutritionGoal, conflictingGoal]
+    : input.goalScenario === 'incompatible-unit'
+      ? [incompatibleGoal]
+    : input.goalScenario === 'date-window'
+      ? [canonicalNutritionGoal, futureGoal]
+    : input.goalScenario === 'legacy'
     ? [legacyGoal]
     : input.goalScenario === 'rolling-legacy'
       ? [rollingLegacyGoal]
@@ -29496,6 +29687,31 @@ async function materializeNutritionCardVaultCli(input: {
     : input.goalScenario === 'canonical-with-activity'
       ? [canonicalNutritionGoal, activityCaloriesGoal]
       : [macroOnlyGoal, activityCaloriesGoal]
+  if (input.vaultRoot) {
+    const vaultRoot = input.vaultRoot
+    await initializeVault({ vaultRoot, timezone: 'America/New_York', createdAt: '2026-07-01T12:00:00Z' })
+    for (const { entity } of activeGoals) {
+      await upsertGoal({ vaultRoot, slug: entity.id.replaceAll('_', '-'), title: entity.title,
+        status: 'active', window: { startAt: entity.data.windowStartAt }, metricTargets: entity.data.metricTargets })
+    }
+    await upsertMemory(vaultRoot, { section: 'Identity', text: 'Synthetic adult test profile, age 34.' })
+    await upsertMemory(vaultRoot, { section: 'Context', text: 'A synthetic nutrition suitability review is complete. Self-directed numeric nutrition targets are suitable, and no target-changing constraint applies.' })
+    for (const [index, calories] of [600, 600, 560].entries()) {
+      await addMeal({ vaultRoot, source: 'manual', occurredAt: `2026-07-30T${12 + index * 3}:00:00Z`,
+        note: 'Synthetic complete meal', nutrition: {
+          totals: { calories, proteinGrams: index === 2 ? 47 : 45, carbsGrams: index === 2 ? 65 : 60, fatGrams: 18, fiberGrams: 8 },
+          provenance: { source: 'label', confidence: 'high', sourceDetail: 'Synthetic measured label totals.' },
+        } })
+    }
+    await writeFile(input.executablePath, [
+      '#!/bin/sh', 'set -eu',
+      `printf '%s\\n' "$*" >> "$NUTRITION_E2E_COMMAND_LOG"`,
+      'export TSX_TSCONFIG_PATH="$NUTRITION_E2E_TSCONFIG"',
+      'exec "$NUTRITION_E2E_NODE" --import "$NUTRITION_E2E_LOADER" "$NUTRITION_E2E_ENTRY" "$@" --vault "$NUTRITION_E2E_VAULT"', '',
+    ].join('\n'), { encoding: 'utf8', mode: 0o700 })
+    await chmod(input.executablePath, 0o700)
+    return
+  }
   const activeGoalItems = activeGoals.map((goal) => ({
     data: {
       metricTargetsCount: goal.entity.data.metricTargets.length,
@@ -29567,17 +29783,24 @@ async function materializeNutritionCardVaultCli(input: {
         nextCursor: null,
         vault: 'synthetic-vault',
       }
+  const canonicalGoals: CanonicalEntity[] = activeGoals.map(({ entity }) => ({
+    entityId: entity.id, primaryLookupId: entity.id, lookupIds: [entity.id], family: 'goal', recordClass: 'bank', kind: 'goal',
+    status: 'active', occurredAt: null, date: null, path: `bank/goals/${entity.id}.md`, title: entity.title, body: null,
+    attributes: { window: { startAt: entity.data.windowStartAt }, metricTargets: entity.data.metricTargets },
+    frontmatter: null, links: [], relatedIds: [], stream: null, experimentSlug: null, tags: [],
+  }))
   const totals = {
-    from: '2026-07-30',
+    filters: { from: '2026-07-30', to: '2026-07-30' },
     mealCount: 3,
-    metrics: {
+    totals: {
       calories: { mealCount: 3, total: 1_760 },
       carbsGrams: { mealCount: 3, total: 185 },
       fatGrams: { mealCount: 3, total: 54 },
       fiberGrams: { mealCount: 3, total: 24 },
       proteinGrams: { mealCount: 3, total: 137 },
     },
-    to: '2026-07-30',
+    days: [],
+    goalContext: resolveMealNutritionGoals(canonicalGoals, '2026-07-30'),
     vault: 'synthetic-vault',
   }
   const emit = (value: unknown) =>
@@ -32481,6 +32704,16 @@ async function materializeWearableActivityCompactionVaultCli(input: {
       workoutFeatures: activityFixture.workoutFeatures,
     }],
   })
+  const summariesResult = JSON.stringify({
+    ...JSON.parse(compactResult),
+    items: [{
+      ...compactItem,
+      workoutFeatures: activityFixture.workoutFeatures.map(({ splits: _splits, ...workout }) => ({
+        ...workout,
+        splitsOmitted: true,
+      })),
+    }],
+  })
   const dayResult = JSON.stringify({
     activity: {
       date: '2026-08-31',
@@ -32504,8 +32737,18 @@ async function materializeWearableActivityCompactionVaultCli(input: {
       'command="$*"',
       `printf '%s\\n' "$command" >> ${quoteNutritionShellLiteral(input.commandLogPath)}`,
       'include_workout_details=false',
+      'include_workout_summaries=false',
       'while [ "$#" -gt 0 ]; do',
       '  case "$1" in',
+      '    --include-workout-summaries|--includeWorkoutSummaries)',
+      '      if [ "${2-}" != "false" ]; then include_workout_summaries=true; fi',
+      '      ;;',
+      '    --include-workout-summaries=true|--includeWorkoutSummaries=true)',
+      '      include_workout_summaries=true',
+      '      ;;',
+      '    --include-workout-summaries=false|--includeWorkoutSummaries=false)',
+      '      include_workout_summaries=false',
+      '      ;;',
       '    --include-workout-details|--includeWorkoutDetails)',
       '      if [ "${2-}" = "false" ]; then',
       '        include_workout_details=false',
@@ -32535,6 +32778,10 @@ async function materializeWearableActivityCompactionVaultCli(input: {
       '      exit 0',
       '      ;;',
       '  esac',
+      'fi',
+      'if [ "$include_workout_summaries" = true ]; then',
+      `  printf '%s\\n' ${quoteNutritionShellLiteral(summariesResult)}`,
+      '  exit 0',
       'fi',
       'case "$command" in',
       '  *"wearables activity list"*"--date 2026-08-31"*|*"wearables activity list"*"--date=2026-08-31"*)',

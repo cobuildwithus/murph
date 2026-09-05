@@ -2220,6 +2220,15 @@ eligible when the card alone completely satisfies the current request. New
 accepted input in the same live turn invalidates an earlier card-only decision,
 and attachment is rejected after the delivery context advances. Every
 card copies the immediately preceding single-date canonical meal-totals read.
+The existing `meal totals --resolve-goals` single-date read derives compact
+nutrition goal points and provenance from one canonical goal-family scan. It
+returns explicit missing, conflicting, incompatible, or capacity states rather
+than values that would require conversion or invented authority. Query owns
+date windows, point compatibility, the existing calorie floor, and the narrow
+complete historical bundle display exception; prompts retain health
+suitability, card intent, meal recovery, and explicit proposal acceptance.
+Ordinary totals reads keep their existing shape. No new state or mutation owner
+is introduced, and any subsequent meal or Goal mutation requires a fresh read.
 Both versions use the same deterministic text fallback, Linq capability
 boundary, and existing outbox idempotency lifecycle. Hosted inbound routing
 keeps the opaque conversation locator used for continuity separate from the

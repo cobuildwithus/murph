@@ -1704,6 +1704,12 @@ describe('assistant local PDF evidence guidance', () => {
     expect(prompt).toContain(
       'Do not read memory solely because that block is absent',
     )
+    expect(prompt).toContain('memory show <id> --record-only --format json')
+    expect(prompt).toContain('keep the complete memory read above when resolving context or conflicts')
+    expect(prompt).toContain('Use `--compact` on memory upsert, update, forget, and set-name')
+    expect(prompt).toContain('`--include-workout-summaries` for individual workout facts')
+    expect(prompt).toContain('`--include-workout-details` for lap/split rows')
+    expect(prompt).toContain('Never probe with a smaller level and retry; omitted splits are not absent splits')
     expect(prompt).toContain(
       'only when exact saved context could materially change the current answer',
     )
@@ -2191,8 +2197,10 @@ describe('assistant system prompt cache stability', () => {
     // cross-route CLI error-recovery contract, and shared exact-versus-vague
     // one-shot reminder timing policy, Apple Health stale-data recovery, and
     // wearable-summary freshness contract plus the public goal workflow owner
-    // plus the 212-character existing-file attachment guidance set this exact ceiling.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(67_894)
+    // set the prior ceiling. Exact-memory and workout-output hints add 684
+    // characters; existing-file attachment guidance adds 212, retaining the
+    // prior 4-character margin (68,574 characters plus 4).
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(68_578)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
