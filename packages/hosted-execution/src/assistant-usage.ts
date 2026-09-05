@@ -111,6 +111,14 @@ export const ASSISTANT_TURN_PROFILE_COMMAND_FAMILIES = [
 ] as const;
 export type AssistantTurnProfileCommandFamily =
   (typeof ASSISTANT_TURN_PROFILE_COMMAND_FAMILIES)[number];
+
+export const ASSISTANT_TURN_PROFILE_KNOWLEDGE_COUNT_KEYS = [
+  "showCalls", "listCalls", "searchCalls", "writeCalls", "otherCalls",
+  "notFoundFailures", "invalidFailures", "conflictFailures", "otherFailures",
+] as const;
+export type AssistantTurnProfileKnowledgeCounts = Record<
+  (typeof ASSISTANT_TURN_PROFILE_KNOWLEDGE_COUNT_KEYS)[number], number
+>;
 const ASSISTANT_TURN_PROFILE_COMMAND_FAMILY_SET = new Set<string>(
   ASSISTANT_TURN_PROFILE_COMMAND_FAMILIES,
 );
@@ -513,6 +521,8 @@ export function buildAssistantMaintenanceUsageRecord(input: {
   assistantSessionId: string;
   // Provider-side correlation handle, stored as providerRequestId.
   codexThreadId: string | null;
+  providerRequestId?: string;
+  providerRequestOutcome?: AssistantProviderRequestOutcome;
   credentialSource: AssistantUsageCredentialSource;
   featureKey: string;
   memberId: string;
@@ -522,6 +532,9 @@ export function buildAssistantMaintenanceUsageRecord(input: {
   tokenPricingBasis?: AssistantUsageTokenPricingBasis;
   triggerKind: string;
   usage: {
+    cacheWriteTokens?: number | null;
+    reasoningTokens?: number | null;
+    rawUsageJson?: Record<string, unknown> | null;
     cachedInputTokens: number | null;
     inputTokens: number | null;
     outputTokens: number | null;
@@ -530,10 +543,19 @@ export function buildAssistantMaintenanceUsageRecord(input: {
   usageExtractionSourcePath?: string | null;
   usageExtractionVersion?: string | null;
 }): AssistantUsageRecord {
-  const turnId = `turn_maintenance_${randomUUID().replaceAll("-", "")}`;
+  const identity = input.providerRequestId
+    ? createHash("sha256").update(JSON.stringify([
+        "murph.idle-compaction-usage.v1", input.memberId, input.providerName,
+        input.providerRequestId,
+      ])).digest("hex").slice(0, 32)
+    : randomUUID().replaceAll("-", "");
+  const turnId = `turn_maintenance_${identity}`;
 
   return parseAssistantUsageRecord({
     attemptCount: 1,
+    cacheWriteTokens: input.usage.cacheWriteTokens ?? null,
+    reasoningTokens: input.usage.reasoningTokens ?? null,
+    rawUsageJson: input.usage.rawUsageJson ?? null,
     cachedInputTokens: input.usage.cachedInputTokens,
     credentialSource: input.credentialSource,
     featureKey: input.featureKey,
@@ -543,7 +565,8 @@ export function buildAssistantMaintenanceUsageRecord(input: {
     outputTokens: input.usage.outputTokens,
     provider: "codex-cli",
     ...(input.providerName === undefined ? {} : { providerName: input.providerName }),
-    providerRequestId: input.codexThreadId,
+    providerRequestId: input.providerRequestId ?? input.codexThreadId,
+    ...(input.providerRequestOutcome ? { providerRequestOutcome: input.providerRequestOutcome } : {}),
     requestedModel: input.model,
     schema: ASSISTANT_USAGE_SCHEMA,
     sessionId: input.assistantSessionId,
@@ -1465,7 +1488,32 @@ function normalizeTurnProfileV2Tool(
     ...normalized,
     kind: tool.kind,
     label: tool.label,
+    ...(tool.knowledgeCounts === undefined ? {} : {
+      knowledgeCounts: normalizeTurnProfileKnowledgeCounts(tool, label),
+    }),
   };
+}
+
+function normalizeTurnProfileKnowledgeCounts(
+  tool: Record<string, unknown>,
+  label: string,
+): AssistantTurnProfileKnowledgeCounts {
+  if (tool.kind !== "command" || tool.label !== "vault-cli knowledge") {
+    throw new TypeError(`${label}.knowledgeCounts requires the knowledge command family.`);
+  }
+  const counts = normalizeTurnProfileIntegerRecord(
+    tool.knowledgeCounts,
+    `${label}.knowledgeCounts`,
+    ASSISTANT_TURN_PROFILE_KNOWLEDGE_COUNT_KEYS,
+  ) as AssistantTurnProfileKnowledgeCounts;
+  const calls = counts.showCalls + counts.listCalls + counts.searchCalls
+    + counts.writeCalls + counts.otherCalls;
+  const failures = counts.notFoundFailures + counts.invalidFailures
+    + counts.conflictFailures + counts.otherFailures;
+  if (calls !== tool.calls || failures !== tool.failedCalls) {
+    throw new TypeError(`${label}.knowledgeCounts must reconcile with calls and failedCalls.`);
+  }
+  return counts;
 }
 
 function validateTurnProfileFailedCalls(

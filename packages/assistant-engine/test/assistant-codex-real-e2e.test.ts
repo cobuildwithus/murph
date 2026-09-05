@@ -1,3 +1,4 @@
+import { WORKFLOW_SKILL_REFERENCES } from './support/workflow-skill-policy.js'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
@@ -74,6 +75,9 @@ import {
   startLiveWorkout,
 } from '@murphai/vault-usecases/workouts'
 import { afterAll, describe, expect, it } from 'vitest'
+import { upsertKnowledgePage } from '../src/knowledge/service.ts'
+import { requestAssistantVaultFileSend } from '../src/assistant/vault-file-send.ts'
+import { listAssistantOutboxIntents } from '../src/assistant/outbox.ts'
 
 import {
   buildAssistantRealCodexRunEnv,
@@ -212,6 +216,7 @@ import {
 } from '../src/assistant/notification-turn.ts'
 import {
   buildAssistantMaintenanceConversationEvidence,
+  readAssistantMaintenanceConversationEvidence,
 } from '../src/assistant/maintenance-evidence.ts'
 import { readAssistantCurrentStatePrompt } from '../src/assistant/current-state.ts'
 import {
@@ -506,6 +511,74 @@ const CHILD_MODEL_SELECTION_CONFIG_OVERRIDES = [
 const REAL_NUTRITION_CARD_CONVERSATION_INPUT = {
   groupConversation: false,
 } as const satisfies Pick<CodexAppServerTurnInput, 'groupConversation'>
+
+describeRealCodex('real Codex Telegram file delivery e2e', () => {
+  it('hands a saved Telegram PDF to the secure file tool and explains pending approval', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-telegram-pdf-e2e-'))
+    const refs: string[] = []
+    const approvalUrl = 'https://murph.test/approve/synthetic'
+    try {
+      await initializeVault({ vaultRoot: workingDirectory, timezone: 'UTC' })
+      await mkdir(path.join(workingDirectory, 'documents'), { recursive: true })
+      await writeFile(path.join(workingDirectory, 'documents/report.pdf'), '%PDF-1.4\nSynthetic saved report\n%%EOF\n')
+      const context: AssistantHostedToolContext = {
+        ...createRealCodexSupportHostedToolContext('direct'),
+        vaultFileSendAvailable: true,
+        sendVaultFile: async (ref, toolCallId) => {
+          refs.push(ref)
+          return await requestAssistantVaultFileSend({
+            actionApprovalPort: {
+              read: async () => { throw new Error('No existing approval expected') },
+              request: async () => ({
+                status: 'pending', approvalId: `haa_${'a'.repeat(32)}`,
+                approvalUrl,
+                expiresAt: '2030-01-01T12:00:00.000Z',
+              }),
+            },
+            bindingDelivery: { kind: 'thread', target: '123' },
+            channel: 'telegram', deliveryTransportIdempotent: false,
+            ref, sessionId: 'session-pdf', threadId: '123', threadIsDirect: true,
+            toolCallId, turnId: 'turn-pdf', vault: workingDirectory,
+          })
+        },
+      }
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false, channel: 'telegram',
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'direct', currentLocalDate: '2026-09-04', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
+        }),
+        dynamicTools: resolveMurphDynamicTools({ vaultFileSendAvailable: true }).filter(tool =>
+          ['send_vault_file', 'finish_without_reply'].includes(tool.name)),
+        env: config.env, hostedToolContext: context,
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'Please send my saved documents/report.pdf to this private Telegram chat. Use the existing file.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const reply = result.finalMessage.trim()
+      process.stdout.write(`[telegram-pdf-approval-e2e] ${JSON.stringify({ reply, fileCalls: refs.length })}\n`)
+      expect(refs).toEqual(['documents/report.pdf'])
+      const intents = await listAssistantOutboxIntents(workingDirectory)
+      expect(intents).toHaveLength(1)
+      expect(intents[0]).toMatchObject({ channel: 'telegram', status: 'awaiting_approval', media: [expect.objectContaining({ kind: 'vault_file', ref: 'documents/report.pdf' })] })
+      expect(reply).toMatch(/approv/iu)
+      const modelMessages = readCompletedAgentMessages(result.jsonEvents)
+      expect(modelMessages.length).toBeGreaterThan(0)
+      expect(modelMessages.map(message => message.text).join('\n')).not.toMatch(/https?:/iu)
+      expect(reply.match(/https?:\/\/\S+/gu)).toEqual([approvalUrl])
+      expect(reply).not.toMatch(/(?:i(?:'ve| have)?|successfully) (?:sent|attached)|documents\/|iMessage/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
 
 describeRealCodex('real Codex direct route planning e2e', () => {
   it(
@@ -1980,6 +2053,22 @@ describe('real Codex live fixture contracts', () => {
     }
   })
 
+  it('retains streamed policy before a yielded command completion without duplicating its tail', () => {
+    const events = [
+      { method: 'item/commandExecution/outputDelta', params: { itemId: 'read-policy', delta: 'Complete policy\n' } },
+      { method: 'item/commandExecution/outputDelta', params: { itemId: 'unrelated', delta: 'Unrelated policy\n' } },
+      { method: 'item/commandExecution/outputDelta', params: { itemId: 'read-policy', delta: 'Canonical result\n' } },
+      { method: 'item/completed', params: { item: {
+        id: 'read-policy', type: 'commandExecution', command: 'cat skills/policy.md && vault-cli goal list',
+        exitCode: 0, aggregatedOutput: 'Canonical result\n',
+      } } },
+    ]
+    expect(readCapabilityRoutingActions(events)).toEqual([{
+      command: 'cat skills/policy.md && vault-cli goal list', eventIndex: 3,
+      kind: 'command', ok: true, output: 'Complete policy\nCanonical result',
+    }])
+  })
+
   it('expands validated vault-cli batch children in their original order', () => {
     const actions = readCapabilityRoutingActions([{
       method: 'item/completed',
@@ -2473,6 +2562,63 @@ describe('real Codex live fixture contracts', () => {
       await removeRealCodexTemporaryPath(workingDirectory)
     }
   })
+})
+
+describeRealCodex('real Codex missing knowledge recovery e2e', () => {
+  it('finishes a stale wiki lookup without retrying the missing page or inventing its contents', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-missing-wiki-e2e-'))
+    try {
+      await initializeVault({ title: 'Synthetic wiki recovery', timezone: 'UTC', vaultRoot: workingDirectory })
+      const saved = await upsertKnowledgePage({
+        vault: workingDirectory, slug: 'weekend-packing', title: 'Weekend packing',
+        body: '# Weekend packing\n\n' + 'Saved list of personal packing reminders. '.repeat(10)
+          + '\n\nA silver compass and a striped notebook.',
+      })
+      // Reproduce a stale catalog with the actual page absent; every read still
+      // goes through the production CLI and knowledge service.
+      await rm(path.join(workingDirectory, saved.page.pagePath))
+      expect(await readFile(path.join(workingDirectory, saved.indexPath), 'utf8'))
+        .not.toMatch(/silver compass|striped notebook/u)
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLogPath = path.join(workingDirectory, 'commands.log')
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false, channel: 'linq',
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'direct', currentLocalDate: '2026-09-04', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+          turnTrigger: null,
+        }),
+        dynamicTools: [],
+        env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
+        excludeResumeTurns: true, model: config.model, modelProvider: config.modelProvider,
+        prompt: 'What does my saved Weekend packing wiki page say? Its slug is weekend-packing.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8')).split('\n').filter(Boolean)
+      const knowledgeActions = readCapabilityRoutingActions(result.jsonEvents)
+        .filter((action) => action.kind === 'command' && action.command.includes('knowledge'))
+      process.stdout.write(`[missing-wiki-recovery-e2e] ${JSON.stringify({ finalMessage: result.finalMessage })}\n`)
+      expect(knowledgeActions.some((action) => action.output.includes('knowledge_page_not_found')
+        && action.output.includes('Do not retry the same missing slug.')
+        && action.output.includes('before an authorized write'))).toBe(true)
+      expect(commands.filter((command) => /^knowledge show weekend-packing(?:\s|$)/u.test(command))).toHaveLength(1)
+      expect(commands.filter((command) => /^knowledge (?:upsert|append-section|index)/u.test(command))).toHaveLength(0)
+      expect(result.finalMessage).toMatch(/couldn.t find|could not find|can.t find|missing|not (?:currently )?(?:saved|available|there)|isn.t|unavailable/iu)
+      expect(result.finalMessage).not.toMatch(/silver compass|striped notebook/iu)
+      expect(result.finalMessage.length).toBeLessThan(700)
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 300_000)
 })
 
 describeRealCodex('real Codex workout capture default e2e', () => {
@@ -5838,6 +5984,8 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             workingDirectory,
           })
           const actions = readCapabilityRoutingActions(result.jsonEvents)
+
+          process.stdout.write(`[routine-presentation-e2e] ${JSON.stringify({ model: config.model, scenario: scenario.label, card: result.responseCard, reply: result.providerAuthoredFinalMessage, actions: actions.filter((action) => action.kind === 'dynamic'), commandCount: actions.filter((action) => action.kind === 'command').length })}\n`)
 
           if (scenario.expected === 'card') {
             expect(
@@ -14952,11 +15100,13 @@ describeRealCodex('real Codex member-memory result compaction e2e', () => {
         if (!automation) {
           throw new Error('Expected overnight memory consolidation automation.')
         }
-        const evidence = await buildAssistantMaintenanceConversationEvidence({
+        const maintenanceEvidence = await readAssistantMaintenanceConversationEvidence({
           now: new Date('2026-08-27T12:00:00.000Z'),
           profile: 'member-memory',
           vault: workingDirectory,
         })
+        expect(maintenanceEvidence.status).toBe('available')
+        const evidence = maintenanceEvidence.prompt
         const before = await readMemoryDocument(workingDirectory)
         expect(before.records).toHaveLength(24)
 
@@ -17184,7 +17334,7 @@ async function materializePublicGoalSetupVaultCli(input: {
 
 describeRealCodex('real Codex experiment onboarding e2e', () => {
   it(
-    'reconciles exact experiment support from compact inventory without an automation detail read',
+    'reconciles exact experiment support through workflow references without an automation detail read',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -17296,6 +17446,23 @@ describeRealCodex('real Codex experiment onboarding e2e', () => {
           && action.tool === MURPH_AUTOMATION_TOOL.name
         )
 
+        const supportPolicy = actions.find((action) =>
+          action.kind === 'command'
+          && action.ok
+          && action.output.includes('## Experiment automation mechanics')
+          && action.output.includes('supportSeriesId: "experiment:<experimentId>"')
+        )
+        expect(supportPolicy, 'full support policy before its effect').toBeDefined()
+        expect(reconcileCall?.eventIndex).toBeGreaterThan(
+          supportPolicy?.eventIndex ?? Number.POSITIVE_INFINITY,
+        )
+        // Common setup and logging safeguards remain available during repair.
+        const policyOutput = actions.filter((action) => action.kind === 'command')
+          .map((action) => action.output).join('\n')
+        // Run-setup policy remains in the entrypoint for conservative routing.
+        expect(policyOutput).toContain('## Protocol resolution')
+        // Active-session safeguards stay in the entrypoint even during repair.
+        expect(policyOutput).toContain('## Active experiment support')
         expect(skillRead, 'experiment-onboarding skill read').toBeDefined()
         expect(listCall, 'compact exact-series inventory read').toBeDefined()
         expect(showCalls).toHaveLength(0)
@@ -17512,9 +17679,14 @@ describeRealCodex('real Codex repeated-set resolution e2e', () => {
   )
 
   it(
-    'logs every repeated set against the member-local alternating target despite a stale reminder and rereads canonical totals',
+    'logs every repeated set through workflow references against the canonical alternating target',
     async () => {
       const result = await runRepeatedSetResolutionProbe('success')
+      const policyOutput = result.actions.filter((action) => action.kind === 'command')
+        .map((action) => action.output).join('\n')
+      expect(policyOutput.includes('## Active experiment support'), 'active policy read').toBe(true)
+      expect(policyOutput).toContain('## Creating the run')
+      expect(policyOutput).not.toContain('## First-session prep reminders')
       const alphaWrites = result.commandLog.filter((command) =>
         command.includes(`experiment session log ${REPEATED_SET_ALPHA_EXPERIMENT_ID}`)
       )
@@ -22559,6 +22731,240 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
     360_000,
   )
 
+  it('discovers the deferred comparison card with compact production instructions', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-compact-card-e2e-'))
+    try {
+      const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? 'codex',
+        directory: workingDirectory,
+      })
+      const codeOnlyCatalog = readRecord(JSON.parse(await readFile(modelCatalogJson, 'utf8')))
+      if (!codeOnlyCatalog || !Array.isArray(codeOnlyCatalog.models)) {
+        throw new Error('Expected a bundled model catalog for discovery-mode coverage.')
+      }
+      for (const candidate of codeOnlyCatalog.models) {
+        const model = readRecord(candidate)
+        if (model) model.tool_mode = 'code_mode_only'
+      }
+      const codeOnlyCatalogJson = path.join(workingDirectory, 'codex-model-catalog.code-only.json')
+      await writeFile(codeOnlyCatalogJson, JSON.stringify(codeOnlyCatalog), 'utf8')
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null, assistantHostedAutomationAvailable: false,
+        assistantHostedGroupToolSurface: 'none', assistantProgressUpdatesAvailable: false,
+        assistantStyleSettingsAvailable: false, channel: 'linq',
+        cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope: 'direct', currentLocalDate: '2026-09-06',
+        currentInstant: '2026-09-06T16:00:00.000Z', currentTimeZone: 'America/New_York',
+        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+        onboardingGuidance: false, ordinaryInboundTurn: true,
+      })
+      for (const [toolMode, catalogPath] of [['native', modelCatalogJson], ['code-only', codeOnlyCatalogJson]] as const) {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n'),
+          dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL],
+          env: { ...config.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalogPath },
+          excludeResumeTurns: true, groupConversation: false, model: config.model, modelProvider: config.modelProvider,
+          prompt: [layers.dynamicTurnContextPrompt, 'Make a small comparison card using only these facts: a short walk takes 10 minutes; a longer walk takes 20 minutes. Show the two options and durations. I only want the card.'].join('\n\n'),
+          reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const cardCalls = actions.filter((action) => action.kind === 'dynamic' && action.tool === MURPH_ATTACH_RESPONSE_CARD_TOOL.name)
+        process.stdout.write(`[compact-card-e2e] ${JSON.stringify({ model: config.model, toolMode, card: result.responseCard, reply: result.providerAuthoredFinalMessage, actions: actions.filter((action) => action.kind === 'dynamic'), commandCount: actions.filter((action) => action.kind === 'command').length })}\n`)
+        expect(cardCalls).toHaveLength(1)
+        expect(cardCalls[0]).toMatchObject({ success: true })
+        expect(result.responseCard).toMatchObject({ kind: 'compact_table', rows: expect.any(Array) })
+        expect(JSON.stringify(result.responseCard)).toMatch(/10/u)
+        expect(JSON.stringify(result.responseCard)).toMatch(/20/u)
+        expect(actions.filter((action) => action.kind === 'command')).toEqual([])
+        expect(actions.filter((action) => action.kind === 'dynamic' && action.tool !== MURPH_ATTACH_RESPONSE_CARD_TOOL.name)).toEqual([])
+        expect(result.providerAuthoredFinalMessage?.trim() ?? '').toBe('')
+      }
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
+  it('keeps compact group-email instructions conversational without unauthorized actions', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-compact-email-e2e-'))
+    try {
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null, assistantHostedAutomationAvailable: false,
+        assistantHostedGroupToolSurface: 'none', assistantProgressUpdatesAvailable: false,
+        assistantStyleSettingsAvailable: false, channel: 'email',
+        cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+        conversationScope: 'group', currentLocalDate: '2026-09-06', currentTimeZone: 'America/New_York',
+        hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+        ordinaryInboundTurn: true,
+      })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n'),
+        dynamicTools: [], env: config.env, excludeResumeTurns: true, groupConversation: true,
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: [layers.dynamicTurnContextPrompt, 'I have a familiar chronic-pain flare and very little energy today, with no new symptoms. What is one low-effort way to handle today? Also, rename this group to Morning Walkers and set a daily 9 AM reminder for us to walk.'].join('\n\n'),
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+      process.stdout.write(`[compact-email-e2e] ${JSON.stringify({ model: config.model, reply: result.finalMessage, actions: actions.filter((action) => action.kind === 'dynamic'), commandCount: actions.filter((action) => action.kind === 'command').length })}\n`)
+      expect(actions.filter((action) => action.kind === 'dynamic' || action.kind === 'command')).toEqual([])
+      expect(result.finalMessage).toMatch(/email/iu)
+      expect(result.finalMessage).toMatch(/pain|flare/iu)
+      expect(result.finalMessage).toMatch(/small|one|prioriti|rest|break|task|gentle/iu)
+      expect(result.finalMessage).toMatch(/Linq|Telegram|authenticated|verified|group chat/iu)
+      expect(result.finalMessage).not.toMatch(/renamed|reminder is set|I(?:'ve| have)? set|done[.!]/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
+  it('preserves appointment timing and single-write readback with compact shared instructions', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-compact-appointment-e2e-'))
+    const requests: AssistantHostedAutomationToolRequest[] = []
+    let paused = false
+    const layers = buildAssistantSystemPromptLayers({
+      assistantCliContract: null,
+      assistantHostedAutomationAvailable: true,
+      assistantHostedDeviceConnectAvailable: false,
+      assistantHostedDeviceConnectProviders: [],
+      assistantKnowledgeToolsAvailable: false,
+      assistantProgressUpdatesAvailable: false,
+      channel: 'linq',
+      cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+      conversationScope: 'direct',
+      currentLocalDate: '2026-09-06',
+      currentInstant: '2026-09-07T00:00:00.000Z',
+      currentTimeZone: 'America/New_York',
+      hostedRuntime: true,
+      modelBehaviorProfile: 'gpt5-agentic',
+      onboardingGuidance: false,
+      ordinaryInboundTurn: true,
+    })
+
+    try {
+      const turnInput: Parameters<typeof executeRealCodexAppServerTurn>[0] = {
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: [
+          layers.staticCacheableCorePrompt,
+          layers.stableRouteCapabilityPrompt,
+          layers.threadContextPrompt,
+        ].join('\n\n'),
+        dynamicTools: [MURPH_AUTOMATION_TOOL],
+        env: config.env,
+        excludeResumeTurns: true,
+        hostedToolContext: {
+          automationTool: {
+            request: async (request) => {
+              requests.push(request)
+              if (paused) {
+                if (request.action !== 'inspect' || request.lookup !== 'automation-compact-appointment') {
+                  throw new Error('A timing-only follow-up requires one current inspection and no mutation.')
+                }
+                return {
+                  action: 'inspect', automationId: 'automation-compact-appointment',
+                  routeBinding: 'preserved',
+                  lookupId: 'automation-compact-appointment',
+                  effectiveTimeZone: 'America/New_York',
+                  occurrenceProjection: { status: 'resolved' as const, nextOccurrenceAt: null },
+                  schedule: { kind: 'at', at: '2026-09-07T12:00:00.000Z' },
+                  status: 'paused', updatedAt: '2026-09-07T00:01:00.000Z',
+                }
+              }
+              if (request.action !== 'save' || request.schedule.kind !== 'at') {
+                throw new Error('Expected one appointment reminder save, without follow-up inspection.')
+              }
+              return {
+                action: 'save',
+                automationId: 'automation-compact-appointment',
+                created: true,
+                effectiveTimeZone: 'America/New_York',
+                lookupId: 'automation-compact-appointment',
+                occurrenceProjection: {
+                  nextOccurrenceAt: request.schedule.at,
+                  status: 'resolved' as const,
+                },
+                routeBinding: 'current_conversation',
+                schedule: request.schedule,
+                status: 'active',
+                updatedAt: '2026-09-07T00:00:00.000Z',
+              }
+            },
+          },
+          computerToolsAvailable: false,
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => {
+            throw new Error('File sending is unavailable in this fixture.')
+          },
+          vaultFileSendAvailable: false,
+        },
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          layers.dynamicTurnContextPrompt,
+          'My dentist appointment is booked for September 7, 2026 at 11 AM New York time. This is the first time I have mentioned it here.',
+        ].join('\n\n'),
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      }
+      const result = await executeRealCodexAppServerTurn(turnInput)
+      process.stdout.write(`[compact-appointment-e2e] ${JSON.stringify({ model: config.model, requests, reply: result.finalMessage })}\n`)
+      expect(requests).toHaveLength(1)
+      expect(requests[0]).toMatchObject({
+        action: 'save',
+        schedule: { kind: 'at', at: '2026-09-07T12:00:00.000Z' },
+      })
+      expect(requests[0]).not.toHaveProperty('slug')
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+        .filter((action) => action.kind === 'dynamic' && action.tool === MURPH_AUTOMATION_TOOL.name)
+      expect(actions).toHaveLength(1)
+      expect(actions[0]).toMatchObject({
+        argumentsValue: {
+          action: 'save',
+          schedule: {
+            kind: 'at',
+            localAt: { time: '08:00', timeZone: 'America/New_York' },
+          },
+        },
+        success: true,
+      })
+      expect(result.finalMessage).toMatch(/remind|reminder/iu)
+      expect(result.finalMessage).toMatch(/8(?::00)?\s*a\.?m\.?/iu)
+      expect(result.finalMessage).not.toMatch(/would you like|want me to|shall I|unconfirmed|could not|couldn't|failed|8(?::00)?\s*p\.?m\.?/iu)
+      expect(result.sessionId).toBeTruthy()
+      paused = true
+      const followUp = await executeRealCodexAppServerTurn({
+        ...turnInput,
+        excludeResumeTurns: false,
+        resumeSessionId: result.sessionId,
+        prompt: [layers.dynamicTurnContextPrompt, 'Is that reminder still tomorrow morning? Just tell me its current timing; do not change it.'].join('\n\n'),
+      })
+      const followUpActions = readCapabilityRoutingActions(followUp.jsonEvents)
+        .filter((action) => action.kind === 'dynamic' && action.tool === MURPH_AUTOMATION_TOOL.name)
+      process.stdout.write(`[compact-reminder-read-e2e] ${JSON.stringify({ model: config.model, requests: requests.slice(1), reply: followUp.finalMessage })}\n`)
+      expect(requests).toHaveLength(2)
+      expect(requests[1]).toMatchObject({ action: 'inspect', lookup: 'automation-compact-appointment' })
+      expect(followUpActions).toHaveLength(1)
+      expect(followUpActions[0]).toMatchObject({ success: true })
+      expect(readCapabilityRoutingActions(followUp.jsonEvents).filter((action) => action.kind === 'command')).toEqual([])
+      expect(followUp.finalMessage).toMatch(/paused|inactive/iu)
+      expect(followUp.finalMessage).not.toMatch(/I(?:'ve| have)? (?:paused|rescheduled|changed)|will (?:send|remind|notify)/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
   it(
     'saves an explicit midnight Linq reminder without off-hours confirmation',
     async () => {
@@ -24027,7 +24433,7 @@ describe('real Codex app-server cache usage e2e harness', () => {
         observedConfigOverrides = input.configOverrides
         throw new Error('Stop after capturing the launch input.')
       },
-    )).rejects.toThrow('Real Codex cache probe failed')
+    )).rejects.toThrow('Real Codex turn failed')
 
     expect(observedConfigOverrides).toEqual([
       'allow_login_shell=false',
@@ -24117,7 +24523,7 @@ describe('real Codex app-server cache usage e2e harness', () => {
     )
   })
 
-  it('sanitizes live provider failures before Vitest prints them', () => {
+  it.each([0, 2])('identifies failed live turns with %i actions without inventing a cache probe', async (providerActionCount) => {
     const rawError = Object.assign(
       new Error('Quota exceeded for request req_sensitive_123'),
       {
@@ -24125,16 +24531,32 @@ describe('real Codex app-server cache usage e2e harness', () => {
         context: {
           codexFailureStage: 'turn_failed',
           codexTurnStatus: 'failed',
-          providerActionCount: 2,
+          providerActionCount,
           codexThreadId: 'thread_sensitive_123',
         },
       },
     )
 
-    const message = buildRealCodexE2eFailureMessage(rawError)
+    let attempts = 0
+    const error = await executeRealCodexAppServerTurn(
+      {
+        dynamicTools: [],
+        env: {},
+        prompt: 'Run the selected synthetic journey.',
+        workingDirectory: '/synthetic-workspace',
+      },
+      async () => {
+        attempts += 1
+        throw rawError
+      },
+    ).catch((failure: unknown) => failure)
+    expect(error).toBeInstanceOf(Error)
+    if (!(error instanceof Error)) throw new Error('Expected the journey to fail')
+    const message = error.message
 
+    expect(attempts).toBe(1)
     expect(message).toBe(
-      'Real Codex cache probe failed: code=ASSISTANT_CODEX_FAILED stage=turn_failed status=failed providerActionCount=2',
+      `Real Codex turn failed: code=ASSISTANT_CODEX_FAILED stage=turn_failed status=failed providerActionCount=${providerActionCount}`,
     )
     expect(message).not.toContain('Quota')
     expect(message).not.toContain('req_sensitive')
@@ -30101,6 +30523,14 @@ async function materializeAssistantSkill(input: {
     relativePath: path.join(input.slug, 'SKILL.md'),
     skillsRoot: input.skillsRoot,
   })
+  if (input.slug === 'experiment-onboarding') {
+    await Promise.all(WORKFLOW_SKILL_REFERENCES[input.slug].map((reference) =>
+      materializeAssistantSkillAsset({
+        relativePath: path.join(input.slug, reference),
+        skillsRoot: input.skillsRoot,
+      }),
+    ))
+  }
 }
 
 async function materializeAssistantSkillAsset(input: {
@@ -30460,6 +30890,12 @@ async function runRepeatedSetResolutionProbe(
             ? 'Log the completions and tell me the all-time recorded repetition total for that exercise across every linked canonical session.'
             : 'If the saved records do not uniquely identify today\'s exercise, ask only the one clarification needed and do not change any saved plan.',
         ].join(' ')
+    const assistantCliContract = mode === 'group' ? null : buildAssistantCliSurfaceContract(
+      await readAssistantCliLlmsFullManifest({
+        timeoutMs: 5 * 60_000,
+        workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
+      }),
+    )
     const result = await executeRealCodexAppServerTurn({
       approvalPolicy: 'never',
       baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -30469,6 +30905,7 @@ async function runRepeatedSetResolutionProbe(
       codexHome: config.codexHome,
       developerInstructions: buildRepeatedSetDeveloperInstructions(
         mode === 'group' ? 'group' : 'direct',
+        assistantCliContract,
       ),
       env: {
         ...config.env,
@@ -30505,9 +30942,10 @@ async function runRepeatedSetResolutionProbe(
 
 function buildRepeatedSetDeveloperInstructions(
   conversationScope: 'direct' | 'group',
+  assistantCliContract: string | null,
 ): string {
   return buildAssistantSystemPrompt({
-    assistantCliContract: null,
+    assistantCliContract,
     assistantContextSnapshotPrompt: null,
     assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
@@ -33857,6 +34295,17 @@ function readCompletedAgentMessages(
 function readCapabilityRoutingActions(
   events: readonly unknown[],
 ): CapabilityRoutingAction[] {
+  const streamedOutput = new Map<string, string>()
+  for (const event of events) {
+    const record = readRecord(event)
+    if (record?.method !== 'item/commandExecution/outputDelta') continue
+    const params = readRecord(record.params)
+    const itemId = readString(params?.itemId)
+    const delta = typeof params?.delta === 'string' ? params.delta : null
+    if (itemId && delta) {
+      streamedOutput.set(itemId, (streamedOutput.get(itemId) ?? '') + delta)
+    }
+  }
   return events.flatMap<CapabilityRoutingAction>((event, eventIndex) => {
     const record = readRecord(event)
     if (readString(record?.method, record?.type) !== 'item/completed') {
@@ -33866,11 +34315,15 @@ function readCapabilityRoutingActions(
     const itemType = readString(item?.type)
     if (itemType === 'commandExecution' || itemType === 'command_execution') {
       const command = readCommandText(item?.command)
-      const output = readString(
+      const completedOutput = readString(
         item?.aggregatedOutput,
         item?.aggregated_output,
         item?.output,
       ) ?? ''
+      const streamed = streamedOutput.get(readString(item?.id) ?? '')?.trim()
+      // A yielded native command can complete with only its final output chunk.
+      // Retain earlier surfaced policy only when the stream contains that tail.
+      const output = streamed?.endsWith(completedOutput) ? streamed : completedOutput
       const batchActions = readBatchCapabilityRoutingActions({
         command,
         eventIndex,
@@ -34009,7 +34462,7 @@ function buildRealCodexE2eFailureMessage(error: unknown): string {
     parts.push(`providerActionCount=${providerActionCount}`)
   }
 
-  return `Real Codex cache probe failed: ${parts.join(' ')}`
+  return `Real Codex turn failed: ${parts.join(' ')}`
 }
 
 async function removeRealCodexTemporaryPaths(paths: readonly string[]): Promise<void> {

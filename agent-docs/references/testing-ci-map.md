@@ -4,8 +4,31 @@ Last verified: 2026-09-04
 
 ## Current Repo Checks
 
+Linq email identity remediation is covered by the focused
+`hosted-onboarding-linq-email-authority.test.ts` and
+`hosted-onboarding-linq-email-crypto.test.ts` suites, plus linked-account,
+Settings email, Privy, and dispatch regressions. The crypto proof uses real
+authenticated encryption with a synthetic local root. With an isolated local
+`DATABASE_URL` and `MURPH_TEST_POSTGRES_CONCURRENCY=1`, run
+`hosted-onboarding-linq-email-identity-migration-postgres.test.ts` and the
+`Linq email-handle identity` slice of `hosted-onboarding-member-lock-postgres.test.ts`
+through `pnpm --dir apps/web test:prepared -- test/<file>`. These prove exact
+same-member ciphertext copying, source/ownership rejection and rollback,
+concurrent creation, and unlink followed by a fresh inbound identity.
+The same local lane runs `hosted-group-start-recovery-postgres.test.ts` through
+the real recovery endpoint, identity writer, routing owner, and activation
+promotion: foreign-owner rejection, exactly one concurrent recovery claimant,
+route-failure rollback, and retained identity/source without verified-email
+authorization, plus a recovered member's separate verified-email inbound and
+duplicate replay through the real planner and mailbox without identity writes.
+Its external session/token and crypto boundaries are synthetic;
+the separate crypto suite owns authenticated-encryption proof. Recovery route
+and Linq thread-route regressions cover ordered mutation and direct-only group
+admission alongside existing verified and recovered group behavior.
+
 | Command | Purpose | Current coverage |
 | --- | --- | --- |
+| `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm --dir apps/web test:prepared test/hosted-onboarding-linq-terminal-retry-postgres.test.ts` | Opt-in real-PostgreSQL proof for one terminal Linq send retry; requires an isolated loopback test database with the current schema. | Concurrent claims, provider ambiguity, direct/group and multipart recovery, both acceptance/receipt arrival orders, replacement receipt projection, and current route/access/line/chat blocks. Companion terminal-retry, HTTP, and delivery-route tests prove exact failure matching, preserved payloads, disabled SDK retries, and post-response scheduling. |
 | `pnpm test:assistant:live -- --test "<name-pattern>"` | Required focused local real-Codex journey for assistant-behavior changes after deterministic proof. Defaults to the local ChatGPT/Codex subscription and `gpt-5.6-terra`; `--auth provider` preserves the isolated provider-key lane. | One selected `assistant-codex-real-e2e.test.ts` journey, including exact required/forbidden effects and printed synthetic replies for manual `Ready`/`Hold` UX review. Routine CI leaves the paid gate unset. |
 | `.github/workflows/foreground-reply-state-cardinality.yml` | Every-PR asymptotic gate that requires foreground reply filesystem work to saturate as unrelated persisted state grows. | The shared meter, convention-discovered `*-state-cardinality.test.ts` probes, fail-closed primitive coverage, and maintenance rules are specified in `agent-docs/references/README.md#foreground-reply-state-cardinality`. |
 | `pnpm exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage packages/cli/test/release-script-coverage-audit.test.ts -t 'review-gpt runner|ReviewGPT|review-gpt managed|Product UX|attests one fresh|fails closed marked'` | Focused PR review-tool contracts. | Packet vocabulary and completion outcomes, executable preset selection, full/delta packaging, protected config, and response capture. Narrative wording is not frozen; parent readback owns the realistic serious-bug and material Complexity Collapse thresholds, excluding speculation, minor refactoring, and disclosure findings. |
@@ -470,11 +493,11 @@ gate unset and makes no paid request.
   parent Next process a direct 1 GiB old-space flag and appends a 3 GiB flag to
   `NODE_OPTIONS` for the Webpack build worker. Before Webpack starts, the shared
   production runner performs route type generation and an explicit app-local
-  generated-contract TypeScript check in a separate 3.5 GiB child, then marks
+  generated-contract TypeScript check in a separate 6 GiB child, then marks
   only that check prepared. Node applies the direct flag to the parent; Next
   16.3.0 rebuilds non-isolated child options from the parent arguments followed
   by `NODE_OPTIONS`, so the sequential Webpack compiler workers receive 3 GiB,
-  while the separate TypeScript CLI child receives 3.5 GiB and isolated static
+  while the separate TypeScript CLI child receives 6 GiB and isolated static
   workers have the flag removed. The same script owns the Vercel package build
   and CI memory-observation invocation.
   `apps/web/README.md` § "Production build memory guard" is the single prose

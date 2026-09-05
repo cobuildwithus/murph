@@ -15,16 +15,16 @@ describe('action-first browser prompt contract', () => {
     })
 
     expect(executionText).toContain(
-      'For browser-backed real-world action requests such as ordering, reordering, booking, rescheduling, canceling, paying, refilling, submitting a form, or using a portal',
+      'For requested real-world browser actions (orders, bookings, changes, payments, refills, forms, portals)',
     )
     expect(executionText).toContain(
-      'treat product, catalog, web, email, calendar, or vault lookup as preflight only',
+      'lookup is preflight only',
     )
     expect(executionText).toContain(
-      'use that tool instead of replying with only a search result, product link, appointment portal, or instructions',
+      'use a completion-capable tool when the next safe step is clear',
     )
     expect(executionText).toContain(
-      'For medical appointment check-in or intake, read `appointment-scheduling` before browser execution',
+      'plus `appointment-scheduling` for medical check-in/intake',
     )
   })
 
@@ -32,25 +32,25 @@ describe('action-first browser prompt contract', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'For browser approval, sensitive-data transmission, takeover, and retry boundaries, follow `computer-use` as the single policy owner',
+      '`computer-use` owns approval, disclosure, takeover, and bounded recovery',
     )
     expect(prompt).toContain(
       'Make reversible progress first',
     )
     expect(prompt).toContain(
-      'An ordinary failed or unresponsive control is not yet a blocker',
+      'an unresponsive control needs re-inspection',
     )
     expect(prompt).toContain(
-      're-inspect current state, complete one safe alternate interaction, and only then use `computer-use` OS fallback when allowed',
+      'one safe alternate interaction before allowed OS fallback',
     )
     expect(prompt).toContain(
-      'After one OS action, re-inspect; when the target state changed, never repeat that action',
+      'Re-inspect after an OS action; never repeat it when state changed',
     )
     expect(prompt).toContain(
-      'Refresh only when no side effect is unknown and entered state is safe',
+      'Refresh only with no unknown side effect and safe entered state',
     )
     expect(prompt).toContain(
-      'do not imply you opened or can drive checkout unless an actual runtime action happened',
+      'Claim actions or completion only from runtime evidence',
     )
     expect(prompt).toContain(
       'Complete the browser task end-to-end when the user has asked you to do it and the needed information is available.',
@@ -61,10 +61,10 @@ describe('action-first browser prompt contract', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'When `computer-use` requires in-chat approval, ask the smallest concrete question',
+      'Ask the smallest concrete in-chat approval question',
     )
     expect(prompt).toContain(
-      'Keep a handoff link optional unless automation cannot proceed after approval',
+      'a handoff link is optional unless takeover is required',
     )
   })
 
@@ -72,13 +72,13 @@ describe('action-first browser prompt contract', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'When direct browser takeover is actually required and the pause tool returns a fresh handoff URL',
+      "For takeover, include the pause tool's fresh URL",
     )
     expect(prompt).toContain(
-      'include that URL with the one precise action needed',
+      'and one precise action',
     )
     expect(prompt).toContain(
-      'Never refer to an "open page" or takeover without giving the usable link',
+      "For takeover, include the pause tool's fresh URL and one precise action",
     )
   })
 })

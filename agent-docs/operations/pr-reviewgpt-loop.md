@@ -78,32 +78,32 @@ restart.
 
 ## Wait And Wake Ownership
 
-Give every ReviewGPT run one completion owner. For a normal active review run,
-use `--wait` and let that invocation own response capture until it returns on
-completion, timeout, or failure. Waiting on that completion-returning process is
-not status polling. Do not spend the active agent turn repeatedly reopening the
-thread, querying the process, or otherwise asking whether the review is done.
+Give every ReviewGPT run one completion owner in the original Codex
+session/thread. Prefer `--wait` and let that invocation own response capture
+until completion, timeout, or failure. Keep the same session active and watch
+that process through the tool's wait/resume facility, including across yielded
+tool calls. A slow review alone is not a reason to end the turn, arm an
+automatic continuation, or move completion work into a new session.
 
-When an accepted ReviewGPT request must outlive the active turn, prefer a
-detached `cobuild-review-gpt thread wake` handoff. Bind it to the exact thread,
-capture metadata, owning Codex session, repository checkout, and managed browser
-lane. The detached watcher owns the wait and resumes Codex only after the
-response is complete; the active agent does not remain in a progress-check
-loop. Use `--poll-interval 5m` so watcher checks are no more frequent than once
-every five minutes. Unless an explicit caller- or user-supplied per-run bound
-already applies, use `--poll-timeout 260m`; preserve any explicit bound. That
-wake timeout is independent of the normal ReviewGPT response-capture timeout,
-which defaults to 250 minutes.
+When a completion-returning wait is unavailable, poll the exact accepted
+ReviewGPT thread from the same Codex session, leaving at least five minutes
+between status checks. Use interruptible waits between checks and honor the
+existing per-run timeout. Waiting for output from the existing `--wait` process
+is not a separate status poll; do not add a second thread-status polling loop
+while that process owns capture.
 
-Manual status polling is a fallback only when neither a completion-returning
-wait nor a completion watcher can notify the owning model and the task cannot
-safely proceed without a check. In that case, leave at least five minutes
-between checks and stop polling as soon as one completion owner is available.
-Do not stack a manual polling loop on top of a live `--wait` process or detached
-wake watcher.
+Reserve detached `cobuild-review-gpt thread wake` for a deliberate handoff when
+the current session cannot remain active or the user requests it. Bind it to
+the exact thread, capture metadata, owning Codex session, repository checkout,
+and managed browser lane. Once handed off, the watcher owns completion; do
+not also run a manual polling loop. Use `--poll-interval 5m` and, unless an
+explicit caller- or user-supplied per-run bound already applies,
+`--poll-timeout 260m`. Preserve explicit bounds. That wake timeout remains
+independent of normal ReviewGPT response capture, which defaults to 250
+minutes.
 
-The completion watcher does not relax exact-head, exact-thread, attachment,
-model, timeout, or response-marker validation.
+Same-session waiting, polling, and deliberate handoffs all preserve exact-head,
+exact-thread, attachment, model, timeout, and response-marker validation.
 
 ## Finding Disposition Boundary
 
@@ -424,21 +424,18 @@ the current user explicitly asks for it.
    round. Correct its evidence or invocation gap and retry the same round number
    against the same pushed head.
 
-   Treat 7.5 minutes as the default final-gate trust floor, not an absolute
-   stopwatch verdict. A marked concrete-model response below 6.5 minutes is too
-   fast and does not count. A response from 6.5 minutes up to the 7.5-minute
-   default is near-threshold and may count at local discretion when inspection
-   confirms the exact turn, attachment, requested model selection, completion
-   marker, and a substantive review proportionate to the requested scope. Record
-   the elapsed time, selected lane/model evidence, artifact-quality judgment,
-   and acceptance reason in the round handoff. ReviewGPT's package-level
-   five-minute attestation threshold does not replace this stricter final-gate
-   judgment. Responses at or above 7.5 minutes still require all ordinary
-   evidence checks and are not trusted by duration alone.
+   Require at least 4.5 minutes (270 seconds) for a marked concrete-model final
+   response. The repository wrapper passes `--minimum-marked-response-time 270s`
+   to align the tool's attestation fallback with this final-gate minimum. Below
+   that minimum, the response does not count. At or above it, inspect the exact
+   turn, attachment, requested model selection, completion marker, and a
+   substantive review proportionate to the requested scope. Record the elapsed
+   time, selected lane/model evidence, artifact-quality judgment, and acceptance
+   reason in the round handoff. Duration alone never establishes a valid review.
 
-   If a too-fast response is not accepted under this narrow exception, preserve
-   it only as diagnostic output and retry the same substantive round number
-   against the same pushed head. Browser, model, capture, attachment, and
+   Preserve a too-fast response only as diagnostic output and retry the same
+   substantive round number against the same pushed head. Browser, model,
+   capture, attachment, and
    too-fast-response retries never advance the round counter. If evidence shows
    a different or downgraded model, incomplete response, missing snapshot, or
    shallow/templated output, discard the round regardless of duration, correct

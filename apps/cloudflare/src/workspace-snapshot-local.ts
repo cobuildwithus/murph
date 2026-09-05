@@ -201,6 +201,7 @@ export async function createEncryptedWorkspaceSnapshotFile(input: {
       "-C",
       durableRoot,
       "--format=pax",
+      "--numeric-owner",
       "--no-recursion",
       "--null",
       "-T",
@@ -517,12 +518,6 @@ export async function restoreEncryptedWorkspaceSnapshotFromEncryptedStream(input
 
     const extractStartedAt = Date.now();
     const archiveExtractStartedAt = Date.now();
-    const zstd = spawn("zstd", [
-      "-d",
-      "--stdout",
-    ], {
-      stdio: ["pipe", "pipe", "pipe"],
-    });
     const tar = spawn("tar", [
       "-C",
       restoreRoot,
@@ -536,14 +531,21 @@ export async function restoreEncryptedWorkspaceSnapshotFromEncryptedStream(input
     ], {
       stdio: ["pipe", "ignore", "pipe"],
     });
-    const zstdExit = waitForHostedWorkspaceSnapshotProcess(zstd, "zstd");
     const tarExit = waitForHostedWorkspaceSnapshotProcess(tar, "tar");
+    // Share the pipe with zstd directly. Relaying the expanded tar through Node
+    // adds stream scheduling and copies proportional to the unpacked workspace.
+    const zstd = spawn("zstd", [
+      "-d",
+      "--stdout",
+    ], {
+      stdio: ["pipe", tar.stdin, "pipe"],
+    });
+    const zstdExit = waitForHostedWorkspaceSnapshotProcess(zstd, "zstd");
+    // The child owns its duplicated descriptor. Close the parent's copy so tar
+    // receives EOF when zstd closes stdout, including on decoder failure.
+    tar.stdin?.destroy();
     let zstdInputPipe: Promise<void> | null = null;
-    let archivePipe: Promise<void> | null = null;
     try {
-      if (!zstd.stdout || !tar.stdin) {
-        throw new Error("Hosted workspace snapshot restore archive streams are unavailable.");
-      }
       if (!zstd.stdin) {
         throw new Error("Hosted workspace snapshot restore archive streams are unavailable.");
       }
@@ -551,13 +553,8 @@ export async function restoreEncryptedWorkspaceSnapshotFromEncryptedStream(input
         pipeline(Readable.from([plaintextArchive]), zstd.stdin),
         [zstdExit, tarExit],
       );
-      archivePipe = waitForHostedWorkspaceSnapshotProcessPipe(
-        pipeline(zstd.stdout, tar.stdin),
-        [zstdExit, tarExit],
-      );
       await Promise.all([
         zstdInputPipe,
-        archivePipe,
         zstdExit,
         tarExit,
       ]);
@@ -568,7 +565,7 @@ export async function restoreEncryptedWorkspaceSnapshotFromEncryptedStream(input
         zstdExit,
         tarExit,
       ]);
-      await Promise.allSettled([zstdInputPipe, archivePipe].filter((promise) => promise !== null));
+      await zstdInputPipe?.catch(() => {});
       if (
         processFailure
         && shouldPreferHostedWorkspaceSnapshotProcessFailure(error)
