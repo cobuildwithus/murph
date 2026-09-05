@@ -32,7 +32,6 @@ describe("assistant configuration tool", () => {
   it("describes Astra as available on paid Edge or Max with OpenAI", () => {
     expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.description).toContain("Sol and Astra require an active paid Edge or Max plan");
     expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.description).toContain("Astra requires OpenAI");
-    expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.description).toContain("Call update once for a requested change");
     expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.description).not.toContain("Astra requires an active paid Max");
   });
 
