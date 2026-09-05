@@ -967,6 +967,8 @@ function serializeAutomationToolResponse(
         action: response.action,
         automationId: response.automationId,
         contextReferences: response.contextReferences,
+        instructions: response.instructions,
+        title: response.title,
         effectiveTimeZone: response.effectiveTimeZone,
         occurrenceProjection: response.occurrenceProjection,
         routeBinding: response.routeBinding,
@@ -978,7 +980,12 @@ function serializeAutomationToolResponse(
   }
   try {
     const text = JSON.stringify(payload) ?? 'null'
-    return new TextEncoder().encode(text).byteLength <= AUTOMATION_TOOL_RESULT_MAX_BYTES
+    // Inspect also returns up to 50,000 instruction characters and a 160-character
+    // title. JSON escaping can use six bytes per character; keep metadata's budget.
+    const maxBytes = response.action === 'inspect'
+      ? AUTOMATION_TOOL_RESULT_MAX_BYTES + (50_000 + 160) * 6
+      : AUTOMATION_TOOL_RESULT_MAX_BYTES
+    return new TextEncoder().encode(text).byteLength <= maxBytes
       ? text
       : null
   } catch {
