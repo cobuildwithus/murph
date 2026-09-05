@@ -1,6 +1,6 @@
 # Load public-page authentication on intent
 
-Status: active
+Status: completed
 Created: 2026-09-05
 Updated: 2026-09-05
 
@@ -39,4 +39,20 @@ Auth loading only. Experiment image sizing has a separate PR. Audit server delay
 
 ## Verification
 
-Pending implementation.
+- Focused auth suite: 12 files, 189 tests passed, including cold/warm runtime, chunk retry, sidebar logout, OAuth return, consent and focus accessibility.
+- Sidebar and changelog recheck: 2 files, 35 tests passed.
+- `pnpm --dir apps/web typecheck` initially found the existing fresh-worktree `@murphai/device-syncd/service` build-artifact gap. After `pnpm --dir packages/device-syncd build`, `pnpm --dir apps/web typecheck:prepared` passed.
+- `pnpm complexity:diff`: passed; AuthDialog remains at the pre-existing 22, preserving its consent, accessibility and recovery branches. Auth control and nav complexity decreased. No justified additional abstraction.
+- `pnpm test:frontend-design-proof`: 12 tests passed.
+- `pr-public-auth-loading-design-proof.spec.ts`: 2 browser tests passed at 412px and 1440px. Fresh navigation to experiments, goals and homepage leaves actual Privy/WalletConnect/Reown chunks unloaded after five idle seconds. The small Turbopack async-loader descriptor is distinguished from the SDK. Signup renders the real dialog and phone field. Native crops inspected at both widths.
+- Browser external requests were blocked and the SDK used smoke configuration. This proves download boundaries and cold form rendering, not external provider authentication or a production Speed Insights score.
+- Public baseline diagnostic evidence showed about 749KB of avoidable auth transfer on goals, knowledge and search. Production score and exact deployed bundle bytes require post-deployment comparison.
+
+## Product UX walkthrough
+
+Ready: passive mobile and desktop browsing, cold form entry, focus/touch preparation, stable active runtime, OAuth return, and failed chunk/app logout retry are covered at their changed boundaries. Existing authentication, consent and readiness owners remain intact. No new server waits or cache policies.
+
+## Review handoff
+
+PR #2909. Final review and exact-head CI are tracked on the PR. This plan records implementation and local proof; it does not assert those external gates have passed.
+Completed: 2026-09-05
