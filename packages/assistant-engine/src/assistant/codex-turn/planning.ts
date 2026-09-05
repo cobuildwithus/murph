@@ -53,7 +53,6 @@ import {
   type AssistantDiagnosticsPolicy,
 } from '../issue-reporting.js'
 import {
-  buildAssistantResearchScoutCapabilityText,
   resolveAssistantModelBehaviorProfile,
 } from '../model-behavior.js'
 import {
@@ -533,17 +532,15 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.profile.promptProfile === 'system-notification' ||
     input.profile.promptProfile === 'creative-notification' ||
     operatorMessageNotificationTurn
+  const conversationProviderTurn =
+    input.profile.promptProfile === 'conversation' &&
+    input.profile.toolProfile === 'provider-turn'
   const privateInteractiveProviderTurn =
-    privateInteractiveAudience &&
-    input.profile.promptProfile === 'conversation' &&
-    input.profile.toolProfile === 'provider-turn'
+    privateInteractiveAudience && conversationProviderTurn
   const authenticatedGroupProviderTurn =
-    authenticatedGroupChatRuntime &&
-    input.profile.promptProfile === 'conversation' &&
-    input.profile.toolProfile === 'provider-turn'
+    authenticatedGroupChatRuntime && conversationProviderTurn
   const ordinaryInboundTurn =
-    input.profile.promptProfile === 'conversation' &&
-    input.profile.toolProfile === 'provider-turn' &&
+    conversationProviderTurn &&
     input.input.scheduledOccurrenceAt == null &&
     (
       input.input.turnTrigger == null ||
@@ -562,9 +559,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     (
       responseCardsAvailable ||
       (
-        authenticatedGroupChatRuntime &&
-        input.profile.promptProfile === 'conversation' &&
-        input.profile.toolProfile === 'provider-turn' &&
+        authenticatedGroupProviderTurn &&
         (
           scheduledInvocationScope !== null ||
           (
@@ -579,11 +574,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const telegramRichContentResponseCardsAvailable =
     telegramPresentationResponseCardsAvailable
   const groupChallengeResponseCardsAvailable =
-    authenticatedGroupChatRuntime &&
+    authenticatedGroupProviderTurn &&
     resolvedChannel?.trim().toLowerCase() === 'linq' &&
     input.hostedToolContext?.groupSharedReader != null &&
-    input.profile.promptProfile === 'conversation' &&
-    input.profile.toolProfile === 'provider-turn' &&
     (scheduledInvocationScope !== null ||
       (ordinaryInboundTurn &&
         input.input.scheduledInvocationAuthority == null))
@@ -617,12 +610,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
       )
       || hostedGroupStyleSettingsAvailable
     ) &&
-    input.profile.promptProfile === 'conversation' &&
-    input.profile.toolProfile === 'provider-turn'
+    conversationProviderTurn
   const groupAssistantStylePreferencesApply =
-    hostedGroupRuntime &&
-    input.profile.promptProfile === 'conversation' &&
-    input.profile.toolProfile === 'provider-turn'
+    hostedGroupRuntime && conversationProviderTurn
   const assistantVoicePreferenceApplies =
     privateInteractiveAudience || hostedGroupRuntime
   const explicitAssistantPersona =
@@ -712,14 +702,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
             ? [pendingHostedImageContextPrompt]
             : []),
         ]
-  const groupRoomModelPrompt =
-    authenticatedGroupChatRuntime &&
-    input.profile.promptProfile === 'conversation' &&
-    input.profile.toolProfile === 'provider-turn'
-      ? await readAssistantGroupRoomModelPrompt({
-          vaultRoot: input.input.vault,
-        })
-      : null
+  const groupRoomModelPrompt = authenticatedGroupProviderTurn
+    ? await readAssistantGroupRoomModelPrompt({
+        vaultRoot: input.input.vault,
+      })
+    : null
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
     executionContext: input.executionContext,
   })
@@ -731,9 +718,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const assistantDynamicContextPrompts = [
     ...hostedDynamicContextPrompts,
     ...(groupRoomModelPrompt ? [groupRoomModelPrompt] : []),
-    ...(assistantResearchAvailable
-      ? [buildAssistantResearchScoutCapabilityText()]
-      : []),
   ]
   const voiceMemoDeliveryChannel = outputOnlyTurn
     ? null
@@ -874,6 +858,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       assistantKnowledgeToolsAvailable:
         promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
       assistantProgressUpdatesAvailable: input.progressDelivery != null,
+      assistantResearchAvailable,
       assistantToolNameAliases,
       assistantPersona: explicitAssistantPersona,
       assistantPersonality:
@@ -1127,7 +1112,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     )
   const nativeResumeEnabled =
     input.profile.threadScope === 'session-thread'
-  const candidateResumeCodexThreadId =
+  const resumeCodexThreadId =
     nativeResumeEnabled &&
     routeProviderCapabilities.supportsNativeResume &&
     resumeBinding !== null &&
@@ -1138,15 +1123,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
           }),
         })
       : null
-  const resumeCodexThreadId = candidateResumeCodexThreadId
   const conversationHistoryMessages = resumeCodexThreadId === null
     ? await resolveCommittedTranscriptHistoryMessages()
     : []
-  const shouldInjectBootstrapContext = resumeCodexThreadId === null
-  const shouldPrepareBootstrapContext = shouldInjectBootstrapContext
-  const actualAssistantCliContract = shouldPrepareBootstrapContext
-    ? bootstrapAssistantCliContract
-    : null
+  const shouldPrepareBootstrapContext = resumeCodexThreadId === null
   const turnContextPrompt = normalizeNullableString(
     [
       normalizeNullableString(
@@ -1160,18 +1140,17 @@ export async function resolveAssistantRouteTurnPlan(input: {
         codexThreadId: resumeCodexThreadId,
       }
     : null
-  const systemPromptResult = threadStartPromptResult
   const systemPrompt = onboardingGoalCheckinTurn
     ? [
-        systemPromptResult.prompt,
+        threadStartPromptResult.prompt,
         MURPH_ONBOARDING_GOAL_CHECKIN_EXECUTION_POLICY,
       ].join('\n\n')
     : contextHandoffNotificationTurn
       ? [
-          systemPromptResult.prompt,
+          threadStartPromptResult.prompt,
           ASSISTANT_CONTEXT_HANDOFF_NOTIFICATION_OUTPUT_CONTRACT,
         ].join('\n\n')
-      : systemPromptResult.prompt
+      : threadStartPromptResult.prompt
   const developerInstructions =
     resumeCodexThreadId === null
       ? threadStartDeveloperInstructions
@@ -1189,7 +1168,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
 
   return {
     assistantContractFingerprint,
-    assistantCliContract: actualAssistantCliContract,
+    assistantCliContract: shouldPrepareBootstrapContext
+      ? bootstrapAssistantCliContract
+      : null,
     cliEnv: {
       ...input.sharedPlan.cliAccess.env,
     },
@@ -1237,7 +1218,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       : undefined,
     promptCacheMetadata: contextHandoffNotificationTurn
       ? null
-      : systemPromptResult.cacheMetadata,
+      : threadStartPromptResult.cacheMetadata,
     assistantPreferredElevenLabsVoiceId:
       assistantVoicePreferenceApplies
         ? resolveAssistantVoiceOptionElevenLabsVoiceId(assistantVoice)

@@ -99,7 +99,11 @@ accepted wake becomes that same positive immediate-recheck edge; a later wake
 is rejected for the existing outer reconciliation owner.
 A failed best-effort signal
 leaves the durable preference intact; the next invocation and the mandatory
-provider-entry revalidation remain the recovery path. The signal carries no
+provider-entry consistency check remain the recovery path. This compares the
+invocation provider with the saved provider; it is not input admission or
+target/audience authorization. Handoff and unavailable settings reads preserve
+accepted work for retry. The warm-wake consistency check precedes mailbox
+prefetch, which can perform usage-denial bookkeeping. The signal carries no
 provider value or credential, and `runtime_recheck_requested` remains a
 facts-read-only signal for its existing callers.
 
@@ -2702,7 +2706,12 @@ persists on the existing mailbox item across pending, sending, recording,
 retryable recording, and preemption transitions, and ends when existing
 completion removes the item. Restore promotes the exact legacy pending
 retained-job shape to the marker once so rollout does not strand an existing
-owner; projection after that compatibility read is marker-based. The set admits
+owner; projection after that compatibility read is marker-based. An idle restore
+also compares the restored exact owner set with the committed checkpoint. An
+unpublished owner enters the existing fenced checkpoint path, including when
+the default pass imports nothing and all retained retries remain in the future.
+The default pass with current ownership remains a no-op; publication neither
+executes a future job early nor changes its retry time. The set admits
 at most one owner per connection and is capped by the existing 100-connection
 complete-snapshot hydration authority. Exact continuation membership is independent
 of the global handled frontier: another connection's earlier retry cannot veto

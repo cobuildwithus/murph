@@ -260,6 +260,5 @@ function createHostedUserRunner(
     runnerContainerNamespace,
     env.HOSTED_RUNTIME_RETRY_ANALYTICS ?? null,
     env.STANDBY_COORDINATOR ?? null,
-    env.STANDBY_RUNNER_CONTAINER ?? null,
   );
 }

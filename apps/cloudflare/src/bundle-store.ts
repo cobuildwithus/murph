@@ -19,6 +19,7 @@ import {
   hostedRunnerSecretsObjectKey,
 } from "./storage-paths.js";
 import {
+  encryptHostedStorageEnvelope,
   readEncryptedR2Payload,
   writeEncryptedR2Payload,
   type EncryptedR2ObjectBodyLike,
@@ -48,7 +49,10 @@ export interface HostedBundleStore {
 export interface HostedArtifactStore {
   deleteArtifact(sha256: string): Promise<void>;
   readArtifact(sha256: string): Promise<Uint8Array | null>;
-  writeArtifact(sha256: string, plaintext: Uint8Array): Promise<void>;
+  writeArtifact(sha256: string, plaintext: Uint8Array, recovery?: {
+    signal: AbortSignal;
+    beforeRetry(error: unknown): Promise<boolean>;
+  }): Promise<void>;
 }
 
 export type HostedMediaKind = "image" | "video";
@@ -310,26 +314,42 @@ export function createHostedArtifactStore(input: {
       });
     },
 
-    async writeArtifact(sha256, plaintext) {
+    async writeArtifact(sha256, plaintext, recovery) {
       const key = await hostedArtifactObjectKey({
         sha256,
         userId: input.userId,
       });
       await assertHostedArtifactHash(plaintext, sha256);
-      await writeEncryptedR2Payload({
+      const envelope = await encryptHostedStorageEnvelope({
         aad: buildHostedStorageAad({
           key,
           purpose: "artifact",
           sha256,
           userId: input.userId,
         }),
-        bucket: input.bucket,
-        cryptoKey: input.key,
-        key,
+        key: input.key,
         keyId: input.keyId,
         plaintext,
         scope: "artifact",
       });
+      // Keep the same authenticated envelope and user-scoped key for both PUTs.
+      // Only this storage effect can be repeated; hash/encryption failures escape.
+      const serializedEnvelope = JSON.stringify(envelope);
+      recovery?.signal.throwIfAborted();
+      try {
+        await input.bucket.put(key, serializedEnvelope);
+      } catch (error) {
+        if (!recovery || !await recovery.beforeRetry(error)) {
+          throw error;
+        }
+        recovery.signal.throwIfAborted();
+        try {
+          await input.bucket.put(key, serializedEnvelope);
+        } catch {
+          // The existing caller/device-sync owner retains the original failure.
+          throw error;
+        }
+      }
     },
   };
 }

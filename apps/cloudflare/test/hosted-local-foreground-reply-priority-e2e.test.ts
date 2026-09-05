@@ -284,10 +284,9 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       latestAppend.wake.seq,
       systemWakes.length,
     );
-    // The coordinator periodically re-proves its single ready slot. The wake
-    // storm intentionally runs long enough to overlap that interval, so wait
-    // for the same real slot to finish any in-flight reprobe before ingress.
-    await expect(waitForReadyStandbySlot()).resolves.toBe(
+    // Background work must leave the observed unclaimed slot available even
+    // when inventory replenishment or health checks change its array position.
+    await expect(waitForReadyStandbySlot(readyStandbySlotName)).resolves.toBe(
       readyStandbySlotName,
     );
     const inboundText = "Reply while the full system mailbox is active.";
@@ -2759,11 +2758,11 @@ async function readActiveRuntimeFenceForTest(userId: string): Promise<{
   );
 }
 
-async function waitForReadyStandbySlot(): Promise<string> {
+async function waitForReadyStandbySlot(expectedSlotName?: string): Promise<string> {
   const deadlineAt = Date.now() + 90_000;
   type StandbyState = {
-    provisioningSlotName: string | null;
-    readySlotName: string | null;
+    provisioningSlotNames: string[];
+    readySlotNames: string[];
   };
   let lastState: StandbyState | null = null;
 
@@ -2773,8 +2772,11 @@ async function waitForReadyStandbySlot(): Promise<string> {
       { method: "POST" },
     );
     lastState = state;
-    if (state.readySlotName) {
-      return state.readySlotName;
+    const readySlotName = expectedSlotName
+      ? state.readySlotNames.find((slotName) => slotName === expectedSlotName)
+      : state.readySlotNames[0];
+    if (readySlotName) {
+      return readySlotName;
     }
     await sleep(250);
   }

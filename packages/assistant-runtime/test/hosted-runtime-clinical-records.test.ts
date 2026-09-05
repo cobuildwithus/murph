@@ -11,7 +11,6 @@ import {
 } from "@murphai/clinical-records";
 import { initializeVault } from "@murphai/core";
 import type {
-  HostedClinicalRecordsQueryRunDescriptor,
   HostedClinicalRecordsRunDescriptor,
 } from "@murphai/hosted-execution/clinical-records";
 import {
@@ -35,6 +34,7 @@ import type {
 
 const HASH = "a".repeat(64);
 const RUN: HostedClinicalRecordsRunDescriptor = {
+  retrievalProtocol: "query-slices-v2",
   connectionId: "connection_1",
   fetchedAt: "2026-07-10T12:00:00.000Z",
   fhirBaseUrlHash: HASH,
@@ -43,7 +43,7 @@ const RUN: HostedClinicalRecordsRunDescriptor = {
   patientIdHash: HASH,
   requestedScopes: ["patient/Observation.read"],
   retrievalJobId: "clinical_run_1",
-  retrievalScopes: [{
+  retrievalSlices: [{queryScopeId: "observation", sliceId: "whole",
     coverage: "whole-family",
     queryFingerprint: HASH,
     resourceType: "Observation",
@@ -83,7 +83,7 @@ describe("hosted clinical records maintenance", () => {
           resourceType: "Bundle",
         }),
         nextCursor: "opaque-cursor-2",
-        nextPageUrlHash,
+
         status: "page",
       })
       .mockResolvedValueOnce({
@@ -102,6 +102,8 @@ describe("hosted clinical records maintenance", () => {
         supersededCount: 0,
       },
       executableDecisionCount: 2,
+      labResultCount: 0,
+      incompleteRevisionCount: 0,
       manifestPath: "raw/clinical/fhir/connection_1/clinical_run_1/manifest.json",
       rawFileCount: 3,
       reviewDecisionCount: 0,
@@ -124,9 +126,9 @@ describe("hosted clinical records maintenance", () => {
       cursor: "opaque-cursor-2",
     }), expect.objectContaining({ signal: null }));
     expect(importSnapshot).toHaveBeenCalledWith(expect.objectContaining({
-      completedResourceTypes: ["Observation"],
+      completedRetrievalSlices: [{ queryScopeId: "observation", sliceId: "whole" }],
       pages: [
-        expect.objectContaining({ nextPageUrlHash, resourceType: "Observation" }),
+        expect.objectContaining({  resourceType: "Observation" }),
         expect.objectContaining({ pageUrlHash: nextPageUrlHash, resourceType: "Observation" }),
       ],
     }));
@@ -141,6 +143,53 @@ describe("hosted clinical records maintenance", () => {
     }));
     expect(port.recordOutcome).not.toHaveBeenCalled();
     expect(result.status).toBe("completed");
+  });
+
+  it("keeps completed slices when a later page exceeds the resource bound", async () => {
+    await initializeVault({ vaultRoot, timezone: "UTC" });
+    const run = { ...createQueryRun(["labs", "other", "unattempted"]),
+      patientIdHash: createHash("sha256").update("patient-1").digest("hex"),
+      fhirBaseUrlHash: createHash("sha256").update("https://ehr.example.test/fhir").digest("hex"),
+    };
+    const lab = { resourceType: "Observation", id: "saved-a1c", status: "final",
+      meta: { lastUpdated: "2026-07-10T12:00:00.000Z" }, subject: { reference: "Patient/patient-1" },
+      effectiveDateTime: "2026-07-10T12:00:00.000Z",
+      category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "laboratory" }] }],
+      code: { coding: [{ system: "http://loinc.org", code: "4548-4", display: "Hemoglobin A1c" }] },
+      valueQuantity: { value: 5.4, unit: "%", code: "%", system: "http://unitsofmeasure.org" },
+    };
+    const fetchPage = vi.fn().mockResolvedValueOnce({
+      body: JSON.stringify({ resourceType: "Bundle", type: "searchset", entry: [{ resource: lab }] }), nextCursor: null, status: "page",
+    }).mockResolvedValueOnce({
+      body: createFhirBundleBody(CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE + 1), nextCursor: null, status: "page",
+    });
+    const importSnapshot = vi.fn(importClinicalFhirSnapshot);
+    const result = await runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: createPort({ readRun: vi.fn().mockResolvedValue({ run, status: "ready" }), fetchPage }),
+      importSnapshot, vaultRoot, wake: WAKE,
+    });
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+    expect(importSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+      completedRetrievalSlices: [{ queryScopeId: "labs", sliceId: "whole" }],
+      pages: [expect.objectContaining({ queryScopeId: "labs" })],
+      errors: [expect.objectContaining({ code: "page_resource_limit_exceeded", queryScopeId: "other" }), expect.objectContaining({ code: "not-attempted", queryScopeId: "unattempted" })],
+    }));
+    expect(result.outcome).toMatchObject({ status: "partial", counts: { createdCount: 1, labResultCount: 1, fetchedPageCount: 2 } });
+  });
+
+  it.each(["warning", "error", "fatal"])("reports provider %s outcomes as incomplete even when pagination finishes", async (severity) => {
+    const importSnapshot = vi.fn().mockResolvedValue({
+      canonical: { applied: false, createdCount: 0, retractedCount: 0, skippedExistingCount: 0, supersededCount: 0 },
+      executableDecisionCount: 0, rawFileCount: 2, reviewDecisionCount: 0, labResultCount: 0, incompleteRevisionCount: 0,
+    });
+    const result = await runHostedClinicalRecordsSyncWakeLane({
+      clinicalRecordsPort: createPort({ fetchPage: vi.fn().mockResolvedValue({
+        body: JSON.stringify({ resourceType: "Bundle", entry: [{ search: { mode: "outcome" }, resource: { resourceType: "OperationOutcome", issue: [{ severity, code: "incomplete" }] } }] }),
+        nextCursor: null, status: "page",
+      }) }), importSnapshot, vaultRoot, wake: WAKE,
+    });
+    expect(importSnapshot).toHaveBeenCalledWith(expect.objectContaining({ errors: [expect.objectContaining({ code: "provider-search-incomplete" })] }));
+    expect(result.status).toBe("partial");
   });
 
   it("resumes repeated resource types as independent query slices after preemption", async () => {
@@ -162,6 +211,8 @@ describe("hosted clinical records maintenance", () => {
         supersededCount: 0,
       },
       executableDecisionCount: 0,
+      labResultCount: 0,
+      incompleteRevisionCount: 0,
       manifestPath: "raw/clinical/fhir/connection_1/clinical_run_1/manifest.json",
       rawFileCount: 3,
       reviewDecisionCount: 0,
@@ -183,7 +234,6 @@ describe("hosted clinical records maintenance", () => {
       vaultRoot,
     })).resolves.toMatchObject({
       checkpoint: {
-        completedResourceTypes: ["Observation"],
         completedRetrievalSlices: [
           { queryScopeId: "observation-labs", sliceId: "whole" },
         ],
@@ -210,7 +260,7 @@ describe("hosted clinical records maintenance", () => {
       checkpointFiles[0]!,
     ), "utf8"));
     expect(persistedCheckpoint.schema)
-      .toBe("murph.clinical-retrieval-checkpoint.v2");
+      .toBe("murph.clinical-retrieval-checkpoint.v3");
 
     const result = await runHostedClinicalRecordsSyncWakeLane({
       clinicalRecordsPort: port,
@@ -233,7 +283,6 @@ describe("hosted clinical records maintenance", () => {
       resourceType: "Observation",
     }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(importSnapshot).toHaveBeenCalledWith(expect.objectContaining({
-      completedResourceTypes: ["Observation"],
       completedRetrievalSlices: [
         { queryScopeId: "observation-labs", sliceId: "whole" },
         { queryScopeId: "observation-vitals", sliceId: "whole" },
@@ -277,7 +326,7 @@ describe("hosted clinical records maintenance", () => {
           return {
             body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
             nextCursor: "first-query-page-2",
-            nextPageUrlHash,
+
             status: "page",
           };
         }
@@ -298,6 +347,8 @@ describe("hosted clinical records maintenance", () => {
         supersededCount: 0,
       },
       executableDecisionCount: 0,
+      labResultCount: 0,
+      incompleteRevisionCount: 0,
       manifestPath: "raw/clinical/fhir/connection_1/clinical_run_1/manifest.json",
       rawFileCount: CLINICAL_FHIR_MAX_RETRIEVAL_SLICES + 2,
       reviewDecisionCount: 0,
@@ -406,6 +457,8 @@ describe("hosted clinical records maintenance", () => {
         supersededCount: 0,
       },
       executableDecisionCount: 0,
+      labResultCount: 0,
+      incompleteRevisionCount: 0,
       manifestPath: "raw/clinical/fhir/connection_1/clinical_run_1/manifest.json",
       rawFileCount: 1,
       reviewDecisionCount: 0,
@@ -419,10 +472,11 @@ describe("hosted clinical records maintenance", () => {
     });
 
     expect(importSnapshot).toHaveBeenCalledWith(expect.objectContaining({
-      completedResourceTypes: [],
+      completedRetrievalSlices: [],
       errors: [{
         code: "provider_denied",
         message: "Provider did not return this FHIR resource family.",
+        queryScopeId: "observation", sliceId: "whole",
         resourceType: "Observation",
       }],
       pages: [],
@@ -441,7 +495,7 @@ describe("hosted clinical records maintenance", () => {
         .mockResolvedValueOnce({
           body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
           nextCursor: "opaque-cursor-2",
-          nextPageUrlHash: "b".repeat(64),
+
           status: "page",
         })
         .mockResolvedValueOnce({
@@ -459,6 +513,8 @@ describe("hosted clinical records maintenance", () => {
         supersededCount: 0,
       },
       executableDecisionCount: 0,
+      labResultCount: 0,
+      incompleteRevisionCount: 0,
       manifestPath: "raw/clinical/fhir/connection_1/clinical_run_1/manifest.json",
       rawFileCount: 1,
       reviewDecisionCount: 0,
@@ -484,14 +540,14 @@ describe("hosted clinical records maintenance", () => {
   it("records unattempted families when authorization ends during a multi-family run", async () => {
     const multiFamilyRun: HostedClinicalRecordsRunDescriptor = {
       ...RUN,
-      retrievalScopes: [
-        RUN.retrievalScopes[0]!,
-        {
+      retrievalSlices: [
+        RUN.retrievalSlices[0]!,
+        {queryScopeId: "condition", sliceId: "whole",
           coverage: "whole-family",
           queryFingerprint: "b".repeat(64),
           resourceType: "Condition",
         },
-        {
+        {queryScopeId: "medicationrequest", sliceId: "whole",
           coverage: "whole-family",
           queryFingerprint: "c".repeat(64),
           resourceType: "MedicationRequest",
@@ -530,6 +586,8 @@ describe("hosted clinical records maintenance", () => {
           supersededCount: 0,
         },
         executableDecisionCount: 0,
+        labResultCount: 0,
+        incompleteRevisionCount: 0,
         manifestPath: "raw/clinical/fhir/connection_1/clinical_run_1/manifest.json",
         rawFileCount: 3,
         reviewDecisionCount: 0,
@@ -546,32 +604,34 @@ describe("hosted clinical records maintenance", () => {
     expect(fetchPage).toHaveBeenCalledTimes(2);
     expect(readRun).toHaveBeenCalledTimes(2);
     expect(importSnapshot).toHaveBeenCalledWith(expect.objectContaining({
-      completedResourceTypes: ["Observation"],
+      completedRetrievalSlices: [{ queryScopeId: "observation", sliceId: "whole" }],
       errors: [
         {
           code: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
-          message: "Provider did not return this FHIR resource family.",
+          message: "Provider retrieval could not finish this query.",
+          queryScopeId: "condition", sliceId: "whole",
           resourceType: "Condition",
         },
         {
           code: "not-attempted",
-          message: "Retrieval was not attempted after provider authorization ended.",
+          message: "Retrieval stopped before this query.",
+          queryScopeId: "medicationrequest", sliceId: "whole",
           resourceType: "MedicationRequest",
         },
       ],
       pages: [expect.objectContaining({ resourceType: "Observation" })],
-      retrievalScopes: multiFamilyRun.retrievalScopes,
+      retrievalSlices: multiFamilyRun.retrievalSlices,
     }));
     expect(port.recordOutcome).not.toHaveBeenCalled();
     expect(result.status).toBe("partial");
   });
 
-  it("does not overwrite authorization-required when retained evidence is rejected", async () => {
+  it("reports a rejected save after authorization ends", async () => {
     const multiFamilyRun: HostedClinicalRecordsRunDescriptor = {
       ...RUN,
-      retrievalScopes: [
-        RUN.retrievalScopes[0]!,
-        {
+      retrievalSlices: [
+        RUN.retrievalSlices[0]!,
+        {queryScopeId: "condition", sliceId: "whole",
           coverage: "whole-family",
           queryFingerprint: "b".repeat(64),
           resourceType: "Condition",
@@ -606,14 +666,14 @@ describe("hosted clinical records maintenance", () => {
     });
 
     expect(importSnapshot).toHaveBeenCalledWith(expect.objectContaining({
-      completedResourceTypes: ["Observation"],
+      completedRetrievalSlices: [{ queryScopeId: "observation", sliceId: "whole" }],
       errors: [expect.objectContaining({
         code: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
         resourceType: "Condition",
       })],
     }));
     expect(result).toEqual(expect.objectContaining({
-      outcome: null,
+      outcome: expect.objectContaining({ status: "failed", errorCode: "snapshot_rejected" }),
       status: "failed",
     }));
     expect(port.recordOutcome).not.toHaveBeenCalled();
@@ -718,23 +778,24 @@ describe("hosted clinical records maintenance", () => {
       .mockResolvedValueOnce({
         body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
         nextCursor: "randomized-cursor-1",
-        nextPageUrlHash: firstPageUrlHash,
+
         status: "page",
       })
       .mockResolvedValueOnce({
         body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
         nextCursor: "randomized-cursor-2",
-        nextPageUrlHash: secondPageUrlHash,
+
         pageUrlHash: firstPageUrlHash,
         status: "page",
       })
       .mockResolvedValueOnce({
         body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
         nextCursor: "randomized-cursor-3",
-        nextPageUrlHash: firstPageUrlHash,
+
         pageUrlHash: secondPageUrlHash,
         status: "page",
-      });
+      })
+      .mockResolvedValueOnce({ body: "{\"resourceType\":\"Bundle\",\"entry\":[]}", pageUrlHash: firstPageUrlHash, nextCursor: "randomized-cursor-4", status: "page" });
     const port = createPort({ fetchPage });
     const importSnapshot = vi.fn();
 
@@ -745,10 +806,10 @@ describe("hosted clinical records maintenance", () => {
       wake: WAKE,
     });
 
-    expect(fetchPage).toHaveBeenCalledTimes(3);
+    expect(fetchPage).toHaveBeenCalledTimes(4);
     expect(importSnapshot).not.toHaveBeenCalled();
     expect(result.outcome).toEqual(expect.objectContaining({
-      counts: expect.objectContaining({ fetchedPageCount: 3 }),
+      counts: expect.objectContaining({ fetchedPageCount: 4 }),
       errorCode: "cursor_cycle",
       status: "failed",
     }));
@@ -888,6 +949,8 @@ describe("hosted clinical records maintenance", () => {
         supersededCount: 0,
       },
       executableDecisionCount: 0,
+      labResultCount: 0,
+      incompleteRevisionCount: 0,
       manifestPath: "raw/clinical/fhir/connection_1/clinical_run_1/manifest.json",
       rawFileCount: pageCount + 1,
       reviewDecisionCount: 0,
@@ -956,14 +1019,14 @@ describe("hosted clinical records maintenance", () => {
   });
 
   it("keeps discarded family resources charged to the run-wide resource cap", async () => {
-    const conditionScope = {
+    const conditionScope = {queryScopeId: "condition", sliceId: "whole",
       coverage: "whole-family",
       queryFingerprint: "b".repeat(64),
       resourceType: "Condition",
-    } satisfies HostedClinicalRecordsRunDescriptor["retrievalScopes"][number];
+    } satisfies HostedClinicalRecordsRunDescriptor["retrievalSlices"][number];
     const multiFamilyRun: HostedClinicalRecordsRunDescriptor = {
       ...RUN,
-      retrievalScopes: [RUN.retrievalScopes[0]!, conditionScope],
+      retrievalSlices: [RUN.retrievalSlices[0]!, conditionScope],
     };
     const fullObservationPage = createFhirBundleBody(
       CLINICAL_RAW_MANIFEST_MAX_RESOURCES_PER_FILE,
@@ -1027,14 +1090,14 @@ describe("hosted clinical records maintenance", () => {
   });
 
   it("does not reset the absolute page-fetch cap when a partial family is discarded", async () => {
-    const conditionScope = {
+    const conditionScope = {queryScopeId: "condition", sliceId: "whole",
       coverage: "whole-family",
       queryFingerprint: "b".repeat(64),
       resourceType: "Condition",
-    } satisfies HostedClinicalRecordsRunDescriptor["retrievalScopes"][number];
+    } satisfies HostedClinicalRecordsRunDescriptor["retrievalSlices"][number];
     const multiFamilyRun: HostedClinicalRecordsRunDescriptor = {
       ...RUN,
-      retrievalScopes: [RUN.retrievalScopes[0]!, conditionScope],
+      retrievalSlices: [RUN.retrievalSlices[0]!, conditionScope],
     };
     let fetchCallCount = 0;
     const fetchPage = vi.fn(async () => {
@@ -1203,14 +1266,14 @@ describe("hosted clinical records maintenance", () => {
   it("resumes completed families after authorization terminalization and import preemption", async () => {
     const multiFamilyRun: HostedClinicalRecordsRunDescriptor = {
       ...RUN,
-      retrievalScopes: [
-        RUN.retrievalScopes[0]!,
-        {
+      retrievalSlices: [
+        RUN.retrievalSlices[0]!,
+        {queryScopeId: "condition", sliceId: "whole",
           coverage: "whole-family",
           queryFingerprint: "b".repeat(64),
           resourceType: "Condition",
         },
-        {
+        {queryScopeId: "medicationrequest", sliceId: "whole",
           coverage: "whole-family",
           queryFingerprint: "c".repeat(64),
           resourceType: "MedicationRequest",
@@ -1259,6 +1322,8 @@ describe("hosted clinical records maintenance", () => {
           supersededCount: 0,
         },
         executableDecisionCount: 1,
+        labResultCount: 0,
+        incompleteRevisionCount: 0,
         manifestPath: "raw/clinical/fhir/connection_1/clinical_run_1/manifest.json",
         rawFileCount: 2,
         reviewDecisionCount: 0,
@@ -1283,7 +1348,7 @@ describe("hosted clinical records maintenance", () => {
     expect(retained).toMatchObject({
       checkpoint: {
         authorizationRequired: true,
-        completedResourceTypes: ["Observation"],
+        completedRetrievalSlices: [{ queryScopeId: "observation", sliceId: "whole" }],
         currentResourceIndex: 3,
         errors: [
           {
@@ -1292,7 +1357,7 @@ describe("hosted clinical records maintenance", () => {
           },
           { code: "not-attempted", resourceType: "MedicationRequest" },
         ],
-        pages: [{ content: completedPage, resourceType: "Observation" }],
+        pages: [{ content: completedPage, resourceType: "Observation", queryScopeId: "observation", sliceId: "whole" }],
       },
       identity: multiFamilyRun,
     });
@@ -1308,15 +1373,15 @@ describe("hosted clinical records maintenance", () => {
 
     expect(completed).toMatchObject({
       counts: { createdCount: 1, fetchedResourceFamilyCount: 1 },
-      outcome: null,
+      outcome: expect.objectContaining({ errorCode: "authorization-required", status: "partial" }),
       status: "partial",
     });
     expect(successfulImports).toBe(1);
     expect(importSnapshot).toHaveBeenCalledTimes(2);
     for (const [snapshot] of importSnapshot.mock.calls) {
       expect(snapshot).toMatchObject({
-        completedResourceTypes: ["Observation"],
-        pages: [{ content: completedPage, resourceType: "Observation" }],
+        completedRetrievalSlices: [{ queryScopeId: "observation", sliceId: "whole" }],
+        pages: [{ content: completedPage, resourceType: "Observation", queryScopeId: "observation", sliceId: "whole" }],
       });
     }
     await expect(readClinicalFhirRetrievalCheckpointForRun({
@@ -1332,9 +1397,9 @@ describe("hosted clinical records maintenance", () => {
     async (authorityErrorCode) => {
       const multiFamilyRun: HostedClinicalRecordsRunDescriptor = {
         ...RUN,
-        retrievalScopes: [
-          RUN.retrievalScopes[0]!,
-          {
+        retrievalSlices: [
+          RUN.retrievalSlices[0]!,
+          {queryScopeId: "condition", sliceId: "whole",
             coverage: "whole-family",
             queryFingerprint: "b".repeat(64),
             resourceType: "Condition",
@@ -1467,6 +1532,8 @@ describe("hosted clinical records maintenance", () => {
           supersededCount: 0,
         },
         executableDecisionCount: 1,
+        labResultCount: 0,
+        incompleteRevisionCount: 0,
         manifestPath: "raw/clinical/fhir/connection_1/clinical_run_1/manifest.json",
         rawFileCount: 2,
         reviewDecisionCount: 0,
@@ -1514,6 +1581,8 @@ describe("hosted clinical records maintenance", () => {
         supersededCount: 0,
       },
       executableDecisionCount: 0,
+      labResultCount: 0,
+      incompleteRevisionCount: 0,
       manifestPath: "raw/clinical/fhir/connection_1/clinical_run_1/manifest.json",
       rawFileCount: 2,
       reviewDecisionCount: 0,
@@ -1572,6 +1641,8 @@ describe("hosted clinical records maintenance", () => {
         supersededCount: 0,
       },
       executableDecisionCount: 0,
+      labResultCount: 0,
+      incompleteRevisionCount: 0,
       manifestPath: "raw/clinical/fhir/connection_1/clinical_run_1/manifest.json",
       rawFileCount: 6,
       reviewDecisionCount: 0,
@@ -1632,8 +1703,8 @@ type HostedRuntimeClinicalRecordsPortMocks = {
 
 function createQueryRun(
   queryScopeIds: readonly string[],
-): HostedClinicalRecordsQueryRunDescriptor {
-  const { retrievalScopes: _retrievalScopes, ...runBase } = RUN;
+): HostedClinicalRecordsRunDescriptor {
+  const { retrievalSlices: _retrievalSlices, ...runBase } = RUN;
   return {
     ...runBase,
     retrievalProtocol: "query-slices-v2",
@@ -1684,14 +1755,14 @@ async function seedPartialClinicalCheckpoint(
   await writeClinicalFhirRetrievalCheckpoint({
     checkpoint: {
       authorizationRequired: false,
-      completedResourceTypes: ["Observation"],
+      completedRetrievalSlices: [{ queryScopeId: "observation", sliceId: "whole" }],
       currentResourceIndex: 1,
       cursor: "condition-page-2",
       errors: [],
       pageFetchCount: 2,
       pages: [
-        { content: completedPage, resourceType: "Observation" },
-        { content: partialPage, resourceType: "Condition" },
+        { content: completedPage, resourceType: "Observation", queryScopeId: "observation", sliceId: "whole" },
+        { content: partialPage, resourceType: "Condition", queryScopeId: "condition", sliceId: "whole" },
       ],
       resourcePageStartIndex: 1,
       seenCursors: [],

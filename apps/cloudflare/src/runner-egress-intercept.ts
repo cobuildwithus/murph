@@ -4447,6 +4447,7 @@ function readTelegramSentinelFilePath(pathname: string): string | null {
 function isAllowedTelegramOperation(operation: string): boolean {
   return operation === "sendMessage"
     || operation === "sendPhoto"
+    || operation === "sendDocument"
     || operation === "sendRichMessage"
     || operation === "sendVoice"
     || operation === "sendChatAction"

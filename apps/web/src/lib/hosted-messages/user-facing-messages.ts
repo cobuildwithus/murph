@@ -27,6 +27,7 @@ const USER_FACING_MESSAGE_TEMPLATE_KEYS = [
   "linq.home_redirect",
   "linq.device_delivery_stalled",
   "linq.apple_health_delivery_stalled",
+  "linq.device_connection_check",
   "linq.ai_usage.billing_inactive",
   "linq.ai_usage.starter_limit_reached",
   "linq.ai_usage.edge_limit_reached",
@@ -41,6 +42,11 @@ export type UserFacingMessageTemplateKey =
   (typeof USER_FACING_MESSAGE_TEMPLATE_KEYS)[number]
 
 export interface UserFacingMessageContextByKey {
+  "linq.device_connection_check": {
+    companionAppName: string
+    deviceDisplayName: string
+    providerDisplayName: string
+  }
   "assistant.signup_welcome": Record<string, never>
   "assistant.family_welcome": Record<string, never>
   "linq.invite_signup": {
@@ -640,6 +646,28 @@ Sound good?`,
     `I haven't received a recent update from {providerDisplayName}. Want to check {companionAppName} and make sure the {deviceDisplayName} is charged and syncing?`,
     `Your recent {providerDisplayName} readings aren't reaching me right now. Could you open {companionAppName} and check the {deviceDisplayName}'s charge and sync?`,
     `It looks like I may be missing new {providerDisplayName} data. Can you open {companionAppName} and make sure your {deviceDisplayName} is charged and syncing?`,
+  ],
+  "linq.device_connection_check": [
+    `I haven't received recent {providerDisplayName} data. Want help checking the connection?`,
+    `Your recent {providerDisplayName} data hasn't reached me. Would you like help looking into it?`,
+    `I'm missing new data from {providerDisplayName}. Want to check the connection together?`,
+    `It has been a while since {providerDisplayName} data came through. Can I help you check it?`,
+    `New {providerDisplayName} data isn't reaching me right now. Would you like a hand with the connection?`,
+    `I haven't seen fresh {providerDisplayName} data lately. Want help figuring out what's happening?`,
+    `Recent data from {providerDisplayName} hasn't come through on my side. Shall we check the connection?`,
+    `I'm not seeing new {providerDisplayName} readings. Would you like help getting them coming through again?`,
+    `Your latest {providerDisplayName} data hasn't reached me. Want a hand checking why?`,
+    `There's a gap in the {providerDisplayName} data I'm receiving. Can I help you look into it?`,
+    `I may be missing your latest {providerDisplayName} data. Would you like to check the connection with me?`,
+    `I haven't picked up recent {providerDisplayName} data. Want help checking what's going on?`,
+    `Data from {providerDisplayName} has been quiet on my side. Would you like help with the connection?`,
+    `Your recent {providerDisplayName} readings aren't coming through to me. Can I help check the connection?`,
+    `I'm missing recent readings from {providerDisplayName}. Would you like a hand finding out why?`,
+    `I haven't received a recent update from {providerDisplayName}. Want to look at the connection together?`,
+    `Fresh {providerDisplayName} data hasn't been coming through. Shall we take a look at the connection?`,
+    `It looks like recent {providerDisplayName} data hasn't reached me. Would you like help checking it?`,
+    `I'm not receiving your latest data from {providerDisplayName}. Want help looking into the connection?`,
+    `New readings from {providerDisplayName} haven't reached me lately. Can I give you a hand checking it?`,
   ],
   "linq.ai_usage.billing_inactive": [
     `Your Murph plan isn't active right now. You can sort that out here:

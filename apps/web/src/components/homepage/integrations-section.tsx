@@ -106,7 +106,6 @@ export function IntegrationsSection({
             authLabel="Get started"
             authenticated={authenticated}
             context="footer"
-            preloadAuthPanel
             signupLabel="Get started"
           />
         </div>

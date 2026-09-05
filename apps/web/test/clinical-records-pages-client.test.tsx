@@ -185,7 +185,7 @@ describe("Clinical Records connect page", () => {
       );
       expect(rendered.window.location.href).not.toContain(claim);
       expect(rendered.container.textContent).toContain(
-        "Review how Murph uses your health data",
+        "Accept health-data consent",
       );
     });
   });
@@ -239,7 +239,7 @@ describe("Clinical Records connect page", () => {
     await vi.waitFor(() => {
       expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
       expect(rendered.container.textContent).toContain(
-        "Review how Murph uses your health data",
+        "Accept health-data consent",
       );
       expect(rendered.window.location.href).not.toContain(claim);
     });
@@ -284,27 +284,9 @@ describe("Clinical Records connect page", () => {
     expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
     expect(rendered.replaceState).toHaveBeenCalled();
     expect(String(rendered.replaceState.mock.lastCall?.[2])).not.toContain(claim);
-    const connectionProgress = rendered.container.querySelector(
-      '[aria-label="Medical records connection progress"]',
-    );
-    assert.ok(connectionProgress);
-    expect(connectionProgress.querySelector('[aria-current="step"]')?.textContent).toContain(
-      "Review",
-    );
-
     await clickButton(rendered, "Accept health-data consent");
-    expect(rendered.container.textContent).toContain(
-      "Murph copies records once. It does not keep checking your chart.",
-    );
     expect(rendered.container.textContent).toContain("Where do you get care?");
-    expect(rendered.container.textContent).toContain(
-      "Murph supports selected portals right now.",
-    );
-    expect(rendered.container.textContent).not.toContain("Epic organization");
-    expect(connectionProgress.textContent).toContain("Patient portal");
-    expect(connectionProgress.querySelector('[aria-current="step"]')?.textContent).toContain(
-      "Where you get care",
-    );
+    expect(rendered.container.querySelector('[aria-current="step"]')).toBeNull();
     const searchInput = rendered.container.querySelector("#clinical-provider-search");
     assert.ok(searchInput instanceof rendered.window.HTMLInputElement);
     await act(async () => {
@@ -341,9 +323,6 @@ describe("Clinical Records connect page", () => {
     expect(String(mocks.requestHostedOnboardingJson.mock.calls[1]?.[0]?.url)).not.toContain(claim);
     expect(JSON.stringify(rendered.replaceState.mock.lastCall?.[0])).not.toContain(claim);
     expect(rendered.container.textContent).toContain("Opening portal");
-    expect(connectionProgress.querySelector('[aria-current="step"]')?.textContent).toContain(
-      "Where you get care",
-    );
 
     await restoreFromBackForwardCache(rendered);
 
@@ -700,6 +679,47 @@ describe("Clinical Records connect page", () => {
     expect(input.hasAttribute("readOnly")).toBe(false);
   });
 
+  it("keeps a failed start bound to the selected provider while allowing its retry", async () => {
+    const claim = `cr_${"f".repeat(32)}`;
+    mocks.requestHostedOnboardingJson
+      .mockResolvedValueOnce({
+        directoryVersion: "test-v1", ok: true,
+        providers: ["first", "second"].map((id) => ({
+          brandName: `Example ${id}`, facilities: [], id: `epic-${id}`, sourceSystem: "epic-fhir",
+        })),
+      })
+      .mockRejectedValueOnce(new Error("Temporary start failure"))
+      .mockResolvedValueOnce({
+        authorizationUrl: "https://epic.example.test/oauth2/authorize",
+        expiresAt: "2026-07-16T18:15:00.000Z", ok: true,
+      });
+    const { ProviderSearch } = await import("../app/(dashboard)/records/connect/records-connect-client");
+    const rendered = await renderClientComponent(createElement(ProviderSearch, {
+      intentClaim: claim, onConsentRequired: vi.fn(),
+    }));
+    cleanup = rendered.cleanup;
+    const input = rendered.container.querySelector("#clinical-provider-search");
+    assert.ok(input instanceof rendered.window.HTMLInputElement);
+    await act(async () => { setInputValue(rendered.window, input, "Example"); });
+    await submitProviderSearch(rendered);
+    const portalButtons = () => Array.from(rendered.container.querySelectorAll("button"))
+      .filter((button) => button.textContent?.includes("Continue to portal"));
+    await vi.waitFor(() => { expect(portalButtons()).toHaveLength(2); });
+    await act(async () => { portalButtons()[0]!.click(); });
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Could not continue with Example first");
+    });
+    expect(portalButtons()[0]!.disabled).toBe(false);
+    expect(portalButtons()[1]!.disabled).toBe(true);
+    await act(async () => { portalButtons()[1]!.click(); });
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+    await act(async () => { portalButtons()[0]!.click(); });
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenLastCalledWith(expect.objectContaining({
+      payload: { claim, providerDirectoryEntryId: "epic-first" },
+    }));
+    expect(rendered.assign).toHaveBeenCalledWith("https://epic.example.test/oauth2/authorize");
+  });
+
   it("closes a committed connection flow when a successful response has a non-HTTPS redirect", async () => {
     const claim = `cr_${"d".repeat(32)}`;
     mocks.requestHostedOnboardingJson
@@ -817,113 +837,17 @@ describe("Clinical Records connect page", () => {
 });
 
 describe("Clinical Records status page", () => {
-  it("creates a fresh private intent from the empty state without provider authority", async () => {
-    const claim = `cr_${"c".repeat(32)}`;
-    const technicalMessage = "Clinical Records connect-intent issuance failed.";
-    mocks.requestHostedOnboardingJson.mockResolvedValue({
-      claim,
-      expiresAt: "2026-07-16T18:15:00.000Z",
-      ok: true,
-    });
-    const { RecordsPageClient } = await import(
-      "../app/(dashboard)/records/records-page-client"
-    );
+  it("routes the empty state through the shared launcher without creating a claim", async () => {
+    const { RecordsPageClient } = await import("../app/(dashboard)/records/records-page-client");
     const rendered = await renderClientComponent(createElement(RecordsPageClient, {
-      authenticated: true,
-      initialCallback: null,
-      initialConnections: [],
-      initialLoadError: false,
-    }), {
-      location: {
-        hash: "",
-        href: "https://join.example.test/records",
-        origin: "https://join.example.test",
-        pathname: "/records",
-        search: "",
-      },
-      requireButton: false,
-    });
+      authenticated: true, initialCallback: null, initialConnections: [], initialLoadError: false,
+    }), { requireButton: false });
     cleanup = rendered.cleanup;
-
-    expect(rendered.container.textContent).toContain("Connect a supported patient portal.");
-    expect(rendered.container.textContent).toContain(
-      "Murph copies available lab results and report summaries once",
-    );
-
-    await clickButton(rendered, "Connect records");
-
-    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
-      method: "POST",
-      payload: {},
-      url: "/api/clinical-records/connect-intents",
-    });
-    await vi.waitFor(() => {
-      expect(rendered.assign).toHaveBeenCalledWith(
-        `/records/connect#clinicalRecordsIntent=${claim}`,
-      );
-    });
-    expect(rendered.container.textContent).toContain("Getting things ready");
-
-    await restoreFromBackForwardCache(rendered);
-
-    expect(findButton(rendered, "Connect records").disabled).toBe(false);
-
-    mocks.requestHostedOnboardingJson.mockRejectedValueOnce(new HostedOnboardingApiError({
-      code: "CLINICAL_RECORD_CONNECT_INTENT_FAILED",
-      message: technicalMessage,
-    }));
-    await clickButton(rendered, "Connect records");
-
-    await vi.waitFor(() => {
-      expect(rendered.container.textContent).toContain(
-        "Murph could not get the records connection ready. Try again.",
-      );
-    });
-    expect(rendered.container.textContent).not.toContain(technicalMessage);
-  });
-
-  it("ignores a stale private-intent response after BFCache restore", async () => {
-    const claim = `cr_${"e".repeat(32)}`;
-    let resolveIntent!: (value: unknown) => void;
-    mocks.requestHostedOnboardingJson.mockReturnValueOnce(new Promise((resolve) => {
-      resolveIntent = resolve;
-    }));
-    const { RecordsPageClient } = await import(
-      "../app/(dashboard)/records/records-page-client"
-    );
-    const rendered = await renderClientComponent(createElement(RecordsPageClient, {
-      authenticated: true,
-      initialCallback: null,
-      initialConnections: [],
-      initialLoadError: false,
-    }), {
-      location: {
-        hash: "",
-        href: "https://join.example.test/records",
-        origin: "https://join.example.test",
-        pathname: "/records",
-        search: "",
-      },
-      requireButton: false,
-    });
-    cleanup = rendered.cleanup;
-
-    await clickButton(rendered, "Connect records");
-    expect(rendered.container.textContent).toContain("Getting things ready");
-    await restoreFromBackForwardCache(rendered);
-
-    await act(async () => {
-      resolveIntent({
-        claim,
-        expiresAt: "2026-07-16T18:15:00.000Z",
-        ok: true,
-      });
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(rendered.assign).not.toHaveBeenCalled();
-    expect(findButton(rendered, "Connect records").disabled).toBe(false);
+    const links = Array.from(rendered.container.querySelectorAll('a[href="/records/connect?launch=clinical-records"]'));
+    expect(links).toHaveLength(1);
+    expect(links[0]?.textContent).toContain("Import records");
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+    expect(rendered.container.textContent).toContain("No records imported yet");
   });
 
   it("renders truthful partial status, strips callback state, and deduplicates disconnect attempts", async () => {
@@ -962,16 +886,10 @@ describe("Clinical Records status page", () => {
     expect(rendered.container.querySelector('[role="alert"]')).toBeNull();
     expect(rendered.container.textContent).toContain("Partly complete");
     expect(rendered.container.textContent).toContain(
-      "Murph added some lab results or report summaries, but part of the copy could not finish.",
+      "Some records were saved. Part of this import could not be completed.",
     );
-    const addedLabel = Array.from(rendered.container.querySelectorAll("p"))
-      .find((paragraph) => paragraph.textContent === "Added");
-    assert.ok(addedLabel);
-    expect(addedLabel.nextElementSibling?.textContent).toBe("3");
-    const reviewLabel = Array.from(rendered.container.querySelectorAll("p"))
-      .find((paragraph) => paragraph.textContent === "Held for review");
-    assert.ok(reviewLabel);
-    expect(reviewLabel.nextElementSibling?.textContent).toBe("1");
+    expect(rendered.container.textContent).toContain("3 records added.");
+    expect(rendered.container.textContent).toContain("1 retained as source evidence");
     const partialBadge = Array.from(rendered.container.querySelectorAll("span"))
       .find((span) => span.textContent === "Partly complete");
     assert.ok(partialBadge);
@@ -1020,7 +938,8 @@ describe("Clinical Records status page", () => {
     });
     await vi.waitFor(() => {
       expect(rendered.container.textContent).toContain("Results already copied into Murph stay there");
-      expect(rendered.container.textContent).toContain("No patient portals connected");
+      expect(rendered.container.textContent).toContain(connection.displayName);
+      expect(rendered.container.textContent).toContain("3 records added.");
       expect(rendered.container.textContent).not.toContain("Partly complete");
     });
     const disconnectNotice = Array.from(rendered.container.querySelectorAll('[role="alert"]'))
@@ -1101,6 +1020,7 @@ describe("Clinical Records status page", () => {
       latestRun: {
         completedAt: "2026-07-16T18:15:00.000Z",
         importedCount: 3,
+        labResultCount: 3,
         reviewCount: 0,
         runId: "crr_complete",
         status: "complete",
@@ -1121,8 +1041,9 @@ describe("Clinical Records status page", () => {
       .find((span) => span.textContent === "Copy complete");
     assert.ok(completeBadge);
     expect(completeBadge.className).toContain("bg-primary");
+    expect(rendered.container.querySelector('a[href="/biomarkers"]')?.textContent).toBe("View lab results");
     expect(rendered.container.textContent).toContain(
-      "The totals below show how many lab results and report summaries were added",
+      "Your records are saved and ready for conversations with Murph.",
     );
 
     await rendered.rerender(renderWithConnection({
@@ -1139,8 +1060,10 @@ describe("Clinical Records status page", () => {
       .find((span) => span.textContent === "Nothing added");
     assert.ok(nothingAddedBadge);
     expect(nothingAddedBadge.className).not.toContain("bg-primary");
+    expect(rendered.container.querySelector('a[href="/biomarkers"]')).toBeNull();
+    expect(rendered.container.textContent).toContain("1 retained as source evidence");
     expect(rendered.container.textContent).toContain(
-      "Murph finished this copy, but nothing was added.",
+      "No usable results were available to add.",
     );
 
     await rendered.rerender(renderWithConnection({
@@ -1158,19 +1081,25 @@ describe("Clinical Records status page", () => {
     assert.ok(emptyPartialBadge);
     expect(emptyPartialBadge.className).not.toContain("bg-primary");
     expect(rendered.container.textContent).toContain(
-      "Part of the copy could not finish, and nothing was added.",
+      "The import could not finish and no usable results were added.",
     );
 
     await rendered.rerender(renderWithConnection({
       ...connection,
       status: "needs_reauth",
+      canImport: true,
+      latestRun: { ...connection.latestRun!, importedCount: 3, labResultCount: 3, reviewCount: 2 },
     }));
+    expect(rendered.container.textContent).toContain("3 records added.");
+    expect(rendered.container.textContent).toContain("2 retained as source evidence");
+    expect(rendered.container.querySelector('a[href="/biomarkers"]')).not.toBeNull();
+    expect(Array.from(rendered.container.querySelectorAll("a")).find((link) => link.textContent === "Reconnect")?.getAttribute("href")).toBe("/records/connect?launch=clinical-records");
     const reauthorizationBadge = Array.from(rendered.container.querySelectorAll("span"))
       .find((span) => span.textContent === "Portal access ended");
     assert.ok(reauthorizationBadge);
     expect(reauthorizationBadge.className).not.toContain("bg-primary");
     expect(rendered.container.textContent).toContain(
-      "Access from your patient portal ended before Murph finished copying records. Connecting it again is not available in this beta.",
+      "Portal access ended before the import finished. Saved records remain in your vault.",
     );
 
     await rendered.rerender(renderWithConnection({
@@ -1210,53 +1139,9 @@ describe("Clinical Records status page", () => {
     const callbackNotice = Array.from(rendered.container.querySelectorAll('[role="alert"]'))
       .find((alert) => alert.textContent?.includes("Connection canceled"));
     assert.ok(callbackNotice);
-    expect(callbackNotice.textContent).toContain("The patient portal was not connected and no records were copied.");
+    expect(callbackNotice.textContent).toContain("You canceled this authorization. Earlier saved records are unchanged.");
     expect(callbackNotice.className).toContain("before:bg-border");
     expect(callbackNotice.className).not.toContain("before:bg-primary");
-  });
-
-  it("refreshes the server-rendered source of truth for an active import", async () => {
-    const connection = makeConnection();
-    const { RecordsPageClient } = await import(
-      "../app/(dashboard)/records/records-page-client"
-    );
-    const rendered = await renderClientComponent(createElement(RecordsPageClient, {
-      authenticated: true,
-      initialCallback: null,
-      initialConnections: [{
-        ...connection,
-        lastSyncCompletedAt: null,
-        latestRun: {
-          completedAt: null,
-          importedCount: 0,
-          reviewCount: 0,
-          runId: "crr_1",
-          status: "retrieving",
-        },
-      }],
-      initialLoadError: false,
-    }), {
-      location: {
-        hash: "",
-        href: "https://join.example.test/records",
-        origin: "https://join.example.test",
-        pathname: "/records",
-        search: "",
-      },
-      requireButton: false,
-    });
-    cleanup = rendered.cleanup;
-
-    expect(rendered.container.textContent).toContain("Getting records");
-    expect(rendered.container.querySelector('[role="status"]')?.textContent).toContain(
-      "Getting records",
-    );
-    const copyProgress = rendered.container.querySelector('[aria-label="Records copy progress"]');
-    assert.ok(copyProgress);
-    expect(copyProgress.querySelector('[aria-current="step"]')?.textContent).toBe("Copying");
-    await clickButton(rendered, "Refresh status");
-
-    expect(mocks.refresh).toHaveBeenCalledTimes(1);
   });
 
   it("updates on its own and shows a live indicator while an import is running", async () => {
@@ -1293,13 +1178,9 @@ describe("Clinical Records status page", () => {
     cleanup = rendered.cleanup;
 
     expect(rendered.container.textContent).toContain(
-      "This page updates on its own while Murph is copying records.",
+      "Murph is saving the records into your private vault.",
     );
     expect(rendered.container.querySelector('[role="status"]')?.textContent).toContain("Loading");
-    const copyProgress = rendered.container.querySelector('[aria-label="Records copy progress"]');
-    assert.ok(copyProgress);
-    expect(copyProgress.querySelector('[aria-current="step"]')?.textContent).toBe("Saving");
-
     await act(async () => {
       vi.advanceTimersByTime(15_000);
     });
@@ -1334,7 +1215,7 @@ describe("Clinical Records status page", () => {
     cleanup = rendered.cleanup;
 
     expect(rendered.container.textContent).not.toContain(
-      "This page updates on its own while Murph is copying records.",
+      "Murph is saving the records into your private vault.",
     );
     expect(rendered.container.querySelector('[role="status"]')?.textContent).not.toContain("Loading");
 
@@ -1453,7 +1334,7 @@ describe("Clinical Records status page", () => {
     }));
 
     expect(rendered.container.textContent).not.toContain(
-      "This page updates on its own while Murph is copying records.",
+      "Murph is saving the records into your private vault.",
     );
     expect(rendered.container.querySelector('[role="status"]')?.textContent).not.toContain("Loading");
     await act(async () => {

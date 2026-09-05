@@ -2,7 +2,7 @@ import { readFile, rm, writeFile } from 'node:fs/promises'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   appendAssistantAcceptedTurnInputItems,
-  assertAssistantAcceptedTurnInputAssistantInputEventsExist,
+  readAssistantAcceptedTurnInputEvents,
   assistantAcceptedTurnInputJournalSchema,
   readAssistantAcceptedTurnInputJournal,
   recordAssistantAcceptedTurnInputProviderRequest,
@@ -304,8 +304,8 @@ describe('assistant accepted active-turn input journal', () => {
     })
 
     await expect(
-      assertAssistantAcceptedTurnInputAssistantInputEventsExist({
-        journal: missing,
+      readAssistantAcceptedTurnInputEvents({
+        inputs: missing.inputs,
         vault: vaultRoot,
       }),
     ).rejects.toMatchObject({
@@ -348,11 +348,11 @@ describe('assistant accepted active-turn input journal', () => {
     })
 
     await expect(
-      assertAssistantAcceptedTurnInputAssistantInputEventsExist({
-        journal: stored,
+      readAssistantAcceptedTurnInputEvents({
+        inputs: stored.inputs,
         vault: vaultRoot,
       }),
-    ).resolves.toBeUndefined()
+    ).resolves.toEqual([event])
   })
 
   it('updates transcript refs without persisting raw prompt fallback text', async () => {

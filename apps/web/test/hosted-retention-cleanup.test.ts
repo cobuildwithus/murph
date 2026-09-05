@@ -195,7 +195,13 @@ describe("hosted retention cleanup", () => {
     );
     expect(mailboxDeleteSql).toContain('UPDATE "hosted_mailbox_lane_counter"');
     expect(mailboxDeleteSql).toContain('"consumed_seq" = GREATEST');
-    expect(mailboxDeleteSql).toContain('MIN(blocker."lane_seq") - 1');
+    expect(mailboxDeleteSql).toContain("LEFT JOIN LATERAL");
+    expect(mailboxDeleteSql).toContain(
+      'blocker."lane_seq" > counter."consumed_seq"',
+    );
+    expect(mailboxDeleteSql).toContain('ORDER BY blocker."lane_seq" ASC');
+    expect(mailboxDeleteSql).toContain("LIMIT 1");
+    expect(mailboxDeleteSql).not.toContain('MIN(blocker."lane_seq")');
     expect(mailboxDeleteSql.match(/FOR UPDATE SKIP LOCKED/g)).toHaveLength(2);
     expect(queryRaw.mock.calls[0]?.slice(1)).toEqual([
       now,

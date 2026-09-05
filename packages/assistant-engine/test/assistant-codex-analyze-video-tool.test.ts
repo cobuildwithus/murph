@@ -16,6 +16,7 @@ import {
   createAnalyzeVideoToolRuntimeFromEnv,
   createAnalyzeVideoTurnState,
   executeAnalyzeVideoTool,
+  readAnalyzeVideoConversationEvents,
   snapshotAnalyzeVideoAttachmentAuthorities,
   type AnalyzeVideoAttachmentAuthority,
 } from '../src/assistant-codex/analyze-video-tool.ts'
@@ -725,7 +726,7 @@ describe('executeAnalyzeVideoTool', () => {
       mimeType: 'video/quicktime',
     }])
 
-    await updateAssistantInputAttachmentEvidence({
+    const failedEvent = await updateAssistantInputAttachmentEvidence({
       attachmentEvidence: {
         attachments: fixture.attachments,
         optionalInboxCaptureId: 'cap_video',
@@ -737,10 +738,7 @@ describe('executeAnalyzeVideoTool', () => {
       inputId: fixture.inputId,
       vault: fixture.vaultRoot,
     })
-    await expect(snapshotAnalyzeVideoAttachmentAuthorities({
-      acceptedInputIds: [fixture.inputId],
-      vaultRoot: fixture.vaultRoot,
-    })).resolves.toEqual([])
+    expect(snapshotAnalyzeVideoAttachmentAuthorities([failedEvent])).toEqual([])
 
     const fetchImpl = vi.fn<typeof fetch>()
     await expect(executeAnalyzeVideoTool({
@@ -785,11 +783,10 @@ describe('executeAnalyzeVideoTool', () => {
         sourceRef: { kind: 'inbox-capture', captureId: 'cap_video_followup', source: 'telegram', version: null },
       },
     })
-    const authorities = await snapshotAnalyzeVideoAttachmentAuthorities({
-      acceptedInputIds: [followup.inputId],
-      includeConversationHistory: true,
+    const authorities = snapshotAnalyzeVideoAttachmentAuthorities(await readAnalyzeVideoConversationEvents({
+      acceptedEvents: [followup],
       vaultRoot: fixture.vaultRoot,
-    })
+    }))
     expect(authorities).toEqual(allowed ? fixture.attachmentAuthorities : [])
     const fetchImpl = vi.fn<typeof fetch>(async () => answerResponse('The object moves left.'))
     const hostedToolContext = createAssistantHostedToolContext({
@@ -816,10 +813,10 @@ describe('executeAnalyzeVideoTool', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(allowed ? 1 : 0)
 
     await retireAssistantInputEventContent({ inputId: fixture.inputId, vault: fixture.vaultRoot })
-    expect(await snapshotAnalyzeVideoAttachmentAuthorities({
-      acceptedInputIds: [followup.inputId], includeConversationHistory: true,
+    expect(snapshotAnalyzeVideoAttachmentAuthorities(await readAnalyzeVideoConversationEvents({
+      acceptedEvents: [followup],
       vaultRoot: fixture.vaultRoot,
-    })).toEqual([])
+    }))).toEqual([])
   })
 
   it('executes a valid video request through the dynamic-tool boundary', async () => {
@@ -1096,7 +1093,7 @@ async function createVideoFixture(
       sourceAttachmentId: `source_${video.ordinal}`,
     })
   }
-  await updateAssistantInputAttachmentEvidence({
+  const preparedEvent = await updateAssistantInputAttachmentEvidence({
     attachmentEvidence: {
       attachments,
       optionalInboxCaptureId: 'cap_video',
@@ -1108,10 +1105,7 @@ async function createVideoFixture(
     inputId: event.inputId,
     vault: context.vaultRoot,
   })
-  const attachmentAuthorities = await snapshotAnalyzeVideoAttachmentAuthorities({
-    acceptedInputIds: [event.inputId],
-    vaultRoot: context.vaultRoot,
-  })
+  const attachmentAuthorities = snapshotAnalyzeVideoAttachmentAuthorities([preparedEvent])
   return {
     attachments,
     attachmentAuthorities,

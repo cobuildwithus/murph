@@ -37,6 +37,7 @@ import {
 } from "./usage-credit-purchase-stripe";
 import {
   lockHostedUsageCreditPurchaseReservationOwnersTx,
+  readHostedUsageCreditPurchaseMemberLockOrder,
 } from "./usage-credit-purchase-reservation-lock";
 import { logHostedStripeFailure } from "./stripe-error-log";
 import {
@@ -97,7 +98,15 @@ export async function closeHostedUsageCreditPurchasesForAccountDeletion(input: {
       const reconciledDirectPayment =
         await cancelHostedUsageCreditDirectPayment({
           ...(purchase.beneficiaryMemberId !== purchase.payerMemberId
-            ? { groupBeneficiaryMemberId: purchase.beneficiaryMemberId }
+            ? {
+                memberLockOrder:
+                  readHostedUsageCreditPurchaseMemberLockOrder({
+                    beneficiaryMemberId: purchase.beneficiaryMemberId,
+                    checkoutSuccessUrl: purchase.checkoutSuccessUrl,
+                    payerMemberId:
+                      requireHostedUsageCreditPurchasePayerMemberId(purchase),
+                  }),
+              }
             : {}),
           now,
           prisma,
@@ -485,6 +494,12 @@ async function persistHostedUsageCreditAccountDeletionSessionState(input: {
     if (providerState === "expired") {
       await lockHostedUsageCreditPurchaseReservationOwnersTx({
         beneficiaryMemberId: input.purchase.beneficiaryMemberId,
+        memberLockOrder:
+          readHostedUsageCreditPurchaseMemberLockOrder({
+            beneficiaryMemberId: input.purchase.beneficiaryMemberId,
+            checkoutSuccessUrl: input.purchase.checkoutSuccessUrl,
+            payerMemberId,
+          }),
         payerMemberId,
         tx,
       });
@@ -607,6 +622,12 @@ async function persistHostedUsageCreditAccountDeletionNoSessionProof(input: {
     );
     await lockHostedUsageCreditPurchaseReservationOwnersTx({
       beneficiaryMemberId: input.purchase.beneficiaryMemberId,
+      memberLockOrder:
+        readHostedUsageCreditPurchaseMemberLockOrder({
+          beneficiaryMemberId: input.purchase.beneficiaryMemberId,
+          checkoutSuccessUrl: input.purchase.checkoutSuccessUrl,
+          payerMemberId,
+        }),
       payerMemberId,
       tx,
     });

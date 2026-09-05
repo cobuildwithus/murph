@@ -1,6 +1,7 @@
 ---
 title: 'Web typecheck retains stale generated route types'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2790'
 ---
 
 ## Expected Behavior

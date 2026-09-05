@@ -47,6 +47,7 @@ const mocks = vi.hoisted(() => {
     listBoundedConnectionSourcesForConnections: vi.fn(),
     listConnectionSources: vi.fn(),
     listConnectionsForUser: vi.fn(),
+    listMemberConnectionStatuses: vi.fn(),
     listConnectionsRequiringCleanupForUser: vi.fn(),
     markConnectionSourcesDisconnected: vi.fn(),
     markDirtyConnectionProcessed: vi.fn(),
@@ -350,6 +351,14 @@ function buildHostedConnection(
   };
 }
 
+function toHostedConnectionStatus(connection: ReturnType<typeof buildHostedConnection>) {
+  return {
+    id: connection.id,
+    setupPhase: connection.setupPhase,
+    status: connection.status,
+  };
+}
+
 function buildWebhookAdmissionRecord(
   overrides: Parameters<typeof buildHostedConnection>[0] = {},
 ) {
@@ -614,6 +623,7 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
       mocks.listBoundedConnectionSourcesForConnections;
     listConnectionSources = mocks.listConnectionSources;
     listConnectionsForUser = mocks.listConnectionsForUser;
+    listMemberConnectionStatuses = mocks.listMemberConnectionStatuses;
     listConnectionsRequiringCleanupForUser = mocks.listConnectionsRequiringCleanupForUser;
     markConnectionSourcesDisconnected = mocks.markConnectionSourcesDisconnected;
     markDirtyConnectionProcessed = mocks.markDirtyConnectionProcessed;
@@ -725,6 +735,8 @@ describe("hosted device-sync wakes", () => {
     mocks.getConnectionForUser.mockReset();
     mocks.getConnectionRecordForUser.mockReset();
     mocks.getStoredConnectionAccountForUser.mockReset();
+    mocks.listMemberConnectionStatuses.mockReset();
+    mocks.listMemberConnectionStatuses.mockResolvedValue([]);
     mocks.materializeStoredConnectionAccount.mockReset();
     mocks.readOAuthStateProviderApplicationBinding.mockReset();
     mocks.resolveDeviceProviderApplication.mockReset();
@@ -1130,7 +1142,9 @@ describe("hosted device-sync wakes", () => {
     mocks.getStoredConnectionAccountForUser.mockImplementation(
       async () => buildProviderConfigStoredConnection(currentConnection),
     );
-    mocks.listConnectionsForUser.mockResolvedValue([currentConnection]);
+    mocks.listMemberConnectionStatuses.mockResolvedValue([
+      toHostedConnectionStatus(currentConnection),
+    ]);
     mocks.listConnectionSources.mockImplementation(async () => [currentSource]);
     mocks.resolveConnectionSourceAdmissionCandidate.mockImplementation(async () =>
       buildHostedConnectionSourceAdmissionCandidate(currentSource)
@@ -1165,7 +1179,13 @@ describe("hosted device-sync wakes", () => {
       provider: "junction",
     });
     expect(mocks.resumeSdkSignInSession).not.toHaveBeenCalled();
-    expect(mocks.listConnectionsForUser).toHaveBeenCalledWith("user-123");
+    expect(mocks.listMemberConnectionStatuses).toHaveBeenCalledWith({
+      limit: 32,
+      provider: "junction",
+      status: "all",
+      userId: "user-123",
+    });
+    expect(mocks.listConnectionsForUser).not.toHaveBeenCalled();
     expect(mocks.upsertConnectionSource).toHaveBeenCalledWith(expect.objectContaining({
       connectionId: currentConnection.id,
       firstSeenAt: "2026-03-26T12:00:00.000Z",
@@ -1311,7 +1331,9 @@ describe("hosted device-sync wakes", () => {
       setupPhase: "source_confirmed",
     });
     mockConnectionForAdmission(connection);
-    mocks.listConnectionsForUser.mockResolvedValue([connection]);
+    mocks.listMemberConnectionStatuses.mockResolvedValue([
+      toHostedConnectionStatus(connection),
+    ]);
     mocks.listConnectionSources.mockResolvedValue([
       buildHostedConnectionSource(connection.id, "apple_health_kit", {
         lastErrorCode: "SOURCE_USER_DISCONNECTED",
@@ -1349,7 +1371,9 @@ describe("hosted device-sync wakes", () => {
     });
     const source = buildHostedConnectionSource(connection.id, "apple_health_kit");
     mocks.getConnectionForUser.mockResolvedValue(connection);
-    mocks.listConnectionsForUser.mockResolvedValue([connection]);
+    mocks.listMemberConnectionStatuses.mockResolvedValue([
+      toHostedConnectionStatus(connection),
+    ]);
     mocks.listConnectionSources.mockResolvedValue([source]);
     const ingress = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/companion/sign-in-token"),
@@ -1407,7 +1431,9 @@ describe("hosted device-sync wakes", () => {
       canonicalSource,
     ];
     const canonicalSnapshot = { ...canonicalSource };
-    mocks.listConnectionsForUser.mockResolvedValue([connection]);
+    mocks.listMemberConnectionStatuses.mockResolvedValue([
+      toHostedConnectionStatus(connection),
+    ]);
     mocks.getConnectionForUser.mockResolvedValue(connection);
     mocks.listConnectionSources.mockImplementation(async () => sources);
     mocks.upsertConnectionSource.mockImplementation(async (input) => {
@@ -1527,7 +1553,9 @@ describe("hosted device-sync wakes", () => {
     };
     const deferredSession = createDeferred<typeof session>();
     mocks.createSdkSignInSession.mockReturnValue(deferredSession.promise);
-    mocks.listConnectionsForUser.mockResolvedValue([connection]);
+    mocks.listMemberConnectionStatuses.mockResolvedValue([
+      toHostedConnectionStatus(connection),
+    ]);
     mockConnectionForAdmission(connection);
     mocks.listConnectionSources.mockImplementation(async () => [source]);
     const ingress = createHostedDeviceSyncPublicIngressService(
@@ -1569,7 +1597,9 @@ describe("hosted device-sync wakes", () => {
     };
     const deferredSession = createDeferred<typeof session>();
     mocks.createSdkSignInSession.mockReturnValue(deferredSession.promise);
-    mocks.listConnectionsForUser.mockResolvedValue([establishedConnection]);
+    mocks.listMemberConnectionStatuses.mockResolvedValue([
+      toHostedConnectionStatus(establishedConnection),
+    ]);
     mocks.getConnectionForUser.mockImplementation(async () => currentConnection);
     mocks.listConnectionSources.mockResolvedValue([source]);
     const ingress = createHostedDeviceSyncPublicIngressService(
@@ -1598,12 +1628,12 @@ describe("hosted device-sync wakes", () => {
   it.each(["resume", null] as const)(
     "resumes the one active companion SDK connection for intent %s without ensuring it",
     async (connectionIntent) => {
-      mocks.listConnectionsForUser.mockResolvedValueOnce([
-        buildHostedConnection({
+      mocks.listMemberConnectionStatuses.mockResolvedValueOnce([
+        toHostedConnectionStatus(buildHostedConnection({
           id: "dsc_junction_active",
           provider: "junction",
           setupPhase: "source_confirmed",
-        }),
+        })),
       ]);
       const ingress = createHostedDeviceSyncPublicIngressService(
         new Request("https://control.example.test/api/device-sync/companion/sign-in-token"),
@@ -1625,7 +1655,7 @@ describe("hosted device-sync wakes", () => {
   );
 
   it("preserves legacy first-connect behavior only when no provider row exists", async () => {
-    mocks.listConnectionsForUser.mockResolvedValueOnce([]);
+    mocks.listMemberConnectionStatuses.mockResolvedValueOnce([]);
     const ingress = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/companion/sign-in-token"),
     );
@@ -1642,7 +1672,7 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("rejects explicit resume when no provider row exists without ensuring one", async () => {
-    mocks.listConnectionsForUser.mockResolvedValueOnce([]);
+    mocks.listMemberConnectionStatuses.mockResolvedValueOnce([]);
     const ingress = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/companion/sign-in-token"),
     );
@@ -1661,13 +1691,13 @@ describe("hosted device-sync wakes", () => {
   it.each(["resume", null] as const)(
     "requires an explicit reconnect for terminal companion state with intent %s",
     async (connectionIntent) => {
-      mocks.listConnectionsForUser.mockResolvedValueOnce([
-        buildHostedConnection({
+      mocks.listMemberConnectionStatuses.mockResolvedValueOnce([
+        toHostedConnectionStatus(buildHostedConnection({
           id: "dsc_junction_terminal",
           provider: "junction",
           setupPhase: "source_confirmed",
           status: "disconnected",
-        }),
+        })),
       ]);
       const ingress = createHostedDeviceSyncPublicIngressService(
         new Request("https://control.example.test/api/device-sync/companion/sign-in-token"),
@@ -1686,17 +1716,17 @@ describe("hosted device-sync wakes", () => {
   );
 
   it("rejects ambiguous active companion SDK connections without minting or ensuring", async () => {
-    mocks.listConnectionsForUser.mockResolvedValueOnce([
-      buildHostedConnection({
+    mocks.listMemberConnectionStatuses.mockResolvedValueOnce([
+      toHostedConnectionStatus(buildHostedConnection({
         id: "dsc_junction_active_1",
         provider: "junction",
         setupPhase: "source_confirmed",
-      }),
-      buildHostedConnection({
+      })),
+      toHostedConnectionStatus(buildHostedConnection({
         id: "dsc_junction_active_2",
         provider: "junction",
         setupPhase: "source_confirmed",
-      }),
+      })),
     ]);
     const ingress = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/companion/sign-in-token"),

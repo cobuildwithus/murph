@@ -82,6 +82,7 @@ import {
   HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS,
   prepareHostedCodexRuntimeEnvironment,
   projectHostedRuntimeProcessEnvironment,
+  resolveHostedCodexModelCatalogPath,
 } from "./hosted-runtime/codex-config.ts";
 import {
   HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
@@ -243,7 +244,6 @@ import {
   isHostedApprovedContinuationSystemMailboxItem,
   isHostedSystemMailboxModelFreeExactNotificationItem,
   readHostedSystemMailboxState,
-  readHostedSystemMailboxHandledThroughSeq,
   readHostedSystemMailboxProgress,
   type HostedSystemMailboxPendingItem,
 } from "./hosted-runtime/system-mailbox-state.ts";
@@ -1954,8 +1954,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       nextWakeAt: workspaceRead.workspace?.nextWakeAt ?? null,
       nextWakeReason: workspaceRead.workspace?.nextWakeReason ?? null,
     });
-    const imageCodexModelCatalogJson =
-      process.env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]?.trim();
+    const imageCodexModelCatalogJson = resolveHostedCodexModelCatalogPath({
+      imageCatalogPath: process.env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV],
+      astraAllowed: workspaceRead.hostedAssistantAstraAllowed,
+    });
     const imageHealthCommonsPackageRoot =
       process.env["MURPH_HEALTH_COMMONS_PACKAGE_ROOT"]?.trim();
     const baseRuntimeEnv = {
@@ -3975,7 +3977,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       }
       return response.result.provider;
     };
-    const resolveInvocationAssistantProviderAuthority = async (): Promise<
+    // Provider preference changes require a fresh provider-specific invocation.
+    // This check preserves accepted work for handoff; it does not reauthorize it.
+    const resolveInvocationAssistantProviderConsistency = async (): Promise<
       "current" | "handoff"
     > => {
       const liveAssistantProvider = await readLiveAssistantProvider();
@@ -4181,7 +4185,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                   acceptedInputs,
                 }) => {
                   if (
-                    await resolveInvocationAssistantProviderAuthority()
+                    await resolveInvocationAssistantProviderConsistency()
                       === "handoff"
                   ) {
                     throw new AssistantActiveTurnInputUnavailableError(
@@ -4503,7 +4507,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         options.runtimeWakeSignal?.notify();
       },
       resolveProviderAuthority:
-        resolveInvocationAssistantProviderAuthority,
+        resolveInvocationAssistantProviderConsistency,
       ...(ordinaryConsentedAssistantAskSelected
         ? {
             selectNextExactItemId:
@@ -5775,6 +5779,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         const runtimeStateDirtyBeforeMailboxImport = runtimeStateDirty;
         let invocationLocalAssistantInputBatch:
           HostedWorkspaceRunnerAssistantInputBatch | null = null;
+        let foregroundProviderStartCriticalPath:
+          AssistantProviderStartCriticalPathContext | null = null;
         const stageMailboxImportWake = async (
           mailboxImport: HostedMailboxImportCheckpointResult,
         ): Promise<void> => {
@@ -5863,7 +5869,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           const runtimeStateDirtyAfterMailboxImport = runtimeStateDirty;
           runtimeStateDirty = runtimeStateDirtyBeforeMailboxImport;
           try {
-            return await runForegroundPass(wakeInput);
+            return await runForegroundPass({
+              ...wakeInput,
+              providerStartCriticalPath: foregroundProviderStartCriticalPath,
+            });
           } finally {
             runtimeStateDirty ||= runtimeStateDirtyAfterMailboxImport;
           }
@@ -5933,6 +5942,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             signal: importSignal,
             workspace: passWorkspace,
           });
+          // Hot wakes need their own import boundary; the invocation's initial
+          // timing context predates these inputs and must not be reused.
+          foregroundProviderStartCriticalPath =
+            (result.initialMailboxImport.importResult.assistantInputIds?.length ?? 0) > 0
+              ? createAssistantProviderStartCriticalPathContext()
+              : null;
           invocationLocalAssistantInputBatch =
             result.latestAssistantInputBatch
             ?? invocationLocalAssistantInputBatch;
@@ -6103,13 +6118,13 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           && options.shutdownSignal?.aborted !== true
         ) {
           try {
-            if (await resolveInvocationAssistantProviderAuthority() === "handoff") {
+            if (await resolveInvocationAssistantProviderConsistency() === "handoff") {
               markIdleCheckpointTimerAfterDirtyWork();
               return false;
             }
           } catch {
             // A runtime wake is only a handoff hint. The provider-entry gate
-            // remains the fail-closed authority when the live read is
+            // still checks the saved provider when this hint read is
             // temporarily unavailable.
           }
         }
@@ -6448,7 +6463,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           workspace: committedWorkspace,
         });
         const runtimeDirtyAfterForeground = result.runtimeStateDirty
-          || hostedVaultStartupPreparation.mutated;
+          || hostedVaultStartupPreparation.mutated
+          || await hasRestoredSystemMailboxProgressAheadOfWorkspace({
+            importedSeq: result.latestMailboxImport.state.watermarks.system,
+            redactedStatus: committedWorkspace?.redactedStatus ?? null,
+            vaultRoot: restored.vaultRoot,
+          });
         runtimeStateDirty ||=
           runtimeDirtyAfterForeground || committedInboxMediaRetentionWakeDue;
         if (runtimeDirtyAfterForeground) {
@@ -8528,17 +8548,22 @@ async function hasRestoredSystemMailboxProgressAheadOfWorkspace(input: {
   }
 
   const localImportedSeq = BigInt(input.importedSeq);
-  const localHandledThroughSeq = BigInt(
-    await readHostedSystemMailboxHandledThroughSeq({
-      importedSeq: input.importedSeq,
-      vaultRoot: input.vaultRoot,
-    }),
-  );
+  const localProgress = await readHostedSystemMailboxProgress({
+    importedSeq: input.importedSeq,
+    vaultRoot: input.vaultRoot,
+  });
+  const localHandledThroughSeq = BigInt(localProgress.handledThroughSeq);
+  const canonicalContinuationSeqs =
+    input.redactedStatus?.hostedMailboxSystemDeviceSyncContinuationSeqs;
   return localImportedSeq >= canonicalImportedSeq
     && localHandledThroughSeq >= canonicalHandledThroughSeq
     && (
       localImportedSeq > canonicalImportedSeq
       || localHandledThroughSeq > canonicalHandledThroughSeq
+      || localProgress.deviceSyncContinuationSeqs.some((seq) =>
+        !Array.isArray(canonicalContinuationSeqs)
+        || !canonicalContinuationSeqs.some((owner) => owner === seq)
+      )
     );
 }
 

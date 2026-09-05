@@ -20,8 +20,7 @@ import {
 import { handleHostedDeviceWebhookQueueBatch } from "../device-webhook-queue.ts";
 import type { DeviceWebhookQueueEnvelopeV1 } from "@murphai/cloudflare-hosted-control/device-webhook-queue";
 import {
-  HOSTED_STANDBY_LOCATION_HINT,
-  HOSTED_STANDBY_REGION,
+  HOSTED_RUNNER_REGION,
   readHostedStandbyMode,
   readHostedStandbyReleaseId,
   resolveHostedStandbyCoordinatorName,
@@ -96,13 +95,12 @@ export function handleStandbyRunnerScheduled(
   const coordinator = namespace.getByName(
     resolveHostedStandbyCoordinatorName({
       releaseId,
-      region: HOSTED_STANDBY_REGION,
+      region: HOSTED_RUNNER_REGION,
     }),
-    { locationHint: HOSTED_STANDBY_LOCATION_HINT },
   );
   ctx.waitUntil(coordinator.ensureReadyStandby({
     releaseId,
-    region: HOSTED_STANDBY_REGION,
+    region: HOSTED_RUNNER_REGION,
   }));
 }
 

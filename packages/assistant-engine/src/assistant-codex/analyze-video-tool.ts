@@ -29,7 +29,6 @@ import type {
 } from '../assistant/execution-context.js'
 import {
   listAssistantInputEvents,
-  readAssistantInputEvent,
   resolveAssistantInputEventReferenceAt,
   type AssistantInputAttachmentEvidenceItem,
   type AssistantInputConversationRef,
@@ -113,74 +112,55 @@ export function createAnalyzeVideoTurnState(): AnalyzeVideoTurnState {
   }
 }
 
-export async function snapshotAnalyzeVideoAttachmentAuthorities(input: {
-  acceptedInputIds: readonly string[]
-  includeConversationHistory?: boolean
-  vaultRoot?: string | null
-}): Promise<AnalyzeVideoAttachmentAuthority[]> {
-  const vaultRoot = normalizeNullableString(input.vaultRoot)
-  if (!vaultRoot) return []
-
-  const events = await readAnalyzeVideoConversationEvents({ ...input, vaultRoot })
+export function snapshotAnalyzeVideoAttachmentAuthorities(
+  events: readonly AssistantInputEventRecord[],
+): AnalyzeVideoAttachmentAuthority[] {
   const authorities: AnalyzeVideoAttachmentAuthority[] = []
   for (const event of events) {
-    try {
+    if (
+      event.contentRetiredAt
+      || (event.attachmentEvidence.status !== 'available'
+        && event.attachmentEvidence.status !== 'partial')
+    ) {
+      continue
+    }
+    for (const attachment of event.attachmentEvidence.attachments) {
+      if (attachment.kind !== 'video') continue
+      const rawPath = normalizeAssistantRawAttachmentArtifactPath(
+        attachment.raw?.path ?? null,
+      )
+      const byteSize = attachment.raw?.byteSize ?? null
+      const sha256 = attachment.raw?.sha256 ?? null
+      const mimeType = normalizeVideoMimeType(attachment)
       if (
-        event.contentRetiredAt
-        || (event.attachmentEvidence.status !== 'available'
-          && event.attachmentEvidence.status !== 'partial')
+        !rawPath
+        || typeof byteSize !== 'number'
+        || !Number.isSafeInteger(byteSize)
+        || byteSize <= 0
       ) {
         continue
       }
-      for (const attachment of event.attachmentEvidence.attachments) {
-        if (attachment.kind !== 'video') continue
-        const rawPath = normalizeAssistantRawAttachmentArtifactPath(
-          attachment.raw?.path ?? null,
-        )
-        const byteSize = attachment.raw?.byteSize ?? null
-        const sha256 = attachment.raw?.sha256 ?? null
-        const mimeType = normalizeVideoMimeType(attachment)
-        if (
-          !rawPath
-          || typeof byteSize !== 'number'
-          || !Number.isSafeInteger(byteSize)
-          || byteSize <= 0
-        ) {
-          continue
-        }
-        authorities.push({
-          byteSize,
-          messageRef: event.inputId,
-          mimeType,
-          ordinal: attachment.ordinal,
-          rawPath,
-          sha256,
-        })
-      }
-    } catch {
-      // Invalid or unavailable evidence cannot grant cross-provider egress.
+      authorities.push({
+        byteSize,
+        messageRef: event.inputId,
+        mimeType,
+        ordinal: attachment.ordinal,
+        rawPath,
+        sha256,
+      })
     }
   }
   return authorities
 }
 
-async function readAnalyzeVideoConversationEvents(input: {
-  acceptedInputIds: readonly string[]
-  includeConversationHistory?: boolean
+export async function readAnalyzeVideoConversationEvents(input: {
+  acceptedEvents: readonly AssistantInputEventRecord[]
   vaultRoot: string
 }): Promise<AssistantInputEventRecord[]> {
   const vaultRoot = input.vaultRoot
-  const events = new Map<string, AssistantInputEventRecord>()
-  for (const messageRef of input.acceptedInputIds) {
-    try {
-      const event = await readAssistantInputEvent({ inputId: messageRef, vault: vaultRoot })
-      if (event?.inputId === messageRef) events.set(messageRef, event)
-    } catch {
-      // Invalid or unavailable evidence cannot grant cross-provider egress.
-    }
-  }
-  if (input.includeConversationHistory && events.size > 0) {
-    const currentEvents = [...events.values()]
+  const currentEvents = input.acceptedEvents
+  const events = new Map(currentEvents.map((event) => [event.inputId, event]))
+  if (events.size > 0) {
     const history = await listAssistantInputEvents({
       limit: Number.MAX_SAFE_INTEGER,
       skipInvalidRecords: true,

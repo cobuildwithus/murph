@@ -3378,16 +3378,21 @@ text(result.output);
     expect((await readFile(requestLog, 'utf8')).trim().split('\n')).toHaveLength(3)
   })
 
-  it.each(['direct', 'group'] as const)(
-    'carries a delayed V2 child completion into a later %s root turn without waiting',
+  it.each([
+    ['direct', 'gpt-5.6-luna', false],
+    ['group', 'gpt-5.6-luna', false],
+    ['direct', 'gpt-6-astra', true],
+  ] as const)(
+    'carries a delayed V2 %s %s child completion into a later root turn without waiting',
     { timeout: TURN_TIMEOUT_MS },
-    async (conversationScope) => {
+    async (conversationScope, childModel, astraAllowed) => {
       const scenario = await prepareScriptedTurnScenario({
         multiAgentV2: true,
       })
       const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
         codexCommand: scenario.turnInput.codexCommand,
         directory: scenario.turnInput.codexHome,
+        astraAllowed,
       })
       const scopeLabel = conversationScope.toUpperCase()
       const childResult = `LATE_CHILD_RESULT_${scopeLabel}`
@@ -3399,7 +3404,7 @@ text(result.output);
             arguments: {
               fork_turns: 'none',
               message: `Return exactly ${childResult}.`,
-              model: 'gpt-5.6-luna',
+              model: childModel,
               task_name: `late_child_${conversationScope}`,
             },
             name: 'spawn_agent',
@@ -3452,7 +3457,7 @@ text(result.output);
       ).toContain(childResult)
       expect(
         scenario.stub.requestSummariesSinceBaseline().map(({ model }) => model),
-      ).toContain('gpt-5.6-luna')
+      ).toContain(childModel)
       await delay(100)
 
       scenario.stub.queue({
@@ -3479,9 +3484,9 @@ text(result.output);
     },
   )
 
-  it('rejects a non-product child model before a provider request', {
+  it.each(['gpt-5.5', 'gpt-6-astra'])('rejects an unavailable child model %s before a provider request', {
     timeout: TURN_TIMEOUT_MS,
-  }, async () => {
+  }, async (model) => {
     const scenario = await prepareScriptedTurnScenario({
       multiAgentV2: true,
     })
@@ -3495,7 +3500,7 @@ text(result.output);
           arguments: {
             fork_turns: 'none',
             message: 'Return exactly NON_PRODUCT_CHILD_SHOULD_NOT_RUN.',
-            model: 'gpt-5.5',
+            model,
             task_name: 'non_product_child',
           },
           name: 'spawn_agent',
@@ -3523,7 +3528,7 @@ text(result.output);
     expect(summaries.flatMap(
       (summary) => summary.functionCallOutputs ?? [],
     )).toEqual([
-      'Unknown model `gpt-5.5` for spawn_agent. Available models: gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna',
+      `Unknown model \`${model}\` for spawn_agent. Available models: gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna`,
     ])
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
@@ -7010,6 +7015,7 @@ if (!tool) {
       const scenario = await prepareScriptedTurnScenario()
       scenario.stub.captureProviderRequestDiagnostics()
       scenario.stub.queue(
+        { toolSearchCall: { query: 'murph attach_response_card private structured compact_table daily_nutrition', limit: 1 } },
         {
           functionCall: {
             arguments: { card },
@@ -7031,9 +7037,16 @@ if (!tool) {
         scenario.stub.requestSummariesSinceBaseline()[0]
           ?.providerRequestDiagnostics,
       ).toMatchObject({
-        includesResponseCardCompactTableShape: true,
-        includesResponseCardNutritionV2Shape: true,
+        includesResponseCardCompactTableShape: false,
+        includesResponseCardNutritionV2Shape: false,
       })
+      const discovered = scenario.stub.requestSummariesSinceBaseline()[1]?.toolSearchOutputTools
+      expect(JSON.stringify(discovered)).toContain('compact_table')
+      expect(JSON.stringify(discovered)).toContain('daily_nutrition')
+      expect(JSON.stringify(discovered)).toContain(
+        'meal totals --from <date> --to <same-date> --resolve-goals --format json',
+      )
+      expect(JSON.stringify(discovered)).not.toContain('goal list --status active')
       expect(result.runtimeIssueInputs).toEqual([])
       if ('workout' in card) {
         expect(result.responseCard).toMatchObject({
@@ -8268,22 +8281,19 @@ text(JSON.stringify(result));
       serviceTier: null,
       threadId: seeded.threadId,
     })
-    // Usage attribution must never regress to the zero-row production failure:
-    // Codex 0.135 does not expose a compact-specific usage event, so the engine
-    // records a nonzero lower-bound estimate from the pre-compact thread size.
+    // The pinned runtime exposes the scripted provider's exact usage through
+    // raw completion events for this opted-in warm thread.
     expect(compacted.kind).toBe('compacted')
     if (compacted.kind !== 'compacted') {
       throw new Error('Expected idle compaction to complete.')
     }
     expect(compacted.usage).toMatchObject({
-      cachedInputTokens: null,
-      inputTokens: expect.any(Number),
-      outputTokens: null,
-      source: 'estimated',
-      totalTokens: expect.any(Number),
+      cachedInputTokens: 0,
+      inputTokens: 12,
+      outputTokens: 7,
+      source: 'measured',
+      totalTokens: 19,
     })
-    expect(compacted.usage.inputTokens).toBeGreaterThan(0)
-    expect(compacted.usage.totalTokens).toBeGreaterThan(0)
 
     // Repeat guard: a successful compact clears the thread vitals, so an
     // immediate second idle pass must skip without provider traffic instead

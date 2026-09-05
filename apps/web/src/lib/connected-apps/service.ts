@@ -1,5 +1,7 @@
 import "server-only";
 
+import { reconcileHostedConnectedAppsDiscovery } from "./discovery";
+
 import { createHash, randomBytes } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
@@ -138,11 +140,11 @@ async function runHostedConnectedAppsRequest(input: {
           memberId: input.memberId,
           prisma,
         });
-        return await client.search({
+        return reconcileHostedConnectedAppsDiscovery(await client.search({
           query: input.request.input.query,
           sessionId,
           ...(toolkits ? { toolkits } : {}),
-        });
+        }));
       }
       case "execute": {
         const {

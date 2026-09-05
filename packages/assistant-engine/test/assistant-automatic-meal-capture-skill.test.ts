@@ -213,22 +213,22 @@ describe('assistant automatic meal capture skill', () => {
     expect(skill).toContain('latest `recordedAt` is at or after')
     expect(skill).toContain('partial-cleanup failure loses no meal')
     expect(skill).toMatch(
-      /canonical\s+`vault-cli meal totals --from <occurrence-local-date> --to\s+<occurrence-local-date>` read/,
+      /`vault-cli meal totals --from <occurrence-local-date>\s+--to <occurrence-local-date> --resolve-goals --format json`/,
     )
     expect(compact(skill)).toContain(
       'immediately before any response-card attachment',
     )
     expect(compactSkill).toContain(
-      'Run `vault-cli goal list --status active --limit 200 --format json`.',
+      '`vault-cli meal totals --from <occurrence-local-date> --to <occurrence-local-date> --resolve-goals --format json`.',
     )
     expect(compactSkill).toContain(
-      'If it returns 200 records, fail closed with the ordinary compact closeout: run no Goal detail reads, perform no Goal or measurement mutation, ask no question, and attach no card.',
+      '`conflict`, `incompatible`, or `capacity` means ordinary compact closeout, no Goal or measurement mutation, no question, and no card.',
     )
     expect(compactSkill).toContain(
-      'run `vault-cli goal show <goal-id> --format json` for every returned active Goal whose list item reports a nonzero `data.metricTargetsCount`.',
+      'do not repeat goal list/show to re-resolve active authority.',
     )
     expect(compactSkill).toContain(
-      'Do not select detail reads by title, slug, domain, context-snapshot visibility, or the default list prefix.',
+      'This query owns the complete active target scan and deterministic rules below;',
     )
     expect(compactSkill).toContain(
       'This active-target authority read is separate from any all-status Goal lookup used to reuse or honor Murph\'s managed paused or abandoned proposal',
@@ -388,7 +388,7 @@ describe('assistant automatic meal capture skill', () => {
       compactSkill.indexOf('vault-cli meal remove-photo <meal-id>'),
     )
     expect(compactClarification).toBeLessThan(
-      compactSkill.indexOf('vault-cli goal list --status active'),
+      compactSkill.indexOf('vault-cli meal totals --from <occurrence-local-date>'),
     )
     expect(compactSkill).toContain(
       'This is the sole scheduled-question exception',

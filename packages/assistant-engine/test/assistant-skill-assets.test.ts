@@ -1,3 +1,4 @@
+import { readWorkflowSkillPolicy } from './support/workflow-skill-policy.js'
 import { existsSync, readFileSync } from 'node:fs'
 import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
@@ -263,14 +264,11 @@ describe('assistant skill assets', () => {
     const daily = (await readSkillFile(dailySkill)).replace(/\s+/gu, ' ')
 
     expect(daily).toMatch(
-      /workout activity questions.+choose compact or detailed output from the user's question before the first and only activity-list data read; never use compact output as a probe before retrying with detail.+wearables activity list --date <date> --format json.+compact routine result.+Do not run `wearables day` first.+other date-specific wearable facts.+wearables day <date>/u,
+      /workout activity questions.+choose the required output.+before the first and only activity-list data read; never probe.+Do not run `wearables day` first/u,
     )
-    expect(daily).toContain(
-      'wearables activity list --date <date> --include-workout-details --format json',
-    )
-    expect(daily).toContain(
-      'Omit `--include-workout-details` only when the answer is entirely available from the day-level `sessionCount`, `sessionMinutes`, and distinct `activityTypes` fields. Pass it truthy whenever selecting, comparing, grouping, ordering, or attributing individual workouts, including type-specific count, duration, distance, start time, provider, heart rate, cadence, power, speed, or splits',
-    )
+    expect(daily).toContain('use `--include-workout-summaries`')
+    expect(daily).toContain('`splitsOmitted: true` means omitted evidence, never proof there were no splits')
+    expect(daily).toContain('Only when the question needs lap/split rows, use `--include-workout-details` instead')
     expect(daily).toContain(
       '`workoutFeatures` associates the bounded detail with each workout by provider and start time',
     )
@@ -1079,6 +1077,11 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('vault-cli memory upsert')
     expect(raw).toContain('Do not create a memory record for routine success')
     expect(raw).toContain('Finite-supply replenishment check-ins')
+    const replenishment = raw.split('## Finite-supply replenishment check-ins')[1]!.split('## Supplement order completion')[0]!
+    expect(replenishment).toContain('schedule.localAt.timeZone')
+    expect(replenishment).toContain('Omit `slug`; the host generates the automation identity')
+    expect(replenishment).not.toContain('"at": "<ISO')
+    expect(replenishment).not.toContain('`slug`: a stable value')
     expect(raw).toMatch(
       /Treat the browser task as complete only when the site or tool result verifies the\s+requested outcome\./u,
     )
@@ -1185,7 +1188,11 @@ describe('assistant skill assets', () => {
       modelBehaviorProfile: 'gpt5-agentic',
       turnTrigger: null,
     })
-    const skillTexts = await Promise.all(ASSISTANT_SKILLS.map(readSkillFile))
+    const skillTexts = await Promise.all(ASSISTANT_SKILLS.map((skill) =>
+      skill.slug === 'experiment-onboarding'
+        ? readWorkflowSkillPolicy(skill.slug)
+        : readSkillFile(skill),
+    ))
     const registeredSkillText = skillTexts.join('\n')
 
     expectNoDeletedCommonsCommands(systemPrompt)
@@ -1210,7 +1217,7 @@ describe('assistant skill assets', () => {
     )
   })
 
-  it('keeps experiment onboarding details in the skill file, not the prompt', async () => {
+  it('keeps experiment onboarding details in its skill policy, not the prompt', async () => {
     const experimentOnboardingSkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'experiment-onboarding',
     )
@@ -1222,7 +1229,7 @@ describe('assistant skill assets', () => {
       'planned-session support reminders',
     )
 
-    const raw = await readSkillFile(experimentOnboardingSkill)
+    const raw = await readWorkflowSkillPolicy('experiment-onboarding')
 
     expect(raw).toContain(
       'Before asking any experiment onboarding question, perform a bounded vault-first evidence pass',

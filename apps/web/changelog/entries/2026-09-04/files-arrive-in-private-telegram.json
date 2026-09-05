@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-09-04",
+  "order": 100,
+  "item": {
+    "id": "files-arrive-in-private-telegram",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Receive files in private Telegram chats",
+    "summary": "Murph can send requested PDFs and other files as attachments in your private Telegram conversation.",
+    "details": "Review and approve the file and destination before Murph sends it. If delivery cannot be confirmed, Murph avoids automatically sending a duplicate.",
+    "relevanceTags": [
+      "telegram",
+      "files"
+    ],
+    "sourcePullRequests": [2875]
+  }
+}

@@ -1129,16 +1129,19 @@ function createIntegratedQueryServices(): QueryServices {
       return listFoodRecords(input)
     },
     async showMealNutritionTotals(input: CommandContext & {
+      resolveGoals?: boolean
       from?: string
       to?: string
     }) {
       const query = await loadQueryRuntime()
       const result = await query.readMealNutritionTotals(input.vault, {
+        resolveGoals: input.resolveGoals,
         from: input.from,
         to: input.to,
       })
 
       return {
+        ...(result.goalContext ? { goalContext: result.goalContext } : {}),
         vault: input.vault,
         filters: {
           from: result.from,
@@ -1478,6 +1481,7 @@ function createIntegratedQueryServices(): QueryServices {
       providers?: string[]
       limit: number
       includeWorkoutDetails?: boolean
+      includeWorkoutSummaries?: boolean
     }) {
       const normalized = normalizeWearableSummaryInput(input)
       const query = await loadQueryRuntime()
@@ -1489,7 +1493,14 @@ function createIntegratedQueryServices(): QueryServices {
         ? rawItems
         : rawItems.map((item) => {
             const summary: Record<string, unknown> = { ...item }
-            delete summary.workoutFeatures
+            if (input.includeWorkoutSummaries) {
+              summary.workoutFeatures = item.workoutFeatures.map(({ splits: _splits, ...workout }) => ({
+                ...workout,
+                splitsOmitted: true,
+              }))
+            } else {
+              delete summary.workoutFeatures
+            }
             return summary
           })
       const items = limitedCompactWearableCommandSummaryArray(
