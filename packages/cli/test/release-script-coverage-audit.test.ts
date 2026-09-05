@@ -6050,19 +6050,14 @@ exec "\${MURPH_TEST_REAL_WC:?}" "$@"
     }
   })
 
-  it('keeps diff-aware CLI escalation behind the nested lock handoff instead of locking every test:diff run', () => {
+  it('keeps diff-aware CLI escalation on the targeted verification lane', () => {
     const workspaceVerifyScript = readFileSync(
       path.join(repoRoot, 'scripts', 'workspace-verify.sh'),
       'utf8',
     )
 
-    expect(workspaceVerifyScript).toContain('command_requires_workspace_artifact_lock()')
     expect(workspaceVerifyScript).toContain(
-      'if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" != "1" ]] && command_requires_workspace_artifact_lock "${1:-}"; then',
-    )
-    expect(workspaceVerifyScript).toContain('run_verify_cli_with_workspace_artifact_lock')
-    expect(workspaceVerifyScript).toContain(
-      'run_timed_step "CLI targeted verification" run_verify_cli_with_workspace_artifact_lock',
+      'run_timed_step "CLI targeted verification" run_verify_cli',
     )
   })
 })
