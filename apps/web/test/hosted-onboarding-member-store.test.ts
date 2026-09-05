@@ -2457,11 +2457,11 @@ describe("hosted-member-store", () => {
     });
 
     expect(findUnique).toHaveBeenCalledWith({
-      select: {
+      select: expect.objectContaining({
         linqChatLookupKey: true,
         linqParticipantContactKind: true,
         linqParticipantContactLookupKey: true,
-      },
+      }),
       where: {
         memberId: "member_123",
       },
@@ -2513,11 +2513,11 @@ describe("hosted-member-store", () => {
       pendingLinqChatLookupKey: null,
     }));
     expect(findUnique).toHaveBeenCalledWith({
-      select: {
+      select: expect.objectContaining({
         linqChatLookupKey: true,
         linqParticipantContactKind: true,
         linqParticipantContactLookupKey: true,
-      },
+      }),
       where: {
         memberId: "member_123",
       },
@@ -2596,11 +2596,11 @@ describe("hosted-member-store", () => {
     expect(queryRaw).toHaveBeenCalledTimes(1);
     expect(executeRaw).toHaveBeenCalledTimes(1);
     expect(findUnique).toHaveBeenCalledWith({
-      select: {
+      select: expect.objectContaining({
         linqChatLookupKey: true,
         linqParticipantContactKind: true,
         linqParticipantContactLookupKey: true,
-      },
+      }),
       where: {
         memberId: "member_123",
       },

@@ -78,7 +78,7 @@ import {
 } from '../message-target-selection.js'
 import {
   listAssistantTranscriptEntries,
-  resolveAssistantSession,
+  lookupAssistantSession,
 } from '../store.js'
 import {
   hasAssistantOutboxDeliveryEvidence,
@@ -5576,9 +5576,8 @@ async function resolveAssistantAutoReplyExistingSession(input: {
   vault: string
 }): Promise<AssistantSession | null> {
   try {
-    return (await resolveAssistantSession({
+    return (await lookupAssistantSession({
       vault: input.vault,
-      createIfMissing: false,
       conversation: conversationRefFromAssistantInputConversation(
         input.input.conversation,
       ),
