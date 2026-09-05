@@ -891,7 +891,9 @@ only that prepared check complete before starting the Webpack build. Node
 applies the direct flag to the parent; Next 16.3.0 rebuilds non-isolated child
 options from the parent arguments followed by `NODE_OPTIONS`, so the sequential
 Webpack compiler workers receive 3 GiB while the separate TypeScript CLI child
-receives 6 GiB. Next removes the flag from isolated static workers. The same
+receives 6 GiB. Next removes the flag from isolated static workers. The migration
+guard and the build-runner fixture must both track this configured heap; the
+runner remains the configuration owner. The same
 script owns the Vercel package build and the CI memory-observation invocation.
 This bounds the compile parent without weakening validation, but only repeated
 forced-cold Standard previews prove the real Vercel boundary. The generated-
