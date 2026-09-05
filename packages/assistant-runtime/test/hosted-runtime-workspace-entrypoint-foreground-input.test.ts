@@ -1591,6 +1591,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const exportedIssues: unknown[] = [];
+    const providerStartMetadataPresent: boolean[] = [];
     const releaseSha = "0123456789abcdef0123456789abcdef01234567";
     const runtimeAttemptId =
       "runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda";
@@ -1877,6 +1878,10 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
               workspace: createWorkspaceState({ version: "0" }),
             }),
           }),
+          async runAssistantPhase(input) {
+            providerStartMetadataPresent.push(input.providerStartCriticalPath != null);
+            return await runHostedWorkspaceAssistantPhase(input);
+          },
           runtimeIssueProvenance: {
             releaseSha,
             runtimeName,
@@ -1894,6 +1899,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
       );
       await withRealTimeout(resultPromise, 15_000, () => events.join(","));
       assert.equal(assistantPhaseCalls, 2);
+      assert.deepEqual(providerStartMetadataPresent, [true, false]);
       assert.equal(completionInputIds.length, 2);
       expect(exportedIssues).toEqual([
         expect.objectContaining({

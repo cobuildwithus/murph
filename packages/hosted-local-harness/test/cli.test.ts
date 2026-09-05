@@ -297,7 +297,27 @@ describe("hosted-local run CLI", () => {
       stdout: createBufferedStdout().stdout,
     });
 
-    expect(runDoctorCommand).toHaveBeenCalledTimes(4);
+    expect(runDoctorCommand).toHaveBeenCalledTimes(5);
+  });
+
+  test("reports unavailable Buildx as a doctor prerequisite failure", async () => {
+    const output = createBufferedStdout();
+    resolveHostedLocalDevConfig.mockReturnValueOnce({
+      ...resolveHostedLocalDevConfig(),
+      temporal: { ...resolveHostedLocalDevConfig().temporal, mode: "disabled" },
+    });
+    runDoctorCommand.mockImplementation((command, args) => ({
+      command: [command, ...args].join(" "),
+      ok: args[0] !== "buildx",
+      stderr: args[0] === "buildx" ? "Docker Buildx is unavailable" : "",
+      stdout: "",
+    }));
+
+    await runHostedLocalCli(["doctor"], { env: {}, stdout: output.stdout });
+
+    expect(output.text()).toContain("[fail] docker buildx version");
+    expect(output.text()).toContain("Docker Buildx is unavailable");
+    expect(startHostedLocalDevStack).not.toHaveBeenCalled();
   });
 
   test("prepares worktree resources before delegating worktree up to the normal stack", async () => {
@@ -549,6 +569,17 @@ describe("hosted-local run CLI", () => {
     for (const [input] of resolveHostedLocalWorktreeConfig.mock.calls) {
       expect(input.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
     }
+  });
+
+  test("passes an explicit process shard through the canonical E2E command", async () => {
+    await runHostedLocalCli(["e2e", "foreground-reply-priority", "--no-bundle", "--process-shard", "2/2"], {
+      env: {}, stdout: createBufferedStdout().stdout,
+    });
+    expect(runHostedLocalE2eSuite).toHaveBeenCalledWith(expect.objectContaining({
+      prepareRunnerBundle: false,
+      processShard: "2/2",
+      scenario: ["foreground-reply-priority"],
+    }));
   });
 
   test("marks interrupted hosted-local e2e runs as stopped", async () => {

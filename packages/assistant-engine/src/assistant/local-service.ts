@@ -148,6 +148,7 @@ import {
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import {
   requestAssistantVaultFileSend,
+  supportsAssistantVaultFileDelivery,
   resolveAssistantVaultFileSendTargetFingerprint,
 } from './vault-file-send.js'
 import {
@@ -991,12 +992,12 @@ export async function sendAssistantMessageLocal(
           input.deliverResponse === true
           && currentAudienceReplyDeliveryAvailable
           && actionApprovalPort != null
-          && currentDeliveryFields.channel?.trim().toLowerCase() === 'linq'
+          && supportsAssistantVaultFileDelivery(currentDeliveryFields)
           && vaultFileSendTargetFingerprint !== null
         const pendingVaultFilesAvailable =
           input.deliverResponse === true
           && currentAudienceReplyDeliveryAvailable
-          && currentDeliveryFields.channel?.trim().toLowerCase() === 'linq'
+          && supportsAssistantVaultFileDelivery(currentDeliveryFields)
         const hostedToolContext = hostedExecutionContext
           ? createAssistantHostedToolContext({
               computerToolsAvailable: hostedComputerToolsAvailable,
@@ -1078,10 +1079,10 @@ export async function sendAssistantMessageLocal(
                         session: currentSession,
                         sharedPlan,
                       })
-                      if (deliveryFields.channel?.trim().toLowerCase() !== 'linq') {
+                      if (!supportsAssistantVaultFileDelivery(deliveryFields)) {
                         throw new VaultCliError(
                           'ASSISTANT_VAULT_FILE_CHANNEL_UNSUPPORTED',
-                          'Vault files can only be sent to the current iMessage conversation.',
+                          'Vault files cannot be sent to this conversation.',
                         )
                       }
                       if (!resolveAssistantVaultFileSendTargetFingerprint(deliveryFields)) {
@@ -1753,36 +1754,40 @@ export async function sendAssistantMessageLocal(
             sinceProviderResultMs: 0,
             stage: 'provider-result-returned',
           })
+          if (providerOutcome.kind !== 'failed_terminal') {
+            onFirstAssistantResponseCompleted()
+          }
+          const completedContinuation = providerOutcome.kind === 'failed_terminal'
+            ? providerOutcome.codexContinuation
+            : providerOutcome.providerTurn.codexContinuation
+          if (!providerRequestJournal) {
+            providerRequestJournal =
+              await runtimeState.turns.acceptedInputs.recordProviderRequest({
+                continuation: completedContinuation,
+                ordinal: providerRequestOrdinal,
+                providerAttemptId: null,
+                turnId: currentUserTurn.turnId,
+              })
+            providerRequestAcceptedInputIds =
+              providerRequestJournal?.inputIds ?? acceptedInputIdsForProviderRequest
+            providerRequestAcceptedInputItems =
+              providerRequestJournal?.inputs ?? acceptedInputItemsForProviderRequest
+          } else {
+            providerRequestJournal =
+              await runtimeState.turns.acceptedInputs.updateProviderRequest({
+                continuation: completedContinuation,
+                ordinal: providerRequestOrdinal,
+                providerAttemptId: null,
+                turnId: currentUserTurn.turnId,
+              }) ?? providerRequestJournal
+            providerRequestAcceptedInputIds =
+              providerRequestJournal?.inputIds ?? providerRequestAcceptedInputIds
+            providerRequestAcceptedInputItems =
+              providerRequestJournal?.inputs ?? providerRequestAcceptedInputItems
+          }
+          acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
+          acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
           if (providerOutcome.kind === 'failed_terminal') {
-            if (!providerRequestJournal) {
-              providerRequestJournal =
-                await runtimeState.turns.acceptedInputs.recordProviderRequest({
-                  continuation: providerOutcome.codexContinuation,
-                  ordinal: providerRequestOrdinal,
-                  providerAttemptId: null,
-                  turnId: currentUserTurn.turnId,
-                })
-              providerRequestAcceptedInputIds =
-                providerRequestJournal?.inputIds ?? acceptedInputIdsForProviderRequest
-              providerRequestAcceptedInputItems =
-                providerRequestJournal?.inputs ?? acceptedInputItemsForProviderRequest
-              acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
-              acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
-            } else {
-              providerRequestJournal =
-                await runtimeState.turns.acceptedInputs.updateProviderRequest({
-                  continuation: providerOutcome.codexContinuation,
-                  ordinal: providerRequestOrdinal,
-                  providerAttemptId: null,
-                  turnId: currentUserTurn.turnId,
-                }) ?? providerRequestJournal
-              providerRequestAcceptedInputIds =
-                providerRequestJournal?.inputIds ?? providerRequestAcceptedInputIds
-              providerRequestAcceptedInputItems =
-                providerRequestJournal?.inputs ?? providerRequestAcceptedInputItems
-              acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
-              acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
-            }
             const failedProviderResult = {
               attemptCount: providerOutcome.attemptCount,
               provider: providerOutcome.route.provider,
@@ -2030,37 +2035,7 @@ export async function sendAssistantMessageLocal(
             throw providerOutcome.error
           }
 
-          onFirstAssistantResponseCompleted()
           const currentProviderResult = providerOutcome.providerTurn
-          if (!providerRequestJournal) {
-            providerRequestJournal =
-              await runtimeState.turns.acceptedInputs.recordProviderRequest({
-                continuation: currentProviderResult.codexContinuation,
-                ordinal: providerRequestOrdinal,
-                providerAttemptId: null,
-                turnId: currentUserTurn.turnId,
-              })
-            providerRequestAcceptedInputIds =
-              providerRequestJournal?.inputIds ?? acceptedInputIdsForProviderRequest
-            providerRequestAcceptedInputItems =
-              providerRequestJournal?.inputs ?? acceptedInputItemsForProviderRequest
-            acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
-            acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
-          } else {
-            providerRequestJournal =
-              await runtimeState.turns.acceptedInputs.updateProviderRequest({
-                continuation: currentProviderResult.codexContinuation,
-                ordinal: providerRequestOrdinal,
-                providerAttemptId: null,
-                turnId: currentUserTurn.turnId,
-              }) ?? providerRequestJournal
-            providerRequestAcceptedInputIds =
-              providerRequestJournal?.inputIds ?? providerRequestAcceptedInputIds
-            providerRequestAcceptedInputItems =
-              providerRequestJournal?.inputs ?? providerRequestAcceptedInputItems
-            acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
-            acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
-          }
           await drainLiveSteeredActiveTurnInputs({
             continuation: currentProviderResult.codexContinuation,
             sessionId: currentProviderResult.session.sessionId,

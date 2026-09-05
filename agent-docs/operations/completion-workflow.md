@@ -209,8 +209,10 @@ validation without changing the reviewed commit baseline.
 ## Review-Resolution Loop
 
 Treat review findings as claims to verify, not implementation instructions.
-Read the actual path and dependency contract. Accept a finding only with a
-current invariant, material harm, and evidence. Reject wrong, speculative,
+Read the actual path and dependency contract. Accept bugs only with a realistic
+trigger, serious harm, and code-path evidence. Accept Complexity Collapse only
+with concrete removable complexity and proof of preserved behavior/invariants.
+Reject wrong, speculative,
 already-handled, disproportionate, or out-of-scope findings with a reason.
 Rejected findings need no reviewer agreement.
 

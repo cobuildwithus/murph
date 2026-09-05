@@ -25,6 +25,11 @@ pnpm hosted-local run -- pnpm --dir apps/cloudflare test:workers
 
 Root `pnpm dev` is a thin alias for `pnpm hosted-local up`.
 
+`doctor` reports Docker daemon and Buildx prerequisites separately. Isolated
+Docker configuration selects the first candidate plugin directory containing an
+executable `docker-buildx`, so an empty or unusable earlier directory cannot hide
+a later installed Buildx plugin.
+
 ### Hot admission benchmark
 
 `pnpm hosted-local e2e hot-admission-latency` measures mailbox acceptance to

@@ -477,6 +477,7 @@ export interface HostedLocalE2eSuiteInput {
   env?: NodeJS.ProcessEnv;
   injectSkipRunnerBundleEnv?: boolean;
   prepareRunnerBundle?: boolean;
+  processShard?: string;
   scenario?: HostedLocalE2eScenarioSelection;
 }
 
@@ -562,12 +563,35 @@ function partitionLiveWearableEnvironment(input: {
   return { genericEnv, vitestEnvOverlay };
 }
 
+function selectHostedLocalE2eProcessShard(
+  scenarios: readonly HostedLocalE2eScenario[],
+  shard: string | undefined,
+): readonly HostedLocalE2eScenario[] {
+  if (shard === undefined) return scenarios;
+  const match = /^([1-9][0-9]*)\/([1-9][0-9]*)$/u.exec(shard);
+  const scenario = scenarios[0];
+  const patterns = scenario?.vitestProcessTestNamePatterns;
+  const index = Number(match?.[1]);
+  const count = Number(match?.[2]);
+  if (
+    !match || scenarios.length !== 1 || !patterns
+    || !Number.isSafeInteger(index) || count !== patterns.length
+    || index > count
+  ) {
+    throw new Error("E2E process shard must select i/n from one scenario's complete declared process inventory.");
+  }
+  return [{ ...scenario, vitestProcessTestNamePatterns: [patterns[index - 1]!] }];
+}
+
 export async function runHostedLocalE2eSuite(
   input: HostedLocalE2eSuiteInput = {},
 ): Promise<HostedLocalE2eSuiteResult> {
   const env = sanitizeHostedLocalGenericEnvironment(input.env ?? process.env);
   removeHostedLocalWebAuthorityFromProcessEnvironment();
-  const scenarios = resolveHostedLocalE2eScenarios(input.scenario ?? "all");
+  const scenarios = selectHostedLocalE2eProcessShard(
+    resolveHostedLocalE2eScenarios(input.scenario ?? "all"),
+    input.processShard,
+  );
   const liveWearableEnvironment = partitionLiveWearableEnvironment({ env, scenarios });
   const liveStripeEnvironment = partitionHostedStripeBillingLiveEnvironment({
     environment: liveWearableEnvironment.genericEnv,
@@ -715,9 +739,11 @@ async function prepareHostedLocalWebGeneratedArtifacts(input: {
   env: NodeJS.ProcessEnv;
   scenarios: readonly HostedLocalE2eScenario[];
 }): Promise<void> {
-  if (input.scenarios.length <= 1) {
-    return;
-  }
+  const sharesGeneratedArtifacts = input.scenarios.length > 1
+    || input.scenarios.some((scenario) =>
+      (scenario.vitestProcessTestNamePatterns?.length ?? 1) > 1
+    );
+  if (!sharesGeneratedArtifacts) return;
 
   if (input.env[HOSTED_WEB_PRISMA_GENERATED_PREPARED_ENV] !== "1") {
     input.assertWorkAdmission();
