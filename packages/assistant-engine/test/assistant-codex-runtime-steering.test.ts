@@ -1656,6 +1656,60 @@ describe('steered final segments', () => {
     expect(result.precedingAgentMessageSegments).toEqual([])
   })
 
+  it.each([
+    {
+      card: DAILY_NUTRITION_RESPONSE_CARD,
+      expectedText: 'response card attached',
+      label: 'response card',
+    },
+    {
+      card: OVERSIZED_TRACKED_WORKOUT_RESPONSE_CARD,
+      expectedText: 'workout card envelope too large; full text recovery selected',
+      label: 'oversized card text recovery',
+    },
+  ])('retains trailing $label and its delivery context after commentary', async ({ card, expectedText }) => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-retained-card',
+        type: 'user_message',
+        message: 'Show the saved summary.',
+      }),
+      { card, expectedText, id: 82, kind: 'attach-response-card' },
+      completedItemEvent({
+        id: 'assistant-retained-card',
+        type: 'assistant_message',
+        message: 'Saved summary.',
+      }),
+      completedItemEvent({
+        id: 'user-after-retained-card',
+        type: 'user_message',
+        message: 'One more detail.',
+      }),
+      completedItemEvent({
+        id: 'assistant-after-retained-card',
+        type: 'assistant_message',
+        message: 'Considering the detail.',
+        phase: 'commentary',
+      }),
+    ], { responseCardsAvailable: true })
+
+    expect(result.responseDeliveryContextOrdinal).toBe(0)
+    expect(result.precedingAgentMessageSegments).toEqual([])
+    expect(result.responseMedia).toEqual([])
+    expect(result.providerAuthoredFinalMessage).toBe('Saved summary.')
+    expect(result.finalMessage).not.toContain('Considering the detail.')
+    if (card === DAILY_NUTRITION_RESPONSE_CARD) {
+      expect(result.responseCard).toEqual(card)
+      expect(result.finalMessage).toContain('1,490.25 calories')
+    } else {
+      expect(result.responseCard).toBeNull()
+      expect(result.finalMessage).toContain('Capacity exercise 16:')
+      expect(result.finalMessage).toContain('Exercise 16 set 16 target')
+      expect(result.finalMessage).not.toContain('evt_')
+      expect(result.transcriptMessage).toContain('[Murph tracked workout source:')
+    }
+  })
+
   it('keeps steered final answers while commentary remains internal', async () => {
     const progressDelivery = createProgressDeliveryMock()
     const result = await runScriptedSteeredFinalSegmentsTurn([

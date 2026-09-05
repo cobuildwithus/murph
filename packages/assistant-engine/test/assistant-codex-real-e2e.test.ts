@@ -26225,9 +26225,13 @@ describeRealCodex('real Codex steered acknowledgement no-reply e2e', () => {
       expect(result.finalAction).toEqual({ kind: 'none' })
       expect(result.finalActionExplicit).toBe(true)
       expect(result.finalMessage).toBe('')
+      expect(result.providerAuthoredFinalMessage).toBe('')
+      expect(result.transcriptMessage).toBeNull()
+      expect(result.responseDeliveryContextOrdinal).toBe(1)
       expect(result.responseMedia).toEqual([])
       expect(result.responseCard).toBeNull()
       expect(finishAttempts).toHaveLength(1)
+      expect(readDynamicToolAttempts(result.jsonEvents)).toEqual(finishAttempts)
     } finally {
       await removeRealCodexTemporaryPaths([
         workingDirectory,
