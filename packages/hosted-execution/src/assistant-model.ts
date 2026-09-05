@@ -1,11 +1,13 @@
 export const HOSTED_ASSISTANT_LUNA_MODEL = "gpt-5.6-luna" as const;
 export const HOSTED_ASSISTANT_TERRA_MODEL = "gpt-5.6-terra" as const;
 export const HOSTED_ASSISTANT_SOL_MODEL = "gpt-5.6-sol" as const;
+export const HOSTED_ASSISTANT_ASTRA_MODEL = "gpt-6-astra" as const;
 
 export const HOSTED_ASSISTANT_PRODUCT_MODELS = [
   HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_TERRA_MODEL,
   HOSTED_ASSISTANT_SOL_MODEL,
+  HOSTED_ASSISTANT_ASTRA_MODEL,
 ] as const;
 
 export type HostedAssistantProductModel =
@@ -14,11 +16,11 @@ export type HostedAssistantProductModel =
 export const HOSTED_ASSISTANT_OPENAI_PROVIDER = "openai" as const;
 export const HOSTED_ASSISTANT_VENICE_PROVIDER = "venice" as const;
 
-export const HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS = {
+export const HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS: Partial<Record<HostedAssistantProductModel, string>> = {
   [HOSTED_ASSISTANT_LUNA_MODEL]: "openai-gpt-56-luna",
   [HOSTED_ASSISTANT_TERRA_MODEL]: "openai-gpt-56-terra",
   [HOSTED_ASSISTANT_SOL_MODEL]: "openai-gpt-56-sol",
-} as const satisfies Record<HostedAssistantProductModel, string>;
+};
 
 export const HOSTED_ASSISTANT_PROVIDERS = [
   HOSTED_ASSISTANT_OPENAI_PROVIDER,
@@ -53,6 +55,7 @@ export function parseHostedAssistantProviderOverride(
 export const HOSTED_ASSISTANT_MODEL_OVERRIDES = [
   HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_SOL_MODEL,
+  HOSTED_ASSISTANT_ASTRA_MODEL,
 ] as const;
 
 export type HostedAssistantModelOverride =
@@ -68,7 +71,8 @@ export function parseHostedAssistantModelOverride(
   value: unknown,
 ): HostedAssistantModelOverride | null {
   return value === HOSTED_ASSISTANT_LUNA_MODEL ||
-      value === HOSTED_ASSISTANT_SOL_MODEL
+      value === HOSTED_ASSISTANT_SOL_MODEL ||
+      value === HOSTED_ASSISTANT_ASTRA_MODEL
     ? value
     : null;
 }

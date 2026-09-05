@@ -169,6 +169,54 @@ describe("hosted source delivery-stall notice identity", () => {
 });
 
 describe("hosted source delivery-stall notice materialization", () => {
+  it.each(["connected", "error"] as const)("offers help once for a WHOOP %s silence episode", async (status) => {
+    const input = {
+      ...BASE_INPUT,
+      sourceProviderSlug: "whoop_v2",
+      status,
+      lastErrorCode: status === "error" ? "TOKEN_REFRESH_FAILED" : null,
+    };
+    const candidate = resolveHostedSourceDeliveryStallNoticeCandidate(input);
+    if (!candidate) throw new Error("Expected WHOOP recovery candidate");
+    const connected = resolveHostedSourceDeliveryStallNoticeCandidate({ ...input, status: "connected", lastErrorCode: null });
+    expect(candidate).toEqual(connected);
+    mocks.findDeviceConnectionSource.mockResolvedValue({
+      ...input,
+      connection: { status: "active", userId: "member-1" },
+      lastDataAt: new Date(input.lastDataAt),
+    });
+
+    await materializeHostedSourceDeliveryStallNotice({ candidate, now: input.now, userId: "member-1" });
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).toHaveBeenCalledOnce();
+    const text = mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mock.calls[0]?.[0]?.envelope.notification.responsePolicy.text;
+    expect(text).toMatch(/WHOOP.*\?.*wait 5–30 days or stop these check-ins/su);
+    expect(text).not.toMatch(/reconnect|expired|revoked|charged|Junction|OAuth/iu);
+
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue({ ...MAILBOX_ITEM, consumedAt: input.now });
+    await materializeHostedSourceDeliveryStallNotice({ candidate, now: input.now, userId: "member-1" });
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { status: "disconnected", lastErrorCode: "TOKEN_REFRESH_FAILED" },
+    { status: "error", lastErrorCode: "PROVIDER_TIMEOUT" },
+    { status: "error", lastErrorCode: null },
+    { status: "connected", lastErrorCode: null, lastDataAt: new Date(BASE_INPUT.now) },
+    { status: "error", lastErrorCode: "TOKEN_REFRESH_FAILED", lifecycleEpoch: 5 },
+  ])("revalidates WHOOP before queuing: %j", async (change) => {
+    const input = { ...BASE_INPUT, sourceProviderSlug: "whoop_v2", status: "error" as const, lastErrorCode: "TOKEN_REFRESH_FAILED" };
+    const candidate = resolveHostedSourceDeliveryStallNoticeCandidate(input);
+    if (!candidate) throw new Error("Expected WHOOP recovery candidate");
+    mocks.findDeviceConnectionSource.mockResolvedValue({
+      ...input,
+      connection: { status: "active", userId: "member-1" },
+      lastDataAt: new Date(input.lastDataAt),
+      ...change,
+    });
+    await materializeHostedSourceDeliveryStallNotice({ candidate, now: input.now, userId: "member-1" });
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).not.toHaveBeenCalled();
+  });
+
   it.each(["eligible", "opted-out", "recovered", "group", "already-sent"])(
     "handles an Apple Health silence episode: %s",
     async (scenario) => {

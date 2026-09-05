@@ -271,6 +271,8 @@ export type AssistantHostedAutomationToolResponse =
       action: 'inspect'
       automationId: string
       contextReferences?: readonly AutomationContextReference[]
+      instructions?: string
+      title?: string
       effectiveTimeZone: string | null
       lookupId: string
       occurrenceProjection: AssistantAutomationOccurrenceProjection

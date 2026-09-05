@@ -135,6 +135,27 @@ test("Garmin recovery notices start after five days of established delivery sile
   }), true);
 });
 
+test("WHOOP recovery uses established delivery silence, including explicit refresh failure", () => {
+  const input = {
+    lastDataAt: "2030-02-01T00:00:00.000Z",
+    now: "2030-02-06T00:00:00.000Z",
+    sourceProviderSlug: "whoop_v2",
+    status: "connected",
+  };
+  assert.equal(isPushPrimarySourceProvider(input.sourceProviderSlug), false);
+  assert.equal(isSourceRecoveryNoticeEligible(input), true);
+  assert.equal(isSourceRecoveryNoticeEligible({ ...input, now: "2030-02-05T23:59:59.999Z" }), false);
+  assert.equal(isSourceRecoveryNoticeEligible({ ...input, silentHours: 240 }), false);
+  assert.equal(isSourceRecoveryNoticeEligible({ ...input, lastDataAt: null }), false);
+  assert.equal(isSourceRecoveryNoticeEligible({ ...input, status: "error", lastErrorCode: "TOKEN_REFRESH_FAILED" }), true);
+  assert.equal(isSourceRecoveryNoticeEligible({ ...input, status: "error", lastErrorCode: "token_refresh_failed" }), true);
+  for (const status of ["error", "unavailable", "disconnected"]) {
+    assert.equal(isSourceRecoveryNoticeEligible({ ...input, status }), false);
+  }
+  assert.equal(isSourceRecoveryNoticeEligible({ ...input, status: "error", lastErrorCode: "PROVIDER_TIMEOUT" }), false);
+  assert.equal(isSourceRecoveryNoticeEligible({ ...input, sourceProviderSlug: "garmin", status: "error", lastErrorCode: "TOKEN_REFRESH_FAILED" }), false);
+});
+
 test("Apple Health recovery starts at three days without changing push-primary classification", () => {
   assert.equal(readSourceRecoveryNoticePolicy(" APPLE_HEALTH_KIT ")?.silentHours, 72);
   assert.equal(isPushPrimarySourceProvider("apple_health_kit"), false);

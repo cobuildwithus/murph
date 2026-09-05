@@ -1064,6 +1064,47 @@ while :; do sleep 0.01; done
     }
   });
 
+  it.each(["tar", "zstd"] as const)("preserves durable state when restore %s exits early", async (label) => {
+    const root = await mkdtemp(path.join(tmpdir(), "snapshot-restore-process-failure-"));
+    const source = path.join(root, "source");
+    const durableRoot = path.join(root, "restored", "durable");
+    const dataKey = encodeHostedWorkspaceSnapshotV2DataKey(Buffer.alloc(32, 7));
+    const originalPath = process.env.PATH;
+    try {
+      await mkdir(source, { recursive: true });
+      await mkdir(durableRoot, { recursive: true });
+      await writeFile(path.join(source, "note.md"), "synthetic replacement\n");
+      await writeFile(path.join(durableRoot, "existing.md"), "preserve this workspace\n");
+      const snapshotId = "snapshot_process_failure";
+      const objectKey = "users/hsn_test/workspace-snapshots/snapshot_process_failure.snapshot.enc";
+      const userId = "member_synthetic";
+      const aad = buildHostedWorkspaceSnapshotV2Aad({ objectKey, snapshotId, userId });
+      const encrypted = await createEncryptedWorkspaceSnapshotFile({
+        aad, dataKey, durableRoot: source,
+        archiveEntries: [{ absolutePath: path.join(source, "note.md"), archivePath: "note.md", kind: "file" }],
+        ivBase64: "AQIDBAUGBwgJCgsM", maxEncryptedBytes: 1024 * 1024,
+        outputDir: path.join(root, "archive"),
+      });
+      const bin = path.join(root, "bin");
+      await mkdir(bin);
+      await writeFile(path.join(bin, label), "#!/bin/sh\nprintf 'synthetic process failure\\n' >&2\nexit 17\n", { mode: 0o700 });
+      process.env.PATH = `${bin}${path.delimiter}${originalPath ?? ""}`;
+      const error = await restoreEncryptedWorkspaceSnapshot({
+        dataKey, durableRoot, encryptedFilePath: encrypted.encryptedFilePath,
+        ref: createHostedWorkspaceSnapshotTestRef({ aad, encrypted, objectKey, snapshotId, userId }),
+      }).catch((failure: unknown) => failure);
+      // The peer can also fail with a broken pipe; either process diagnostic
+      // must accompany failure without replacing the durable workspace.
+      expect(readHostedWorkspaceSnapshotProcessFailureDiagnostics(error)).not.toBeNull();
+      await expect(readFile(path.join(durableRoot, "existing.md"), "utf8")).resolves.toBe("preserve this workspace\n");
+      await expect(access(path.join(durableRoot, "note.md"))).rejects.toThrow();
+      await expect(readdir(path.dirname(durableRoot))).resolves.toEqual(["durable"]);
+    } finally {
+      process.env.PATH = originalPath;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("rejects encrypted stream auth failures without replacing durable state", async () => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "workspace-snapshot-local-stream-auth-test-"));
     const sourceDurableRoot = path.join(tempRoot, "source", "durable");
