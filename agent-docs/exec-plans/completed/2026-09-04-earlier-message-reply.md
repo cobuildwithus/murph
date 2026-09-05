@@ -1,6 +1,6 @@
 # Preserve earlier accepted native reply targets
 
-Status: active
+Status: completed
 Created: 2026-09-04
 Updated: 2026-09-05
 
@@ -101,5 +101,15 @@ Updated: 2026-09-05
 - `MURPH_VITEST_MAX_WORKERS=1 MURPH_APP_VITEST_MAX_WORKERS=1 pnpm --dir
   apps/web test -- changelog-page.test.tsx`: nine server-rendering tests passed.
 - Current-main merge-tree proof is clean; no base rebase was needed.
-- Remaining: Web typecheck, exact-head final ReviewGPT and required CI, then
-  parent completion review.
+- `pnpm --dir apps/web typecheck`: passed after the normal device-syncd build
+  prerequisite supplied its missing declaration. No source correction was needed.
+- Final ReviewGPT round 1: PASS on immutable candidate
+  `c7247d9b18c61e3fa30aed7fab2eae1579309878`. The configured model, response
+  hashes, committed-turn association, exact head and completion marker all
+  validate; recorded send-to-capture elapsed time was 637.346 seconds. The
+  reviewer found no qualifying issue and accurately separated synthetic route
+  proof from the real-model selection fixture and untested physical rendering.
+- Parent final review passed with zero findings. Implementation and review are
+  complete. Final documentation-head CI remains tracked on PR 2882 and must
+  pass before the overall PR handoff; merge and deployment remain out of scope.
+Completed: 2026-09-05
