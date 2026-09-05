@@ -19,3 +19,10 @@ Derive a bounded inspection from the existing runtime owner, ten newest retained
 ## Verification
 
 Pending focused regression, relevant typechecks, complexity guard, candidate review, exact-head CI and final ReviewGPT.
+
+## Candidate evidence
+
+- Production owner regressions and focused real-Codex journey pass; synthetic reply and exact effects reviewed Ready.
+- Relevant package checks and complexity guard pass. Web preparation requires the normal declared device-syncd package build in a fresh checkout.
+- Content-only changelog archive SSR coverage passes; release provenance is bound to this PR.
+- Remaining completion gates: final exact-head ReviewGPT, required CI and parent final review. No merge or deployment authorized.

@@ -11,7 +11,9 @@
     "relevanceTags": [
       "reminders"
     ],
-    "sourcePullRequests": [],
+    "sourcePullRequests": [
+      2885
+    ],
     "tryIt": {
       "label": "Ask Murph",
       "prompt": "What happened to my last reminder?"
