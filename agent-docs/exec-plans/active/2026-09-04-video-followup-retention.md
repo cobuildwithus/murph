@@ -55,8 +55,8 @@ graft index exists in this checkout. Direct scoped source inspection was used.
   package builds passed. Changelog rendering: 9 tests passed.
 - Native scripted Responses capture, identical direct/group fixtures, normalized
   temporary paths and opaque native identifiers, GPT-5 Codex o200k_base encoding:
-  direct 25,988 -> 26,021 tokens (+33; +0.127%), 120,109 -> 120,305 UTF-8 bytes;
-  group 21,767 -> 21,800 tokens (+33; +0.152%), 100,804 -> 101,000 bytes.
+  direct 26,070 -> 26,103 tokens (+33; +0.127%), 120,710 -> 120,906 UTF-8 bytes;
+  group 21,979 -> 22,012 tokens (+33; +0.150%), 102,099 -> 102,295 bytes.
   Capture includes the complete provider-visible input after native tool
   assembly; request transport/cache/client metadata is excluded. Comparison
   proved only the video tool description and message-ref guidance differ.
@@ -69,3 +69,16 @@ graft index exists in this checkout. Direct scoped source inspection was used.
   call, and a correct concise answer. Product UX verdict: Ready. No assertion
   was weakened. The focused command is `pnpm test:assistant:live -- --test
   "analyzes a retained video"`, model `gpt-5.6-terra`, local subscription auth.
+
+## Reconciled candidate
+
+PR #2874 is draft. The upstream merge preserves Gemini 3.8 Flash and its
+best-effort usage recording. The compact upstream index replaces obsolete
+narrative duplication. An inherited unrelated local friction entry is excluded
+from this PR; its original checkout and commit are preserved.
+
+On the reconciled candidate, video authority (39), retention (29), hosted
+snapshot and idle maintenance (90), and changelog rendering (9) tests passed.
+All three affected package typechecks passed. The same two-turn live journey
+passed with one successful analysis call and a correct answer. The refreshed
+provider-input measurements above differ only in the video tool guidance.

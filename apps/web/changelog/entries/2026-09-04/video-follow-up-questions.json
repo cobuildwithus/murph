@@ -9,6 +9,6 @@
     "summary": "Ask another question about a video from earlier in the same conversation without sending it again.",
     "details": "Videos now follow the same 14-day media retention window as images and audio. Follow-up analysis works in private chats and supported iMessage and Telegram groups. Clips already removed under the earlier policy need to be sent again.",
     "relevanceTags": ["assistant", "video"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [2874]
   }
 }
