@@ -1,6 +1,8 @@
 import "server-only";
 
-import type { PrismaClient } from "@prisma/client";
+import { lockHostedMemberRow } from "../hosted-onboarding/shared";
+
+import { Prisma, type PrismaClient } from "@prisma/client";
 import type { CloudflareHostedControlClient } from "@murphai/cloudflare-hosted-control/client";
 
 import { revokeAllMealPhotoCaptureEnrollmentsForMember } from "../device-sync/meal-photo-capture";
@@ -53,6 +55,35 @@ export async function cleanupWithdrawnHostedHealthDataConsent(input: {
   prisma: PrismaClient;
   request: Request;
 }): Promise<void> {
+  await runWithdrawalCleanup("clinical records", async () => {
+    await input.prisma.$transaction(async (tx) => {
+      await lockHostedMemberRow(tx, input.memberId);
+      if (await readHostedHealthDataConsentState({ memberId: input.memberId, prisma: tx }) !== "revoked") return;
+      const now = new Date();
+      await tx.clinicalRecordConnection.updateMany({
+        where: { memberId: input.memberId },
+        data: {
+          accessTokenEncrypted: null,
+          accessTokenExpiresAt: null,
+          patientIdEncrypted: null,
+          disconnectedAt: now,
+          status: "disconnected",
+        },
+      });
+      await tx.clinicalRecordRetrievalRun.updateMany({
+        where: {
+          memberId: input.memberId,
+          OR: [
+            { completedAt: null },
+            { status: "needs_reauth", outcomeCountsJson: { equals: Prisma.DbNull } },
+          ],
+        },
+        data: { completedAt: now, status: "canceled" },
+      });
+      await tx.clinicalRecordOauthSession.deleteMany({ where: { memberId: input.memberId } });
+      await tx.clinicalRecordConnectIntent.deleteMany({ where: { memberId: input.memberId } });
+    });
+  });
   await runWithdrawalCleanup("device connections", async () => {
     await disconnectAllHostedDeviceSyncConnectionsForUser({
       request: input.request,

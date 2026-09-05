@@ -509,44 +509,29 @@ Last verified: 2026-09-04
 
 ## Runtime Expectations
 
-- Cloudflare standby allocation is an optional one-slot optimization, not a
-  scheduler. `off` is the source-controlled default, `shadow` maintains and
-  re-proves one current-release ENAM slot without allocating it, and `allocate`
-  offers one 250 ms claim/bind deadline to fence-free `default` work from
-  authenticated Web-direct ingress or an authenticated request carrying
-  `conversationWorkPending: true`. Temporal derives that positive-only fact
-  from fresh admitted conversation lag on every attempt. System-only work,
-  scheduled default work, and provider/runtime wakes without conversation lag
-  keep the ordinary exact-user target. After foreground preemption has cleared an
-  exact-user background fence, the trusted foreground replacement may claim
-  the ready standby instead of reusing the child while it shuts down. A miss
-  before slot ownership uses the same exact-user fallback; an ambiguous bind
-  after the per-member stop target is durably reserved retries that exact
-  target instead of risking two live containers. Pending targets are reconciled
-  before fresh-claim eligibility. A claimed slot counts as retained only when
-  its existing container owner proves explicit native warmth while validating
-  the exact slot, release, and member in one bounded RPC; a durable binding
-  alone never authorizes reuse. The warm proof renews the handoff window.
-  Explicit stop or an exact prior-release binding uses the same one-way
-  transition (`unbound` to `bound` to `retiring` to `retired`), and `UserRunner`
-  clears the exact stop target only after retirement settles. Only then may the
-  same eligible trusted foreground request attempt one fresh claim. Unknown
-  liveness, foreign or contradictory identity, and failed retirement keep the
-  old target assigned and start no second container. In `allocate` mode the
-  standby coordinator is the only shell-prewarm owner; the exact-user prewarm
-  hint is skipped so it cannot reserve a competing target before a fresh claim.
-  The ordinary exact-user start remains the fallback after a claim miss.
-  Every accepted fresh start records the bounded standby allocation outcome,
-  exact reason, and elapsed milliseconds in the existing latency phase
-  breakdown. The same metadata-only fields are emitted immediately in the
-  Worker structured log, including starts that exhaust the caller response
-  budget before an accepted runtime invocation exists.
-  A coordinator transaction admits at most one winner, then replacement
-  provisioning runs under `waitUntil`; alarms re-prove readiness, retry failed
-  retirement, expire unbound claim tombstones, and drain stale releases. A
-  claimed slot is never rebound or returned to ready; group conversations are
-  not lifecycle owners because allocation remains per member. Mode `off` retires
-  only coordinator-owned slots and never interrupts bound member work.
+- Cloudflare ready inventory is a bounded allocation optimization within the
+  unified runner fleet. `off` is the source default; `shadow` maintains the
+  configured current-release global inventory, and `allocate` offers it only
+  to authenticated foreground conversation work. The ready target defaults to
+  two and is bounded to 0–32. Background-only work never claims inventory;
+  member-owned warm reuse and fresh cold allocation share the normal lifecycle.
+  Claims atomically remove one pristine slot. Refill counts only ready and
+  provisioning slots, runs with bounded parallelism, and does not serialize
+  new capacity behind abandoned-handoff cleanup. Durable recovery is scheduled
+  before asynchronous preparation; coalesced maintenance and staggered reproof
+  avoid withdrawing the entire ready inventory together. Cleanup batches are
+  indexed and bounded, with deadlines and retry fairness. Late preparation
+  cannot republish a slot after its coordinator has drained or retired it.
+  `UserRunner` reserves the exact target before binding. Pending targets reconcile
+  before new allocation, so ambiguous bind or stop results never open a second
+  execution owner. Reuse requires exact identity and native warmth in one bounded
+  container RPC; a bound row alone is insufficient. The one-way lifecycle moves
+  from unbound to bound to retiring to retired, with no cross-member recycling.
+  Foreign or contradictory identity and unsettled retirement retain the exact
+  stop target for retry. Legacy references keep their original namespace until
+  safely retired. Mode `off` drains only coordinator-owned inventory and does
+  not interrupt bound member work. Allocation outcome, reason, and duration remain
+  metadata in the existing latency phase breakdown and immediate Worker log.
 - Initial onboarding has one Postgres completion owner across website and
   native clients. Existing members are backfilled complete. During the
   migration-first rolling deploy, a temporary database default also completes
@@ -833,8 +818,7 @@ Last verified: 2026-09-04
   provider payload contains one non-empty text part. Source-part cardinality is
   preserved rather than deduplicated by type, so two text parts cannot enter
   the fast path after their text is joined. Web then runs one bounded
-  tool-free Murph reply generation beside the admission classifier, enrollment,
-  and shell prewarm. After the planner converges and before any fallback side
+  tool-free Murph reply generation beside the admission classifier and enrollment. After the planner converges and before any fallback side
   effect, only an exact model-approved active direct wake retains that claim for
   Web delivery; every other successfully planned outcome marks the same row
   skipped. A caught planning failure also skips an attempted row before
@@ -919,10 +903,15 @@ Last verified: 2026-09-04
 - Short-lived connected-app, sensitive-action, device-connect, device OAuth,
   Clinical Records connect, and Clinical Records OAuth rows never trigger a
   global expiry sweep from foreground creation or provider admission. Exact
-  reads and consumes fail closed when the addressed row is expired; exact OAuth
-  consumers lock their addressed state row before replay classification and
-  consume, so retention skips a live consumer instead of fabricating replay
-  evidence. The hourly retention owner owns backlog deletion. Started
+  reads and consumes fail closed when the addressed row is expired. A
+  member-bound device OAuth consumer reads only its owner hint before the
+  transaction, locks that member before the exact state row, and revalidates
+  the owner under both locks. Credential replacement and account deletion use
+  the same member-before-state order; unowned device state and Clinical OAuth
+  consumers require only their exact state lock. If retention wins an expired
+  unconsumed device row before its callback obtains that lock, the callback
+  fails missing without replay evidence or provider work. The hourly retention
+  owner owns backlog deletion. Started
   connected-app, device-connect, and Clinical Records intents retain their
   exact completion row for one bounded 30-minute grace past link expiry.
   Consumed device OAuth claims remain with exact callback finalization and
@@ -943,6 +932,13 @@ Last verified: 2026-09-04
   sensitive-action lane has a partial expiry-and-token index so durable
   approval history cannot enlarge its transient claim scan. Approval-backed
   rows remain with their approval owner.
+- Mailbox content retirement keeps ciphertext retirement, policy non-reply
+  recording, and contiguous conversation-floor advancement in one bounded
+  statement. For each member touched by the at-most-5,000-row retired set, the
+  floor owner uses the existing member/lane/sequence index to read only the
+  first unconsumed blocker above the current floor. It excludes exact rows
+  retired by the same statement and never aggregates the member's remaining
+  pending backlog.
 - Account deletion must not discard its only external-cleanup owner. The
   canonical account transaction persists the KMS-encrypted, foreign-key-free
   receipt before deleting the member. The existing hourly retention sweep
@@ -1685,8 +1681,25 @@ Last verified: 2026-09-04
   It then compare-and-sets the marker and deletes credential-scoped payloads
   set-wise in that transaction. Reconnect and acknowledgement therefore both
   lock the dirty marker before touching payload rows.
-  A larger nullable backlog fails retryably until runtime acknowledgement
-  reduces it; classification may never run before the consent fence.
+  A larger nullable backlog commits only its bounded classification annotations
+  before the existing reconnect retry. Connection credentials and epoch, marker
+  reset, payload deletion and OAuth claim resolution wait until classification
+  is complete. Exhausting the request retry budget returns the existing retryable
+  error with annotation progress retained for the next request. The OAuth
+  callback must not run failed-setup replacement cleanup for this outcome:
+  the old connection remains intact and the exact consumed claim retains
+  unresolved provider authority behind the existing replay/recovery fence.
+  Every pass reacquires authority and consent; classification never precedes
+  that fence.
+- Connection upsert prepares its device-domain encryption root outside the
+  member transaction, after advisory member and health-consent admission. The
+  transaction repeats admission under the member lock and retains exact
+  provider-application, connection ownership and refresh-lease checks. At the
+  credential-write boundary it commits/revalidates the exact prepared root and
+  seals tokens and account identity locally; KMS never participates in those
+  credential writes while locks are held. A competing root winner retries via
+  the existing bounded upsert owner with a fresh attempt-scoped cache. No
+  caller-supplied ciphertext, new key owner or cross-request cache is added.
 - Queue-enabled provider webhooks verify once, freeze a versioned prepared
   event, and encrypt before any Postgres read. Raw provider signature headers
   and payload bytes do not enter Queue state. The prepared event enters one
@@ -1702,6 +1715,11 @@ Last verified: 2026-09-04
   instant. Only `accepted` and `duplicate` results ack one Queue
   message; all failed, missing, malformed, tampered, ambiguous, or unavailable
   results retain only that encrypted message for retry and DLQ recovery.
+  Batch completion logs distinguish source-readiness failures with bounded
+  reason counts derived only from the admission owners' fixed messages.
+  Unknown messages map to `unclassified`; logs retain no exception message,
+  provider payload, or event/account identity. These counters do not change
+  admission dispositions or create another retry owner.
   Current provider registration, connection epoch/status, consent, source
   lifecycle, and provider-application authority are revalidated at admission.
   When an authenticated canonical Junction source attribution targets an active
@@ -1914,6 +1932,10 @@ Last verified: 2026-09-04
   `whoop`, but admission uses the Junction `whoop_v2` lifecycle source. Resume,
   omitted intent, stale
   events, and background work never clear the source fence.
+  SDK sign-in chooses its provider connection from a limit-plus-one metadata
+  projection of id, lifecycle status, and setup phase. Selection never opens
+  credential ciphertext; connect and resume mutation owners still revalidate
+  the exact selected connection and source authority.
 - Personal Patterns operator email is terminal-state only. A failed cron
   attempt remains silent while the finalized job has a scheduled retry. Web
   treats an absent retry disposition from an older runner as non-terminal, so
@@ -1958,7 +1980,10 @@ Last verified: 2026-09-04
   error-code-independent stalls. Conversation rows with a non-null
   `consumed_at` are terminal and are excluded before both head selection and the
   lane's `COUNT(*) OVER()`; system-lane selection remains unchanged. A system
-  head ages from its accepted mailbox creation time. Import and unrelated
+  head ages from its accepted mailbox creation time.
+  Lane high-water reads select only sequence and update time; they never fetch
+  inline or externalized mailbox ciphertext.
+  Import and unrelated
   checkpoint or wake changes cannot reset that clock. The independent device
   and assistant wake projections remain scheduler inputs, not per-item progress
   evidence. Advancing the canonical handling frontier exposes the next live
@@ -2211,7 +2236,16 @@ Last verified: 2026-09-04
   an active purchase and map a different target to status/cancel-only recovery.
   The server projects a departed Family beneficiary as status/cancel-only and
   does not decrypt or serialize its Checkout URL, including when membership
-  changes while a Stripe request is in flight.
+  changes while a Stripe request is in flight. Stripe Checkout expiry chooses
+  the frozen Family owner at its outer transaction boundary before locking a
+  distinct beneficiary, then revalidates purchase ownership and reconciliation
+  version under those locks. Choosing owner-first only inside a nested release
+  helper cannot reorder a beneficiary lock already acquired by its caller.
+  Detached-payer replay and financial events retain beneficiary ownership.
+  Family admission and terminal reservation release acquire the owner member
+  before a distinct beneficiary,
+  matching subscription reconciliation's owner-then-roster order; the separate
+  hosted-group sponsorship ledger keeps beneficiary-first ordering.
 - Usage-credit fulfillment reuses the Stripe event receipt as its retry owner.
   It verifies live one-time payment state, then appends the unique grant and
   updates the beneficiary balance/version projection in one locked
@@ -2683,14 +2717,21 @@ Last verified: 2026-09-04
   replaced stale claimant from double-counting, settling, or releasing its
   successor. Completed recovery replays remain bounded and charged without
   incrementing logical page progress. Credential-version compare and swap
-  prevents stale refresh failures from clearing a newer token. Preemption
-  requeues the same run and preserves page progress. The initial backend lane
-  permits one retrieval generation per member/provider connection; retry,
-  reconnect, and refresh remain closed until immutable raw references have a
-  bounded retention lifecycle. The existing Temporal recovery schedule's
+  prevents stale authorization failures from clearing a newer token. Preemption
+  requeues the same run and preserves page progress. Repeat imports reuse the same source with a new generation only after the
+  previous run is finalized. Eight immutable snapshots per source and twenty
+  sources per member bound retained evidence while preserving all references.
+  The existing Temporal recovery schedule's
   shared mailbox handoff sweep may select at most one exact pending item per
   user; a Clinical Records candidate must be the unconsumed wake for an active
   queued generation. It creates no replacement work or generation.
+- Later page/byte/resource bounds retain validated completed slices and exclude
+  the unfinished slice without refunding historical charges. Meaningful search
+  warnings mark clinical coverage incomplete even after transport completion.
+  Partial received-page counts may be below Web served counts, never above.
+  Same-generation saved counts can finalize an authorization-ended run without
+  restoring access. Permanent outcome conflicts terminate through the existing
+  mailbox owner; transient failures retain their normal retry.
 - Clinical provider calls use manual redirects, 20-second FHIR timeouts,
   15-second token timeouts, bounded streaming reads, 5 MiB/page, 500 provider
   fetch attempts, 32 MiB charged egress/run, and exact-family pagination. The
@@ -2728,7 +2769,11 @@ Last verified: 2026-09-04
   cron and its UTC-date upsert; it has no second scheduler or retry owner. Each
   run computes the completed prior-day and trailing-seven-day distinct-sender
   windows from direct and attributable group messages by durable mailbox receipt
-  time, not provider event time. A provider delivery that arrives after capture
+  time, not provider event time. Retained group-message ciphertext is selected
+  in stable `(created_at, id)` pages of at most 100 rows and decoded one page at
+  a time under the request-local root cache; the decoded attribution evidence
+  may then be combined across the bounded 14- or 30-day reporting window. A
+  provider delivery that arrives after capture
   therefore belongs to the open receipt window instead of mutating a closed day.
   A same-date rerun may
   replace the aggregate, but retired group evidence makes the affected value

@@ -206,6 +206,9 @@ import {
   hostedUsageCreditPolicySupportsSavedCardTarget,
 } from "@/src/lib/hosted-onboarding/usage-credit-offers";
 import {
+  readHostedUsageCreditPurchaseMemberLockOrder,
+} from "@/src/lib/hosted-onboarding/usage-credit-purchase-reservation-lock";
+import {
   HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE,
   HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_MESSAGE,
 } from "@/src/lib/hosted-onboarding/usage-credit-capacity-conflict";
@@ -215,6 +218,29 @@ const GROUP_REFILL_RECOVERY_NOW = new Date("2026-08-01T12:00:00.000Z");
 const LAST_STRIPE_EVENT_AT = new Date("2026-07-16T16:59:00.000Z");
 const MEMBER_ID = "hbm_member123";
 const CLIENT_REQUEST_KEY = "request_key_123456";
+
+describe("usage-credit purchase member lock order", () => {
+  it("recognizes only a distinct Family return marker as owner-first", () => {
+    expect(readHostedUsageCreditPurchaseMemberLockOrder({
+      beneficiaryMemberId: "hbm_familymember1",
+      checkoutSuccessUrl:
+        "https://example.test/settings?usageCheckout=success&usageFamily=hbag_abcdefghijklmnop&usageMember=hbm_familymember1&usagePurchase=hucp_abcdefghijklmnop#family",
+      payerMemberId: MEMBER_ID,
+    })).toBe("payer_first");
+    expect(readHostedUsageCreditPurchaseMemberLockOrder({
+      beneficiaryMemberId: "member_group_runtime",
+      checkoutSuccessUrl:
+        "https://example.test/groups/fund/group_join_code_1234?usageCheckout=success&usagePurchase=hucp_abcdefghijklmnop",
+      payerMemberId: MEMBER_ID,
+    })).toBe("beneficiary_first");
+    expect(readHostedUsageCreditPurchaseMemberLockOrder({
+      beneficiaryMemberId: MEMBER_ID,
+      checkoutSuccessUrl:
+        "https://example.test/settings?usageCheckout=success&usageFamily=hbag_abcdefghijklmnop&usageMember=hbm_familymember1&usagePurchase=hucp_abcdefghijklmnop#family",
+      payerMemberId: MEMBER_ID,
+    })).toBe("beneficiary_first");
+  });
+});
 
 function buildPersonalSavedCardBillingSnapshot(input?: {
   billingStatus?: "active" | "canceled";
@@ -565,7 +591,7 @@ describe("parseHostedGroupSponsorshipCheckoutRequest", () => {
 });
 
 describe("createHostedUsageCreditCheckout", () => {
-  it("admits a new Family checkout with 31 combined occupied slots under beneficiary-first locking", async () => {
+  it("admits a new Family checkout with 31 combined occupied slots under owner-first locking", async () => {
     const usageCreditEvents: string[] = [];
     const fake = createFakePrisma({
       occupiedUsageCreditSlotCount: 31,
@@ -588,8 +614,8 @@ describe("createHostedUsageCreditCheckout", () => {
     })).resolves.toMatchObject({ status: "checkout_open" });
 
     expect(usageCreditEvents).toEqual([
-      "beneficiary-lock",
       "payer-lock",
+      "beneficiary-lock",
       "capacity-read",
       "purchase-create",
     ]);
@@ -649,8 +675,8 @@ describe("createHostedUsageCreditCheckout", () => {
 
     expect(released).toMatchObject({ status: "expired" });
     expect(usageCreditEvents).toEqual([
-      "beneficiary-lock",
       `payer-lock:${MEMBER_ID}`,
+      "beneficiary-lock",
       `payer-lock:${MEMBER_ID}`,
     ]);
     expect(fake.purchases.get(released.purchaseId)).toMatchObject({

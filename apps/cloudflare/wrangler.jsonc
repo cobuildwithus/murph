@@ -45,12 +45,13 @@
         "memory_mib": 6144,
         "disk_mb": 6000
       },
-      "max_instances": 1000,
+      // Fresh-install default. Existing fleets must reserve legacy capacity
+      // until both persisted legacy references and running instances drain.
+      "max_instances": 0,
       "constraints": {
         "regions": ["ENAM"]
       },
       "rollout_active_grace_period": 300,
-      "rollout_step_percentage": [10, 25, 50, 100],
       "ssh": { "enabled": false }
     }
   ],
@@ -200,6 +201,7 @@
   // `gh variable list --env production` before assuming a value here is live.
   "vars": {
     "HOSTED_EXECUTION_STANDBY_MODE": "off",
+    "HOSTED_EXECUTION_STANDBY_TARGET": "2",
     "HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION": "projects/.../cryptoKeyVersions/1",
     "HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM": "-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----",
     "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID": "cloudflare-automation:v1",

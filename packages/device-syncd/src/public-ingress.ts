@@ -1394,6 +1394,7 @@ export class DeviceSyncPublicIngress {
         }
       } else if (connection) {
         try {
+          assertOAuthConnectionCleanupAllowed(error, connectionPersisted);
           if (connectionPersisted && account) {
             await this.cleanupPersistedOAuthConnection(
               provider,
@@ -2296,6 +2297,19 @@ export class DeviceSyncPublicIngress {
       });
       return null;
     }
+  }
+}
+
+function assertOAuthConnectionCleanupAllowed(error: unknown, connectionPersisted: boolean): void {
+  if (
+    !connectionPersisted
+    && isDeviceSyncError(error)
+    && error.code === "HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_CLASSIFICATION_PENDING"
+  ) {
+    // Only annotations committed. Cleanup replacement could finish the backlog
+    // and revoke the established connection. Keep the exact consumed claim as
+    // unresolved provider authority behind the existing replay/recovery fence.
+    throw error;
   }
 }
 

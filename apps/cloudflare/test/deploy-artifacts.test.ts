@@ -1453,6 +1453,7 @@ export function getGeneratedHealthCommonsProtocolIndexReader() {
       readHostedDeployAutomationEnvironment({
         ...fixture.source,
         CF_CONTAINER_MAX_INSTANCES: "99",
+        CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES: "0",
       }),
     );
 

@@ -109,6 +109,7 @@ import {
 } from "./hosted-runtime-crypto-fixtures";
 import { asWorkerStringEnvironment } from "../src/worker-contracts.ts";
 import { createTestSqlStorage } from "./sql-storage.ts";
+import { RunnerSlotBindingStore } from "../src/runner-slot-binding.ts";
 
 const describe = baseDescribe.sequential;
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -4597,7 +4598,32 @@ function createRuntimeControlRunnerHarness(input: {
     });
     return next;
   });
+  const slotStore = new RunnerSlotBindingStore(createTestSqlStorage());
   const stub: HostedExecutionContainerStubLike = {
+    bindStandbySlot: vi.fn(async (binding) => {
+      slotStore.initialize(binding);
+      const bound = slotStore.bind(binding);
+      return { ...bound, bound: true as const };
+    }),
+    prepareStandbySlot: vi.fn(async () => {
+      throw new Error("Runtime control route tests must not prewarm shared inventory.");
+    }),
+    readStandbySlotBinding: vi.fn(async () => slotStore.read()),
+    readStandbySlotCoordinatorState: vi.fn(async () => {
+      const binding = slotStore.read();
+      return {
+        coordinatorOwned: binding.userId === null,
+        releaseId: binding.releaseId,
+        slotName: binding.slotName,
+        state: binding.state,
+      };
+    }),
+    resolveRetainedStandbySlot: vi.fn(async () => {
+      throw new Error("Runtime control route tests must not reuse an idle target.");
+    }),
+    retireStandbySlot: vi.fn(async () => {
+      throw new Error("Runtime control route tests must not retire a bound target.");
+    }),
     destroyInstance: vi.fn(async () => undefined),
     ensureReadyForProcessing: vi.fn<
       NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>

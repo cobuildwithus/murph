@@ -40,7 +40,6 @@ import {
 import type { HostedExecutionContainerNamespaceLike } from "../runner-container.js";
 import type {
   HostedStandbyCoordinatorNamespaceLike,
-  HostedStandbyRunnerContainerNamespaceLike,
 } from "../standby-runner-contract.js";
 import {
   HOSTED_WEB_CONTROL_FORWARDED_RESPONSE_HEADER,
@@ -174,7 +173,6 @@ export class HostedUserRunner {
     ).runnerContainerNamespace ?? null,
     runtimeRetryAnalytics: WorkerAnalyticsEngineDatasetLike | null = null,
     standbyCoordinatorNamespace: HostedStandbyCoordinatorNamespaceLike | null = null,
-    standbyContainerNamespace: HostedStandbyRunnerContainerNamespaceLike | null = null,
   ) {
     // Keep this first. The schema floor must reject an older Worker before it
     // can construct any service capable of waking a runner or reading a workspace.
@@ -194,7 +192,6 @@ export class HostedUserRunner {
     const runtimeInvocation = new RuntimeInvocationService({
       env,
       runnerContainerNamespace,
-      standbyContainerNamespace,
       runnerRuntimeEnvSource,
       runnerStoreCache: this.runnerStoreCache,
       stateStore: this.stateStore,
@@ -226,7 +223,6 @@ export class HostedUserRunner {
         await this.workspaceSnapshotSessions.readCurrentOwnerHandoff(input),
       runnerRuntimeEnvSource,
       runtimeRetryAnalytics,
-      standbyContainerNamespace,
       standbyCoordinatorNamespace,
       stateStore: this.stateStore,
     });

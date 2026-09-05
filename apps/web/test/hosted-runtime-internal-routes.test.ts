@@ -530,6 +530,65 @@ describe("hosted runtime internal web routes", () => {
     expect(JSON.stringify(payload)).not.toContain("payloadCiphertext");
   });
 
+  it.each([
+    { scenario: "empty conversation batch", item: null, consumedSeq: "0", eligible: false },
+    { scenario: "system-only work", item: { lane: "system" }, consumedSeq: "0", eligible: false },
+    { scenario: "consumed item replay", item: { consumedAt: FIXED_NOW }, consumedSeq: "0", eligible: false },
+    { scenario: "consumed watermark replay", item: {}, consumedSeq: "1", eligible: false },
+    { scenario: "missing payload", item: { payloadInlineCiphertext: null }, consumedSeq: "0", eligible: false },
+    { scenario: "fresh conversation work", item: {}, consumedSeq: "0", eligible: true },
+  ])("only loads sponsorship for usable conversation input: $scenario", async ({ item, consumedSeq, eligible }) => {
+    const runningBit = {
+      expiresAt: "2026-04-27T00:00:00.000Z",
+      publicAlias: null,
+      requestedBit: "Use a nautical greeting.",
+      schema: "murph.group-sponsorship-bit.v1",
+    };
+    const items = item === null ? [] : [{
+      consumedAt: null,
+      createdAt: FIXED_NOW,
+      dedupeKey: "conversation-sponsorship-1",
+      expiresAt: null,
+      id: "mailbox_sponsorship_1",
+      kind: "conversation.message",
+      lane: "conversation",
+      laneSeq: "1",
+      occurredAt: FIXED_NOW,
+      payloadBytes: 64,
+      payloadInlineCiphertext: "cipher_inline_1",
+      payloadRef: null,
+      payloadSchema: "murph.hosted-mailbox-item.v1",
+      updatedAt: FIXED_NOW,
+      userId: "member_routes_1",
+      ...item,
+    }];
+    mocks.fetchHostedRuntimeMailboxProjection.mockResolvedValueOnce({
+      consumedSeqByLane: [{ lane: "conversation", consumedSeq }],
+      items,
+      maxSeqByLane: [{ lane: "conversation", maxSeq: "1" }],
+    });
+    mocks.readHostedActiveGroupRunningBit.mockResolvedValue(runningBit);
+
+    const response = await mailboxFetchRoute.POST(jsonRequest(
+      "/api/internal/hosted-mailbox/fetch",
+      {
+        lanes: [
+          { importedSeq: "0", lane: "conversation" },
+          { importedSeq: "0", lane: "system" },
+        ],
+        limitPerLane: 10,
+        requestId: "request_sponsorship_eligibility",
+      },
+    ));
+    const payload = parseHostedMailboxFetchResponse(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledTimes(eligible ? 1 : 0);
+    expect(mocks.readHostedActiveGroupRunningBit).toHaveBeenCalledTimes(eligible ? 1 : 0);
+    expect(payload.groupRunningBit ?? null).toEqual(eligible ? runningBit : null);
+    expect(payload.items).toHaveLength(items.length);
+  });
+
   it("returns ordinary mailbox work when the optional sponsorship bit is unavailable", async () => {
     mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
       {

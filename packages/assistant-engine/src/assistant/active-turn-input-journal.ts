@@ -401,24 +401,13 @@ export async function appendAssistantAcceptedTurnInputItems(input: {
   })
 }
 
-export async function assertAssistantAcceptedTurnInputAssistantInputEventsExist(
-  input: {
-    journal: AssistantAcceptedTurnInputJournal
-    vault: string
-  },
-): Promise<void> {
-  await assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist({
-    inputs: input.journal.inputs,
-    vault: input.vault,
-  })
-}
-
-export async function assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist(
+export async function readAssistantAcceptedTurnInputEvents(
   input: {
     inputs: readonly AssistantAcceptedTurnInputItemInput[]
     vault: string
   },
-): Promise<void> {
+): Promise<AssistantInputEventRecord[]> {
+  const events: AssistantInputEventRecord[] = []
   for (const item of input.inputs) {
     if (item.source !== 'assistant-input') {
       continue
@@ -452,7 +441,9 @@ export async function assertAssistantAcceptedTurnInputItemInputsAssistantInputEv
       event,
       inputId: item.id,
     })
+    events.push(event)
   }
+  return events
 }
 
 export async function updateAssistantAcceptedTurnInputTranscriptRefs(input: {

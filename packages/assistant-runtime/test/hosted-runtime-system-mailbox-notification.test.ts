@@ -1772,9 +1772,9 @@ describe("hosted system mailbox notification execution context", () => {
     });
   });
 
-  it("records a clinical outcome only after its vault checkpoint is durable", async () => {
+  it.each([null, "CLINICAL_RECORD_OUTCOME_CONFLICT", "CLINICAL_RECORD_OUTCOME_COUNT_MISMATCH", "CLINICAL_RECORD_RUN_STALE"])("settles a durable clinical outcome once (error=%s)", async (errorCode) => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
-    const recordOutcome = vi.fn(async () => undefined);
+    const recordOutcome = vi.fn(async () => { if (errorCode) throw Object.assign(new Error("Outcome rejected"), { code: errorCode }); });
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "assistant.notification.requested:clinical-outcome",
       memberId: "member_123",
@@ -1794,7 +1794,7 @@ describe("hosted system mailbox notification execution context", () => {
       },
       occurredAt: FIXED_NOW,
     });
-    const request = {
+    const request = {retrievalProtocol: "query-slices-v2" as const, retrievalSlices: [{ queryScopeId: "observation", sliceId: "whole" }],
       counts: {
         createdCount: 1,
         executableDecisionCount: 1,
@@ -1861,11 +1861,12 @@ describe("hosted system mailbox notification execution context", () => {
         item: prepared.item,
         runtime,
         vaultRoot: workspace.vaultRoot,
-      })).resolves.toEqual({
-        failed: 0,
+      })).resolves.toMatchObject({
+        failed: errorCode ? 1 : 0,
         nextWakeAt: null,
-        recorded: 1,
+        recorded: errorCode ? 0 : 1,
       });
+      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending).toHaveLength(0);
       expect(recordOutcome).toHaveBeenCalledOnce();
       expect(recordOutcome).toHaveBeenCalledWith(request);
     } finally {
@@ -1876,7 +1877,7 @@ describe("hosted system mailbox notification execution context", () => {
   it("aborts a stalled clinical outcome record and preserves it for retry", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const controller = new AbortController();
-    const request = {
+    const request = {retrievalProtocol: "query-slices-v2" as const, retrievalSlices: [{ queryScopeId: "observation", sliceId: "whole" }],
       counts: {
         createdCount: 0,
         executableDecisionCount: 0,

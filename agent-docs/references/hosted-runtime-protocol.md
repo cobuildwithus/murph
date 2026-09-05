@@ -99,7 +99,11 @@ accepted wake becomes that same positive immediate-recheck edge; a later wake
 is rejected for the existing outer reconciliation owner.
 A failed best-effort signal
 leaves the durable preference intact; the next invocation and the mandatory
-provider-entry revalidation remain the recovery path. The signal carries no
+provider-entry consistency check remain the recovery path. This compares the
+invocation provider with the saved provider; it is not input admission or
+target/audience authorization. Handoff and unavailable settings reads preserve
+accepted work for retry. The warm-wake consistency check precedes mailbox
+prefetch, which can perform usage-denial bookkeeping. The signal carries no
 provider value or credential, and `runtime_recheck_requested` remains a
 facts-read-only signal for its existing callers.
 

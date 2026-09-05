@@ -43,6 +43,31 @@ Docker configuration selects the first candidate plugin directory containing an
 executable `docker-buildx`, so an empty or unusable earlier directory cannot hide
 a later installed Buildx plugin.
 
+### Hot admission benchmark
+
+`pnpm hosted-local e2e hot-admission-latency` measures mailbox acceptance to
+native Codex turn start through the local Web, Temporal, and Docker runtime.
+It uses a deterministic local provider, discards two warm-up messages, and
+requires one running runtime attempt across every measured message. It is
+manual-only and excluded from `e2e all`.
+Each message waits for the preceding assistant pass to finish, so this measures
+new turns on a warm runtime, not steering during an unfinished turn.
+The acceptance anchor is the mailbox row's `created_at`, which uses the database
+transaction-start timestamp. The measured interval includes the remaining
+append-transaction work before the wake handoff.
+
+Set `MURPH_E2E_HOT_ADMISSION_SAMPLES` to choose 3–100 measured messages (default
+10). Set `MURPH_E2E_HOT_ADMISSION_VAULT_DIR` to an already-unpacked, ignored
+local vault directory to compare against the default small synthetic vault.
+Prepare a private copy with scheduled automations paused before running it;
+never commit private fixtures. The harness copies the directory into temporary
+storage and reports only numeric timing summaries. A canonical export does not
+include historical runtime/session state, so document that limitation when
+interpreting the comparison. Local timings do not model production network RTT.
+
+Only use `--no-bundle` when the runner bundle already matches the source being
+measured. Keep provider mode and other benchmark settings equal across runs.
+
 ## External Temporal worker package
 
 Hosted-local keeps Web and Cloudflare in this checkout, but it can start the
