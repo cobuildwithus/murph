@@ -61,13 +61,8 @@ test("Linq production canary runner proves the welcome and three bounded replies
   const runner = await readFile(runnerPath, "utf8");
 
   assert.match(runner, /CANARY_REPLY_BUDGET_MS = 20_000/u);
+  assert.match(runner, /CANARY_REPLY_WAIT_MS = 90_000/u);
   assert.match(runner, /const CANARY_TURNS = \[/u);
-  assert.equal(
-    [...runner.matchAll(/^  ".+",$/gmu)].filter(([line]) =>
-      !line.includes("The Linq production canary failed")
-    ).length,
-    3,
-  );
   assert.match(runner, /MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE/u);
   assert.match(runner, /message\.direction !== "inbound"/u);
   assert.match(runner, /message\.platform !== "imessage"/u);

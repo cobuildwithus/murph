@@ -1837,13 +1837,13 @@ describe('assistant skill assets', () => {
     expect(root).toContain('### 2. Minimal identity')
     expect(root).toContain('Do not preload the stage references.')
     expect(root.replace(/\s+/gu, ' ')).toContain(
-      'persistence reference before handling any foundation answer that adds or confirms canonical context, including an explicit none or negative fact;',
+      'Read `references/persistence-recovery-follow-up.md` for foundation answers that add or confirm canonical context (including none or negative facts),',
     )
     expect(root.replace(/\s+/gu, ' ')).toContain(
       'A vague opener—including bare “Let’s continue” without a visible onboarding referent—and generic saved records—even a goal plus aspiration readiness and all six areas—do not establish onboarding stage.',
     )
     expect(root.replace(/\s+/gu, ' ')).toContain(
-      'This skill may create only the scheduled early-stall check-in defined in `references/persistence-recovery-follow-up.md` and the post-completion first-personal-read one-shot defined in `references/return-launch-completion.md`.',
+      'This skill may create only the scheduled early-stall check-in defined in the injected onboarding instructions and the post-completion first-personal-read one-shot defined in `references/return-launch-completion.md`.',
     )
     for (const movedSection of [
       '## Delegating onboarding work',
@@ -1914,8 +1914,8 @@ describe('assistant skill assets', () => {
         rule: 'Deferring an unanswered checkpoint leaves that checkpoint open.',
       },
       {
-        owner: 'persistence-recovery-follow-up.md',
-        rule: 'Saving the same slug twice converges on one automation, so a duplicate save is harmless, but never save it on a later turn.',
+        owner: 'system-prompt',
+        rule: 'arm only when handling the answer or skip to the bundled identity question actually asked in this conversation, never on a later resume.',
       },
       {
         owner: 'persistence-recovery-follow-up.md',
@@ -2064,9 +2064,7 @@ describe('assistant skill assets', () => {
       'Make one targeted owning read only when the checkpoint needed now is omitted, truncated, or errored in the snapshot.',
     )
     expect(raw).toContain('vault-cli memory show --compact --format json')
-    expect(compact).toContain(
-      'Save optional demographic context to the existing best-fit Identity or Context memory.',
-    )
+    expect(onboardingSystemPrompt).toContain('Identity or Context memory for optional demographics')
     expect(compact).toContain('vault-cli blood-test list --format json')
     expect(compact).toContain(
       'Missing evidence is unresolved unless the visible conversation shows that the user said it was not relevant or explicitly skipped it.',
@@ -2130,51 +2128,19 @@ describe('assistant skill assets', () => {
       'use one delegated child to save that single answer',
     )
     expect(raw).toContain('### 2. Minimal identity')
-    expect(raw).toContain(`For casual tone, use:
-
-\`\`\`text
-hey — what should i call you?
-
-also, how old are you, and are you a guy or a girl?
-\`\`\``)
-    expect(raw).toContain(`For formal tone, use:
-
-\`\`\`text
-What should I call you?
-
-How old are you and what's your gender?
-\`\`\``)
-    expect(raw.toLowerCase()).not.toContain('totally optional')
-    expect(raw).not.toContain("Totally fine if you'd rather not say.")
-    expect(compact).toContain(
-      'Casual tone asks whether they are a guy or a girl. Formal tone asks their gender.',
-    )
-    expect(compact).toContain(
-      'Age and gender remain optional, but do not announce or append that optionality to the question.',
-    )
-    expect(compact).toContain(
-      'Accept a different self-description without correcting or pressing them',
-    )
-    expect(raw).not.toContain('age and relevant sex or gender context')
-    expect(raw).not.toContain("I'll only ask about sex or gender")
-    expect(raw).not.toContain('how do you identify')
-    expect(raw).not.toContain('avoid dumb assumptions')
-    expect(compact).toContain(
-      'Treat this bundled minimal-identity prompt as one onboarding question.',
-    )
-    expect(raw).toContain('If the user gives only a name, continue.')
-    expect(raw).toContain(
-      'What would you most like from your health—something you want to improve, understand, handle, or be able to do?',
-    )
-    expect(compact).toContain(
-      'start the same reply by greeting them by the name they just gave, then give a short two- or three-sentence bridge on how Murph works before the question',
-    )
-    expect(compact).toContain(
-      "You might already know what you want to improve about your health. Following through is often the hard part. That's where I can help.",
-    )
-    expect(compact).toContain(
-      'Do not frame the bridge around getting healthy, as if the user is starting from unhealthy.',
-    )
+    expect(onboardingSystemPrompt).toContain('hey — what should i call you?')
+    expect(onboardingSystemPrompt).toContain("What should I call you? How old are you and what's your gender?")
+    expect(onboardingSystemPrompt).toContain('accept any self-description, partial answer, or skip without pressing')
+    expect(onboardingSystemPrompt).toContain('Do not announce optionality')
+    expect(onboardingSystemPrompt).toContain('Name, age, and gender are one bundled checkpoint')
+    expect(onboardingSystemPrompt).toContain('spawn one fresh one-shot leaf')
+    expect(onboardingSystemPrompt).toContain('Do not wait, poll, repeat the child')
+    expect(onboardingSystemPrompt).toContain('No progress message is needed for this short exchange')
+    expect(onboardingSystemPrompt).toContain('If spawning is unavailable or fails')
+    expect(root).not.toContain('every minimal-identity answer that continues onboarding requires both')
+    expect(persistenceReference).not.toContain('slug: "onboarding-early-stall-check-in"')
+    expect(onboardingSystemPrompt).toContain('What would you most like from your health')
+    expect(onboardingSystemPrompt).toContain("Following through is often the hard part. That's where I can help.")
     expect(raw).toContain('**Change:**')
     expect(raw).toContain('**Understand:**')
     expect(raw).toContain('**Handle:**')
@@ -2732,7 +2698,7 @@ How old are you and what's your gender?
     )
     expect(raw).toContain('--reason user_declined')
     expect(compact).toContain(
-      'Except for the bundled minimal-identity prompt in `../SKILL.md` and the foundation brain-dump memo in `aspiration-foundation-delegation.md`, ask at most one question per reply.',
+      'Except for the bundled minimal-identity prompt in the injected opening instructions and the foundation brain-dump memo in `aspiration-foundation-delegation.md`, ask at most one question per reply.',
     )
     expect(compact).toContain(
       'If the last onboarding question is still unanswered, do not send a different setup question.',

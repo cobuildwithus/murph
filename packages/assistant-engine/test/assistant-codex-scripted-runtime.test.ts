@@ -2472,6 +2472,9 @@ text(result.output);
         },
       },
       {
+        requestIncludes: [
+          'accept any self-description, partial answer, or skip without pressing or inferring missing details.',
+        ],
         text: ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
       },
     )
@@ -2497,7 +2500,7 @@ text(result.output);
       .join('\n')
     expect(toolOutputs).toContain('## Progressive disclosure')
     expect(toolOutputs).toContain(
-      'Never re-ask solely for optional demographics.',
+      'The injected onboarding instructions own the visible opening exchanges:',
     )
     expect(toolOutputs).toContain('"hasPriorSetupContext":false')
     expect(toolOutputs).not.toContain(laterStageMarker)

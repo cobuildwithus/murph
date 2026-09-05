@@ -263,6 +263,12 @@ type HostedLinqCurrentInboundReplyProof = {
 
 const HOSTED_LINQ_CHAT_CLASSIFICATION_TIMEOUT_MS = 1_500;
 
+function isModelAllowedFirstContactAdmission(
+  decision: HostedLinqFirstContactAdmissionDecision | null,
+): boolean {
+  return decision?.kind === "allow" && decision.source === "model";
+}
+
 export async function handleHostedOnboardingLinqWebhook(input: {
   rawBody: string;
   scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
@@ -590,6 +596,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     let instantFirstTurnGeneration:
       Promise<HostedLinqInstantFirstTurnGeneration> | null = null;
     let instantFirstTurnOwnsFinalPlan = false;
+    let instantOpeningContinuation = false;
     let firstContactAdmissionDecision: HostedLinqFirstContactAdmissionDecision | null = null;
     const abandonInstantFirstTurn = async (reason: string): Promise<void> => {
       if (!instantFirstTurnCandidate) {
@@ -616,7 +623,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
             prisma,
           })
         : null;
-      const startInstantFirstTurnGeneration = async (): Promise<void> => {
+      const startInstantFirstTurnGeneration = async (continuationOnly = false): Promise<void> => {
         if (
           instantFirstTurnGeneration
           || !instantFirstTurnCandidate
@@ -633,6 +640,12 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           participantContact: context.participantContact,
         });
         const claim = await claimHostedLinqInstantFirstTurn({
+          ...(continuationOnly ? {
+            continuationMemberId: await resolveHostedLinqDirectPreparationMemberId({
+              event: planningEvent,
+              prisma,
+            }),
+          } : {}),
           linqChatId: context.summary.chatId,
           prisma,
           request,
@@ -640,6 +653,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         if (claim.kind === "unavailable") {
           return;
         }
+        instantOpeningContinuation = claim.openingTone !== undefined;
         const generation = startHostedLinqInstantFirstTurnGeneration({
           claim,
           request,
@@ -804,6 +818,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       if (firstContactAdmissionDecision?.kind === "block") {
         plan = await planAfterBlockedAdmission();
       } else {
+        // Claim before the planner appends input visible to a warm runtime.
+        // The existing ledger fences runtime egress for this exact inbound.
+        await startInstantFirstTurnGeneration(true);
         plan = await runPlan();
       }
 
@@ -989,8 +1006,10 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     }
     instantFirstTurnOwnsFinalPlan = Boolean(
       instantFirstTurnGeneration
-      && firstContactAdmissionDecision?.kind === "allow"
-      && firstContactAdmissionDecision.source === "model"
+      && (
+        instantOpeningContinuation
+        || isModelAllowedFirstContactAdmission(firstContactAdmissionDecision)
+      )
       && plan.wakeHandoffs?.[0],
     );
     if (!instantFirstTurnOwnsFinalPlan) {
