@@ -268,17 +268,16 @@ occurrence date. Ask only for missing identity and amount, expose no meal ids,
 and do not substitute ordinary closeout or a dashboard refusal. This is the sole
 scheduled-question exception; its answer uses the existing-meal recovery above.
 
-6. After inspection, enrichment, read-back, and photo cleanup, first prove the
-   cheap read-only active Goal discovery is complete. Run `vault-cli goal list --status active
-   --limit 200 --format json`. If it returns 200 records, fail closed with the
-   ordinary compact closeout: run no Goal detail reads, perform no Goal or
-   measurement mutation, ask no question, and attach no card. Otherwise, run
-   `vault-cli goal show <goal-id> --format json` for every returned active Goal
-   whose list item reports a nonzero `data.metricTargetsCount`. Do not select
-   detail reads by title, slug, domain, context-snapshot visibility, or the
-   default list prefix. Resolve metric identity, unit, comparator, effective
-   date, conflicts, and the 1,200-kcal boundary only after inspecting that
-   complete detail set. This active-target authority read is separate from any
+6. After inspection, enrichment, read-back, and photo cleanup, run
+   `vault-cli meal totals --from <occurrence-local-date> --to <occurrence-local-date> --resolve-goals --format json`.
+   This query owns the complete active target scan and deterministic rules below;
+   do not repeat goal list/show to re-resolve active authority.
+   Use fresh canonical totals and `goalContext` points. `conflict`, `incompatible`,
+   or `capacity` means ordinary compact closeout, no Goal or measurement
+   mutation, no question, and no card. `ready` still requires the suitability,
+   intent, and meal-completeness gates. Only `missing` permits the existing
+   first-run proposal exception below. Historical compatibility is read-only
+   display authority. This active-target authority read is separate from any
    all-status Goal lookup used to reuse or honor Murph's managed paused or
    abandoned proposal; never substitute that lookup here. If active authority
    is ambiguous, unit-incompatible, comparator-incompatible, or otherwise
@@ -354,11 +353,12 @@ scheduled-question exception; its answer uses the existing-meal recovery above.
    ask no question, perform no Goal or measurement mutation, and use ordinary
    closeout text without a card.
 7. Only when the complete target-authority read in step 6 resolves one
-   unambiguous card-authorizing bundle, run the exact canonical
-   `vault-cli meal totals --from <occurrence-local-date> --to
-   <occurrence-local-date>` read immediately before any response-card
-   attachment; do not reuse an
-   earlier total or calculate nutrition independently. On an interactive card
+   unambiguous card-authorizing bundle, use its fresh canonical totals
+   immediately before any response-card attachment. If a meal or Goal changed
+   after that read, rerun `vault-cli meal totals --from <occurrence-local-date>
+   --to <occurrence-local-date> --resolve-goals --format json` first; otherwise
+   do not repeat the read. Never calculate nutrition independently or reuse
+   totals from an earlier turn. On an interactive card
    request, apply food-journal's selected-date incomplete-meal recovery to
    every saved meal whose nutrition coverage blocks the card, including a
    manual, conversation, provider, or device meal not selected by this

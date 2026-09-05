@@ -65,6 +65,8 @@ import {
 import {
   parsePersonalPatternVocabulary,
   readVaultRawTolerant,
+  resolveMealNutritionGoals,
+  type CanonicalEntity,
 } from '@murphai/query'
 import { showAssistantPersonality } from '@murphai/vault-usecases/preferences'
 import {
@@ -1750,6 +1752,31 @@ describe('onboarding policy read detection', () => {
 })
 
 describe('real Codex live fixture contracts', () => {
+  it('executes canonical single-read nutrition fixtures through the real CLI', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'murph-nutrition-cli-fixture-'))
+    const binDirectory = path.join(root, 'bin')
+    const commandLog = path.join(root, 'commands.log')
+    const vaultRoot = path.join(root, 'vault')
+    const executablePath = path.join(binDirectory, 'vault-cli')
+    try {
+      await mkdir(binDirectory)
+      await writeFile(commandLog, '')
+      await materializeNutritionCardVaultCli({ vaultRoot, executablePath, commandLog,
+        conditionRecovery: 'none', goalScenario: 'rolling-legacy' })
+      const fixture = await readFile(executablePath, 'utf8')
+      expect(fixture).not.toContain('goalContext')
+      expect(fixture).not.toContain(homedir())
+      const result = await execFileAsync(executablePath, ['meal', 'totals', '--from', '2026-07-30', '--to', '2026-07-30', '--resolve-goals', '--format', 'json'], {
+        env: { PATH: process.env.PATH, ...buildNutritionFixtureEnvironment({ vaultRoot, commandLog }) },
+      })
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        mealCount: 3, goalContext: { status: 'ready', compatibility: 'historical-rolling-mean',
+          targets: { calories: { target: 1800 } } }, totals: { calories: { total: 1760, mealCount: 3 } },
+      })
+      expect((await readFile(commandLog, 'utf8')).trim().split('\n')).toHaveLength(1)
+    } finally { await removeRealCodexTemporaryPath(root) }
+  }, 120_000)
+
   it('recognizes both wearable workout-detail option spellings in the compact fixture', async () => {
     const workingDirectory = await mkdtemp(
       path.join(tmpdir(), 'murph-wearable-activity-compact-fixture-'),
@@ -25942,6 +25969,36 @@ describeRealCodex('real Codex automatic meal closeout recovery e2e', () => {
 })
 
 describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
+  it.each([
+    ['rolling-legacy', true],
+    ['date-window', true],
+    ['conflicting-targets', false],
+    ['incompatible-unit', false],
+    ['activity-only', false],
+  ] as const)('uses one canonical nutrition context read for %s', {
+    timeout: 1_800_000,
+  }, async (goalScenario, cardExpected) => {
+    const config = await resolveRealCodexE2eConfig()
+    try {
+      const result = await runRealNutritionCardAuthorityScenario({ config, conditionRecovery: 'none', goalScenario, realVault: true })
+      process.stdout.write(`[nutrition-context-e2e] ${JSON.stringify({ scenario: goalScenario, reply: result.finalMessage, card: result.card ? renderAssistantResponseCardText(result.card) : null })}\n`)
+      expect(result.commands.filter((command) => command.startsWith('meal totals '))).toEqual([
+        'meal totals --from 2026-07-30 --to 2026-07-30 --resolve-goals --format json',
+      ])
+      expect(result.commands.filter((command) => command.startsWith('goal '))).toEqual([])
+      expect(readNutritionGoalMutationCommands(result.commands)).toEqual([])
+      expect(result.progressUpdates).toEqual([])
+      expect(result.attachCallCount).toBe(cardExpected ? 1 : 0)
+      if (cardExpected) {
+        expect(result.card).toMatchObject({ kind: 'daily_nutrition', version: 2, localDate: '2026-07-30',
+          goals: { calories: { target: 1800 }, proteinGrams: { target: 140 }, fiberGrams: { target: 25 } } })
+      } else {
+        expect(result.card).toBeNull()
+        expect(result.finalMessage).not.toMatch(/(?:saved|updated|activated|changed) (?:your |the )?(?:goal|target)/iu)
+      }
+    } finally { await removeRealCodexTemporaryPaths(config.temporaryPaths) }
+  })
+
   it('lets the model resolve legacy calories and recover only complete same-id safety records', {
     timeout: 1_800_000,
   }, async () => {
@@ -28341,6 +28398,9 @@ type NutritionConditionRecovery =
   | 'wrong-id'
 
 type NutritionGoalScenario =
+  | 'conflicting-targets'
+  | 'incompatible-unit'
+  | 'date-window'
   | 'activity-only'
   | 'activity-same-goal'
   | 'canonical-with-activity'
@@ -28349,10 +28409,22 @@ type NutritionGoalScenario =
   | 'rolling-legacy-incompatible-statistic'
   | 'rolling-legacy-mixed'
 
+function buildNutritionFixtureEnvironment(input: { vaultRoot: string; commandLog: string }): NodeJS.ProcessEnv {
+  return {
+    NUTRITION_E2E_NODE: process.execPath,
+    NUTRITION_E2E_LOADER: HABITAT_VOICE_E2E_TSX_LOADER,
+    NUTRITION_E2E_ENTRY: HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
+    NUTRITION_E2E_TSCONFIG: path.resolve(path.dirname(HABITAT_VOICE_E2E_CLI_ENTRYPOINT), '../../../tsconfig.base.json'),
+    NUTRITION_E2E_VAULT: input.vaultRoot,
+    NUTRITION_E2E_COMMAND_LOG: input.commandLog,
+  }
+}
+
 async function runRealNutritionCardAuthorityScenario(input: {
   config: RealCodexE2eConfig
   conditionRecovery: NutritionConditionRecovery
   goalScenario: NutritionGoalScenario
+  realVault?: boolean
   initialPrompt?: string
   liveSteerPrompt?: string
 }): Promise<{
@@ -28382,13 +28454,17 @@ async function runRealNutritionCardAuthorityScenario(input: {
           { recursive: true },
         )),
     ])
+    const vaultRoot = path.join(workingDirectory, 'vault')
     await materializeNutritionCardVaultCli({
+      vaultRoot: input.realVault ? vaultRoot : undefined,
       commandLog,
       conditionRecovery: input.conditionRecovery,
       executablePath: path.join(binDirectory, 'vault-cli'),
       goalScenario: input.goalScenario,
     })
 
+    const goalsBefore = input.realVault ? await listGoals(vaultRoot) : null
+    const eventsBefore = input.realVault ? (await readVaultRawTolerant(vaultRoot)).events : null
     const progressUpdates: string[] = []
     const inheritedPath = normalizeEnvString(input.config.env.PATH)
     const liveSteer = input.liveSteerPrompt
@@ -28405,6 +28481,12 @@ async function runRealNutritionCardAuthorityScenario(input: {
       codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
         ?? undefined,
       codexHome: input.config.codexHome,
+      configOverrides: input.realVault ? [
+        'allow_login_shell=false',
+        'shell_environment_policy.inherit="all"',
+        'shell_environment_policy.ignore_default_excludes=false',
+        `shell_environment_policy.include_only=["PATH","TMPDIR","${MURPH_ASSISTANT_SKILLS_ROOT_ENV}","NUTRITION_E2E_NODE","NUTRITION_E2E_LOADER","NUTRITION_E2E_ENTRY","NUTRITION_E2E_TSCONFIG","NUTRITION_E2E_VAULT","NUTRITION_E2E_COMMAND_LOG"]`,
+      ] : undefined,
       developerInstructions: buildAssistantSystemPrompt({
         assistantCliContract: [
           'Use vault-cli for canonical member data.',
@@ -28435,6 +28517,7 @@ async function runRealNutritionCardAuthorityScenario(input: {
       ],
       env: {
         ...input.config.env,
+        ...(input.realVault ? buildNutritionFixtureEnvironment({ vaultRoot, commandLog }) : {}),
         [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
         PATH: inheritedPath
           ? `${binDirectory}${path.delimiter}${inheritedPath}`
@@ -28470,6 +28553,8 @@ async function runRealNutritionCardAuthorityScenario(input: {
     if (liveSteerError) {
       throw liveSteerError
     }
+    if (goalsBefore) expect(await listGoals(vaultRoot)).toEqual(goalsBefore)
+    if (eventsBefore) expect((await readVaultRawTolerant(vaultRoot)).events).toEqual(eventsBefore)
     const commandText = (await readFile(commandLog, 'utf8')).trim()
     const attachCallCount = readCapabilityRoutingActions(result.jsonEvents)
       .filter((action) =>
@@ -28491,6 +28576,7 @@ async function runRealNutritionCardAuthorityScenario(input: {
 }
 
 async function materializeNutritionCardVaultCli(input: {
+  vaultRoot?: string
   commandLog: string
   conditionRecovery: NutritionConditionRecovery
   executablePath: string
@@ -28676,7 +28762,31 @@ async function materializeNutritionCardVaultCli(input: {
       title: 'Accepted macro targets',
     },
   }
-  const activeGoals = input.goalScenario === 'legacy'
+  const conflictingGoal = {
+    ...canonicalNutritionGoal,
+    entity: { ...canonicalNutritionGoal.entity, id: 'goal_conflicting_protein',
+      data: { ...canonicalNutritionGoal.entity.data,
+        metricTargets: [pointTarget('other-protein', 'protein-grams', 'g', 90)] } },
+  }
+  const incompatibleGoal = {
+    ...canonicalNutritionGoal,
+    entity: { ...canonicalNutritionGoal.entity,
+      data: { ...canonicalNutritionGoal.entity.data,
+        metricTargets: canonicalNutritionGoal.entity.data.metricTargets.map((target) =>
+          target.metricKey === 'dietary-calories' ? { ...target, unit: 'kJ' } : target) } },
+  }
+  const futureGoal = {
+    ...conflictingGoal,
+    entity: { ...conflictingGoal.entity,
+      data: { ...conflictingGoal.entity.data, windowStartAt: '2026-08-01' } },
+  }
+  const activeGoals = input.goalScenario === 'conflicting-targets'
+    ? [canonicalNutritionGoal, conflictingGoal]
+    : input.goalScenario === 'incompatible-unit'
+      ? [incompatibleGoal]
+    : input.goalScenario === 'date-window'
+      ? [canonicalNutritionGoal, futureGoal]
+    : input.goalScenario === 'legacy'
     ? [legacyGoal]
     : input.goalScenario === 'rolling-legacy'
       ? [rollingLegacyGoal]
@@ -28689,6 +28799,31 @@ async function materializeNutritionCardVaultCli(input: {
     : input.goalScenario === 'canonical-with-activity'
       ? [canonicalNutritionGoal, activityCaloriesGoal]
       : [macroOnlyGoal, activityCaloriesGoal]
+  if (input.vaultRoot) {
+    const vaultRoot = input.vaultRoot
+    await initializeVault({ vaultRoot, timezone: 'America/New_York', createdAt: '2026-07-01T12:00:00Z' })
+    for (const { entity } of activeGoals) {
+      await upsertGoal({ vaultRoot, slug: entity.id.replaceAll('_', '-'), title: entity.title,
+        status: 'active', window: { startAt: entity.data.windowStartAt }, metricTargets: entity.data.metricTargets })
+    }
+    await upsertMemory(vaultRoot, { section: 'Identity', text: 'Synthetic adult test profile, age 34.' })
+    await upsertMemory(vaultRoot, { section: 'Context', text: 'A synthetic nutrition suitability review is complete. Self-directed numeric nutrition targets are suitable, and no target-changing constraint applies.' })
+    for (const [index, calories] of [600, 600, 560].entries()) {
+      await addMeal({ vaultRoot, source: 'manual', occurredAt: `2026-07-30T${12 + index * 3}:00:00Z`,
+        note: 'Synthetic complete meal', nutrition: {
+          totals: { calories, proteinGrams: index === 2 ? 47 : 45, carbsGrams: index === 2 ? 65 : 60, fatGrams: 18, fiberGrams: 8 },
+          provenance: { source: 'label', confidence: 'high', sourceDetail: 'Synthetic measured label totals.' },
+        } })
+    }
+    await writeFile(input.executablePath, [
+      '#!/bin/sh', 'set -eu',
+      `printf '%s\\n' "$*" >> "$NUTRITION_E2E_COMMAND_LOG"`,
+      'export TSX_TSCONFIG_PATH="$NUTRITION_E2E_TSCONFIG"',
+      'exec "$NUTRITION_E2E_NODE" --import "$NUTRITION_E2E_LOADER" "$NUTRITION_E2E_ENTRY" "$@" --vault "$NUTRITION_E2E_VAULT"', '',
+    ].join('\n'), { encoding: 'utf8', mode: 0o700 })
+    await chmod(input.executablePath, 0o700)
+    return
+  }
   const activeGoalItems = activeGoals.map((goal) => ({
     data: {
       metricTargetsCount: goal.entity.data.metricTargets.length,
@@ -28760,17 +28895,24 @@ async function materializeNutritionCardVaultCli(input: {
         nextCursor: null,
         vault: 'synthetic-vault',
       }
+  const canonicalGoals: CanonicalEntity[] = activeGoals.map(({ entity }) => ({
+    entityId: entity.id, primaryLookupId: entity.id, lookupIds: [entity.id], family: 'goal', recordClass: 'bank', kind: 'goal',
+    status: 'active', occurredAt: null, date: null, path: `bank/goals/${entity.id}.md`, title: entity.title, body: null,
+    attributes: { window: { startAt: entity.data.windowStartAt }, metricTargets: entity.data.metricTargets },
+    frontmatter: null, links: [], relatedIds: [], stream: null, experimentSlug: null, tags: [],
+  }))
   const totals = {
-    from: '2026-07-30',
+    filters: { from: '2026-07-30', to: '2026-07-30' },
     mealCount: 3,
-    metrics: {
+    totals: {
       calories: { mealCount: 3, total: 1_760 },
       carbsGrams: { mealCount: 3, total: 185 },
       fatGrams: { mealCount: 3, total: 54 },
       fiberGrams: { mealCount: 3, total: 24 },
       proteinGrams: { mealCount: 3, total: 137 },
     },
-    to: '2026-07-30',
+    days: [],
+    goalContext: resolveMealNutritionGoals(canonicalGoals, '2026-07-30'),
     vault: 'synthetic-vault',
   }
   const emit = (value: unknown) =>

@@ -5368,6 +5368,10 @@
                           "minLength": 1,
                           "maxLength": 128
                         },
+                        "resolveGoals": {
+                          "description": "Resolve applicable nutrition goal points with conflicts and provenance. Requires identical explicit from/to dates; read-only and never approves suitability or activates proposals.",
+                          "type": "boolean"
+                        },
                         "from": {
                           "description": "Optional inclusive lower date bound in YYYY-MM-DD form.",
                           "type": "string",

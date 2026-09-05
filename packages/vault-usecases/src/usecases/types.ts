@@ -55,6 +55,7 @@ import type {
   QueryMealNutritionDayTotal,
   QueryMealNutritionMetricTotal,
   QueryMealNutritionTotals,
+  QueryMealNutritionTotalsResult,
   QueryPersonalPatternReport,
   QueryRuntimeModule as SharedQueryRuntimeModule,
   QueryWearableSleepPatternSummary,
@@ -338,6 +339,7 @@ export type MealNutritionTotals = QueryMealNutritionTotals
 export type MealNutritionDayResult = QueryMealNutritionDayTotal
 
 export interface MealNutritionTotalsResult {
+  goalContext?: QueryMealNutritionTotalsResult['goalContext']
   vault: string
   filters: {
     from: string | null
@@ -1362,6 +1364,7 @@ export interface QueryServices extends HealthQueryServiceMethods {
   ): Promise<FoodListResult>
   showMealNutritionTotals(
     input: CommandContext & {
+      resolveGoals?: boolean
       from?: string
       to?: string
     },

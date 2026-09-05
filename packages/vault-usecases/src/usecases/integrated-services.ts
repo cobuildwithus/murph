@@ -1129,16 +1129,19 @@ function createIntegratedQueryServices(): QueryServices {
       return listFoodRecords(input)
     },
     async showMealNutritionTotals(input: CommandContext & {
+      resolveGoals?: boolean
       from?: string
       to?: string
     }) {
       const query = await loadQueryRuntime()
       const result = await query.readMealNutritionTotals(input.vault, {
+        resolveGoals: input.resolveGoals,
         from: input.from,
         to: input.to,
       })
 
       return {
+        ...(result.goalContext ? { goalContext: result.goalContext } : {}),
         vault: input.vault,
         filters: {
           from: result.from,
