@@ -74,11 +74,13 @@ HTTP route. `HOSTED_EXECUTION_STANDBY_MODE` has three strict values:
 - `off` (the default) advertises no slot and retires any still-unclaimed slot.
 - `shadow` keeps one release-scoped ENAM slot ready but never gives it to real
   processing.
-- `allocate` lets only a fence-free, authenticated Web-direct `default` request
+- `allocate` lets fence-free `default` work from authenticated Web-direct
+  ingress or a request carrying authenticated `conversationWorkPending: true`
   claim that one ready slot, immediately starts a replacement in background
   work, and falls back to the ordinary exact-user container when the claim does
-  not finish within 250 ms. Temporal requests and background modes do not claim
-  it. A trusted foreground replacement may claim it after clearing an
+  not finish within 250 ms. Temporal includes that fact only for fresh admitted
+  conversation lag; background-only requests do not claim it. A trusted
+  foreground replacement may claim it after clearing an
   exact-user background fence so it does not reuse a child that is still
   shutting down. In `allocate` mode the standby coordinator is the only
   shell-prewarm owner: the exact-user prewarm hint is skipped so it cannot

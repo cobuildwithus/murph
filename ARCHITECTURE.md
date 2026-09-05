@@ -1628,9 +1628,11 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   readiness and atomic availability only; the per-member `UserRunner` persists
   the exact opaque stop target, binds it once, then owns the ordinary write
   fence, workspace restore, invocation, retention, and retirement. Standby
-  allocation is available only to a fence-free, OIDC-authenticated Web-direct
-  `default` request with a validated direct-attempt identity. Background modes
-  and Temporal requests retain the exact-user target. A foreground request that
+  allocation is available to fence-free `default` work from OIDC-authenticated
+  Web-direct ingress with a validated direct-attempt identity or an authenticated
+  request carrying `conversationWorkPending: true`. Temporal derives that fact
+  from current admitted conversation lag, not a wake pointer or generic default
+  processing. Background-only requests retain the exact-user target. A foreground request that
   has finished preempting an exact-user background child may claim the ready
   standby instead of reusing the child while it shuts down. A previously
   reserved standby is reconciled before this eligibility check so retries and

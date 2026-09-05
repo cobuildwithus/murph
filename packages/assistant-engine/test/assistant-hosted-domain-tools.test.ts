@@ -1409,6 +1409,12 @@ describe('hosted domain dynamic tools', () => {
   })
 
   it('uses accountId for bounded device actions and rejects credentials', () => {
+    expect(MURPH_DEVICE_TOOL.description).toContain('Apple Health (sourceProvider apple_health_kit)')
+    expect(MURPH_DEVICE_TOOL.description).toContain('A saved result confirms the check-in preference')
+    expect(MURPH_DEVICE_TOOL.description).toContain('Off stops only these check-ins; connection and syncing stay unchanged')
+    expect(readToolRequest('device', {
+      action: 'configure_no_data_outreach', mode: 'off', sourceProvider: 'apple_health_kit',
+    })).toMatchObject({ kind: 'device' })
     expect(MURPH_DEVICE_TOOL.description).toMatch(
       /current private member message/u,
     )

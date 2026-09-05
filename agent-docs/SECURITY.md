@@ -10,6 +10,13 @@ Last verified: 2026-08-31
 - The release artifact guard permits one generated public data store: `package/node_modules/@murphai/health-commons/generated/knowledge.sqlite`. This exact bundled path contains public authored Health Commons knowledge and no user data. Every other `.sqlite`, `.db`, backup, or dump path remains blocked.
 - Keep sensitive identifiers out of committed fixtures, examples, screenshots, uploaded artifacts, and user/provider-facing output. Do not let identifier redaction block local root-cause debugging.
 - Treat auth, wallet, payment, and health-related data flows as security-sensitive until documented otherwise.
+- `conversationWorkPending: true` on an authenticated ensure-processing request
+  is a transient allocation fact, not consent or execution authority. Temporal
+  derives it only from Web-admitted conversation lag. The body-bound callback
+  signature or existing Web OIDC and target-user binding remain mandatory;
+  default mode, live consent, pending-target reconciliation, immutable standby
+  binding, and runtime write fences still apply. Background processing modes
+  cannot carry the fact.
 - Hosted health-data withdrawal is authorized only by the durable
   `launch.health-data = revoked` grant. A missing legacy grant is not
   withdrawal. Write revocation before cleanup, and recheck it independently at

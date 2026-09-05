@@ -372,6 +372,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
           hostedMailboxSystemFirstPendingSeq: null,
           hostedMailboxSystemHandledThroughSeq: "0",
           hostedMailboxSystemImportedSeq: "0",
+          hostedMailboxSystemDeviceSyncContinuationSeqs: [],
         },
         status: "idle",
       });

@@ -4,6 +4,10 @@ import type { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { buildHostedDeviceSyncWake } from "@/src/lib/device-sync/wake";
+import { runHostedDeviceSyncDueReconcileSweeper } from "@/src/lib/device-sync/due-reconcile-sweeper";
+import { runHostedDeviceSyncRecoverySweep } from "@/src/lib/device-sync/recovery-sweeper";
+import * as runtimeSignal from "@/src/lib/hosted-orchestration/signal-runtime";
+import * as prismaModule from "@/src/lib/prisma";
 import {
   appendHostedMailboxEnvelopeTx,
   appendHostedScheduledDeviceSyncWakeEnvelopeTx,
@@ -112,6 +116,207 @@ describe.skipIf(!runPostgresProof)(
         });
         expect(warn).not.toHaveBeenCalled();
       } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it("accepts the exact runtime-retained wake behind the handled frontier", async () => {
+      const client = requirePrisma(prisma);
+      const fixture = await seedRetiredScheduledWake({
+        client,
+        consumedSeq: 1n,
+        firstPendingSeq: null,
+        importedSeq: "1",
+        memberIds,
+        deviceSyncContinuationSeqs: ["1"],
+      });
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+      try {
+        await expect(client.$transaction((tx) =>
+          appendHostedScheduledDeviceSyncWakeEnvelopeTx({
+            envelope: fixture.wake,
+            tx,
+          })
+        )).resolves.toMatchObject({
+          dedupeConflict: false,
+          duplicate: true,
+          inserted: false,
+          runtimeOwnedRetiredDuplicate: true,
+        });
+        expect(warn).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it.each([
+      { blocker: 9n, consumed: 8n, owner: 4n },
+      { blocker: 4n, consumed: 3n, owner: 9n },
+    ])("keeps owner $owner exact through recording and completion beside blocker $blocker", async ({ blocker, consumed, owner }) => {
+      const client = requirePrisma(prisma);
+      const firstRetained = await seedRetiredScheduledWake({
+        client,
+        consumedSeq: consumed,
+        firstPendingSeq: String(blocker),
+        importedSeq: "9",
+        laneSeq: owner,
+        memberIds,
+        nextSeq: 10n,
+        deviceSyncContinuationSeqs: [String(owner), "6"],
+      });
+      const secondRetained = await insertRetiredScheduledWake({
+        client,
+        laneSeq: 6n,
+        memberId: firstRetained.memberId,
+      });
+      const completed = await insertRetiredScheduledWake({
+        client,
+        laneSeq: 7n,
+        memberId: firstRetained.memberId,
+      });
+      const blocking = await insertRetiredScheduledWake({
+        client,
+        laneSeq: blocker,
+        memberId: firstRetained.memberId,
+      });
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const getPrisma = vi.spyOn(prismaModule, "getPrisma").mockReturnValue(client);
+      const signal = vi.spyOn(runtimeSignal, "signalHostedDeviceSyncMailboxRuntime")
+        .mockImplementation(async () => { throw new Error("Unexpected runtime signal"); });
+
+      try {
+        for (const fixture of [firstRetained, secondRetained, blocking]) {
+          await expect(client.$transaction((tx) =>
+            appendHostedScheduledDeviceSyncWakeEnvelopeTx({
+              envelope: fixture.wake,
+              tx,
+            })
+          )).resolves.toMatchObject({
+            dedupeConflict: false,
+            duplicate: true,
+            inserted: false,
+            runtimeOwnedRetiredDuplicate: true,
+          });
+        }
+
+        const recovery = await runHostedDeviceSyncRecoverySweep({
+          runDueReconcileSweeper: () => runHostedDeviceSyncDueReconcileSweeper({
+            logger: { info: () => {}, warn: console.warn },
+            now: new Date("2026-09-04T12:00:00.000Z"),
+            store: {
+              listDueReconcileConnectionsForSweep: async () =>
+                [firstRetained, secondRetained, blocking].map(({ wake }) => ({
+                  connectionId: wake.connectionId!,
+                  connectedAt: wake.expectedConnectedAt!,
+                  nextReconcileAt: wake.hint!.nextReconcileAt!,
+                  provider: wake.provider!,
+                  userId: wake.userId,
+                })),
+            },
+          }),
+          runPreferenceHandoffSweeper: async () => ({
+            candidateUsers: 0,
+            handoffAccepted: 0,
+            handoffAttempted: 0,
+            handoffFailed: 0,
+            handoffLimit: 25,
+            handoffSkippedInactive: 0,
+            skippedCandidateUsers: 0,
+          }),
+        });
+        expect(recovery.dueReconcileSweeper).toMatchObject({
+          wakeAccepted: 3,
+          wakeFailed: 0,
+          wakeNotAccepted: 0,
+        });
+        expect(signal).not.toHaveBeenCalled();
+        expect(await client.deviceSyncSignal.count({
+          where: { userId: firstRetained.memberId },
+        })).toBe(0);
+
+        const recordingCheckpoint = await checkpointHostedWorkspace({
+          checkpointedAt: "2026-09-04T12:00:00.000Z",
+          expectedVersion: "0",
+          prisma: client,
+          reason: "idle_shutdown",
+          redactedStatusJson: {
+            hostedMailboxSystemDeviceSyncContinuationSeqs: [String(owner), "6"],
+            hostedMailboxSystemFirstPendingSeq: String(blocker),
+            hostedMailboxSystemHandledThroughSeq: String(consumed),
+            hostedMailboxSystemImportedSeq: "9",
+          },
+          snapshotRef: null,
+          userId: firstRetained.memberId,
+        });
+        expect(recordingCheckpoint.status).toBe("updated");
+        await expect(client.$transaction((tx) =>
+          appendHostedScheduledDeviceSyncWakeEnvelopeTx({
+            envelope: firstRetained.wake,
+            tx,
+          })
+        )).resolves.toMatchObject({
+          dedupeConflict: false,
+          duplicate: true,
+          inserted: false,
+          runtimeOwnedRetiredDuplicate: true,
+        });
+
+        const completedCheckpoint = await checkpointHostedWorkspace({
+          checkpointedAt: "2026-09-04T12:01:00.000Z",
+          expectedVersion: "1",
+          prisma: client,
+          reason: "idle_shutdown",
+          redactedStatusJson: {
+            hostedMailboxSystemDeviceSyncContinuationSeqs: ["6"],
+            hostedMailboxSystemFirstPendingSeq: String(blocker),
+            hostedMailboxSystemHandledThroughSeq: String(consumed),
+            hostedMailboxSystemImportedSeq: "9",
+          },
+          snapshotRef: null,
+          userId: firstRetained.memberId,
+        });
+        expect(completedCheckpoint.status).toBe("updated");
+        await expect(client.$transaction((tx) =>
+          appendHostedScheduledDeviceSyncWakeEnvelopeTx({
+            envelope: firstRetained.wake,
+            tx,
+          })
+        )).resolves.toMatchObject({
+          dedupeConflict: true,
+          duplicate: true,
+          inserted: false,
+          runtimeOwnedRetiredDuplicate: false,
+        });
+        for (const fixture of [secondRetained, blocking]) {
+          await expect(client.$transaction((tx) =>
+            appendHostedScheduledDeviceSyncWakeEnvelopeTx({
+              envelope: fixture.wake,
+              tx,
+            })
+          )).resolves.toMatchObject({
+            dedupeConflict: false,
+            duplicate: true,
+            inserted: false,
+            runtimeOwnedRetiredDuplicate: true,
+          });
+        }
+
+        await expect(client.$transaction((tx) =>
+          appendHostedScheduledDeviceSyncWakeEnvelopeTx({
+            envelope: completed.wake,
+            tx,
+          })
+        )).resolves.toMatchObject({
+          dedupeConflict: true,
+          duplicate: true,
+          inserted: false,
+          runtimeOwnedRetiredDuplicate: false,
+        });
+        expect(warn).toHaveBeenCalledTimes(2);
+      } finally {
+        signal.mockRestore();
+        getPrisma.mockRestore();
         warn.mockRestore();
       }
     });
@@ -288,14 +493,37 @@ describe.skipIf(!runPostgresProof)(
         label: "an imported watermark beyond the allocated high-water mark",
       },
       {
-        consumedSeq: 1n,
-        importedSeq: "1",
-        label: "a wake already covered by the handled frontier",
+        consumedSeq: 0n,
+        firstPendingSeq: "2",
+        importedSeq: "2",
+        label: "a first-pending wake ahead of the handled frontier",
+        laneSeq: 2n,
+        nextSeq: 3n,
       },
       {
         importedSeq: "1",
         label: "a retired row with a remaining sidecar",
         sidecar: true,
+      },
+      {
+        consumedSeq: 1n,
+        firstPendingSeq: null,
+        importedSeq: "1",
+        label: "a missing retained-owner list for a handled wake",
+      },
+      {
+        consumedSeq: 1n,
+        firstPendingSeq: null,
+        importedSeq: "1",
+        label: "a retained-owner list that omits the handled wake",
+        deviceSyncContinuationSeqs: ["2"],
+      },
+      {
+        consumedSeq: 1n,
+        firstPendingSeq: null,
+        importedSeq: "1",
+        label: "a malformed retained-owner claim",
+        deviceSyncContinuationSeqs: "1",
       },
       {
         importedSeq: "1",
@@ -312,7 +540,10 @@ describe.skipIf(!runPostgresProof)(
       eventSchema,
       firstPendingSeq,
       importedSeq,
+      laneSeq,
+      nextSeq,
       occurredAtOffsetMs,
+      deviceSyncContinuationSeqs,
       sidecar,
     }) => {
       const client = requirePrisma(prisma);
@@ -322,8 +553,11 @@ describe.skipIf(!runPostgresProof)(
         eventSchema,
         firstPendingSeq,
         importedSeq,
+        laneSeq,
         memberIds,
+        nextSeq,
         occurredAtOffsetMs,
+        deviceSyncContinuationSeqs,
         sidecar,
       });
       const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -363,23 +597,12 @@ async function seedRetiredScheduledWake(input: {
   memberIds: string[];
   nextSeq?: bigint;
   occurredAtOffsetMs?: number;
+  deviceSyncContinuationSeqs?: string[] | string | null;
   sidecar?: boolean;
 }) {
   const suffix = randomUUID().replaceAll("-", "");
   const memberId = `member_scheduled_retention_${suffix}`;
-  const connectionId = `dsc_scheduled_retention_${suffix}`;
-  const mailboxItemId = `mailbox_scheduled_retention_${suffix}`;
-  const expectedConnectedAt = "2026-08-01T12:00:00.000Z";
-  const nextReconcileAt = "2026-08-02T12:00:00.000Z";
   const laneSeq = input.laneSeq ?? 1n;
-  const eventId = [
-    "device-sync",
-    "scheduled-reconcile",
-    input.eventSchema ?? "v3",
-    connectionId,
-    expectedConnectedAt,
-    nextReconcileAt,
-  ].join(":");
   input.memberIds.push(memberId);
 
   await input.client.hostedMember.create({
@@ -392,7 +615,15 @@ async function seedRetiredScheduledWake(input: {
           input.firstPendingSeq === undefined
             ? laneSeq.toString()
             : input.firstPendingSeq,
+        hostedMailboxSystemHandledThroughSeq:
+          (input.consumedSeq ?? 0n).toString(),
         hostedMailboxSystemImportedSeq: input.importedSeq,
+        ...(input.deviceSyncContinuationSeqs === undefined
+          ? {}
+          : {
+              hostedMailboxSystemDeviceSyncContinuationSeqs:
+                input.deviceSyncContinuationSeqs,
+            }),
       },
       userId: memberId,
     },
@@ -405,6 +636,42 @@ async function seedRetiredScheduledWake(input: {
       userId: memberId,
     },
   });
+
+  return {
+    memberId,
+    ...await insertRetiredScheduledWake({
+      client: input.client,
+      eventSchema: input.eventSchema,
+      laneSeq,
+      memberId,
+      occurredAtOffsetMs: input.occurredAtOffsetMs,
+      sidecar: input.sidecar,
+    }),
+  };
+}
+
+async function insertRetiredScheduledWake(input: {
+  client: PrismaClient;
+  eventSchema?: string;
+  laneSeq: bigint;
+  memberId: string;
+  occurredAtOffsetMs?: number;
+  sidecar?: boolean;
+}) {
+  const suffix = randomUUID().replaceAll("-", "");
+  const connectionId = `dsc_scheduled_retention_${suffix}`;
+  const mailboxItemId = `mailbox_scheduled_retention_${suffix}`;
+  const expectedConnectedAt = "2026-08-01T12:00:00.000Z";
+  const nextReconcileAt = "2026-08-02T12:00:00.000Z";
+  const eventId = [
+    "device-sync",
+    "scheduled-reconcile",
+    input.eventSchema ?? "v3",
+    connectionId,
+    expectedConnectedAt,
+    nextReconcileAt,
+  ].join(":");
+
   await input.client.hostedMailboxItem.create({
     data: {
       contentRetiredAt: new Date("2026-08-20T12:00:00.000Z"),
@@ -413,12 +680,12 @@ async function seedRetiredScheduledWake(input: {
       id: mailboxItemId,
       kind: "device-sync.wake",
       lane: "system",
-      laneSeq,
+      laneSeq: input.laneSeq,
       occurredAt: new Date(
         Date.parse(nextReconcileAt) + (input.occurredAtOffsetMs ?? 0),
       ),
       payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
-      userId: memberId,
+      userId: input.memberId,
     },
   });
   if (input.sidecar) {
@@ -427,14 +694,13 @@ async function seedRetiredScheduledWake(input: {
         mailboxItemId,
         payloadCiphertext: "encrypted-retention-fixture",
         payloadSchema: "murph.hosted-mailbox-payload.v1",
-        userId: memberId,
+        userId: input.memberId,
       },
     });
   }
 
   return {
     mailboxItemId,
-    memberId,
     wake: buildHostedDeviceSyncWake({
       connectionId,
       eventId,
@@ -446,7 +712,7 @@ async function seedRetiredScheduledWake(input: {
       occurredAt: nextReconcileAt,
       provider: "oura",
       source: "scheduled-reconcile",
-      userId: memberId,
+      userId: input.memberId,
     }),
   };
 }

@@ -5135,13 +5135,13 @@ export function createJunctionDeviceSyncProvider(
       };
     }
 
-    const currentSources = sourceLifecycleFence && input.context.listConnectionSources
+    const currentSources = input.context.listConnectionSources
+      && (sourceLifecycleFence || records.length > 0 || input.authorizedLocalDay)
       ? await input.context.listConnectionSources()
-      : null;
+      : input.context.account.sources ?? [];
     if (
       sourceLifecycleFence
-      && (!currentSources
-        || !isJunctionSourceLifecycleFenceCurrent(sourceLifecycleFence, currentSources))
+      && !isJunctionSourceLifecycleFenceCurrent(sourceLifecycleFence, currentSources)
     ) {
       throw junctionTimeseriesSourceLifecycleSuperseded();
     }
@@ -5156,7 +5156,7 @@ export function createJunctionDeviceSyncProvider(
     const sourceScopedHistoricalRecordsSeen = input.sourceProviderSlug
       ? await hasJunctionSourceScopedAdmittedSnapshotRecords({
           context: input.context,
-          ...(currentSources ? { listedSources: currentSources } : {}),
+          listedSources: currentSources,
           options: { projectAccountSourceIdentities: calendarDayAggregate },
           snapshots: { [input.resource]: records },
           sourceProviderSlug: input.sourceProviderSlug,
@@ -5164,25 +5164,18 @@ export function createJunctionDeviceSyncProvider(
         })
       : false;
 
-    const preparedImport = currentSources
-      ? prepareJunctionImportSnapshotForSources(
-          { [input.resource]: records },
-          input.sourceProviders,
-          currentSources,
-          calendarDayAggregate
-            ? { sourceIdentities: resolveJunctionAccountSourceIdentities(currentSources) }
-            : {},
-          {
-            allowUnlistedSources: input.context.connectionSourceAdmissionMode !== "listed_only",
-            sourceStatusRequirement: "not_disconnected",
-          },
-        )
-      : await prepareJunctionImportSnapshot(
-          input.context,
-          { [input.resource]: records },
-          input.sourceProviders,
-          { projectAccountSourceIdentities: calendarDayAggregate },
-        );
+    const preparedImport = prepareJunctionImportSnapshotForSources(
+      { [input.resource]: records },
+      input.sourceProviders,
+      currentSources,
+      calendarDayAggregate
+        ? { sourceIdentities: resolveJunctionAccountSourceIdentities(currentSources) }
+        : {},
+      {
+        allowUnlistedSources: input.context.connectionSourceAdmissionMode !== "listed_only",
+        sourceStatusRequirement: "not_disconnected",
+      },
+    );
     if (!hasJunctionSnapshotRecords(preparedImport.snapshots) && !input.authorizedLocalDay) {
       return {
         historicalProviderRecordsSeen: providerRecordsSeen,
