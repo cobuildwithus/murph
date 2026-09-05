@@ -1,6 +1,6 @@
 # Missing knowledge page recovery and bounded diagnostics
 
-Status: active
+Status: completed
 Created: 2026-09-04
 Updated: 2026-09-04
 
@@ -36,8 +36,8 @@ Updated: 2026-09-04
 
 1. Completed: trace service, CLI projection, command attribution and codec owners.
 2. Completed: implement narrow recovery and numeric counters; deterministic tests and real journey pass.
-3. In progress: finish release-note proof and parent review of draft PR #2849.
-4. Pending: Ready, final ReviewGPT concurrently with CI, resolve results, close this plan and report PR readiness.
+3. Completed: release-note archive proof, Web typecheck and parent candidate review of PR #2849.
+4. Completed: Ready admission and valid final ReviewGPT round 1 with no findings; close the implementation plan. Required CI remains a separate final-head completion gate; no merge or deployment is authorized.
 
 ## Decisions
 
@@ -50,4 +50,10 @@ Updated: 2026-09-04
 
 - Passed: assistant knowledge-service tests, all 85 runtime-helper tests, all 26 hosted usage tests, focused production CLI error-bridge test, assistant/hosted-execution/CLI typechecks, complexity guard and diff privacy check.
 - Passed: `pnpm test:assistant:live -- --test 'finishes a stale wiki lookup without retrying'` with GPT-5.6 Terra and local subscription; one requested missing-page read, zero knowledge writes, no invented page contents, truthful concise reply.
-- Pending: final archive test and Web typecheck, parent exact candidate review, ReviewGPT and required CI.
+- Passed: 9 changelog archive tests, Web typecheck and parent candidate review at `082c465ebbd4a6362eb2da7ac81164f5c4027fa8`.
+- Passed: focused mixed direct/batch attribution regressions in both orders (2 tests), including hosted normalization. Batch knowledge children remain in the existing `other` family and cannot produce a partially counted knowledge aggregate.
+- Passed: final ReviewGPT round 1 on that same head, GPT-6 Pro, with exact-turn/model/hash evidence and 562-second elapsed review; zero findings. A too-fast diagnostic capture and one pre-send staging failure did not count as substantive rounds.
+- Passed: clean current-base merge-tree proof before plan closure.
+- Pending at plan closure: required CI on the final plan-closing head. This documentation-only closure preserves the reviewed production tree and does not require another substantive review. The completion owner retains responsibility for final checks and PR evidence.
+- Verification recovery: an optional test invocation forwarded an extra argument separator and ran unrelated tests; only its proven task-owned worker/coordinator were stopped. The corrected focused command above passed; no product failure was inferred.
+Completed: 2026-09-04
