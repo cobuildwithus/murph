@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, copyFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -78,6 +78,42 @@ export function runContainer(image, directory, script, run = command) {
   }
 }
 
+function isPathInside(parent, child) {
+  const relative = path.relative(parent, child);
+  return relative === "" || (relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+export async function bundleBenchmarkSource(build, root, contents, scratch, outfile) {
+  await mkdir(path.join(scratch, "source", benchPath), { recursive: true });
+  const syntheticBenchDir = await realpath(path.join(scratch, "source", benchPath));
+  const syntheticSource = path.join(syntheticBenchDir, "device-import.ts");
+  await writeFile(syntheticSource, contents);
+  const checkoutBenchDir = path.join(root, benchPath);
+  await build({
+    entryPoints: [syntheticSource],
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    target: "node24",
+    tsconfig: path.join(root, "tsconfig.base.json"),
+    outfile,
+    banner: { js: 'import { createRequire } from "node:module"; const require = createRequire(import.meta.url);' },
+    plugins: [{
+      name: "checkout-benchmark-relative-imports",
+      setup(buildApi) {
+        buildApi.onResolve({ filter: /^\.{1,2}(\/|$)/ }, (args) => {
+          const importer = path.resolve(args.importer);
+          if (!isPathInside(syntheticBenchDir, importer)) return undefined;
+          const syntheticResolved = path.resolve(path.dirname(importer), args.path);
+          if (isPathInside(syntheticBenchDir, syntheticResolved)) return undefined;
+          const relativeImporterDir = path.relative(syntheticBenchDir, path.dirname(importer));
+          return { path: path.resolve(path.join(checkoutBenchDir, relativeImporterDir), args.path) };
+        });
+      },
+    }],
+  });
+}
+
 export async function inspectLatencyWorkflow(source) {
   const job = source.split("  production-runner-bundle-budget-linux:\n")[1]?.split(/^  [a-z].*:\n/mu)[0];
   assert.ok(job?.includes("          node candidate/scripts/check-container-latency-ci.mjs base candidate"),
@@ -94,7 +130,7 @@ async function main(baseArgument, candidateArgument) {
   const candidate = roots[1];
   await inspectLatencyWorkflow(await readFile(path.join(candidate, ".github/workflows/host-support.yml"), "utf8"));
   const require = createRequire(path.join(candidate, "apps/cloudflare/package.json"));
-  const { buildSync } = require("esbuild");
+  const { build } = require("esbuild");
   const contents = await readFile(path.join(candidate, benchPath, "device-import.ts"), "utf8");
   const artifacts = path.join(candidate, ".artifacts");
   await mkdir(artifacts, { recursive: true });
@@ -104,10 +140,7 @@ async function main(baseArgument, candidateArgument) {
     for (const [index, root] of roots.entries()) {
       const directory = path.join(scratch, String(index));
       await mkdir(directory);
-      buildSync({ stdin: { contents, resolveDir: path.join(root, benchPath), loader: "ts" },
-        bundle: true, platform: "node", format: "esm", target: "node24",
-        tsconfig: path.join(root, "tsconfig.base.json"), outfile: path.join(directory, "import.mjs"),
-        banner: { js: 'import { createRequire } from "node:module"; const require = createRequire(import.meta.url);' } });
+      await bundleBenchmarkSource(build, root, contents, directory, path.join(directory, "import.mjs"));
       await copyFile(path.join(candidate, "scripts/container-latency-boot.mjs"), path.join(directory, "boot.mjs"));
       command("pnpm", ["--dir", path.join(root, "apps/cloudflare"), "runner:docker:base"], { stdio: "inherit" });
       const image = `murph-latency-${randomUUID()}`;

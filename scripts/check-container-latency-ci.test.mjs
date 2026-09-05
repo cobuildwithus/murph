@@ -1,7 +1,20 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
-import { compareLatencyRuns, inspectLatencyWorkflow, parseLatencyRun, runContainer } from "./check-container-latency-ci.mjs";
+import {
+  bundleBenchmarkSource,
+  compareLatencyRuns,
+  inspectLatencyWorkflow,
+  parseLatencyRun,
+  runContainer,
+} from "./check-container-latency-ci.mjs";
+
+const require = createRequire(import.meta.url);
+const { build } = require("esbuild");
 
 function rows(value = 1_000) {
   return [
@@ -77,6 +90,24 @@ test("container success, workload failure and timeout release only the exact cre
   const calls = [];
   assert.throws(() => runContainer("image", "/synthetic-bench", "boot.mjs", (_, args) => { calls.push(args); throw new Error("create failed"); }));
   assert.equal(calls.length, 1);
+});
+
+test("bundles the candidate benchmark against a base checkout without bench sources", async () => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), "container-latency-bundle-"));
+  try {
+    const root = path.join(temp, "base");
+    await mkdir(path.join(root, "packages/core/src"), { recursive: true });
+    await writeFile(path.join(root, "tsconfig.base.json"), JSON.stringify({ compilerOptions: {} }));
+    await writeFile(path.join(root, "packages/core/src/index.ts"), "export const value = 'base-source';\n");
+    const out = path.join(temp, "import.mjs");
+    await bundleBenchmarkSource(build, root, [
+      "import { value } from '../src/index.ts';",
+      "console.log(value);",
+    ].join("\n"), path.join(temp, "scratch"), out);
+    assert.equal(execFileSync(process.execPath, [out], { encoding: "utf8" }).trim(), "base-source");
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
 });
 
 test("the existing required bundle job executes the comparator tests and latency gate", async () => {
