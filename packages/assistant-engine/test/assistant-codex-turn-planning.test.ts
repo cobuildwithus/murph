@@ -367,14 +367,15 @@ describe('assistant Codex turn planning', () => {
 
     expect(Object.fromEntries(
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
-    )).toEqual({
-      direct: '01476a910fdd905f746175fa9e382eb0d600b98ee61f0a218c50767923b4f150',
-      group: 'ac2ac38181832a52bc449d5f0f14dbbb8d963cca30321b4485203fc72252e292',
-      maintenance: '4c439dbf05ccb6d2cd7540b1ef7f94c99e898afd9b9658abefa860a8b421ca55',
-      outputOnly: 'a83a04afea06e5290de36b14a0fee5d18970077a8294dde129b2e2dfa99116b4',
-      scheduledEmail:
-        'ff69a1658d9c1e23a776f6cf63949a8f83ad26b5f132e99018bf72f219f020a0',
-    })
+    )).toMatchInlineSnapshot(`
+      {
+        "direct": "c493bf6341bf5aea8aa423582ca101f5598c34fbf50207111197c5d7911c5064",
+        "group": "ead4ee04f2ca83fc9dd1db3a581b0ab3afa60b612d7c9372a26833b8bb98a904",
+        "maintenance": "4c439dbf05ccb6d2cd7540b1ef7f94c99e898afd9b9658abefa860a8b421ca55",
+        "outputOnly": "a83a04afea06e5290de36b14a0fee5d18970077a8294dde129b2e2dfa99116b4",
+        "scheduledEmail": "924d8018a2468a06c76742238ee0417499eb6e93fd5079457009d5bb08a24b8a",
+      }
+    `)
   })
 
   it('bounds snapshot refresh inside direct provider planning and skips it for groups', async () => {
@@ -544,9 +545,9 @@ describe('assistant Codex turn planning', () => {
       resolvePlan({ configured: true, group: true }),
       resolvePlan({ configured: true, scheduled: true }),
     ])) {
-      expect(configuredPlan.systemPrompt).toContain(
-        'Configured Exa research:',
-      )
+      expect(configuredPlan.systemPrompt).toContain('Configured Exa research:')
+      expect(configuredPlan.developerInstructions).toContain('Configured Exa research:')
+      expect(configuredPlan.turnContextPrompt).not.toContain('Configured Exa research:')
       expect(configuredPlan.systemPrompt).toContain(
         '`resultIndex` maps to a result',
       )
@@ -559,6 +560,12 @@ describe('assistant Codex turn planning', () => {
       expect(configuredPlan.systemPrompt).toContain(
         'never send a mode-less single-scout request',
       )
+    }
+
+    for (const group of [false, true]) {
+      const configured = await resolvePlan({ configured: true, group })
+      const unavailable = await resolvePlan({ configured: false, group })
+      expect(configured.assistantContractFingerprint).not.toBe(unavailable.assistantContractFingerprint)
     }
 
     const directProgressPlan = await resolvePlan({
@@ -4443,14 +4450,10 @@ describe('assistant Codex turn planning', () => {
       'Scheduled automation changes for this group room are available through `murph.automation`.',
     )
     expect(plan.developerInstructions).toContain(
-      'Use `murph.automation` with `action: save` to create an ordinary automation, `action: inspect` to read one without mutation, and `action: patch` to change one.',
+      'For automation creation, inspection, changes, or reconciliation, discover `murph.automation` through native `tool_search` or code-mode `ALL_TOOLS`',
     )
-    expect(plan.developerInstructions).toContain(
-      'Patch `status` to pause, reactivate, or archive an existing automation.',
-    )
-    expect(plan.developerInstructions).toContain(
-      'Ordinary patches preserve its stored route.',
-    )
+    expect(plan.dynamicTools.find((tool) => tool.name === 'automation')?.description).toContain('On patch, inspect the current stored automation first')
+    expect(plan.developerInstructions).toContain('The tool owns exact arguments')
     expect(plan.developerInstructions).toContain(
       'A save always binds to the trusted current group room.',
     )

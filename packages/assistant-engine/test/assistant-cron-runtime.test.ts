@@ -244,10 +244,14 @@ import {
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_PRIVATE_SUMMARY,
+  MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID,
+  MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
+  MURPH_MANAGED_AUTOMATIONS,
   MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
+  MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
@@ -6212,6 +6216,189 @@ describe('assistant cron runtime orchestration', () => {
       processed: 1,
       succeeded: 1,
     })
+  })
+
+  it.each([
+    {
+      automationId: MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
+      name: 'Journal morning',
+      occurrenceAt: '2026-04-08T08:00:00.000Z',
+    },
+    {
+      automationId: MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID,
+      name: 'Journal afternoon',
+      occurrenceAt: '2026-04-08T16:00:00.000Z',
+    },
+    {
+      automationId: MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
+      name: 'Personal Patterns',
+      occurrenceAt: '2026-04-08T13:00:00.000Z',
+    },
+  ])('uses Flex then Standard after a failed managed $name occurrence', async ({
+    automationId,
+    occurrenceAt,
+  }) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(occurrenceAt))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-managed-flex-',
+    )
+    const seed = addManagedBackgroundAutomation(vaultRoot, automationId)
+    const executionContext: AssistantExecutionContext = {
+      hosted: {
+        memberId: 'member-managed-flex',
+        userEnvKeys: [],
+      },
+    }
+    cronMocks.sendAssistantMessageLocal
+      .mockImplementationOnce(async (input: AssistantNotificationInput) => {
+        await input.onProviderRequestStarted?.({
+          acceptedInputIds: [],
+          providerRequestOrdinal: 1,
+          startedAt: occurrenceAt,
+        })
+        throw new Error('Synthetic Flex provider capacity failure.')
+      })
+      .mockResolvedValueOnce({
+        decision: {
+          kind: 'skip',
+          privateSummary: 'No new background context required attention.',
+        },
+        response: null,
+        session: { sessionId: 'session-managed-flex-retry' },
+      })
+
+    const first = await processDueAssistantCronJobsLocal({
+      executionContext,
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(
+      await listAssistantCronRuns({ job: automationId, vault: vaultRoot }),
+    ).toMatchObject({
+      runs: [{ status: 'failed', error: 'Synthetic Flex provider capacity failure.' }],
+    })
+    expect(first).toEqual({ failed: 1, processed: 1, succeeded: 0 })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        ...(seed.assistantTargetOverride
+          ? { assistantTargetOverride: seed.assistantTargetOverride }
+          : {}),
+        scheduledInvocationAuthority: { automationId, occurrenceAt },
+        serviceTier: 'flex',
+        turnTrigger: 'automation-cron',
+      }),
+    )
+    const failedJob = await getAssistantCronJob(vaultRoot, automationId)
+    expect(failedJob.state.consecutiveFailures).toBe(1)
+    expect(failedJob.state.nextRunAt).toBe(
+      new Date(Date.parse(occurrenceAt) + 30_000).toISOString(),
+    )
+
+    vi.setSystemTime(new Date(Date.parse(occurrenceAt) + 30_000))
+    const retried = await processDueAssistantCronJobsLocal({
+      executionContext,
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(retried).toEqual({ failed: 0, processed: 1, succeeded: 1 })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(2)
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        ...(seed.assistantTargetOverride
+          ? { assistantTargetOverride: seed.assistantTargetOverride }
+          : {}),
+        scheduledInvocationAuthority: { automationId, occurrenceAt },
+        serviceTier: null,
+        turnTrigger: 'automation-cron',
+      }),
+    )
+    const completedJob = await getAssistantCronJob(vaultRoot, automationId)
+    expect(completedJob.state.consecutiveFailures).toBe(0)
+    expect(completedJob.state.nextRunAt).toBe(
+      new Date(Date.parse(occurrenceAt) + 86_400_000).toISOString(),
+    )
+  })
+
+  it.each([
+    {
+      automationId: MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
+      name: 'Journal morning without accounts',
+      occurrenceAt: '2026-04-08T08:00:00.000Z',
+      hasAccount: false,
+    },
+    {
+      automationId: MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID,
+      name: 'Journal afternoon without accounts',
+      occurrenceAt: '2026-04-08T16:00:00.000Z',
+      hasAccount: false,
+    },
+    {
+      automationId: MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
+      name: 'Journal morning with a new account',
+      occurrenceAt: '2026-04-08T08:00:00.000Z',
+      hasAccount: true,
+    },
+  ])('preserves managed $name provider eligibility', async ({
+    automationId,
+    hasAccount,
+    occurrenceAt,
+  }) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(occurrenceAt))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-journal-eligibility-',
+    )
+    addManagedBackgroundAutomation(vaultRoot, automationId)
+    const request = vi.fn(async () => ({
+      result: {
+        accounts: hasAccount ? [{ id: 'account-new', toolkit: { slug: 'googlecalendar' } }] : [],
+        toolkits: [],
+      },
+    }))
+    const summary = await processDueAssistantCronJobsLocal({
+      executionContext: {
+        hosted: {
+          connectedApps: { request },
+          memberId: 'member-journal-eligibility',
+          userEnvKeys: [],
+        },
+      },
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(request).toHaveBeenCalledExactlyOnceWith({
+      input: { action: 'list' },
+      operation: 'manage',
+    }, { signal: expect.any(AbortSignal) })
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: hasAccount ? 1 : 0,
+    })
+    if (hasAccount) {
+      expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          scheduledInvocationAuthority: { automationId, occurrenceAt },
+          serviceTier: 'flex',
+        }),
+      )
+    } else {
+      expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+      expect(
+        await listAssistantCronRuns({ job: automationId, vault: vaultRoot }),
+      ).toMatchObject({ runs: [{ outcome: 'skipped_gate', status: 'skipped' }] })
+    }
+    const job = await getAssistantCronJob(vaultRoot, automationId)
+    expect(job.state.consecutiveFailures).toBe(0)
+    expect(job.state.nextRunAt).toBe(
+      new Date(Date.parse(occurrenceAt) + 86_400_000).toISOString(),
+    )
   })
 
   it('makes optional group email authority available at the first natural cron occurrence', async () => {
@@ -13443,6 +13630,32 @@ async function createLocalJob(
   store.jobs.push(job)
   await writeAssistantCronStore(paths, store)
   return job
+}
+
+function addManagedBackgroundAutomation(vaultRoot: string, automationId: string) {
+  const seed = MURPH_MANAGED_AUTOMATIONS.find(
+    (candidate) => candidate.automationId === automationId,
+  )
+  if (!seed) {
+    throw new Error('Expected the production managed automation seed.')
+  }
+  getVaultAutomationStore(vaultRoot).push({
+    ...seed,
+    createdAt: '2026-04-08T00:00:00.000Z',
+    route: {
+      channel: 'telegram',
+      deliverySource: null,
+      deliveryTarget: 'room-1',
+      identityId: null,
+      participantId: null,
+      threadId: 'room-1',
+      threadIsDirect: true,
+    },
+    status: 'active',
+    tags: [...seed.tags],
+    updatedAt: '2026-04-08T00:00:00.000Z',
+  })
+  return seed
 }
 
 async function createCanonicalJob(

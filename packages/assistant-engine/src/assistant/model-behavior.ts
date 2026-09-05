@@ -49,6 +49,7 @@ export function isAssistantGpt5FamilyModel(
 
 export function buildAssistantExecutionBehaviorText(input: {
   profile: AssistantModelBehaviorProfile
+  browserActionsAvailable?: boolean
   progressUpdatesAvailable?: boolean
   progressUpdateMode?: 'direct' | 'group'
 }): string {
@@ -66,12 +67,10 @@ export function buildAssistantExecutionBehaviorText(input: {
 - A single routine daily-card read alone does not trigger progress. Skip it within ordinary latency; for an expected delay, send one outcome-focused update before slow work. Never narrate safety, totals, estimates, or target resolution.
 - For work likely to finish within about a minute, send at most one update. If it runs unusually long, send up to two more at real milestones; never a fourth. Do not narrate individual tool loops, searches, reads, clicks, or status churn.
 - Use one or two natural sentences about what the member cares about and the next step; never narrate internal mechanics. Skip skill reads, setup checks, routine single-command reads, quick replies, one-shot logging/capture/memory saves, and auto-transcribed audio unless broader work is long-running.`
-  const browserActionGuidance = `
-- For browser-backed real-world action requests such as ordering, reordering, booking, rescheduling, canceling, paying, refilling, submitting a form, or using a portal, treat product, catalog, web, email, calendar, or vault lookup as preflight only. When a completion-capable tool has enough for the next safe step, use that tool instead of replying with only a search result, product link, appointment portal, or instructions.
-- For medical appointment check-in or intake, read \`appointment-scheduling\` before browser execution so its identity and disclosure gates govern the action.
-- For browser approval, sensitive-data transmission, takeover, and retry boundaries, follow \`computer-use\` as the single policy owner. Make reversible progress first. An ordinary failed or unresponsive control is not yet a blocker: re-inspect current state, complete one safe alternate interaction, and only then use \`computer-use\` OS fallback when allowed. After one OS action, re-inspect; when the target state changed, never repeat that action. Refresh only when no side effect is unknown and entered state is safe. If no completion-capable browser or integration tool is available in the current route, say the route is blocked and give the best handoff; do not imply you opened or can drive checkout unless an actual runtime action happened.
-- When \`computer-use\` requires in-chat approval, ask the smallest concrete question so a natural "yes" or "go ahead" can resume the run. Keep a handoff link optional unless automation cannot proceed after approval.
-- When direct browser takeover is actually required and the pause tool returns a fresh handoff URL, include that URL with the one precise action needed. Never refer to an "open page" or takeover without giving the usable link.`
+  const browserActionGuidance = input.browserActionsAvailable === false ? '' : `
+- For requested real-world browser actions (orders, bookings, changes, payments, refills, forms, portals), lookup is preflight only: use a completion-capable tool when the next safe step is clear. Read \`computer-use\` before execution, plus \`appointment-scheduling\` for medical check-in/intake.
+- \`computer-use\` owns approval, disclosure, takeover, and bounded recovery. Make reversible progress first; an unresponsive control needs re-inspection and one safe alternate interaction before allowed OS fallback. Re-inspect after an OS action; never repeat it when state changed. Refresh only with no unknown side effect and safe entered state.
+- Ask the smallest concrete in-chat approval question; a handoff link is optional unless takeover is required. For takeover, include the pause tool's fresh URL and one precise action. If this route lacks a completion-capable tool, state the blocker and best handoff. Claim actions or completion only from runtime evidence.`
   const appointmentReminderGuidance = input.progressUpdateMode === 'group'
     ? ''
     : `
@@ -80,7 +79,8 @@ export function buildAssistantExecutionBehaviorText(input: {
 - Do not create a reminder for a hypothetical, tentative, canceled, completed, or date/time-unknown appointment. If a confirmed appointment is canceled or rescheduled and current conversation or tool evidence identifies its reminder, archive it or patch its timing rather than leaving a stale occurrence. When an appointment is clearly booked but its date or start time is missing, ask only for the missing detail instead of guessing. Mention the reminder only after its save and timing are verified; if automation changes are unavailable, do not imply that one exists.`
   const messagingPresentationGuidance = `
 - Messaging: no Markdown tables; use labeled lines.
-- Complete cards replace text. Response media comes with concise text for order, dose, timing, cues, safety, and fallback; do not repeat visuals. With no fit, use concise text.
+- When an available card can fully answer the request, discover \`murph.attach_response_card\`, \`murph.attach_exercise_routine_card\`, or \`murph.attach_telegram_rich_content\` through native \`tool_search\` or code-mode \`ALL_TOOLS\` and read its full contract before authoring it. Preserve route eligibility and all required reads, safety, and fallback rules.
+- Complete cards replace text. After attachment, do not call \`murph.finish_without_reply\`; end an attended turn without final text, or use the scheduled turn's required terminal decision. Response media comes with concise text for order, dose, timing, cues, safety, and fallback; do not repeat visuals. With no fit, use concise text.
 - Use \`murph.generate_image\` only if no card fits and a safe image helps. Keep exact or safety-critical text. No decorative/private-health group images.`
   const responseCardGuidance = input.progressUpdateMode === 'group'
     ? ''

@@ -123,6 +123,10 @@ import {
   type CodexTokenUsageBreakdown,
 } from './assistant-codex/app-server-protocol.js'
 import {
+  collectCodexCompactionResponseUsage,
+  type CodexCompactionResponseUsage,
+} from './assistant-codex/compaction-usage.js'
+import {
   resolveCodexChildEnv,
   withHostedCodexModelCatalogConfigOverride,
 } from './assistant-codex/config.js'
@@ -1829,7 +1833,6 @@ class CodexAppServerProcess {
   }
 
   private handleStdoutData(text: string): void {
-    this.activeTurn?.onStdoutText(text)
     this.stdoutBuffer += text
     this.stdoutBuffer = consumeCompleteLines(this.stdoutBuffer, (line) => {
       this.handleStdoutLine(line)
@@ -1997,6 +2000,10 @@ class CodexAppServerProcess {
 
   private handleStdoutLine(line: string): void {
     const parsed = tryParseJsonLine(line)
+    if (!parsed.ok || (parsed.value.method !== 'rawResponseItem/completed'
+      && parsed.value.method !== 'rawResponse/completed')) {
+      this.activeTurn?.onStdoutText(`${line}\n`)
+    }
     if (parsed.ok) {
       this.observeDetachedChildLifecycle(parsed.value)
       this.observeThreadTokenUsage(parsed.value)
@@ -2865,19 +2872,16 @@ export interface CodexWarmThreadCompactionUsage {
   cachedInputTokens: number | null
   inputTokens: number
   outputTokens: number | null
-  source: 'estimated'
+  source: 'estimated' | 'measured'
   totalTokens: number
+  responses?: readonly CodexCompactionResponseUsage[]
 }
-
 function estimateCodexWarmThreadCompactionUsage(
   threadContextTokensBefore: number,
 ): CodexWarmThreadCompactionUsage {
-  // Codex idle compaction consumes the provider response without
-  // surfacing ResponseEvent::Completed.token_usage, then emits a recomputed
-  // post-compact context-size update whose request input/output buckets are
-  // zero. Until Codex surfaces real compact request usage, store the
-  // pre-compact thread context as an explicit lower-bound input/total estimate
-  // so idle compaction spend is not recorded as 0/0/0.
+  // Older/cold-resumed threads do not emit rawResponse/completed. Keep the
+  // existing explicit estimate when actual compact operation usage is absent;
+  // pre-compact context is not a lower bound on provider dollar cost.
   return {
     cachedInputTokens: null,
     inputTokens: threadContextTokensBefore,
@@ -2885,6 +2889,18 @@ function estimateCodexWarmThreadCompactionUsage(
     source: 'estimated',
     totalTokens: threadContextTokensBefore,
   }
+}
+
+function buildMeasuredCodexCompactionUsage(
+  responses: readonly CodexCompactionResponseUsage[],
+): CodexWarmThreadCompactionUsage | null {
+  if (responses.length === 0) return null
+  const inputTokens = responses.reduce((sum, usage) => sum + usage.inputTokens, 0)
+  const outputTokens = responses.reduce((sum, usage) => sum + usage.outputTokens, 0)
+  const cachedInputTokens = responses.reduce((sum, usage) => sum + usage.cachedInputTokens, 0)
+  const totalTokens = inputTokens + outputTokens
+  if (!Number.isSafeInteger(totalTokens)) return null
+  return { cachedInputTokens, inputTokens, outputTokens, responses, source: 'measured', totalTokens }
 }
 
 export type CodexWarmThreadCompactionOutcome =
@@ -2902,6 +2918,9 @@ export type CodexWarmThreadCompactionOutcome =
       reason: 'aborted' | 'process_exit' | 'rpc_error' | 'timeout'
       threadContextTokensBefore: number
       threadId: string
+      model?: string | null
+      serviceTier?: AssistantProviderServiceTier | null
+      usage?: CodexWarmThreadCompactionUsage
     }
   | {
       kind: 'skipped'
@@ -2986,6 +3005,8 @@ export async function compactWarmCodexThread(input: {
   let compactRequestSubmitted = false
   let compactRequestAccepted = false
   let compactStartedItemId: string | null = null
+  let compactTurnId: string | null = null
+  const compactResponses = new Map<string, CodexCompactionResponseUsage>()
   let compactCompletionBuffered = false
   type CompactionSettleReason = 'aborted' | 'compacted' | 'process_exit' | 'rpc_error' | 'timeout'
   let compactionSettleReason: CompactionSettleReason | null = null
@@ -3045,6 +3066,10 @@ export async function compactWarmCodexThread(input: {
         return
       }
 
+      collectCodexCompactionResponseUsage(
+        message, { threadId: vitals.threadId, turnId: compactTurnId }, compactResponses,
+      )
+
       const update = readCodexThreadTokenUsageUpdate(message)
       if (update) {
         return
@@ -3057,6 +3082,7 @@ export async function compactWarmCodexThread(input: {
         const itemId = readCodexContextCompactionItemId(message)
         if (itemId !== null && compactStartedItemId === null) {
           compactStartedItemId = itemId
+          compactTurnId = extractCodexTurnIdFromMessage(message)
         }
         return
       }
@@ -3132,14 +3158,17 @@ export async function compactWarmCodexThread(input: {
         threadContextTokensBefore: vitals.lastInputTokens,
         threadId: vitals.threadId,
         serviceTier: vitals.serviceTier,
-        usage: estimateCodexWarmThreadCompactionUsage(vitals.lastInputTokens),
+        usage: buildMeasuredCodexCompactionUsage([...compactResponses.values()])
+          ?? estimateCodexWarmThreadCompactionUsage(vitals.lastInputTokens),
       }
     }
 
+    const measuredUsage = buildMeasuredCodexCompactionUsage([...compactResponses.values()])
     await processInstance.poison('idle-compaction-failed')
     return {
       kind: 'failed',
       reason: settledReason,
+      ...(measuredUsage ? { usage: measuredUsage, model: vitals.model, serviceTier: vitals.serviceTier } : {}),
       threadContextTokensBefore: vitals.lastInputTokens,
       threadId: vitals.threadId,
     }

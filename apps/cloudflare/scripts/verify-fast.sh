@@ -17,11 +17,6 @@ fi
 readonly shared_host_mode
 export MURPH_VERIFY_SHARED_HOST="$shared_host_mode"
 
-if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" != "1" ]]; then
-  exec node "$repo_root/scripts/run-with-workspace-artifact-lock.mjs" "apps/cloudflare verify" -- \
-    bash "$script_dir/verify-fast.sh" "$@"
-fi
-
 if [[ "$shared_host_mode" == "1" && "${MURPH_VERIFY_HOST_SLOT_HELD:-0}" != "1" ]]; then
   exec node "$repo_root/scripts/run-with-host-verification-slot.mjs" "apps/cloudflare verify" -- \
     bash "$script_dir/verify-fast.sh" "$@"
