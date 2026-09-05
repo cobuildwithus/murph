@@ -220,6 +220,12 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
       reason: "Codex Apps file upload requires ChatGPT auth and the ChatGPT backend base URL.",
     },
     {
+      candidate: "/v1/liveazurefd.generateapi.path",
+      disposition: "binary_false_positive",
+      owner: "codex",
+      reason: "This exact Linux printable token joins the reviewed /v1/live route to adjacent Azure-provider and request-metadata labels; it is not a separate HTTP route.",
+    },
+    {
       candidate: "/v1/liveend_turn",
       disposition: "binary_false_positive",
       owner: "codex",
@@ -236,6 +242,12 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
       disposition: "configurable_telemetry_origin",
       owner: "codex-otel",
       reason: "OTLP export uses an operator-configured telemetry endpoint.",
+    },
+    {
+      candidate: "/v1/rateiconcwdsrowscolssteplinelastargvenumusedexecsyncdesc",
+      disposition: "binary_false_positive",
+      owner: "dependency",
+      reason: "This exact Linux printable token joins unrelated serialized field labels; the pinned provider source has no such HTTP route.",
     },
     {
       candidate: "/v1/resp",
