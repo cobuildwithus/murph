@@ -69,3 +69,14 @@ One Cloudflare runner release; no ordered Web or Temporal contract migration.
 Old containers retain previous behavior until replaced. Use the existing deploy
 process; local proof does not establish production recovery.
 Completed: 2026-09-04
+
+## Final CI follow-up
+
+The final-head assistant-engine coverage job exposed an unrelated existing test
+expectation in the onboarding predecessor cases. A generated schedule at the
+legacy occurrence time preserves the pending retry, but the test expected the
+next daily occurrence. Reuse its existing `transfersLegacyPendingOccurrence`
+condition for that expectation. This correction changes only test evidence;
+no scheduler or reviewed restore implementation changes. All three focused
+predecessor cases and assistant-engine typecheck passed after the correction.
+The required release-gate rerun remains necessary before merge.
