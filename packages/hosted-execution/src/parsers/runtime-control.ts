@@ -3355,59 +3355,159 @@ export function parseHostedRuntimeGroupToolResponse(
     }
   }
 
-  if (action === "read_current") {
-    const result = requireObject(
-      record.result,
-      "Hosted runtime group tool read_current response result",
-    );
-    const status = requireString(
-      result.status,
-      "Hosted runtime group tool read_current response status",
-    );
-    if (status === "ok") {
-      assertAllowedObjectKeys(
-        result,
-        new Set([
-          "disclosureGrantsTruncated",
-          "group",
-          "nextDisclosureGrantCursor",
-          "status",
-        ]),
-        "Hosted runtime group tool read_current ok response result",
-      );
-      return {
-        action,
-        result: {
-          status,
-          ...(result.disclosureGrantsTruncated === undefined
-            ? {}
-            : {
-                disclosureGrantsTruncated: requireBoolean(
-                  result.disclosureGrantsTruncated,
-                  "Hosted runtime group tool read_current disclosureGrantsTruncated",
-                ),
-              }),
-          group: parseHostedRuntimeGroupSummary(result.group),
-          ...parseHostedRuntimeGroupDisclosureNextCursor(
-            result.nextDisclosureGrantCursor,
-            "Hosted runtime group tool read_current nextDisclosureGrantCursor",
-          ),
-        },
-      };
-    }
-    if (status === "none") {
-      assertAllowedObjectKeys(
-        result,
-        new Set(["status", "group"]),
-        "Hosted runtime group tool read_current none response result",
-      );
-      return { action, result: { status, group: null } };
+  if (
+    action === "read_current" ||
+    action === "create_join_link" ||
+    action === "update_display_name" ||
+    action === "post_join_offer"
+  ) {
+    const label = `Hosted runtime group tool ${action}`;
+    const result = requireObject(record.result, `${label} response result`);
+    const status = requireString(result.status, `${label} response status`);
+    if (action === "read_current") {
+      if (status === "ok") {
+        assertAllowedObjectKeys(
+          result,
+          new Set([
+            "disclosureGrantsTruncated",
+            "group",
+            "nextDisclosureGrantCursor",
+            "status",
+          ]),
+          "Hosted runtime group tool read_current ok response result",
+        );
+        return {
+          action,
+          result: {
+            status,
+            ...(result.disclosureGrantsTruncated === undefined
+              ? {}
+              : {
+                  disclosureGrantsTruncated: requireBoolean(
+                    result.disclosureGrantsTruncated,
+                    "Hosted runtime group tool read_current disclosureGrantsTruncated",
+                  ),
+                }),
+            group: parseHostedRuntimeGroupSummary(result.group),
+            ...parseHostedRuntimeGroupDisclosureNextCursor(
+              result.nextDisclosureGrantCursor,
+              "Hosted runtime group tool read_current nextDisclosureGrantCursor",
+            ),
+          },
+        };
+      }
+      if (status === "none") {
+        assertAllowedObjectKeys(
+          result,
+          new Set(["status", "group"]),
+          "Hosted runtime group tool read_current none response result",
+        );
+        return { action, result: { status, group: null } };
+      }
+    } else if (action === "create_join_link") {
+      if (status === "ok") {
+        assertAllowedObjectKeys(
+          result,
+          new Set(["status", "group", "joinUrl", "offeredAt"]),
+          "Hosted runtime group tool create_join_link ok response result",
+        );
+        const offeredAt =
+          result.offeredAt === undefined
+            ? undefined
+            : parseHostedRuntimeGroupCanonicalTimestamp(
+                result.offeredAt,
+                "Hosted runtime group tool create_join_link offeredAt",
+              );
+        return {
+          action,
+          result: {
+            status,
+            group: parseHostedRuntimeGroupSummary(result.group),
+            joinUrl: requireString(
+              result.joinUrl,
+              "Hosted runtime group tool create_join_link joinUrl",
+            ),
+            ...(offeredAt === undefined ? {} : { offeredAt }),
+          },
+        };
+      }
+    } else if (action === "update_display_name") {
+      if (status === "ok") {
+        assertAllowedObjectKeys(
+          result,
+          new Set(["status", "group"]),
+          "Hosted runtime group tool update_display_name ok response result",
+        );
+        return {
+          action,
+          result: {
+            status,
+            group:
+              result.group === null
+                ? null
+                : parseHostedRuntimeGroupSummary(result.group),
+          },
+        };
+      }
+    } else {
+      if (status === "sent") {
+        assertAllowedObjectKeys(
+          result,
+          new Set(["status", "group", "joinUrl", "offeredAt", "offerState"]),
+          "Hosted runtime group tool post_join_offer sent response result",
+        );
+        const offeredAt =
+          result.offeredAt === undefined
+            ? undefined
+            : parseHostedRuntimeGroupCanonicalTimestamp(
+                result.offeredAt,
+                "Hosted runtime group tool post_join_offer offeredAt",
+              );
+        const offerState =
+          result.offerState === undefined
+            ? undefined
+            : requireString(
+                result.offerState,
+                "Hosted runtime group tool post_join_offer offerState",
+              );
+        if (
+          offerState !== undefined &&
+          offerState !== "existing" &&
+          offerState !== "posted"
+        ) {
+          throw new TypeError(
+            "Hosted runtime group tool post_join_offer offerState is invalid.",
+          );
+        }
+        if (offeredAt !== undefined && offerState === undefined) {
+          throw new TypeError(
+            "Hosted runtime group tool post_join_offer offeredAt requires offerState.",
+          );
+        }
+        return {
+          action,
+          result: {
+            status,
+            group: parseHostedRuntimeGroupSummary(result.group),
+            joinUrl: requireString(
+              result.joinUrl,
+              "Hosted runtime group tool post_join_offer joinUrl",
+            ),
+            ...(offerState === undefined
+              ? {}
+              : {
+                  offerState,
+                  ...(offeredAt === undefined ? {} : { offeredAt }),
+                }),
+          },
+        };
+      }
     }
     if (status === "unavailable") {
       assertAllowedObjectKeys(
         result,
         new Set(["status", "unavailableReason", "group"]),
-        "Hosted runtime group tool read_current unavailable response result",
+        `${label} unavailable response result`,
       );
       return {
         action,
@@ -3994,188 +4094,6 @@ export function parseHostedRuntimeGroupToolResponse(
             result.unavailableReason,
             "Hosted runtime group tool leave_membership unavailableReason",
           ),
-        },
-      };
-    }
-  }
-
-  if (action === "create_join_link") {
-    const result = requireObject(
-      record.result,
-      "Hosted runtime group tool create_join_link response result",
-    );
-    const status = requireString(
-      result.status,
-      "Hosted runtime group tool create_join_link response status",
-    );
-    if (status === "ok") {
-      assertAllowedObjectKeys(
-        result,
-        new Set(["status", "group", "joinUrl", "offeredAt"]),
-        "Hosted runtime group tool create_join_link ok response result",
-      );
-      const offeredAt =
-        result.offeredAt === undefined
-          ? undefined
-          : parseHostedRuntimeGroupCanonicalTimestamp(
-              result.offeredAt,
-              "Hosted runtime group tool create_join_link offeredAt",
-            );
-      return {
-        action,
-        result: {
-          status,
-          group: parseHostedRuntimeGroupSummary(result.group),
-          joinUrl: requireString(
-            result.joinUrl,
-            "Hosted runtime group tool create_join_link joinUrl",
-          ),
-          ...(offeredAt === undefined ? {} : { offeredAt }),
-        },
-      };
-    }
-    if (status === "unavailable") {
-      assertAllowedObjectKeys(
-        result,
-        new Set(["status", "unavailableReason", "group"]),
-        "Hosted runtime group tool create_join_link unavailable response result",
-      );
-      return {
-        action,
-        result: {
-          status,
-          unavailableReason: requireString(
-            result.unavailableReason,
-            "Hosted runtime group unavailableReason",
-          ),
-          group: null,
-        },
-      };
-    }
-  }
-
-  if (action === "update_display_name") {
-    const result = requireObject(
-      record.result,
-      "Hosted runtime group tool update_display_name response result",
-    );
-    const status = requireString(
-      result.status,
-      "Hosted runtime group tool update_display_name response status",
-    );
-    if (status === "ok") {
-      assertAllowedObjectKeys(
-        result,
-        new Set(["status", "group"]),
-        "Hosted runtime group tool update_display_name ok response result",
-      );
-      return {
-        action,
-        result: {
-          status,
-          group:
-            result.group === null
-              ? null
-              : parseHostedRuntimeGroupSummary(result.group),
-        },
-      };
-    }
-    if (status === "unavailable") {
-      assertAllowedObjectKeys(
-        result,
-        new Set(["status", "unavailableReason", "group"]),
-        "Hosted runtime group tool update_display_name unavailable response result",
-      );
-      return {
-        action,
-        result: {
-          status,
-          unavailableReason: requireString(
-            result.unavailableReason,
-            "Hosted runtime group unavailableReason",
-          ),
-          group: null,
-        },
-      };
-    }
-  }
-
-  if (action === "post_join_offer") {
-    const result = requireObject(
-      record.result,
-      "Hosted runtime group tool post_join_offer response result",
-    );
-    const status = requireString(
-      result.status,
-      "Hosted runtime group tool post_join_offer response status",
-    );
-    if (status === "sent") {
-      assertAllowedObjectKeys(
-        result,
-        new Set(["status", "group", "joinUrl", "offeredAt", "offerState"]),
-        "Hosted runtime group tool post_join_offer sent response result",
-      );
-      const offeredAt =
-        result.offeredAt === undefined
-          ? undefined
-          : parseHostedRuntimeGroupCanonicalTimestamp(
-              result.offeredAt,
-              "Hosted runtime group tool post_join_offer offeredAt",
-            );
-      const offerState =
-        result.offerState === undefined
-          ? undefined
-          : requireString(
-              result.offerState,
-              "Hosted runtime group tool post_join_offer offerState",
-            );
-      if (
-        offerState !== undefined &&
-        offerState !== "existing" &&
-        offerState !== "posted"
-      ) {
-        throw new TypeError(
-          "Hosted runtime group tool post_join_offer offerState is invalid.",
-        );
-      }
-      if (offeredAt !== undefined && offerState === undefined) {
-        throw new TypeError(
-          "Hosted runtime group tool post_join_offer offeredAt requires offerState.",
-        );
-      }
-      return {
-        action,
-        result: {
-          status,
-          group: parseHostedRuntimeGroupSummary(result.group),
-          joinUrl: requireString(
-            result.joinUrl,
-            "Hosted runtime group tool post_join_offer joinUrl",
-          ),
-          ...(offerState === undefined
-            ? {}
-            : {
-                offerState,
-                ...(offeredAt === undefined ? {} : { offeredAt }),
-              }),
-        },
-      };
-    }
-    if (status === "unavailable") {
-      assertAllowedObjectKeys(
-        result,
-        new Set(["status", "unavailableReason", "group"]),
-        "Hosted runtime group tool post_join_offer unavailable response result",
-      );
-      return {
-        action,
-        result: {
-          status,
-          unavailableReason: requireString(
-            result.unavailableReason,
-            "Hosted runtime group unavailableReason",
-          ),
-          group: null,
         },
       };
     }
