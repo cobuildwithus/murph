@@ -3400,9 +3400,7 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
   const dataSourceProviderSlug = normalizeJunctionProviderSlug(
     input.dataSourceProviderSlug,
   );
-  const unknownJunctionDataSource = input.provider === "junction"
-    && dataSourceProviderSlug === null
-    && isHostedJunctionDataWebhookEvent(input.eventType);
+  const unknownJunctionDataSource = isHostedJunctionDataSourceUnknown(input);
   const observedGoogleHealthSource = normalizeJunctionProviderSlug(
     input.sourceObservation?.source.sourceProviderSlug,
   ) === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG;
@@ -3564,6 +3562,34 @@ function buildHostedFitbitMigrationSuccessorEventId(input: {
     input.expectedConnectedAt,
     logicalFactId,
   ].join(":");
+}
+
+function isHostedJunctionDataSourceUnknown(
+  input: HostedDeviceSyncWebhookAdmissionInput,
+): boolean {
+  if (
+    input.provider !== "junction"
+    || normalizeJunctionProviderSlug(input.dataSourceProviderSlug) !== null
+    || !isHostedJunctionDataWebhookEvent(input.eventType)
+  ) {
+    return false;
+  }
+  const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug);
+  // Historical completion has no delivered data to attribute. Its already
+  // prepared exact-source fetch still needs durable admission; the provider
+  // read/import owners prove data provenance and migration authority later.
+  const sourceScopedHistoryFetch = input.eventType.startsWith("historical.data.")
+    && sourceProviderSlug !== null
+    && input.dirtyResources.length > 0
+    && input.dirtyResources.every((resource) =>
+      resource.jobKind === "resource"
+      && resource.resource !== null
+      && resource.resourceCategory !== null
+      && resource.windowStart !== null
+      && resource.windowEnd !== null
+      && canonicalizeJunctionProviderSlug(resource.sourceProviderSlug) === sourceProviderSlug
+      && resource.payload?.webhookDataJson === undefined);
+  return !sourceScopedHistoryFetch;
 }
 
 function isHostedJunctionDataWebhookEvent(eventType: string): boolean {

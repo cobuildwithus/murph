@@ -9795,6 +9795,100 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.upsertDirtyConnection).toHaveBeenCalledOnce();
   });
 
+  it.each(["fitbit", "garmin", "google_health"])(
+    "admits a data-less %s historical fetch while legacy Fitbit remains active",
+    async (sourceProviderSlug) => {
+      mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
+        buildWebhookAdmissionRecord({ provider: "junction", setupPhase: "source_confirmed" }),
+      );
+      mockFitbitMigrationAdmissionSources();
+      mocks.resolveConnectionSourceAdmissionCandidate.mockResolvedValue(
+        buildHostedConnectionSourceAdmissionCandidate(
+          buildHostedConnectionSource("dsc_123", sourceProviderSlug),
+        ),
+      );
+      const payload = {
+        eventType: "historical.data.sleep.created",
+        resource: "sleep",
+        resourceCategory: "summary",
+        sourceProviderSlug,
+        windowStart: "2026-03-20T00:00:00.000Z",
+        windowEnd: "2026-03-25T00:00:00.000Z",
+      };
+
+      await expect(handleHostedDeviceSyncWebhookAccepted({
+        account: { connectedAt: "2026-03-26T12:00:00.000Z", id: "dsc_123", provider: "junction" },
+        claimToken: "claim-token",
+        now: "2026-03-26T12:00:00.000Z",
+        ownerId: "user-123",
+        processingAttemptedAt: "2026-03-26T12:00:00.000Z",
+        store: new PrismaDeviceSyncControlPlaneStore({ prisma: getPrisma() }),
+        traceId: "trace_history_fetch",
+        webhook: {
+          acceptanceMode: "durable_webhook_work",
+          dataSourceProviderSlug: null,
+          eventType: payload.eventType,
+          jobs: [{ kind: "resource", payload }],
+          sourceProviderSlug,
+        },
+      })).resolves.toBeUndefined();
+
+      expect(mocks.completeWebhookTrace).toHaveBeenCalledOnce();
+      expect(mocks.upsertDirtyConnection).toHaveBeenCalledWith(expect.objectContaining({
+        resources: [expect.objectContaining({ jobKind: "resource", payload, sourceProviderSlug })],
+      }));
+      expect(mocks.markConnectionSourceDataReceived).not.toHaveBeenCalled();
+      expect(mocks.createSignal).toHaveBeenCalledWith(expect.objectContaining({ sourceProviderSlug: null }));
+      expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledOnce();
+      expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each([
+    { label: "inline data", eventType: "historical.data.sleep.created", extraPayload: { webhookDataJson: "{}" } },
+    { label: "daily data", eventType: "daily.data.sleep.created", extraPayload: {} },
+    { label: "mismatched source", eventType: "historical.data.sleep.created", extraPayload: { sourceProviderSlug: "fitbit" } },
+    { label: "missing source", eventType: "historical.data.sleep.created", extraPayload: { sourceProviderSlug: "" } },
+    { label: "unbounded window", eventType: "historical.data.sleep.created", extraPayload: { windowStart: "" } },
+  ])("keeps $label out of data-less history recovery", async ({ eventType, extraPayload }) => {
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
+      buildWebhookAdmissionRecord({ provider: "junction", setupPhase: "source_confirmed" }),
+    );
+    mockFitbitMigrationAdmissionSources();
+
+    const validPayload = {
+      eventType,
+      resource: "sleep",
+      resourceCategory: "summary",
+      sourceProviderSlug: "google_health",
+      windowStart: "2026-03-20T00:00:00.000Z",
+      windowEnd: "2026-03-25T00:00:00.000Z",
+    };
+    await expect(handleHostedDeviceSyncWebhookAccepted({
+      account: { connectedAt: "2026-03-26T12:00:00.000Z", id: "dsc_123", provider: "junction" },
+      claimToken: "claim-token",
+      now: "2026-03-26T12:00:00.000Z",
+      ownerId: "user-123",
+      processingAttemptedAt: "2026-03-26T12:00:00.000Z",
+      store: new PrismaDeviceSyncControlPlaneStore({ prisma: getPrisma() }),
+      traceId: "trace_unknown_history",
+      webhook: {
+        acceptanceMode: "durable_webhook_work",
+        eventType,
+        jobs: [
+          { kind: "resource", payload: validPayload },
+          { kind: "resource", payload: { ...validPayload, ...extraPayload } },
+        ],
+        sourceProviderSlug: "google_health",
+      },
+    })).rejects.toMatchObject({ code: "WEBHOOK_SOURCE_NOT_READY", retryable: true });
+
+    expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.markConnectionSourceDataReceived).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+  });
+
   it("retries source-unknown Junction data while a Fitbit migration source exists", async () => {
     mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
       buildWebhookAdmissionRecord({

@@ -41,6 +41,9 @@ Updated: 2026-09-05
 
 ## Decisions
 
+- The deployed bounded diagnostic identifies the provenance guard. Provider-owned historical completion parsing deliberately omits data-arrival attribution, but hosted admission confuses this with unknown inline data whenever legacy Fitbit remains active.
+- Correction: derive a narrowly source-scoped, data-less historical fetch from existing prepared work. Preserve inline/mixed/unknown-source rejection, source lifecycle and consent checks, and migration freshness ownership. No new payload schema or producer deployment is needed.
+- Product UX patch: restore bounded history fetching for established wearable sources; cover legacy Fitbit, unrelated connected sources, and Google Health without claiming that a fetch notification proves new data arrived. Prove durable handoff and unchanged unsafe-input rejection with synthetic tests, then separately verify retained Queue admission.
 - Diagnostics reuse the existing log owner and never emit arbitrary exception messages, payloads, or event identities.
 - No new persistence, queue, admission authority, or retry policy is introduced.
 - Changelog: the initial diagnostic change has no member-visible behavior and needs no entry; revisit for the correction.
