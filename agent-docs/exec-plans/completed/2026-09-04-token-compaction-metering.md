@@ -1,6 +1,6 @@
 # Meter compaction from provider usage
 
-Status: active
+Status: completed
 Created: 2026-09-04
 Updated: 2026-09-04
 
@@ -56,7 +56,9 @@ Updated: 2026-09-04
 - Focused engine/runtime `test:coverage` runs passed their assertions but failed package-global thresholds because the selected tests do not exercise unrelated package files. Required CI remains the broad coverage gate; these commands are not reported as green.
 - Complexity guard passed: engine debt unchanged; idle-maintenance maximum complexity reduced from 49 to 44. Parent candidate source/privacy review passed.
 - Web `pnpm --dir apps/web typecheck` is blocked by the unchanged `test/device-sync-hosted-runtime-authority.test.ts:2` import of `@murphai/device-syncd/service`: its local built declaration is absent and the Web source aliases omit that subpath. Import and export match current main. Next-best validation is the passing changelog archive test; no unrelated source edit was made.
-- Draft PR: #2865. Required CI, final ReviewGPT, and plan closure remain with completion. `git merge-tree --write-tree HEAD origin/main` passed against the refreshed base.
+- Final ReviewGPT round 1 passed on `a9e00c4da289eb55a6d130af54841101f6420694` with no qualifying findings. Exact send-to-capture duration was 703.407 seconds on Phlebas with `gpt-6-pro`; head, committed-turn linkage, response hash, model attestation, attachment/full-snapshot metadata, and completion marker were verified. The earlier 331.267-second capture was rejected as too fast and remains diagnostic only.
+- The reviewed packet used the safe full-snapshot default for undeclared sensitivity; the PR body was subsequently corrected from an HTML comment to a plain sensitive declaration without changing scope or code. Both round-one remediation deltas were empty.
+- Parent final candidate review passed. PR #2865 is Ready; required final-head CI remains the merge-readiness gate. `git merge-tree --write-tree HEAD origin/main` passed against the refreshed base. No merge or deployment was performed.
 
 ## Product UX
 
@@ -64,3 +66,4 @@ Updated: 2026-09-04
 - Reaches: existing personal and group idle-maintenance accounting. Older/cold-resumed threads retain estimates. Automatic compaction is excluded.
 - Proof: native pinned-runtime completion and next-turn isolation; ledger bucket and identity tests; failed-operation and telemetry-failure tests. No new controls or conversation flow.
 - Changelog: `more-accurate-idle-summary-usage`; ordinary content-only archive presentation.
+Completed: 2026-09-04
