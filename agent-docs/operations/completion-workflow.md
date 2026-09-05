@@ -53,8 +53,8 @@ alone does not authorize a narrower product or another state owner.
    explanatory docs and isolated proof additions follow the review loop's exemptions.
 8. Fetch the current base and prove mergeability with
    `git merge-tree --write-tree HEAD origin/<base>`. Keep green required CI on
-   the PR-authored head. Do not chase a moving base; use the review loop's
-   Base-Update-Only Exception at an authorized merge boundary.
+   the PR-authored head. Reconcile the base when the authorized merge path
+   needs it, following the review loop's Base-Update-Only Exception.
 9. Report the outcome, evidence, and remaining risks or blockers. For a feature
    or fix, give the shortest practical verification steps and expected result.
    Keep an open PR's worktree. After confirmed merge or closure, retire it using
