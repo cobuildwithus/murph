@@ -13,6 +13,8 @@ import {
 } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
 import { HomeExperimentCard } from "@/src/components/home/home-experiment-card";
+import { ExperimentBrowseCard } from "@/src/components/experiments/experiment-browse-card";
+import { ExperimentHeroCard } from "@/src/components/experiments/experiment-hero-card";
 import {
   GroupUsageFundingActions,
   GroupUsageFundingShell,
@@ -691,6 +693,31 @@ export function ComponentsContent() {
             </p>
             <div className="overflow-hidden border border-[#c4a882]/35">
               <PublicTrustPageContent content={CONTACT_MURPH_CONTENT} />
+            </div>
+          </Section>
+        </div>
+
+        <Separator />
+
+        <div data-design-component="experiment-library-cards" id="experiment-library-cards" inert>
+          <Section title="Experiment library cards">
+            <div className="grid items-start gap-6 md:grid-cols-2">
+              <ExperimentHeroCard
+                id="design-featured"
+                title="Featured experiment"
+                category="Movement"
+                image="/design-assets/hero-daily-step-floor.jpeg"
+                metadata="Featured card study"
+                href={null}
+              />
+              <ExperimentBrowseCard
+                id="design-browse"
+                title="Browse experiment"
+                category="Movement"
+                image="/design-assets/hero-daily-step-floor.jpeg"
+                metadata="Browse card study"
+                href={null}
+              />
             </div>
           </Section>
         </div>
