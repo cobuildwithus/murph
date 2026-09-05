@@ -18,7 +18,9 @@ const mocks = vi.hoisted(() => ({
       createElement(
         "div",
         {
-          "data-landing-auth-actions-authenticated": String(props.authenticated),
+          "data-landing-auth-actions-authenticated": String(
+            props.authenticated,
+          ),
           "data-landing-auth-actions-auth-label": props.authLabel,
           "data-landing-auth-actions-context": props.context,
           "data-landing-auth-actions-signup-label": props.signupLabel ?? "",
@@ -39,10 +41,7 @@ const redirectMock = vi.hoisted(() =>
 );
 
 const policyMarkdown = readFileSync(
-  path.resolve(
-    process.cwd(),
-    "apps/web/legal/consumer-health-data-notice.md",
-  ),
+  path.resolve(process.cwd(), "apps/web/legal/consumer-health-data-notice.md"),
   "utf8",
 );
 
@@ -87,21 +86,20 @@ test("ConsumerHealthDataPrivacyPolicyPage exposes canonical metadata and renders
     "Murph's Consumer Health Data Notice covering consumer health data categories, sources, purposes, sharing, rights, deletion, appeals, and sale/no-sale.",
   );
 
-  const markup = renderToStaticMarkup(await ConsumerHealthDataPrivacyPolicyPage());
+  const markup = renderToStaticMarkup(
+    await ConsumerHealthDataPrivacyPolicyPage(),
+  );
 
   assert.match(markup, /Murph Consumer Health Data Notice/);
   assert.match(markup, /Effective Date:<\/strong> April 29, 2026/);
-  assert.match(
-    markup,
-    /Murph may collect Consumer Health Data from:/,
-  );
+  assert.match(markup, /Murph may collect Consumer Health Data from:/);
   assert.match(markup, /href="\/legal\/consumer-health-data-notice\.pdf"/u);
   assert.match(markup, /Download PDF/);
 });
 
 test("legacy Consumer Health Data Privacy Policy route redirects to the canonical notice", async () => {
   const { default: LegacyConsumerHealthDataPrivacyPolicyPage } = await import(
-    "../app/legal/consumer-health-data-privacy-policy/page",
+    "../app/legal/consumer-health-data-privacy-policy/page"
   );
 
   assert.throws(
@@ -128,7 +126,10 @@ test("SiteFooter exposes the public status page in the product nav column", () =
   assert.match(markup, /aria-label="Product links"/u);
   assert.match(markup, /href="https:\/\/status\.withmurph\.ai"/u);
   assert.match(markup, />Status<\/a>/u);
-  assert.match(markup, /href="https:\/\/status\.withmurph\.ai" target="_blank" rel="noreferrer"/u);
+  assert.match(
+    markup,
+    /href="https:\/\/status\.withmurph\.ai" target="_blank" rel="noreferrer"/u,
+  );
 });
 
 test("SiteFooter links to the Murph iOS app in the product nav column", () => {
@@ -154,4 +155,15 @@ test("SiteFooter exposes referrals only while a reward path is available", () =>
   assert.match(availableMarkup, />Referrals<\/a>/u);
   assert.doesNotMatch(unavailableMarkup, /href="\/refer"/u);
   assert.doesNotMatch(unavailableMarkup, />Referrals<\/a>/u);
+});
+
+test("SiteFooter keeps its default width unless a page requests the wide layout", () => {
+  const defaultMarkup = renderToStaticMarkup(createElement(SiteFooter));
+  const wideMarkup = renderToStaticMarkup(
+    createElement(SiteFooter, { wide: true }),
+  );
+
+  assert.match(defaultMarkup, /max-w-\[1080px\]/u);
+  assert.doesNotMatch(defaultMarkup, /max-w-\[1400px\]/u);
+  assert.match(wideMarkup, /max-w-\[1400px\]/u);
 });

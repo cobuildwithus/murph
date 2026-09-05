@@ -81,22 +81,21 @@ export function HomepageAuthWarmRuntimeStudy() {
       </div>
       <div className="rounded-2xl border border-border bg-card p-6" inert>
         <p className="mb-4 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-          Telegram selected before ready
+          Telegram authorization starting
         </p>
-        <HomepageAuthFormStudy telegramQueued />
+        <HomepageAuthFormStudy telegramStarting />
       </div>
       <div
         className="rounded-2xl border border-border bg-card p-6 lg:col-span-2"
         inert
       >
         <p className="mb-4 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-          Telegram ready for its trusted click
+          Telegram authorization available
         </p>
         <div className="grid max-w-xl grid-cols-2 gap-3">
           <HostedTelegramAuthButtonPresentation
             active
             onClick={() => {}}
-            readyToContinue
           />
           <HostedInlineAuthButton
             icon={<EmailIcon className="h-5 w-5" />}
@@ -112,18 +111,18 @@ export function HomepageAuthWarmRuntimeStudy() {
 
 function HomepageAuthFormStudy({
   phoneQueued = false,
-  telegramQueued = false,
+  telegramStarting = false,
 }: {
   phoneQueued?: boolean;
-  telegramQueued?: boolean;
+  telegramStarting?: boolean;
 }) {
-  const authWaiting = phoneQueued || telegramQueued;
+  const authWaiting = phoneQueued || telegramStarting;
 
   return (
     <div className="space-y-4">
       <HostedPhoneEntryStep
         pendingAction={phoneQueued ? "send-code" : null}
-        phoneInputDisabled={telegramQueued}
+        phoneInputDisabled={telegramStarting}
         phoneCountryOptions={HOSTED_PHONE_COUNTRY_OPTIONS}
         phoneNumber="415 555 2671"
         sendCodeDisabled={authWaiting}
@@ -139,9 +138,9 @@ function HomepageAuthFormStudy({
       </div>
       <div className="grid grid-cols-2 gap-3">
         <HostedTelegramAuthButtonPresentation
-          active={telegramQueued}
+          active={telegramStarting}
           disabled={authWaiting}
-          loading={telegramQueued}
+          loading={telegramStarting}
           onClick={() => {}}
         />
         <HostedInlineAuthButton

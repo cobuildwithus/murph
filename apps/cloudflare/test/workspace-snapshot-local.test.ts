@@ -280,6 +280,9 @@ describe("workspace snapshot local restore", () => {
       await mkdir(path.join(sourceVaultRoot, ".runtime", "operations", "assistant", "sessions"), {
         recursive: true,
       });
+      await mkdir(path.join(sourceVaultRoot, ".runtime", "operations", "assistant", "state"), {
+        recursive: true,
+      });
       await mkdir(path.join(sourceVaultRoot, ".runtime", "operations", "device-sync"), {
         recursive: true,
       });
@@ -303,6 +306,18 @@ describe("workspace snapshot local restore", () => {
             resumeRouteId: "route-ready",
           },
         }) + "\n",
+        "utf8",
+      );
+      await writeFile(
+        path.join(
+          sourceVaultRoot,
+          ".runtime",
+          "operations",
+          "assistant",
+          "state",
+          "group-participant-display-names.json",
+        ),
+        "portable participant display-name cache\n",
         "utf8",
       );
       await writeFile(
@@ -366,6 +381,11 @@ describe("workspace snapshot local restore", () => {
       expect(archivePlan.entries).toEqual(expect.arrayContaining([
         expect.objectContaining({
           archivePath: "vault/.runtime/operations/assistant/hosted-system-mailbox.json",
+          kind: "file",
+        }),
+        expect.objectContaining({
+          archivePath:
+            "vault/.runtime/operations/assistant/state/group-participant-display-names.json",
           kind: "file",
         }),
         expect.objectContaining({
@@ -433,6 +453,17 @@ describe("workspace snapshot local restore", () => {
         ),
         "utf8",
       )).resolves.toBe(`${JSON.stringify(retainedDeviceSyncWakeState)}\n`);
+      await expect(readFile(
+        path.join(
+          restoredVaultRoot,
+          ".runtime",
+          "operations",
+          "assistant",
+          "state",
+          "group-participant-display-names.json",
+        ),
+        "utf8",
+      )).resolves.toBe("portable participant display-name cache\n");
       await expect(access(
         path.join(restoredVaultRoot, ".runtime", "operations", "device-sync", "state.sqlite"),
       )).rejects.toThrow();
@@ -1030,6 +1061,47 @@ while :; do sleep 0.01; done
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
       dataKey.fill(0);
+    }
+  });
+
+  it.each(["tar", "zstd"] as const)("preserves durable state when restore %s exits early", async (label) => {
+    const root = await mkdtemp(path.join(tmpdir(), "snapshot-restore-process-failure-"));
+    const source = path.join(root, "source");
+    const durableRoot = path.join(root, "restored", "durable");
+    const dataKey = encodeHostedWorkspaceSnapshotV2DataKey(Buffer.alloc(32, 7));
+    const originalPath = process.env.PATH;
+    try {
+      await mkdir(source, { recursive: true });
+      await mkdir(durableRoot, { recursive: true });
+      await writeFile(path.join(source, "note.md"), "synthetic replacement\n");
+      await writeFile(path.join(durableRoot, "existing.md"), "preserve this workspace\n");
+      const snapshotId = "snapshot_process_failure";
+      const objectKey = "users/hsn_test/workspace-snapshots/snapshot_process_failure.snapshot.enc";
+      const userId = "member_synthetic";
+      const aad = buildHostedWorkspaceSnapshotV2Aad({ objectKey, snapshotId, userId });
+      const encrypted = await createEncryptedWorkspaceSnapshotFile({
+        aad, dataKey, durableRoot: source,
+        archiveEntries: [{ absolutePath: path.join(source, "note.md"), archivePath: "note.md", kind: "file" }],
+        ivBase64: "AQIDBAUGBwgJCgsM", maxEncryptedBytes: 1024 * 1024,
+        outputDir: path.join(root, "archive"),
+      });
+      const bin = path.join(root, "bin");
+      await mkdir(bin);
+      await writeFile(path.join(bin, label), "#!/bin/sh\nprintf 'synthetic process failure\\n' >&2\nexit 17\n", { mode: 0o700 });
+      process.env.PATH = `${bin}${path.delimiter}${originalPath ?? ""}`;
+      const error = await restoreEncryptedWorkspaceSnapshot({
+        dataKey, durableRoot, encryptedFilePath: encrypted.encryptedFilePath,
+        ref: createHostedWorkspaceSnapshotTestRef({ aad, encrypted, objectKey, snapshotId, userId }),
+      }).catch((failure: unknown) => failure);
+      // The peer can also fail with a broken pipe; either process diagnostic
+      // must accompany failure without replacing the durable workspace.
+      expect(readHostedWorkspaceSnapshotProcessFailureDiagnostics(error)).not.toBeNull();
+      await expect(readFile(path.join(durableRoot, "existing.md"), "utf8")).resolves.toBe("preserve this workspace\n");
+      await expect(access(path.join(durableRoot, "note.md"))).rejects.toThrow();
+      await expect(readdir(path.dirname(durableRoot))).resolves.toEqual(["durable"]);
+    } finally {
+      process.env.PATH = originalPath;
+      await rm(root, { recursive: true, force: true });
     }
   });
 

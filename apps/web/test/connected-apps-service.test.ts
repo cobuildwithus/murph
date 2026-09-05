@@ -84,6 +84,18 @@ interface FakePrisma {
       };
     }) => Promise<IntentRow>;
     deleteMany: (input: { where?: IntentWhere }) => Promise<{ count: number }>;
+    findMany: (input: {
+      orderBy: { completedAt: "desc" };
+      select: { completedAt: true; connectedAccountId: true };
+      where: {
+        completedAt: { not: null };
+        connectedAccountId: { in: string[] };
+        memberId: string;
+      };
+    }) => Promise<Array<{
+      completedAt: Date | null;
+      connectedAccountId: string | null;
+    }>>;
     findUnique: (input: { where: { claimHash: string } }) => Promise<IntentRow | null>;
     update: (input: {
       data: IntentUpdateData;
@@ -163,6 +175,22 @@ class ConnectedAppsPrismaHarness {
           }
           return { count };
         }),
+        findMany: vi.fn(async ({ where }) =>
+          [...this.intents.values()]
+            .filter((row) =>
+              row.memberId === where.memberId &&
+              row.completedAt !== null &&
+              row.connectedAccountId !== null &&
+              where.connectedAccountId.in.includes(row.connectedAccountId)
+            )
+            .sort((left, right) =>
+              (right.completedAt?.getTime() ?? 0) -
+              (left.completedAt?.getTime() ?? 0)
+            )
+            .map((row) => ({
+              completedAt: row.completedAt,
+              connectedAccountId: row.connectedAccountId,
+            }))),
         findUnique: vi.fn(async ({ where }) =>
           cloneNullableIntent(this.intents.get(where.claimHash) ?? null)
         ),
@@ -1370,7 +1398,17 @@ describe("connected-app service", () => {
 
   it("keeps removed-toolkit grants manageable without making them executable", async () => {
     vi.stubEnv("COMPOSIO_CONNECTED_APP_TOOLKITS", "googlecalendar");
-    installPrismaHarness();
+    const harness = installPrismaHarness();
+    harness.intents.set("completed-gmail", {
+      alias: "work",
+      claimHash: "completed-gmail",
+      completedAt: new Date("2026-08-31T07:45:00.000Z"),
+      connectedAccountId: "ca_gmail",
+      expiresAt: new Date("2026-08-31T08:00:00.000Z"),
+      memberId: "hbm_member",
+      startedAt: new Date("2026-08-31T07:40:00.000Z"),
+      toolkit: "gmail",
+    });
     const fetchImpl = vi.fn(async (
       url: string | URL | Request,
       init?: RequestInit,
@@ -1410,6 +1448,7 @@ describe("connected-app service", () => {
     })).resolves.toMatchObject({
       accounts: [
         {
+          connectedAt: "2026-08-31T07:45:00.000Z",
           id: "ca_gmail",
           toolkit: "gmail",
           toolkitConfigured: false,

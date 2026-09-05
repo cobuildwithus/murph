@@ -1341,8 +1341,10 @@ describe("hosted workspace runtime entrypoint", () => {
           hostedMailboxImportedCount: 0,
           hostedMailboxNextRetryAtPresent: true,
           hostedMailboxRetryableBlockedCount: 1,
+          hostedMailboxSystemFirstPendingSeq: null,
           hostedMailboxSystemHandledThroughSeq: "0",
           hostedMailboxSystemImportedSeq: "0",
+          hostedMailboxSystemDeviceSyncContinuationSeqs: [],
         },
         status: "scheduled",
       });
@@ -3140,8 +3142,10 @@ describe("hosted workspace runtime entrypoint", () => {
           hostedMailboxFetchedCount: mailboxItemCount,
           hostedMailboxImportedCount: mailboxItemCount,
           hostedMailboxRetryableBlockedCount: 0,
+          hostedMailboxSystemFirstPendingSeq: null,
           hostedMailboxSystemHandledThroughSeq: "0",
           hostedMailboxSystemImportedSeq: "0",
+          hostedMailboxSystemDeviceSyncContinuationSeqs: [],
         },
         status: "idle",
       });

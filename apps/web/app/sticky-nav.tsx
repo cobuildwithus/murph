@@ -20,6 +20,7 @@ const NAV_LINKS: ReadonlyArray<{
   href: string;
   label: string;
 }> = [
+  { href: "/goals", label: "Goals" },
   { href: "/#faq", label: "FAQ" },
   { href: "/knowledge", label: "Knowledge" },
   { href: "/security", label: "Security" },
@@ -29,12 +30,22 @@ const NAV_LINKS: ReadonlyArray<{
 const MOBILE_MENU_ROW =
   "rounded-lg px-5 py-6 text-xl font-medium text-[#2d3436] transition-colors hover:bg-[#c4a882]/10 active:bg-[#c4a882]/15";
 
+function getStickyNavAuthLabel(
+  authenticated: boolean,
+  unauthenticatedAuthLabel: string | undefined,
+): string {
+  return authenticated
+    ? "Dashboard"
+    : unauthenticatedAuthLabel ?? "Dashboard";
+}
+
 export function StickyNav({
   authenticated,
   darkTop = false,
   githubStarCount = null,
   preloadAuthPanel = false,
   splitUnauthenticatedAuth = true,
+  unauthenticatedAuthLabel,
 }: {
   authenticated: boolean;
   /**
@@ -46,6 +57,7 @@ export function StickyNav({
   githubStarCount?: number | null;
   preloadAuthPanel?: boolean;
   splitUnauthenticatedAuth?: boolean;
+  unauthenticatedAuthLabel?: string;
 }) {
   const auth = useAuth();
   const [scrolled, setScrolled] = useState(false);
@@ -150,7 +162,10 @@ export function StickyNav({
           ) : null}
         </a>
         <LandingAuthActions
-          authLabel="Dashboard"
+          authLabel={getStickyNavAuthLabel(
+            authenticated,
+            unauthenticatedAuthLabel,
+          )}
           authenticated={authenticated}
           context="nav"
           {...(onDark ? { onDarkSurface: true } : {})}

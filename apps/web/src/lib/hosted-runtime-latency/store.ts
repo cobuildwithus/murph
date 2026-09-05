@@ -94,6 +94,10 @@ const HOSTED_INGRESS_LATENCY_PHASE_LEAF_RULES_JSON = JSON.stringify(
 );
 
 export interface HostedIngressLatencyWriteResult {
+  // Subset of unmatchedCount that passed ownership/eligibility but could not
+  // claim a trace row because another latency callback held its lock. The
+  // existing runtime retry owns convergence for these rows.
+  contendedCount?: number;
   matchedCount: number;
   recorded: boolean;
   /** True when a best-effort collection milestone deliberately bounded its write. */
@@ -430,8 +434,15 @@ export async function recordHostedIngressProviderStarted(input: {
     requested(assistant_input_id) AS (
       VALUES ${requestedIds}
     ),
-    scoped AS (
-      SELECT DISTINCT requested.assistant_input_id
+    scoped AS MATERIALIZED (
+      SELECT DISTINCT
+        requested.assistant_input_id,
+        trace.id AS trace_id,
+        (
+          trace.runtime_attempt_id IS NULL
+          OR input.runtime_attempt_id IS NULL
+          OR trace.runtime_attempt_id = input.runtime_attempt_id
+        ) AS eligible
       FROM requested
       CROSS JOIN input
       JOIN hosted_ingress_latency_trace AS trace
@@ -440,18 +451,17 @@ export async function recordHostedIngressProviderStarted(input: {
        AND trace.source = input.source
     ),
     locked AS MATERIALIZED (
-      SELECT requested.assistant_input_id, trace.id
-      FROM requested
+      SELECT scoped.assistant_input_id, trace.id
+      FROM scoped
       CROSS JOIN input
       JOIN hosted_ingress_latency_trace AS trace
-        ON trace.assistant_input_id = requested.assistant_input_id
-       AND trace.user_id = input.user_id
-       AND trace.source = input.source
-       AND (
-         trace.runtime_attempt_id IS NULL
-         OR input.runtime_attempt_id IS NULL
-         OR trace.runtime_attempt_id = input.runtime_attempt_id
-       )
+        ON trace.id = scoped.trace_id
+      WHERE scoped.eligible
+        AND (
+          trace.runtime_attempt_id IS NULL
+          OR input.runtime_attempt_id IS NULL
+          OR trace.runtime_attempt_id = input.runtime_attempt_id
+        )
       ORDER BY trace.id
       FOR UPDATE OF trace SKIP LOCKED
     ),
@@ -496,6 +506,12 @@ export async function recordHostedIngressProviderStarted(input: {
         FROM scoped
         WHERE scoped.assistant_input_id = requested.assistant_input_id
       ) AS traced,
+      EXISTS (
+        SELECT 1
+        FROM scoped
+        WHERE scoped.assistant_input_id = requested.assistant_input_id
+          AND scoped.eligible
+      ) AS eligible,
       EXISTS (
         SELECT 1
         FROM locked
@@ -591,8 +607,21 @@ export async function recordHostedIngressAssistantMilestone(input: {
     requested(assistant_input_id) AS (
       VALUES ${requestedIds}
     ),
-    scoped AS (
-      SELECT DISTINCT requested.assistant_input_id
+    scoped AS MATERIALIZED (
+      SELECT DISTINCT
+        requested.assistant_input_id,
+        trace.id AS trace_id,
+        (
+          input.terminal_non_reply_projection
+          OR (
+            input.lifecycle_projection
+            AND ${buildHostedIngressLifecycleAssistantMilestoneEligibilitySql()}
+          )
+          OR (
+            NOT input.lifecycle_projection
+            AND trace.runtime_attempt_id = input.runtime_attempt_id
+          )
+        ) AS eligible
       FROM requested
       CROSS JOIN input
       JOIN hosted_ingress_latency_trace AS trace
@@ -601,24 +630,23 @@ export async function recordHostedIngressAssistantMilestone(input: {
        AND trace.source = input.source
     ),
     locked AS MATERIALIZED (
-      SELECT requested.assistant_input_id, trace.id
-      FROM requested
+      SELECT scoped.assistant_input_id, trace.id
+      FROM scoped
       CROSS JOIN input
       JOIN hosted_ingress_latency_trace AS trace
-        ON trace.assistant_input_id = requested.assistant_input_id
-       AND trace.user_id = input.user_id
-       AND trace.source = input.source
-       AND (
-         input.terminal_non_reply_projection
-         OR (
-           input.lifecycle_projection
-           AND ${buildHostedIngressLifecycleAssistantMilestoneEligibilitySql()}
-         )
-         OR (
-           NOT input.lifecycle_projection
-           AND trace.runtime_attempt_id = input.runtime_attempt_id
-         )
-       )
+        ON trace.id = scoped.trace_id
+      WHERE scoped.eligible
+        AND (
+          input.terminal_non_reply_projection
+          OR (
+            input.lifecycle_projection
+            AND ${buildHostedIngressLifecycleAssistantMilestoneEligibilitySql()}
+          )
+          OR (
+            NOT input.lifecycle_projection
+            AND trace.runtime_attempt_id = input.runtime_attempt_id
+          )
+        )
       ORDER BY trace.id
       FOR UPDATE OF trace SKIP LOCKED
     ),
@@ -656,6 +684,12 @@ export async function recordHostedIngressAssistantMilestone(input: {
       ) AS traced,
       EXISTS (
         SELECT 1
+        FROM scoped
+        WHERE scoped.assistant_input_id = requested.assistant_input_id
+          AND scoped.eligible
+      ) AS eligible,
+      EXISTS (
+        SELECT 1
         FROM locked
         WHERE locked.assistant_input_id = requested.assistant_input_id
       ) AS matched
@@ -670,6 +704,7 @@ export async function recordHostedIngressAssistantMilestone(input: {
 
 type HostedIngressLatencySetWriteProjectionRow = {
   assistantInputId: string;
+  eligible: boolean;
   matched: boolean;
   traced: boolean;
 };
@@ -690,10 +725,15 @@ function buildHostedIngressLatencySetWriteResult(input: {
   const tracedIds = new Set(input.rows
     .filter((row) => row.traced)
     .map((row) => row.assistantInputId));
+  const eligibleIds = new Set(input.rows
+    .filter((row) => row.eligible)
+    .map((row) => row.assistantInputId));
   const unmatchedIds = input.assistantInputIds.filter((id) => !matchedIds.has(id));
   const untracedCount = unmatchedIds.filter((id) => !tracedIds.has(id)).length;
+  const contendedCount = unmatchedIds.filter((id) => eligibleIds.has(id)).length;
 
   return {
+    ...(contendedCount > 0 ? { contendedCount } : {}),
     matchedCount: matchedIds.size,
     recorded: matchedIds.size > 0,
     unmatchedCount: unmatchedIds.length,

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-04",
+  "order": 100,
+  "item": {
+    "id": "health-reminders-keep-the-right-context",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Health reminders keep the right context",
+    "summary": "When you ask Murph to connect a reminder to a saved condition, it can now load the record-reference format before creating the reminder.",
+    "details": "Murph uses the canonical condition identifier and creates the reminder once, avoiding a failed save caused by guessing the reference fields.",
+    "relevanceTags": ["assistant", "reminders", "personal-context", "reliability"],
+    "sourcePullRequests": [2810]
+  }
+}

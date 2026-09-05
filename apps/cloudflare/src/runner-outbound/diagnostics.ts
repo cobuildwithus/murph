@@ -1,4 +1,5 @@
 import {
+  CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_PATH,
   CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
 } from "../internal-hosts.ts";
 import {
@@ -101,23 +102,37 @@ export function readHostedRunnerInternalOperation(input: {
     return "workspace_snapshot_unknown";
   }
   if (input.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.runnerControl) {
-    return "runner_control";
+    return readHostedRunnerControlOperation(input);
   }
   if (input.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort) {
     if (matchHostedExecutionRunnerMealPhotoPath(input.pathname)) {
       return input.method === "DELETE" ? "meal_photo_delete" : "meal_photo_read";
     }
-    if (
-      input.method === "POST"
-      && input.pathname
-        === HOSTED_EXECUTION_RUNNER_PRIVATE_IMAGE_URL_PUBLISH_PATH
-    ) {
+    if (isHostedRunnerPrivateImagePublishOperation(input)) {
       return "private_image_url_publish";
     }
     return "effects_port";
   }
 
   return "unknown_internal_operation";
+}
+
+function readHostedRunnerControlOperation(input: {
+  method: string;
+  pathname: string;
+}): string {
+  return input.method === "POST"
+    && input.pathname === CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_PATH
+    ? "runtime_completion"
+    : "runner_control";
+}
+
+function isHostedRunnerPrivateImagePublishOperation(input: {
+  method: string;
+  pathname: string;
+}): boolean {
+  return input.method === "POST"
+    && input.pathname === HOSTED_EXECUTION_RUNNER_PRIVATE_IMAGE_URL_PUBLISH_PATH;
 }
 
 export async function readHostedRunnerSafeResponseBodyMetadata(

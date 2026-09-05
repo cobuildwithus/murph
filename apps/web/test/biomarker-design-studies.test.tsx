@@ -241,6 +241,13 @@ test("screenshot categories keep the production studies available without one gi
 
   expect(componentsMarkup).toContain(">Components<");
   expect(componentsMarkup).not.toContain(">Sections<");
+  expect(componentsMarkup).toContain(
+    'data-design-study="goal-category-browse"',
+  );
+  expect(componentsMarkup).toContain('id="goal-category-browse"');
+  expect(componentsMarkup).toContain('data-goal-catalog="cardio"');
+  expect(componentsMarkup).toContain('data-design-study="goal-composer"');
+  expect(componentsMarkup).toContain('aria-pressed="true"');
   expect(componentsMarkup).toContain("WHOOP Completion Dialog");
   expect(componentsMarkup).toContain("Preview WHOOP completion");
   expect(componentsMarkup).toContain("Preview capacity fallback");

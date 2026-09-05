@@ -176,7 +176,7 @@ const JUNCTION_LEGACY_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEY
   JUNCTION_NOTE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY,
 ] as const);
 
-const JUNCTION_RECONCILED_HISTORICAL_METADATA_KEYS = Object.freeze([
+export const JUNCTION_RECONCILED_HISTORICAL_METADATA_KEYS = Object.freeze([
   ...Object.values(JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS),
   ...JUNCTION_LEGACY_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEYS,
 ]);
@@ -587,9 +587,11 @@ function canRetainJunctionExtendedTimeseriesHistoryCoverageUpdate(
   update: JunctionExtendedTimeseriesHistoryCoverageUpdate,
 ): boolean {
   const existing = sanitizeStoredDeviceSyncMetadata(metadata);
-  const merged = mergeStoredDeviceSyncMetadataPatch(existing, {
-    [update.metadataKey]: update.value,
-  });
+  const merged = mergeStoredDeviceSyncMetadataPatch(
+    existing,
+    { [update.metadataKey]: update.value },
+    JUNCTION_RECONCILED_HISTORICAL_METADATA_KEYS,
+  );
   return merged[update.metadataKey] === update.value
     && Object.keys(existing).every((key) => Object.hasOwn(merged, key));
 }
@@ -946,9 +948,11 @@ function mergeJunctionExtendedTimeseriesHistoryCoverageMetadata(input: {
         delete metadata[legacyMetadataKey];
       }
     }
-    metadata = mergeStoredDeviceSyncMetadataPatch(metadata, {
-      [metadataKey]: encoded,
-    });
+    metadata = mergeStoredDeviceSyncMetadataPatch(
+      metadata,
+      { [metadataKey]: encoded },
+      JUNCTION_RECONCILED_HISTORICAL_METADATA_KEYS,
+    );
   }
 
   const localCoverageAdvanced = input.localConnectionStateUnpublished

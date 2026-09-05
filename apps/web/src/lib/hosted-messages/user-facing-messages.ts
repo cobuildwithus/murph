@@ -26,6 +26,8 @@ const USER_FACING_MESSAGE_TEMPLATE_KEYS = [
   "linq.daily_quota",
   "linq.home_redirect",
   "linq.device_delivery_stalled",
+  "linq.apple_health_delivery_stalled",
+  "linq.device_connection_check",
   "linq.ai_usage.billing_inactive",
   "linq.ai_usage.starter_limit_reached",
   "linq.ai_usage.edge_limit_reached",
@@ -40,6 +42,11 @@ export type UserFacingMessageTemplateKey =
   (typeof USER_FACING_MESSAGE_TEMPLATE_KEYS)[number]
 
 export interface UserFacingMessageContextByKey {
+  "linq.device_connection_check": {
+    companionAppName: string
+    deviceDisplayName: string
+    providerDisplayName: string
+  }
   "assistant.signup_welcome": Record<string, never>
   "assistant.family_welcome": Record<string, never>
   "linq.invite_signup": {
@@ -52,6 +59,11 @@ export interface UserFacingMessageContextByKey {
     homeRecipientPhone: string
   }
   "linq.device_delivery_stalled": {
+    companionAppName: string
+    deviceDisplayName: string
+    providerDisplayName: string
+  }
+  "linq.apple_health_delivery_stalled": {
     companionAppName: string
     deviceDisplayName: string
     providerDisplayName: string
@@ -591,6 +603,28 @@ Sound good?`,
     `Resend your last message on the number where I answer you:
 {homeRecipientPhone}`,
   ],
+  "linq.apple_health_delivery_stalled": [
+    `I haven't received new Apple Health data in a few days. When you have a moment, open Murph and tap “Check for new data.”`,
+    `Apple Health data hasn't reached me recently. Could you open Murph and tap “Check for new data”?`,
+    `I'm missing recent Apple Health updates. Open Murph when convenient and tap “Check for new data.”`,
+    `It's been a few days since Apple Health data arrived. In Murph, “Check for new data” can give the sync another try.`,
+    `No new Apple Health data has come through lately. When you're free, open Murph and tap “Check for new data.”`,
+    `I haven't seen an Apple Health update in a while. Could you try “Check for new data” in Murph?`,
+    `Recent Apple Health data hasn't come through on my side. Try opening Murph and tapping “Check for new data.”`,
+    `Apple Health has been quiet on my end for a few days. When convenient, tap “Check for new data” in Murph.`,
+    `I'm still waiting for fresh Apple Health data. Opening Murph and tapping “Check for new data” is a useful first check.`,
+    `I haven't received a recent Apple Health update. When you have time, try “Check for new data” in Murph.`,
+    `There's a gap in the Apple Health updates reaching me. Could you open Murph and tap “Check for new data”?`,
+    `New Apple Health records haven't reached me lately. Open Murph when you get a chance and choose “Check for new data.”`,
+    `It's been a while since new Apple Health data came through. Try “Check for new data” on Murph's Home screen.`,
+    `I may be missing your latest Apple Health data. Could you tap “Check for new data” in the Murph app?`,
+    `Apple Health updates haven't arrived here in a few days. Opening Murph and choosing “Check for new data” can help check the connection.`,
+    `I'm not seeing recent Apple Health data yet. When you have a moment, try the “Check for new data” button in Murph.`,
+    `Fresh Apple Health data hasn't arrived on my side. Could you open the Murph app and choose “Check for new data”?`,
+    `I haven't picked up new Apple Health records lately. You can try “Check for new data” in Murph when convenient.`,
+    `Recent Apple Health updates are missing here. A first step is to open Murph and tap “Check for new data.”`,
+    `It's been a few days without an Apple Health update reaching me. When you're ready, open Murph and try “Check for new data.”`,
+  ],
   "linq.device_delivery_stalled": [
     `I haven't seen recent {providerDisplayName} data come through. Want to open {companionAppName} and check that your {deviceDisplayName} is charged and syncing?`,
     `Recent {providerDisplayName} data hasn't reached me. Could you open {companionAppName} and make sure your {deviceDisplayName} is charged and syncing?`,
@@ -612,6 +646,28 @@ Sound good?`,
     `I haven't received a recent update from {providerDisplayName}. Want to check {companionAppName} and make sure the {deviceDisplayName} is charged and syncing?`,
     `Your recent {providerDisplayName} readings aren't reaching me right now. Could you open {companionAppName} and check the {deviceDisplayName}'s charge and sync?`,
     `It looks like I may be missing new {providerDisplayName} data. Can you open {companionAppName} and make sure your {deviceDisplayName} is charged and syncing?`,
+  ],
+  "linq.device_connection_check": [
+    `I haven't received recent {providerDisplayName} data. Want help checking the connection?`,
+    `Your recent {providerDisplayName} data hasn't reached me. Would you like help looking into it?`,
+    `I'm missing new data from {providerDisplayName}. Want to check the connection together?`,
+    `It has been a while since {providerDisplayName} data came through. Can I help you check it?`,
+    `New {providerDisplayName} data isn't reaching me right now. Would you like a hand with the connection?`,
+    `I haven't seen fresh {providerDisplayName} data lately. Want help figuring out what's happening?`,
+    `Recent data from {providerDisplayName} hasn't come through on my side. Shall we check the connection?`,
+    `I'm not seeing new {providerDisplayName} readings. Would you like help getting them coming through again?`,
+    `Your latest {providerDisplayName} data hasn't reached me. Want a hand checking why?`,
+    `There's a gap in the {providerDisplayName} data I'm receiving. Can I help you look into it?`,
+    `I may be missing your latest {providerDisplayName} data. Would you like to check the connection with me?`,
+    `I haven't picked up recent {providerDisplayName} data. Want help checking what's going on?`,
+    `Data from {providerDisplayName} has been quiet on my side. Would you like help with the connection?`,
+    `Your recent {providerDisplayName} readings aren't coming through to me. Can I help check the connection?`,
+    `I'm missing recent readings from {providerDisplayName}. Would you like a hand finding out why?`,
+    `I haven't received a recent update from {providerDisplayName}. Want to look at the connection together?`,
+    `Fresh {providerDisplayName} data hasn't been coming through. Shall we take a look at the connection?`,
+    `It looks like recent {providerDisplayName} data hasn't reached me. Would you like help checking it?`,
+    `I'm not receiving your latest data from {providerDisplayName}. Want help looking into the connection?`,
+    `New readings from {providerDisplayName} haven't reached me lately. Can I give you a hand checking it?`,
   ],
   "linq.ai_usage.billing_inactive": [
     `Your Murph plan isn't active right now. You can sort that out here:

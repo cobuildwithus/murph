@@ -13,9 +13,12 @@ const EXPENSIVE_WORKFLOWS = new Map([
   ["foreground-reply-state-cardinality.yml", ["bounded-work"]],
   ["host-support.yml", [
     "cli-host-matrix",
+    "release-verification-plan-linux",
     "release-build-typecheck-linux",
     "release-package-coverage-linux",
-    "release-app-verification-linux",
+    "release-web-build-linux",
+    "release-web-tests-linux",
+    "release-cloudflare-verification-linux",
     "production-runner-bundle-budget-linux",
     "release-fixture-coverage-linux",
     "release-checks-linux",
@@ -141,6 +144,194 @@ function inspectCancellationAwareJobs(source, name) {
   }
 }
 
+function jobNeeds(job, jobName) {
+  const inline = job.match(/^    needs: ([a-zA-Z0-9_-]+)$/mu);
+  if (inline) {
+    return [inline[1]];
+  }
+
+  const list = job.match(/^    needs:\n((?:      - [a-zA-Z0-9_-]+\n)+)/mu);
+  assert.ok(list, `${jobName} must declare readable needs`);
+  return [...list[1].matchAll(/^      - ([a-zA-Z0-9_-]+)$/gmu)]
+    .map((match) => match[1]);
+}
+
+function countOccurrences(source, needle) {
+  return source.split(needle).length - 1;
+}
+
+function assertExactCandidateCheckout(job, jobName) {
+  assert.match(
+    job,
+    /uses: actions\/checkout@[^\n]+\n        with:\n          ref: \$\{\{ github\.sha \}\}\n          persist-credentials: false/u,
+    `${jobName} must check out the exact event candidate without credentials`,
+  );
+}
+
+function inspectHostSupportReleaseGraph(source) {
+  const plan = jobBlock(source, "release-verification-plan-linux");
+  assert.deepEqual(jobNeeds(plan, "release-verification-plan-linux"), [
+    "markdown-docs-scope",
+  ]);
+  assert.match(
+    plan,
+    new RegExp(`^    ${escapeRegExp(FULL_VERIFICATION_CONDITION)}$`, "mu"),
+  );
+  assert.match(
+    plan,
+    /^      package_matrix: \$\{\{ steps\.verification_plan\.outputs\.package_matrix \}\}$/mu,
+  );
+  assert.match(
+    plan,
+    /^      hosted_web_test_matrix: \$\{\{ steps\.verification_plan\.outputs\.hosted_web_test_matrix \}\}$/mu,
+  );
+  assertExactCandidateCheckout(plan, "release-verification-plan-linux");
+  assert.match(plan, /node-version-file: \.nvmrc/u);
+  assert.match(
+    plan,
+    /node scripts\/release-verification-plan\.mjs --github-output "\$GITHUB_OUTPUT"/u,
+  );
+  assert.doesNotMatch(plan, /pnpm install/u, "the matrix plan must stay dependency-free");
+
+  const build = jobBlock(source, "release-build-typecheck-linux");
+  const packageCoverage = jobBlock(source, "release-package-coverage-linux");
+  assert.deepEqual(jobNeeds(packageCoverage, "release-package-coverage-linux"), [
+    "markdown-docs-scope",
+    "release-verification-plan-linux",
+  ]);
+  assert.match(packageCoverage, /^      fail-fast: false$/mu);
+  assert.match(
+    packageCoverage,
+    /^      matrix: \$\{\{ fromJSON\(needs\.release-verification-plan-linux\.outputs\.package_matrix\) \}\}$/mu,
+  );
+  assert.doesNotMatch(packageCoverage, /matrix\.packages/u);
+  assertExactCandidateCheckout(packageCoverage, "release-package-coverage-linux");
+  assert.match(packageCoverage, /run: pnpm install --frozen-lockfile/u);
+  assert.match(packageCoverage, /run: pnpm health-commons:generate/u);
+  assert.match(
+    packageCoverage,
+    /package_dirs="\$\(node scripts\/release-verification-plan\.mjs --package-dirs "\$\{\{ matrix\.shard \}\}"\)"/u,
+  );
+  assert.match(packageCoverage, /if \[\[ -z "\$package_dirs" \]\]/u);
+  assert.match(packageCoverage, /if: \$\{\{ matrix\.shard == 'cli' \}\}/u);
+  assert.equal(
+    countOccurrences(packageCoverage, "if: ${{ matrix.shard == 'cli' }}"),
+    2,
+    "only the singleton CLI shard may prepare the runtime and package-shape proof",
+  );
+  assert.doesNotMatch(packageCoverage, /verify:package-boundary/u);
+
+  for (const command of [
+    "pnpm --dir packages/messaging-ingress verify:package-boundary:prepared",
+    "pnpm --dir packages/inboxd verify:package-boundary:prepared",
+    "pnpm --dir packages/hosted-local-harness verify:package-boundary:prepared",
+  ]) {
+    assert.equal(countOccurrences(source, command), 1, `${command} must have one owner`);
+    assert.match(build, new RegExp(escapeRegExp(command), "u"));
+  }
+
+  const webBuild = jobBlock(source, "release-web-build-linux");
+  const webTests = jobBlock(source, "release-web-tests-linux");
+  const cloudflare = jobBlock(source, "release-cloudflare-verification-linux");
+  for (const [jobName, job] of [
+    ["release-web-build-linux", webBuild],
+    ["release-web-tests-linux", webTests],
+    ["release-cloudflare-verification-linux", cloudflare],
+  ]) {
+    assert.match(job, /^    runs-on: ubuntu-24\.04$/mu);
+    assert.match(job, /^    timeout-minutes: 45$/mu);
+    assertExactCandidateCheckout(job, jobName);
+    assert.match(job, /run: pnpm install --frozen-lockfile/u);
+  }
+
+  assert.deepEqual(jobNeeds(webBuild, "release-web-build-linux"), [
+    "markdown-docs-scope",
+  ]);
+  assert.match(webBuild, /^      MURPH_HOSTED_WEB_VERIFY_LANE: build$/mu);
+  assert.match(webBuild, /^      MURPH_HOSTED_WEB_WEBPACK_CACHE: "1"$/mu);
+  assert.match(webBuild, /^      MURPH_HOSTED_WEB_VERIFY_SKIP_TYPECHECK: "1"$/mu);
+  assert.match(webBuild, /^      MURPH_VERIFY_STEP_PARALLEL: "1"$/mu);
+  assert.match(webBuild, /^        run: pnpm --dir apps\/web verify$/mu);
+  assert.doesNotMatch(webBuild, /services:\n/u);
+
+  assert.deepEqual(jobNeeds(webTests, "release-web-tests-linux"), [
+    "markdown-docs-scope",
+    "release-verification-plan-linux",
+  ]);
+  assert.match(webTests, /^      fail-fast: false$/mu);
+  assert.match(
+    webTests,
+    /^      matrix: \$\{\{ fromJSON\(needs\.release-verification-plan-linux\.outputs\.hosted_web_test_matrix\) \}\}$/mu,
+  );
+  assert.match(webTests, /^        image: public\.ecr\.aws\/docker\/library\/postgres:17$/mu);
+  assert.match(webTests, /^      MURPH_HOSTED_WEB_TEST_SHARD: \$\{\{ matrix\.shard \}\}$/mu);
+  assert.match(webTests, /^      MURPH_HOSTED_WEB_VERIFY_LANE: test-shard$/mu);
+  assert.match(webTests, /^      MURPH_HOSTED_WEB_VERIFY_SKIP_TYPECHECK: "1"$/mu);
+  assert.match(
+    webTests,
+    /^      MURPH_SUPPLEMENT_SEARCH_TEST_DB_URL: postgresql:\/\/postgres:postgres@127\.0\.0\.1:5432\/murph_search_test$/mu,
+  );
+  assert.match(webTests, /^        run: pnpm --dir apps\/web verify$/mu);
+
+  assert.deepEqual(jobNeeds(cloudflare, "release-cloudflare-verification-linux"), [
+    "markdown-docs-scope",
+  ]);
+  assert.match(cloudflare, /^      MURPH_CLOUDFLARE_VERIFY_SKIP_TYPECHECK: "1"$/mu);
+  assert.match(cloudflare, /^      MURPH_VERIFY_STEP_PARALLEL: "1"$/mu);
+  assert.match(
+    cloudflare,
+    /^        run: pnpm --dir apps\/cloudflare verify:codex-upstream-source$/mu,
+  );
+  assert.match(cloudflare, /^        run: pnpm --dir apps\/cloudflare verify$/mu);
+  assert.doesNotMatch(cloudflare, /services:\n/u);
+
+  assert.equal(countOccurrences(source, "        run: pnpm --dir apps/web verify\n"), 2);
+  assert.equal(countOccurrences(source, "        run: pnpm --dir apps/cloudflare verify\n"), 1);
+  assert.doesNotMatch(source, /pnpm test:apps|MURPH_APP_VERIFY_PARALLEL/u);
+  for (const jobName of workflowJobNames(source)) {
+    const job = jobBlock(source, jobName);
+    assert.equal(
+      job.includes("pnpm --dir apps/web verify")
+        && job.includes("pnpm --dir apps/cloudflare verify"),
+      false,
+      `${jobName} must not overlap Web and Cloudflare verification on one runner`,
+    );
+  }
+
+  const releaseChecks = jobBlock(source, "release-checks-linux");
+  assert.deepEqual(jobNeeds(releaseChecks, "release-checks-linux"), [
+    "markdown-docs-scope",
+    "release-verification-plan-linux",
+    "markdown-docs-proof",
+    "release-build-typecheck-linux",
+    "release-package-coverage-linux",
+    "release-web-build-linux",
+    "release-web-tests-linux",
+    "release-cloudflare-verification-linux",
+    "release-fixture-coverage-linux",
+    "production-runner-bundle-budget-linux",
+  ]);
+  assert.match(releaseChecks, /PLAN_RESULT: \$\{\{ needs\.release-verification-plan-linux\.result \}\}/u);
+  assert.match(releaseChecks, /WEB_BUILD_RESULT: \$\{\{ needs\.release-web-build-linux\.result \}\}/u);
+  assert.match(releaseChecks, /WEB_TEST_RESULT: \$\{\{ needs\.release-web-tests-linux\.result \}\}/u);
+  assert.match(releaseChecks, /CLOUDFLARE_RESULT: \$\{\{ needs\.release-cloudflare-verification-linux\.result \}\}/u);
+  for (const resultName of [
+    "PLAN_RESULT",
+    "BUILD_RESULT",
+    "PACKAGE_RESULT",
+    "WEB_BUILD_RESULT",
+    "WEB_TEST_RESULT",
+    "CLOUDFLARE_RESULT",
+    "FIXTURE_RESULT",
+    "BUNDLE_RESULT",
+  ]) {
+    assert.ok(
+      countOccurrences(releaseChecks, `"$${resultName}"`) >= 2,
+      `${resultName} must be aggregated in docs and full modes`,
+    );
+  }
+}
+
 test("expensive pull-request workflows are ready-only and fail closed for draft opens", async () => {
   for (const [name, jobs] of EXPENSIVE_WORKFLOWS) {
     inspectExpensiveWorkflow(await workflow(name), name, jobs);
@@ -177,7 +368,9 @@ test("runtime-heavy jobs skip only an affirmative trusted Markdown result", asyn
   for (const jobName of [
     "release-build-typecheck-linux",
     "release-package-coverage-linux",
-    "release-app-verification-linux",
+    "release-web-build-linux",
+    "release-web-tests-linux",
+    "release-cloudflare-verification-linux",
     "production-runner-bundle-budget-linux",
     "release-fixture-coverage-linux",
   ]) {
@@ -237,13 +430,49 @@ test("runtime-heavy jobs skip only an affirmative trusted Markdown result", asyn
   }
 });
 
-test("release app verification stays bounded and serial across app owners", async () => {
+test("Host Support consumes one exhaustive plan and isolates app owners", async () => {
   const host = await workflow("host-support.yml");
-  const appVerification = jobBlock(host, "release-app-verification-linux");
+  inspectHostSupportReleaseGraph(host);
+});
 
-  assert.match(appVerification, /^    timeout-minutes: 45$/mu);
-  assert.match(appVerification, /^      MURPH_APP_VERIFY_PARALLEL: "0"$/mu);
-  assert.match(appVerification, /^      MURPH_VERIFY_STEP_PARALLEL: "1"$/mu);
+test("Host Support graph drift cannot skip, duplicate, overlap, or de-aggregate an owner", async () => {
+  const host = await workflow("host-support.yml");
+  const mutations = [
+    host.replace(
+      "needs.release-verification-plan-linux.outputs.package_matrix",
+      "needs.release-verification-plan-linux.outputs.hosted_web_test_matrix",
+    ),
+    host.replace(
+      "      fail-fast: false\n      # The validated release plan",
+      "      fail-fast: true\n      # The validated release plan",
+    ),
+    host.replace(
+      "pnpm --dir packages/inboxd verify:package-boundary:prepared",
+      "pnpm --dir packages/messaging-ingress verify:package-boundary:prepared",
+    ),
+    host.replace(
+      "        run: pnpm --dir apps/cloudflare verify\n",
+      "        run: pnpm --dir apps/web verify\n",
+    ),
+    host.replace(
+      "      - name: Run hosted-Web build, lint, and smoke verification\n        run: pnpm --dir apps/web verify",
+      "      - name: Run hosted-Web build, lint, and smoke verification\n        run: |\n          pnpm --dir apps/web verify\n          pnpm --dir apps/cloudflare verify",
+    ),
+    host.replace(
+      "      MURPH_HOSTED_WEB_VERIFY_LANE: test-shard",
+      "      MURPH_HOSTED_WEB_VERIFY_LANE: all",
+    ),
+    host.replace(
+      "      fail-fast: false\n      matrix: ${{ fromJSON(needs.release-verification-plan-linux.outputs.hosted_web_test_matrix) }}",
+      "      fail-fast: true\n      matrix: ${{ fromJSON(needs.release-verification-plan-linux.outputs.hosted_web_test_matrix) }}",
+    ),
+    host.replace("      - release-web-tests-linux\n", ""),
+  ];
+
+  for (const mutation of mutations) {
+    assert.notEqual(mutation, host, "every graph mutation must alter the workflow fixture");
+    assert.throws(() => inspectHostSupportReleaseGraph(mutation));
+  }
 });
 
 test("Host Support runs one exact merge-candidate documentation proof", async () => {
@@ -347,45 +576,68 @@ test("trusted classifier drift fails closed into the full workflow", async () =>
 
 test("Release checks accepts exactly docs-proof or full-shard receipts", async () => {
   const source = await workflow("host-support.yml");
-  const base = {
-    APP_RESULT: "skipped",
+  const releaseResultNames = [
+    "PLAN_RESULT",
+    "BUILD_RESULT",
+    "PACKAGE_RESULT",
+    "WEB_BUILD_RESULT",
+    "WEB_TEST_RESULT",
+    "CLOUDFLARE_RESULT",
+    "FIXTURE_RESULT",
+    "BUNDLE_RESULT",
+  ];
+  const docsProof = {
     BUILD_RESULT: "skipped",
     BUNDLE_RESULT: "skipped",
+    CLOUDFLARE_RESULT: "skipped",
     DOCS_RESULT: "success",
     EVENT_NAME: "pull_request",
     FIXTURE_RESULT: "skipped",
     MARKDOWN_ONLY: "true",
     PACKAGE_RESULT: "skipped",
+    PLAN_RESULT: "skipped",
     SCOPE_RESULT: "success",
+    WEB_BUILD_RESULT: "skipped",
+    WEB_TEST_RESULT: "skipped",
   };
-  assert.equal(runWorkflowStep(source, "Check release proof mode", base).status, 0);
+  assert.equal(runWorkflowStep(source, "Check release proof mode", docsProof).status, 0);
+  for (const resultName of releaseResultNames) {
+    assert.equal(runWorkflowStep(source, "Check release proof mode", {
+      ...docsProof,
+      [resultName]: "success",
+    }).status, 1, `docs mode must reject non-skipped ${resultName}`);
+  }
   assert.equal(runWorkflowStep(source, "Check release proof mode", {
-    ...base,
-    APP_RESULT: "success",
-  }).status, 1);
-  assert.equal(runWorkflowStep(source, "Check release proof mode", {
-    ...base,
+    ...docsProof,
     DOCS_RESULT: "failure",
   }).status, 1);
-
-  const full = {
-    ...base,
-    APP_RESULT: "success",
-    BUILD_RESULT: "success",
-    BUNDLE_RESULT: "success",
-    DOCS_RESULT: "skipped",
-    FIXTURE_RESULT: "success",
-    MARKDOWN_ONLY: "false",
-    PACKAGE_RESULT: "success",
-  };
-  assert.equal(runWorkflowStep(source, "Check release proof mode", full).status, 0);
   assert.equal(runWorkflowStep(source, "Check release proof mode", {
-    ...full,
-    PACKAGE_RESULT: "skipped",
+    ...docsProof,
+    PLAN_RESULT: "failure",
   }).status, 1);
+
+  const full = Object.fromEntries(
+    Object.entries(docsProof).map(([name, value]) => [
+      name,
+      releaseResultNames.includes(name) ? "success" : value,
+    ]),
+  );
+  full.DOCS_RESULT = "skipped";
+  full.MARKDOWN_ONLY = "false";
+  assert.equal(runWorkflowStep(source, "Check release proof mode", full).status, 0);
+  for (const resultName of releaseResultNames) {
+    assert.equal(runWorkflowStep(source, "Check release proof mode", {
+      ...full,
+      [resultName]: "skipped",
+    }).status, 1, `full mode must reject non-success ${resultName}`);
+  }
   assert.equal(runWorkflowStep(source, "Check release proof mode", {
     ...full,
     DOCS_RESULT: "success",
+  }).status, 1);
+  assert.equal(runWorkflowStep(source, "Check release proof mode", {
+    ...full,
+    PLAN_RESULT: "failure",
   }).status, 1);
 });
 
@@ -694,6 +946,23 @@ test("draft reset rejects missing, ambiguous, or mismatched head candidates befo
       synchronizedWhileDraft: false,
     }), 0);
   }
+});
+
+test("operator docs preserve the bounded Host Support release graph", async () => {
+  const [runtimeOperations, testingMap] = await Promise.all([
+    readFile(path.join(REPO_ROOT, "agent-docs", "operations", "verification-and-runtime.md"), "utf8"),
+    readFile(path.join(REPO_ROOT, "agent-docs", "references", "testing-ci-map.md"), "utf8"),
+  ]);
+  for (const document of [runtimeOperations, testingMap]) {
+    assert.match(document, /scripts\/release-verification-plan\.mjs/u);
+    assert.match(document, /six(?:-shard package| package)/u);
+    assert.match(document, /four(?:-shard Web-test| release-plan-owned Web| Web test)/u);
+    assert.match(document, /package-boundary[\s\S]{0,160}(?:exactly once|sole owner)/u);
+    assert.match(document, /organization-level/u);
+    assert.match(document, /Release checks \(ubuntu\)/u);
+  }
+  assert.match(testingMap, /separate runners[\s\S]{0,160}Frog #2656/u);
+  assert.match(runtimeOperations, /Web and Cloudflare never execute in the same job or runner/u);
 });
 
 test("operator docs preserve the ready-only exact-head lifecycle and native canary recovery", async () => {

@@ -7,6 +7,15 @@ This package exists so hosted runtimes such as `apps/cloudflare` do not need to 
 Current responsibilities:
 
 - run bounded hosted workspace invocations for assistant, inbox, and device-sync work behind an explicit runtime context object
+- publish a device-sync completion record's retained provider cadence and
+  checkpoint mailbox removal inside the same runtime admission after the exact
+  completion record is durable, without another provider-free completion wake
+  on the normal path; direct completion requires an accepted full
+  reconciliation in that admission, zero retained jobs, and an exact active
+  connection epoch; one version conflict rehydrates without re-admitting work,
+  carries same-epoch provider cadence and dirty terminal evidence, and retries
+  that reconciliation, while restored records repeat the full path and
+  authorityless legacy or terminal records drain without a cadence write
 - drain each hosted device-sync pass through one bounded worker call so
   canonical imports can safely reuse a pass-local event identity index, while
   cumulative progress remains observable and the service-owned foreground
@@ -26,7 +35,7 @@ Current responsibilities:
   blocking independent direct files, and unsafe direct structural uncertainty
   fails closed with a bounded error code; checkpoint logs report counts and byte
   totals without paths or names
-- admit only joined-group Assistant Ask requests and legacy joined-group completions through the pre-checkpoint-safe system prefix; keep consented requests and reviewed completions checkpoint-gated, order a legacy completion against older personal input through the read-only pending index, and deliver typed `cannot_answer` with fixed exact copy instead of another provider turn
+- admit only joined-group Assistant Ask requests and legacy joined-group completions through the pre-checkpoint-safe system prefix; keep consented-member requests, authenticated operator tasks, and reviewed completions checkpoint-gated, dispatch an operator task through one direct `executeOperatorDiagnostic` turn instead of the consent/reviewer composition, order a legacy completion against older personal input through the read-only pending index, and deliver typed `cannot_answer` with fixed exact copy instead of another provider turn
 - before provider execution for a direct user-action turn, compare the resident session with the session ids restored from the published snapshot; when absent, including a session created earlier in the same invocation by deterministic welcome output, stop foreground mailbox watching and pause detached work while the existing full `idle_shutdown` checkpoint makes the origin durable
 - accept a committed valid checkpoint's optional `conversationInputAhead` observation, import that durable conversation input immediately while the invocation remains live, and avoid post-upload snapshot discard or metadata-only shutdown resnapshot
 - collect and deliver due hosted side effects from live container state without waiting for foreground hosted workspace checkpointing
@@ -38,7 +47,8 @@ Current responsibilities:
 - recover late foreground input from the current invocation's exact imported-ID snapshot when best-effort active-turn notifications are early or missed; at admission, compose that recovered cursor-ordered prefix with any notified exact IDs, admit every valid same-room successor up to the existing cumulative cap, and reuse the same replyability, route, and capacity checks without scanning or mutating the broad pending index
 - re-read Web's effective core-provider choice immediately before every
   target-owned provider entry: resident accepted input, joined-group Assistant
-  Ask, consented private candidate, and private disclosure review; a missing or
+  Ask, consented private candidate, authenticated operator diagnostic, and
+  private disclosure review; a missing or
   invalid owner response uses the existing typed retry, while a mismatch closes
   detached work in the stale invocation, requeues any claimed ask through its
   existing encrypted mailbox with no delay, suppresses provider-backed idle

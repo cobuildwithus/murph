@@ -339,10 +339,30 @@ export type HostedRunnerWebControlOperation =
   | "mailbox_payload_decode"
   | "web_control_blocked";
 
+export const HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED_ERROR_CODE =
+  "HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED" as const;
+
 export type HostedRunnerWebControlRoute = RegisteredHostedRunnerWebControlRoute<
   HostedRunnerWebControlMethod,
   HostedRunnerWebControlOperation
 >;
+
+export class HostedWebControlRouteNotAllowlistedError extends TypeError {
+  readonly code = HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED_ERROR_CODE;
+  readonly operation: HostedRunnerWebControlOperation;
+
+  constructor(input: {
+    method: string;
+    operation: HostedRunnerWebControlOperation;
+    path: string;
+  }) {
+    super(
+      `Hosted runtime web-control route is not allowlisted for proxy transport: ${input.method} ${input.path}`,
+    );
+    this.name = "HostedWebControlRouteNotAllowlistedError";
+    this.operation = input.operation;
+  }
+}
 
 export interface HostedRunnerWebControlPolicy {
   allowed: boolean;
@@ -429,13 +449,16 @@ export function assertAllowedHostedRunnerWebControlRequest(input: {
   method: string;
   path: string;
 }): void {
-  if (isAllowedHostedRunnerWebControlRequest(input)) {
+  const policy = readHostedRunnerWebControlPolicy(input);
+  if (policy.allowed) {
     return;
   }
 
-  throw new TypeError(
-    `Hosted runtime web-control route is not allowlisted for proxy transport: ${input.method} ${input.path}`,
-  );
+  throw new HostedWebControlRouteNotAllowlistedError({
+    method: input.method,
+    operation: policy.operation,
+    path: input.path,
+  });
 }
 
 export function assertAllowedHostedRunnerWebControlRoute(
@@ -450,11 +473,12 @@ export function assertAllowedHostedRunnerWebControlRoute(
     return;
   }
 
-  throw new TypeError(
-    `Hosted runtime web-control route is not allowlisted for proxy transport: ${route.method} ${parsed.pathname}`,
-  );
+  throw new HostedWebControlRouteNotAllowlistedError({
+    method: route.method,
+    operation: policy.operation,
+    path: parsed.pathname,
+  });
 }
-
 export function readHostedRunnerWebControlOperation(input: {
   method: string;
   path: string;

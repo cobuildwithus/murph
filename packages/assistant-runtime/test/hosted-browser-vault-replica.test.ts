@@ -399,6 +399,54 @@ describe("hosted browser-vault replica refresh preparation", () => {
     }
   });
 
+  it("refreshes when the validated Pattern vocabulary changes", async () => {
+    const { hashHostedBrowserVaultReplicaSources } = await import(
+      "../src/hosted-runtime/browser-vault-replica.ts"
+    );
+    const testTempRoot = process.env.MURPH_VITEST_TEMP_ROOT;
+    if (!testTempRoot) throw new Error("MURPH_VITEST_TEMP_ROOT is required.");
+    const vaultRoot = await mkdtemp(
+      path.join(testTempRoot, "murph-browser-vault-vocabulary-"),
+    );
+
+    try {
+      const initialHash = await hashHostedBrowserVaultReplicaSources(vaultRoot);
+      await writeVaultFile(
+        vaultRoot,
+        "derived/knowledge/pages/journal-pattern-vocabulary.md",
+        [
+          "---",
+          "title: Journal and Pattern vocabulary",
+          "slug: journal-pattern-vocabulary",
+          "pageType: ledger",
+          "status: active",
+          "---",
+          "",
+          "# Journal and Pattern vocabulary",
+          "",
+          JSON.stringify({
+            concepts: [
+              {
+                aliases: ["dancing"],
+                icon: "dance",
+                id: "dance",
+                label: "Dance",
+              },
+            ],
+            version: 1,
+          }),
+        ].join("\n"),
+      );
+      const vocabularyHash =
+        await hashHostedBrowserVaultReplicaSources(vaultRoot);
+
+      expect(vocabularyHash.hash).not.toBe(initialHash.hash);
+      expect(vocabularyHash.fileCount).toBe(initialHash.fileCount + 1);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it("projects the output of the canonical experiment outcome writer", async () => {
     const {
       createHostedBrowserVaultReplicaForSourceState,
@@ -669,6 +717,191 @@ describe("hosted browser-vault replica refresh preparation", () => {
         replacedReplicaRef: null,
       }));
       expect(publishRef).toHaveBeenCalledOnce();
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("skips unchanged sources and leaves newer evidence pending after a calculation race", async () => {
+    const { VAULT_LAYOUT } = await import("@murphai/contracts");
+    const vaultRoot = await mkdtemp(
+      path.join(os.tmpdir(), "murph-browser-vault-refresh-"),
+    );
+    const sourcePath = path.posix.join(
+      VAULT_LAYOUT.experimentsDirectory,
+      "trial.md",
+    );
+    const initialSource =
+      "---\nexperimentId: exp_trial\nslug: trial\nstatus: active\n---\n# Trial\n";
+    const changedSource = initialSource.replace("# Trial", "# Corrected trial");
+
+    try {
+      await writeVaultFile(vaultRoot, sourcePath, initialSource);
+      const initialModule = await import(
+        "../src/hosted-runtime/browser-vault-replica.ts"
+      );
+      const initialHash =
+        await initialModule.hashHostedBrowserVaultReplicaSources(vaultRoot);
+      const currentRef: HostedBrowserVaultReplicaRef = {
+        byteLength: 128,
+        dataVersion: "browser-data-v1",
+        generatedAt: "2026-05-10T13:00:00.000Z",
+        generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
+        keyId: "browser-vault-replica:key",
+        objectKey: "users/browser-vault-replicas/member_123/current.json",
+        replicaSchema: "murph.browser-vault-replica",
+        runtimeRootKeyId: "udrk:runtime:test-root",
+        schema: "murph.hosted-browser-vault-replica-ref.v1",
+        sourceBundleHash: initialHash.hash,
+      };
+      const workspace = createWorkspaceState({
+        browserVaultReplicaRef: currentRef,
+      });
+      const write = vi.fn(async (input: { replica: unknown }) =>
+        createReplicaRefFromReplica(input.replica),
+      );
+      const publishRef = vi.fn(
+        async (input: { replicaRef: HostedBrowserVaultReplicaRef }) => ({
+          published: true as const,
+          workspace: createWorkspaceState({
+            browserVaultReplicaRef: input.replicaRef,
+          }),
+        }),
+      );
+      const platform = createPlatform({
+        browserVaultReplicaPort: { publishRef, write },
+      });
+      const unchanged =
+        await initialModule.refreshHostedBrowserVaultReplicaFromRuntime({
+          generatedAt: "2026-05-10T13:00:01.000Z",
+          platform,
+          vaultRoot,
+          workspace,
+        });
+
+      expect(unchanged).toMatchObject({ status: "skipped_current" });
+      expect(write).not.toHaveBeenCalled();
+      expect(publishRef).not.toHaveBeenCalled();
+
+      vi.resetModules();
+      vi.doUnmock("@murphai/contracts");
+      vi.doUnmock("@murphai/query");
+      vi.doUnmock("@murphai/runtime-state/node");
+      vi.doMock(
+        "@murphai/query/browser-replica-server",
+        async (importOriginal) => {
+          const actual =
+            await importOriginal<
+              typeof import("@murphai/query/browser-replica-server")
+            >();
+          return {
+            ...actual,
+            async createBrowserVaultReplica(
+              input: Parameters<typeof actual.createBrowserVaultReplica>[0],
+            ) {
+              const replica = await actual.createBrowserVaultReplica(input);
+              await writeVaultFile(vaultRoot, sourcePath, changedSource);
+              return replica;
+            },
+          };
+        },
+      );
+      const racedModule = await import(
+        "../src/hosted-runtime/browser-vault-replica.ts"
+      );
+      const raced =
+        await racedModule.refreshHostedBrowserVaultReplicaFromRuntime({
+          force: true,
+          generatedAt: "2026-05-10T13:01:00.000Z",
+          platform,
+          vaultRoot,
+          workspace,
+        });
+
+      expect(raced).toMatchObject({
+        status: "deferred_source_changed",
+      });
+      expect(write).not.toHaveBeenCalled();
+      expect(publishRef).not.toHaveBeenCalled();
+
+      vi.resetModules();
+      vi.doUnmock("@murphai/contracts");
+      vi.doUnmock("@murphai/query");
+      vi.doUnmock("@murphai/query/browser-replica-server");
+      vi.doUnmock("@murphai/runtime-state/node");
+      const retryModule = await import(
+        "../src/hosted-runtime/browser-vault-replica.ts"
+      );
+      const retried =
+        await retryModule.refreshHostedBrowserVaultReplicaFromRuntime({
+          generatedAt: "2026-05-10T13:02:00.000Z",
+          platform,
+          vaultRoot,
+          workspace,
+        });
+      const changedHash =
+        await retryModule.hashHostedBrowserVaultReplicaSources(vaultRoot);
+
+      expect(retried).toMatchObject({
+        replicaRef: { sourceBundleHash: changedHash.hash },
+        status: "published",
+      });
+      expect(write).toHaveBeenCalledOnce();
+      expect(publishRef).toHaveBeenCalledOnce();
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("does not publish when evidence changes while the replica object is written", async () => {
+    const { VAULT_LAYOUT } = await import("@murphai/contracts");
+    const { refreshHostedBrowserVaultReplicaFromRuntime } = await import(
+      "../src/hosted-runtime/browser-vault-replica.ts"
+    );
+    const vaultRoot = await mkdtemp(
+      path.join(os.tmpdir(), "murph-browser-vault-refresh-"),
+    );
+    const sourcePath = path.posix.join(
+      VAULT_LAYOUT.experimentsDirectory,
+      "trial.md",
+    );
+    const workspace = createWorkspaceState({ browserVaultReplicaRef: null });
+    const publishRef = vi.fn(
+      async (input: { replicaRef: HostedBrowserVaultReplicaRef }) => ({
+        published: true as const,
+        workspace: createWorkspaceState({
+          browserVaultReplicaRef: input.replicaRef,
+        }),
+      }),
+    );
+    const write = vi.fn(async (input: { replica: unknown }) => {
+      const replicaRef = createReplicaRefFromReplica(input.replica);
+      await writeVaultFile(
+        vaultRoot,
+        sourcePath,
+        "---\nexperimentId: exp_trial\nslug: trial\nstatus: active\n---\n# Changed during write\n",
+      );
+      return replicaRef;
+    });
+
+    try {
+      await writeVaultFile(
+        vaultRoot,
+        sourcePath,
+        "---\nexperimentId: exp_trial\nslug: trial\nstatus: active\n---\n# Initial trial\n",
+      );
+      const result = await refreshHostedBrowserVaultReplicaFromRuntime({
+        generatedAt: "2026-05-10T13:00:00.000Z",
+        platform: createPlatform({
+          browserVaultReplicaPort: { publishRef, write },
+        }),
+        vaultRoot,
+        workspace,
+      });
+
+      expect(result).toMatchObject({ status: "deferred_source_changed" });
+      expect(write).toHaveBeenCalledOnce();
+      expect(publishRef).not.toHaveBeenCalled();
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }

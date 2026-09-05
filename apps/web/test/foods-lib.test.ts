@@ -683,7 +683,7 @@ describe("foods query helpers", () => {
     expect(searchCall?.text).not.toMatch(
       /SELECT\s+brand[\s\S]*FROM foods[\s\S]*GROUP BY brand/u,
     );
-    expect(searchCall?.values).toEqual(["greek yogurt", false, 5, null]);
+    expect(searchCall?.values).toEqual(["greek yogurt", false, 5, null, 0]);
 
     const contaminantsCall = calls[1];
     expect(contaminantsCall?.text).toContain("FROM product_tests");
@@ -792,6 +792,7 @@ describe("foods query helpers", () => {
       false,
       1,
       ["usda_foundation", "usda_sr_legacy", "usda_fndds"],
+      0,
     ]);
   });
 
@@ -889,6 +890,7 @@ describe("foods query helpers", () => {
       false,
       5,
       null,
+      0,
     ]);
   });
 
@@ -1818,12 +1820,21 @@ describe("foods query helpers", () => {
     ]);
 
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.values).toEqual(["Greek Yogurt", false, 5, null]);
+    expect(calls[0]?.values).toEqual(["Greek Yogurt", false, 5, null, 0]);
     expect(calls[0]?.text).toContain("'usda_foundation'");
     expect(calls[0]?.text).toContain("'usda_sr_legacy'");
     expect(calls[0]?.text).toContain("'usda_fndds'");
     expect(calls[0]?.text).toContain("COUNT(DISTINCT product_tests.id)");
-    expect(calls[0]?.text).not.toContain("labels.label");
+    expect(calls[0]?.text).not.toMatch(
+      /(?:^|[^A-Za-z0-9_])labels\.label/u,
+    );
+    expect(calls[0]?.text).toContain("FROM foods identity_labels");
+    expect(calls[0]?.text).toContain(
+      "identity_labels.label->>'brandName'",
+    );
+    expect(calls[0]?.text).toContain(
+      "identity_labels.label->>'category'",
+    );
   });
 
   it("resolves a bare public food GTIN exactly before ranked search", async () => {
@@ -1885,6 +1896,10 @@ describe("foods query helpers", () => {
     expect(calls[0]?.text).toContain("labels.data_origin NOT IN");
     expect(calls[0]?.text).toContain("fdc_release_date::text AS \"releaseDate\"");
     expect(calls[0]?.text).toContain("last_seen_at");
+    expect(calls[0]?.text).toContain("FROM foods identity_labels");
+    expect(calls[0]?.text).toContain(
+      "identity_labels.id = labels.id",
+    );
     expect(calls[0]?.values).toEqual(["fdc:123"]);
   });
 

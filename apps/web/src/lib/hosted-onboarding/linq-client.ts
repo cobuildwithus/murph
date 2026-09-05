@@ -13,6 +13,7 @@ import {
 import type { LinqAPIV3 } from "@linqapp/sdk";
 import type { TextPart } from "@linqapp/sdk/resources";
 import type { SupportedContentType } from "@linqapp/sdk/resources/attachments";
+import type { Message } from "@linqapp/sdk/resources/messages";
 import type {
   Chat,
   ChatCreateParams,
@@ -72,6 +73,31 @@ export type HostedLinqSendResult = {
   messageId: string | null;
   providerMessageIds?: string[];
 };
+
+/** Content stays request-local; retrieval never creates a new send target. */
+export async function readHostedLinqFailedMessage(messageId: string): Promise<Message> {
+  return requestHostedLinqSdkOrThrow({
+    operation: "failed message retrieve",
+    request: (client) => client.messages.retrieve(messageId),
+    timeoutMessage: "Linq failed message retrieval timed out.",
+    timeoutMs: 3_000,
+  });
+}
+
+export async function resendHostedLinqMessage(input: {
+  chatId: string;
+  message: MessageSendParams["message"];
+}): Promise<HostedLinqSendResult> {
+  const response = await requestHostedLinqSdkOrThrow({
+    operation: "terminal message retry",
+    request: (client) => client.chats.messages.send(input.chatId, {
+      message: input.message,
+    }),
+    timeoutMessage: "Linq terminal message retry timed out.",
+    timeoutMs: 5_000,
+  });
+  return { chatId: response.chat_id, messageId: response.message.id };
+}
 
 export async function createHostedLinqChat(input: {
   from: string;

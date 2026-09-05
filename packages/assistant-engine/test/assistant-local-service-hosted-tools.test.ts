@@ -679,7 +679,12 @@ test('sendAssistantMessageLocal requires hosted Linq text delivery for model pro
   assert.equal(progressDeliveryDependencies.sendLinqVoiceMemo.mock.calls.length, 0)
 })
 
-test('sendAssistantMessageLocal enables hosted computer tools for Telegram when provider fetch and delivery are available', async () => {
+test.each([
+  { approvalAvailable: true, threadIsDirect: true },
+  { approvalAvailable: false, threadIsDirect: true },
+  { approvalAvailable: true, threadIsDirect: false },
+  { approvalAvailable: true, threadIsDirect: null },
+])('sendAssistantMessageLocal gates Telegram file tools on approval $approvalAvailable and private audience $threadIsDirect', async ({ approvalAvailable, threadIsDirect }) => {
   const progressDeliveryDependencies = {
     sendTelegram: vi.fn(async () => ({
       providerMessageId: 'progress-message',
@@ -690,7 +695,12 @@ test('sendAssistantMessageLocal enables hosted computer tools for Telegram when 
   }
   const sharedPlan = createSharedPlan()
   sharedPlan.conversationPolicy.audience.channel = 'telegram'
+  sharedPlan.conversationPolicy.audience.threadIsDirect = threadIsDirect
+  sharedPlan.conversationPolicy.audience.effectiveThreadIsDirect = threadIsDirect === true
+  const session = createAssistantSession()
+  session.binding.threadIsDirect = threadIsDirect
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    session,
     plan: {
       ...sharedPlan,
       persistUserPromptOnFailure: false,
@@ -704,6 +714,7 @@ test('sendAssistantMessageLocal enables hosted computer tools for Telegram when 
     executionContext: {
       hosted: {
         memberId: 'member-hosted',
+        ...(approvalAvailable ? { actionApprovalPort: { read: vi.fn(), request: vi.fn() } } : {}),
         progressDeliveryDependencies,
         providerFetch: vi.fn<typeof fetch>(),
         userEnvKeys: [],
@@ -721,6 +732,7 @@ test('sendAssistantMessageLocal enables hosted computer tools for Telegram when 
   assert.ok(progressDelivery)
   assert.ok(hostedToolContext)
   assert.equal(hostedToolContext.computerToolsAvailable, true)
+  assert.equal(hostedToolContext.vaultFileSendAvailable, approvalAvailable && threadIsDirect === true)
   await progressDelivery.send('Checking the Telegram thread.')
 
   assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 1)

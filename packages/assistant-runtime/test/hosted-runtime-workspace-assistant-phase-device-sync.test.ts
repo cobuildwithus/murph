@@ -702,6 +702,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
     await result.afterCheckpoint?.();
     expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).toHaveBeenCalledWith(
       expect.objectContaining({
+        deviceSyncCompletionAcceptedInCurrentAdmission: true,
         item: deviceSyncItem,
       }),
     );

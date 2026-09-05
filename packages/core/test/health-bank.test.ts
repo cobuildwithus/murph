@@ -266,20 +266,29 @@ test("goal update-only intent rejects an absent id before canonical or audit wri
   const auditBefore = await snapshotRelativeFiles(vaultRoot, "audit");
   const operationsBefore = await listWriteOperationMetadataPaths(vaultRoot);
 
-  await assert.rejects(
-    () =>
-      upsertGoal({
-        vaultRoot,
-        goalId: missingGoalId,
-        requireExistingGoalId: true,
-        slug: created.record.entity.slug,
-        title: "Must not replace",
-      }),
-    (error: unknown) =>
-      error instanceof VaultError &&
-      error.code === "VAULT_GOAL_MISSING" &&
-      error.message === "Goal was not found.",
-  );
+  for (const update of [
+    {
+      status: "paused" as const,
+    },
+    {
+      slug: created.record.entity.slug,
+      title: "Must not replace",
+    },
+  ]) {
+    await assert.rejects(
+      () =>
+        upsertGoal({
+          vaultRoot,
+          goalId: missingGoalId,
+          requireExistingGoalId: true,
+          ...update,
+        }),
+      (error: unknown) =>
+        error instanceof VaultError
+        && error.code === "VAULT_GOAL_MISSING"
+        && error.message === "Goal was not found.",
+    );
+  }
 
   assert.deepEqual(
     await readGoal({
@@ -433,6 +442,82 @@ test("goal upserts preserve metric targets in canonical frontmatter", async () =
   assert.deepEqual(read.entity.metricTargets, metricTargets);
   assert.match(read.document.markdown, /metricTargets:/);
   assert.match(read.document.markdown, /targetId: fasting-glucose-under-90/);
+});
+
+test("goal upserts preserve Health Commons goal lineage", async () => {
+  const vaultRoot = await makeTempDirectory("murph-goal-commons-lineage");
+  await initializeVault({ vaultRoot });
+  const commonsGoalRef = {
+    key: "goal_template:lower-resting-heart-rate",
+    pageRevisionId: `sha256:${"a".repeat(64)}`,
+    workflowSpecRevisionId: `sha256:${"b".repeat(64)}`,
+  } as const;
+
+  const created = await upsertGoal({
+    vaultRoot,
+    title: "Lower my resting heart rate",
+    commonsGoalRef,
+  });
+  const updated = await upsertGoal({
+    vaultRoot,
+    goalId: created.record.entity.goalId,
+    priority: 7,
+  });
+  const read = await readGoal({
+    vaultRoot,
+    goalId: created.record.entity.goalId,
+  });
+
+  assert.deepEqual(updated.record.entity.commonsGoalRef, commonsGoalRef);
+  assert.deepEqual(read.entity.commonsGoalRef, commonsGoalRef);
+  assert.match(read.document.markdown, /commonsGoalRef:/);
+  assert.match(read.document.markdown, /goal_template:lower-resting-heart-rate/);
+});
+
+test("goal upserts reject malformed Health Commons lineage without changing the goal or audit", async () => {
+  const vaultRoot = await makeTempDirectory("murph-goal-invalid-commons-lineage");
+  await initializeVault({ vaultRoot });
+  const created = await upsertGoal({
+    vaultRoot,
+    title: "Improve my deep sleep",
+    commonsGoalRef: {
+      key: "goal_template:improve-deep-sleep",
+      pageRevisionId: `sha256:${"a".repeat(64)}`,
+      workflowSpecRevisionId: `sha256:${"b".repeat(64)}`,
+    },
+  });
+  const goalMarkdownBefore = created.record.document.markdown;
+  const auditBefore = await readJsonlRecords({
+    vaultRoot,
+    relativePath: created.auditPath,
+  });
+
+  await assert.rejects(
+    () =>
+      upsertGoal({
+        vaultRoot,
+        goalId: created.record.entity.goalId,
+        commonsGoalRef: invalidTestValue({
+          key: "goal_template:improve-deep-sleep",
+          pageRevisionId: "sha256:not-a-digest",
+          workflowSpecRevisionId: `sha256:${"b".repeat(64)}`,
+        }),
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === "commonsGoalRef must be a valid Health Commons goal reference.",
+  );
+
+  const unchanged = await readGoal({
+    vaultRoot,
+    goalId: created.record.entity.goalId,
+  });
+  assert.equal(unchanged.document.markdown, goalMarkdownBefore);
+  assert.deepEqual(
+    await readJsonlRecords({ vaultRoot, relativePath: created.auditPath }),
+    auditBefore,
+  );
 });
 
 test("goal upserts merge concurrent partial updates with the latest record", async () => {

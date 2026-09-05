@@ -1802,6 +1802,211 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("reuses an established shared prefetch for the first pre-assistant system page", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const events: string[] = [];
+    const items = [
+      createMailboxItem({
+        id: "mailbox_item_runner_established_prefetch_conversation",
+        laneSeq: "1",
+      }),
+    ];
+    const { mailboxPort } = createMailboxPort({ fetchRequests, items });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const state = createEmptyHostedMailboxImportState();
+    state.watermarks.system = "1";
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await writeHostedMailboxImportState({ state, vaultRoot });
+      const initialMailboxPrefetch = prefetchHostedMailboxPrefix({
+        lanes: ["conversation", "system"],
+        limitPerLane: 10,
+        mailboxPort,
+        requestId: "request_synthetic_runner_established_prefetch",
+        state,
+      });
+      await initialMailboxPrefetch.response;
+      items.push(createMailboxItem({
+        id: "mailbox_item_runner_established_prefetch_later_system",
+        kind: "member.preferences.updated",
+        lane: "system",
+        laneSeq: "2",
+      }));
+
+      const firstResult = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_established_prefetch",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          events.push(`first:import:${item.item.lane}`);
+          return { status: "imported" };
+        },
+        initialMailboxPrefetch,
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_established_prefetch",
+        async runAssistantPhase(input) {
+          events.push("first:assistant");
+          assert.equal(input.initialMailboxImport.state.watermarks.system, "1");
+          return { progressed: false };
+        },
+        vaultRoot,
+        workspace: null,
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(fetchRequests.map((request) => request.lanes), [[
+        { importedSeq: "0", lane: "conversation" },
+        { importedSeq: "1", lane: "system" },
+      ]]);
+      assert.deepEqual(events, [
+        "first:import:conversation",
+        "first:assistant",
+      ]);
+      assert.equal(firstResult.latestMailboxImport.state.watermarks.system, "1");
+
+      const secondResult = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_established_prefetch_followup",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          events.push(`second:import:${item.item.lane}`);
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_established_prefetch_followup",
+        async runAssistantPhase(input) {
+          events.push("second:assistant");
+          assert.equal(input.initialMailboxImport.state.watermarks.system, "2");
+          return { progressed: false };
+        },
+        vaultRoot,
+        workspace: null,
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(fetchRequests.map((request) => request.lanes), [
+        [
+          { importedSeq: "0", lane: "conversation" },
+          { importedSeq: "1", lane: "system" },
+        ],
+        [
+          { importedSeq: "1", lane: "conversation" },
+        ],
+        [
+          { importedSeq: "1", lane: "system" },
+        ],
+      ]);
+      assert.deepEqual(events.slice(-2), [
+        "second:import:system",
+        "second:assistant",
+      ]);
+      assert.equal(secondResult.latestMailboxImport.state.watermarks.system, "2");
+      assert.deepEqual(checkpointRequests, []);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
+  test("refreshes an established shared prefetch after an initial system import", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const events: string[] = [];
+    const items: HostedMailboxItem[] = [];
+    const { mailboxPort } = createMailboxPort({ fetchRequests, items });
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const state = createEmptyHostedMailboxImportState();
+    state.watermarks.system = "1";
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await writeHostedMailboxImportState({ state, vaultRoot });
+      const initialMailboxPrefetch = prefetchHostedMailboxPrefix({
+        lanes: ["system"],
+        limitPerLane: 10,
+        mailboxPort,
+        requestId: "request_synthetic_runner_established_system_prefetch",
+        state,
+      });
+      await initialMailboxPrefetch.response;
+      items.push(createMailboxItem({
+        id: "mailbox_item_runner_established_system_prefetch_later_ask",
+        kind: "assistant.ask.requested",
+        lane: "system",
+        laneSeq: "2",
+      }));
+
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_established_system_prefetch",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          events.push(`import:${item.item.lane}`);
+          return { status: "imported" };
+        },
+        initialMailboxImportLanes: ["system"],
+        initialMailboxPrefetch,
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_runner_established_system_prefetch",
+        async runAssistantPhase(input) {
+          events.push("assistant");
+          assert.equal(input.initialMailboxImport.state.watermarks.system, "2");
+          return { progressed: false };
+        },
+        vaultRoot,
+        workspace: null,
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(fetchRequests.map((request) => request.lanes), [
+        [{ importedSeq: "1", lane: "system" }],
+        [{ importedSeq: "1", lane: "system" }],
+      ]);
+      assert.deepEqual(events, ["import:system", "assistant"]);
+      assert.equal(result.latestMailboxImport.state.watermarks.system, "2");
+      assert.deepEqual(checkpointRequests, []);
+    } finally {
+      await rm(vaultRoot, {
+        force: true,
+        recursive: true,
+      });
+    }
+  });
+
   test("imports paged member preference system work before a fresh conversation assistant phase", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const fetchRequests: HostedMailboxFetchRequest[] = [];

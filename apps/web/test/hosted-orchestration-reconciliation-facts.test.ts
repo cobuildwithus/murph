@@ -223,6 +223,45 @@ describe("hosted orchestration reconciliation facts", () => {
       await expect(readOwnerReleaseActionable()).resolves.toBe(false);
     });
 
+    it("signals for an imported live system item beyond handled-through", async () => {
+      mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+        redactedStatusJson: {
+          hostedMailboxSystemHandledThroughSeq: "0",
+          systemImportedSeq: "1",
+        },
+      }));
+      mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+        { lane: "system", maxSeq: "1" },
+      ]);
+      mocks.readHostedMailboxFirstLiveSystemItemAfterSeq.mockResolvedValue({
+        dedupeKey: "device-sync.wake:owner-release-actionable",
+        kind: "device-sync.wake",
+        laneSeq: "1",
+      });
+
+      await expect(readOwnerReleaseActionable()).resolves.toBe(true);
+      expect(mocks.readHostedMailboxFirstLiveSystemItemAfterSeq).toHaveBeenCalledWith({
+        afterSeq: "0",
+        at: new Date(FIXED_NOW),
+        prisma: expect.any(Object),
+        userId: MEMBER_ID,
+      });
+    });
+
+    it("preserves the owner horizon when the system high-water has no live item", async () => {
+      mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+        redactedStatusJson: {
+          hostedMailboxSystemHandledThroughSeq: "0",
+          systemImportedSeq: "1",
+        },
+      }));
+      mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+        { lane: "system", maxSeq: "1" },
+      ]);
+
+      await expect(readOwnerReleaseActionable()).resolves.toBe(false);
+    });
+
     it("does not hot-loop lag with a future mailbox continuation", async () => {
       mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
         nextWakeAt: "2026-05-20T12:00:15.000Z",
@@ -2014,10 +2053,10 @@ function routeContext(): { params: Promise<{ userId: string }> } {
 
 async function readOwnerReleaseActionable(): Promise<boolean> {
   const {
-    readHostedRuntimeOwnerReleaseMailboxLagActionable,
+    readHostedRuntimeOwnerReleaseActionable,
   } = await import("../src/lib/hosted-orchestration/runtime-reconciliation-facts");
 
-  return await readHostedRuntimeOwnerReleaseMailboxLagActionable({
+  return await readHostedRuntimeOwnerReleaseActionable({
     userId: MEMBER_ID,
   });
 }

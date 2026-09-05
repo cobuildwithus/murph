@@ -22,6 +22,10 @@ const hostedCryptoDomainRootStoreModuleSpecifier = new URL(
   "../../src/lib/hosted-crypto/domain-root-store.ts",
   import.meta.url,
 ).href;
+const hostedMemberIdentityFieldsModuleSpecifier = new URL(
+  "../../src/lib/hosted-onboarding/member-identity-fields.ts",
+  import.meta.url,
+).href;
 const hostedInviteServiceModuleSpecifier = new URL(
   "../../src/lib/hosted-onboarding/invite-service.ts",
   import.meta.url,
@@ -78,6 +82,7 @@ export interface HostedBillingMemberSeedForTest {
   previouslyActivated: boolean;
   privyUserId?: string | null;
   verifiedEmail?: string | null;
+  verifiedPhoneNumber?: string;
 }
 
 export interface HostedBillingProjectionForTest {
@@ -324,6 +329,11 @@ interface HostedFamilyPlanModule {
 }
 
 interface HostedBillingTestModules {
+  buildHostedMemberPhoneIdentityFields(phoneNumber: string): Pick<
+    Parameters<HostedMemberIdentityStoreModule["upsertHostedMemberIdentity"]>[0],
+    "maskedPhoneNumberHint" | "phoneLookupKey" | "phoneNumber"
+    | "phoneNumberVerifiedAt" | "privyUserId"
+  >;
   createHostedMember: HostedMemberStoreModule["createHostedMember"];
   createPrismaClient: HostedPrismaModule["createPrismaClient"];
   issueHostedInvite: HostedInviteServiceModule["issueHostedInvite"];
@@ -386,6 +396,13 @@ export async function seedHostedBillingMemberForTest(
           walletChainType: null,
           walletCreatedAt: null,
           walletProvider: null,
+          ...(input.verifiedPhoneNumber
+            ? {
+                ...modules.buildHostedMemberPhoneIdentityFields(input.verifiedPhoneNumber),
+                phoneNumberVerifiedAt: new Date(),
+                privyUserId,
+              }
+            : {}),
         });
       }
 
@@ -660,6 +677,7 @@ async function loadHostedBillingTestModules(
     memberStoreModule,
     memberBillingStoreModule,
     memberIdentityStoreModule,
+    memberIdentityFieldsModule,
     cryptoDomainRootStoreModule,
     inviteServiceModule,
     familyPlanModule,
@@ -668,6 +686,7 @@ async function loadHostedBillingTestModules(
     import(hostedMemberStoreModuleSpecifier),
     import(hostedMemberBillingStoreModuleSpecifier),
     import(hostedMemberIdentityStoreModuleSpecifier),
+    import(hostedMemberIdentityFieldsModuleSpecifier),
     import(hostedCryptoDomainRootStoreModuleSpecifier),
     import(hostedInviteServiceModuleSpecifier),
     import(hostedFamilyPlanModuleSpecifier),
@@ -685,6 +704,8 @@ async function loadHostedBillingTestModules(
   const familyPlan = familyPlanModule as HostedFamilyPlanModule;
   return {
     createHostedMember: memberStore.createHostedMember,
+    buildHostedMemberPhoneIdentityFields:
+      memberIdentityFieldsModule.buildHostedMemberPhoneIdentityFields,
     createPrismaClient: prisma.createPrismaClient,
     issueHostedInvite: inviteService.issueHostedInvite,
     provisionHostedCryptoDomainRootsForUserTx:

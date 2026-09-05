@@ -1,5 +1,3 @@
-import Link from "next/link";
-
 import { WideFeature } from "./asks-section";
 import { ChallengeCard, NewsletterCard } from "./group-chat-cards";
 import {
@@ -12,10 +10,7 @@ export function TogetherSection() {
     <section className="bg-[#f5f0e8] px-4 pt-20 pb-10 sm:px-8 sm:pt-20 sm:pb-20 lg:px-16 lg:pt-28 lg:pb-28">
       <div className="mx-auto max-w-[1200px]">
         <div className="max-w-[720px]">
-          <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#736a58]">
-            Better together
-          </p>
-          <h2 className="mt-4 font-serif text-[1.875rem] font-semibold leading-[1.08] tracking-[-0.03em] text-[#2d3436] sm:text-[clamp(2rem,4vw,3.25rem)]">
+          <h2 className="font-serif text-[1.875rem] font-semibold leading-[1.08] tracking-[-0.03em] text-[#2d3436] sm:text-[clamp(2rem,4vw,3.25rem)]">
             Do it with your people.
           </h2>
           <p className="mt-5 max-w-[62ch] text-[1rem] leading-[1.7] text-[#3a322a]">
@@ -23,20 +18,12 @@ export function TogetherSection() {
             friends, or set up a weekly newsletter so the whole family knows
             how everyone is doing.
           </p>
-          <Link
-            className="mt-6 inline-flex min-h-10 items-center gap-2 text-[0.875rem] font-semibold text-[#5a6e32] underline decoration-[#5a6e32]/35 underline-offset-4 transition-colors hover:text-[#3d5028]"
-            href="/clubs"
-          >
-            Murph for clubs
-            <span aria-hidden="true">→</span>
-          </Link>
         </div>
 
         <div className="mt-10 space-y-5 sm:mt-12 sm:space-y-6">
           <WideFeature
             tint="sage"
             artifactSide="right"
-            eyebrow="Group challenges"
             headline="I referee health challenges with your friends."
             body="Murph is the referee. It sets fair baselines across different devices, keeps score, nudges the slackers, and calls the winner at the end."
             bubble="no shot you guys are keeping up with me this week 😤"
@@ -64,7 +51,6 @@ export function TogetherSection() {
           <WideFeature
             tint="gold"
             artifactSide="left"
-            eyebrow="The weekly newsletter"
             headline="I send the whole family a weekly health newsletter."
             body="Every Sunday the group gets an email recap of the week. Wins, trends, and gentle callouts. Grandparents included."
             bubble="can you send grandpa our weekly wins?"

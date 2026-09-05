@@ -82,6 +82,7 @@ import {
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_MISSED_LOG_POLICIES,
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_POSITIVE_DISPOSITIONS,
   healthCommonsActivitySessionEvidenceSchema,
+  healthCommonsGoalTemplateKeySchema,
   healthCommonsKeySchema,
   healthCommonsStableIdSchema,
 } from "./health-commons.ts";
@@ -1963,6 +1964,14 @@ export const commonsProtocolRefSchema = z
 
 const sha256DigestSchema = patternedString(SHA256_DIGEST_PATTERN);
 
+export const commonsGoalRefSchema = z
+  .object({
+    key: healthCommonsGoalTemplateKeySchema,
+    pageRevisionId: sha256DigestSchema,
+    workflowSpecRevisionId: sha256DigestSchema,
+  })
+  .strict();
+
 export const protocolRefSchema = z
   .object({
     protocolId: idSchema(ID_PREFIXES.protocol),
@@ -3488,6 +3497,7 @@ export const goalFrontmatterSchema = withContractMetadata(
       parentGoalId: z.union([idSchema(ID_PREFIXES.goal), z.null()]).optional(),
       relatedGoalIds: uniqueArray(idSchema(ID_PREFIXES.goal), { uniqueItems: true }).optional(),
       relatedExperimentIds: uniqueArray(idSchema(ID_PREFIXES.experiment), { uniqueItems: true }).optional(),
+      commonsGoalRef: commonsGoalRefSchema.optional(),
       links: uniqueArray(goalRelationLinkSchema, { uniqueItems: true }).optional(),
       domains: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
       metricTargets: uniqueArray(goalMetricTargetSchema, { maxItems: 20, uniqueItems: true }).optional(),
@@ -3741,6 +3751,7 @@ export type InboxAttachmentRetentionRecord = z.infer<typeof inboxAttachmentReten
 export type CoreFrontmatter = z.infer<typeof coreFrontmatterSchema>;
 export type JournalDayFrontmatter = z.infer<typeof journalDayFrontmatterSchema>;
 export type CommonsProtocolRef = z.infer<typeof commonsProtocolRefSchema>;
+export type CommonsGoalRef = z.infer<typeof commonsGoalRefSchema>;
 export type ProtocolRef = z.infer<typeof protocolRefSchema>;
 export type ProtocolActivitySessionEvidence = z.infer<
   typeof protocolActivitySessionEvidenceSchema

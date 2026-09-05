@@ -22,6 +22,7 @@ import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
   MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+  MURPH_OPERATOR_DIAGNOSTIC_READ_PERMISSION_PROFILE,
 } from "@murphai/hosted-execution/assistant-permissions";
 import {
   HostedAssistantConfigurationError,
@@ -57,12 +58,22 @@ import {
   HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS,
   HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS,
   prepareHostedCodexRuntimeEnvironment,
+  resolveHostedCodexModelCatalogPath,
 } from "../src/hosted-runtime/codex-config.ts";
 import {
   HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY,
 } from "../src/hosted-runtime/codex-shell-env-policy.ts";
 
 const temporaryPaths: string[] = [];
+
+test("selects the expanded catalog only with explicit workspace Astra authority", () => {
+  const imageCatalogPath = "/opt/murph/models.json";
+  for (const astraAllowed of [false, undefined]) {
+    assert.equal(resolveHostedCodexModelCatalogPath({ imageCatalogPath, astraAllowed }), imageCatalogPath);
+  }
+  assert.equal(resolveHostedCodexModelCatalogPath({ imageCatalogPath, astraAllowed: true }), `${imageCatalogPath}.astra`);
+  assert.equal(resolveHostedCodexModelCatalogPath({ imageCatalogPath: undefined, astraAllowed: true }), undefined);
+});
 const RUN_HOSTED_CODEX_AUTH_E2E = process.env.MURPH_RUN_HOSTED_CODEX_AUTH_E2E === "1";
 const RUN_HOSTED_CODEX_AUTOCOMPACTION_E2E =
   process.env.MURPH_RUN_HOSTED_CODEX_AUTOCOMPACTION_E2E === "1";
@@ -317,6 +328,27 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
     config,
     new RegExp(
       String.raw`\[permissions\.${MURPH_GROUP_READ_PERMISSION_PROFILE}\.network\]\nenabled = false`,
+      "u",
+    ),
+  );
+  assert.match(
+    config,
+    new RegExp(
+      String.raw`\[permissions\.${MURPH_OPERATOR_DIAGNOSTIC_READ_PERMISSION_PROFILE}\.filesystem\]\n":minimal" = "read"\nglob_scan_max_depth = 64`,
+      "u",
+    ),
+  );
+  assert.match(
+    config,
+    new RegExp(
+      String.raw`\[permissions\.${MURPH_OPERATOR_DIAGNOSTIC_READ_PERMISSION_PROFILE}\.filesystem\.":workspace_roots"\]\n"\." = "read"\n"\.runtime/operations/assistant/secrets" = "deny"\n"\.codex" = "deny"\n"\.git" = "deny"\n"\*\*/\.env" = "deny"\n"\*\*/\.env\.\*" = "deny"\n"\*\*/\.mcp\.json" = "deny"\n"\*\*/auth\.json" = "deny"\n"\*\*/config\.toml" = "deny"\n"\*\*/credential\*" = "deny"\n"\*\*/\*\.key" = "deny"\n"\*\*/\*\.pem" = "deny"`,
+      "u",
+    ),
+  );
+  assert.match(
+    config,
+    new RegExp(
+      String.raw`\[permissions\.${MURPH_OPERATOR_DIAGNOSTIC_READ_PERMISSION_PROFILE}\.network\]\nenabled = false`,
       "u",
     ),
   );
@@ -1922,6 +1954,28 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       '"**/.env.*" = "deny"',
       "",
       `[permissions.${MURPH_GROUP_READ_PERMISSION_PROFILE}.network]`,
+      "enabled = false",
+      "",
+      "# Authenticated operator diagnostics inspect only exact host-bound read roots.",
+      `[permissions.${MURPH_OPERATOR_DIAGNOSTIC_READ_PERMISSION_PROFILE}.filesystem]`,
+      '":minimal" = "read"',
+      "glob_scan_max_depth = 64",
+      "",
+      `[permissions.${MURPH_OPERATOR_DIAGNOSTIC_READ_PERMISSION_PROFILE}.filesystem.":workspace_roots"]`,
+      '"." = "read"',
+      '".runtime/operations/assistant/secrets" = "deny"',
+      '".codex" = "deny"',
+      '".git" = "deny"',
+      '"**/.env" = "deny"',
+      '"**/.env.*" = "deny"',
+      '"**/.mcp.json" = "deny"',
+      '"**/auth.json" = "deny"',
+      '"**/config.toml" = "deny"',
+      '"**/credential*" = "deny"',
+      '"**/*.key" = "deny"',
+      '"**/*.pem" = "deny"',
+      "",
+      `[permissions.${MURPH_OPERATOR_DIAGNOSTIC_READ_PERMISSION_PROFILE}.network]`,
       "enabled = false",
       "",
       "# Silent group room-model consolidation uses only its host-owned dynamic tool.",

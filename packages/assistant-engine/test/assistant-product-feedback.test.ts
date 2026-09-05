@@ -15,10 +15,6 @@ import {
   resolveAssistantProductFeedbackAcceptedInputIds,
 } from "../src/assistant/turn-progress.js";
 import {
-  MURPH_MANAGED_AUTOMATIONS,
-  MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
-} from "../src/assistant/managed-automations.js";
-import {
   buildAssistantSystemPrompt,
 } from "../src/assistant/system-prompt.js";
 
@@ -212,11 +208,6 @@ describe("assistant product feedback", () => {
       onboardingGuidance: false,
       turnTrigger: null,
     });
-    const productNotes = MURPH_MANAGED_AUTOMATIONS.find(
-      (automation) =>
-        automation.automationId === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
-    );
-    expect(productNotes).toBeDefined();
     expect(systemPrompt).toContain(
       "append a privacy-safe `Reproduction:` section in that same summary field",
     );
@@ -225,11 +216,8 @@ describe("assistant product feedback", () => {
       MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema,
     );
     const ordinaryStack = `${systemPrompt}\n${toolSchema}`;
-    const managedStack =
-      `${systemPrompt}\n${productNotes?.instructions ?? ""}\n${toolSchema}`;
 
     expect(ordinaryStack.split(rubricMarker)).toHaveLength(2);
-    expect(managedStack.split(rubricMarker)).toHaveLength(2);
   });
 
   it("parses and collects one explicit feedback candidate without a pre-reply write", async () => {

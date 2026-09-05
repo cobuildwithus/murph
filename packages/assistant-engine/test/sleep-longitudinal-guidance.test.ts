@@ -36,6 +36,9 @@ describe('longitudinal sleep guidance', () => {
     expect(plan).toContain('standard/tiny/fallback versions')
     expect(plan).toContain('a dated review point')
     expect(plan).toContain('prefer a one-shot check-in')
+    expect(plan).toContain(
+      'review morning restoration after waking, not at night',
+    )
     expect(plan).toContain('Reminders and check-ins are separate user choices')
     expect(plan).toContain('load experiment-onboarding')
     expect(plan).not.toContain('recurring review')

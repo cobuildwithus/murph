@@ -121,7 +121,7 @@ describe("companion initial onboarding routes", () => {
     expect(payload.catalog.personas).toHaveLength(6);
     expect(payload.catalog.voices.length).toBeGreaterThan(10);
     expect(payload.catalog.voices[0].previewURL).toMatch(
-      /^https:\/\/app\.example\.test\/audio\//u,
+      /^https:\/\/www\.withmurph\.ai\/audio\//u,
     );
     expect(mocks.requireActivePrivyMemberAuthFromBearerToken)
       .toHaveBeenCalledWith(request, expect.anything());

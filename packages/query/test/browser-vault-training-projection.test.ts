@@ -203,10 +203,7 @@ test("browser vault replicas expose a bounded sanitized training projection with
   );
   assert.ok(projectedStrength);
   const training = requireRecord(projectedStrength.attributes.training);
-  assert.equal(
-    training.schema,
-    BROWSER_VAULT_TRAINING_SESSION_SCHEMA,
-  );
+  assert.equal(training.schema, BROWSER_VAULT_TRAINING_SESSION_SCHEMA);
   assert.equal(training.activityType, "strength-training");
   assert.equal(training.title, "Push day");
   assert.equal(training.durationMinutes, 45);
@@ -239,7 +236,10 @@ test("browser vault replicas expose a bounded sanitized training projection with
   const projectedExercises = training.exercises as Record<string, unknown>[];
   assert.equal("groupId" in projectedExercises[0]!, false);
   assert.equal("mode" in projectedExercises[0]!, false);
-  const projectedSets = projectedExercises[0]!.sets as Record<string, unknown>[];
+  const projectedSets = projectedExercises[0]!.sets as Record<
+    string,
+    unknown
+  >[];
   assert.equal("type" in projectedSets[0]!, false);
   assert.equal(projectedStrength.bodyPreview, null);
   assert.equal(projectedStrength.title, null);
@@ -269,10 +269,13 @@ test("browser vault replicas expose a bounded sanitized training projection with
     state: "completed",
     title: "45-minute run",
   });
-  assert.equal("privateProviderPayload" in projectedManualCardio.attributes, false);
   assert.equal(
-    "privateNestedPayload"
-      in requireRecord(projectedManualCardio.attributes.training),
+    "privateProviderPayload" in projectedManualCardio.attributes,
+    false,
+  );
+  assert.equal(
+    "privateNestedPayload" in
+      requireRecord(projectedManualCardio.attributes.training),
     false,
   );
 
@@ -308,43 +311,44 @@ test("browser vault replicas expose a bounded sanitized training projection with
   assert.equal(liveTraining.state, "in_progress");
   assert.equal("sourceApp" in liveTraining, false);
   assert.deepEqual(liveTraining.exercises, []);
-  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 10);
+  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 15);
 });
 
 test("browser training projection preserves completed next-local-day sessions before UTC midnight", async () => {
-  const createReplica = (endedAt?: string) => createBrowserVaultReplica({
-    generatedAt: "2026-08-09T23:30:00.000Z",
-    metricPoints: [],
-    sourceBundleHash: endedAt
-      ? "training-next-local-day-completed"
-      : "training-next-local-day-active",
-    vault: createVaultReadModel({
-      entities: [
-        createEntity("event", "next_local_day", {
-          attributes: {
-            activityType: "strength-training",
-            workout: {
-              ...(endedAt ? { endedAt } : {}),
-              exercises: [
-                {
-                  name: "Bench press",
-                  order: 1,
-                  sets: [{ order: 1, reps: 8, weight: 60, weightUnit: "kg" }],
-                },
-              ],
-              sourceApp: "murph-live",
-              startedAt: "2026-08-09T23:00:00.000Z",
+  const createReplica = (endedAt?: string) =>
+    createBrowserVaultReplica({
+      generatedAt: "2026-08-09T23:30:00.000Z",
+      metricPoints: [],
+      sourceBundleHash: endedAt
+        ? "training-next-local-day-completed"
+        : "training-next-local-day-active",
+      vault: createVaultReadModel({
+        entities: [
+          createEntity("event", "next_local_day", {
+            attributes: {
+              activityType: "strength-training",
+              workout: {
+                ...(endedAt ? { endedAt } : {}),
+                exercises: [
+                  {
+                    name: "Bench press",
+                    order: 1,
+                    sets: [{ order: 1, reps: 8, weight: 60, weightUnit: "kg" }],
+                  },
+                ],
+                sourceApp: "murph-live",
+                startedAt: "2026-08-09T23:00:00.000Z",
+              },
             },
-          },
-          date: "2026-08-10",
-          kind: "activity_session",
-          occurredAt: "2026-08-09T23:00:00.000Z",
-        }),
-      ],
-      metadata: null,
-      vaultRoot: "browser://vault",
-    }),
-  });
+            date: "2026-08-10",
+            kind: "activity_session",
+            occurredAt: "2026-08-09T23:00:00.000Z",
+          }),
+        ],
+        metadata: null,
+        vaultRoot: "browser://vault",
+      }),
+    });
 
   const activeReplica = await createReplica();
   const completedReplica = await createReplica("2026-08-09T23:25:00.000Z");
@@ -394,9 +398,10 @@ test("browser training projection retains the preceding local-date lookback boun
     }),
   });
 
-  assert.ok(replica.entities.find(
-    (entity) => entity.id === "preceding_local_boundary",
-  )?.attributes.training);
+  assert.ok(
+    replica.entities.find((entity) => entity.id === "preceding_local_boundary")
+      ?.attributes.training,
+  );
   assert.equal(
     replica.entities.find((entity) => entity.id === "outside_local_boundary")
       ?.attributes.training,

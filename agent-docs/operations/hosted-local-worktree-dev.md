@@ -76,6 +76,10 @@ The helper:
   default, overwrites inherited remote public web origins locally, and allows
   both `localhost:<web-port>` and `127.0.0.1:<web-port>` for hosted-onboarding
   browser mutations
+- when `MURPH_DEV_WEB_PUBLIC_BASE_URL=https://local.withmurph.ai:3443` is set,
+  publishes that browser origin while the Web server stays on its isolated
+  worktree port; the managed Caddy child proxies to that same port and the
+  mutation allowlist keeps both public and internal origins
 - preserves live Stripe support
 - uses normal Linq webhook `auto` mode with a worktree-local registration cache
   and tunnel config path, so an active worktree can reuse the shared local
@@ -95,6 +99,29 @@ Companion commands:
 pnpm hosted-local worktree doctor <slug> [--json]
 pnpm hosted-local worktree env <slug>
 ```
+
+The helper uses the canonical local HTTPS origin for authenticated previews by
+default:
+
+```bash
+MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR=../murph-cloud/packages/hosted-orchestrator-temporal \
+pnpm dev:worktree <slug>
+```
+
+The helper still binds Web, Worker, Temporal, and MinIO to their isolated
+worktree ports. It starts Caddy for `https://local.withmurph.ai:3443` and prints
+that browser URL after startup. The app session, Oura callback, and other
+browser-facing URLs use the same hostname. It rejects other public Web origins
+so an inherited hosted URL cannot redirect local mutations or callbacks to a
+remote environment.
+
+The helper also selects the Cobuild Cloudflare account for local Wrangler by
+default. Set `CLOUDFLARE_ACCOUNT_ID` before startup only when a different account
+is required. The generated Wrangler config receives the selected account, so a
+cold local Worker start does not pause for an interactive account choice.
+
+Set `MURPH_DEV_SKIP_TLS_PROXY=1` only for direct HTTP work that does not use
+host-only browser authentication or provider OAuth.
 
 `doctor` applies the worktree env internally and checks the resolved non-secret
 config. `env` is inspection-only: it prints the resolved exports with the
@@ -185,6 +212,80 @@ pnpm dev -- --hostname 127.0.0.1 --port 3101
 
 For hosted runner/container proof, stop the main stack or wait for the
 `worktree` profile helper.
+
+### Interactive HTTPS preview
+
+When a person must use an authenticated preview after the agent turn, run the
+Worker, Web server, and HTTPS proxy in separate Orca-managed terminals for that
+worktree. The Worker is required for Browser Vault data and other authenticated
+backend requests. A Web-only preview is valid only for public or synthetic UI.
+Do not leave any preview process in a tool-owned exec session, `nohup`, or
+`screen`. Those processes can end while the browser keeps a stale page open.
+
+Use the standard local HTTPS origin only when that exact origin is configured
+for the development Privy client.
+
+Start the local Worker first:
+
+```bash
+vercel env run -- env \
+  MURPH_DEV_SKIP_WORKERS_AI=1 \
+  MURPH_DEV_TEMPORAL=disabled \
+  MURPH_DEV_USE_REMOTE_HOSTED_CRYPTO_KEYS=1 \
+  MURPH_DEV_WEB_HOST=127.0.0.1 \
+  MURPH_DEV_WEB_PORT=<web-port> \
+  pnpm hosted-local up --profile worker-only
+```
+
+The Worker uses that direct Web address for signed internal callbacks. The port
+must match the Web process below. Wait for the harness to report the Worker
+ready on `127.0.0.1:8787`. The Worker also writes the shared local crypto state.
+The Web dev wrapper loads that exact state before it starts. This keeps local
+authentication keys identical even when provider environment values contain
+formatting whitespace. Then start the Web server with one public origin:
+
+```bash
+cd apps/web
+vercel env run -- env \
+  DEVICE_SYNC_PUBLIC_BASE_URL='https://local.withmurph.ai:3443/api/device-sync' \
+  HOSTED_ONBOARDING_PUBLIC_BASE_URL='https://local.withmurph.ai:3443' \
+  HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS='https://local.withmurph.ai:3443' \
+  HOSTED_WEB_BASE_URL='https://local.withmurph.ai:3443' \
+  NEXT_DIST_DIR_MODE=smoke \
+  NEXT_DIST_DIR_SUFFIX='<slug>' \
+  pnpm dev:local-env -- --hostname 127.0.0.1 --port <web-port>
+```
+
+Run the HTTPS proxy in a third Orca-managed terminal:
+
+```bash
+caddy reverse-proxy \
+  --from https://local.withmurph.ai:3443 \
+  --to http://127.0.0.1:<web-port> \
+  --internal-certs \
+  --disable-redirects
+```
+
+Preserve the browser's `Host`, `Origin`, and `Referer` headers. Do not rewrite
+them to `localhost`, because hosted mutation and auth checks use the public
+origin.
+
+Before handoff, prove all of the following:
+
+1. The Worker health check returns HTTP 200 on port 8787.
+2. The direct Web port is listening.
+3. `https://local.withmurph.ai:3443/<route>` returns HTTP 200.
+4. The Orca browser can reload the route after all three terminals are active.
+5. The auth dialog reaches its usable phone or email form.
+6. A signed-in data page leaves its loading state and renders data or a
+   truthful empty state.
+7. All three terminals remain running after the browser check.
+
+Opening the auth dialog alone does not prove login or data access. If it shows
+`Invalid request`, check the proxy response first. A live proxy with a stopped
+Web server returns 502 and can leave a stale auth panel visible. If a signed-in
+page stays in a loading state, confirm that the local Worker still answers on
+port 8787 before debugging the page.
 
 ## Auth And Secret Sources
 

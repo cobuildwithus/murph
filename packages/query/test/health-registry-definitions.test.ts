@@ -572,6 +572,11 @@ test("goal query projection round-trips shared Goal relation and window metadata
       parentGoalId: "goal_01JNY0B2W4VG5C2A0G9S8M7R6P",
       relatedGoalIds: ["goal_01JNY0B2W4VG5C2A0G9S8M7R6R"],
       relatedExperimentIds: ["exp_01JNY0B2W4VG5C2A0G9S8M7R6S"],
+      commonsGoalRef: {
+        key: "goal_template:sleep-better",
+        pageRevisionId: `sha256:${"a".repeat(64)}`,
+        workflowSpecRevisionId: `sha256:${"b".repeat(64)}`,
+      },
       domains: ["sleep", "recovery"],
     },
   };
@@ -584,6 +589,11 @@ test("goal query projection round-trips shared Goal relation and window metadata
   assert.equal(goalRecord?.entity.parentGoalId, "goal_01JNY0B2W4VG5C2A0G9S8M7R6P");
   assert.deepEqual(goalRecord?.entity.relatedGoalIds, ["goal_01JNY0B2W4VG5C2A0G9S8M7R6R"]);
   assert.deepEqual(goalRecord?.entity.relatedExperimentIds, ["exp_01JNY0B2W4VG5C2A0G9S8M7R6S"]);
+  assert.deepEqual(goalRecord?.entity.commonsGoalRef, {
+    key: "goal_template:sleep-better",
+    pageRevisionId: `sha256:${"a".repeat(64)}`,
+    workflowSpecRevisionId: `sha256:${"b".repeat(64)}`,
+  });
   assert.deepEqual(goalRecord?.entity.domains, ["sleep", "recovery"]);
 
   const entity = projectRegistryEntity("goal", goalRecord!);
@@ -610,7 +620,45 @@ test("goal query projection round-trips shared Goal relation and window metadata
   assert.equal(roundTripped?.entity.parentGoalId, "goal_01JNY0B2W4VG5C2A0G9S8M7R6P");
   assert.deepEqual(roundTripped?.entity.relatedGoalIds, ["goal_01JNY0B2W4VG5C2A0G9S8M7R6R"]);
   assert.deepEqual(roundTripped?.entity.relatedExperimentIds, ["exp_01JNY0B2W4VG5C2A0G9S8M7R6S"]);
+  assert.deepEqual(roundTripped?.entity.commonsGoalRef, {
+    key: "goal_template:sleep-better",
+    pageRevisionId: `sha256:${"a".repeat(64)}`,
+    workflowSpecRevisionId: `sha256:${"b".repeat(64)}`,
+  });
   assert.deepEqual(roundTripped?.entity.domains, ["sleep", "recovery"]);
+});
+
+test("goal query projection distinguishes legacy Goals from malformed public lineage", () => {
+  const attributes = {
+    goalId: "goal_01JNY0B2W4VG5C2A0G9S8M7R6Q",
+    slug: "sleep-better",
+    title: "Sleep better",
+    status: "active",
+  };
+  const document = {
+    relativePath: "bank/goals/sleep-better.md",
+    markdown: "# Sleep better",
+    body: "# Sleep better",
+    attributes,
+  };
+
+  const legacy = toRegistryRecord(document, goalRegistryDefinition);
+  assert.equal(legacy?.entity.commonsGoalRef, null);
+
+  assert.throws(() => toRegistryRecord(
+    {
+      ...document,
+      attributes: {
+        ...attributes,
+        commonsGoalRef: {
+          key: "goal_template:sleep-better",
+          pageRevisionId: `sha256:${"a".repeat(64)}`,
+          workflowSpecRevisionId: "malformed",
+        },
+      },
+    },
+    goalRegistryDefinition,
+  ));
 });
 
 test("family and genetics query projections round-trip shared registry metadata without leaking legacy aliases", () => {

@@ -71,15 +71,16 @@ const TELEGRAM_SEND_TIMEOUT_MS = 30_000
 const TELEGRAM_MAX_VOICE_MEMO_BYTES = 10 * 1024 * 1024
 const LINQ_TYPING_REFRESH_MS = 45_000
 const LINQ_TYPING_MAX_SESSION_MS = 5 * 60_000
-// Linq accepts message sends asynchronously and clears typing when the message
-// actually sends. Restart after that short provider settle window instead of
-// racing the auto-clear immediately after the HTTP acceptance response.
+// Message acceptance precedes delivery. Restart promptly, then once more to
+// recover when a delayed send clears the first restart.
 const LINQ_TYPING_POST_MESSAGE_REFRESH_MS = 1_000
+const LINQ_TYPING_POST_MESSAGE_FOLLOWUP_MS = 4_000
 
 type TelegramParsedTarget = TelegramThreadTarget
 type TelegramSendOperation =
   | 'sendMessage'
   | 'sendPhoto'
+  | 'sendDocument'
   | 'sendRichMessage'
   | 'sendVoice'
 type TelegramImageResponseMedia = Extract<
@@ -499,6 +500,53 @@ async function prepareTelegramPhoto(
   }
 }
 
+export async function sendTelegramFileMessage(
+  input: {
+    file: Extract<AssistantResponseMedia, { kind: 'vault_file' }>
+    replyToMessageId?: string | null
+    target: string
+  },
+  dependencies: TelegramRuntimeDependencies = {},
+): Promise<{ providerMessageId: string | null; target: string }> {
+  const env = dependencies.env ?? process.env
+  const token = resolveTelegramBotToken(env)
+  if (!token) {
+    throw new VaultCliError(
+      'ASSISTANT_TELEGRAM_TOKEN_REQUIRED',
+      'Outbound Telegram delivery requires TELEGRAM_BOT_TOKEN.',
+    )
+  }
+  const fetchImplementation = dependencies.fetchImplementation ?? globalThis.fetch?.bind(globalThis)
+  if (!fetchImplementation || typeof FormData !== 'function' || typeof Blob !== 'function') {
+    throw new VaultCliError('ASSISTANT_TELEGRAM_UNAVAILABLE', 'Telegram file delivery requires fetch, FormData, and Blob support.')
+  }
+  if (!dependencies.loadVaultFile) {
+    throw new VaultCliError('ASSISTANT_VAULT_FILE_LOADER_REQUIRED', 'File delivery requires a trusted vault-file loader.')
+  }
+  const target = parseTelegramTargetOrThrow(input.target)
+  const targetLabel = serializeTelegramThreadTarget(target)
+  // An approved file must never follow a provider migration to another destination.
+  assertTelegramAuthorityBoundTarget({ authorityBoundTarget: dependencies.authorityBoundTarget, target: targetLabel })
+  const bytes = await dependencies.loadVaultFile(input.file)
+  if (bytes.byteLength === 0 || bytes.byteLength !== input.file.sizeBytes || bytes.byteLength > 50 * 1024 * 1024) {
+    throw new VaultCliError('ASSISTANT_VAULT_FILE_SIZE_UNSUPPORTED', 'Telegram file bytes must match the approved size and fit the upload limit.')
+  }
+  return await sendTelegramBinaryMessage({
+    authorityBoundTarget: targetLabel,
+    baseUrl: (resolveTelegramApiBaseUrl(env) ?? 'https://api.telegram.org').replace(/\/$/u, ''),
+    bytes,
+    contentType: input.file.contentType,
+    fetchImplementation,
+    filename: input.file.filename,
+    operation: 'sendDocument',
+    replyToMessageId: normalizeTelegramReplyToMessageId(input.replyToMessageId),
+    signal: dependencies.signal,
+    target,
+    targetLabel,
+    token,
+  })
+}
+
 export async function sendTelegramVoiceMemoMessage(
   input: {
     filename: string
@@ -620,7 +668,8 @@ export async function sendPreparedTelegramVoiceMemoMessage(
     ? serializeTelegramThreadTarget(target)
     : input.targetLabel
 
-  return await sendTelegramVoiceMemo({
+  return await sendTelegramBinaryMessage({
+    operation: 'sendVoice',
     authorityBoundTarget: dependencies.authorityBoundTarget,
     baseUrl: input.baseUrl,
     bytes: input.bytes,
@@ -1120,6 +1169,7 @@ export async function startTelegramTypingIndicator(
 
 export async function startAssistantChannelActivitySession(input: {
   afterMessageRefreshMs?: number | null
+  afterMessageFollowupMs?: number
   refresh?: ((signal: AbortSignal) => Promise<void>) | null
   refreshMs: number
   maxSessionMs?: number | null
@@ -1165,7 +1215,10 @@ export async function startAssistantChannelActivitySession(input: {
     ...(afterMessageRefreshMs === null
       ? {}
       : {
-          refreshAfterMessage: async () => scheduleRefresh(afterMessageRefreshMs),
+          refreshAfterMessage: async () => scheduleRefresh(
+            afterMessageRefreshMs,
+            input.afterMessageFollowupMs ?? refreshMs,
+          ),
         }),
     refreshNow: async () => {
       clearRefreshTimer()
@@ -1178,8 +1231,8 @@ export async function startAssistantChannelActivitySession(input: {
     stop: stopActivity,
   }
 
-  function scheduleRefresh(delayMs: number): void {
-    if (stopped || linkedStopSignal.signal.aborted || refreshFailure) {
+  function scheduleRefresh(delayMs: number, nextDelayMs = refreshMs): void {
+    if (stopped || linkedStopSignal.signal.aborted) {
       return
     }
 
@@ -1189,7 +1242,7 @@ export async function startAssistantChannelActivitySession(input: {
       refreshTimer = null
       void enqueueRefresh().then(() => {
         if (scheduleVersion === refreshScheduleVersion) {
-          scheduleRefresh(refreshMs)
+          scheduleRefresh(nextDelayMs)
         }
       })
     }, delayMs)
@@ -1198,16 +1251,18 @@ export async function startAssistantChannelActivitySession(input: {
 
   function enqueueRefresh(): Promise<void> {
     refreshTail = refreshTail.then(async () => {
-      if (stopped || linkedStopSignal.signal.aborted || refreshFailure) {
+      if (stopped || linkedStopSignal.signal.aborted) {
         return
       }
 
-      await refresh(linkedStopSignal.signal)
-        .catch((error) => {
-          if (!linkedStopSignal.signal.aborted) {
-            refreshFailure = error
-          }
-        })
+      try {
+        await refresh(linkedStopSignal.signal)
+        refreshFailure = null
+      } catch (error) {
+        if (!linkedStopSignal.signal.aborted) {
+          refreshFailure = error
+        }
+      }
     })
     return refreshTail
   }
@@ -1323,6 +1378,7 @@ export async function startLinqTypingIndicator(
 
   return startAssistantChannelActivitySession({
     afterMessageRefreshMs: LINQ_TYPING_POST_MESSAGE_REFRESH_MS,
+    afterMessageFollowupMs: LINQ_TYPING_POST_MESSAGE_FOLLOWUP_MS,
     refreshMs: dependencies.refreshMs ?? LINQ_TYPING_REFRESH_MS,
     maxSessionMs: dependencies.maxSessionMs ?? LINQ_TYPING_MAX_SESSION_MS,
     signal: dependencies.signal,
@@ -1336,6 +1392,21 @@ export async function startLinqTypingIndicator(
         signal,
       },
     ),
+    // A repeated start cannot restore an indicator cleared by reopening an
+    // unread chat. Serialize stop/start with other refreshes and final cleanup.
+    refresh: async (signal) => {
+      await stopLinqChatTypingIndicator({ chatId }, {
+        env,
+        fetchImplementation: dependencies.fetchImplementation,
+        signal,
+      })
+      signal.throwIfAborted()
+      await startLinqChatTypingIndicator({ chatId }, {
+        env,
+        fetchImplementation: dependencies.fetchImplementation,
+        signal,
+      })
+    },
     stop: () => stopLinqChatTypingIndicator(
       {
         chatId,
@@ -1812,11 +1883,12 @@ async function sendTelegramPhoto(input: {
   }
 }
 
-async function sendTelegramVoiceMemo(input: {
+async function sendTelegramBinaryMessage(input: {
+  operation: 'sendVoice' | 'sendDocument'
   authorityBoundTarget?: string | null
   baseUrl: string
   bytes: Uint8Array
-  contentType: 'audio/mpeg'
+  contentType: string
   fetchImplementation: TelegramFetchImplementation
   filename: string
   replyToMessageId: string | null
@@ -1841,8 +1913,9 @@ async function sendTelegramVoiceMemo(input: {
 
   while (true) {
     const outcome = resolveTelegramSendAttemptOutcome({
-      operation: 'sendVoice',
-      result: await sendTelegramVoiceMemoOnce({
+      operation: input.operation,
+      result: await sendTelegramBinaryMessageOnce({
+        operation: input.operation,
         baseUrl: input.baseUrl,
         bytes: input.bytes,
         contentType: input.contentType,
@@ -2045,9 +2118,10 @@ function buildTelegramPhotoFormData(input: {
   return form
 }
 
-function buildTelegramVoiceMemoFormData(input: {
+function buildTelegramBinaryFormData(input: {
+  operation: 'sendVoice' | 'sendDocument'
   bytes: Uint8Array
-  contentType: 'audio/mpeg'
+  contentType: string
   filename: string
   replyToMessageId: string | null
   target: TelegramParsedTarget
@@ -2058,7 +2132,7 @@ function buildTelegramVoiceMemoFormData(input: {
   }
   appendTelegramFormField(form, 'reply_to_message_id', input.replyToMessageId)
   form.append(
-    'voice',
+    input.operation === 'sendVoice' ? 'voice' : 'document',
     new Blob([copyUint8ArrayToArrayBuffer(input.bytes)], {
       type: input.contentType,
     }),
@@ -2508,10 +2582,11 @@ async function sendTelegramPhotoOnce(input: {
   }
 }
 
-async function sendTelegramVoiceMemoOnce(input: {
+async function sendTelegramBinaryMessageOnce(input: {
+  operation: 'sendVoice' | 'sendDocument'
   baseUrl: string
   bytes: Uint8Array
-  contentType: 'audio/mpeg'
+  contentType: string
   fetchImplementation: TelegramFetchImplementation
   filename: string
   replyToMessageId: string | null
@@ -2523,7 +2598,8 @@ async function sendTelegramVoiceMemoOnce(input: {
   try {
     const result = await sendTelegramBotApiRequest({
       baseUrl: input.baseUrl,
-      body: buildTelegramVoiceMemoFormData({
+      body: buildTelegramBinaryFormData({
+        operation: input.operation,
         bytes: input.bytes,
         contentType: input.contentType,
         filename: input.filename,
@@ -2531,7 +2607,7 @@ async function sendTelegramVoiceMemoOnce(input: {
         target: input.target,
       }),
       fetchImplementation: input.fetchImplementation,
-      operation: 'sendVoice',
+      operation: input.operation,
       signal: input.signal,
       token: input.token,
     })
@@ -2541,12 +2617,20 @@ async function sendTelegramVoiceMemoOnce(input: {
       ...result,
     }
   } catch (error) {
+    if (input.operation === 'sendDocument' && providerRequestWasSkipped(error)) {
+      throw error
+    }
     return {
       kind: 'request-error',
-      failure: createTelegramVoiceMemoAmbiguousDeliveryFailure({
-        error,
-        target: input.targetLabel,
-      }),
+      failure: input.operation === 'sendVoice'
+        ? createTelegramVoiceMemoAmbiguousDeliveryFailure({ error, target: input.targetLabel })
+        : markTelegramDeliveryAmbiguous(
+            new VaultCliError(
+              'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+              'Telegram file delivery could not be confirmed after calling the Bot API.',
+            ),
+            input.targetLabel,
+          ),
     }
   }
 }

@@ -195,6 +195,36 @@ jobs:
       - name: Check documentation gardening
         run: pnpm docs:gardening
 
+  release-verification-plan-linux:
+    name: Release verification plan (ubuntu)
+    needs: markdown-docs-scope
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
+    runs-on: ubuntu-24.04
+    outputs:
+      package_matrix: ${{ steps.verification_plan.outputs.package_matrix }}
+      hosted_web_test_matrix: ${{ steps.verification_plan.outputs.hosted_web_test_matrix }}
+    steps:
+      - name: Reject draft pull request proof
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
+        run: |
+          echo "::error::Mark the pull request ready for review to run exact-head CI."
+          exit 1
+
+      - name: Check out exact release candidate
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Validate and publish release verification plan
+        id: verification_plan
+        run: node scripts/release-verification-plan.mjs --github-output "$GITHUB_OUTPUT"
+
   release-build-typecheck-linux:
     name: Release build/typecheck (ubuntu)
     needs: markdown-docs-scope
@@ -284,47 +314,18 @@ jobs:
 
   release-package-coverage-linux:
     name: Release package coverage (${{ matrix.shard }})
-    needs: markdown-docs-scope
+    needs:
+      - markdown-docs-scope
+      - release-verification-plan-linux
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
-      # Three shards balanced so each job's test wall clock roughly matches the
-      # slowest single package lane (the CLI suite, ~5 minutes). Fewer, fuller
-      # shards keep per-job checkout/install overhead and org-level concurrency
-      # slot usage down; the org concurrency cap is the real CI bottleneck.
-      matrix:
-        include:
-          - shard: cli
-            packages: packages/cli
-          - shard: assistant
-            packages: >-
-              packages/assistant-engine
-              packages/assistant-cli
-              packages/assistantd
-              packages/hosted-execution
-          - shard: platform
-            packages: >-
-              packages/assistant-runtime
-              packages/setup-cli
-              packages/operator-config
-              packages/core
-              packages/query
-              packages/vault-usecases
-              packages/device-syncd
-              packages/exercise-library
-              packages/health-metrics
-              packages/inboxd
-              packages/importers
-              packages/runtime-state
-              packages/cloudflare-hosted-control
-              packages/clinical-records
-              packages/contracts
-              packages/gateway-core
-              packages/inbox-services
-              packages/messaging-ingress
-              packages/openclaw-plugin
-              packages/parsers
+      # The validated release plan keeps the measured CLI and Assistant Engine
+      # floors isolated, splits the platform owners across two bounded runners,
+      # and retains dedicated Health Commons and Hosted Local Harness lanes.
+      # Package commands remain serial inside each two-core runner.
+      matrix: ${{ fromJSON(needs.release-verification-plan-linux.outputs.package_matrix) }}
     steps:
       - name: Reject draft pull request proof
         if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
@@ -334,6 +335,7 @@ jobs:
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Setup pnpm
@@ -343,8 +345,6 @@ jobs:
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .nvmrc
-          # Cache the pnpm store keyed on pnpm-lock.yaml; biggest win on the
-          # macOS leg where a cold install costs ~2 minutes.
           cache: pnpm
 
       - name: Install deps
@@ -362,21 +362,73 @@ jobs:
         run: pnpm --dir packages/cli exec tsx scripts/verify-package-shape.ts
 
       - name: Run package coverage shard
+        shell: bash
         run: |
-          for package_dir in ${{ matrix.packages }}; do
+          set -euo pipefail
+          package_dirs="$(node scripts/release-verification-plan.mjs --package-dirs "${{ matrix.shard }}")"
+          if [[ -z "$package_dirs" ]]; then
+            echo "Release package shard '${{ matrix.shard }}' matched zero packages." >&2
+            exit 1
+          fi
+
+          while IFS= read -r package_dir; do
+            [[ -n "$package_dir" ]] || continue
             if [[ "$package_dir" == "packages/cli" ]]; then
               env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_CLI_RELEASE_TARBALL_TEST=1 MURPH_VITEST_MAX_WORKERS=50% pnpm exec vitest run --config packages/cli/vitest.workspace.ts --coverage
             else
               env MURPH_VITEST_MAX_WORKERS=50% pnpm --dir "$package_dir" test:coverage
             fi
-          done
+          done <<< "$package_dirs"
 
-  release-app-verification-linux:
-    name: Release app verification (ubuntu)
+  release-web-build-linux:
+    name: Release Web build verification (ubuntu)
     needs: markdown-docs-scope
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    env:
+      MURPH_HOSTED_WEB_VERIFY_LANE: build
+      MURPH_HOSTED_WEB_WEBPACK_CACHE: "1"
+      MURPH_HOSTED_WEB_VERIFY_SKIP_TYPECHECK: "1"
+      MURPH_VERIFY_STEP_PARALLEL: "1"
+    steps:
+      - name: Reject draft pull request proof
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
+        run: |
+          echo "::error::Mark the pull request ready for review to run exact-head CI."
+          exit 1
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Run hosted-Web build, lint, and smoke verification
+        run: pnpm --dir apps/web verify
+
+  release-web-tests-linux:
+    name: Release Web tests (${{ matrix.shard }})
+    needs:
+      - markdown-docs-scope
+      - release-verification-plan-linux
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.release-verification-plan-linux.outputs.hosted_web_test_matrix) }}
     services:
       postgres:
         image: public.ecr.aws/docker/library/postgres:17
@@ -392,8 +444,45 @@ jobs:
         ports:
           - 5432:5432
     env:
-      MURPH_APP_VERIFY_PARALLEL: "0"
+      MURPH_HOSTED_WEB_TEST_SHARD: ${{ matrix.shard }}
+      MURPH_HOSTED_WEB_VERIFY_LANE: test-shard
+      MURPH_HOSTED_WEB_VERIFY_SKIP_TYPECHECK: "1"
       MURPH_SUPPLEMENT_SEARCH_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_search_test
+    steps:
+      - name: Reject draft pull request proof
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
+        run: |
+          echo "::error::Mark the pull request ready for review to run exact-head CI."
+          exit 1
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Run hosted-Web test shard
+        run: pnpm --dir apps/web verify
+
+  release-cloudflare-verification-linux:
+    name: Release Cloudflare verification (ubuntu)
+    needs: markdown-docs-scope
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.markdown-docs-scope.outputs.markdown_only != 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      MURPH_CLOUDFLARE_VERIFY_SKIP_TYPECHECK: "1"
       MURPH_VERIFY_STEP_PARALLEL: "1"
     steps:
       - name: Reject draft pull request proof
@@ -404,6 +493,7 @@ jobs:
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Setup pnpm
@@ -413,8 +503,6 @@ jobs:
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .nvmrc
-          # Cache the pnpm store keyed on pnpm-lock.yaml; biggest win on the
-          # macOS leg where a cold install costs ~2 minutes.
           cache: pnpm
 
       - name: Install deps
@@ -423,22 +511,8 @@ jobs:
       - name: Verify pinned Codex upstream egress source
         run: pnpm --dir apps/cloudflare verify:codex-upstream-source
 
-      # Keep trusted-main app reuse on its own namespace so the two release
-      # lanes never exchange incremental state and PRs cannot seed it.
-      - name: Restore release app verification build info
-        if: github.event_name == 'push'
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: |
-            apps/cloudflare/typecheck.tsbuildinfo
-            apps/web/.next/cache/tsconfig.tsbuildinfo
-            apps/web/.next/cache/tsconfig.next.tsbuildinfo
-          key: tsbuildinfo-release-app-verification-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.nvmrc', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'packages/*/package.json', 'apps/*/package.json', 'tsconfig*.json', 'packages/*/tsconfig*.json', 'apps/*/tsconfig*.json') }}-${{ github.sha }}
-          restore-keys: |
-            tsbuildinfo-release-app-verification-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.nvmrc', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'packages/*/package.json', 'apps/*/package.json', 'tsconfig*.json', 'packages/*/tsconfig*.json', 'apps/*/tsconfig*.json') }}-
-
-      - name: Run app verification
-        run: pnpm test:apps
+      - name: Run Cloudflare verification
+        run: pnpm --dir apps/cloudflare verify
 
   production-runner-bundle-budget-linux:
     name: Production runner bundle budget (ubuntu)
@@ -526,6 +600,12 @@ jobs:
       - name: Compare exact total output
         run: node candidate/scripts/check-runner-bundle-budget-ci.mjs compare base candidate
 
+      - name: Check one-vCPU container latency
+        timeout-minutes: 15
+        run: |
+          node --test candidate/scripts/check-container-latency-ci.test.mjs
+          node candidate/scripts/check-container-latency-ci.mjs base candidate
+
   release-fixture-coverage-linux:
     name: Release fixture coverage (ubuntu)
     needs: markdown-docs-scope
@@ -564,10 +644,13 @@ jobs:
     runs-on: ubuntu-24.04
     needs:
       - markdown-docs-scope
+      - release-verification-plan-linux
       - markdown-docs-proof
       - release-build-typecheck-linux
       - release-package-coverage-linux
-      - release-app-verification-linux
+      - release-web-build-linux
+      - release-web-tests-linux
+      - release-cloudflare-verification-linux
       - release-fixture-coverage-linux
       - production-runner-bundle-budget-linux
     if: ${{ !cancelled() }}
@@ -583,10 +666,13 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           SCOPE_RESULT: ${{ needs.markdown-docs-scope.result }}
           MARKDOWN_ONLY: ${{ needs.markdown-docs-scope.outputs.markdown_only }}
+          PLAN_RESULT: ${{ needs.release-verification-plan-linux.result }}
           DOCS_RESULT: ${{ needs.markdown-docs-proof.result }}
           BUILD_RESULT: ${{ needs.release-build-typecheck-linux.result }}
           PACKAGE_RESULT: ${{ needs.release-package-coverage-linux.result }}
-          APP_RESULT: ${{ needs.release-app-verification-linux.result }}
+          WEB_BUILD_RESULT: ${{ needs.release-web-build-linux.result }}
+          WEB_TEST_RESULT: ${{ needs.release-web-tests-linux.result }}
+          CLOUDFLARE_RESULT: ${{ needs.release-cloudflare-verification-linux.result }}
           FIXTURE_RESULT: ${{ needs.release-fixture-coverage-linux.result }}
           BUNDLE_RESULT: ${{ needs.production-runner-bundle-budget-linux.result }}
         shell: bash
@@ -603,7 +689,7 @@ jobs:
                 echo "Markdown documentation proof did not succeed." >&2
                 exit 1
               fi
-              for result in "$BUILD_RESULT" "$PACKAGE_RESULT" "$APP_RESULT" "$FIXTURE_RESULT" "$BUNDLE_RESULT"; do
+              for result in "$PLAN_RESULT" "$BUILD_RESULT" "$PACKAGE_RESULT" "$WEB_BUILD_RESULT" "$WEB_TEST_RESULT" "$CLOUDFLARE_RESULT" "$FIXTURE_RESULT" "$BUNDLE_RESULT"; do
                 if [[ "$result" != "skipped" ]]; then
                   echo "Markdown documentation proof requires every release shard to remain skipped." >&2
                   exit 1
@@ -616,7 +702,7 @@ jobs:
                 echo "Full release proof requires the documentation-only job to remain skipped." >&2
                 exit 1
               fi
-              for result in "$BUILD_RESULT" "$PACKAGE_RESULT" "$APP_RESULT" "$FIXTURE_RESULT" "$BUNDLE_RESULT"; do
+              for result in "$PLAN_RESULT" "$BUILD_RESULT" "$PACKAGE_RESULT" "$WEB_BUILD_RESULT" "$WEB_TEST_RESULT" "$CLOUDFLARE_RESULT" "$FIXTURE_RESULT" "$BUNDLE_RESULT"; do
                 if [[ "$result" != "success" ]]; then
                   echo "Full release proof requires every release shard to succeed." >&2
                   exit 1
