@@ -1,6 +1,6 @@
 # Service discovery authentication
 
-Status: active
+Status: completed
 
 ## Outcome and invariant
 
@@ -26,3 +26,12 @@ Pending focused service tests, Web typecheck, assistant journey, complexity guar
 - Relevant package checks and complexity guard pass. Web preparation requires the normal declared device-syncd package build in a fresh checkout.
 - Content-only changelog archive SSR coverage passes; release provenance is bound to this PR.
 - Remaining completion gates: final exact-head ReviewGPT, required CI and parent final review. No merge or deployment authorized.
+
+## Final review
+
+- Round 1: PASS on 04edcd8216ac986699912a359380d740fd5ca494; zero findings, accepted or rejected. Verified full snapshot, exact turn/head, gpt-6-pro model, response hash and completion marker; captured after 704 seconds.
+- One earlier too-fast capture was discarded as diagnostic output, not a substantive round.
+- Parent reviewed the entire scoped patch, test boundaries, privacy, shared execution authority, and absence of extra I/O. No review remediation or source expansion was needed.
+- This closing commit changes explanatory evidence only. Required checks on its resulting head must pass before merge readiness; no merge or deployment is included.
+Updated: 2026-09-05
+Completed: 2026-09-05
