@@ -2440,6 +2440,10 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
       orderBy: {
         laneSeq: "desc",
       },
+      select: {
+        laneSeq: true,
+        updatedAt: true,
+      },
       where: expectLiveHostedMailboxWhere({
         lane: "conversation",
         userId: "member_mailbox_1",

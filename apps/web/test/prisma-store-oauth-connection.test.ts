@@ -2205,9 +2205,10 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(findMany).toHaveBeenCalledTimes(1);
   });
 
-  it("uses an id-and-status-only member projection for companion status", async () => {
+  it("uses bounded lifecycle metadata without credential ciphertext for companion selection", async () => {
     const findMany = vi.fn(async () => [{
       id: "dsc_123",
+      setupPhase: "source_confirmed",
       status: "active",
     }]);
     const store = new PrismaDeviceSyncControlPlaneStore({
@@ -2219,10 +2220,11 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     await expect(store.listMemberConnectionStatuses({
       limit: 32,
       provider: "junction",
-      status: "not_disconnected",
+      status: "all",
       userId: "user-123",
     })).resolves.toEqual([{
       id: "dsc_123",
+      setupPhase: "source_confirmed",
       status: "active",
     }]);
     expect(findMany).toHaveBeenCalledWith({
@@ -2230,11 +2232,11 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       take: 33,
       select: {
         id: true,
+        setupPhase: true,
         status: true,
       },
       where: {
         provider: "junction",
-        status: { not: "disconnected" },
         userId: "user-123",
       },
     });

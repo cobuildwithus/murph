@@ -1903,6 +1903,10 @@ Last verified: 2026-09-04
   `whoop`, but admission uses the Junction `whoop_v2` lifecycle source. Resume,
   omitted intent, stale
   events, and background work never clear the source fence.
+  SDK sign-in chooses its provider connection from a limit-plus-one metadata
+  projection of id, lifecycle status, and setup phase. Selection never opens
+  credential ciphertext; connect and resume mutation owners still revalidate
+  the exact selected connection and source authority.
 - Personal Patterns operator email is terminal-state only. A failed cron
   attempt remains silent while the finalized job has a scheduled retry. Web
   treats an absent retry disposition from an older runner as non-terminal, so
@@ -1947,7 +1951,10 @@ Last verified: 2026-09-04
   error-code-independent stalls. Conversation rows with a non-null
   `consumed_at` are terminal and are excluded before both head selection and the
   lane's `COUNT(*) OVER()`; system-lane selection remains unchanged. A system
-  head ages from its accepted mailbox creation time. Import and unrelated
+  head ages from its accepted mailbox creation time.
+  Lane high-water reads select only sequence and update time; they never fetch
+  inline or externalized mailbox ciphertext.
+  Import and unrelated
   checkpoint or wake changes cannot reset that clock. The independent device
   and assistant wake projections remain scheduler inputs, not per-item progress
   evidence. Advancing the canonical handling frontier exposes the next live
