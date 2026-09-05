@@ -1011,6 +1011,7 @@ function serializeAutomationToolResponse(
     case 'inspect':
       payload = {
         action: response.action,
+        executionInspection: response.executionInspection,
         automationId: response.automationId,
         contextReferences: response.contextReferences,
         instructions: response.instructions,

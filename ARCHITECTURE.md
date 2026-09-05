@@ -247,6 +247,14 @@ The account inventory owner rejects malformed pages instead of presenting them
 as empty. Journal and Personal Patterns retain the common hosted cron policy:
 eligible first attempts request Flex; failed-attempt retries use Standard, and
 the provider boundary validates model and catalog support before selecting Flex.
+
+Read-only hosted automation inspection also projects execution evidence from
+that automation's existing runtime state, its ten newest retained cron runs,
+and at most one exact outstanding outbox intent. It exposes phase, retry timing,
+bounded sanitized failure detail and delivery status without prompts, responses,
+recipient identities or a new history store. A consumed or failed occurrence is
+not delivery confirmation; inspection never retries or recreates it.
+
 Reminder availability uses no
 model turn or separate automation: the existing hosted background automation
 pass deterministically scans active private automations that explicitly store
