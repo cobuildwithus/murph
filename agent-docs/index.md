@@ -141,6 +141,7 @@ not a guarantee that every claim was checked in this cleanup.
 | `agent-docs/prompts/seam-audits/` | One-pass bespoke seam prompts governed by a shared review-only, evidence, correction, and zero-finding contract. | Seam-audit prompt library | Low | 2026-07-13 |
 | `apps/web/README.md` | Hosted Web setup, runtime ownership, and build/deploy contracts. | `apps/web/**` | Medium | 2026-08-09 |
 | `apps/cloudflare/README.md` | Hosted execution-plane overview and runtime contract. | `apps/cloudflare/**` | Medium | 2026-07-29 |
+| `apps/cloudflare/scripts/benchmark-workspace-restore.md` | Synthetic encrypted restore benchmark, measurement controls, and local/Linux limitations. | Cloudflare workspace restore | Medium | 2026-09-04 |
 | `apps/cloudflare/DEPLOY.md` | Current deployment procedure for hosted execution. | Hosted deploy flow | Medium | 2026-08-26 |
 | `packages/assistantd/README.md` | Local assistant daemon boundary and control-plane contract. | `packages/assistantd/**` | Medium | 2026-03-30 |
 | `packages/assistant-runtime/README.md` | Headless hosted runtime surface consumed by Cloudflare. | `packages/assistant-runtime/**` | Medium | 2026-07-15 |
