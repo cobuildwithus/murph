@@ -50,11 +50,13 @@ The authorized September FHIR refactor covers correctness, policy/contract delet
 - Workspace incremental build and affected typechecks passed; rerun after final contract/schema edits.
 - Phone (390 px) and desktop (1280 px) real-component studies and signed-out route inspected; Playwright overflow and keyboard proof passed. No live provider journey has been exercised.
 - Postdeploy contract SQL applied successfully to the isolated database; the six concurrency tests still pass. Complexity guard passes with no increased per-file debt.
-- Remaining completion gates: final typechecks, branch preview/changelog, PR CI and exact-head ReviewGPT.
+- All affected typechecks and the workspace incremental build pass. Changelog archive proof adds nine passing cases.
+- PR #2918 is draft; branch preview, exact-head CI and final ReviewGPT remain.
 
 ## Progress
 
 - Implemented all five workstreams within existing owners; removed obsolete hosted protocols, duplicate state, policy registries, filesystem facade and UI steps/sidebars.
 - Reconnect reuses source identity and encrypted patient binding. Limit to eight retained imports per source and twenty sources; retain immutable evidence rather than adding garbage collection.
 - Expansion migration permits old database readers during deploy. Existing guarded post-deploy contract lane drops unused columns only after the new reader is deployed; this sets the rollback floor.
+- The rollout aggregate was rechecked before PR creation and remained zero.
 - Parent candidate review covers source and test deletions, frozen identities, partial outcomes, privacy, migration ordering and UI states. Live provider validation remains unavailable; synthetic proof is explicitly scoped.
