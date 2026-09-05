@@ -14,6 +14,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   checkpointHostedWorkspaceTx,
   ensureHostedWorkspace,
+  readHostedBrowserVaultReplicaState,
   publishLatestBrowserVaultReplicaRefTx,
   claimHostedAcceptedAttemptFailureRecheck,
   type HostedWorkspaceTransactionRunner,
@@ -23,6 +24,19 @@ import {
 const FIXED_NOW = new Date("2026-04-26T00:00:00.000Z");
 
 describe("hosted workspace store", () => {
+  it("reads only replica session metadata, including missing workspaces", async () => {
+    const hostedWorkspace = createHostedWorkspaceDelegate();
+    const prisma = createHostedWorkspaceClient({ hostedWorkspace });
+    const state = await readHostedBrowserVaultReplicaState({ prisma, userId: "member_workspace_1" });
+    expect(hostedWorkspace.findUnique).toHaveBeenCalledWith({
+      where: { userId: "member_workspace_1" },
+      select: { browserVaultReplicaRef: true, version: true },
+    });
+    expect(state).toEqual({ browserVaultReplicaRef: null, version: "4" });
+    hostedWorkspace.findUnique.mockResolvedValueOnce(null);
+    expect(await readHostedBrowserVaultReplicaState({ prisma, userId: "member_workspace_1" })).toBeNull();
+  });
+
   it("creates the version-zero workspace row when missing", async () => {
     const hostedWorkspace = createHostedWorkspaceDelegate();
     const prisma = createHostedWorkspaceClient({

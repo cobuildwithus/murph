@@ -1,0 +1,15 @@
+{
+  "publishedOn": "2026-09-05",
+  "order": 100,
+  "item": {
+    "id": "lighter-private-dashboard-loading",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Less work to load your dashboard",
+    "summary": "Private dashboard pages do less background setup when loading your data, with fewer repeated calculations on Biomarkers and Patterns.",
+    "details": "Session checks also read less data. Your health data stays encrypted in transit, and pages still check your current access before showing cached data.",
+    "relevanceTags": ["performance", "dashboard"],
+    "sourcePullRequests": [2947],
+    "tryIt": { "label": "View Patterns", "href": "/patterns" }
+  }
+}

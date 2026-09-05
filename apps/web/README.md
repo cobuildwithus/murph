@@ -132,6 +132,16 @@ a revoked Web webhook/sync admission, and a revoked grantor shared-data read.
 Missing legacy grants remain compatible within those current artifacts; they
 are not a reason to restore pre-consent readers.
 
+## Browser-vault dashboard loading
+
+Browser-vault dashboard sessions and public-homepage preparation read only the
+published replica ref and workspace version. Refresh orchestration is imported
+only when the existing after-response refresh path needs it. The browser loader
+constructs one query client for the route's requested capability; the combined
+metrics/labs client reuses its metrics client's core access. Patterns reads its
+precomputed report directly. Session reauthorization, exact replica identity,
+route-scoped shard retention, and encrypted transport remain unchanged.
+
 ## Browser-vault member-proof rollback floor
 
 Successful browser-vault session responses in the `empty` and `not_modified`

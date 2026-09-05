@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   after: vi.fn(),
   assertBrowserVaultMemberAuthority: vi.fn(),
   getPrisma: vi.fn(),
-  readHostedWorkspace: vi.fn(),
+  readHostedBrowserVaultReplicaState: vi.fn(),
   signalHostedBrowserVaultRefreshRuntime: vi.fn(),
 }));
 
@@ -31,7 +31,7 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-workspace/store", () => ({
-  readHostedWorkspace: mocks.readHostedWorkspace,
+  readHostedBrowserVaultReplicaState: mocks.readHostedBrowserVaultReplicaState,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -52,7 +52,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.getPrisma.mockReturnValue(prisma);
   mocks.assertBrowserVaultMemberAuthority.mockResolvedValue(undefined);
-  mocks.readHostedWorkspace.mockResolvedValue({
+  mocks.readHostedBrowserVaultReplicaState.mockResolvedValue({
     browserVaultReplicaRef: createReplicaRef(),
   });
   mocks.signalHostedBrowserVaultRefreshRuntime.mockResolvedValue({
@@ -72,7 +72,7 @@ describe("homepage browser-vault preparation", () => {
     expect(mocks.after).toHaveBeenCalledTimes(1);
     expect(mocks.after).toHaveBeenCalledWith(expect.any(Function));
     expect(mocks.assertBrowserVaultMemberAuthority).not.toHaveBeenCalled();
-    expect(mocks.readHostedWorkspace).not.toHaveBeenCalled();
+    expect(mocks.readHostedBrowserVaultReplicaState).not.toHaveBeenCalled();
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
   });
 
@@ -85,7 +85,7 @@ describe("homepage browser-vault preparation", () => {
       memberId: MEMBER_ID,
       prisma,
     });
-    expect(mocks.readHostedWorkspace).toHaveBeenCalledWith({
+    expect(mocks.readHostedBrowserVaultReplicaState).toHaveBeenCalledWith({
       prisma,
       userId: MEMBER_ID,
     });
@@ -116,7 +116,7 @@ describe("homepage browser-vault preparation", () => {
   ])("reuses the durable refresh signal when the replica is $label", async ({
     replicaRef,
   }) => {
-    mocks.readHostedWorkspace.mockResolvedValue({
+    mocks.readHostedBrowserVaultReplicaState.mockResolvedValue({
       browserVaultReplicaRef: replicaRef,
     });
 
@@ -137,14 +137,14 @@ describe("homepage browser-vault preparation", () => {
     scheduleHomepageBrowserVaultPreparation({ memberId: MEMBER_ID });
     await expect(runScheduledAfterTask()).resolves.toBeUndefined();
 
-    expect(mocks.readHostedWorkspace).not.toHaveBeenCalled();
+    expect(mocks.readHostedBrowserVaultReplicaState).not.toHaveBeenCalled();
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
   });
 
   it.each([
     {
       fail: () => {
-        mocks.readHostedWorkspace.mockRejectedValue(
+        mocks.readHostedBrowserVaultReplicaState.mockRejectedValue(
           new Error("workspace unavailable"),
         );
       },
@@ -152,7 +152,7 @@ describe("homepage browser-vault preparation", () => {
     },
     {
       fail: () => {
-        mocks.readHostedWorkspace.mockResolvedValue({
+        mocks.readHostedBrowserVaultReplicaState.mockResolvedValue({
           browserVaultReplicaRef: null,
         });
         mocks.signalHostedBrowserVaultRefreshRuntime.mockRejectedValue(
@@ -178,7 +178,7 @@ describe("homepage browser-vault preparation", () => {
       scheduleHomepageBrowserVaultPreparation({ memberId: MEMBER_ID })
     ).not.toThrow();
     expect(mocks.assertBrowserVaultMemberAuthority).not.toHaveBeenCalled();
-    expect(mocks.readHostedWorkspace).not.toHaveBeenCalled();
+    expect(mocks.readHostedBrowserVaultReplicaState).not.toHaveBeenCalled();
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
   });
 });
