@@ -1,6 +1,6 @@
 # Resolve daily nutrition context in one canonical read
 
-Status: active
+Status: completed
 Created: 2026-09-04
 Updated: 2026-09-04
 
@@ -88,3 +88,24 @@ Query tests cover complete authority, dates, cap, competing owners, incompatible
 - Web typecheck passes. All local focused gates and parent candidate review
   are complete; the intended candidate is being pushed for concurrent CI and
   required final ReviewGPT. The plan remains active until those gates resolve.
+- ReviewGPT round 1 PASS at 4ebb3cd1c705f18031aaab6c55a57eff4557cf9d
+  on Eragon with gpt-6-pro. Exact model, committed user/assistant turns,
+  response SHA-256, attachment, head, and completion marker were verified.
+  Send-to-capture was 439.976 seconds. Parent accepted this near-threshold
+  review because it substantiated all 22 postimages and canonical/legacy,
+  date/conflict/capacity, suitability, and refresh boundaries proportionately.
+  The review claimed source/contract inspection, not independent test execution.
+- An adjacent characterization check exposed two stale route-plan hashes.
+  Ignored full baseline/head captures proved only the reviewed response-card
+  description and its derived contract fingerprint changed for direct and
+  scheduled-email routes; the other three routes remain byte-identical.
+  Parent approved refreshing only those two test expectations under the
+  isolated-proof exception. The system-prompt size ratchet passed unchanged.
+- Exact-head CI has passed fixture integrity, release build/typecheck, macOS
+  CLI, sandbox, billing, cardinality, private-artifact, overflow, and PR evidence
+  checks at the reviewed head. Final-head CI remains a publication gate after
+  the isolated proof refresh and plan closure; no merge or deploy is authorized.
+- Both targeted characterization/size checks pass after the two expectation
+  refreshes, and assistant-engine typecheck passes again. Parent final approval
+  covers the isolated proof update; implementation and local validation are done.
+Completed: 2026-09-04
