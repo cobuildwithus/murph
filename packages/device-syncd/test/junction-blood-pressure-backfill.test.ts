@@ -2182,13 +2182,11 @@ test("maximum-cardinality schedule-time history queries 396 keys once and offers
 });
 
 test.each([
-  ["before provider discovery", 1, 0, 0, 0],
-  ["after provider discovery", 3, 1, 0, 0],
-  ["after timeseries fetch", 4, 1, 1, 0],
-  ["after snapshot preparation", 5, 1, 1, 0],
+  ["before provider discovery", 0, 0, 0],
+  ["after provider discovery", 1, 0, 0],
+  ["after timeseries fetch", 1, 1, 0],
 ] as const)("an old source epoch is fenced %s", async (
-  _label,
-  supersedeAtRead,
+  boundary,
   expectedProviderListRequests,
   expectedTimeseriesRequests,
   expectedImportCalls,
@@ -2235,7 +2233,6 @@ test.each([
     ).jobs,
     "caffeine",
   );
-  let sourceReads = 0;
   const result = await requireValue(provider.jobExecutor).executeJob(
     createJobContext({
       account: createAccount({ sources: [epochOneSource] }),
@@ -2244,11 +2241,13 @@ test.each([
         return importWithRealJunctionNormalizer(snapshot);
       },
       listConnectionSources: async () => {
-        sourceReads += 1;
-        return sourceReads >= supersedeAtRead ? [epochTwoSource] : [epochOneSource];
+        const superseded = boundary === "before provider discovery"
+          || (boundary === "after provider discovery" && providerListRequests.count > 0)
+          || (boundary === "after timeseries fetch" && requests.length > 0);
+        return superseded ? [epochTwoSource] : [epochOneSource];
       },
     }),
-    toJobRecord(job, 200 + supersedeAtRead),
+    toJobRecord(job, 200),
   );
 
   assert.equal(result.metadataPatch, undefined);
@@ -4199,6 +4198,45 @@ test("retryable post-fetch failures preserve raw evidence and replay the anchore
       boundary,
     );
   }
+});
+
+test.each([false, true])("historical source reads follow actual import work (records: %s)", async (hasRecords) => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    bloodPressureRecords: hasRecords ? [{
+      id: "bp-source-read-bound",
+      timestamp: "2026-05-12T08:30:00.000Z",
+      systolic: 120,
+      diastolic: 78,
+    }] : [],
+    requests,
+  });
+  const scheduled = createScheduledBloodPressureJob(provider);
+  const source = createSourceSummary("omron");
+  const events: string[] = [];
+  const context = createJobContext({
+    listConnectionSources: async () => {
+      if (requests.length > 0) events.push("sources");
+      return [source];
+    },
+    importSnapshot: async (snapshot) => {
+      events.push("import");
+      return importWithRealJunctionNormalizer(snapshot);
+    },
+  });
+  const result = await requireValue(provider.jobExecutor).executeJob(context, toJobRecord({
+    ...scheduled,
+    payload: {
+      ...scheduled.payload,
+      historicalWindowStart: "2026-05-12T00:00:00.000Z",
+      windowStart: "2026-05-12T00:00:00.000Z",
+      windowEnd: "2026-05-13T00:00:00.000Z",
+    },
+  }, 144));
+
+  assert.deepEqual(events, hasRecords ? ["sources", "import", "sources"] : ["sources"]);
+  assert.equal(requests.filter((request) => request.resource === "blood_pressure").length, 1);
+  assert.equal(result.scheduledJobs?.length ?? 0, hasRecords ? 0 : 1);
 });
 
 test("an empty successful segment retries when its post-fetch source reread fails", async () => {

@@ -1646,40 +1646,47 @@ export function createJunctionDeviceSyncProvider(
         );
     const {
       providerRecordsSeen: historicalSummaryHasFetchedRecords,
-      snapshots: summaries,
+      snapshots: historicalSummaries,
     } = summaryFetchResult;
-    const sourceScopedHistoricalSummaryHasRecords =
-      job.kind === "backfill" && sourceProviderSlug
-        ? await hasJunctionSourceScopedAdmittedSnapshotRecords({
-            context,
-            snapshots: summaries,
-            sourceProviderSlug,
-            sourceProviders,
-          })
-        : false;
     const profileSummaryResult = summaryPhaseComplete
       ? { checked: false, records: [] }
       : await fetchProfileSummaryOnce(context, skippedOptionalResources);
     const profileMetadataPatch = profileSummaryResult.checked
       ? buildJunctionProfileSummaryCheckedMetadataPatch(context)
       : {};
-    if (profileSummaryResult.records.length > 0) {
-      summaries[JUNCTION_PROFILE_SUMMARY_RESOURCE] = profileSummaryResult.records;
-    }
+    const summaries = profileSummaryResult.records.length > 0
+      ? { ...historicalSummaries, [JUNCTION_PROFILE_SUMMARY_RESOURCE]: profileSummaryResult.records }
+      : historicalSummaries;
     const summaryHasFetchedRecords = hasJunctionSnapshotRecords(summaries);
-    const preparedSummaryImport =
-      job.kind === "backfill"
+    const yieldedEmptyBackfill = job.kind === "backfill"
       && !summaryHasFetchedRecords
-      && context.shouldYield?.() === true
+      && context.shouldYield?.() === true;
+    const historicalSummarySource = job.kind === "backfill" ? sourceProviderSlug : null;
+    const currentSummarySources = !yieldedEmptyBackfill || historicalSummarySource
+      ? await readJunctionImportSources(context)
+      : context.account.sources ?? [];
+    const sourceScopedHistoricalSummaryHasRecords =
+      historicalSummarySource
+        ? hasJunctionSourceScopedAdmittedSnapshotRecords({
+            listedSources: currentSummarySources,
+            snapshots: historicalSummaries,
+            sourceProviderSlug: historicalSummarySource,
+            sourceProviders,
+          })
+        : false;
+    const preparedSummaryImport =
+      yieldedEmptyBackfill
         ? prepareJunctionImportSnapshotForSources(
             summaries,
             sourceProviders,
             context.account.sources ?? [],
           )
-        : await prepareJunctionImportSnapshot(
-            context,
+        : prepareJunctionImportSnapshotForSources(
             summaries,
             sourceProviders,
+            currentSummarySources,
+            {},
+            { allowUnlistedSources: context.connectionSourceAdmissionMode !== "listed_only" },
           );
     const importConnections = preparedSummaryImport.connections;
     const importSummaries = preparedSummaryImport.snapshots;
@@ -4389,10 +4396,7 @@ export function createJunctionDeviceSyncProvider(
       applyFetchedProviderRecordEvidence(fetchedProviderRecordIdentityEvidence);
 
       try {
-        const currentSources: readonly JunctionImportAdmissionSource[] =
-          context.listConnectionSources
-            ? await context.listConnectionSources()
-            : context.account.sources ?? [];
+        const currentSources = await readJunctionImportSources(context);
         const importSourceIdentities = resolveJunctionAccountSourceIdentities(currentSources);
         if (
           sourceProviderSlug
@@ -4493,16 +4497,18 @@ export function createJunctionDeviceSyncProvider(
               canonicalEventCount >= providerRecordCount ? 0 : providerRecordCount;
             unresolvedProviderRecordsWithoutStableIdentity = unresolvedProviderRecordCount > 0;
           }
-        }
-        if (
-          sourceProviderSlug
-          && options.sourceStatusRequirement === "connected"
-        ) {
-          postFetchSourceAdmission = await resolveJunctionCurrentSourceAdmission(
-            context,
-            sourceProviderSlug,
-            options.sourceLifecycleEpoch,
-          );
+          // Import introduces another asynchronous boundary; empty segments
+          // retain the post-fetch read instead of fetching it twice.
+          if (
+            sourceProviderSlug
+            && options.sourceStatusRequirement === "connected"
+          ) {
+            postFetchSourceAdmission = await resolveJunctionCurrentSourceAdmission(
+              context,
+              sourceProviderSlug,
+              options.sourceLifecycleEpoch,
+            );
+          }
         }
       } catch (error) {
         if (
@@ -5135,9 +5141,8 @@ export function createJunctionDeviceSyncProvider(
       };
     }
 
-    const currentSources = input.context.listConnectionSources
-      && (sourceLifecycleFence || records.length > 0 || input.authorizedLocalDay)
-      ? await input.context.listConnectionSources()
+    const currentSources = sourceLifecycleFence || records.length > 0 || input.authorizedLocalDay
+      ? await readJunctionImportSources(input.context)
       : input.context.account.sources ?? [];
     if (
       sourceLifecycleFence
@@ -5154,8 +5159,7 @@ export function createJunctionDeviceSyncProvider(
     }
 
     const sourceScopedHistoricalRecordsSeen = input.sourceProviderSlug
-      ? await hasJunctionSourceScopedAdmittedSnapshotRecords({
-          context: input.context,
+      ? hasJunctionSourceScopedAdmittedSnapshotRecords({
           listedSources: currentSources,
           options: { projectAccountSourceIdentities: calendarDayAggregate },
           snapshots: { [input.resource]: records },
@@ -5422,18 +5426,21 @@ export function createJunctionDeviceSyncProvider(
         const sourceScopedFeature = input.sourceProviderSlug
           ? withJunctionSourceProviderFallback(feature, input.sourceProviderSlug)
           : feature;
+        const currentSources = await readJunctionImportSources(input.context);
         historicalRecordsSeen ||= input.sourceProviderSlug
-          ? await hasJunctionSourceScopedAdmittedSnapshotRecords({
-              context: input.context,
+          ? hasJunctionSourceScopedAdmittedSnapshotRecords({
+              listedSources: currentSources,
               snapshots: { workout_stream: [sourceScopedFeature] },
               sourceProviderSlug: input.sourceProviderSlug,
               sourceProviders: input.sourceProviders,
             })
           : false;
-        const preparedImport = await prepareJunctionImportSnapshot(
-          input.context,
+        const preparedImport = prepareJunctionImportSnapshotForSources(
           { workout_stream: [sourceScopedFeature] },
           input.sourceProviders,
+          currentSources,
+          {},
+          { allowUnlistedSources: input.context.connectionSourceAdmissionMode !== "listed_only" },
         );
         if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
           await commitPreparedJunctionCanonicalImport(
@@ -8157,6 +8164,14 @@ function sanitizeJunctionImportConnections(
   });
 }
 
+async function readJunctionImportSources(
+  context: ProviderJobContext,
+): Promise<readonly JunctionImportAdmissionSource[]> {
+  return context.listConnectionSources
+    ? await context.listConnectionSources()
+    : context.account.sources ?? [];
+}
+
 async function prepareJunctionImportSnapshot(
   context: ProviderJobContext,
   snapshots: Record<string, unknown[]>,
@@ -8164,10 +8179,7 @@ async function prepareJunctionImportSnapshot(
   options: JunctionImportSnapshotSanitizeOptions = {},
   sourceStatusRequirement: JunctionImportSourceStatusRequirement = "not_disconnected",
 ): Promise<PreparedJunctionImportSnapshot> {
-  const currentSources: readonly JunctionImportAdmissionSource[] =
-    context.listConnectionSources
-      ? await context.listConnectionSources()
-      : context.account.sources ?? [];
+  const currentSources = await readJunctionImportSources(context);
   const sourceIdentities = options.projectAccountSourceIdentities
     ? mergeJunctionAccountSourceIdentities(
         resolveJunctionAccountSourceIdentities(currentSources),
@@ -8187,21 +8199,14 @@ async function prepareJunctionImportSnapshot(
   );
 }
 
-async function hasJunctionSourceScopedAdmittedSnapshotRecords(input: {
-  context: ProviderJobContext;
-  listedSources?: readonly JunctionImportAdmissionSource[];
+function hasJunctionSourceScopedAdmittedSnapshotRecords(input: {
+  listedSources: readonly JunctionImportAdmissionSource[];
   options?: JunctionImportSnapshotSanitizeOptions;
   snapshots: Record<string, unknown[]>;
   sourceProviderSlug: string;
   sourceProviders: readonly JunctionProviderConnection[];
-}): Promise<boolean> {
-  const listedSources: readonly JunctionImportAdmissionSource[] = input.listedSources
-    ?? (input.context.listConnectionSources
-      ? await input.context.listConnectionSources({
-          sourceProviderSlug: input.sourceProviderSlug,
-        })
-      : input.context.account.sources ?? []);
-  const sourceAuthorities = listedSources.filter((source) =>
+}): boolean {
+  const sourceAuthorities = input.listedSources.filter((source) =>
     areJunctionProviderSlugsDataEquivalent(
       source.sourceProviderSlug,
       input.sourceProviderSlug,
