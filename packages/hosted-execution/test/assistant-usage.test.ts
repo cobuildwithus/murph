@@ -898,6 +898,44 @@ test("assistant usage parsing accepts the v2 tool profile and drops invalid v2 i
   }
 });
 
+test("knowledge profile counts are optional, bounded and reconciled without accepting private fields", () => {
+  const tool = {
+    calls: 2, durationKnownCalls: 0, durationMs: 0, failedCalls: 1,
+    kind: "command", label: "vault-cli knowledge", outputBytesMax: 10, outputBytesTotal: 20,
+    knowledgeCounts: {
+      showCalls: 1, listCalls: 1, searchCalls: 0, writeCalls: 0, otherCalls: 0,
+      notFoundFailures: 1, invalidFailures: 0, conflictFailures: 0, otherFailures: 0,
+    },
+  };
+  const profile = {
+    modelContextWindow: null, requestCount: 0, requests: [], requestsTruncated: false,
+    schema: "murph.assistant-turn-profile.v2", tools: [tool], toolsTruncated: false,
+  };
+  const parse = (entry: unknown) => parseAssistantUsageRecord({
+    attemptCount: 1, credentialSource: "platform", inputTokens: 10, outputTokens: 5,
+    occurredAt: "2026-09-04T12:00:00.000Z", provider: "codex-cli",
+    schema: ASSISTANT_USAGE_SCHEMA, sessionId: "asst_synthetic", turnId: "turn_synthetic",
+    usageId: "turn_synthetic.attempt-1", turnProfileJson: { ...profile, tools: [entry] },
+  });
+  assert.deepEqual(parse({
+    ...tool,
+    knowledgeCounts: { ...tool.knowledgeCounts, privateSlug: "private-sentinel" },
+  }).turnProfileJson, profile);
+  const { knowledgeCounts, ...legacyTool } = tool;
+  assert.deepEqual(parse(legacyTool).turnProfileJson, { ...profile, tools: [legacyTool] });
+  for (const badCounts of [
+    { ...knowledgeCounts, showCalls: -1 },
+    { ...knowledgeCounts, showCalls: Number.MAX_SAFE_INTEGER + 1 },
+    { ...knowledgeCounts, showCalls: 2 },
+    { ...knowledgeCounts, otherFailures: 1 },
+    { ...knowledgeCounts, notFoundFailures: "private-sentinel" },
+    {},
+  ]) {
+    assert.equal(parse({ ...tool, knowledgeCounts: badCounts }).turnProfileJson, null);
+  }
+  assert.equal(parse({ ...tool, label: "curl" }).turnProfileJson, null);
+});
+
 test("assistant usage parsing drops out-of-contract turn profiles without failing the record", () => {
   const validProfile = {
     // A null context window is part of the contract (older runtimes omit it).
