@@ -1446,6 +1446,12 @@ Last verified: 2026-09-04
   `device-sync.maintenance_failed`, and activity scheduling uses
   `assistant.device_activity_automation_failed`; none increments the
   failed-attempt metric.
+  For `JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE`, the existing failed-attempt
+  event may also carry `junctionEcgBindingReason`, checked against the same
+  finite service-owned reason set before generic log sanitization. Missing,
+  malformed, and unknown reasons are omitted. ECG recording/sample counts,
+  identifiers, raw errors, URLs, paths, and payloads remain excluded. This reason
+  describes local binding validation, not proof of an upstream HTTP response.
   Junction sync-result metadata preserves the existing historical progress and
   coverage keys before optional diagnostics when the 16-entry envelope fills.
   The provider owner supplies that priority to the shared sanitized merge for

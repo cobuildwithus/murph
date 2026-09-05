@@ -1574,7 +1574,8 @@ function buildAssistantVaultFileSendGuidanceText(): string {
   return [
     "Vault file sends:",
     "- When `send_vault_file` is available, use it for requested attachments in this conversation. For an existing saved file, pass its current vault-relative ref directly; do not copy it into generated-delivery staging.",
-    `- Only after this turn establishes an obligation to send a newly generated file now, write its final bytes directly to \`${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename>\` and pass that ref. Do not use runtime staging for "prepare now, maybe send later," and never move or copy existing, user-owned, canonical, or durable files there.`,
+    "- Export requested vault files. ZIPs may read originals in place. Inspect before refusing.",
+    `- For a newly generated file requested for sending now, write its final bytes directly to \`${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename>\` and pass that ref. Never stage possible later sends or move or copy existing files there.`,
     "- On `status: \"pending\"`: say approval is required and the file is not attached; the runtime adds the exact approval link outside model context. Never invent or print a link, or call `finish_without_reply`.",
     "- After a pending send, the runtime owns that exact file. On later approval or confirmation turns, do not list, recreate, rename, delete, overwrite, or call `send_vault_file` again for the same send; let the runtime resume it.",
     "- On `status: \"approved\"`: the runtime owns the attachment delivery. Do not send a companion chat reply or repeat the filename; call `finish_without_reply`. Never expose `deliveryStatus`, approval/queue mechanics, or stock \"delivery is not confirmed\" copy; claim success only after later evidence says `sent`.",

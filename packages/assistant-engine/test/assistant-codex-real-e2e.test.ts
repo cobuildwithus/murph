@@ -1,3 +1,4 @@
+import { WORKFLOW_SKILL_REFERENCES } from './support/workflow-skill-policy.js'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
@@ -74,6 +75,7 @@ import {
   startLiveWorkout,
 } from '@murphai/vault-usecases/workouts'
 import { afterAll, describe, expect, it } from 'vitest'
+import { upsertKnowledgePage } from '../src/knowledge/service.ts'
 import { requestAssistantVaultFileSend } from '../src/assistant/vault-file-send.ts'
 import { listAssistantOutboxIntents } from '../src/assistant/outbox.ts'
 
@@ -121,6 +123,7 @@ import {
   MURPH_PERSONALIZATION_TOOL,
   MURPH_PLAN_USAGE_TOOL,
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
+  MURPH_SEND_VAULT_FILE_TOOL,
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
   MURPH_SUBSCRIPTION_TOOL,
   readMurphDynamicToolRequest,
@@ -214,6 +217,7 @@ import {
 } from '../src/assistant/notification-turn.ts'
 import {
   buildAssistantMaintenanceConversationEvidence,
+  readAssistantMaintenanceConversationEvidence,
 } from '../src/assistant/maintenance-evidence.ts'
 import { readAssistantCurrentStatePrompt } from '../src/assistant/current-state.ts'
 import {
@@ -263,6 +267,7 @@ import {
   writeHostedOpenAiMixedModeModelCatalogJson,
 } from './support/codex-model-catalog.ts'
 import { createDeferred } from './test-helpers.ts'
+import { isAssistantGeneratedDeliveryRef } from '../src/assistant/generated-delivery-files.ts'
 
 const RUN_REAL_CODEX_E2E = process.env.MURPH_RUN_REAL_CODEX_E2E === '1'
 const execFileAsync = promisify(execFile)
@@ -2050,6 +2055,22 @@ describe('real Codex live fixture contracts', () => {
     }
   })
 
+  it('retains streamed policy before a yielded command completion without duplicating its tail', () => {
+    const events = [
+      { method: 'item/commandExecution/outputDelta', params: { itemId: 'read-policy', delta: 'Complete policy\n' } },
+      { method: 'item/commandExecution/outputDelta', params: { itemId: 'unrelated', delta: 'Unrelated policy\n' } },
+      { method: 'item/commandExecution/outputDelta', params: { itemId: 'read-policy', delta: 'Canonical result\n' } },
+      { method: 'item/completed', params: { item: {
+        id: 'read-policy', type: 'commandExecution', command: 'cat skills/policy.md && vault-cli goal list',
+        exitCode: 0, aggregatedOutput: 'Canonical result\n',
+      } } },
+    ]
+    expect(readCapabilityRoutingActions(events)).toEqual([{
+      command: 'cat skills/policy.md && vault-cli goal list', eventIndex: 3,
+      kind: 'command', ok: true, output: 'Complete policy\nCanonical result',
+    }])
+  })
+
   it('expands validated vault-cli batch children in their original order', () => {
     const actions = readCapabilityRoutingActions([{
       method: 'item/completed',
@@ -2543,6 +2564,160 @@ describe('real Codex live fixture contracts', () => {
       await removeRealCodexTemporaryPath(workingDirectory)
     }
   })
+})
+
+describeRealCodex('real Codex personal archive e2e', () => {
+  it('prepares an original-file workspace ZIP without relocating source files', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-personal-archive-e2e-'))
+    const originals = {
+      'notes/reading-list.md': '# Reading list\nA field guide to trees.\n',
+      'documents/supply-list.csv': 'item,count\nnotebook,2\n',
+      'raw/captures/sketch.txt': 'A synthetic pencil sketch description.\n',
+    }
+    const requestedRefs: string[] = []
+    let approvalRequests = 0
+    try {
+      for (const [ref, contents] of Object.entries(originals)) {
+        await mkdir(path.dirname(path.join(workingDirectory, ref)), { recursive: true })
+        await writeFile(path.join(workingDirectory, ref), contents)
+      }
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildDirectConversationDeveloperInstructions(),
+        dynamicTools: [MURPH_SEND_VAULT_FILE_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL],
+        env: config.env,
+        excludeResumeTurns: true,
+        hostedToolContext: {
+          ...createRealCodexSupportHostedToolContext('direct'),
+          vaultFileSendAvailable: true,
+          sendVaultFile: async (ref, toolCallId, retireExportPackIds) => {
+            requestedRefs.push(ref)
+            return requestAssistantVaultFileSend({
+              actionApprovalPort: {
+                read: async () => { throw new Error('No prior approval exists in this fixture') },
+                request: async () => {
+                  approvalRequests += 1
+                  return {
+                    approvalId: `haa_${'b'.repeat(32)}`,
+                    approvalUrl: 'https://murph.test/approve/personal-archive',
+                    expiresAt: '2099-01-01T00:00:00.000Z',
+                    status: 'pending',
+                  }
+                },
+              },
+              bindingDelivery: { kind: 'thread', target: 'chat_archive_fixture' },
+              channel: 'linq',
+              ref,
+              retireExportPackIds,
+              sessionId: 'session_archive_fixture',
+              threadId: 'chat_archive_fixture',
+              threadIsDirect: true,
+              toolCallId,
+              turnId: 'turn_archive_fixture',
+              vault: workingDirectory,
+            })
+          },
+        },
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: 'Back up my reading list and supply list along with the other personal files in this Murph runtime workspace. Make one ZIP attachment with their folders intact.',
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+      process.stdout.write(`[personal-archive-e2e] ${JSON.stringify({
+        finalMessage: result.finalMessage.replaceAll(workingDirectory, '<VAULT>'),
+        sendCalls: requestedRefs.length,
+        approvalRequests,
+      })}\n`)
+      expect(requestedRefs).toHaveLength(1)
+      expect(isAssistantGeneratedDeliveryRef(requestedRefs[0] ?? '')).toBe(true)
+      expect(approvalRequests).toBe(1)
+      const intents = await listAssistantOutboxIntents(workingDirectory)
+      expect(intents).toHaveLength(1)
+      const attachment = intents[0]?.media?.[0]
+      expect(attachment).toMatchObject({ kind: 'vault_file', contentType: 'application/zip' })
+      if (attachment?.kind !== 'vault_file') throw new Error('Expected one ZIP attachment')
+      const inspected = await execFileAsync('python3', ['-c', [
+        'import json, sys, zipfile',
+        'with zipfile.ZipFile(sys.argv[1]) as archive:',
+        ' print(json.dumps({name: archive.read(name).decode() for name in archive.namelist() if not name.endswith("/")}))',
+      ].join('\n'), path.join(workingDirectory, attachment.ref)])
+      expect(JSON.parse(inspected.stdout)).toEqual(originals)
+      for (const [ref, contents] of Object.entries(originals)) {
+        expect(await readFile(path.join(workingDirectory, ref), 'utf8')).toBe(contents)
+      }
+      expect(result.finalMessage).toMatch(/approv/iu)
+      expect(result.finalMessage).not.toMatch(/(?:I (?:can|could) help|would you like|shall I)|(?:sent|delivered|attached) (?:it|the (?:zip|file|archive))/iu)
+      expect(result.responseMedia).toEqual([])
+      expect(readCapabilityRoutingActions(result.jsonEvents).filter((action) =>
+        action.kind === 'dynamic' && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name
+      )).toHaveLength(0)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 5 * 60_000)
+})
+
+describeRealCodex('real Codex missing knowledge recovery e2e', () => {
+  it('finishes a stale wiki lookup without retrying the missing page or inventing its contents', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-missing-wiki-e2e-'))
+    try {
+      await initializeVault({ title: 'Synthetic wiki recovery', timezone: 'UTC', vaultRoot: workingDirectory })
+      const saved = await upsertKnowledgePage({
+        vault: workingDirectory, slug: 'weekend-packing', title: 'Weekend packing',
+        body: '# Weekend packing\n\n' + 'Saved list of personal packing reminders. '.repeat(10)
+          + '\n\nA silver compass and a striped notebook.',
+      })
+      // Reproduce a stale catalog with the actual page absent; every read still
+      // goes through the production CLI and knowledge service.
+      await rm(path.join(workingDirectory, saved.page.pagePath))
+      expect(await readFile(path.join(workingDirectory, saved.indexPath), 'utf8'))
+        .not.toMatch(/silver compass|striped notebook/u)
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLogPath = path.join(workingDirectory, 'commands.log')
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false, channel: 'linq',
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'direct', currentLocalDate: '2026-09-04', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false,
+          turnTrigger: null,
+        }),
+        dynamicTools: [],
+        env: { ...config.env, PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
+        excludeResumeTurns: true, model: config.model, modelProvider: config.modelProvider,
+        prompt: 'What does my saved Weekend packing wiki page say? Its slug is weekend-packing.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8')).split('\n').filter(Boolean)
+      const knowledgeActions = readCapabilityRoutingActions(result.jsonEvents)
+        .filter((action) => action.kind === 'command' && action.command.includes('knowledge'))
+      process.stdout.write(`[missing-wiki-recovery-e2e] ${JSON.stringify({ finalMessage: result.finalMessage })}\n`)
+      expect(knowledgeActions.some((action) => action.output.includes('knowledge_page_not_found')
+        && action.output.includes('Do not retry the same missing slug.')
+        && action.output.includes('before an authorized write'))).toBe(true)
+      expect(commands.filter((command) => /^knowledge show weekend-packing(?:\s|$)/u.test(command))).toHaveLength(1)
+      expect(commands.filter((command) => /^knowledge (?:upsert|append-section|index)/u.test(command))).toHaveLength(0)
+      expect(result.finalMessage).toMatch(/couldn.t find|could not find|can.t find|missing|not (?:currently )?(?:saved|available|there)|isn.t|unavailable/iu)
+      expect(result.finalMessage).not.toMatch(/silver compass|striped notebook/iu)
+      expect(result.finalMessage.length).toBeLessThan(700)
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 300_000)
 })
 
 describeRealCodex('real Codex workout capture default e2e', () => {
@@ -15024,11 +15199,13 @@ describeRealCodex('real Codex member-memory result compaction e2e', () => {
         if (!automation) {
           throw new Error('Expected overnight memory consolidation automation.')
         }
-        const evidence = await buildAssistantMaintenanceConversationEvidence({
+        const maintenanceEvidence = await readAssistantMaintenanceConversationEvidence({
           now: new Date('2026-08-27T12:00:00.000Z'),
           profile: 'member-memory',
           vault: workingDirectory,
         })
+        expect(maintenanceEvidence.status).toBe('available')
+        const evidence = maintenanceEvidence.prompt
         const before = await readMemoryDocument(workingDirectory)
         expect(before.records).toHaveLength(24)
 
@@ -17256,7 +17433,7 @@ async function materializePublicGoalSetupVaultCli(input: {
 
 describeRealCodex('real Codex experiment onboarding e2e', () => {
   it(
-    'reconciles exact experiment support from compact inventory without an automation detail read',
+    'reconciles exact experiment support through workflow references without an automation detail read',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -17368,6 +17545,23 @@ describeRealCodex('real Codex experiment onboarding e2e', () => {
           && action.tool === MURPH_AUTOMATION_TOOL.name
         )
 
+        const supportPolicy = actions.find((action) =>
+          action.kind === 'command'
+          && action.ok
+          && action.output.includes('## Experiment automation mechanics')
+          && action.output.includes('supportSeriesId: "experiment:<experimentId>"')
+        )
+        expect(supportPolicy, 'full support policy before its effect').toBeDefined()
+        expect(reconcileCall?.eventIndex).toBeGreaterThan(
+          supportPolicy?.eventIndex ?? Number.POSITIVE_INFINITY,
+        )
+        // Common setup and logging safeguards remain available during repair.
+        const policyOutput = actions.filter((action) => action.kind === 'command')
+          .map((action) => action.output).join('\n')
+        // Run-setup policy remains in the entrypoint for conservative routing.
+        expect(policyOutput).toContain('## Protocol resolution')
+        // Active-session safeguards stay in the entrypoint even during repair.
+        expect(policyOutput).toContain('## Active experiment support')
         expect(skillRead, 'experiment-onboarding skill read').toBeDefined()
         expect(listCall, 'compact exact-series inventory read').toBeDefined()
         expect(showCalls).toHaveLength(0)
@@ -17584,9 +17778,14 @@ describeRealCodex('real Codex repeated-set resolution e2e', () => {
   )
 
   it(
-    'logs every repeated set against the member-local alternating target despite a stale reminder and rereads canonical totals',
+    'logs every repeated set through workflow references against the canonical alternating target',
     async () => {
       const result = await runRepeatedSetResolutionProbe('success')
+      const policyOutput = result.actions.filter((action) => action.kind === 'command')
+        .map((action) => action.output).join('\n')
+      expect(policyOutput.includes('## Active experiment support'), 'active policy read').toBe(true)
+      expect(policyOutput).toContain('## Creating the run')
+      expect(policyOutput).not.toContain('## First-session prep reminders')
       const alphaWrites = result.commandLog.filter((command) =>
         command.includes(`experiment session log ${REPEATED_SET_ALPHA_EXPERIMENT_ID}`)
       )
@@ -30423,6 +30622,14 @@ async function materializeAssistantSkill(input: {
     relativePath: path.join(input.slug, 'SKILL.md'),
     skillsRoot: input.skillsRoot,
   })
+  if (input.slug === 'experiment-onboarding') {
+    await Promise.all(WORKFLOW_SKILL_REFERENCES[input.slug].map((reference) =>
+      materializeAssistantSkillAsset({
+        relativePath: path.join(input.slug, reference),
+        skillsRoot: input.skillsRoot,
+      }),
+    ))
+  }
 }
 
 async function materializeAssistantSkillAsset(input: {
@@ -30782,6 +30989,12 @@ async function runRepeatedSetResolutionProbe(
             ? 'Log the completions and tell me the all-time recorded repetition total for that exercise across every linked canonical session.'
             : 'If the saved records do not uniquely identify today\'s exercise, ask only the one clarification needed and do not change any saved plan.',
         ].join(' ')
+    const assistantCliContract = mode === 'group' ? null : buildAssistantCliSurfaceContract(
+      await readAssistantCliLlmsFullManifest({
+        timeoutMs: 5 * 60_000,
+        workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
+      }),
+    )
     const result = await executeRealCodexAppServerTurn({
       approvalPolicy: 'never',
       baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -30791,6 +31004,7 @@ async function runRepeatedSetResolutionProbe(
       codexHome: config.codexHome,
       developerInstructions: buildRepeatedSetDeveloperInstructions(
         mode === 'group' ? 'group' : 'direct',
+        assistantCliContract,
       ),
       env: {
         ...config.env,
@@ -30827,9 +31041,10 @@ async function runRepeatedSetResolutionProbe(
 
 function buildRepeatedSetDeveloperInstructions(
   conversationScope: 'direct' | 'group',
+  assistantCliContract: string | null,
 ): string {
   return buildAssistantSystemPrompt({
-    assistantCliContract: null,
+    assistantCliContract,
     assistantContextSnapshotPrompt: null,
     assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
@@ -34179,6 +34394,17 @@ function readCompletedAgentMessages(
 function readCapabilityRoutingActions(
   events: readonly unknown[],
 ): CapabilityRoutingAction[] {
+  const streamedOutput = new Map<string, string>()
+  for (const event of events) {
+    const record = readRecord(event)
+    if (record?.method !== 'item/commandExecution/outputDelta') continue
+    const params = readRecord(record.params)
+    const itemId = readString(params?.itemId)
+    const delta = typeof params?.delta === 'string' ? params.delta : null
+    if (itemId && delta) {
+      streamedOutput.set(itemId, (streamedOutput.get(itemId) ?? '') + delta)
+    }
+  }
   return events.flatMap<CapabilityRoutingAction>((event, eventIndex) => {
     const record = readRecord(event)
     if (readString(record?.method, record?.type) !== 'item/completed') {
@@ -34188,11 +34414,15 @@ function readCapabilityRoutingActions(
     const itemType = readString(item?.type)
     if (itemType === 'commandExecution' || itemType === 'command_execution') {
       const command = readCommandText(item?.command)
-      const output = readString(
+      const completedOutput = readString(
         item?.aggregatedOutput,
         item?.aggregated_output,
         item?.output,
       ) ?? ''
+      const streamed = streamedOutput.get(readString(item?.id) ?? '')?.trim()
+      // A yielded native command can complete with only its final output chunk.
+      // Retain earlier surfaced policy only when the stream contains that tail.
+      const output = streamed?.endsWith(completedOutput) ? streamed : completedOutput
       const batchActions = readBatchCapabilityRoutingActions({
         command,
         eventIndex,

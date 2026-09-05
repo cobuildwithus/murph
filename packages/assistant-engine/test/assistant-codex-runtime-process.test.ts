@@ -2360,7 +2360,7 @@ describe('assistant codex runtime', () => {it('coalesces process-only preinitial
     },
   )
 
-  it('compacts current-shape group usage at the 50k boundary and preserves attribution', async () => {
+  it.each([false, true])('compacts group usage at the boundary with measured evidence=%s', async (measured) => {
     const workingDirectory = await createTempDir('assistant-codex-compact-provider-usage-work-')
     const codexHome = await createTempDir('assistant-codex-compact-provider-usage-home-')
     const threadId = 'thread-compact-provider-usage'
@@ -2428,11 +2428,24 @@ describe('assistant codex runtime', () => {it('coalesces process-only preinitial
           const compact = await waitForRpcMethod(child, 'thread/compact/start')
           expect(asRecord(compact.params)).toEqual({ threadId })
           child.stdout.write(jsonLine({ id: compact.id, result: {} }))
-          writeContextCompactionStarted({
-            child,
-            itemId: 'context-compact-provider-usage',
-            threadId,
-          })
+          const rawUsage = { inputTokens: 100, cachedInputTokens: 50, cacheWriteInputTokens: 10,
+            outputTokens: 20, reasoningOutputTokens: 5, totalTokens: 120 }
+          const raw = { method: 'rawResponse/completed', params: {
+            threadId, turnId: 'turn_idle_compact', responseId: 'response_compact_1', usage: rawUsage,
+          } }
+          // Before-start and unrelated completions must never enter this operation.
+          child.stdout.write(jsonLine(raw))
+          child.stdout.write(jsonLine({ method: 'item/started', params: {
+            threadId, turnId: 'turn_idle_compact',
+            item: { id: 'context-compact-provider-usage', type: 'contextCompaction' },
+          } }))
+          child.stdout.write(jsonLine({ ...raw, params: { ...raw.params, threadId: 'child_fixture' } }))
+          child.stdout.write(jsonLine({ ...raw, params: { ...raw.params, turnId: 'old_compact' } }))
+          if (measured) {
+            child.stdout.write(jsonLine(raw))
+            child.stdout.write(jsonLine(raw))
+            child.stdout.write(jsonLine({ ...raw, params: { ...raw.params, responseId: 'response_compact_2' } }))
+          }
           child.stdout.write(jsonLine({
             method: 'thread/tokenUsage/updated',
             params: {
@@ -2521,12 +2534,11 @@ describe('assistant codex runtime', () => {it('coalesces process-only preinitial
       kind: 'compacted',
       threadContextTokensBefore: 50_000,
       threadId,
-      usage: {
-        cachedInputTokens: null,
-        inputTokens: 50_000,
-        outputTokens: null,
-        source: 'estimated',
-        totalTokens: 50_000,
+      usage: measured ? {
+        cachedInputTokens: 100, inputTokens: 200, outputTokens: 40, source: 'measured', totalTokens: 240,
+        responses: [expect.objectContaining({ responseId: 'response_compact_1' }), expect.objectContaining({ responseId: 'response_compact_2' })],
+      } : {
+        cachedInputTokens: null, inputTokens: 50_000, outputTokens: null, source: 'estimated', totalTokens: 50_000,
       },
     })
     expect(

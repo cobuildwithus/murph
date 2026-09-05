@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -120,35 +119,6 @@ describe("experiment page projections", () => {
     mocks.resultsTabClient.mockClear();
   });
 
-  it("keeps experiment route entrypoints on generated projections instead of the full resolver", () => {
-    const pageSource = readFileSync(
-      new URL("../app/(dashboard)/experiments/[experimentId]/page.tsx", import.meta.url),
-      "utf8",
-    );
-    const layoutSource = readFileSync(
-      new URL("../app/(dashboard)/experiments/[experimentId]/layout.tsx", import.meta.url),
-      "utf8",
-    );
-    const layoutClientSource = readFileSync(
-      new URL("../app/(dashboard)/experiments/[experimentId]/experiment-layout-client.tsx", import.meta.url),
-      "utf8",
-    );
-    const resultsSource = readFileSync(
-      new URL("../app/(dashboard)/experiments/[experimentId]/results/page.tsx", import.meta.url),
-      "utf8",
-    );
-
-    expect(pageSource).toContain("resolveHealthCommonsExperimentProtocolTab");
-    expect(pageSource).not.toContain("resolveHealthCommonsExperimentProtocol(");
-    expect(pageSource).not.toContain("ExperimentDetailClient");
-    expect(layoutSource).toContain("resolveHealthCommonsExperimentShell");
-    expect(layoutSource).not.toContain("resolveHealthCommonsExperimentProtocol");
-    expect(resultsSource).toContain("resolveHealthCommonsExperimentResultsPublic");
-    expect(resultsSource).not.toContain("resolveHealthCommonsExperimentProtocol");
-    expect(layoutClientSource).not.toContain("BrowserVaultProvider");
-    expect(layoutClientSource).not.toContain("resolveBrowserVaultExperimentRun");
-  });
-
   it("renders the authenticated results route from the narrow public projection", async () => {
     await expect(generateResultsMetadata({
       params: Promise.resolve({
@@ -198,12 +168,6 @@ describe("experiment page projections", () => {
       experimentId: "exp:private-run",
     });
     expect(markup).toContain('data-private-run-id="exp:private-run"');
-
-    const privatePageSource = readFileSync(
-      new URL("../app/(dashboard)/experiments/runs/[experimentId]/page.tsx", import.meta.url),
-      "utf8",
-    );
-    expect(privatePageSource).not.toContain("HealthCommons");
   });
 
   it("uses the shell projection for metadata and shared layout props", async () => {

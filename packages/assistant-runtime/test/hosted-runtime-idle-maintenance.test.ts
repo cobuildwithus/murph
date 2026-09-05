@@ -211,6 +211,43 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     expect(compactWarmCodexThread).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { kind: "compacted", failFirstWrite: false },
+    { kind: "failed", failFirstWrite: false },
+    { kind: "compacted", failFirstWrite: true },
+  ])("records measured compact operations once: %j", async ({ kind, failFirstWrite }) => {
+    const response = {
+      responseId: "resp_compact_synthetic_1", inputTokens: 1400, cachedInputTokens: 900,
+      cacheWriteInputTokens: 100, outputTokens: 90, reasoningOutputTokens: 30, totalTokens: 1490,
+    };
+    compactWarmCodexThread.mockResolvedValue({
+      kind, reason: "timeout", durationMs: 1200, threadContextTokensBefore: 140_000,
+      threadId: "thread_xyz", serviceTier: "flex", model: "gpt-5.6-terra",
+      usage: { cachedInputTokens: 1800, inputTokens: 2800, outputTokens: 180, totalTokens: 2980,
+        source: "measured", responses: [response, { ...response, responseId: "resp_compact_synthetic_2" }] },
+    });
+    const recorded: AssistantUsageRecord[] = [];
+    await runHostedIdleCheckpointMaintenance({
+      credentialSource: "platform", memberId: "member_1", model: "gpt-5.6-sol",
+      providerName: "hosted-openai", pendingWork: false,
+      recordUsage: async (record) => {
+        recorded.push(record);
+        if (failFirstWrite && recorded.length === 1) throw new Error("synthetic telemetry failure");
+      },
+      resolveAssistantSessionId: async () => "asst_real_session", shutdownSignal: null, wakeSignal: null,
+    });
+    await vi.waitFor(() => expect(recorded).toHaveLength(2));
+    expect(new Set(recorded.map((record) => record.usageId)).size).toBe(2);
+    expect(recorded[0]).toMatchObject({
+      providerRequestId: response.responseId, providerRequestOutcome: kind === "failed" ? "failed" : "succeeded",
+      cacheWriteTokens: 100, cachedInputTokens: 900, inputTokens: 1400, outputTokens: 90,
+      reasoningTokens: 30, totalTokens: 1490, requestedModel: "gpt-5.6-terra", servedModel: null,
+      tokenPricingBasis: "openai-flex", usageExtractionSourcePath: "rawResponse.completed.usage",
+      usageExtractionVersion: "codex-idle-compaction-raw-v1",
+    });
+    expect(recorded[0]?.rawUsageJson).not.toHaveProperty("responseId");
+  });
+
   it("records local OpenAI compaction usage with hosted Flex evidence", async () => {
     compactWarmCodexThread.mockResolvedValue({
       kind: "compacted",

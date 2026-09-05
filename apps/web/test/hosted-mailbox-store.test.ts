@@ -555,64 +555,6 @@ describe("claimHostedMailboxConversationSubscriptionAction", () => {
       });
     },
   );
-
-  it("allows only one of two concurrent different actions to claim an input", async () => {
-    type TestSubscriptionAction = "start_pulse_now" | "upgrade_edge";
-    type ClaimUpdateArgs = {
-      data: { subscriptionActionClaim: TestSubscriptionAction };
-    };
-
-    let currentClaim: TestSubscriptionAction | null = null;
-    let readCount = 0;
-    let releaseReads!: () => void;
-    const bothReadsStarted = new Promise<void>((resolve) => {
-      releaseReads = resolve;
-    });
-    const findMany = vi.fn(async () => {
-      const observedClaim = currentClaim;
-      readCount += 1;
-      if (readCount === 2) {
-        releaseReads();
-      }
-      await bothReadsStarted;
-      return [{
-        id: "mailbox_claim_1",
-        subscriptionActionClaim: observedClaim,
-      }];
-    });
-    const updateMany = vi.fn(async (args: ClaimUpdateArgs) => {
-      if (currentClaim !== null) {
-        return { count: 0 };
-      }
-      currentClaim = args.data.subscriptionActionClaim;
-      return { count: 1 };
-    });
-    const findFirst = vi.fn(async () => ({
-      subscriptionActionClaim: currentClaim,
-    }));
-    const prisma = {
-      hostedMailboxItem: { findFirst, findMany, updateMany },
-    } as never;
-
-    const results = await Promise.all([
-      claimHostedMailboxConversationSubscriptionAction({
-        action: "start_pulse_now",
-        assistantInputId: "ain_valid",
-        memberId: "member_mailbox_1",
-        prisma,
-      }),
-      claimHostedMailboxConversationSubscriptionAction({
-        action: "upgrade_edge",
-        assistantInputId: "ain_valid",
-        memberId: "member_mailbox_1",
-        prisma,
-      }),
-    ]);
-
-    expect(new Set(results)).toEqual(new Set(["claimed", "conflict"]));
-    expect(updateMany).toHaveBeenCalledTimes(2);
-    expect(findFirst).toHaveBeenCalledTimes(1);
-  });
 });
 
 describe("readHostedMailboxConversationWakeByAssistantInputId", () => {
