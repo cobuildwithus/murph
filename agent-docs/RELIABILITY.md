@@ -1648,8 +1648,12 @@ Last verified: 2026-09-04
   before the existing reconnect retry. Connection credentials and epoch, marker
   reset, payload deletion and OAuth claim resolution wait until classification
   is complete. Exhausting the request retry budget returns the existing retryable
-  error with annotation progress retained for the next request. Every pass
-  reacquires authority and consent; classification never precedes that fence.
+  error with annotation progress retained for the next request. The OAuth
+  callback must not run failed-setup replacement cleanup for this outcome:
+  the old connection remains intact and the exact consumed claim retains
+  unresolved provider authority behind the existing replay/recovery fence.
+  Every pass reacquires authority and consent; classification never precedes
+  that fence.
 - Queue-enabled provider webhooks verify once, freeze a versioned prepared
   event, and encrypt before any Postgres read. Raw provider signature headers
   and payload bytes do not enter Queue state. The prepared event enters one
