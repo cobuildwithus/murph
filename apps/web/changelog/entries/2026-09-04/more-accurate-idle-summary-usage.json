@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-04",
+  "order": 100,
+  "item": {
+    "id": "more-accurate-idle-summary-usage",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "More accurate usage for idle conversation summaries",
+    "summary": "When Murph summarizes an idle conversation, usage accounting now uses the provider's reported input, output, and cached tokens when available.",
+    "details": "Conversations without exact usage reports retain the existing estimate. Recorded usage may be higher or lower than that estimate.",
+    "relevanceTags": ["usage", "conversation"],
+    "sourcePullRequests": []
+  }
+}
