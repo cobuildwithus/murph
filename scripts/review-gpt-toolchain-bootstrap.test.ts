@@ -238,7 +238,7 @@ describe("ReviewGPT fresh-worktree toolchain bootstrap", () => {
     );
     expect(readFileSync(harness.pnpmLog, "utf8")).toBe(
       "install --frozen-lockfile --filter . --ignore-scripts\n" +
-        "exec cobuild-review-gpt --config scripts/review-gpt.config.sh --minimum-marked-response-time 5m --zip --dry-run\n",
+        "exec cobuild-review-gpt --config scripts/review-gpt.config.sh --minimum-marked-response-time 270s --zip --dry-run\n",
     );
     expect(readFileSync(harness.lockLog, "utf8")).toContain(
       "review-gpt-toolchain-install.lock\n",
@@ -254,7 +254,7 @@ describe("ReviewGPT fresh-worktree toolchain bootstrap", () => {
     expect(result.status, result.stderr).toBe(0);
     expect(readFileSync(harness.pnpmLog, "utf8")).toBe(
       "install --frozen-lockfile --filter . --ignore-scripts\n" +
-        "exec cobuild-review-gpt --config scripts/review-gpt.config.sh --minimum-marked-response-time 5m --zip --dry-run\n",
+        "exec cobuild-review-gpt --config scripts/review-gpt.config.sh --minimum-marked-response-time 270s --zip --dry-run\n",
     );
     expect(readFileSync(harness.executionLog, "utf8")).toBe("current\n");
   });
