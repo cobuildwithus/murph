@@ -927,6 +927,13 @@ Last verified: 2026-09-04
   sensitive-action lane has a partial expiry-and-token index so durable
   approval history cannot enlarge its transient claim scan. Approval-backed
   rows remain with their approval owner.
+- Mailbox content retirement keeps ciphertext retirement, policy non-reply
+  recording, and contiguous conversation-floor advancement in one bounded
+  statement. For each member touched by the at-most-5,000-row retired set, the
+  floor owner uses the existing member/lane/sequence index to read only the
+  first unconsumed blocker above the current floor. It excludes exact rows
+  retired by the same statement and never aggregates the member's remaining
+  pending backlog.
 - Account deletion must not discard its only external-cleanup owner. The
   canonical account transaction persists the KMS-encrypted, foreign-key-free
   receipt before deleting the member. The existing hourly retention sweep
