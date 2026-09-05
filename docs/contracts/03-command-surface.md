@@ -55,11 +55,11 @@ vault-cli doctor --vault <path> [--repair] [--request-id <id>]
 vault-cli stop --vault <path> [--request-id <id>]
 vault-cli assistant session list --vault <path> [--limit <n>] [--request-id <id>]
 vault-cli assistant session show <sessionId> --vault <path> [--request-id <id>]
-vault-cli memory show [memoryId] --vault <path>
-vault-cli memory set-name <displayName> --vault <path>
-vault-cli memory upsert <text> --vault <path> --section <section>
-vault-cli memory update <memoryId> <text> --vault <path> [--section <section>]
-vault-cli memory forget <memoryId> --vault <path>
+vault-cli memory show [memoryId] --vault <path> [--compact] [--record-only]
+vault-cli memory set-name <displayName> --vault <path> [--compact]
+vault-cli memory upsert <text> --vault <path> [--compact] --section <section>
+vault-cli memory update <memoryId> <text> --vault <path> [--compact] [--section <section>]
+vault-cli memory forget <memoryId> --vault <path> [--compact]
 vault-cli automation scaffold --vault <path>
 vault-cli automation save <title> --vault <path> --instructions <text> --schedule-kind <kind> [--channel <channel>] [...]
 vault-cli automation show <lookup> --vault <path>

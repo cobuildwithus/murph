@@ -1530,6 +1530,7 @@ export interface QueryServices extends HealthQueryServiceMethods {
       providers?: string[]
       limit: number
       includeWorkoutDetails?: boolean
+      includeWorkoutSummaries?: boolean
     },
   ): Promise<WearableActivityListResult>
   listWearableBodyState(

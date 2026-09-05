@@ -6,6 +6,7 @@ import {
   createHostedTelegramUserLookupKeyReadCandidates,
 } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
+import { acquireHostedLinqParticipantEmailLockTx } from "./linq-participant-contact";
 import { lockHostedMemberRow } from "./shared";
 import type { HostedPrivyAuthMethod } from "./types";
 
@@ -42,6 +43,12 @@ export async function removeHostedMemberLinkedAccountProjectionTx(input: {
   method: HostedPrivyAuthMethod;
   prisma: Prisma.TransactionClient;
 }): Promise<boolean> {
+  if (input.method === "email") {
+    await acquireHostedLinqParticipantEmailLockTx({
+      emailAddress: input.expectedIdentity,
+      tx: input.prisma,
+    });
+  }
   await lockHostedMemberRow(input.prisma, input.memberId);
 
   switch (input.method) {
@@ -149,6 +156,17 @@ async function removeHostedMemberEmailProjectionTx(input: {
     expectedLookupKeys,
   });
 
+  const identityChanged = (await input.prisma.hostedMemberIdentity.updateMany({
+    where: {
+      memberId: input.memberId,
+      linqEmailHandleLookupKey: { in: expectedLookupKeys },
+    },
+    data: {
+      linqEmailHandleLookupKey: null,
+      linqEmailHandleEncrypted: null,
+    },
+  })).count > 0;
+
   const routing = await input.prisma.hostedMemberRouting.findUnique({
     where: { memberId: input.memberId },
     select: hostedLinkedAccountRoutingSelect,
@@ -192,7 +210,7 @@ async function removeHostedMemberEmailProjectionTx(input: {
     });
   }
 
-  return authorizationChanged || routingChanged;
+  return identityChanged || authorizationChanged || routingChanged;
 }
 
 async function removeHostedMemberTelegramProjectionTx(input: {

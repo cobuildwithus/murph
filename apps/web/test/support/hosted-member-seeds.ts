@@ -1275,16 +1275,24 @@ async function seedHostedJunctionDeviceSyncConnectionWithStore(input: {
   };
 }
 
+let hostedMemberSeedEnvironmentTail: Promise<void> = Promise.resolve();
+
 async function withHostedMemberSeedEnvironment<T>(
   source: NodeJS.ProcessEnv | undefined,
   operation: (environment: NodeJS.ProcessEnv) => Promise<T>,
 ): Promise<T> {
-  const scope = applyHostedMemberSeedEnvironment(source);
-  try {
-    return await operation(scope.environment);
-  } finally {
-    scope.restore();
-  }
+  const result = hostedMemberSeedEnvironmentTail.then(async () => {
+    // Read ambient inputs only after the preceding scope restores them.
+    const scope = applyHostedMemberSeedEnvironment(source);
+    try {
+      return await operation(scope.environment);
+    } finally {
+      scope.restore();
+    }
+  });
+  // A failed seed must release the environment for the next caller too.
+  hostedMemberSeedEnvironmentTail = result.then(() => {}, () => {});
+  return await result;
 }
 
 function applyHostedMemberSeedEnvironment(

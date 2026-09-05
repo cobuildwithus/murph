@@ -661,9 +661,9 @@ test('murph age submitted-data commands stay in generated agent artifacts', asyn
 
 test('wearables activity list exposes explicit bounded workout detail on demand', async () => {
   const detailDescription =
-    'Include bounded workoutFeatures and splits (up to 32 workouts per day and 64 splits per workout). Choose compact or detailed output from the question before the first and only activity-list data read; never use compact output as a probe before retrying with detail. Omit this option only when the answer is entirely available from day-level sessionCount, sessionMinutes, and distinct activityTypes. Pass it truthy whenever selecting, comparing, grouping, ordering, or attributing individual workouts, including type-specific count, duration, distance, start time, provider, heart rate, cadence, power, speed, or splits.'
+    'Include bounded workoutFeatures and splits (up to 32 workouts per day and 64 splits per workout). Use when the question needs lap or split rows. Prefer --include-workout-summaries for individual workout facts without splits; omit both options for day totals. Choose the required level before the first and only activity-list data read; never use a smaller output as a probe before retrying with detail.'
   const activityHint =
-    'One data read only. Day totals (`sessionCount`, `sessionMinutes`, distinct `activityTypes`): omit detail; no false flag or schema read. Workout/subset facts: include detail first.'
+    'One read: day totals omit flags; workout facts use --include-workout-summaries; lap/split facts use --include-workout-details. Choose first; never probe and retry.'
   const commands = await loadFullLlmCommands()
   const generatedTypes = await readFile(
     new URL('../src/incur.generated.ts', import.meta.url),
@@ -689,6 +689,13 @@ test('wearables activity list exposes explicit bounded workout detail on demand'
     'wearables activity list schema includeWorkoutDetails',
   )
 
+  const summaryOption = requireRecord(
+    schemaProperties(activityCommand.schema, 'options').includeWorkoutSummaries,
+    'wearables activity list manifest includeWorkoutSummaries',
+  )
+  assert.equal(summaryOption.type, 'boolean')
+  assert.equal(summaryOption.default, false)
+  assert.match(String(summaryOption.description), /without lap\/split rows/u)
   assert.equal(activityCommand.hint, activityHint)
   assert.equal(schemaIncludesProperty(activityCommand.schema, 'includeWorkoutDetails'), true)
   assert.equal(manifestDetailOption.type, 'boolean')
@@ -705,7 +712,7 @@ test('wearables activity list exposes explicit bounded workout detail on demand'
   )
   assert.match(
     generatedTypes,
-    /'wearables activity list': \{ args: \{\}; options: \{ requestId\?: string; date\?: string; from\?: string; to\?: string; provider\?: string\[\]; limit: number; includeWorkoutDetails: boolean \} \}/u,
+    /'wearables activity list': \{ args: \{\}; options: \{ requestId\?: string; date\?: string; from\?: string; to\?: string; provider\?: string\[\]; limit: number; includeWorkoutSummaries: boolean; includeWorkoutDetails: boolean \} \}/u,
   )
   assert.deepEqual(
     commandConfigOptionNames(configSchema, 'wearables activity list').sort(),
@@ -713,6 +720,7 @@ test('wearables activity list exposes explicit bounded workout detail on demand'
       'date',
       'from',
       'includeWorkoutDetails',
+      'includeWorkoutSummaries',
       'limit',
       'provider',
       'requestId',
