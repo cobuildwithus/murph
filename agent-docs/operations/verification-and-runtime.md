@@ -33,8 +33,8 @@ The delivery path decides who owns broad verification:
   conflict resolution, prove whether the accepted patch is preserved, and rerun
   affected focused checks. Resolve bounded conflicts within the authorized scope
   without another permission pause, preserving both sides' intended changes.
-  Meaning-preserving docs or context resolution does not invalidate acceptance. Do not restart full acceptance solely because the
-  base moved; rerun it when changed behavior or invalidated assumptions make the
+  Meaning-preserving docs or context resolution does not invalidate acceptance.
+  Do not restart full acceptance solely because the base moved; rerun it when changed behavior or invalidated assumptions make the
   earlier result insufficient. Continue necessary reconciliation within the
   existing push authorization without a numerical retry limit. Preserve
   published history, require all branch protections, and stop for unresolved
