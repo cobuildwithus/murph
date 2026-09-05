@@ -5212,30 +5212,13 @@ async function runCodexAppServerTurnOnProcess(
       currentTurnStartedNotificationObserved =
         turnId !== null && extractCodexTurnIdFromMessage(message) === turnId
     }
-    const shouldCaptureTurnStartedNotification =
-      providerRequestStartedAtMs !== null &&
-      isTurnStartedNotification &&
-      codexTimingTurnStartedNotificationElapsedMs === null
-    const shouldCaptureTurnCompletedNotification =
-      providerRequestStartedAtMs !== null &&
-      isTurnCompletedNotification &&
-      codexTimingTurnCompletedNotificationElapsedMs === null
-    if (
-      providerRequestStartedAtMs !== null &&
-      (shouldCaptureTurnStartedNotification ||
-        shouldCaptureTurnCompletedNotification)
-    ) {
-      if (shouldCaptureTurnStartedNotification) {
-        codexTimingTurnStartedNotificationElapsedMs = Math.max(
-          0,
-          observedAtMs - providerRequestStartedAtMs,
-        )
+    if (providerRequestStartedAtMs !== null) {
+      const elapsedMs = Math.max(0, observedAtMs - providerRequestStartedAtMs)
+      if (isTurnStartedNotification) {
+        codexTimingTurnStartedNotificationElapsedMs ??= elapsedMs
       }
-      if (shouldCaptureTurnCompletedNotification) {
-        codexTimingTurnCompletedNotificationElapsedMs = Math.max(
-          0,
-          observedAtMs - providerRequestStartedAtMs,
-        )
+      if (isTurnCompletedNotification) {
+        codexTimingTurnCompletedNotificationElapsedMs ??= elapsedMs
       }
     }
     lastEventError = extractCodexErrorMessage(message) ?? lastEventError
@@ -5395,20 +5378,19 @@ async function runCodexAppServerTurnOnProcess(
     }
 
     const progressEvent = extractCodexProgressEventFromNormalized(normalizedEvent)
-    if (progressEvent) {
-      if (suppressDeliveryContext && progressEvent.kind === 'message') {
-        // A completed no-reply context must not leak later text progress.
-      } else {
-        if (progressEvent.kind === 'message') {
-          if (
-            input.onProgress &&
-            normalizeStreamingText(progressEvent.text)
-          ) {
-            markExternallyVisibleAssistantOutput(deliveryContextOrdinal)
-          }
-        }
-        input.onProgress?.(progressEvent)
+    // A completed no-reply context must not leak later text progress.
+    if (
+      progressEvent &&
+      !(suppressDeliveryContext && progressEvent.kind === 'message')
+    ) {
+      if (
+        progressEvent.kind === 'message' &&
+        input.onProgress &&
+        normalizeStreamingText(progressEvent.text)
+      ) {
+        markExternallyVisibleAssistantOutput(deliveryContextOrdinal)
       }
+      input.onProgress?.(progressEvent)
     }
 
     if (isTurnStartedNotification) {
@@ -6131,18 +6113,12 @@ async function runCodexAppServerTurnOnProcess(
   }
   const selectedFinalMessage =
     finalTrailingSteerCandidate?.response ?? extractedFinalMessage
-  const finalResponseMedia =
-    latestFinalActionPatch?.kind === 'none'
-      ? responseMedia
-      : suppressTrailingSteerCandidateForEarlierNoReply
-        ? responseMedia
-        : finalTrailingSteerCandidate?.media ?? responseMedia
-  const finalResponseCard =
-    latestFinalActionPatch?.kind === 'none'
-      ? responseCard
-      : suppressTrailingSteerCandidateForEarlierNoReply
-        ? responseCard
-        : finalTrailingSteerCandidate?.card ?? responseCard
+  // A latest-context no-reply already promoted and cleared the candidate above.
+  const finalResponseCandidate = suppressTrailingSteerCandidateForEarlierNoReply
+    ? null
+    : finalTrailingSteerCandidate
+  const finalResponseMedia = finalResponseCandidate?.media ?? responseMedia
+  const finalResponseCard = finalResponseCandidate?.card ?? responseCard
   if (finalResponseCard !== null && finalResponseMedia.length > 0) {
     throw new VaultCliError(
       'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
@@ -6150,19 +6126,9 @@ async function runCodexAppServerTurnOnProcess(
     )
   }
   const finalDeliveryContextOrdinal =
-    latestFinalActionPatch?.kind === 'none'
-      ? latestDeliveryContextOrdinal
-      : suppressTrailingSteerCandidateForEarlierNoReply
-        ? latestDeliveryContextOrdinal
-        : finalTrailingSteerCandidate?.deliveryContextOrdinal ??
-          latestDeliveryContextOrdinal
+    finalResponseCandidate?.deliveryContextOrdinal ?? latestDeliveryContextOrdinal
   const finalResponseCardTextFallback =
-    latestFinalActionPatch?.kind === 'none'
-      ? responseCardTextFallback
-      : suppressTrailingSteerCandidateForEarlierNoReply
-        ? responseCardTextFallback
-        : finalTrailingSteerCandidate?.cardTextFallback
-          ?? responseCardTextFallback
+    finalResponseCandidate?.cardTextFallback ?? responseCardTextFallback
   if (finalResponseCardTextFallback !== null && finalResponseMedia.length > 0) {
     throw new VaultCliError(
       'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',

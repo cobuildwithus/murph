@@ -77,6 +77,8 @@ export async function materializeHostedSourceDeliveryStallNotice(input: {
   const notificationKey = buildHostedSourceDeliveryStallNoticeKey(input.candidate);
   const messageKey = input.candidate.sourceProviderSlug === "apple_health_kit"
     ? "linq.apple_health_delivery_stalled"
+    : input.candidate.sourceProviderSlug === "whoop_v2"
+    ? "linq.device_connection_check"
     : "linq.device_delivery_stalled";
   const dedupeKey = `assistant.notification.requested:${notificationKey}`;
   const existing = await readHostedMailboxItemByDedupeKey({
@@ -93,6 +95,7 @@ export async function materializeHostedSourceDeliveryStallNotice(input: {
         select: {
           connection: { select: { status: true, userId: true } },
           lastDataAt: true,
+          lastErrorCode: true,
           lifecycleEpoch: true,
           sourceProviderSlug: true,
           status: true,
@@ -121,6 +124,7 @@ export async function materializeHostedSourceDeliveryStallNotice(input: {
         || !outreachPolicy?.enabled
         || !isSourceRecoveryNoticeEligible({
           lastDataAt: source.lastDataAt?.toISOString() ?? null,
+          lastErrorCode: source.lastErrorCode,
           now: input.now,
           silentHours: outreachPolicy.silentHours,
           sourceProviderSlug: source.sourceProviderSlug,

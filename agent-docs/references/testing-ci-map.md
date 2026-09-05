@@ -1180,6 +1180,20 @@ keep the one-second presentation-only deadline and late-result rejection.
   R2 resources.
 - The tag-driven release workflow is present and uses npm trusted publishing for package publication. Its preflight mode validates release metadata, syntax-checks and tests the final-tarball secret guard, performs the clean workspace build, and runs typecheck plus doc gardening; isolated required jobs then own package coverage, fixture coverage, hosted-web build and test shards, and Cloudflare verification before the final clean pack checkout may run. The full local `release:check` command remains the monolithic `pnpm verify:acceptance` extension used outside that tag DAG. The guard's focused Node tests cover accepted source literals, exact public metadata and placeholders, declaration-only `.d.ts` colon syntax, invalid `.d.ts` equals assignments, and the existing external pack-output contract. Negative cases cover sensitive filenames, provider tokens, private key/JWK/wallet material, credentialed URLs and form/query parameters including JWT-shaped values, separator- and camel-case credential names, JSON/bracket/setter/tuple authorization serialization, quoted and unquoted generic assignments with command prefixes, shell operators, terminators, and comments, credential-bearing archive segments and tarball names with all artifact names hidden by default, archive links, and tarball-inventory drift. `incur` remains an explicit bundled `@murphai/murph` runtime dependency so the reviewed Murph error-envelope and canonical skill-hash patch plus the framework's runtime and source entrypoints ship together; Incur 0.5.1 now owns lazy optional YAML and MCP loading upstream. The three proven non-runtime upstream test sources that previously required scanner exceptions are omitted so every shipped file receives one unconditional scan policy. The CLI release-workflow guard locks the scan ordering ahead of manifest write, npm provider access, and GitHub Release upload plus the handoff's one-day retention. The workflow is only exercised on real `v*.*.*` tag pushes rather than during ordinary repo verification. npm trust is package-level rather than repo-level, so this monorepo also ships `pnpm release:trust:github` for the one-time bootstrap that binds every publishable `@murphai/*` package to `cobuildwithus/murph` and `.github/workflows/release.yml`; if a package already has the wrong trusted publisher entry, that npm-side state still needs manual revoke-and-recreate repair, which local repo checks cannot fully prove.
 
+## Temporal integration compiler cache
+
+The harness suite and CLI tests prove that the explicit `--process-shard i/n`
+invocations partition the original foreground Vitest commands exactly once,
+reject invalid or stale inventories before setup, and preserve the default
+complete run. Private CI requires both foreground process results.
+
+`MURPH_HOSTED_WEB_WEBPACK_CACHE=1` retains Next's compiler-owned cache for CI
+jobs that persist it. Default production builds keep caching disabled. Existing
+Web config and production-build-runner tests cover opt-in/default behavior,
+route type generation, and the independently earned TypeScript gate. Private
+integration restores compiler inputs while retaining full builds, exact-source
+handoffs, and every hosted E2E assertion.
+
 ## Update Rule
 
 When real source code, CI, or deployment automation is added, update this file and `agent-docs/operations/verification-and-runtime.md` in the same change.
