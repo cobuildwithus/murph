@@ -244,6 +244,7 @@ export async function executeCodexAssistantTurnAttempt(
     ...(input.generateSongPolicy
       ? { generateSongPolicy: input.generateSongPolicy }
       : {}),
+    followUpAttachmentAllowed: input.followUpAttachmentAllowed === true,
     groupConversation: input.groupConversation === true,
     groupRoomModelMaintenanceAuthorized:
       input.groupRoomModelMaintenanceAuthorized === true,
@@ -476,6 +477,7 @@ export async function executeCodexAssistantTurnAttempt(
           ? {}
           : { contextReferences: segment.contextReferences }),
         deliveryContextOrdinal: segment.deliveryContextOrdinal,
+        followUpRequest: segment.followUpRequest,
         media: segment.media,
         response: segment.response,
         ...(segment.transcriptResponse === undefined
@@ -490,6 +492,7 @@ export async function executeCodexAssistantTurnAttempt(
             productFeedbackCandidate,
           }
         : {}),
+      followUpRequest: result.followUpRequest,
       responseMedia: result.responseMedia,
       ...(result.responseCard === undefined
         ? {}

@@ -1,3 +1,4 @@
+import { registerDeliveredAssistantFollowUp } from './follow-ups.js'
 import { randomUUID } from 'node:crypto'
 import {
   ASSISTANT_ANSWERED_MAILBOX_ITEM_ID_LIMIT,
@@ -280,6 +281,8 @@ export type AssistantOutboxCreateIntentInput = {
   actorId?: string | null
   answeredMailboxItemIds?: readonly string[] | null
   reviewedAssistantAskCompletionExpiresAt?: string | null
+  followUpRequest?: AssistantOutboxIntent['followUpRequest']
+  followUpEvaluatedThrough?: AssistantOutboxIntent['followUpEvaluatedThrough']
   automationAuthority?: AssistantOutboxIntent['automationAuthority']
   automationContextReferences?: AssistantOutboxIntent['automationContextReferences']
   plannedOccurrenceAt?: string | null
@@ -527,6 +530,8 @@ export async function createAssistantOutboxIntent(
       dedupeKey,
       targetFingerprint: hashAssistantOutboxTargetFingerprint(rawTargetIdentity),
       ...persistedTarget,
+      followUpRequest: input.followUpRequest,
+      followUpEvaluatedThrough: input.followUpEvaluatedThrough,
       automationAuthority: input.automationAuthority ?? null,
       automationContextReferences,
       plannedOccurrenceAt: input.plannedOccurrenceAt ?? null,
@@ -1406,11 +1411,11 @@ function assistantOutboxIntentRequiresTerminalConfirmation(input: {
   intent: AssistantOutboxIntent
   vault: string
 }): boolean {
-  return input.dispatchHooks?.confirmTerminalIntent !== undefined &&
+  return input.intent.followUpRequest !== undefined || (input.dispatchHooks?.confirmTerminalIntent !== undefined &&
     input.dispatchHooks.requiresTerminalConfirmation?.({
       intent: input.intent,
       vault: input.vault,
-    }) === true
+    }) === true)
 }
 
 function readAssistantOutboxPendingTerminalConfirmation(input: {
@@ -1456,16 +1461,15 @@ async function confirmAssistantOutboxTerminalIntent(input: {
   vault: string
 }): Promise<AssistantOutboxIntent> {
   const confirmTerminalIntent = input.dispatchHooks?.confirmTerminalIntent
-  if (!confirmTerminalIntent) {
-    return input.intent
-  }
-
   try {
-    await confirmTerminalIntent({
+    await confirmTerminalIntent?.({
       intent: input.intent,
       outcome: input.outcome,
       vault: input.vault,
     })
+    if (input.outcome.status === "sent") {
+      await registerDeliveredAssistantFollowUp({ intent: input.intent, vault: input.vault })
+    }
   } catch {
     return rescheduleAssistantOutboxConfirmationRetry({
       error:
@@ -1627,6 +1631,8 @@ export async function deliverAssistantOutboxMessage(input: {
   actorId?: string | null
   answeredMailboxItemIds?: readonly string[] | null
   reviewedAssistantAskCompletionExpiresAt?: string | null
+  followUpRequest?: AssistantOutboxIntent['followUpRequest']
+  followUpEvaluatedThrough?: AssistantOutboxIntent['followUpEvaluatedThrough']
   automationAuthority?: AssistantOutboxIntent['automationAuthority']
   automationContextReferences?: AssistantOutboxIntent['automationContextReferences']
   plannedOccurrenceAt?: string | null
@@ -1664,6 +1670,8 @@ export async function deliverAssistantOutboxMessage(input: {
       input.answeredMailboxItemIds ?? [],
     )
   const intent = await createAssistantOutboxIntent({
+    followUpRequest: input.followUpRequest,
+    followUpEvaluatedThrough: input.followUpEvaluatedThrough,
     actorId: input.actorId,
     answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
     reviewedAssistantAskCompletionExpiresAt:

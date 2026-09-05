@@ -1,6 +1,7 @@
 ---
 title: 'Hosted-local cleanup omits standby runner artifacts'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2749'
 ---
 
 ## Expected Behavior

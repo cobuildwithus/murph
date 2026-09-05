@@ -404,6 +404,9 @@ export function expectAdvertisedMurphDynamicTools(
   const expectedAdvertisedToolNames = advertisement.codeMode
     ? expectedToolNames.filter((name) =>
         name !== "automation"
+        && name !== "attach_response_card"
+        && name !== "attach_exercise_routine_card"
+        && name !== "attach_telegram_rich_content"
         && !hostedGroupFamilyToolNames.has(`murph.${name}`)
       )
     : expectedToolNames;

@@ -38,6 +38,7 @@ import { createHostedDeviceSyncControlPlaneContext } from "./control-plane-conte
 import {
   assertCompanionHrvRmssdObservationFresh,
   COMPANION_APPLE_HEALTH_SOURCE_PROVIDER,
+  COMPANION_DEVICE_SYNC_STATUS_CONNECTION_LIMIT,
   resolveCompanionHrvRmssdConnection,
   type CompanionConnectionIntent,
 } from "./companion";
@@ -369,13 +370,18 @@ export class HostedDeviceSyncPublicIngressService {
     provider: string,
     connectionIntent: CompanionConnectionIntent | null,
   ): Promise<SdkSignInSessionResult> {
+    const providerConnections = await this.context.store.listMemberConnectionStatuses({
+      limit: COMPANION_DEVICE_SYNC_STATUS_CONNECTION_LIMIT,
+      provider,
+      status: "all",
+      userId,
+    });
+    const establishedConnections = providerConnections.filter(
+      isEstablishedDeviceSyncConnection,
+    );
+
     if (connectionIntent === "connect") {
-      const providerConnections = (await this.context.store.listConnectionsForUser(userId))
-        .filter((connection) =>
-          connection.provider === provider
-          && isEstablishedDeviceSyncConnection(connection)
-        );
-      if (providerConnections.length > 1) {
+      if (establishedConnections.length > 1) {
         throw deviceSyncError({
           code: "SDK_SIGN_IN_CONNECTION_AMBIGUOUS",
           message: "The companion could not identify one active device-sync connection.",
@@ -383,7 +389,7 @@ export class HostedDeviceSyncPublicIngressService {
           httpStatus: 409,
         });
       }
-      const establishedConnection = providerConnections[0] ?? null;
+      const establishedConnection = establishedConnections[0] ?? null;
       const capturedReconnectProof = establishedConnection
         ? await captureHostedDeviceSyncConnectionSourceReconnect({
             connectionId: establishedConnection.id,
@@ -421,12 +427,6 @@ export class HostedDeviceSyncPublicIngressService {
       });
       return session;
     }
-
-    const providerConnections = (await this.context.store.listConnectionsForUser(userId))
-      .filter((connection) => connection.provider === provider);
-    const establishedConnections = providerConnections.filter(
-      isEstablishedDeviceSyncConnection,
-    );
 
     if (establishedConnections.length > 1) {
       throw deviceSyncError({

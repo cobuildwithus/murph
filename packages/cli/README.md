@@ -61,6 +61,18 @@ When you need to read from the vault, use this chooser:
 - `vault-cli wearables day` or `wearables ... list` for semantic wearable summaries
 - family `manifest` commands for immutable import provenance
 
+Use `memory show <id> --record-only` when verifying an exact known memory
+record. It returns that record and its metadata without the whole document;
+`memory show --compact` still returns all saved facts for context and conflict
+checks. Add `--compact` to memory mutations for the exact affected record plus
+the created/existed outcome; canonical persistence is unchanged.
+
+For `wearables activity list`, omit detail flags for day totals, use
+`--include-workout-summaries` for individual workout facts, and use
+`--include-workout-details` when lap/split rows are needed. Summary workouts
+mark `splitsOmitted: true`; this does not mean no splits exist. Full detail wins
+when both flags are supplied. Choose the needed level before the first read.
+
 Canonical CLI writes expose typed args and options. Raw structured payloads use explicitly named JSON escape hatches instead of hiding behind canonical add/save commands:
 
 ```bash
@@ -104,6 +116,15 @@ vault-cli knowledge search "sleep magnesium"
 vault-cli knowledge list
 vault-cli knowledge lint
 ```
+
+## Activity check-ins
+
+Device-activity automations accept `--device-source garmin`, `oura`, or `fitbit`,
+alongside the existing `whoop` and `whoop_v2` filters. Omit the source filter to
+match activity from any provider. The Fitbit filter recognizes both current
+Google Health imports and legacy Fitbit imports. Use `automation edit` with
+`--trigger-kind deviceActivity --device-source <source>` to change the selected
+source on the same automation; its activity cursor restarts at the edit time.
 
 ## What you get
 

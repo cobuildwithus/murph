@@ -688,7 +688,7 @@ export function SectionsContent({
 
           <Separator />
 
-          <StudySection title="Clinical Records scheduled launcher">
+          <StudySection title="Medical records import and recovery">
             <ClinicalRecordsConnectLauncherStudy />
           </StudySection>
 

@@ -1,3 +1,4 @@
+import { MURPH_ATTACH_FOLLOW_UP_TOOL } from '../src/assistant-codex/dynamic-tools/automation.ts'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createServer, type Server, type ServerResponse } from 'node:http'
@@ -618,6 +619,21 @@ afterAll(async () => {
 }, 180_000)
 
 describe('real codex app-server with scripted provider', () => {
+  it.each([true, false])('enforces follow-up attachment authority through real App Server (%s)', async (allowed) => {
+    const scenario = await prepareScriptedTurnScenario()
+    const request = { action: 'attach_follow_up', afterMinutes: 20, instructions: 'Check the pending choice; skip if resolved.' }
+    scenario.stub.queue({ functionCall: { name: 'automation', namespace: 'murph', arguments: request } }, { text: 'Which arrival window works?' })
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput, dynamicTools: [MURPH_ATTACH_FOLLOW_UP_TOOL],
+      followUpAttachmentAllowed: allowed, groupConversation: false,
+      prompt: 'Ask the pending arrival-window question.',
+    })
+    expect(result.followUpRequest).toEqual(allowed
+      ? { afterMinutes: 20, instructions: request.instructions } : null)
+    expect(result.finalMessage).toBe('Which arrival window works?')
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
   it('streams a scripted turn through the real app-server protocol', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
@@ -2493,6 +2509,9 @@ text(result.output);
         },
       },
       {
+        requestIncludes: [
+          'accept any self-description, partial answer, or skip without pressing or inferring missing details.',
+        ],
         text: ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
       },
     )
@@ -2518,7 +2537,7 @@ text(result.output);
       .join('\n')
     expect(toolOutputs).toContain('## Progressive disclosure')
     expect(toolOutputs).toContain(
-      'Never re-ask solely for optional demographics.',
+      'The injected onboarding instructions own the visible opening exchanges:',
     )
     expect(toolOutputs).toContain('"hasPriorSetupContext":false')
     expect(toolOutputs).not.toContain(laterStageMarker)
@@ -7096,7 +7115,10 @@ if (!tool) {
       const discovered = scenario.stub.requestSummariesSinceBaseline()[1]?.toolSearchOutputTools
       expect(JSON.stringify(discovered)).toContain('compact_table')
       expect(JSON.stringify(discovered)).toContain('daily_nutrition')
-      expect(JSON.stringify(discovered)).toContain('goal list --status active')
+      expect(JSON.stringify(discovered)).toContain(
+        'meal totals --from <date> --to <same-date> --resolve-goals --format json',
+      )
+      expect(JSON.stringify(discovered)).not.toContain('goal list --status active')
       expect(result.runtimeIssueInputs).toEqual([])
       if ('workout' in card) {
         expect(result.responseCard).toMatchObject({
@@ -8331,22 +8353,19 @@ text(JSON.stringify(result));
       serviceTier: null,
       threadId: seeded.threadId,
     })
-    // Usage attribution must never regress to the zero-row production failure:
-    // Codex 0.135 does not expose a compact-specific usage event, so the engine
-    // records a nonzero lower-bound estimate from the pre-compact thread size.
+    // The pinned runtime exposes the scripted provider's exact usage through
+    // raw completion events for this opted-in warm thread.
     expect(compacted.kind).toBe('compacted')
     if (compacted.kind !== 'compacted') {
       throw new Error('Expected idle compaction to complete.')
     }
     expect(compacted.usage).toMatchObject({
-      cachedInputTokens: null,
-      inputTokens: expect.any(Number),
-      outputTokens: null,
-      source: 'estimated',
-      totalTokens: expect.any(Number),
+      cachedInputTokens: 0,
+      inputTokens: 12,
+      outputTokens: 7,
+      source: 'measured',
+      totalTokens: 19,
     })
-    expect(compacted.usage.inputTokens).toBeGreaterThan(0)
-    expect(compacted.usage.totalTokens).toBeGreaterThan(0)
 
     // Repeat guard: a successful compact clears the thread vitals, so an
     // immediate second idle pass must skip without provider traffic instead

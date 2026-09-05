@@ -27,11 +27,21 @@ invocation-scoped root tools: the resident App Server may expose them to the
 active root turn, but descendant or foreign resident threads fail before the
 accepted-message resolver runs.
 
+Native replies may select any input admitted in the active turn through the
+exact tool or response ordinal, including earlier live-steering segments.
+Reactions remain segment-only. Native selection and pre-delivery revalidation
+use the same bounded prefix; invalid ordinals, including request-relative
+ordinals before group reconsideration rebasing, fail closed. Admission and
+checkpointing still precede target authority, and no-reply accounting is
+unchanged.
+
 `murph.select_reply_target` annotates a normal response segment;
 `murph.react_to_message` keeps the existing reaction effect and outbox
 operation. The delivery owner re-resolves the selected input immediately before
-each effect and clones its reply context instead of mutating shared input. Every
-`---` bubble from one response segment inherits the same selected target.
+each effect. Native replies clone the response ordinal's reply context and
+overlay only the canonical message target, without replacing the route or
+audience or mutating shared input. Every `---` bubble from one response segment
+inherits the same selected target.
 
 Intentional replies persist a true-only `nativeReplyRequested` marker on each
 normal message intent. The marker participates in strict parsing, persistence,
@@ -194,12 +204,57 @@ decrypted contact roster, or compatibility branch. The legacy `read_current`
 wire is unchanged, and assistant-engine still removes the global member id and
 legacy roster handle before any group summary reaches the model.
 
+Optional private follow-ups reuse canonical one-shot automations and the existing
+scheduler/wake path. `murph.automation.attach_follow_up` attaches a finite delay
+and instructions to the current outgoing message; required outbox terminal
+confirmation registers the child only after dispatch. The canonical source
+intent reference makes replay idempotent, including after archival. Registration
+admits at most two unexpired children per private conversation. A parent
+reference lets ordinary parent edits retire children; scheduler-only one-shot
+consumption preserves its delivered occurrence's child.
+
+Foreground turns receive at most two pending records and can resolve or defer
+them through ordinary versioned automation operations. Unrelated messages do
+not cancel a specific matter. Due follow-ups use a fresh read-only contextual
+turn, current committed history, and protected source dispatch evidence to
+send or skip once. They cannot attach another follow-up. An existing input
+cursor captured before evaluation is checked again before the first transport
+attempt; new input retires only the unsent candidate and uses normal cron retry
+to reconsider. Provider-entered attempts retain ordinary ambiguity handling.
+The cursor is vault-wide, so unrelated accepted input can conservatively cause
+reconsideration. Expiry, archival, delivery reconciliation, and retention remain
+with their existing owners; no new scheduler, table, or lifecycle store exists.
+
 Immutable hosted memory consolidation remains an isolated one-shot automation.
 Only its exact built-in id receives `murph.member_memory`; the host executes
 that narrow state tool through canonical core memory operations. The turn uses
 the shared restricted maintenance configuration and needs no separate
 permission profile or filesystem mutation path; native controls are not an
 additional memory owner, and the host suppresses their effects in this lane.
+The evidence owner distinguishes a successfully empty bounded conversation
+window from collection failures. An empty member-memory window skips before
+provider admission. An empty group window skips only when its room-model page
+is also genuinely missing; existing pages remain eligible for cleanup, and
+unavailable evidence or pages keep the ordinary maintenance path. The rolling
+evidence window remains intact so corrections and late committed events are
+not hidden behind a last-run timestamp.
+
+The canonical cron lifecycle skips a managed Journal connected-context pass
+only when its ledger is genuinely missing and its complete connected-account
+inventory is empty. Existing ledgers, new accounts, unavailable ports, and
+failed reads keep the normal pass, preserving notices and due follow-ups.
+The account inventory owner rejects malformed pages instead of presenting them
+as empty. Journal and Personal Patterns retain the common hosted cron policy:
+eligible first attempts request Flex; failed-attempt retries use Standard, and
+the provider boundary validates model and catalog support before selecting Flex.
+
+Read-only hosted automation inspection also projects execution evidence from
+that automation's existing runtime state, its ten newest retained cron runs,
+and at most one exact outstanding outbox intent. It exposes phase, retry timing,
+bounded sanitized failure detail and delivery status without prompts, responses,
+recipient identities or a new history store. A consumed or failed occurrence is
+not delivery confirmation; inspection never retries or recreates it.
+
 Reminder availability uses no
 model turn or separate automation: the existing hosted background automation
 pass deterministically scans active private automations that explicitly store
@@ -654,6 +709,15 @@ table, or second service.
 
 Connected apps expose exactly three assistant tools: account management, semantic tool search, and execution. `apps/web` owns the Composio API key, durable per-member Tool Router session id, short-lived member-bound connect intents, account verification, server-owned built-in service tool allowlist, server-held OpenWeather authority, server-owned fixed-write allowlist for primary-calendar creation and bounded Gmail/Outlook email sending, and branded OAuth completion UX. The hosted runner reaches that authority only through the existing signed `web-control.worker` boundary; Composio credentials, session ids, OAuth state, OpenWeather credentials, and connected-account provider tokens never enter Codex env or prompts. Composio owns provider schemas and raw execution results for its tools. Murph applies a session-level read-only/non-destructive policy, explicit multi-account selection for connected-account tools, and accountless execution only for server-allowlisted built-in service tools. The existing current-weather tools use direct custom-auth execution through Composio. One fixed web-owned One Call read accepts only bounded latitude and longitude, requests only official national alerts, and returns a small normalized alert projection. It adds no scheduler, state, cache, or user-defined weather threshold. The direct and scheduled alert guidance must not deploy until One Call 3 is active for the exact production key and a signed Web-control smoke read returns a normalized success, including a valid empty alert list. Deploy Web first when activation and assistant deployment cannot happen together. Primary-calendar creation and bounded Gmail/Outlook email sends share one exact server-owned direct-execute policy table. Every route pins its toolkit and provider version, requires agent approval plus an active owned account from that toolkit, rejects missing, blank, unsupported, or server-owned model arguments before egress, and forces provider-owned fields such as the primary calendar, sender, and Outlook Sent-copy behavior. Email sends additionally require current accepted user input in a private direct turn at the assistant runtime boundary; scheduled, group, maintenance, system-notification, and output-only turns fail closed before provider egress. Failed or ambiguous writes are non-retryable; ambiguous email outcomes are reconciled only against a narrow recent Sent-mail window matching the primary recipient, subject, and substantive body, and uncertain results remain unknown.
 
+Connected-app search reconciles provider connection metadata with Web's exact
+service-tool allowlist and the credential reader used by execution. Only returned,
+allowlisted actions receive member-account-free execution guidance; missing server
+configuration does not become a member connection request. Personal account
+metadata and approval remain unchanged. Mixed service searches discard upstream
+cached connection plans that contradict this host-owned boundary while preserving
+tool schemas and search errors. This projection adds no network call or state.
+
+
 Hosted group runtimes execute as synthetic thread-container members, not as any participant's personal account. Turn planning derives that scope from the existing conversation audience and makes it part of the thread contract. Group turns omit personal browser, phone, Family, wearable-connect, and connected-account management authority; connected-app search and execution remain only for server-allowlisted accountless service tools. The web control plane independently rejects personal Family, wearable authorization, and connected-account operations for thread-container members. Group-owned management, sharing/join flows, and explicitly room-routed automations remain separate authorities; a personal Settings page never configures a room. A group newsletter is an ordinary automation whose instructions reopen the private editorial skill and record its chosen delivery and exact scopes. Its slug and instructions grant no capability, and cron never recognizes newsletter metadata. Current-chat editions use the ordinary consent-aware shared read and bound-route conversation outbox. Any scheduled non-direct group cron occurrence may instead use the generic one-shot group-email effect: `murph.group_data` prepares address-free authorized facts through `read_shared audience="group_email"`, then `murph.group_email` accepts a recipient-free `send_email`. Preparation derives the group from the signed runtime member and keeps its private authorization proof outside model-visible output. Send persists the proof plus HTML on the existing assistant outbox parent and ends the turn so the group outbox cannot duplicate the edition. The outbox reports an accepted parent to cron immediately, Web marks it sent only after current-authority revalidation and durable recipient fanout, and the existing cron reconciler settles the occurrence without another model turn. Recipient intents use only the generic outbox retry lifecycle. Bounded readers recognize prior newsletter idempotency keys and proof fields solely to drain already-accepted effects; new writes use generic group-email names. Because group-email `From` identity is spoofable, replies may converse and read current group context but cannot mutate automations, join policy, group presentation, or other durable room controls; those actions require the authenticated group-chat route.
 
 For retained group-participant activity reporting, an authenticated non-direct
@@ -852,11 +916,11 @@ current-user assistant turn can create the same short-lived first-party link
 through the existing Clinical Records runtime port and signed Web control
 boundary. That tool accepts no member, provider, patient, recipient, URL, or
 scope argument, so provider selection and SMART consent remain browser-owned.
-The initial lane permits one retrieval
-generation per unique member/provider connection; later retry, reconnect, or
-refresh requires a bounded raw-evidence retention lifecycle. The Epic beta
-requests only Patient read, laboratory Observation search, and DiagnosticReport
-search, with no offline-access scope. Each retrieval run also freezes the exact
+Each unique member/provider connection admits at most eight immutable snapshots
+across fresh authorizations, bounded to twenty sources per member. Reconnect
+keeps the same encrypted patient/base binding and increments the existing
+credential epoch and run generation. The ordered Epic catalog contains 24
+queries across 17 resource families, with no offline-access scope. Each retrieval run also freezes the exact
 adapter-owned query plan in additive operational JSON. Stable `queryScopeId`
 and deterministic `sliceId` values distinguish repeated resource-type queries
 and bounded history windows, but they are acquisition identity only and never
@@ -1130,7 +1194,14 @@ field. Provider and reasoning stay fixed to OpenAI and `low`; no participant
 identity, plan state, or private preference enters the room path.
 Idle maintenance attributes compaction usage to the model actually bound to the
 warm thread, not a future preference, and skips provider work when that model
-cannot be priced. The
+cannot be priced. On fresh threads, pinned Codex raw completion notifications
+provide exact idle-compaction token buckets, deduplicated by provider response
+identity in the existing usage ledger. A successful compaction without usable
+raw evidence retains the explicit context-size estimate; cold-resumed threads
+cannot opt into raw events in Codex 0.151.0. Measured responses remain billable
+when the encompassing compaction fails. Raw provider content is excluded from
+persisted turn events and stdout. Automatic compaction accounting is unchanged.
+The
 runtime and web control plane
 accept only the input-bound update shape; approval-shaped configuration
 callbacks are rejected. The personalization response
@@ -1631,28 +1702,27 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   group-room model, Temporal, and Cloudflare own no sponsorship state,
   financial fact, expiration scheduler, or second delivery queue.
 - `apps/cloudflare`: hosted execution plane for ensure-processing requests (callback-signed from the Temporal orchestrator, or Vercel OIDC-authenticated best-effort direct ingress wakes from `apps/web`) plus Vercel OIDC-authenticated browser-vault session, deletion, status, and web-owned Telegram usage-limit notice requests, plus signed memberless `bindings-v1` admission and deploy-smoke callbacks used to admit the versioned Temporal worker and verify the managed container image, with per-user coordination via container-enabled Durable Objects, active write-fence wake/replace behavior, encrypted hosted workspace snapshots, legacy encrypted artifact objects, encrypted runner-secret blobs, short-lived DO-local coordination metadata, derived gateway projections, and a native Cloudflare container image that runs one-shot inbox/parser/assistant/device-sync execution through `packages/assistant-runtime`; it owns execution coordination, configured env profile selection, user-secret allowlisting, image-owned native parser tool paths, Worker-owned provider credential injection through runner HTTPS egress interception, and adapter transport details such as local loopback URL rewriting, while runtime launch semantics and profile key sets come from `packages/assistant-runtime`. Web applies its hosted access-and-usage decision before exhausted runnable mailbox work reaches Temporal or the runner. Cloudflare receives no billing or credit projection, cannot grant usage, and performs no Stripe call. Web preserves hosted conversation input before admission, and allowance accounting runs after usage exists. Cloudflare/runner #587 or newer is the permanent rollback floor while Web omits the retired callback route. Cloudflare carries the signed plan-usage read as a transport-only runtime port and cannot select a member, billing action, or usage interpretation; it owns opaque runtime blobs only, not canonical hosted product facts outside the encrypted workspace snapshot, and it may verify signed ingress/runtime root envelopes and unwrap its P-256 recipient wrap without holding GCP KMS decrypt authority; foreground runtime work may defer intermediate checkpoints, the active invocation remains dirty until the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint succeeds, RunnerContainer never records pending checkpoint intent, and activity expiry is cleanup-only
-- Its optional warm-standby path keeps at most one release-scoped pristine ENAM
-  container outside any member trust boundary. A memberless coordinator owns
-  readiness and atomic availability only; the per-member `UserRunner` persists
-  the exact opaque stop target, binds it once, then owns the ordinary write
-  fence, workspace restore, invocation, retention, and retirement. Standby
-  allocation is available to fence-free `default` work from OIDC-authenticated
-  Web-direct ingress with a validated direct-attempt identity or an authenticated
-  request carrying `conversationWorkPending: true`. Temporal derives that fact
-  from current admitted conversation lag, not a wake pointer or generic default
-  processing. Background-only requests retain the exact-user target. A foreground request that
-  has finished preempting an exact-user background child may claim the ready
-  standby instead of reusing the child while it shuts down. A previously
-  reserved standby is reconciled before this eligibility check so retries and
-  replacements already bound to a standby cannot split ownership. In
-  `allocate` mode the standby coordinator is the sole shell-prewarm owner; the
-  exact-user prewarm hint is skipped so it cannot reserve a competing target
-  before the claim, while the normal exact-user start remains the claim-miss
-  fallback.
-  Standby readiness warms the image, heavy runtime, and a disposable
-  content-free Codex initialization, while the member-specific resident Codex
-  process remains post-restore. Claimed containers are never returned for
-  another member.
+- Fresh member execution uses one globally eligible `RunnerContainer` fleet.
+  Warm inventory is an allocation optimization within that fleet: the memberless
+  coordinator maintains a configurable number of pristine current-release slots
+  (two by default), and atomically removes a slot when claimed. Warm and cold
+  starts use the same opaque identity, immutable binding, invocation, retention,
+  and retirement lifecycle. `UserRunner` persists the exact target before binding
+  and remains the sole member execution, write-fence, and workspace owner.
+  Only fence-free `default` work from authenticated Web-direct ingress or an
+  authenticated request with `conversationWorkPending: true` may claim ready
+  inventory. Temporal derives that fact from fresh admitted conversation lag.
+  Background-only work may reuse its member-owned warm container or start a
+  cold target in the same fleet, but never consumes shared ready inventory.
+  Pending targets reconcile before new allocation; uncertain binding or stop
+  results retain that exact target and cannot create a second execution owner.
+  The inventory coordinator owns all speculative shell prewarming. Readiness
+  warms the image, heavy runtime, and disposable content-free Codex initialization;
+  the member-specific resident process starts only after workspace restore.
+  Bound slots never return to inventory or change members. Legacy exact-user and
+  ENAM standby references retain their original namespace for recovery and drain;
+  they are not fresh allocation paths. One fleet budget includes the temporary
+  legacy application reservation until that application drains.
 - `UserRunner` remains the sole durable runtime write-fence owner when a
   `RunnerContainer` Durable Object activation is replaced. After a successful
   invocation, the container entrypoint first clears its wake and abort pointers,
@@ -1906,18 +1976,16 @@ Clinical retrieval ownership is intentionally split across existing layers.
 FHIR pagination, opaque cursor/request replay, run state, and the signed
 read/fetch/outcome routes. Its durable system-mailbox handoff is exactly
 `{runId, generation}` and uses the existing per-user Temporal workflow.
-The member/provider unique connection owns one initial retrieval generation,
-which bounds immutable raw-evidence directories until a future retention owner
-can preserve canonical raw references across refreshes.
+The member/provider connection retains at most eight immutable snapshots,
+preserving every canonical raw reference without another retention service.
 `apps/cloudflare` supplies only the typed signed-web-control transport adapter.
 `packages/assistant-runtime` performs finite preemptible background iteration,
 resuming from the vault-owned operational checkpoint after preemption. The
-versioned runtime contract accepts either the current resource-family descriptor
-or explicit query slices; query-aware raw pages and completion state remain
-grouped by query/slice through the checkpoint and v3 raw manifest. Existing v2
-manifests and v1 checkpoints remain readable. Each run pins its retrieval
-protocol at creation: existing nullable-protocol rows remain legacy for their
-entire lifecycle, while new runs emit `query-slices-v2`. Query-aware page
+runtime contract carries only the frozen query slices and completed-slice
+references. The v3 checkpoint and v3 manifest preserve that same grouping.
+Only the external importer reads legacy v2 manifests; hosted legacy descriptors,
+cursors, duplicate completion lists and outgoing next-link metadata are gone.
+Query-aware page
 requests, opaque cursors, durable request claims, and terminal outcomes bind
 the frozen query-scope and slice identities so they cannot be swapped across
 the same resource type. Epic's active policy expands 24 primary query scopes
@@ -2010,7 +2078,7 @@ application code.
 
 - Web owns four authenticated, staggered hourly Vercel retention routes instead of one cross-domain sweep: nonce retention at minute 5, ordinary primary-database retention at minute 20, external account/computer provider cleanup at minute 35, and runtime-signal plus diagnostic-log maintenance at minute 50. Only the nonce route has an 800-second duration; the other three are capped at 300 seconds. No route invokes another owner, so a Kernel/browser, account-provider, runtime-signal, or diagnostic-database failure cannot prevent callback nonce catch-up.
 - Every verified Cloudflare-to-Web execution callback consumes one SHA-256 nonce row with a single primary-Postgres insert. The `nonce_hash` primary key is the replay linearization point: one concurrent exact nonce wins and every exact-nonce conflict replay loses. The insert uses the database clock to refuse a delayed first admission after the callback's inclusive expiry boundary while retaining that row as a replay tombstone. The callback path owns no expiry sweep, transaction callback, or application-visible lock orchestration. The dedicated nonce-retention route finishes the small browser-assertion nonce lane before selecting strictly expired callback nonce rows in `expires_at`, `nonce_hash` order, locking at most 5,000 candidates per statement with PostgreSQL `FOR UPDATE SKIP LOCKED`, and deleting those exact rows in the same statement. Callback nonces alone use a 100-times-higher max-batch ceiling to drain sustained control-plane volume; browser assertion nonces and all ordinary retention categories keep the shared four-batch ceiling. A caught-up hour stops after the first short batch. Account deletion independently retains its per-member nonce delete.
-- Short-lived hosted control-plane creation is likewise cleanup-free. Connected-app intents, unbound sensitive-action challenges, device-connect intents, device OAuth sessions, Clinical Records connect intents, and Clinical Records OAuth sessions are created or consumed only through their exact owner rows; an exact expired read or consume fails closed. Device and Clinical Records OAuth consumers lock the exact state row before replay classification and consume, so the retention owner's `SKIP LOCKED` claim cannot turn a first callback into a false replay. Public expiry is not terminal ownership: consumed device OAuth claims remain with exact callback finalization and recovery, while consumed Clinical OAuth claims remain until no incomplete linked connect intent exists. Started connected-app, device-connect, and Clinical Records intents retain their exact completion row for one bounded 30-minute continuation grace. The ordinary control-plane retention route serially claims only owner-dead expired rows from each expiry-indexed table in expiry-and-primary-key order, under a smaller control-artifact batch and max-batch ceiling, with PostgreSQL `FOR UPDATE SKIP LOCKED`. The unbound sensitive-action lane uses a partial expiry-and-token index so durable approval history cannot enlarge its transient claim scan. Overlapping retention runs skip already-claimed mailbox, Linq diagnostic, session, and transient-control rows instead of waiting or repeating work. Approval-backed sensitive-action rows stay outside this transient cleanup because their approval lifecycle remains authoritative.
+- Short-lived hosted control-plane creation is likewise cleanup-free. Connected-app intents, unbound sensitive-action challenges, device-connect intents, device OAuth sessions, Clinical Records connect intents, and Clinical Records OAuth sessions are created or consumed only through their exact owner rows; an exact expired read or consume fails closed. A member-bound device OAuth consumer reads only an owner hint before its transaction, then locks the member before the exact state row and revalidates the owner; credential replacement and account deletion use the same member-before-state order. An unowned device state and a Clinical Records OAuth consumer lock only their exact state row before classification. If retention removes an expired unconsumed device state before the callback obtains its row lock, the locked reread fails missing rather than fabricating replay or provider authority. Public expiry is not terminal ownership: consumed device OAuth claims remain with exact callback finalization and recovery, while consumed Clinical OAuth claims remain until no incomplete linked connect intent exists. Started connected-app, device-connect, and Clinical Records intents retain their exact completion row for one bounded 30-minute continuation grace. The ordinary control-plane retention route serially claims only owner-dead expired rows from each expiry-indexed table in expiry-and-primary-key order, under a smaller control-artifact batch and max-batch ceiling, with PostgreSQL `FOR UPDATE SKIP LOCKED`. The unbound sensitive-action lane uses a partial expiry-and-token index so durable approval history cannot enlarge its transient claim scan. Overlapping retention runs skip already-claimed mailbox, Linq diagnostic, session, and transient-control rows instead of waiting or repeating work. Approval-backed sensitive-action rows stay outside this transient cleanup because their approval lifecycle remains authoritative.
 - Canonical vault storage is file-native under the vault root.
 - Human-facing truth lives in Markdown documents such as `CORE.md`, journal pages, and experiment pages.
 - Canonical markdown writes now reduce to one shared `packages/core` document seam with three target shapes only: singleton documents (for example `CORE.md` and `bank/memory.md`), slugged documents (for example `bank/automations/*.md`, `bank/experiments/*.md`, and registry-backed bank records), and dated documents (for example `journal/YYYY/YYYY-MM-DD.md`). Typed singleton JSON documents such as `bank/preferences.json` remain canonical too, but they stay out of the markdown seam on purpose.
@@ -2197,6 +2265,15 @@ eligible when the card alone completely satisfies the current request. New
 accepted input in the same live turn invalidates an earlier card-only decision,
 and attachment is rejected after the delivery context advances. Every
 card copies the immediately preceding single-date canonical meal-totals read.
+The existing `meal totals --resolve-goals` single-date read derives compact
+nutrition goal points and provenance from one canonical goal-family scan. It
+returns explicit missing, conflicting, incompatible, or capacity states rather
+than values that would require conversion or invented authority. Query owns
+date windows, point compatibility, the existing calorie floor, and the narrow
+complete historical bundle display exception; prompts retain health
+suitability, card intent, meal recovery, and explicit proposal acceptance.
+Ordinary totals reads keep their existing shape. No new state or mutation owner
+is introduced, and any subsequent meal or Goal mutation requires a fresh read.
 Both versions use the same deterministic text fallback, Linq capability
 boundary, and existing outbox idempotency lifecycle. Hosted inbound routing
 keeps the opaque conversation locator used for continuity separate from the
@@ -3215,21 +3292,13 @@ window to a well-formed past-or-near-present range. The shared Exa
 research-scout request recipe, query shape, and structured-output schema live
 in `@murphai/contracts` so local CLI and hosted Worker validation cannot drift.
 
-Hosted Linq typing-start events are verified and parsed strictly. For Linq's
-supported direct-chat signal, Web acknowledges before post-response work reads
-only the private home-chat blind index plus active access and crypto-root
-eligibility, then issues the existing best-effort runtime shell-prewarm hint.
-Unknown, ambiguous, inactive, or ineligible chats remain no-ops. Typing never
-plans onboarding, binds a route, appends mailbox work, starts processing,
-signals Temporal, sends a receipt, or adds reconciliation work. Cloudflare
-still rechecks live Web-owned admission under the per-user consent-mutation
-barrier before it starts a container, so Web's lookup grants no runtime
-authority. The optional Cloudflare owner admits a hint only when its existing
-consent-mutation lock is idle; repeated hints and hints arriving during
-authoritative ensure, withdrawal, or deletion are dropped before the FIFO.
-The single admitted hint then relies on the existing container lifecycle's
-coalescing instead of a second dedupe or warm-state owner. The Temporal mailbox
-signal remains the only durable wake authority for hosted runtime work. For a
+Hosted Linq typing-start events are verified, parsed strictly, and acknowledged
+without scheduling member lookup or runtime work. Current Web no longer sends
+member-specific shell-prewarm hints from typing, message routing, or instant
+start. The old authenticated receiver remains an accepting no-op during mixed
+Web/Worker deployment. The inventory coordinator owns speculative preparation;
+normal admitted execution remains the only member-binding path. The Temporal
+mailbox signal remains the durable wake authority for hosted runtime work. For a
 committed known-checkpoint Linq message, Web first verifies the checkpoint owner
 and canonical participant-aware live access as part of the unconditional
 Temporal pointer signal. Assistant Ask request and completion handlers likewise

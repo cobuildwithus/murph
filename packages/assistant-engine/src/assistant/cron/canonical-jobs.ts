@@ -50,6 +50,7 @@ export interface CanonicalAutomationAssistantCronJobRecord {
   activeUntil: string | null
   automationId: string
   relativePath: string
+  followUpSourceIntentId?: string
   continuityPolicy: 'fresh' | 'preserve'
   createdAt: string
   scheduleAnchorAt?: string
@@ -584,6 +585,7 @@ function normalizeCanonicalAssistantCronRecord(
 
   return {
     kind: 'automation',
+    followUpSourceIntentId: record.followUpSourceIntentId,
     activeUntil: record.activeUntil ?? null,
     automationId: record.automationId,
     relativePath: record.relativePath,

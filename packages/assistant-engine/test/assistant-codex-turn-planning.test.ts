@@ -369,11 +369,11 @@ describe('assistant Codex turn planning', () => {
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
     )).toMatchInlineSnapshot(`
       {
-        "direct": "551be59861418332447fc8347d0b89dc88a6f51bbe8bbe1b2725b431b2db705a",
+        "direct": "965bfe8dd1b746752ff11cd146d9b67ee3687b5c2c7eb04fee32fe6d5c132675",
         "group": "ead4ee04f2ca83fc9dd1db3a581b0ab3afa60b612d7c9372a26833b8bb98a904",
         "maintenance": "4c439dbf05ccb6d2cd7540b1ef7f94c99e898afd9b9658abefa860a8b421ca55",
         "outputOnly": "a83a04afea06e5290de36b14a0fee5d18970077a8294dde129b2e2dfa99116b4",
-        "scheduledEmail": "bc0a0719dfbad840214cbcefd0857111ce3a69d007a0efa49d2ebd02d7fd0618",
+        "scheduledEmail": "ce3a83489506edf6c0bbf653351d684405ae77f546642e15f8e422cdd11febfd",
       }
     `)
   })
@@ -1982,10 +1982,19 @@ describe('assistant Codex turn planning', () => {
     expect(plan.turnContextPrompt).not.toContain('Murph onboarding:')
     expect(plan.developerInstructions).toContain('Murph onboarding:')
     expect(plan.developerInstructions).toContain(
-      `Read and follow \`${skillRef}\` before interpreting or acting on any onboarding answer or decision to advance, pause, defer, skip, decline, or complete onboarding`,
+      'When the canonical Murph welcome is visible in this direct conversation, treat it as authoritative evidence that onboarding just began.',
     )
     expect(plan.developerInstructions).toContain(
-      'That skill is the single owner of resume behavior, aspiration capture and parking, foundation checkpoints, the contextual return, persistence, generic defer and skip meaning, and completion.',
+      'For that first-reply fast path, do not read the onboarding skill and do not run `vault-cli assistant onboarding resume-context --format json`.',
+    )
+    expect(plan.developerInstructions).toContain(
+      `Outside these visible opening exchanges—missing or ambiguous history, established later stages, an immediate request, or an overall pause or decline—read and follow \`${skillRef}\` before interpreting or acting on an onboarding answer or decision to advance, pause, defer, skip, decline, or complete onboarding`,
+    )
+    expect(plan.developerInstructions).not.toContain(
+      `Read and follow \`${skillRef}\` before interpreting or acting on any onboarding answer`,
+    )
+    expect(plan.developerInstructions).toContain(
+      'That skill is the single owner of resume behavior, aspiration capture and parking, foundation checkpoints, the contextual return, later-stage persistence, generic defer and skip meaning, and completion.',
     )
     const onboardingDecisionContract = [
       'During discovery, a stated health goal is context, not an action request.',
@@ -3023,6 +3032,7 @@ describe('assistant Codex turn planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: first.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
           telegramRichContentResponseCardsAvailable: true,
@@ -3803,6 +3813,7 @@ describe('assistant Codex turn planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: telegramReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
           telegramRichContentResponseCardsAvailable: true,
@@ -3853,6 +3864,7 @@ describe('assistant Codex turn planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: linqReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
           messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
@@ -3951,6 +3963,7 @@ describe('assistant Codex turn planning', () => {
         developerInstructions:
           linqCurrentMessageNotReactionEligiblePlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
           messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
@@ -3980,6 +3993,7 @@ describe('assistant Codex turn planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: telegramBusinessReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
           telegramRichContentResponseCardsAvailable: true,
@@ -4007,6 +4021,7 @@ describe('assistant Codex turn planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: telegramInferredBindingPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
           telegramRichContentResponseCardsAvailable: true,
@@ -4086,6 +4101,7 @@ describe('assistant Codex turn planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: plan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
           computerToolsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,

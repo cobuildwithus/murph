@@ -31,6 +31,26 @@ index d4d31ac9172093d9b0b84df0e1fd3a22dbab189b..6600d0abd4c81ce58250efb7f55bd193
              candidate.precedingUserTurnIndex === committedUserTurn.turnIndex &&
              matchesStoredCaptureValue(candidate.precedingUserMessageSignature, capture.committedUserTurn.signature));
          if (pendingAssistantMatches.length > 1) {
+diff --git a/dist/review-gpt-lib.mjs b/dist/review-gpt-lib.mjs
+index 65d9b9ca92011d1751f0e6b4a19aa9bee1bef702..2af81964fa14375f69d3cad22076c8a24a3456f0 100644
+--- a/dist/review-gpt-lib.mjs
++++ b/dist/review-gpt-lib.mjs
+@@ -1126,6 +1126,7 @@ export function formatSensitiveArtifactFailure(zipPath, findings) {
+ }
+ function listAllZipEntries(zipPath) {
+     const result = spawnSync('unzip', ['-Z1', zipPath], {
++        maxBuffer: 64 * 1024 * 1024,
+         encoding: 'utf8',
+     });
+     if (result.status !== 0) {
+@@ -1209,6 +1210,7 @@ function buildRepomixIgnorePaths(repoRoot, configuredPatterns, generatedPaths) {
+ function listZipManifestPaths(repoRoot, zipPath) {
+     const result = spawnSync('unzip', ['-Z1', zipPath], {
+         cwd: repoRoot,
++        maxBuffer: 64 * 1024 * 1024,
+         encoding: 'utf8',
+     });
+     if (result.status !== 0) {
 diff --git a/dist/thread-cli.mjs b/dist/thread-cli.mjs
 index 02756c3b597e2970392f7c29ef669318e2a4037f..5e9cb84d2e8a945cec0d3b2d6c4b9188744f81ff 100644
 --- a/dist/thread-cli.mjs
@@ -141,6 +161,58 @@ index dfdd71b7d5f53e0aed0ad438cb9b95c7892912d0..16caf02fa705b92cb231152d6a834c85
          candidate.precedingUserTurnIndex === committedUserTurn.turnIndex &&
          matchesStoredCaptureValue(candidate.precedingUserMessageSignature, capture.committedUserTurn.signature),
      );
+diff --git a/src/prepare-chatgpt-draft.js b/src/prepare-chatgpt-draft.js
+index 420aced0c8030a23f61e41e5112823fb90d8b0d8..6c99f01ff93167be8ec68317805da6a6b00c5e1f 100644
+--- a/src/prepare-chatgpt-draft.js
++++ b/src/prepare-chatgpt-draft.js
+@@ -1304,9 +1304,8 @@ function markedResponseDurationFailure({
+   responseMarker: requiredMarker,
+   responseElapsedMs,
+   minimumResponseMs = 5 * 60 * 1000,
+-  hasConcreteModelEvidence = false,
+ }) {
+-  if (!requiredMarker || isCurrentSelectionTarget(targetModel) || hasConcreteModelEvidence) {
++  if (!requiredMarker || isCurrentSelectionTarget(targetModel)) {
+     return '';
+   }
+ 
+@@ -1327,7 +1326,7 @@ function markedResponseDurationFailure({
+   const minimumLabel = Number.isSafeInteger(requiredMinimumMs) && requiredMinimumMs > 0
+     ? formatDurationMs(requiredMinimumMs)
+     : 'invalid configured duration';
+-  return `Assistant response reached the required completion marker after ${elapsedSeconds}s, below the ${minimumLabel} minimum for a marked concrete-model review without compatible response-model metadata. The response is untrusted and was not attested.`;
++  return `Assistant response reached the required completion marker after ${elapsedSeconds}s, below the ${minimumLabel} minimum for a marked concrete-model review. The response is untrusted and was not attested.`;
+ }
+ 
+ function formatDurationMs(durationMs) {
+@@ -5758,7 +5757,6 @@ async function main() {
+           responseMarker,
+           responseElapsedMs: Date.now() - responseWaitStartedAt,
+           minimumResponseMs: minimumMarkedResponseMs,
+-          hasConcreteModelEvidence: Boolean(modelAttestation.evidence),
+         });
+         if (responseDurationFailure) {
+           return {
+diff --git a/src/review-gpt-lib.mts b/src/review-gpt-lib.mts
+index 7a4a5ab6b4121fadbf294bf0c9d5a4f7e6af9dde..651d53290b2f83682fb41793f93dca18ca9dfd29 100644
+--- a/src/review-gpt-lib.mts
++++ b/src/review-gpt-lib.mts
+@@ -1560,6 +1560,7 @@ export function formatSensitiveArtifactFailure(
+ 
+ function listAllZipEntries(zipPath: string): string[] {
+   const result = spawnSync('unzip', ['-Z1', zipPath], {
++    maxBuffer: 64 * 1024 * 1024,
+     encoding: 'utf8',
+   });
+   if (result.status !== 0) {
+@@ -1660,6 +1661,7 @@ function buildRepomixIgnorePaths(repoRoot: string, configuredPatterns: string[],
+ function listZipManifestPaths(repoRoot: string, zipPath: string): string[] {
+   const result = spawnSync('unzip', ['-Z1', zipPath], {
+     cwd: repoRoot,
++    maxBuffer: 64 * 1024 * 1024,
+     encoding: 'utf8',
+   });
+   if (result.status !== 0) {
 diff --git a/src/thread-cli.mts b/src/thread-cli.mts
 index 0159d95b3196142b6d407e3c773aa512bdc31b7a..f9d04169a1f277bf03bc32bd9316d65e7de8f28f 100644
 --- a/src/thread-cli.mts

@@ -172,6 +172,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   onProviderRequestStarted?: AssistantProviderRequestStartHook | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   operatorAuthority?: AssistantOperatorAuthority
+  outboxFollowUpEvaluatedThrough?: AssistantOutboxIntent['followUpEvaluatedThrough']
   outboxAutomationAuthority?: AssistantOutboxIntent['automationAuthority']
   outboxAutomationContextReferences?: AssistantOutboxIntent['automationContextReferences']
   outboxPlannedOccurrenceAt?: string | null

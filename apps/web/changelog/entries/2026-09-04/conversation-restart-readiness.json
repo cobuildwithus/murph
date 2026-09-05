@@ -7,8 +7,14 @@
     "priority": 3,
     "title": "Less waiting when a conversation restarts",
     "summary": "Murph makes better use of ready capacity to reduce avoidable waits when you return to a conversation.",
-    "details": "Your conversation still restores its saved context before processing, and ordinary startup remains available when ready capacity is busy.",
-    "relevanceTags": ["conversation", "reliability"],
-    "sourcePullRequests": [2822]
+    "details": "More than one conversation can start from ready capacity at the same time. Each restores its own saved context first; ordinary startup remains available when ready capacity is busy.",
+    "relevanceTags": [
+      "conversation",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      2822,
+      2887
+    ]
   }
 }

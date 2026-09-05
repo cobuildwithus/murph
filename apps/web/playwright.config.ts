@@ -2,10 +2,12 @@ import { defineConfig } from "@playwright/test";
 
 import { createHostedWebSmokeEnvironment } from "./next-artifacts";
 
-// Deterministic viewport-overflow gate. Playwright owns the dev-server
-// lifecycle via `webServer`, booting hosted-web with the same placeholder
-// environment the smoke lane uses (`createHostedWebSmokeEnvironment`) so the
-// public marketing pages render without real secrets, auth, or a database.
+// Deterministic browser-test gate. Playwright owns the dev-server lifecycle via
+// `webServer`, booting hosted-web with the same placeholder environment the
+// smoke lane uses (`createHostedWebSmokeEnvironment`) so public pages render
+// without real secrets, auth, or a database. The viewport package command
+// prepares generated inputs before Playwright starts its readiness deadline;
+// direct config consumers keep the self-preparing server command.
 //
 // The server uses its own dist dir suffix (`.next-smoke-overflow`) so it never
 // contends with the concurrent `dev:smoke` lock in `apps/web verify`.
@@ -13,6 +15,10 @@ import { createHostedWebSmokeEnvironment } from "./next-artifacts";
 const host = "127.0.0.1";
 const port = Number.parseInt(process.env.VIEWPORT_OVERFLOW_PORT ?? "3210", 10);
 const baseURL = `http://${host}:${port}`;
+const devCommand =
+  process.env.MURPH_PLAYWRIGHT_GENERATED_INPUTS_PREPARED === "1"
+    ? "dev:prepared-local-env"
+    : "dev:local-env";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -37,7 +43,7 @@ export default defineConfig({
   // CI is sufficient — no dependency on a system Google Chrome install.
   projects: [{ name: "chromium", use: { browserName: "chromium" } }],
   webServer: {
-    command: `pnpm dev:local-env --hostname ${host} --port ${port}`,
+    command: `pnpm ${devCommand} --hostname ${host} --port ${port}`,
     url: `${baseURL}/api/internal/health`,
     env: {
       ...createHostedWebSmokeEnvironment(process.env),

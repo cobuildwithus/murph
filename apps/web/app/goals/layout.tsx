@@ -23,7 +23,6 @@ export default async function GoalsLayout({ children }: { children: ReactNode })
       <StickyNav
         authenticated={authenticated}
         githubStarCount={githubStarCount}
-        preloadAuthPanel
       />
       <main
         id="goal-content"

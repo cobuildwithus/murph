@@ -1,7 +1,7 @@
 import {
   deriveHostedExecutionErrorCode,
 } from "@murphai/hosted-execution";
-import { isHostedStandbySlotName } from "../standby-runner-contract.js";
+import { isHostedRunnerTargetName } from "../standby-runner-contract.js";
 
 import { ensureRunnerStateSchema } from "./runner-state-schema.js";
 import {
@@ -58,6 +58,13 @@ export class RunnerWriteFenceAlreadyActiveError extends Error {
     super("Hosted runner write fence is already active.");
     this.name = "RunnerWriteFenceAlreadyActiveError";
     this.record = record;
+  }
+}
+
+export class RunnerContainerReservationLostError extends Error {
+  constructor() {
+    super("Hosted runner container reservation changed before write-fence admission.");
+    this.name = "RunnerContainerReservationLostError";
   }
 }
 
@@ -179,13 +186,6 @@ export class RunnerStateStore {
     }
   }
 
-  async reserveRunnerContainerStopTargetForShellPrewarm(input: {
-    runnerContainerName: string;
-    userId: string;
-  }): Promise<boolean> {
-    return await this.reserveRunnerContainerStopTarget(input);
-  }
-
   async reserveRunnerContainerStopTarget(input: {
     runnerContainerName: string;
     userId: string;
@@ -232,6 +232,15 @@ export class RunnerStateStore {
       throw new RunnerWriteFenceAlreadyActiveError(this.readStateFromMetaSync(meta));
     }
 
+    const requestedContainerName = requireRunnerContainerName(input.runnerContainerName);
+    const reservedContainerName = normalizeRunnerContainerNameOrNull(meta.active_runner_container_name);
+    if (
+      (reservedContainerName !== null && reservedContainerName !== requestedContainerName)
+      || (isHostedRunnerTargetName(requestedContainerName) && reservedContainerName !== requestedContainerName)
+    ) {
+      throw new RunnerContainerReservationLostError();
+    }
+
     const nextGeneration = normalizeNonNegativeInteger(meta.active_generation) + 1;
     const startedAt = new Date().toISOString();
     const attemptId = createRuntimeWriteAttemptId();
@@ -245,7 +254,7 @@ export class RunnerStateStore {
     meta.active_custom_inference_envelope = null;
     meta.active_platform_ai_allowed = null;
     meta.active_reason = processingMode;
-    meta.active_runner_container_name = requireRunnerContainerName(input.runnerContainerName);
+    meta.active_runner_container_name = requestedContainerName;
     meta.active_started_at = startedAt;
     meta.active_workspace_version = null;
     this.writeMetaRowSync(meta);
@@ -812,7 +821,7 @@ export class RunnerStateStore {
     meta.active_custom_inference_envelope = null;
     meta.active_platform_ai_allowed = null;
     meta.active_reason = null;
-    if (!isHostedStandbySlotName(meta.active_runner_container_name)) {
+    if (!isHostedRunnerTargetName(meta.active_runner_container_name)) {
       meta.active_runner_container_name = null;
     }
     meta.active_started_at = null;

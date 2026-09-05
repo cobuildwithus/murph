@@ -105,7 +105,7 @@ describe('assistant dynamic context prompt blocks', () => {
     const existingFileGuidance = 'For an existing saved file, pass its current vault-relative ref directly'
     expect(prompt).toContain(existingFileGuidance)
     expect(tool!.description).toContain(existingFileGuidance)
-    expect(prompt).toContain('never move or copy existing, user-owned, canonical, or durable files there')
+    expect(prompt).toContain('Never stage possible later sends or move or copy existing files there.')
     expect(prompt).toContain('the runtime adds the exact approval link outside model context')
     expect(prompt).not.toMatch(/only (?:be sent to|for) (?:the current |your )?iMessage/iu)
   })

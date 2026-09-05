@@ -1,44 +1,20 @@
 # Persistence, recovery, and follow-up
 
-Read the top-level `../SKILL.md` first. This reference owns the early-stall
-one-shot, canonical context persistence, finite scheduled recovery, and reply
-and follow-up constraints. Read it whenever the current turn persists or
+Read the top-level `../SKILL.md` first. This reference owns canonical foundation
+context persistence, finite scheduled recovery, and reply and follow-up
+constraints. Read it whenever the current turn persists or
 interprets a skip or deferral, handles a scheduled onboarding occurrence, or
 needs the cross-stage reply rules.
 
-#### Arm the early-stall check-in
-
-Setup drop-off is most likely in these first minutes, so in the same turn
-that handles the user's minimal-identity answer, when `murph.automation` is
-available, save one scheduled one-shot before the visible reply. Arm it only
-in that turn: skip it when the minimal-identity prompt was never asked in this
-conversation or when the flow is resuming past this point. Saving the same
-slug twice converges on one automation, so a duplicate save is harmless, but
-never save it on a later turn. Read the current clock first (for example
-`date -u +%Y-%m-%dT%H:%M:%SZ` in the workspace) and compute `at` from that
-result; do not guess the time or offset. Use:
-
-- `action: "save"`
-- `slug: "onboarding-early-stall-check-in"`
-- `title: "Onboarding early-stall check-in"`
-- `summary: "One-shot check-in if the user goes quiet right after starting onboarding."`
-- `schedule: { "kind": "at", "at": "<now + 15 minutes, ISO with offset>" }`
-- `tags: ["assistant", "scheduled", "onboarding"]`
-- `instructions`: exactly the decision policy below.
-
-```text
-Onboarding just started and the user answered the first question or two. This one-shot exists only to notice a mid-setup stall. Read the recent conversation first. Return skip unless all of these hold: onboarding is still open, the latest message is Murph's own onboarding question, that question has gone unanswered for at least ten minutes, and the user has not asked to pause or continue later. Otherwise reply in chat with one short, light line in Murph's voice: check whether they are still around, keep it playful and pressure-free, and make clear they can pick this up anytime or tell Murph to take a different approach if this style is not working for them. The meaning is "hey, still there? don't leave me hanging - and if you'd rather do this differently, just say so." Use natural wording, not a fixed script. Do not repeat the open question verbatim, do not add a new setup question, and do not mention schedules, automations, or internal state. This check-in happens at most once; any later scheduled continuation belongs only to the finite managed next-day recovery occurrence below.
-```
-
-If the save fails or the tool is unavailable, continue onboarding normally
-without retrying or mentioning it.
-
+The injected onboarding instructions own the early-stall check-in and identity
+persistence. Do not read this reference for that opening transition.
 
 ## Context persistence
 
 Route useful answers to their existing canonical owner in the same turn. The
 parent normally saves the smallest truthful canonical fact or durable source
-before its visible reply. The dense foundation memo in
+before its visible reply. The opening identity exchange follows the injected
+onboarding instructions. The dense foundation memo in
 `aspiration-foundation-delegation.md` is the explicit exception: the durably
 accepted message or transcript is the source, and its three bounded
 children own the named canonical persistence families without a duplicate
@@ -122,7 +98,7 @@ reschedule the owner.
 
 ## Reply and follow-up rules
 
-- Except for the bundled minimal-identity prompt in `../SKILL.md` and the
+- Except for the bundled minimal-identity prompt in the injected opening instructions and the
   foundation brain-dump memo in `aspiration-foundation-delegation.md`, ask at
   most one question per reply. Input affordances for that question do not count
   as extra questions.
@@ -146,8 +122,8 @@ reschedule the owner.
 - If the last onboarding question is still unanswered, do not send a different
   setup question. Wait for a reply or later inbound message instead of
   escalating a drip questionnaire. Inside the first-minutes stall window, the
-  scheduled early-stall check-in above is the only permitted nudge and it never
-  repeats. The separate finite three-day recovery rule above owns the only
+  scheduled early-stall check-in in the injected onboarding instructions is
+  the only permitted nudge and it never repeats. The separate finite three-day recovery rule above owns the only
   later scheduled exception.
 - Skip visible onboarding advancement when the user asks for no follow-up, the
   situation is urgent or safety-sensitive, the immediate task failed and needs

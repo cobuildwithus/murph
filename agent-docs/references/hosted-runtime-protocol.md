@@ -99,7 +99,11 @@ accepted wake becomes that same positive immediate-recheck edge; a later wake
 is rejected for the existing outer reconciliation owner.
 A failed best-effort signal
 leaves the durable preference intact; the next invocation and the mandatory
-provider-entry revalidation remain the recovery path. The signal carries no
+provider-entry consistency check remain the recovery path. This compares the
+invocation provider with the saved provider; it is not input admission or
+target/audience authorization. Handoff and unavailable settings reads preserve
+accepted work for retry. The warm-wake consistency check precedes mailbox
+prefetch, which can perform usage-denial bookkeeping. The signal carries no
 provider value or credential, and `runtime_recheck_requested` remains a
 facts-read-only signal for its existing callers.
 
@@ -175,8 +179,9 @@ asynchronous admission and cancels its exact pending process handle.
 
 Detached MultiAgent V2 work does not become a process-memory queue. Before the
 root reply, Murph retains a durable accepted input, canonical fact, or raw
-source and gives each child its exact source words, ids, or refs. A loaded skill
-may assign one independent canonical record family per child, with every write
+source and gives each child its exact source words, ids, or refs. The injected
+opening instructions or a loaded skill may assign one independent canonical
+record family per child, with every write
 idempotently attributable to that source. A terminal lifecycle receipt remains
 advisory; canonical readback is completion proof. If the member needs the result
 in the current reply, the root keeps the work and uses normal progress updates.
@@ -1569,6 +1574,21 @@ After rollout, verify that conversation lane floors converge toward
 checkpointed imported prefixes and run a Telegram reply across a controlled
 reload with no duplicate reply or multi-minute stall.
 
+The existing Web instant Linq reply owner may answer the first two opening
+messages of an eligible direct text-only conversation. Its second reply is only
+the bundled identity question after the confirmed canonical welcome. Existing
+chat-locked delivery rows cap the path at two and retain exact-event replay;
+no step field or second outbox exists. Web claims before appending the second
+inbound, and normal runtime egress consults that same ledger. Both confirmed
+outgoing replies enter the ordinary encrypted conversation mailbox with their
+inbound references, so import retains continuity and suppresses another answer.
+Supplied identity, skips, immediate requests, missing history, and later turns
+use the normal runtime. The existing shell/process warmup is unchanged; no
+synthetic user message or speculative onboarding provider turn is introduced.
+New Web with an older compatible runner uses the existing external-reply import
+and egress contract; identity saves remain synchronous until the new prompt is
+loaded. New runner with older Web preserves the runtime first-reply fast path.
+
 Hosted Linq and Telegram conversation webhook routes read the raw body and
 verification headers only in the route/service process. That code verifies the
 provider payload, appends the canonical encrypted mailbox item transactionally,
@@ -2702,7 +2722,12 @@ persists on the existing mailbox item across pending, sending, recording,
 retryable recording, and preemption transitions, and ends when existing
 completion removes the item. Restore promotes the exact legacy pending
 retained-job shape to the marker once so rollout does not strand an existing
-owner; projection after that compatibility read is marker-based. The set admits
+owner; projection after that compatibility read is marker-based. An idle restore
+also compares the restored exact owner set with the committed checkpoint. An
+unpublished owner enters the existing fenced checkpoint path, including when
+the default pass imports nothing and all retained retries remain in the future.
+The default pass with current ownership remains a no-op; publication neither
+executes a future job early nor changes its retry time. The set admits
 at most one owner per connection and is capped by the existing 100-connection
 complete-snapshot hydration authority. Exact continuation membership is independent
 of the global handled frontier: another connection's earlier retry cannot veto

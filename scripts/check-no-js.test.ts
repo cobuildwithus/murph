@@ -158,6 +158,81 @@ describe("check-no-js hygiene guards", () => {
     }
   });
 
+  it.each([
+    [".next/types", "app"],
+    [".next/types", "src/app"],
+    [".next-smoke/dev/types", "src/app"],
+  ])("removes orphan route guards in %s while preserving live %s guards", async (typesDir, appDir) => {
+    const tempRoot = process.env.MURPH_VITEST_TEMP_ROOT;
+    if (!tempRoot) throw new Error("MURPH_VITEST_TEMP_ROOT is required.");
+    const root = await mkdtemp(path.join(tempRoot, "next-orphan-guards-"));
+    const nextEnvPath = path.join(root, "next-env.d.ts");
+    const makeGuard = async (relativePath: string, sourcePath: string) => {
+      const guardPath = path.join(root, relativePath);
+      const importedPath = path.relative(path.dirname(guardPath), path.join(root, sourcePath))
+        .replace(/\\/gu, "/");
+      const contents = `// File: synthetic route fixture\nimport * as entry from '${importedPath}'\n`;
+      await mkdir(path.dirname(guardPath), { recursive: true });
+      await writeFile(guardPath, contents);
+      return { guardPath, contents };
+    };
+    try {
+      await mkdir(path.join(root, appDir), { recursive: true });
+      await writeFile(path.join(root, appDir, "page.tsx"), "export default function Page() {}\n");
+      await writeFile(path.join(root, appDir, "layout.jsx"), "export default function Layout() {}\n");
+      await mkdir(path.join(root, appDir, "api/live"), { recursive: true });
+      await writeFile(path.join(root, appDir, "api/live/route.ts"), "export function GET() {}\n");
+      await writeFile(nextEnvPath, buildNextEnvDeclarationArtifact(`./${typesDir}/routes.d.ts`));
+      const orphan = await makeGuard(`${typesDir}/app/api/removed/route.ts`, `${appDir}/api/removed/route.js`);
+      const stableOrphan = await makeGuard(".next/types/app/api/old/route.ts", `${appDir}/api/old/route.js`);
+      const page = await makeGuard(`${typesDir}/app/page.ts`, `${appDir}/page.js`);
+      const layout = await makeGuard(`${typesDir}/app/layout.ts`, `${appDir}/layout.js`);
+      const route = await makeGuard(`${typesDir}/app/api/live/route.ts`, `${appDir}/api/live/route.js`);
+      const unknown = await makeGuard(`${typesDir}/app/custom.ts`, `${appDir}/missing.js`);
+      const unrecognized = await makeGuard(`${typesDir}/app/unrecognized/route.ts`, `${appDir}/unrecognized/route.js`);
+      unrecognized.contents = "export {}; // unrelated generated shape\n";
+      await writeFile(unrecognized.guardPath, unrecognized.contents);
+      const outside = await makeGuard(`${typesDir}/app/elsewhere/route.ts`, "other/route.js");
+      await writeFile(path.join(root, typesDir, "validator.ts"), "import './removed.js';\n");
+
+      await ensureNextRouteTypeStub(nextEnvPath);
+
+      await expect(access(orphan.guardPath)).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(access(stableOrphan.guardPath)).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(access(path.join(root, typesDir, "validator.ts"))).rejects.toMatchObject({ code: "ENOENT" });
+      for (const retained of [page, layout, route, unknown, unrecognized, outside]) {
+        await expect(readFile(retained.guardPath, "utf8")).resolves.toBe(retained.contents);
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["app", "app/nested"])("preserves route guards behind a generated %s symlink", async (linkedDirectory) => {
+    const tempRoot = process.env.MURPH_VITEST_TEMP_ROOT;
+    if (!tempRoot) throw new Error("MURPH_VITEST_TEMP_ROOT is required.");
+    const root = await mkdtemp(path.join(tempRoot, "next-linked-guards-"));
+    const outside = await mkdtemp(path.join(tempRoot, "next-retained-guards-"));
+    const nextEnvPath = path.join(root, "next-env.d.ts");
+    const linkPath = path.join(root, ".next/types", linkedDirectory);
+    const importedPath = path.relative(linkPath, path.join(root, "app/route.js"))
+      .replace(/\\/gu, "/");
+    const guard = `// File: synthetic route fixture\nimport * as entry from '${importedPath}'\n`;
+    try {
+      await mkdir(path.dirname(linkPath), { recursive: true });
+      await symlink(outside, linkPath, "dir");
+      await writeFile(path.join(outside, "route.ts"), guard);
+      await writeFile(nextEnvPath, buildNextEnvDeclarationArtifact("./.next/types/routes.d.ts"));
+
+      await ensureNextRouteTypeStub(nextEnvPath);
+
+      await expect(readFile(path.join(outside, "route.ts"), "utf8")).resolves.toBe(guard);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a root-params import outside the accepted route-types directory", async () => {
     const testTempRoot = process.env.MURPH_VITEST_TEMP_ROOT;
     if (!testTempRoot) {

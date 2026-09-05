@@ -37,32 +37,14 @@ Last verified: 2026-08-31
   for the per-user Cloudflare execution barrier to serialize behind earlier
   ensures, re-read the Web-owned grant, clear its write fence, and stop the
   runner. Every later ensure re-reads the grant; renewal waits behind the stop
-  before granting. An instant-start, authenticated established-direct-chat
-  typing, or eligible established-direct-message shell-prewarm hint uses that
-  same per-user barrier and live admission read. The message producer may start
-  only after direct routing preparation resolves an extant active member,
-  before KMS and transaction work; the planner still
-  repeats authority inside the transaction. The typing producer resolves only
-  the private home-chat blind index and performs an advisory active-access/root
-  check after acknowledging the webhook. Neither producer receives a member id
-  from Linq or grants runtime authority. The shared
-  HTTP route obtains the named runner stub without binding durable state.
-  Because this hint is optional, it is admitted only when the barrier is idle;
-  repeated hints and hints arriving during authoritative ensure, withdrawal, or
-  deletion return without joining the FIFO. The
-  optional read abandons after a fixed 250 ms
-  deadline so it cannot hold authoritative processing, withdrawal, or deletion
-  behind the ordinary Web-control timeout; only allowed admission reserves and
-  binds its exact versioned container in the existing user-control stop-target
-  field, then waits for the container to register the hint before releasing the
-  barrier. Withdrawal and account deletion consume that exact target, while
-  container destruction supersedes a pending platform wait before stopping it.
-  Web admission also requires an
-  extant, non-suspended member, so a hint queued behind account deletion cannot
-  treat the deleted consent row as a compatible legacy grant and recreate
-  runner state. Cleanup failure must never restore authority. Keep Settings,
-  export, and deletion available without waking the paused runtime; only
-  renewed consent may restore processing.
+  before granting. Current Web producers no longer send member-specific shell
+  prewarm hints. The authenticated compatibility receiver accepts older callers
+  under its existing bounded admission barrier but creates no container or
+  member binding. Pristine global inventory is content-free and memberless;
+  only normal admitted execution binds it to a member. Web admission requires
+  an extant, non-suspended member, and cleanup failure never restores authority.
+  Keep Settings, export, and deletion available without waking the paused
+  runtime; only renewed consent may restore processing.
 - Treat suspected breaches, unauthorized access, unauthorized disclosures, vendor incidents, and accidental tracking disclosures involving identifiable health data as FTC HBNR triage events; use `agent-docs/compliance/ftc-hbnr-incident-plan.md` before deciding that notice is not required.
 - Do not add third-party advertising pixels, retargeting SDKs, behavioral ad attribution, customer-list matching, tag-manager destinations, or analytics destinations that receive health data or health-context metadata; use `agent-docs/compliance/health-data-tracking-and-ads-rule.md` for any telemetry or marketing-tool review.
 - Hosted Web must keep the global `Referrer-Policy` at `strict-origin` or
@@ -479,8 +461,10 @@ Last verified: 2026-08-31
   after Stripe returns and before decrypting a Checkout URL or projecting retry
   permission, so membership removal during provider I/O degrades to
   status/cancel-only recovery; fulfillment remains bound to the frozen purchase.
-  Family admission first binds the
-  opaque selector to the owner's roster before locking the beneficiary. A
+  Family admission locks the owner before a distinct beneficiary, matching
+  Family subscription reconciliation. It binds the opaque selector to that
+  owner's roster before taking the beneficiary lock. Hosted-group sponsorship
+  remains on its separate beneficiary-first ledger protocol. A
   payer-wide conflict with another frozen target may be inspected or canceled
   but must never return a payable URL or retry permission, regardless of the
   requested or frozen target kind. Active-purchase projection releases a
@@ -733,7 +717,7 @@ Last verified: 2026-08-31
 - Settings account linking must use Privy's link or update operation for the exact app-session Privy principal; login operations must not stand in for linking. Settings mounts one page-level Privy provider and opens the provider flow directly from the user action. Normal provider success syncs only the exact returned phone. Privy's `account_transfer_required` callback is a non-terminal handoff into its transfer UI, so a later provider-flow exit is only a wake-up: web management-reads the same Privy user and persists only a proven change from the phone observed immediately before the provider flow. An unchanged phone is a quiet cancellation, an absent intermediate replacement remains retryable, and an ambiguous Murph save retries the same expectation without reopening Privy. On remount, a phone present on the exact Privy principal but absent or different in the Murph projection is reconciled as that exact-phone expectation instead of reopening Privy. When Privy transfers a phone from another Privy principal, automatic reconciliation additionally requires a typed provider not-found for that exact source principal and two exact, transactionally locked proofs that the source Murph member is either the pristine `not_started` signup scaffold or the untouched legacy automatic Pulse-trial scaffold. A member with a starter grant is active product state and is never disposable through this transfer path. The allowlist includes only the known system-created billing, routing, workspace, mailbox, counter, crypto, consent, unused web-invite, and same-Privy web-session shapes; any member activity, product state, device state, connected-app or clinical state, credits, referrals, shares, feedback, phone-bound invitation/outreach, or ambiguous state fails closed to support. Murph first commits a source suspension fence, then the existing account-deletion owner performs provider and billing cleanup. Its final transaction management-reads the target Privy principal immediately beforehand, takes the phone lock before sorted source/target member locks, revalidates the exact disposable scaffold, persists the cleanup receipt, deletes that fully proven scaffold, and attaches the phone plus channel projection to the target atomically. General or active member data is never auto-deleted because any such state fails the disposable-source gate.
 - Settings linked-account removal starts with Privy's unlink operation for the exact app-session principal. Settings derives each method from the full management-read user, including top-level Telegram, and offers unlink only when that provider identity exactly matches the canonical identity; provider ambiguity or mismatch fails closed, and the browser rechecks the same canonical value immediately before unlink. Web mutates Murph state only after a bounded management read proves that account type absent and another supported verified email, phone, or Telegram sign-in remains. Because this reduces authority, fresh same-member authentication—not active billing—is its access boundary. The transaction locks the member, requires the submitted provider identity to match the current blind index when one exists, and clears only the identity-owned sign-in, sender, alias, and messaging-route projections. Modern Linq routing is owned by an exact contact kind and lookup-key match; only legacy kindless Linq routing is treated as phone-owned. Billing email and unrelated channels remain intact. A stale tab cannot clear a replacement identity. Telegram replacement completes this revocation before opening the ordinary link flow, so Privy never receives a second same-type link attempt.
 - Rebuildable inbox-derived artifacts can still contain sensitive health data and must be treated as high-sensitivity runtime material. Never persist provider secrets alongside those artifacts.
-- Hosted clinical-record retrieval is a web-owned credential and provider-egress boundary. Web alone stores encrypted FHIR access/refresh tokens, resolves the provider base URL, follows same-base pagination, and returns one size-bounded sanitized JSON page through signed, active-write-fenced runtime callbacks. The system mailbox and Temporal signal contain only `{runId, generation}`; runtime descriptors contain only opaque ids and hashes. Never put tokens, raw patient ids, raw FHIR base/page URLs, authorization headers, raw page bodies, or clinical values in Postgres, Temporal state, assistant session state, model prompts, diagnostics, or logs. `@murphai/vault-usecases/clinical-records` may atomically stage only the already-bounded sanitized pages in private `.runtime/operations/clinical-records/**` state so the encrypted hosted workspace can resume after foreground preemption; that non-canonical checkpoint is portable, schema- and run-bound, and removed on terminal completion or rejection. Full semantic validation still precedes final raw-page/manifest persistence. Web current-run authority is rechecked immediately before the raw batch and again before canonical mutation. The initial backend lane allows one retrieval generation per unique member/provider connection so immutable raw evidence cannot grow through repeated retrieval jobs; retry, reconnect, or refresh must remain closed until a bounded retention lifecycle preserves every canonical raw reference. A terminal `authorization-required` response is web-owned: web clears unusable credentials and marks the connection `needs_reauth`, while runtime must not overwrite that terminal outcome.
+- Hosted clinical-record retrieval is a web-owned credential and provider-egress boundary. Web alone stores encrypted FHIR access tokens, resolves the provider base URL, follows same-base pagination, and returns one size-bounded sanitized JSON page through signed, active-write-fenced runtime callbacks. The system mailbox and Temporal signal contain only `{runId, generation}`; runtime descriptors contain only opaque ids and hashes. Never put tokens, raw patient ids, raw FHIR base/page URLs, authorization headers, raw page bodies, or clinical values in Postgres, Temporal state, assistant session state, model prompts, diagnostics, or logs. `@murphai/vault-usecases/clinical-records` may atomically stage only the already-bounded sanitized pages in private `.runtime/operations/clinical-records/**` state so the encrypted hosted workspace can resume after foreground preemption; that non-canonical checkpoint is portable, schema- and run-bound, and removed on terminal completion or rejection. Full semantic validation still precedes final raw-page/manifest persistence. Web current-run authority is rechecked immediately before the raw batch and again before canonical mutation. Repeat authorization keeps the same member/provider source and encrypted patient binding, with at most eight immutable snapshots per source and twenty sources per member. Temporary patient context and access tokens are erased at terminal completion or disconnect; the binding remains encrypted with existing member/connection/epoch AAD. Acquisition and callback persistence recheck live consent under the shared member lock, and callback persistence rechecks suspension. Withdrawal schedules clinical cleanup before the runtime stop barrier; cleanup skips a renewed grant. A terminal `authorization-required` response clears access and keeps `needs_reauth`; a same-generation runtime may finalize saved counts without reactivating it.
 - Clinical query-scope and slice ids are bounded adapter-owned acquisition
   identifiers. They may be stored in the run plan, runtime descriptor,
   operational page claim, checkpoint, and raw manifest, but must never contain
@@ -745,7 +729,7 @@ Last verified: 2026-08-31
 - `vault-cli route estimate` is an env-gated external egress surface backed by `MAPBOX_ACCESS_TOKEN`. Keep the token in env only, treat any Mapbox geocoding or Search Box lookup as temporary/non-persistent, do not persist route inputs or outputs in Murph state, and only return route geometry when the caller explicitly asks for it. Hosted execution may expose that same CLI path only when the Worker secret is intentionally configured for Cloudflare's runner egress intercept; the raw token must not be copied into the hosted runtime env.
 - `vault-cli research scout` is an env-gated external egress surface backed by `EXA_API_KEY`. Conversation-facing single-scout input requires `mode: "focused"`; managed broad discovery uses `research scout-batch`. Every provider-bound profile value in either lane must belong to the finite, field-specific, server-owned public concept set. Focused mode synthesizes a fixed provider question from those values and never accepts arbitrary question prose or categories. A question that cannot be represented by the set must make no Exa call. Batch lanes retain the legacy tag-only query, prompt, and provider route. The tool must not persist Exa output or profile payloads; assistant flows may append only curated, deduplicated, non-diagnostic research-scout summaries through the normal knowledge surface.
 - Hosted Clinical Records keeps Epic SMART client configuration, OAuth state,
-  PKCE verifiers, patient ids, access tokens, and refresh tokens in `apps/web`.
+  PKCE verifiers, encrypted patient binding/context and access tokens in `apps/web`.
   Patient/token/verifier/cursor ciphertext uses purpose-specific hosted crypto
   lanes and exact member/connection/version AAD; raw secrets must never enter
   prompts, Temporal, assistant state, workspace snapshots, logs, callback
@@ -1506,11 +1490,13 @@ locally readable.
   isolation flag enabled until the configured compatibility date provides the
   same boundary by default. Use structured logs, Durable Object status,
   Container inventory, and managed deploy smoke as the diagnostic boundary.
-- The ENAM runner standby must remain content-free and memberless until an
+- Ready inventory in the global runner fleet must remain content-free and memberless until an
   exact `UserRunner` claim. Its coordinator may persist only release/region,
   opaque slot names, and opaque claim tombstones; it must never receive a
   member id, workspace reference, provider credential, or canonical product
-  fact. The slot's immutable binding is the sole opaque-name-to-member mapping.
+  fact. The container's immutable binding is the sole opaque-name-to-member mapping
+  for both warm and cold allocations. Legacy ENAM targets preserve their original
+  region and namespace; new global targets must never be parsed as member names.
   Before provider credential minting, invocation, wake, or cleanup, the
   per-member owner must re-read that binding and require the exact member,
   release, region, and slot. A claimed slot is never reusable across members;
@@ -1609,6 +1595,13 @@ locally readable.
 - Assistant turns may execute the same canonical local assistant/vault tool catalog shape through the active vault's per-turn Murph runtime context. Message-triggered assistant auto-reply now has the same full Murph autonomy as other assistant turns, including assistant runtime control plus canonical `memory` / `automation` and canonical vault write surfaces, so any accepted inbound channel message is effectively an operator-authorized action for that bound user and vault. The hard-cut assistant command surface is Codex App Server only: it may run with normal local CLI/filesystem/env authority through Codex-specific launch/config options, while legacy OpenAI-compatible endpoint flags are not part of the command surface. That privileged Codex App Server posture still does not grant hosted-control-plane authority outside the local runtime boundary.
 
 ## Scheduled assistant action authority
+
+An optional private follow-up attachment is a staged message effect, not general
+automation-write authority. The host permits it only on eligible original turns,
+binds it to actual outbox dispatch, and rejects recursive attachments. Due child
+turns reuse the existing read-only scheduled configuration, with fresh committed
+history and no mutation tools or hosted write ports. The source and parent IDs
+are host-owned canonical fields, not model-selectable attachment arguments.
 
 A scheduled tool action is authorized only by the trusted runtime's exact
 `automationId + occurrenceAt` pair when the turn trigger is `automation-cron` and

@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   prepareHostedCryptoDomainRootCandidates,
+  revalidatePreparedHostedDomainRootForWebTx,
   prewarmPreparedHostedCryptoDomainRootForWeb,
   type PreparedHostedCryptoDomainRootCandidates,
   unwrapHostedDomainRootForWeb,
@@ -227,8 +228,6 @@ const mocks = vi.hoisted(() => {
       rootKeyId: `root-${input.domain}-active`,
       userId: input.userId,
     }),
-    resolveHostedLinqTypingPrewarmMemberId:
-      vi.fn(async (): Promise<string | null> => null),
     unwrapHostedDomainRootForWebByRootKeyId: vi.fn(),
     unwrapHostedDomainRootsForWebByRootKeyIds: vi.fn(),
   };
@@ -293,8 +292,6 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq", async (importOrigin
       mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
     resolveHostedLinqMailboxPayloadRootPrewarmMemberId:
       mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
-    resolveHostedLinqTypingPrewarmMemberId:
-      mocks.resolveHostedLinqTypingPrewarmMemberId,
   };
 });
 
@@ -1236,11 +1233,16 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         }),
     );
     mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mockImplementation(
-      async (input: { envelope: { eventId: string }; tx: unknown }) =>
-        mocks.appendHostedMailboxEnvelopeTx({
+      async (input: Parameters<typeof import("@/src/lib/hosted-mailbox/store").appendHostedMailboxEnvelopeWithPreparedCryptoTx>[0]) => {
+        await revalidatePreparedHostedDomainRootForWebTx({
+          prepared: input.prepared,
+          tx: input.tx,
+        });
+        return mocks.appendHostedMailboxEnvelopeTx({
           envelope: input.envelope,
           tx: input.tx,
-        }),
+        });
+      },
     );
     mocks.planHostedLinqMessageEditedWebhook.mockResolvedValue({
       desiredSideEffects: [],
@@ -1311,118 +1313,24 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
   });
 
-  it("acknowledges Linq typing before resolving the best-effort shell prewarm", async () => {
-    const afterResponseTasks: Array<() => Promise<void>> = [];
-    const prewarmRuntimeShell = vi.fn(async () => ({ accepted: true as const }));
-    mocks.resolveHostedLinqTypingPrewarmMemberId.mockResolvedValueOnce("member_typing");
-    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
-      ensureRuntimeProcessing: vi.fn(),
-      prewarmRuntimeShell,
-    });
+  it("acknowledges Linq typing without scheduling runtime or member lookup work", async () => {
+    const scheduleAfterResponse = vi.fn();
     const response = await handleHostedOnboardingLinqWebhook({
       prisma: asPrismaTransactionClient({}),
       rawBody: buildTypingWebhookBody(),
-      scheduleAfterResponse: (task) => {
-        afterResponseTasks.push(task);
-      },
+      scheduleAfterResponse,
       signature: null,
       timestamp: null,
     });
 
-    expect(response).toEqual({
-      ignored: true,
-      ok: true,
-      reason: "typing-ignored",
-    });
-    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
-    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(prewarmRuntimeShell).not.toHaveBeenCalled();
-    expect(afterResponseTasks).toHaveLength(1);
-
-    await Promise.all(afterResponseTasks.map((task) => task()));
-
-    expect(mocks.resolveHostedLinqTypingPrewarmMemberId).toHaveBeenCalledWith({
-      event: expect.objectContaining({
-        data: {
-          chat_id: "chat_typing_123",
-        },
-        event_type: "chat.typing_indicator.started",
-      }),
-      prisma: expect.any(Object),
-    });
-    expect(prewarmRuntimeShell).toHaveBeenCalledWith(expect.objectContaining({
-      orchestrationAttemptId: expect.stringMatching(/^web-prewarm-/u),
-      requestStartedAtEpochMs: expect.any(Number),
-      source: "linq-typing-started",
-      userId: "member_typing",
-    }));
-    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
-  });
-
-  it("keeps unresolved Linq typing hints best-effort and process-free", async () => {
-    const afterResponseTasks: Array<() => Promise<void>> = [];
-    const prewarmRuntimeShell = vi.fn(async () => ({ accepted: true as const }));
-    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
-      ensureRuntimeProcessing: vi.fn(),
-      prewarmRuntimeShell,
-    });
-
-    await expect(handleHostedOnboardingLinqWebhook({
-      prisma: asPrismaTransactionClient({}),
-      rawBody: buildTypingWebhookBody(),
-      scheduleAfterResponse: (task) => {
-        afterResponseTasks.push(task);
-      },
-      signature: null,
-      timestamp: null,
-    })).resolves.toMatchObject({
-      ignored: true,
-      reason: "typing-ignored",
-    });
-
-    await Promise.all(afterResponseTasks.map((task) => task()));
-
-    expect(prewarmRuntimeShell).not.toHaveBeenCalled();
+    expect(response).toEqual({ ignored: true, ok: true, reason: "typing-ignored" });
+    expect(scheduleAfterResponse).not.toHaveBeenCalled();
+    expect(mocks.readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
-  it("settles Linq typing lookup failures after acknowledgement", async () => {
-    const afterResponseTasks: Array<() => Promise<void>> = [];
-    const prewarmRuntimeShell = vi.fn(async () => ({ accepted: true as const }));
-    mocks.resolveHostedLinqTypingPrewarmMemberId.mockRejectedValueOnce(
-      hostedOnboardingError({
-        code: "LINQ_HOME_CHAT_ROUTING_LOOKUP_AMBIGUOUS",
-        httpStatus: 500,
-        message: "Hosted Linq prewarm lookup matched multiple members.",
-        retryable: true,
-      }),
-    );
-    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
-      ensureRuntimeProcessing: vi.fn(),
-      prewarmRuntimeShell,
-    });
-
-    await expect(handleHostedOnboardingLinqWebhook({
-      prisma: asPrismaTransactionClient({}),
-      rawBody: buildTypingWebhookBody(),
-      scheduleAfterResponse: (task) => {
-        afterResponseTasks.push(task);
-      },
-      signature: null,
-      timestamp: null,
-    })).resolves.toMatchObject({
-      ignored: true,
-      reason: "typing-ignored",
-    });
-
-    await expect(Promise.all(afterResponseTasks.map((task) => task())))
-      .resolves.toEqual([undefined]);
-    expect(prewarmRuntimeShell).not.toHaveBeenCalled();
-    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
-  });
-
-  it("rejects malformed Linq typing events before scheduling a hint", async () => {
+  it("rejects malformed Linq typing events before acknowledgement", async () => {
     const scheduleAfterResponse = vi.fn();
 
     await expect(handleHostedOnboardingLinqWebhook({
@@ -1443,7 +1351,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(scheduleAfterResponse).not.toHaveBeenCalled();
-    expect(mocks.resolveHostedLinqTypingPrewarmMemberId).not.toHaveBeenCalled();
+    expect(mocks.readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
   });
 
   it("accepts message edits without sending a read receipt or another message", async () => {
@@ -2073,8 +1981,29 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     },
   );
 
-  it("keeps active-member iMessage ingress direct when canonical classification is direct", async () => {
-    const supportedLongText = `${"Context ".repeat(290)}Final question?`;
+  it.each([false, true])("keeps active-member iMessage ingress direct with opening continuation %s", async (continuation) => {
+    const supportedLongText = continuation ? "Yes, ready." : `${"Context ".repeat(290)}Final question?`;
+    if (continuation) {
+      mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
+      mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId.mockResolvedValueOnce("member_123");
+      mocks.claimHostedLinqInstantFirstTurn.mockImplementationOnce(async () => {
+        expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+        return { kind: "generate", openingTone: "formal" };
+      });
+      mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
+        kind: "reply",
+        message: "What should I call you, and how old are you?",
+        usage: { requestedModel: "gpt-5.6-luna", response: {} },
+      });
+      mocks.completeHostedLinqInstantFirstTurn.mockImplementationOnce(async (input) => ({
+        kind: "accepted",
+        wakeHandoff: {
+          ...input.wakeHandoff,
+          mailboxItemId: "mailbox_opening_identity_question",
+          wakeMailboxCheckpoint: { lane: "conversation", laneSeq: "4" },
+        },
+      }));
+    }
     mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
       handles: [],
       isGroup: false,
@@ -2145,6 +2074,23 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     const outboxCall = mocks.enqueueHostedExecutionOutbox.mock.calls[0]?.[0];
     expect(outboxCall?.envelope.message).not.toHaveProperty("accountLookupKey");
     expect(outboxCall?.envelope.message).not.toHaveProperty("routeAuthority");
+    if (continuation) {
+      expect(mocks.claimHostedLinqInstantFirstTurn).toHaveBeenCalledExactlyOnceWith({
+        continuationMemberId: "member_123",
+        linqChatId: "chat_123",
+        prisma,
+        request: expect.objectContaining({ text: "Yes, ready." }),
+      });
+      expect(mocks.completeHostedLinqInstantFirstTurn).toHaveBeenCalledOnce();
+      expect(mocks.abandonHostedLinqInstantFirstTurn).not.toHaveBeenCalled();
+      expect(mocks.classifyHostedLinqFirstContactAdmission).not.toHaveBeenCalled();
+      expect(mocks.ensureHostedLinqInstantStartStarterUsageEnrollment).not.toHaveBeenCalled();
+      expect(mocks.maybeHandoffHostedExecutionWebhookWake).toHaveBeenCalledWith(
+        expect.objectContaining({ wakeHandoff: expect.objectContaining({
+          mailboxItemId: "mailbox_opening_identity_question",
+        }) }),
+      );
+    }
   });
 
   it.each([
@@ -4583,18 +4529,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(hostedMemberRouting.findUnique.mock.calls.filter(([query]) =>
       isFullHostedMemberRoutingRecordQuery(query)
     )).toHaveLength(4);
-    expect(prewarmRuntimeShell).toHaveBeenCalledOnce();
-    expect(prewarmRuntimeShell).toHaveBeenCalledWith(expect.objectContaining({
-      source: "linq-message-routing",
-      userId: "member_123",
-    }));
-    expect(
-      prewarmRuntimeShell.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      vi.mocked(prepareHostedCryptoDomainRootCandidates).mock
-        .invocationCallOrder[0]
-        ?? Number.NEGATIVE_INFINITY,
-    );
+    expect(prewarmRuntimeShell).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
   });
 
@@ -7868,7 +7803,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("starts the web reply beside shell prewarm and wakes the runtime from the completed first turn", async () => {
+  it("preserves enrollment and completed first-turn ordering before waking the runtime", async () => {
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
     const memberId = "member_instant_start_prewarm";
     const eventId = "evt_instant_start_prewarm";
@@ -7969,14 +7904,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     const typingResult = createDeferred<{ ok: boolean; status: number }>();
     const ensureRuntimeProcessing = vi.fn();
-    const prewarmRuntimeShell = vi.fn<
-      (request: {
-        source: "linq-instant-start" | "linq-message-routing" | "linq-typing-started";
-      }) => Promise<{ accepted: true }>
-    >(() => {
-      callOrder.push("shell-prewarm");
-      return new Promise<{ accepted: true }>(() => undefined);
-    });
+    const prewarmRuntimeShell = vi.fn();
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       ensureRuntimeProcessing,
       prewarmRuntimeShell,
@@ -8013,7 +7941,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       .mockImplementationOnce(async () => {
         callOrder.push("activation-continuation");
       });
-    mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({
+    mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({ kind: "unavailable" }).mockResolvedValueOnce({
       kind: "generate",
     });
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
@@ -8068,7 +7996,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     const activationWakeIndex = callOrder.indexOf("activation-continuation");
     const replanIndex = callOrder.indexOf("replan");
     const signalIndex = callOrder.indexOf("conversation-signal");
-    const shellPrewarmIndex = callOrder.indexOf("shell-prewarm");
     const typingIndex = callOrder.indexOf("typing:chat_123");
     expect(enrollmentIndex).toBeGreaterThanOrEqual(0);
     expect(replanIndex).toBeGreaterThan(enrollmentIndex);
@@ -8076,17 +8003,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(activationWakeIndex).toBeGreaterThan(signalIndex);
     expect(typingIndex).toBeGreaterThanOrEqual(0);
     expect(typingIndex).toBeLessThan(enrollmentIndex);
-    expect(shellPrewarmIndex).toBeGreaterThanOrEqual(0);
-    expect(shellPrewarmIndex).toBeLessThan(enrollmentIndex);
-    expect(prewarmRuntimeShell).toHaveBeenCalledOnce();
-    expect(prewarmRuntimeShell).toHaveBeenCalledWith(expect.objectContaining({
-      orchestrationAttemptId: expect.stringMatching(/^web-prewarm-/u),
-      requestStartedAtEpochMs: expect.any(Number),
-      source: "linq-instant-start",
-      userId: memberId,
-    }));
-    expect(prewarmRuntimeShell.mock.calls.map(([request]) => request.source))
-      .toEqual(["linq-instant-start"]);
+    expect(prewarmRuntimeShell).not.toHaveBeenCalled();
     expect(mocks.maybeHandoffHostedExecutionWebhookWake).toHaveBeenCalledWith(
       expect.objectContaining({
         wakeHandoff: expect.not.objectContaining({
@@ -8293,13 +8210,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       reason: "sent-signup-link",
     });
 
-    expect(prewarmRuntimeShell).toHaveBeenCalledOnce();
-    expect(prewarmRuntimeShell).toHaveBeenCalledWith(expect.objectContaining({
-      orchestrationAttemptId: expect.stringMatching(/^web-prewarm-/u),
-      requestStartedAtEpochMs: expect.any(Number),
-      source: "linq-instant-start",
-      userId: memberId,
-    }));
+    expect(prewarmRuntimeShell).not.toHaveBeenCalled();
     expect(ensureRuntimeProcessing).not.toHaveBeenCalled();
     expect(mocks.startHostedLinqChatTypingIndicator).toHaveBeenCalledTimes(1);
     await vi.waitFor(() => {
@@ -8562,7 +8473,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         };
       },
     );
-    mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({
+    mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({ kind: "unavailable" }).mockResolvedValueOnce({
       kind: "generate",
     });
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
@@ -9118,7 +9029,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
   it("keeps a model-approved new contact on the signup-link path when routing selects another line", async () => {
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
-    mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({
+    mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({ kind: "unavailable" }).mockResolvedValueOnce({
       kind: "generate",
     });
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
@@ -9316,7 +9227,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   }) => {
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
     configureEnrollment();
-    mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({
+    mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({ kind: "unavailable" }).mockResolvedValueOnce({
       kind: "generate",
     });
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
@@ -9581,7 +9492,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       kind: "block",
       source: "model",
     });
-    mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({
+    mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({ kind: "unavailable" }).mockResolvedValueOnce({
       kind: "generate",
     });
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
@@ -9680,7 +9591,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledOnce();
-    expect(mocks.claimHostedLinqInstantFirstTurn).toHaveBeenCalledOnce();
+    expect(mocks.claimHostedLinqInstantFirstTurn).toHaveBeenCalledTimes(2);
     expect(mocks.startHostedLinqInstantFirstTurnGeneration).toHaveBeenCalledOnce();
     expect(mocks.abandonHostedLinqInstantFirstTurn).toHaveBeenCalledTimes(2);
     expect(mocks.abandonHostedLinqInstantFirstTurn).toHaveBeenLastCalledWith({
@@ -10329,7 +10240,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
     const admissionOrder: string[] = [];
     let transactionOpen = false;
-    mocks.claimHostedLinqInstantFirstTurn.mockImplementationOnce(async () => {
+    mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({ kind: "unavailable" }).mockImplementationOnce(async () => {
       expect(transactionOpen).toBe(false);
       admissionOrder.push("reply-claim");
       return { kind: "generate" };
@@ -11462,7 +11373,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   it("fails open to the signup link, not instant start, when the classifier is unavailable", async () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
-    mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({
+    mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({ kind: "unavailable" }).mockResolvedValueOnce({
       kind: "generate",
     });
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
@@ -16103,7 +16014,8 @@ function isFullHostedMemberRoutingRecordQuery(query: unknown): boolean {
   return Boolean(
     select
     && typeof select === "object"
-    && "pendingLinqParticipantContactEncrypted" in select,
+    && "pendingLinqParticipantContactEncrypted" in select
+    && "telegramUserIdEncrypted" in select,
   );
 }
 

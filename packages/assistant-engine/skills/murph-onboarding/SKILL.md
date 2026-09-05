@@ -21,8 +21,8 @@ should start problem-solving before the foundation is understood.
 Experiments are one optional primitive. Do not turn onboarding into an upfront
 profile questionnaire, capability tour, wearable funnel, or experiment funnel.
 Do not create a second context-collection lifecycle. This skill may create only
-the scheduled early-stall check-in defined in
-`references/persistence-recovery-follow-up.md` and the post-completion
+the scheduled early-stall check-in defined in the injected onboarding
+instructions and the post-completion
 first-personal-read one-shot defined in
 `references/return-launch-completion.md`. A separate managed owner may
 invoke this skill through the finite three-day recovery window defined there;
@@ -30,31 +30,27 @@ never create, replace, extend, or reschedule that owner.
 
 ## Progressive disclosure
 
-Always read this top-level file first. It owns the onboarding goal, bounded
-resume check, immediate-need override, relationship promise, exact welcome, and
-minimal-identity checkpoint. Use the visible conversation and resume snapshot
-to identify the current stage, then read only the reference that owns the next
-decision:
+The injected onboarding instructions own the visible opening exchanges: asking
+minimal identity, delegating supplied identity persistence, attempting the
+early-stall check-in, and asking what matters to the member. Follow them without
+reading this file or a stage reference when their transcript conditions hold.
 
-- Stay in this file for a fresh greeting or vague opener with no prior setup
-  context. Run the bounded resume check when required, send the exact welcome,
-  and do not read a stage reference.
-- Stay in this file when a short acceptance follows the visible welcome and the
-  next action is only the minimal-identity prompt. Do not read a stage reference.
-- Read `references/aspiration-foundation-delegation.md` before handling a
-  minimal-identity answer that advances into aspiration discovery, capturing or
-  parking an aspiration, collecting any foundation checkpoint, processing a
-  foundation memo or lab source, or delegating onboarding persistence.
-- After applying the immediate-need override below, every minimal-identity
-  answer that continues onboarding requires both the aspiration reference and
-  `references/persistence-recovery-follow-up.md` before any onboarding action
-  or reply, even when the automation tool is unavailable. Also read the
-  persistence reference before handling any foundation answer that adds or
-  confirms canonical context, including an explicit none or negative fact;
-  arming the early-stall check-in; persisting or interpreting a skip, decline,
-  or deferral; handling a scheduled recovery occurrence; or applying the
-  cross-stage reply and follow-up rules. A turn that only asks the next
-  foundation question may stay in the aspiration reference.
+For other onboarding turns, read this top-level router first. It owns the goal,
+bounded resume check, immediate-need override, relationship promise, and exact
+welcome. Use visible conversation and the resume snapshot to select only the
+reference that owns the next decision:
+
+- Stay here for a fresh greeting or vague opener with no prior setup context.
+  Run the bounded resume check when required and send the exact welcome.
+- Read `references/aspiration-foundation-delegation.md` for an aspiration answer,
+  capturing or parking an aspiration, a foundation checkpoint, a foundation
+  memo or lab source, or foundation persistence delegation.
+- Read `references/persistence-recovery-follow-up.md` for foundation answers
+  that add or confirm canonical context (including none or negative facts),
+  skip/decline/deferral interpretation, scheduled recovery, or cross-stage
+  follow-up. A turn that only asks a foundation question may stay in the
+  aspiration reference. Opening identity persistence and its check-in do not
+  require either reference.
 - Read `references/return-launch-completion.md` after the foundation resolves,
   for the capability tour, thread choice, behavioral-fit questions, first-value
   launch, foreground completion, or an overall decline. Also read the
@@ -202,36 +198,6 @@ Do not append an intake question or capability list.
 
 ### 2. Minimal identity
 
-Ask what the user wants to be called. In the same short message, ask their age
-and use the active tone preference for the final identity question. Casual tone
-asks whether they are a guy or a girl. Formal tone asks their gender. Accept a
-different self-description without correcting or pressing them. Age and gender
-remain optional, but do not announce or append that optionality to the question.
-Do not add a clinical explanation unless the user asks.
-
-For casual tone, use:
-
-```text
-hey — what should i call you?
-
-also, how old are you, and are you a guy or a girl?
-```
-
-For formal tone, use:
-
-```text
-What should I call you?
-
-How old are you and what's your gender?
-```
-
-Treat this bundled minimal-identity prompt as one onboarding question. Its
-short name, age, and gender prompts are one checkpoint, not three separate
-setup questions.
-
-Save a preferred name with `vault-cli memory set-name`. Save optional
-demographic context to the existing best-fit Identity or Context memory. Do not
-infer a birthday, sex, gender, or other identity detail.
-
-If the user gives only a name, continue. If they decline or skip any part,
-continue without pressing. Never re-ask solely for optional demographics.
+The injected onboarding instructions own this exchange, canonical save
+commands, bounded background persistence, and the first aspiration question.
+Use that owner without restating its rules or loading stage references.

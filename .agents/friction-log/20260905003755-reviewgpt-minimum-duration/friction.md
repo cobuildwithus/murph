@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT minimum duration flag skips verified model responses'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2903'
 ---
 
 ## Expected Behavior
