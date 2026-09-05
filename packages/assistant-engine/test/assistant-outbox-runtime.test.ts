@@ -5952,7 +5952,7 @@ describe('assistant outbox runtime', () => {
           pendingOccurrenceAt: occurrenceAt,
         }),
       }))
-      const expectedNextRunAt = schedule.kind === 'every'
+      const expectedNextRunAt = schedule.kind === 'every' && !transfersLegacyPendingOccurrence
         ? computeAssistantCronNextRunAt(
             {
               kind: 'dailyLocal',
