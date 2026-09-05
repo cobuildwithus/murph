@@ -3095,6 +3095,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           releasePid.resolve(await readBackendPid(tx));
           await lockHostedUsageCreditPurchaseReservationOwnersTx({
             beneficiaryMemberId: fixture.beneficiaryMemberId,
+            memberLockOrder: "beneficiary_first",
             payerMemberId: fixture.payerMemberId,
             tx,
           });
@@ -3198,6 +3199,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await expect(fixture.firstClient.$transaction(async (tx) => {
           await lockHostedUsageCreditPurchaseReservationOwnersTx({
             beneficiaryMemberId: fixture.beneficiaryMemberId,
+            memberLockOrder: "beneficiary_first",
             payerMemberId: fixture.payerMemberId,
             tx,
           });
@@ -3333,6 +3335,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await fixture.secondClient.$transaction(async (tx) => {
           await lockHostedUsageCreditPurchaseReservationOwnersTx({
             beneficiaryMemberId: fixture.beneficiaryMemberId,
+            memberLockOrder: "beneficiary_first",
             payerMemberId: fixture.payerMemberId,
             tx,
           });
@@ -5331,6 +5334,80 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           where: { id: { in: [beneficiaryMemberId, payerMemberId] } },
         }).catch(() => undefined);
         await observer.$disconnect();
+      }
+    });
+
+    it("serializes Family reservation release behind owner-first subscription locking", async () => {
+      const fixtureId = randomUUID();
+      const beneficiaryMemberId = `member_family_credit_beneficiary_${fixtureId}`;
+      const ownerMemberId = `member_family_credit_owner_${fixtureId}`;
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const subscriptionClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const releaseClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const ownerLocked = createDeferred();
+      const releaseSubscription = createDeferred();
+      const reservationReleaseStarted = createDeferred<number>();
+
+      try {
+        await observer.hostedMember.createMany({
+          data: [
+            { billingStatus: "active", id: beneficiaryMemberId },
+            { billingStatus: "active", id: ownerMemberId },
+          ],
+        });
+
+        const subscriptionReconciliation = subscriptionClient.$transaction(
+          async (tx) => {
+            await tx.$queryRaw`
+              SELECT id
+              FROM hosted_member
+              WHERE id = ${ownerMemberId}
+              FOR UPDATE
+            `;
+            ownerLocked.resolve();
+            await releaseSubscription.promise;
+            await tx.$queryRaw`
+              SELECT id
+              FROM hosted_member
+              WHERE id = ${beneficiaryMemberId}
+              FOR UPDATE
+            `;
+            return "subscription" as const;
+          },
+          transactionOptions,
+        );
+        await ownerLocked.promise;
+
+        const reservationRelease = releaseClient.$transaction(async (tx) => {
+          reservationReleaseStarted.resolve(await readBackendPid(tx));
+          await lockHostedUsageCreditPurchaseReservationOwnersTx({
+            beneficiaryMemberId,
+            memberLockOrder: "payer_first",
+            payerMemberId: ownerMemberId,
+            tx,
+          });
+          return "release" as const;
+        }, transactionOptions);
+        await waitForBlockedBackend({
+          observer,
+          pid: await reservationReleaseStarted.promise,
+        });
+
+        releaseSubscription.resolve();
+        await expect(Promise.all([
+          subscriptionReconciliation,
+          reservationRelease,
+        ])).resolves.toEqual(["subscription", "release"]);
+      } finally {
+        releaseSubscription.resolve();
+        await observer.hostedMember.deleteMany({
+          where: { id: { in: [beneficiaryMemberId, ownerMemberId] } },
+        }).catch(() => undefined);
+        await Promise.all([
+          observer.$disconnect(),
+          releaseClient.$disconnect(),
+          subscriptionClient.$disconnect(),
+        ]);
       }
     });
 

@@ -2125,7 +2125,10 @@ Last verified: 2026-09-04
   an active purchase and map a different target to status/cancel-only recovery.
   The server projects a departed Family beneficiary as status/cancel-only and
   does not decrypt or serialize its Checkout URL, including when membership
-  changes while a Stripe request is in flight.
+  changes while a Stripe request is in flight. Family admission and terminal
+  reservation release acquire the owner member before a distinct beneficiary,
+  matching subscription reconciliation's owner-then-roster order; the separate
+  hosted-group sponsorship ledger keeps beneficiary-first ordering.
 - Usage-credit fulfillment reuses the Stripe event receipt as its retry owner.
   It verifies live one-time payment state, then appends the unique grant and
   updates the beneficiary balance/version projection in one locked

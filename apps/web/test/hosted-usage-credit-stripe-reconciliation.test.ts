@@ -85,10 +85,16 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
 
 vi.mock(
   "@/src/lib/hosted-onboarding/usage-credit-purchase-reservation-lock",
-  () => ({
-    lockHostedUsageCreditPurchaseReservationOwnersTx:
-      mocks.lockPurchaseReservationOwners,
-  }),
+  async (importOriginal) => {
+    const original = await importOriginal<typeof import(
+      "../src/lib/hosted-onboarding/usage-credit-purchase-reservation-lock"
+    )>();
+    return {
+      ...original,
+      lockHostedUsageCreditPurchaseReservationOwnersTx:
+        mocks.lockPurchaseReservationOwners,
+    };
+  },
 );
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -789,6 +795,7 @@ describe("hosted usage-credit Stripe reconciliation", () => {
     }));
     expect(mocks.lockPurchaseReservationOwners).toHaveBeenLastCalledWith({
       beneficiaryMemberId: "member_beneficiary",
+      memberLockOrder: "beneficiary_first",
       payerMemberId: "member_payer",
       tx: harness.client,
     });
