@@ -31,4 +31,7 @@ The ZIP sender and staging guidance predate the recent behavior report. Current 
 - Full first provider-visible input measured through the real pinned app-server and local scripted Responses stub, with identical direct/group fixtures, current-main base instructions reconstructed by reversing this patch, normalized temporary roots and message IDs, and transport/cache metadata excluded. Model gpt-5.6-terra; gpt-tokenizer 3.4.0, o200k_base. Individual: 27,733 to 27,752 tokens (+19, +0.069%), 128,227 to 128,333 bytes (+106). Group: 23,548 tokens and 109,097 bytes unchanged. Temporary capture instrumentation was removed.
 - Parent review found no new permission boundary, state owner, provider call, database call, or awaited work. ReviewGPT is exempt under the prompt-primary route. Product UX is Ready: requested originals remain available and the existing pending approval owns the next action.
 - Historical limit: ZIP support and the ambiguous staging prohibition predate the reported regression. A specific introducing release and the original production turn were not established; the fix addresses the demonstrated instruction ambiguity without claiming a transport failure.
-- PR-wide CI remains required on the final pushed head. Record the source PR in the changelog before marking Ready.
+- Implementation and parent review are complete in PR #2873; the changelog links that PR. Required CI gates the final pushed head. Merge and deployment are separate actions.
+Status: completed
+Updated: 2026-09-04
+Completed: 2026-09-04

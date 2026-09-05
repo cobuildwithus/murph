@@ -9,6 +9,6 @@
     "summary": "Murph handles requests to package your vault files as a ZIP in your private iMessage conversation more directly.",
     "details": "Creating the archive leaves the original files in place. The existing approval step still comes before the attachment is sent.",
     "relevanceTags": ["vault", "exports"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [2873]
   }
 }
