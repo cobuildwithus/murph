@@ -1189,7 +1189,8 @@ reject invalid or stale inventories before setup, and preserve the default
 complete run. Private CI requires both foreground process results.
 
 `MURPH_HOSTED_WEB_WEBPACK_CACHE=1` retains Next's compiler-owned cache for CI
-jobs that persist it. Default production builds keep caching disabled. Existing
+jobs that persist it. Public CI keeps the default disabled policy because the
+cached build exhausted its fixed compiler heap. Existing
 Web config and production-build-runner tests cover opt-in/default behavior,
 route type generation, and the independently earned TypeScript gate. Private
 integration restores compiler inputs while retaining full builds, exact-source
