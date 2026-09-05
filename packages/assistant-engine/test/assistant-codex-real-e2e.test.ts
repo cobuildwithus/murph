@@ -26193,6 +26193,7 @@ describeRealCodex('real Codex live native reply prefix e2e', () => {
         prompt: [
           `Message ref: ${earlierRef}`,
           'A group participant: Murph, what is 13 plus 28?',
+          'I am sending a clarification next; please wait for it before answering.',
         ].join('\n'),
         reasoningEffort: 'low',
         sandbox: 'read-only',

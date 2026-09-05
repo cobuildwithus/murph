@@ -9,6 +9,6 @@
     "summary": "Murph can keep a reply attached to an earlier question when another message arrives while it is answering.",
     "details": "This works in supported private and group iMessage and Telegram conversations for messages received during the same active exchange.",
     "relevanceTags": ["conversation"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [2882]
   }
 }
