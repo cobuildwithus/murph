@@ -12,15 +12,18 @@ import {
   AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
   automationAssistantTargetOverrideSchema,
   automationContextReferencesSchema,
+  automationDeviceActivitySourceValues,
   automationRouteSchema,
   automationScaffoldPayloadSchema,
   automationScheduleSchema,
   buildAutomationSupportSeriesTag,
 } from "@murphai/contracts";
-import { upsertAutomation } from "@murphai/core";
-import type {
-  AutomationListPageOptions,
-  AutomationQueryRecord,
+import { advanceAutomationDeviceActivityCursor, upsertAutomation } from "@murphai/core";
+import {
+  listAutomations,
+  showAutomation,
+  type AutomationListPageOptions,
+  type AutomationQueryRecord,
 } from "@murphai/query";
 import {
   automationRecordSchema,
@@ -369,6 +372,13 @@ test("automation save and edit schemas expose typed fields while automation impo
     "clearContextReferences",
   ]) {
     assert.equal(field in editSchema.options.properties, true, field);
+  }
+
+  for (const schema of [saveSchema, editSchema]) {
+    assert.deepEqual(
+      (schema.options.properties.deviceSource as { enum: string[] }).enum,
+      [...automationDeviceActivitySourceValues],
+    );
   }
 
   const importJsonSchema = await readCommandSchema(cli, ["automation", "import-json"]);
@@ -2798,6 +2808,98 @@ test("automation save maps trigger flags and keeps legacy schedule flags working
     assert.equal(rejectedLegacyScheduleKindDeviceActivity.exitCode, 1);
     assert.equal(rejectedLegacyScheduleKindDeviceActivity.envelope.ok, false);
   } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});
+
+test.each([
+  ["garmin", "oura"],
+  ["oura", "fitbit"],
+  ["fitbit", "garmin"],
+] as const)("automation saves %s and retargets the same owner to %s", async (source, nextSource) => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext("murph-automation-source-");
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-06-07T11:00:00.000Z"));
+  try {
+    const cli = Cli.create("vault-cli", { version: "0.0.0-test" });
+    cli.use(incurErrorBridge);
+    registerAutomationCommands(cli);
+    const saved = await runInProcessJsonCli<{ automationId: string }>(cli, [
+      "automation", "save", "Activity check-in", "--slug", "activity-check-in",
+      "--instructions", "Ask how the activity felt.",
+      "--trigger-kind", "deviceActivity", "--device-source", source,
+      "--activity-kind", "running", "--channel", "telegram",
+      "--delivery-target", "test-activity-thread", "--vault", vaultRoot,
+    ]);
+    assert.equal(saved.exitCode, null);
+    assert.equal(saved.envelope.ok, true);
+    const automationId = saved.envelope.data?.automationId;
+    assert.ok(automationId);
+    const initial = await showAutomation(vaultRoot, automationId);
+    assert.ok(initial);
+    assert.deepEqual(initial.schedule, {
+      kind: "deviceActivity", after: "2026-06-07T11:00:00.000Z", activityKind: "running", source,
+    });
+    const cursorInput = {
+      lookup: automationId,
+      vaultRoot,
+      expectedActivityKind: "running",
+      expectedContinuityPolicy: initial.continuityPolicy,
+      expectedInstructions: initial.instructions,
+      expectedRoute: initial.route,
+      expectedSource: source,
+      after: "2026-06-07T11:30:00.000Z",
+      afterOccurredAt: "2026-06-07T11:25:00.000Z",
+      afterEntityId: "evt_before_source_edit",
+    };
+    vi.setSystemTime(new Date("2026-06-07T11:31:00.000Z"));
+    assert.equal((await advanceAutomationDeviceActivityCursor(cursorInput)).advanced, true);
+
+    vi.setSystemTime(new Date("2026-06-07T12:00:00.000Z"));
+    const edited = await runInProcessJsonCli<{ automationId: string; created: boolean }>(cli, [
+      "automation", "edit", automationId, "--trigger-kind", "deviceActivity",
+      "--device-source", nextSource, "--activity-kind", "running", "--vault", vaultRoot,
+    ]);
+    assert.equal(edited.exitCode, null);
+    assert.equal(edited.envelope.ok, true);
+    assert.equal(edited.envelope.data?.automationId, automationId);
+    assert.equal(edited.envelope.data?.created, false);
+    const updated = await showAutomation(vaultRoot, automationId);
+    assert.ok(updated);
+    assert.deepEqual(updated.schedule, {
+      kind: "deviceActivity", after: "2026-06-07T12:00:00.000Z", activityKind: "running", source: nextSource,
+    });
+    assert.deepEqual(updated.route, initial.route);
+    assert.equal(updated.instructions, initial.instructions);
+    assert.equal(updated.continuityPolicy, initial.continuityPolicy);
+    assert.equal((await listAutomations(vaultRoot)).length, 1);
+
+    // The existing cursor owner fences an in-flight scan of the old selected source.
+    const nextCursorInput = {
+      ...cursorInput,
+      after: "2026-06-07T12:30:00.000Z",
+      afterOccurredAt: "2026-06-07T12:25:00.000Z",
+      afterEntityId: "evt_after_source_edit",
+    };
+    vi.setSystemTime(new Date("2026-06-07T12:31:00.000Z"));
+    assert.equal((await advanceAutomationDeviceActivityCursor(nextCursorInput)).advanced, false);
+    assert.deepEqual((await showAutomation(vaultRoot, automationId))?.schedule, updated.schedule);
+    const currentCursorInput = { ...nextCursorInput, expectedSource: nextSource };
+    assert.equal((await advanceAutomationDeviceActivityCursor(currentCursorInput)).advanced, true);
+    assert.equal((await advanceAutomationDeviceActivityCursor(currentCursorInput)).advanced, false);
+
+    const beforeRejectedEdit = await showAutomation(vaultRoot, automationId);
+    for (const unsupported of ["google_health", "google-health", "unknown-provider"]) {
+      const rejected = await runInProcessJsonCli(cli, [
+        "automation", "edit", automationId, "--trigger-kind", "deviceActivity",
+        "--device-source", unsupported, "--vault", vaultRoot,
+      ]);
+      assert.equal(rejected.exitCode, 1);
+      assert.equal(rejected.envelope.ok, false);
+    }
+    assert.deepEqual(await showAutomation(vaultRoot, automationId), beforeRejectedEdit);
+  } finally {
+    vi.useRealTimers();
     await rm(parentRoot, { force: true, recursive: true });
   }
 });
