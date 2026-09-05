@@ -5,8 +5,11 @@ Last verified: 2026-08-31
 ## Non-Negotiable Rules
 
 - Terminal Linq retry authority comes only from an existing runtime-owned
-  failed delivery, current exact chat/sender routing and active access, and
-  current line/chat egress policy. Provider retrieval must match the original
+  failed delivery, current exact chat/sender routing, consent-aware runtime
+  access, and current line/chat egress policy. The existing runtime access owner
+  must allow recovery both before content retrieval and at attempt claiming;
+  explicit health-data consent withdrawal denies it at either checkpoint.
+  Provider retrieval must match the original
   message, chat, outbound direction, failed status, iMessage service, and
   sender. Never use provider content to select a recipient or line. The retry
   stores only its timestamp and blinded original-message correlation on

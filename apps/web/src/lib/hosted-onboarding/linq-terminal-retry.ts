@@ -12,9 +12,9 @@ import {
 import { readHostedLinqFailedMessage, resendHostedLinqMessage } from "./linq-client";
 import { recordHostedLinqTerminalRetryAcceptedTx } from "./linq-delivery-store";
 import { evaluateHostedLinqEgressPolicy } from "./linq-egress-policy";
+import { readHostedRuntimeAiAccessDecision } from "./member-access";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
 import {
-  assertActiveHostedThreadRouteContainerAccess,
   readHostedThreadRouteByThreadIdentity,
 } from "../hosted-routing/thread-route-store";
 import { sha256Hex } from "../primitives";
@@ -163,9 +163,10 @@ async function assertRetryRouteAndPolicy(input: {
   if (!memberId || lineKey !== input.lineKey || Boolean(direct) !== input.threadIsDirect) {
     return false;
   }
-  await assertActiveHostedThreadRouteContainerAccess({
-    containerMemberId: memberId, prisma: input.prisma,
+  const access = await readHostedRuntimeAiAccessDecision({
+    memberId, prisma: input.prisma,
   });
+  if (!access.allowed) return false;
   const line = await input.prisma.hostedLinqLine.findUnique({
     where: { phoneNumberLookupKey: input.lineKey },
     select: {

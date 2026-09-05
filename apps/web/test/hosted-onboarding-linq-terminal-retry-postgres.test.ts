@@ -14,7 +14,14 @@ import {
 import { ingestHostedLinqProviderEventTx } from "@/src/lib/hosted-onboarding/linq-provider-event-store";
 import { parseHostedLinqProviderEvent } from "@/src/lib/hosted-onboarding/linq-provider-events";
 import type { HostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq-webhook";
-import { retryHostedLinqTerminalSend } from "@/src/lib/hosted-onboarding/linq-terminal-retry";
+import {
+  retryHostedLinqTerminalSend,
+  retryHostedLinqTerminalSendForEvent,
+} from "@/src/lib/hosted-onboarding/linq-terminal-retry";
+import {
+  HOSTED_HEALTH_DATA_CONSENT_SCOPE,
+  revokeHostedConsentScope,
+} from "@/src/lib/legal/consent";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const provider = vi.hoisted(() => ({
@@ -122,13 +129,55 @@ async function seed() {
     return event;
   };
   const retry = (id = messageId) => retryHostedLinqTerminalSend({ chatId, messageId: id, prisma });
+  const grantConsent = () => prisma.hostedConsentGrant.create({
+    data: {
+      memberId, scope: HOSTED_HEALTH_DATA_CONSENT_SCOPE, status: "granted",
+      documentVersionsJson: {}, source: "synthetic-test", grantedAt: new Date(),
+    },
+  });
+  const withdrawConsent = () => revokeHostedConsentScope({
+    memberId, scope: HOSTED_HEALTH_DATA_CONSENT_SCOPE, prisma, source: "synthetic-test",
+  });
   return {
     prisma, memberId, containerId, chatId, chatKey, lineKey, messageId, retryId,
-    deliveryId, accepted, original, receipt, retry,
+    deliveryId, accepted, original, receipt, retry, grantConsent, withdrawConsent,
   };
 }
 
 describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boundary", () => {
+  it.each(["granted", "missing-legacy"])("recovers with %s consent", async (consent) => {
+    await withFixture(async (f) => {
+      if (consent === "granted") await f.grantConsent();
+      const event = await f.receipt();
+      await retryHostedLinqTerminalSendForEvent({ event, prisma: f.prisma });
+      expect(provider.read).toHaveBeenCalledTimes(1);
+      expect(provider.send).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it.each(["before-receipt", "during-retrieval"])(
+    "honors completed consent withdrawal %s", async (withdrawal) => {
+      await withFixture(async (f) => {
+        await f.grantConsent();
+        if (withdrawal === "before-receipt") {
+          await f.withdrawConsent();
+        } else {
+          provider.read.mockImplementation(async () => {
+            await f.withdrawConsent();
+            return f.original;
+          });
+        }
+        const event = await f.receipt();
+        await retryHostedLinqTerminalSendForEvent({ event, prisma: f.prisma });
+        expect(provider.read).toHaveBeenCalledTimes(withdrawal === "before-receipt" ? 0 : 1);
+        expect(provider.send).not.toHaveBeenCalled();
+        expect(await f.prisma.hostedLinqDeliveryMessage.count({
+          where: { deliveryId: f.deliveryId, terminalRetryAttemptedAt: { not: null } },
+        })).toBe(0);
+      });
+    },
+  );
+
   it("recovers once under concurrent attempts, then ignores original and duplicate receipts", async () => {
     await withFixture(async (f) => {
       await f.retry();
@@ -203,6 +252,7 @@ describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boun
 
   it("retries only the failed part of a group delivery and preserves no-receipt status", async () => {
     await withFixture(async (f) => {
+      await f.grantConsent();
       await f.prisma.hostedLinqDelivery.delete({ where: { id: f.deliveryId } });
       await f.prisma.hostedMember.create({
         data: {
@@ -268,9 +318,7 @@ describe.skipIf(!enabled)("terminal Linq retry with PostgreSQL and provider boun
             },
           });
         }
-        await f.retry().catch((error: unknown) => {
-          if (restriction !== "suspended") throw error;
-        });
+        await f.retry();
         expect(provider.send).not.toHaveBeenCalled();
         expect(provider.read).not.toHaveBeenCalled();
       });

@@ -71,4 +71,19 @@ or its fixtures.
   and absence of a PR. Graft and its graph are unavailable in this checkout;
   exact owner reads and focused searches supplied repository context.
 
-ReviewGPT and exact-head required CI remain pending.
+## Review remediation
+
+Round 1 identified an entitlement-only recovery check that allowed processing
+after explicit health-data consent withdrawal. The existing consent-aware
+runtime access owner now governs both recovery checkpoints. Two PostgreSQL
+regressions first reproduced retrieval after completed withdrawal and dispatch
+after withdrawal during retrieval. Positive proof covers granted and compatible
+missing legacy grants plus an authorized group owner. No state owner, provider
+operation, or lifecycle was added. The required migration-inventory test now
+includes the additive retry migration.
+
+All 130 tests across the PostgreSQL retry, reconstruction, HTTP, callback route,
+and migration-inventory suites pass. The production changelog rendering test
+also passes, with its rendered entry captured as local review evidence.
+Web prepared typecheck and complexity diff pass; the retry owner peaks at 18
+with no added complexity debt. Round 2 and exact-head required CI remain pending.
