@@ -369,11 +369,11 @@ describe('assistant Codex turn planning', () => {
       Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
     )).toMatchInlineSnapshot(`
       {
-        "direct": "d07d77205a78a29b81d158aa8042fe9de19bad046e5347c36f3e7eb644ddfdd4",
+        "direct": "965bfe8dd1b746752ff11cd146d9b67ee3687b5c2c7eb04fee32fe6d5c132675",
         "group": "ead4ee04f2ca83fc9dd1db3a581b0ab3afa60b612d7c9372a26833b8bb98a904",
         "maintenance": "4c439dbf05ccb6d2cd7540b1ef7f94c99e898afd9b9658abefa860a8b421ca55",
         "outputOnly": "a83a04afea06e5290de36b14a0fee5d18970077a8294dde129b2e2dfa99116b4",
-        "scheduledEmail": "82b0e00e5874b2bf3c48fbbb6283da62aab9880e9008d47b5e002a093422f5e7",
+        "scheduledEmail": "ce3a83489506edf6c0bbf653351d684405ae77f546642e15f8e422cdd11febfd",
       }
     `)
   })
@@ -3023,6 +3023,7 @@ describe('assistant Codex turn planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: first.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
           telegramRichContentResponseCardsAvailable: true,
@@ -3803,6 +3804,7 @@ describe('assistant Codex turn planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: telegramReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
           telegramRichContentResponseCardsAvailable: true,
@@ -3853,6 +3855,7 @@ describe('assistant Codex turn planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: linqReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
           messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
@@ -3951,6 +3954,7 @@ describe('assistant Codex turn planning', () => {
         developerInstructions:
           linqCurrentMessageNotReactionEligiblePlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
           messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
@@ -3980,6 +3984,7 @@ describe('assistant Codex turn planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: telegramBusinessReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
           telegramRichContentResponseCardsAvailable: true,
@@ -4007,6 +4012,7 @@ describe('assistant Codex turn planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: telegramInferredBindingPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
           telegramRichContentResponseCardsAvailable: true,
@@ -4086,6 +4092,7 @@ describe('assistant Codex turn planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: plan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
           computerToolsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,

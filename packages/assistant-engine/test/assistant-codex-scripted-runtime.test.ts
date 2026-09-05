@@ -1,3 +1,4 @@
+import { MURPH_ATTACH_FOLLOW_UP_TOOL } from '../src/assistant-codex/dynamic-tools/automation.ts'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createServer, type Server, type ServerResponse } from 'node:http'
@@ -617,6 +618,21 @@ afterAll(async () => {
 }, 180_000)
 
 describe('real codex app-server with scripted provider', () => {
+  it.each([true, false])('enforces follow-up attachment authority through real App Server (%s)', async (allowed) => {
+    const scenario = await prepareScriptedTurnScenario()
+    const request = { action: 'attach_follow_up', afterMinutes: 20, instructions: 'Check the pending choice; skip if resolved.' }
+    scenario.stub.queue({ functionCall: { name: 'automation', namespace: 'murph', arguments: request } }, { text: 'Which arrival window works?' })
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput, dynamicTools: [MURPH_ATTACH_FOLLOW_UP_TOOL],
+      followUpAttachmentAllowed: allowed, groupConversation: false,
+      prompt: 'Ask the pending arrival-window question.',
+    })
+    expect(result.followUpRequest).toEqual(allowed
+      ? { afterMinutes: 20, instructions: request.instructions } : null)
+    expect(result.finalMessage).toBe('Which arrival window works?')
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
   it('streams a scripted turn through the real app-server protocol', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {

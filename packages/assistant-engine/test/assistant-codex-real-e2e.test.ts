@@ -273,6 +273,15 @@ import {
 import { createDeferred } from './test-helpers.ts'
 import { isAssistantGeneratedDeliveryRef } from '../src/assistant/generated-delivery-files.ts'
 
+import { MURPH_ATTACH_FOLLOW_UP_TOOL } from '../src/assistant-codex/dynamic-tools/automation.ts'
+import {
+  readAssistantFollowUpSourceContext, registerDeliveredAssistantFollowUp,
+} from '../src/assistant/follow-ups.ts'
+import {
+  createAssistantOutboxIntent, saveAssistantOutboxIntent,
+} from '../src/assistant/outbox.ts'
+import { listAutomations as listFollowUpAutomations } from '@murphai/query'
+
 const RUN_REAL_CODEX_E2E = process.env.MURPH_RUN_REAL_CODEX_E2E === '1'
 const execFileAsync = promisify(execFile)
 const REAL_CODEX_E2E_TAG = 'real-codex-live'
@@ -14653,6 +14662,90 @@ describeRealCodex('real Codex independent scheduled reminder authority e2e', () 
         workingDirectory,
         ...config.temporaryPaths,
       ])
+    }
+  }, 360_000)
+})
+
+describeRealCodex('real Codex durable follow-up e2e', () => {
+  it.each([
+    { label: 'reminder', prompt: 'Send a short reminder to water the herb pots. Attach one optional check in 20 minutes, skipping if watering is already done or the member declines.', afterMinutes: 20, topic: /herb|water/iu },
+    { label: 'important question', prompt: 'Ask which arrival window to reserve, morning or afternoon. This is the one important unresolved decision. Attach one optional check in 60 minutes if it remains unanswered; skip if resolved, declined, or no longer useful.', afterMinutes: 60, topic: /morning|afternoon|arrival/iu },
+  ])('durable follow-up attaches exactly one $label check', async (scenario) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-durable-attachment-e2e-'))
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexHome: config.codexHome, env: config.env, model: config.model,
+        modelProvider: config.modelProvider, reasoningEffort: 'low',
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        dynamicTools: [MURPH_ATTACH_FOLLOW_UP_TOOL], followUpAttachmentAllowed: true,
+        groupConversation: false, sandbox: 'read-only', workingDirectory,
+        prompt: scenario.prompt,
+      })
+      const calls = readCapabilityRoutingActions(result.jsonEvents)
+        .filter((action) => action.kind === 'dynamic')
+      expect(calls).toHaveLength(1)
+      expect(result.followUpRequest).toMatchObject({ afterMinutes: scenario.afterMinutes })
+      expect(result.followUpRequest?.instructions).toMatch(/skip|answered|done|completed|declin|resolv/iu)
+      expect(result.finalMessage).toMatch(scenario.topic)
+      expect(result.finalMessage).not.toMatch(/automation|outbox|primitive|you failed|you ignored/iu)
+      process.stdout.write(`[real-codex durable follow-up ${scenario.label}] ${result.finalMessage?.replaceAll(/\s+/gu, ' ').trim()}\n`)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
+  it.each([
+    { label: 'unanswered reminder', original: 'Time to water the herb pots.', instructions: 'Check whether the herb pots were watered for this reminder; skip if completed, declined, or no longer useful.', history: 'No later human message has arrived.', kind: 'send_message' },
+    { label: 'answered reminder', original: 'Time to water the herb pots.', instructions: 'Check whether the herb pots were watered for this reminder; skip if completed, declined, or no longer useful.', history: 'After the reminder, the member said: I watered the herb pots already. Then they asked an unrelated question about music.', kind: 'skip' },
+    { label: 'older unanswered question', original: 'Which arrival window should I reserve, morning or afternoon?', instructions: 'Check the unresolved arrival-window choice. Skip if resolved, declined, or no longer useful.', history: 'Three later messages discussed music and a book. None addressed the arrival window.', kind: 'send_message' },
+    { label: 'incomplete history', original: 'Time to water the herb pots.', instructions: 'Check whether the herb pots were watered; skip if resolved or relevant history is incomplete.', history: 'The committed conversation history is incomplete because retention omitted messages after the original reminder. Whether the member answered is unknown.', kind: 'skip' },
+    { label: 'older answered question', original: 'Which arrival window should I reserve, morning or afternoon?', instructions: 'Check the unresolved arrival-window choice. Skip if resolved, declined, or no longer useful.', history: 'The member answered: Reserve the afternoon window. Two later messages discussed a book.', kind: 'skip' },
+  ])('durable follow-up reconsiders $label', async (scenario) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-durable-evaluation-e2e-'))
+    try {
+      await initializeVault({ vaultRoot: workingDirectory })
+      const now = new Date(Date.now() - 20 * 60_000).toISOString()
+      const source = await createAssistantOutboxIntent({
+        vault: workingDirectory, channel: 'linq', threadId: 'synthetic-durable-thread',
+        threadIsDirect: true, sessionId: 'session-durable-live', turnId: 'turn-source',
+        message: scenario.original,
+        followUpRequest: { afterMinutes: 20, instructions: scenario.instructions },
+      })
+      const delivered = await saveAssistantOutboxIntent(workingDirectory, {
+        ...source, status: 'sent', sentAt: now, updatedAt: now,
+        delivery: { channel: 'linq', target: 'synthetic-durable-thread', targetKind: 'explicit',
+          sentAt: now, messageLength: scenario.original.length, idempotencyKey: null, providerMessageId: 'synthetic-message', providerThreadId: 'synthetic-durable-thread' },
+      })
+      await registerDeliveredAssistantFollowUp({ vault: workingDirectory, intent: delivered })
+      const [child] = await listFollowUpAutomations(workingDirectory)
+      const context = await readAssistantFollowUpSourceContext({ vault: workingDirectory, record: child })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexHome: config.codexHome, env: config.env, model: config.model,
+        modelProvider: config.modelProvider, reasoningEffort: 'low',
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        developerInstructions: buildScheduledAutomationDeveloperInstructions('direct', 'none')
+          .replaceAll('2026-08-05T13:00:00.000Z', new Date().toISOString())
+          .replaceAll('2026-08-05', new Date().toISOString().slice(0, 10)),
+        dynamicTools: [], followUpAttachmentAllowed: false, groupConversation: false,
+        sandbox: 'read-only', workingDirectory,
+        prompt: [child.instructions, context, 'The follow-up is due now. Current conversation after the original delivered message:', scenario.history].join('\n\n'),
+      })
+      const decision = parseAssistantNotificationDecision(result.finalMessage)
+      expect(decision.kind, decision.privateSummary).toBe(scenario.kind)
+      expect(result.followUpRequest).toBeNull()
+      expect(readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'dynamic')).toHaveLength(0)
+      expect(await listFollowUpAutomations(workingDirectory)).toHaveLength(1)
+      if (decision.kind === 'send_message') {
+        expect(decision.text.length).toBeLessThan(240)
+        expect(decision.text).not.toMatch(/automation|outbox|primitive|you failed|you ignored|why haven.t you/iu)
+      }
+      process.stdout.write(`[real-codex durable follow-up ${scenario.label}] ${decision.kind === 'send_message' ? decision.text.replaceAll(/\s+/gu, ' ').trim() : 'skip'}\n`)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }
   }, 360_000)
 })

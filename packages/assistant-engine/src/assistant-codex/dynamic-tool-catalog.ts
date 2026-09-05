@@ -78,6 +78,7 @@ import {
 } from './dynamic-tools/assistant-style.js'
 import {
   MURPH_AUTOMATION_TOOL,
+  MURPH_ATTACH_FOLLOW_UP_TOOL,
 } from './dynamic-tools/automation.js'
 import {
   MURPH_DEVICE_TOOL,
@@ -1744,6 +1745,7 @@ export const MURPH_DYNAMIC_TOOLS = [
 
 export type MurphDynamicTool =
   | (typeof MURPH_DYNAMIC_TOOLS)[number]
+  | typeof MURPH_ATTACH_FOLLOW_UP_TOOL
   | typeof MURPH_MEMBER_MEMORY_TOOL
   | typeof MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL
   | typeof MURPH_GROUP_CHALLENGE_RESPONSE_CARD_TOOL
@@ -1756,6 +1758,7 @@ export interface MurphDynamicToolAvailability {
   assistantConfigurationAvailable?: boolean | null
   allowFinishWithoutReply?: boolean | null
   automationAvailable?: boolean | null
+  followUpAttachmentAvailable?: boolean | null
   computerToolsAvailable?: boolean | null
   progressUpdatesAvailable?: boolean | null
   connectedAppsAvailable?: boolean | null
@@ -1869,6 +1872,9 @@ export function resolveMurphDynamicTools(
   const tools: MurphDynamicTool[] = MURPH_DYNAMIC_TOOLS.filter((tool) =>
     (TOOL_AVAILABILITY.get(tool) ?? ALWAYS_AVAILABLE)(availability),
   )
+  if (availability.automationAvailable !== true && availability.followUpAttachmentAvailable === true) {
+    tools.push(MURPH_ATTACH_FOLLOW_UP_TOOL)
+  }
   if (availability.groupChallengeResponseCardsAvailable === true) {
     const responseCardToolIndex = tools.indexOf(MURPH_ATTACH_RESPONSE_CARD_TOOL)
     if (responseCardToolIndex >= 0) {

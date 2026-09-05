@@ -1,3 +1,4 @@
+import { prepareAssistantFollowUpEvaluationInput } from './follow-ups.js'
 import * as z from '@murphai/contracts/zod-runtime'
 import type {
   AssistantResponseMedia,
@@ -361,12 +362,12 @@ export async function sendAssistantNotificationLocal(
       const preparedInput = await prepareAssistantCronNotificationInput(input, {
         sessionId: resolved.session.sessionId,
       })
-      const messageInput = preparedInput === input
+      const messageInput = await prepareAssistantFollowUpEvaluationInput(preparedInput === input
         ? resolutionMessageInput
         : buildAssistantNotificationMessageInput(
             preparedInput,
             maintenanceEvidencePrompt,
-          )
+          ))
       await emitHostedAssistantContextSessionResolvedTrace({
         message: messageInput,
         resolved,
@@ -779,6 +780,7 @@ export async function sendAssistantNotificationLocal(
             dedupeToken: input.deliveryDedupeToken ?? null,
             decisionSubject: decision.subject ?? null,
             input: messageInput,
+            followUpRequest: providerResult.followUpRequest,
             card: providerResult.responseCard ?? null,
             media: responseMedia,
             message: responseText,
@@ -844,6 +846,7 @@ export async function sendAssistantNotificationLocal(
           dedupeToken: input.deliveryDedupeToken ?? null,
           decisionSubject: decision.subject ?? null,
           input: messageInput,
+          followUpRequest: providerResult.followUpRequest,
           card: providerResult.responseCard ?? null,
           media: responseMedia,
           message: responseText,
@@ -1628,6 +1631,7 @@ function buildAssistantNotificationMessageInput(
 }
 
 async function deliverAssistantNotificationMessage(input: {
+  followUpRequest?: import("@murphai/contracts").AutomationFollowUpRequest | null
   card?: AssistantResponseCard | null
   dedupeToken: string | null
   decisionSubject: string | null
@@ -1673,6 +1677,8 @@ async function deliverAssistantNotificationMessage(input: {
     answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
     reviewedAssistantAskCompletionExpiresAt:
       input.input.reviewedAssistantAskCompletionExpiresAt ?? null,
+    followUpRequest: input.followUpRequest ?? undefined,
+    followUpEvaluatedThrough: input.input.outboxFollowUpEvaluatedThrough,
     automationAuthority: input.input.outboxAutomationAuthority ?? null,
     automationContextReferences:
       input.input.outboxAutomationContextReferences ?? null,
