@@ -34372,3 +34372,58 @@ function tomlString(value: string): string {
 function tomlKey(value: string): string {
   return /^[A-Za-z0-9_-]+$/u.test(value) ? value : tomlString(value)
 }
+
+
+describeRealCodex('real Codex Murph service discovery e2e', () => {
+  it('uses an available Murph service without requesting a member connection', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-service-discovery-e2e-'))
+    const requests: Array<{ operation: string; input: Record<string, unknown> }> = []
+    try {
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      await materializeAssistantSkill({ skillsRoot, slug: 'connected-apps' })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, developerInstructions: buildWeatherAlertDeveloperInstructions(false),
+        dynamicTools: [MURPH_CONNECTED_APPS_SEARCH_TOOL, MURPH_CONNECTED_APPS_EXECUTE_TOOL, MURPH_CONNECTED_APPS_MANAGE_TOOL],
+        env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot }, excludeResumeTurns: true,
+        hostedToolContext: {
+          computerToolsAvailable: false,
+          connectedApps: { request: async (request) => {
+            requests.push({ operation: request.operation, input: request.input })
+            if (request.operation === 'search') return { result: {
+              success: true,
+              service_tools: [{ toolkit: 'openweather_api', tool_slug: 'OPENWEATHER_API_GET_CURRENT_WEATHER',
+                member_connection_required: false, configuration_status: 'ready',
+                status_message: 'Murph provides this service. Execute without a member account; no connection is needed. Provider execution can still fail.' }],
+              toolkit_connection_statuses: [{ toolkit: 'openweather_api', member_connection_required: false,
+                enabled_tool_slugs: ['OPENWEATHER_API_GET_CURRENT_WEATHER'],
+                status_message: 'Use service_tools for the listed Murph-provided actions. They need no member connection. This does not enable other actions in this toolkit.' }],
+              tool_schemas: { OPENWEATHER_API_GET_CURRENT_WEATHER: {
+                toolkit: 'openweather_api', tool_slug: 'OPENWEATHER_API_GET_CURRENT_WEATHER',
+                input_schema: { type: 'object', properties: { lat: { type: 'number' }, lon: { type: 'number' }, units: { type: 'string' } }, required: ['lat', 'lon'] },
+              } },
+            } }
+            if (request.operation !== 'execute') throw new Error('No member connection is needed for this service.')
+            return { result: { main: { temp: 18 }, weather: [{ description: 'clear sky' }], units: 'metric' } }
+          } },
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => { throw new Error('No file send authorized.') }, vaultFileSendAvailable: false,
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'I am heading out for a walk now near latitude 40, longitude -75. Please use Murph’s built-in weather service to check the current temperature and sky conditions, in Celsius.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      process.stdout.write(JSON.stringify({ scenario: 'Murph-provided service discovery', reply: result.finalMessage, operations: requests.map((request) => request.operation) }) + '\n')
+      expect(requests.filter((request) => request.operation === 'manage')).toEqual([])
+      const executions = requests.filter((request) => request.operation === 'execute')
+      expect(executions).toHaveLength(1)
+      expect(executions[0]?.input).toMatchObject({ toolSlug: 'OPENWEATHER_API_GET_CURRENT_WEATHER', arguments: { lat: 40, lon: -75, units: 'metric' } })
+      expect(executions[0]?.input.account).toBeUndefined()
+      expect(result.finalMessage).toMatch(/18/)
+      expect(result.finalMessage).toMatch(/clear/iu)
+      expect(result.finalMessage).not.toMatch(/connect.*(?:account|weather)|API key|credentials|sign in/iu)
+    } finally { await rm(workingDirectory, { force: true, recursive: true }) }
+  }, 720_000)
+})

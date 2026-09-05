@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-09-04",
+  "order": 100,
+  "item": {
+    "id": "built-in-service-connection-guidance",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Use built-in services without extra connections",
+    "summary": "Murph recognizes supported services that do not need you to connect an account.",
+    "details": "If a built-in service is temporarily unavailable, Murph distinguishes that from a personal account that needs connecting.",
+    "relevanceTags": [
+      "connected-apps"
+    ],
+    "sourcePullRequests": [],
+    "tryIt": {
+      "label": "Ask Murph",
+      "prompt": "What is the weather like today?"
+    }
+  }
+}
