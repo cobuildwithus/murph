@@ -1,6 +1,7 @@
 ---
 title: 'Hosted E2E tool inventory still expects deferred response cards'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2921'
 ---
 
 ## Expected Behavior

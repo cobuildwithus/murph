@@ -1,6 +1,7 @@
 ---
 title: 'Base-update limits stop authorized shipping after routine main movement'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2919'
 ---
 
 ## Expected Behavior

@@ -637,8 +637,24 @@
       "path": ".agents/friction-log/20260827150613-live-hosted-assistant/friction.md"
     },
     {
+      "issue": "cobuildwithus/murph#2513",
+      "path": ".agents/friction-log/20260827124612-hosted-local-e2e/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2514",
+      "path": ".agents/friction-log/20260828163031-assistant-runtime-full/friction.md"
+    },
+    {
       "issue": "cobuildwithus/murph#2560",
       "path": ".agents/friction-log/20260828164243-committer-rejects-directory/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2647",
+      "path": ".agents/friction-log/20260831025840-hosted-member-seed/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2677",
+      "path": ".agents/friction-log/20260830174923-hosted-local-docker/friction.md"
     }
   ],
   "version": 1
