@@ -96,11 +96,17 @@ source that has never delivered is measured from `first_seen_at`, so a connect
 that emits its opening burst and then goes quiet is caught by the same rule.
 
 Member no-data checks have a separate policy from push-primary classification.
-Garmin admits one direct Linq check after five days without a delivery; Apple
-Health admits one after three days. Apple Health retains ordinary polling and
+Garmin and Junction WHOOP (`whoop_v2`) admit one direct Linq check after five
+days without a delivery; Apple Health admits one after three days. WHOOP stays
+pull-capable and also qualifies when its source has the explicit
+`TOKEN_REFRESH_FAILED` error. Its neutral connection-help question does not
+infer disconnection, prescribe reconnect, or claim an automatic repair. Error
+transitions keep the same lifecycle/last-delivery episode key, so they cannot
+produce another check for the same gap. Never-delivered sources and other
+WHOOP error states do not qualify. Apple Health retains ordinary polling and
 its recovery text suggests opening Murph and tapping Check for new data,
 without treating silence as proof of app closure, permissions, or disconnection.
-Both checks are only for an active member with a recent inbound and an established
+These checks are only for an active member with a recent inbound and an established
 direct thread.
 Canonical member-plus-source-provider preference state may extend that wait to
 5–30 days or disable it; missing preference state means the provider's default.
