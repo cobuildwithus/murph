@@ -130,6 +130,9 @@ it.each(["approval", "retry"] as const)(
       expect(postCheckpoint?.afterDurableCheckpoint).toBeDefined();
       const prepared = await readAssistantOutboxIntent(vaultRoot, intent.intentId);
       expect(prepared).toMatchObject({ status: "sending", deliveryTransportIdempotent: false, preparedDispatchToken: expect.any(String) });
+      const recoveryWakeAt = await callbacks.resolveHostedAssistantOutboxNextWakeAt({ vaultRoot });
+      expect(recoveryWakeAt).toBe(new Date(Date.now() + 2 * 60_000).toISOString());
+      expect(postCheckpoint).toMatchObject({ nextWakeAt: recoveryWakeAt, nextWakeReason: HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON });
       // Publish the complete local snapshot before running the durable callback.
       await rm(snapshot, { force: true, recursive: true });
       await cp(vaultRoot, snapshot, { recursive: true });
@@ -142,7 +145,11 @@ it.each(["approval", "retry"] as const)(
       expect(await readAssistantOutboxIntent(vaultRoot, intent.intentId)).toMatchObject({ status: "sending" });
       expect(await drain(await collect())).toEqual([]);
       expect(providerFetch).toHaveBeenCalledTimes(callsBeforePhase + 1);
-      vi.setSystemTime(new Date(Date.now() + 11 * 60_000));
+      vi.setSystemTime(new Date(recoveryWakeAt!));
+      expect(await drain(await collect())).toEqual([]);
+      const staleWakeAt = await callbacks.resolveHostedAssistantOutboxNextWakeAt({ vaultRoot });
+      expect(staleWakeAt).toBe(new Date(Date.parse(recoveryWakeAt!) + 8 * 60_000).toISOString());
+      vi.setSystemTime(new Date(staleWakeAt!));
       const recovered = await drain(await collect());
       expect(recovered).toEqual([expect.objectContaining({ deliveryStatus: "failed", deliveryErrorCode: "ASSISTANT_DELIVERY_AMBIGUOUS", retryable: false })]);
       expect(acceptedUploads).toBe(1);

@@ -7471,11 +7471,18 @@ async function drainHostedDeliveryWithFileCheckpoint(
       input.afterDurableCheckpoint ?? null,
       deferHostedDeliveryUntilDurableCheckpoint(input),
     );
+    const nextWake = selectHostedRuntimeWakeCandidate([
+      input.baseNextWake,
+      createHostedRuntimeWakeCandidate(
+        await resolveHostedAssistantOutboxNextWakeAt({ vaultRoot: input.input.restored.vaultRoot }),
+        HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+      ),
+    ]);
     return {
       ...(afterDurableCheckpoint ? { afterDurableCheckpoint } : {}),
       checkpointReason: "outbox_sending",
-      nextWakeAt: input.baseNextWake.at,
-      nextWakeReason: input.baseNextWake.reason,
+      nextWakeAt: nextWake.at,
+      nextWakeReason: nextWake.reason,
       redactedStatus: input.redactedStatus ?? {},
     };
   }
