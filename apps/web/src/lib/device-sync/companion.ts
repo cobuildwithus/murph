@@ -103,6 +103,9 @@ const COMPANION_AUTH_DIAGNOSTIC_PROVIDER_CODES = new Set([
 ]);
 const COMPANION_AUTH_DIAGNOSTIC_ALLOWED_KEYS = new Set([
   "appVersion",
+  "appBuild",
+  "osVersion",
+  "diagnosticSessionId",
   "diagnosticCode",
   "errorKind",
   "httpStatus",
@@ -116,8 +119,12 @@ const COMPANION_AUTH_DIAGNOSTIC_ALLOWED_KEYS = new Set([
 const COMPANION_AUTH_DIAGNOSTIC_STAGES = new Set([
   "confirm_code",
   "send_code",
+  "session_restore",
+  "session_refresh",
+  "backend_request",
+  "sign_out",
 ]);
-const COMPANION_AUTH_DIAGNOSTIC_METHODS = new Set(["email", "sms"]);
+const COMPANION_AUTH_DIAGNOSTIC_METHODS = new Set(["email", "sms", "session"]);
 const COMPANION_AUTH_DIAGNOSTIC_ERROR_KINDS = new Set([
   "configuration",
   "network",
@@ -127,6 +134,12 @@ const COMPANION_AUTH_DIAGNOSTIC_ERROR_KINDS = new Set([
   "unknown",
 ]);
 const COMPANION_AUTH_DIAGNOSTIC_CODE_DESCRIPTIONS = {
+  session_unverified: "Saved session could not yet be verified.",
+  session_signed_out: "No verified session was available.",
+  session_restored: "Saved session verified successfully.",
+  explicit_sign_out: "The member explicitly signed out.",
+  identity_token_missing: "Session refresh produced no identity token.",
+  backend_auth_rejected: "The backend rejected an authenticated request.",
   network_lost: "Network connection was lost.",
   network_offline: "Network appears offline.",
   network_timeout: "Network request timed out.",
@@ -166,6 +179,9 @@ interface CompanionAuthDiagnosticLog {
   retryable: boolean;
   stage: string;
   appVersion: string | null;
+  appBuild: string | null;
+  osVersion: string | null;
+  diagnosticSessionId: string | null;
 }
 
 export type CompanionConnectionIntent = "connect" | "resume";
@@ -500,7 +516,17 @@ export function validateCompanionAuthDiagnosticRequestBody(
     retryable: readRequiredBoolean(body, "retryable"),
     stage,
     appVersion: readOptionalAuthDiagnosticAppVersion(body),
+    appBuild: readOptionalDiagnosticPattern(body.appBuild, /^[0-9]{1,9}$/u),
+    osVersion: readOptionalDiagnosticPattern(body.osVersion, COMPANION_AUTH_DIAGNOSTIC_VERSION_PATTERN),
+    diagnosticSessionId: readOptionalDiagnosticPattern(
+      body.diagnosticSessionId,
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+    ),
   };
+}
+
+function readOptionalDiagnosticPattern(value: unknown, pattern: RegExp): string | null {
+  return typeof value === "string" && pattern.test(value) ? value : null;
 }
 
 function readOptionalProviderErrorCode(body: Record<string, unknown>): string | null {

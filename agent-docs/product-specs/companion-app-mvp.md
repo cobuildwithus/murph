@@ -564,3 +564,27 @@ boundary.
   production keys for TestFlight.
 - Telegram-on-iOS support tracking with Privy.
 - AGPL/commercial confirmation from Junction (gate above).
+
+## Authentication recovery telemetry
+
+The existing `POST /api/device-sync/companion/auth-diagnostics` route accepts
+legacy OTP diagnostics and closed session_restore, session_refresh,
+backend_request, and sign_out stages (`method: session`). Optional appBuild,
+osVersion, and diagnosticSessionId are strictly numeric/version/UUIDv4-shaped;
+unsupported values become null, unknown fields reject the envelope. The UUID
+is generated once per native process, never persisted or bound to a member.
+No raw errors, request paths, contact details, tokens, device IDs, or health data
+are accepted. Client reports remain spoofable operational evidence.
+
+Vercel runtime logs can be filtered by `companion_auth_diagnostic` (message
+`Companion auth diagnostic.`), then stage, diagnosticCode, appVersion/appBuild,
+and diagnosticSessionId. Successful session restoration and ordinary sign-out
+state use info; failure events use warning. New iOS clients retain a bounded
+memory-only queue for transient failures and flush on another event or
+foreground. Process termination loses unsent events intentionally.
+
+Deploy the backward-compatible backend first, then the native app. An older
+backend can reject new events without affecting sign-in. Keep the existing
+production enablement flag and verified WAF cap; do not bypass them for
+observability. Rollback of the backend may lose newer telemetry only. No
+runtime Worker deployment or data migration is required.
