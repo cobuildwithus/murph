@@ -5,8 +5,8 @@
     "id": "imessage-typing-recovery",
     "kind": "improvement",
     "priority": 2,
-    "title": "Typing stays with longer replies",
-    "summary": "Murph can keep its iMessage typing indicator active for up to ten minutes while working on a reply.",
+    "title": "Typing recovers during replies",
+    "summary": "Murph can restore its iMessage typing indicator after temporary failures or a cleared indicator while working on a reply.",
     "details": "Typing refreshes can recover after temporary failures or a cleared indicator, with an extra refresh after progress messages. Indicators still depend on iMessage delivery.",
     "relevanceTags": [
       "imessage",

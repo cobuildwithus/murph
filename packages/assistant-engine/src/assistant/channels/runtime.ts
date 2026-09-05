@@ -70,7 +70,7 @@ const TELEGRAM_MAX_RETRY_DELAY_MS = 30_000
 const TELEGRAM_SEND_TIMEOUT_MS = 30_000
 const TELEGRAM_MAX_VOICE_MEMO_BYTES = 10 * 1024 * 1024
 const LINQ_TYPING_REFRESH_MS = 45_000
-const LINQ_TYPING_MAX_SESSION_MS = 10 * 60_000
+const LINQ_TYPING_MAX_SESSION_MS = 5 * 60_000
 // Message acceptance precedes delivery. Restart promptly, then once more to
 // recover when a delayed send clears the first restart.
 const LINQ_TYPING_POST_MESSAGE_REFRESH_MS = 1_000

@@ -158,7 +158,7 @@ test("hosted Linq typing uses the hosted env after target context validation", a
     target: "chat_123",
   });
   assert.deepEqual(mocks.startLinqTypingIndicator.mock.calls[0]?.[1]?.env, linqEnv);
-  assert.equal(mocks.startLinqTypingIndicator.mock.calls[0]?.[1]?.maxSessionMs, 10 * 60_000);
+  assert.equal(mocks.startLinqTypingIndicator.mock.calls[0]?.[1]?.maxSessionMs, 5 * 60_000);
   assert.equal(mocks.startLinqTypingIndicator.mock.calls[0]?.[1]?.refreshMs, 45_000);
 });
 
@@ -484,7 +484,7 @@ test("hosted Linq typing suppresses restarts after a max-length session", async 
   const handle = await typing.startLinqTyping?.({
     target: "chat_123",
   });
-  vi.setSystemTime(new Date("2026-07-07T12:10:01.000Z"));
+  vi.setSystemTime(new Date("2026-07-07T12:05:01.000Z"));
   await handle?.stop();
 
   await expect(typing.startLinqTyping?.({
@@ -492,10 +492,10 @@ test("hosted Linq typing suppresses restarts after a max-length session", async 
   })).resolves.toBeUndefined();
   expect(mocks.startLinqTypingIndicator).toHaveBeenCalledTimes(1);
 
-  vi.setSystemTime(new Date("2026-07-07T12:19:59.000Z"));
+  vi.setSystemTime(new Date("2026-07-07T12:14:59.000Z"));
   await handle?.stop(); // Repeated cleanup must not extend the original cooldown.
 
-  vi.setSystemTime(new Date("2026-07-07T12:20:02.000Z"));
+  vi.setSystemTime(new Date("2026-07-07T12:15:02.000Z"));
   const restartedHandle = await typing.startLinqTyping?.({
     target: "chat_123",
   });

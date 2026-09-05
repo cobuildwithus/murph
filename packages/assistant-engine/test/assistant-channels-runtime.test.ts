@@ -3629,9 +3629,9 @@ describe('assistant channels runtime seam', () => {
       },
     )
 
-    await vi.advanceTimersByTimeAsync(5 * 60_000)
-    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(7)
-    await vi.advanceTimersByTimeAsync(5 * 60_000 - 1)
+    await vi.advanceTimersByTimeAsync(2 * 60_000)
+    expect(runtimeMocks.startLinqChatTypingIndicator).toHaveBeenCalledTimes(3)
+    await vi.advanceTimersByTimeAsync(3 * 60_000 - 1)
     runtimeMocks.stopLinqChatTypingIndicator.mockClear()
 
     await vi.advanceTimersByTimeAsync(1)
@@ -3657,7 +3657,7 @@ describe('assistant channels runtime seam', () => {
       },
     )
 
-    await vi.advanceTimersByTimeAsync(10 * 60_000 - 1)
+    await vi.advanceTimersByTimeAsync(5 * 60_000 - 1)
     runtimeMocks.stopLinqChatTypingIndicator.mockClear()
     runtimeMocks.stopLinqChatTypingIndicator.mockRejectedValueOnce(
       new Error('temporary Linq stop failure'),
@@ -3765,14 +3765,14 @@ describe('assistant channels runtime seam', () => {
     expect(runtimeMocks.stopLinqChatTypingIndicator).toHaveBeenCalledTimes(1)
   })
 
-  it('cancels the Linq progress follow-up at the ten-minute cap', async () => {
+  it('cancels the Linq progress follow-up at the five-minute cap', async () => {
     vi.useFakeTimers()
     runtimeMocks.startLinqChatTypingIndicator.mockResolvedValue(undefined)
     runtimeMocks.stopLinqChatTypingIndicator.mockResolvedValue(undefined)
     const handle = await startLinqTypingIndicator({ target: 'chat-cap-race' }, {
       env: { LINQ_API_TOKEN: 'linq-token' },
     })
-    await vi.advanceTimersByTimeAsync(10 * 60_000 - 2_000)
+    await vi.advanceTimersByTimeAsync(5 * 60_000 - 2_000)
     await handle.refreshAfterMessage?.()
     await vi.advanceTimersByTimeAsync(2_000)
     const startsAtCap = runtimeMocks.startLinqChatTypingIndicator.mock.calls.length
