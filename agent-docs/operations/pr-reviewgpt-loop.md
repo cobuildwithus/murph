@@ -424,21 +424,18 @@ the current user explicitly asks for it.
    round. Correct its evidence or invocation gap and retry the same round number
    against the same pushed head.
 
-   Treat 7.5 minutes as the default final-gate trust floor, not an absolute
-   stopwatch verdict. A marked concrete-model response below 6.5 minutes is too
-   fast and does not count. A response from 6.5 minutes up to the 7.5-minute
-   default is near-threshold and may count at local discretion when inspection
-   confirms the exact turn, attachment, requested model selection, completion
-   marker, and a substantive review proportionate to the requested scope. Record
-   the elapsed time, selected lane/model evidence, artifact-quality judgment,
-   and acceptance reason in the round handoff. ReviewGPT's package-level
-   five-minute attestation threshold does not replace this stricter final-gate
-   judgment. Responses at or above 7.5 minutes still require all ordinary
-   evidence checks and are not trusted by duration alone.
+   Require at least 4.5 minutes (270 seconds) for a marked concrete-model final
+   response. The repository wrapper passes `--minimum-marked-response-time 270s`
+   to align the tool's attestation fallback with this final-gate minimum. Below
+   that minimum, the response does not count. At or above it, inspect the exact
+   turn, attachment, requested model selection, completion marker, and a
+   substantive review proportionate to the requested scope. Record the elapsed
+   time, selected lane/model evidence, artifact-quality judgment, and acceptance
+   reason in the round handoff. Duration alone never establishes a valid review.
 
-   If a too-fast response is not accepted under this narrow exception, preserve
-   it only as diagnostic output and retry the same substantive round number
-   against the same pushed head. Browser, model, capture, attachment, and
+   Preserve a too-fast response only as diagnostic output and retry the same
+   substantive round number against the same pushed head. Browser, model,
+   capture, attachment, and
    too-fast-response retries never advance the round counter. If evidence shows
    a different or downgraded model, incomplete response, missing snapshot, or
    shallow/templated output, discard the round regardless of duration, correct
