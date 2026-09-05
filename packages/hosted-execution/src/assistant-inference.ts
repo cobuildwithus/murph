@@ -18,6 +18,8 @@ export type HostedInferenceAuthKind =
 export const HOSTED_CUSTOM_INFERENCE_CONSUMER_VERSION = 1 as const;
 export const HOSTED_CUSTOM_INFERENCE_CONSUMER_VERSION_QUERY =
   "customInferenceVersion" as const;
+// Persisted protocol compatibility identity, not the installed CLI version.
+// Keep stable across Codex upgrades that preserve the portable Responses contract.
 export const HOSTED_CUSTOM_INFERENCE_VERIFICATION_PROFILE =
   "murph-codex-0.151.0-portable-responses-v1" as const;
 export const HOSTED_INFERENCE_CONTEXT_WINDOW_MIN_TOKENS = 8_192;

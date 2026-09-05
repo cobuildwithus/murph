@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { access, readFile } from "node:fs/promises";
 
 import {
@@ -452,7 +453,7 @@ describe("hosted runner container image contract", () => {
       "utf8",
     );
 
-    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.151.0");
+    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.153.4");
     expect(baseDockerfile).toContain("ARG NODE_VERSION=24.14.1");
     expect(baseDockerfile).toContain(
       "ARG NODE_IMAGE_DIGEST=sha256:b506e7321f176aae77317f99d67a24b272c1f09f1d10f1761f2773447d8da26c",
@@ -800,15 +801,8 @@ describe("hosted runner container image contract", () => {
     const legacyLinuxCatalog = parseCodexModelCatalogJson(runJqFilter(patchFilter, {
       models: stockCatalogWithoutFlex.models.filter((model) => model.slug !== "gpt-6-astra"),
     }));
-    expect(readCodexModelSlugs(legacyLinuxCatalog).sort()).toEqual([...hostedRunnerProductModelSlugs].sort());
-    expect(readCodexModel(legacyLinuxCatalog, "gpt-6-astra")).toMatchObject({
-      slug: "gpt-6-astra",
-      display_name: "GPT-6-Astra",
-      context_window: 272_000,
-    });
-    expect(runJqFilter(validationFilter, legacyLinuxCatalog, { slurp: true }).trim()).toBe("true");
-    expect(parseCodexModelCatalogJson(runJqFilter(patchFilter, legacyLinuxCatalog)))
-      .toEqual(legacyLinuxCatalog);
+    expect(readCodexModelSlugs(legacyLinuxCatalog)).not.toContain("gpt-6-astra");
+    expect(runJqFilter(validationFilter, legacyLinuxCatalog, { slurp: true }).trim()).toBe("false");
     expect(runJqFilter(validationFilter, {
       models: patchedCatalog.models.map((model) => model.slug === "gpt-6-astra"
         ? { ...model, context_window: 1_050_000 } : model),
@@ -850,6 +844,29 @@ describe("hosted runner container image contract", () => {
           : model
       ),
     }, { slurp: true }).trim()).toBe("false");
+  });
+
+  it("validates the product catalogs against the installed native Codex release", async () => {
+    const finalDockerfile = await readFile(
+      new URL("../../../Dockerfile.cloudflare-hosted-runner", import.meta.url),
+      "utf8",
+    );
+    const { patchFilter, standardFilter, validationFilter } = readFinalImageCodexModelCatalogJqFilters(finalDockerfile);
+    const nativeCatalogJson = execFileSync(
+      fileURLToPath(new URL("../../../packages/assistant-engine/node_modules/.bin/codex", import.meta.url)),
+      ["debug", "models", "--bundled"],
+      { encoding: "utf8", maxBuffer: 10 * 1024 * 1024, timeout: 30_000 },
+    );
+    const nativeCatalog = parseCodexModelCatalogJson(nativeCatalogJson);
+    const productCatalog = parseCodexModelCatalogJson(runJqFilter(patchFilter, nativeCatalog));
+    expect(runJqFilter(validationFilter, productCatalog, { slurp: true }).trim()).toBe("true");
+    expect(readCodexModel(productCatalog, "gpt-6-astra")).toMatchObject({
+      ...readCodexModel(nativeCatalog, "gpt-6-astra"),
+      service_tiers: expect.any(Array),
+      tool_mode: "code_mode",
+    });
+    expect(readCodexModelSlugs(parseCodexModelCatalogJson(runJqFilter(standardFilter, productCatalog))).sort())
+      .toEqual(["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"]);
   });
 
   it("pins the checked-in and rendered Wrangler config to an app-local build context", async () => {

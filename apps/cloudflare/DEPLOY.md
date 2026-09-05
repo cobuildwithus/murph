@@ -2017,10 +2017,27 @@ pnpm --dir apps/cloudflare runner:docker:base
 ```
 
 That image is prepared in the local Docker cache under the stable GHCR tag
-`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.151.0`,
+`ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.153.4`,
 which is also the final app-layer Dockerfile default. Using the pullable GHCR
 name avoids BuildKit treating the prepared base as a Docker Hub `library/*`
 image during local Wrangler container builds.
+Codex CLI 0.153.4 supplies the native Astra entry; the image no longer
+synthesizes Astra from Sol. The existing standard catalog and separately
+authorized Astra catalog retain their model filtering, mixed Code Mode, Flex,
+and context-window validation. Missing product models fail the image build.
+The saved `portable-responses-v1` custom-inference verification identity remains
+stable across this CLI upgrade because it describes the verified protocol,
+not the installed binary. Changing that identity requires separate compatibility
+handling for saved connections and mixed Web/Worker versions.
+This upgrade changes the runner base fingerprint, but no Web/Worker payload or
+workspace snapshot schema. Build the new base and final runner together through
+the existing deploy path; version-fenced containers replace the old runtime.
+Keep the prior complete runner artifact as the rollback candidate; reverting
+only the base tag would separate the binary from its reviewed route inventory.
+Before deployment, require exact-head Linux egress/catalog and hosted continuity
+proof. After deployment, verify `codexVersion` in runner smoke and bounded
+provider-start/resume error aggregates. Production deployment and any rollback
+remain separately authorized operations.
 It contains Node, Python 3 exposed as both `python3` and `python`, pinned `@openai/codex` with its bundled Linux sandbox resources, `jq`, `ripgrep`, `ffmpeg`, and PDF tooling from Poppler plus `file` and `qpdf`, but no app bundle, worker secrets, or local speech models.
 The final app-layer image filters `codex debug models --bundled` to exactly `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`, adds OpenAI flex service-tier support to each, forces mixed `tool_mode: code_mode`, validates the exact catalog with `jq`, and exposes it through `MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON`. Hosted app-server turns can therefore keep the code executor, expose native `tool_search` for deferred dynamic tools, and send OpenAI `service_tier: flex`; individual tool `deferLoading` flags still keep broad schemas out of the initial model-visible surface. The deploy smoke exercises Terra through that same model catalog, and native Codex validation rejects a non-product per-spawn model before provider traffic. Hosted Codex MultiAgent V2 is enabled through the generated `[features.multi_agent_v2]` config table, which also carries Murph's proactive-delegation tool and mode hints: delegate bounded background work that would otherwise block the immediate reply. Hosted launches must not pass a boolean `features.multi_agent_v2` override because that would replace the table and drop those hints. Per-spawn model selection stays disabled unless Web's existing assistant-configuration owner confirms that the current managed runtime is authorized for the full product-model catalog; Cloudflare forwards that one decision, and missing projection or custom inference disables only the optional selector. Deploy the Cloudflare/runtime consumer before the Web producer so mixed versions fail closed without blocking ordinary replies or inherited-model children. The Codex App Server stays warm for the container lifetime; catalog changes take effect through normal container or process replacement, not per-turn restart.
 The runner bundle is root-owned and mode-normalized in an intermediate image

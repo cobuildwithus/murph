@@ -1865,6 +1865,11 @@ Last verified: 2026-09-04
   new successors never write the envelope or consult its completed-resource
   names. Every partial continuation preserves `lastSyncCompletedAt`; only
   terminal current full work may advance it.
+- Junction summary and workout import preparation share their fresh post-provider
+  source read with historical evidence evaluation through pure admission helpers.
+  Empty historical segments retain their post-fetch authority without a second
+  read; actual canonical imports still recheck authority afterward. Reads are
+  never reused across provider fetches, stream candidates, or job executions.
 - Junction workout streams stay inside that existing resource/day continuation
   owner. Before the workout index, the existing control-plane current-import
   admission predicate intersects with the current Junction provider inventory
