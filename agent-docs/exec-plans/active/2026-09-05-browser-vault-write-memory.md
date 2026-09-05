@@ -53,4 +53,4 @@ To rerun the checked-in Node proof, bundle `apps/cloudflare/test/browser-vault-w
 
 ## Status
 
-Implementation and local parent candidate review complete. Scoped candidate commit, PR creation, final ReviewGPT and required exact-head CI remain pending. This functional fix will be left for human merge; no production mutation or deployed recovery is claimed. The remaining sweep findings and coverage limitations are maintained in automation memory.
+Implementation and local parent candidate review complete. Candidate committed and draft PR #2966 opened. Final ReviewGPT and required exact-head CI remain pending. This functional fix will be left for human merge; no production mutation or deployed recovery is claimed. The remaining sweep findings and coverage limitations are maintained in automation memory.

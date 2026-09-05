@@ -12,7 +12,9 @@
       "dashboard",
       "reliability"
     ],
-    "sourcePullRequests": [],
+    "sourcePullRequests": [
+      2966
+    ],
     "tryIt": {
       "label": "View Patterns",
       "href": "/patterns"
