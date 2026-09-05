@@ -27,11 +27,21 @@ invocation-scoped root tools: the resident App Server may expose them to the
 active root turn, but descendant or foreign resident threads fail before the
 accepted-message resolver runs.
 
+Native replies may select any input admitted in the active turn through the
+exact tool or response ordinal, including earlier live-steering segments.
+Reactions remain segment-only. Native selection and pre-delivery revalidation
+use the same bounded prefix; invalid ordinals, including request-relative
+ordinals before group reconsideration rebasing, fail closed. Admission and
+checkpointing still precede target authority, and no-reply accounting is
+unchanged.
+
 `murph.select_reply_target` annotates a normal response segment;
 `murph.react_to_message` keeps the existing reaction effect and outbox
 operation. The delivery owner re-resolves the selected input immediately before
-each effect and clones its reply context instead of mutating shared input. Every
-`---` bubble from one response segment inherits the same selected target.
+each effect. Native replies clone the response ordinal's reply context and
+overlay only the canonical message target, without replacing the route or
+audience or mutating shared input. Every `---` bubble from one response segment
+inherits the same selected target.
 
 Intentional replies persist a true-only `nativeReplyRequested` marker on each
 normal message intent. The marker participates in strict parsing, persistence,
