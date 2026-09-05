@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-05",
+  "order": 100,
+  "item": {
+    "id": "wearable-history-fetch-recovery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Wearable history sync keeps moving",
+    "summary": "Completed wearable history requests no longer get stuck just because a Fitbit connection is still active.",
+    "details": "Murph can fetch the history for the connected source without treating a completion notification as newly arrived health data. Source permissions and data checks still apply.",
+    "relevanceTags": ["device-sync"],
+    "sourcePullRequests": [2950]
+  }
+}

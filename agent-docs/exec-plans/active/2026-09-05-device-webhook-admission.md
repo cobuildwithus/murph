@@ -46,11 +46,12 @@ Updated: 2026-09-05
 - Product UX patch: restore bounded history fetching for established wearable sources; cover legacy Fitbit, unrelated connected sources, and Google Health without claiming that a fetch notification proves new data arrived. Prove durable handoff and unchanged unsafe-input rejection with synthetic tests, then separately verify retained Queue admission.
 - Diagnostics reuse the existing log owner and never emit arbitrary exception messages, payloads, or event identities.
 - No new persistence, queue, admission authority, or retry policy is introduced.
-- Changelog: the initial diagnostic change has no member-visible behavior and needs no entry; revisit for the correction.
+- Changelog: diagnostics were internal-only; the correction adds `wearable-history-fetch-recovery` with the bounded history-sync outcome.
 
 ## Verification
 
 - Focused Web batch-admission tests and Web typecheck; complexity and diff checks before commit.
 - Expected outcomes: accepted and duplicate dispositions remain unchanged, readiness failures remain retryable, and unknown messages and identifiers remain absent from logs.
-- Final outcome remains pending exact-boundary diagnosis, correction, deployment, and encrypted Queue recovery.
+- The correction's three historical-fetch cases reproduce the original provenance error before the change. The full hosted wake suite passes 200 tests after it, including mixed-job negative cases. Two provider-owned historical parsing/fetch tests and nine changelog rendering tests pass. Web typecheck passes after refreshing workspace dependencies. Complexity debt drops from 112 to 110 and maximum complexity from 59 to 57; remaining transaction hotspots are unchanged outside the extracted predicate.
+- Parent candidate review: existing consent, exact-source registration, connection epoch, encrypted dirty merge, receipt, and mailbox owners remain intact; no provider/KMS I/O or query is added. The pure predicate inspects at most the existing two prepared jobs. Product UX: Ready at the durable-admission boundary; production deployment and Queue convergence remain pending.
 - Initial diagnostic candidate: eight focused batch tests passed; Web typecheck passed; complexity guard passed with no hotspots; diff whitespace check passed. Parent review confirms only the existing aggregate completion log changes, with no admission or provider behavior change.
