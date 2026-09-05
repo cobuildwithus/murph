@@ -244,7 +244,6 @@ import {
   isHostedApprovedContinuationSystemMailboxItem,
   isHostedSystemMailboxModelFreeExactNotificationItem,
   readHostedSystemMailboxState,
-  readHostedSystemMailboxHandledThroughSeq,
   readHostedSystemMailboxProgress,
   type HostedSystemMailboxPendingItem,
 } from "./hosted-runtime/system-mailbox-state.ts";
@@ -6451,7 +6450,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           workspace: committedWorkspace,
         });
         const runtimeDirtyAfterForeground = result.runtimeStateDirty
-          || hostedVaultStartupPreparation.mutated;
+          || hostedVaultStartupPreparation.mutated
+          || await hasRestoredSystemMailboxProgressAheadOfWorkspace({
+            importedSeq: result.latestMailboxImport.state.watermarks.system,
+            redactedStatus: committedWorkspace?.redactedStatus ?? null,
+            vaultRoot: restored.vaultRoot,
+          });
         runtimeStateDirty ||=
           runtimeDirtyAfterForeground || committedInboxMediaRetentionWakeDue;
         if (runtimeDirtyAfterForeground) {
@@ -8531,17 +8535,22 @@ async function hasRestoredSystemMailboxProgressAheadOfWorkspace(input: {
   }
 
   const localImportedSeq = BigInt(input.importedSeq);
-  const localHandledThroughSeq = BigInt(
-    await readHostedSystemMailboxHandledThroughSeq({
-      importedSeq: input.importedSeq,
-      vaultRoot: input.vaultRoot,
-    }),
-  );
+  const localProgress = await readHostedSystemMailboxProgress({
+    importedSeq: input.importedSeq,
+    vaultRoot: input.vaultRoot,
+  });
+  const localHandledThroughSeq = BigInt(localProgress.handledThroughSeq);
+  const canonicalContinuationSeqs =
+    input.redactedStatus?.hostedMailboxSystemDeviceSyncContinuationSeqs;
   return localImportedSeq >= canonicalImportedSeq
     && localHandledThroughSeq >= canonicalHandledThroughSeq
     && (
       localImportedSeq > canonicalImportedSeq
       || localHandledThroughSeq > canonicalHandledThroughSeq
+      || localProgress.deviceSyncContinuationSeqs.some((seq) =>
+        !Array.isArray(canonicalContinuationSeqs)
+        || !canonicalContinuationSeqs.some((owner) => owner === seq)
+      )
     );
 }
 

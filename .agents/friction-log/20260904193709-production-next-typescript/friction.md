@@ -26,3 +26,5 @@ The first command exhausts its heap. The larger-heap check succeeds and permits 
 ## Context
 
 A documentation-only change cannot complete direct-push acceptance when the independently owned production build needs more cold-check memory. Workspace TypeScript 7 checks, package coverage, Web tests, lint, and dev smoke pass. Preserve the route-aware check and production build memory controls when addressing this gap.
+
+The migration guard duplicated the previous heap literal after the runner and its dedicated behavioral test moved to 6144 MiB. Its focused non-mutating-build test then failed deterministically. Keep this guard aligned with the canonical runner; the heap correction does not change migration ownership.

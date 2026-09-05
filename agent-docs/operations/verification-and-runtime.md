@@ -28,19 +28,17 @@ The delivery path decides who owns broad verification:
   `pnpm verify:acceptance` once for that direct-push attempt. This rule overrides
   the PR-focused and docs-only fast paths because there is no PR feedback loop
   before the shared branch changes. If the remote advances while acceptance
-  runs, fetch it and allow the unchanged accepted patch one post-acceptance
-  normal rebase. Resolve bounded conflicts within the authorized scope without
-  another permission pause. Preserve both sides' intended changes, inspect the
-  resulting patch and intervening base diff for overlap or invalidated
-  assumptions, and rerun affected focused checks. A meaning-preserving docs or
-  context resolution does not invalidate acceptance. Do not restart full
-  acceptance solely because the base moved or a conflict needed resolution.
-  Push immediately after that proof. If the resolution changes behavior, the
-  intervening diff invalidates acceptance, or the push is rejected because the
-  remote advances again, do not rebase or rerun acceptance again: report
-  `moving-base race` and stop or move the change to a PR. The
-  one-rebase budget remains consumed until push or handoff; a later agent turn
-  does not reset it.
+  runs or rejects an ordinary push, fetch it and reconcile through a normal
+  merge or an authorized rebase. Inspect the intervening base diff and any
+  conflict resolution, prove whether the accepted patch is preserved, and rerun
+  affected focused checks. Resolve bounded conflicts within the authorized scope
+  without another permission pause, preserving both sides' intended changes.
+  Meaning-preserving docs or context resolution does not invalidate acceptance.
+  Do not restart full acceptance solely because the base moved; rerun it when changed behavior or invalidated assumptions make the
+  earlier result insufficient. Continue necessary reconciliation within the
+  existing push authorization without a numerical retry limit. Preserve
+  published history, require all branch protections, and stop for unresolved
+  ownership or product decisions rather than for base movement alone.
 
 Focused local proof is still mandatory for changed behavior. The PR rule moves
 the broad suite to CI; it does not permit an untested push or make a green
@@ -144,13 +142,12 @@ change; it does not need to be repeatedly merged with a moving base. Keep green
 required CI on that head and prove current-base mergeability with
 `git merge-tree --write-tree`. At the authorized merge boundary, wait only for
 routed review gates and required GitHub checks. If strict up-to-date checks
-apply, prefer the merge queue; otherwise allow at most one normal base update
-for the unchanged reviewed patch and let required CI gate that head. If the base
-advances again after it is green, never perform a second base update or restart
-CI. Re-run the current-base merge-tree and follow the terminal non-refresh merge
-or `moving-base race` stop rule in `pr-reviewgpt-loop.md`. A non-required check
-delays merge only when its failure is relevant to the changed surface or the
-user explicitly requested it.
+apply, prefer the merge queue. When the authorized merge path needs a base
+update, reconcile it and let required CI gate the resulting head. Further base
+movement does not impose a retry cap or require renewed permission; follow the
+inspection and verification requirements in the Base-Update-Only Exception in
+`pr-reviewgpt-loop.md`. A non-required check delays merge only when its failure
+is relevant to the changed surface or the user explicitly requested it.
 
 Verification evidence belongs to the exact file state it checked. After the
 last code, test, or config edit, rerun every focused command whose inputs or
@@ -895,7 +892,9 @@ only that prepared check complete before starting the Webpack build. Node
 applies the direct flag to the parent; Next 16.3.0 rebuilds non-isolated child
 options from the parent arguments followed by `NODE_OPTIONS`, so the sequential
 Webpack compiler workers receive 3 GiB while the separate TypeScript CLI child
-receives 6 GiB. Next removes the flag from isolated static workers. The same
+receives 6 GiB. Next removes the flag from isolated static workers. The migration
+guard and the build-runner fixture must both track this configured heap; the
+runner remains the configuration owner. The same
 script owns the Vercel package build and the CI memory-observation invocation.
 This bounds the compile parent without weakening validation, but only repeated
 forced-cold Standard previews prove the real Vercel boundary. The generated-
