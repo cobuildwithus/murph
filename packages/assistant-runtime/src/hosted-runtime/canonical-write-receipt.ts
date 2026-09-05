@@ -118,31 +118,8 @@ function parseHostedCanonicalWriteReceiptAction(
         ...(contentRef ? { contentRef } : {}),
       };
     }
-    case "raw_upsert": {
-      if (
-        !isSha256(raw.sha256)
-        || !isNonNegativeInteger(raw.byteLength)
-        || typeof raw.mediaType !== "string"
-        || typeof raw.originalFileName !== "string"
-        || !isRawUpsertEffect(raw.effect)
-      ) {
-        throw new Error("Hosted canonical raw write receipt action is invalid.");
-      }
-      const contentRef = parseHostedCanonicalWriteReceiptContentRef(raw.contentRef);
-      if (!contentRef) {
-        throw new Error("Hosted canonical raw write receipt action is missing content.");
-      }
-      return {
-        kind: "raw_upsert",
-        targetRelativePath: raw.targetRelativePath,
-        sha256: raw.sha256,
-        byteLength: raw.byteLength,
-        mediaType: raw.mediaType,
-        originalFileName: raw.originalFileName,
-        effect: raw.effect,
-        contentRef,
-      };
-    }
+    case "raw_upsert":
+      return parseHostedCanonicalRawWriteReceiptAction(raw, raw.targetRelativePath);
     case "delete": {
       if (typeof raw.existedBefore !== "boolean") {
         throw new Error("Hosted canonical delete receipt action is invalid.");
@@ -209,4 +186,51 @@ function isRawUpsertEffect(value: unknown): value is "copy" | "reuse" {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseHostedCanonicalWriteMediaRef(raw: unknown):
+  Extract<HostedCanonicalWriteReceiptAction, { kind: "raw_upsert" }>["mediaRef"] {
+  if (raw === undefined) return undefined;
+  if (!isPlainObject(raw) || !isSha256(raw.id)
+    || (raw.mediaKind !== "image" && raw.mediaKind !== "video") || !isIsoDate(raw.recordedAt)
+    || (raw.expiresAt !== null && !isIsoDate(raw.expiresAt))) {
+    throw new Error("Hosted canonical media reference is invalid.");
+  }
+  return { id: raw.id, mediaKind: raw.mediaKind, recordedAt: raw.recordedAt, expiresAt: raw.expiresAt };
+}
+
+function isIsoDate(value: unknown): value is string {
+  return typeof value === "string" && Number.isFinite(Date.parse(value))
+    && new Date(value).toISOString() === value;
+}
+
+function parseHostedCanonicalRawWriteReceiptAction(
+  raw: Record<string, unknown>,
+  targetRelativePath: string,
+): Extract<HostedCanonicalWriteReceiptAction, { kind: "raw_upsert" }> {
+  if (
+    !isSha256(raw.sha256)
+    || !isNonNegativeInteger(raw.byteLength)
+    || typeof raw.mediaType !== "string"
+    || typeof raw.originalFileName !== "string"
+    || !isRawUpsertEffect(raw.effect)
+  ) {
+    throw new Error("Hosted canonical raw write receipt action is invalid.");
+  }
+  const contentRef = parseHostedCanonicalWriteReceiptContentRef(raw.contentRef);
+  const mediaRef = parseHostedCanonicalWriteMediaRef(raw.mediaRef);
+  if (mediaRef && contentRef) {
+    throw new Error("Hosted canonical media receipt conflicts with its raw action.");
+  }
+  return {
+    ...(mediaRef ? { mediaRef } : {}),
+    kind: "raw_upsert",
+    targetRelativePath,
+    sha256: raw.sha256,
+    byteLength: raw.byteLength,
+    mediaType: raw.mediaType,
+    originalFileName: raw.originalFileName,
+    effect: raw.effect,
+    ...(contentRef ? { contentRef } : {}),
+  };
 }

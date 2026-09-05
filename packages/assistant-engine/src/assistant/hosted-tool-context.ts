@@ -543,9 +543,9 @@ export function createAssistantHostedToolContext(input: {
     currentAnalyzeVideoAttachmentAuthorities: () => {
       const userActionScope = readCurrentUserActionScope()
       if (userActionScope === null) return []
-      const acceptedInputIds = new Set(userActionScope.acceptedInputIds)
-      return (input.getAnalyzeVideoAttachmentAuthorities?.() ?? [])
-        .filter((authority) => acceptedInputIds.has(authority.messageRef))
+      // The turn owner freezes current and retained same-conversation evidence
+      // before provider execution. Historical clips need no new accepted input.
+      return input.getAnalyzeVideoAttachmentAuthorities?.() ?? []
     },
     currentHostedImageCompletionEffectScope:
       readCurrentHostedImageCompletionEffectScope,

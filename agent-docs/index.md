@@ -23,7 +23,7 @@ not a guarantee that every claim was checked in this cleanup.
 | Path | Purpose | Source of truth | Criticality | Last verified |
 | --- | --- | --- | --- | --- |
 | `README.md` | Human-facing repo overview, install path, public package posture, local/hosted runtime tiers, and verification entrypoints. | Current repository state | High | 2026-05-02 |
-| `ARCHITECTURE.md` | Current runtime architecture. | Current runtime architecture | High | 2026-08-31 |
+| `ARCHITECTURE.md` | Current runtime architecture, including hosted media identity, reference-only preservation and receipt recovery. | Current runtime architecture | High | 2026-09-05 |
 | `agent-docs/ARCHITECTURE_GUIDANCE.md` | Architecture planning guidance. | Architecture planning guidance | High | 2026-08-24 |
 | `PRODUCT.md` | Strategic design context: register, users, brand personality, anti-references, design principles. Loaded by the impeccable skill before any UI work. | Product/brand strategic context | High | 2026-04-24 |
 | `DESIGN.md` | Visual design system. | Visual design system | High | 2026-07-22 |
@@ -49,7 +49,7 @@ not a guarantee that every claim was checked in this cleanup.
 | `agent-docs/QUALITY_SCORE.md` | Current quality posture by area. | Current repo quality posture | Medium | 2026-04-06 |
 | `agent-docs/RELIABILITY.md` | Reliability guardrails, request-local artifact PUT recovery, durable retry ownership, and accepted-mailbox progress evidence. | Runtime reliability policy | High | 2026-09-05 |
 | `agent-docs/operations/stripe-effect-compatibility-cutover.md` | Hosted billing operations. | Hosted billing operations | High | 2026-08-28 |
-| `agent-docs/SECURITY.md` | Security constraints, trust boundaries, and escalation rules. | Security policy | High | 2026-09-03 |
+| `agent-docs/SECURITY.md` | Security constraints, trust boundaries, hosted media receipt recovery and atomic retirement, and escalation rules. | Security policy | High | 2026-09-05 |
 | `agent-docs/compliance/README.md` | Compliance reference-pack overview, launch minimums, and official source links for consumer health-data obligations. | Compliance docs index | High | 2026-04-29 |
 | `agent-docs/compliance/2026-07-23-connected-source-launch-gate.md` | Connected-source permission assumption, launch status, and ongoing provider controls. | Connected-source release gate | High | 2026-07-23 |
 | `agent-docs/compliance/ftc-hbnr-incident-plan.md` | Internal incident playbook for suspected FTC HBNR breaches, unauthorized disclosures, vendor incidents, and tracking disclosures involving health data. | Health-data incident response | High | 2026-04-29 |
@@ -112,7 +112,7 @@ not a guarantee that every claim was checked in this cleanup.
 | `agent-docs/feature-user-story-audit/testing-errors.md` | Test errors captured during the feature user-story audit. | Point-in-time feature audit | Low | 2026-06-21 |
 | `agent-docs/references/README.md` | Reference-pack overview and maintenance rules. | Reference pack conventions | Medium | 2026-03-12 |
 | `agent-docs/references/repo-scope.md` | Concrete repo scope and routing boundaries. | Repo ownership boundary | High | 2026-04-06 |
-| `agent-docs/references/testing-ci-map.md` | Verification map for packages, apps, smoke flows, cancellation-config parity, exact-head PR CI, protected-main runtime proof, deferred-tool advertisement fixtures, canonical executors, compiler cache policy, and current coverage owners. | Testing and CI truth | High | 2026-09-05 |
+| `agent-docs/references/testing-ci-map.md` | Verification map for packages, apps, hosted media follow-up proof, smoke flows, cancellation-config parity, exact-head PR CI, protected-main runtime proof, deferred-tool advertisement fixtures, canonical executors, compiler cache policy, and current coverage owners. | Testing and CI truth | High | 2026-09-05 |
 | `packages/core/bench/README.md` | Secret-free Docker import and hydration reproduction, required one-vCPU latency CI budgets, and sizing evidence limits. | Container CPU benchmark | Medium | 2026-09-04 |
 | `agent-docs/references/health-entity-taxonomy-seam.md` | Shared owner seam for health taxonomy metadata. | Health taxonomy seam | Medium | 2026-04-06 |
 | `agent-docs/references/hosted-runtime-protocol.md` | Hosted mailbox/workspace checkpoints, exact ownership and idle restore publication, and accepted-work monitoring boundaries. | Hosted execution architecture | High | 2026-09-04 |

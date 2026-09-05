@@ -124,7 +124,13 @@ export type HostedCanonicalWriteReceiptAction =
       mediaType: string;
       originalFileName: string;
       effect: "copy" | "reuse";
-      contentRef: HostedCanonicalWriteReceiptContentRef;
+      contentRef?: HostedCanonicalWriteReceiptContentRef;
+      mediaRef?: {
+        id: string;
+        mediaKind: "image" | "video";
+        expiresAt: string | null;
+        recordedAt: string;
+      };
     }
   | {
       kind: "delete";
@@ -621,6 +627,25 @@ export async function applyHostedCanonicalWriteReceipt(input: {
         break;
       }
       case "raw_upsert": {
+        if (action.mediaRef && !action.contentRef) {
+          const existingReceipt = await readExistingHostedCanonicalWriteTargetReceipt({
+            targetRelativePath: action.targetRelativePath,
+            vaultRoot,
+          });
+          if (!existingReceipt) {
+            break;
+          }
+          if (
+            existingReceipt.sha256 === action.sha256
+            && existingReceipt.byteLength === action.byteLength
+          ) {
+            break;
+          }
+          throw new VaultError(
+            "HOSTED_CANONICAL_WRITE_RAW_CONFLICT",
+            "Hosted canonical write raw media replay found conflicting existing bytes.",
+          );
+        }
         const bytes = await readHostedCanonicalWriteReceiptPayload({
           expectedByteLength: action.byteLength,
           expectedSha256: action.sha256,
@@ -691,6 +716,21 @@ async function readHostedCanonicalWriteReceiptPayload(input: {
     );
   }
   return bytes;
+}
+
+async function readExistingHostedCanonicalWriteTargetReceipt(input: {
+  targetRelativePath: string;
+  vaultRoot: string;
+}): Promise<CommittedPayloadReceipt | null> {
+  try {
+    const target = resolveVaultPath(input.vaultRoot, input.targetRelativePath);
+    return createCommittedPayloadReceipt(await fs.readFile(target.absolutePath));
+  } catch (error) {
+    if (isErrnoException(error) && error.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
 }
 
 async function applyHostedCanonicalTextReceiptAction(input: {

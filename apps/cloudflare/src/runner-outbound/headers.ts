@@ -1,6 +1,8 @@
 import {
   HOSTED_RUNTIME_ARTIFACT_READ_PURPOSES,
   type HostedRuntimeArtifactReadPurpose,
+  HOSTED_RUNTIME_MEDIA_READ_PURPOSES,
+  type HostedRuntimeMediaReadPurpose,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 
 export const HOSTED_RUNNER_BOUND_USER_ID_HEADER =
@@ -23,9 +25,24 @@ export const HOSTED_RUNTIME_ARTIFACT_READ_PURPOSE_HEADER =
   "x-hosted-runtime-artifact-read-purpose";
 export const HOSTED_RUNTIME_ARTIFACT_FETCH_CORRELATION_ID_HEADER =
   "x-hosted-runtime-artifact-fetch-correlation-id";
+export const HOSTED_RUNTIME_MEDIA_READ_PURPOSE_HEADER =
+  "x-hosted-runtime-media-read-purpose";
+export const HOSTED_RUNTIME_MEDIA_FETCH_CORRELATION_ID_HEADER =
+  "x-hosted-runtime-media-fetch-correlation-id";
+export const HOSTED_RUNTIME_MEDIA_BYTE_SIZE_HEADER =
+  "x-hosted-runtime-media-byte-size";
+export const HOSTED_RUNTIME_MEDIA_KIND_HEADER =
+  "x-hosted-runtime-media-kind";
+export const HOSTED_RUNTIME_MEDIA_SHA256_HEADER =
+  "x-hosted-runtime-media-sha256";
+export const HOSTED_RUNTIME_MEDIA_EXPIRES_AT_HEADER =
+  "x-hosted-runtime-media-expires-at";
 
 const HOSTED_RUNTIME_ARTIFACT_READ_PURPOSE_SET = new Set<string>(
   HOSTED_RUNTIME_ARTIFACT_READ_PURPOSES,
+);
+const HOSTED_RUNTIME_MEDIA_READ_PURPOSE_SET = new Set<string>(
+  HOSTED_RUNTIME_MEDIA_READ_PURPOSES,
 );
 const HOSTED_RUNTIME_ARTIFACT_FETCH_CORRELATION_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -33,6 +50,11 @@ const HOSTED_RUNTIME_ARTIFACT_FETCH_CORRELATION_ID_PATTERN =
 export interface HostedRuntimeArtifactFetchTelemetry {
   correlationId: string;
   purpose: HostedRuntimeArtifactReadPurpose;
+}
+
+export interface HostedRuntimeMediaFetchTelemetry {
+  correlationId: string;
+  purpose: HostedRuntimeMediaReadPurpose;
 }
 
 export function readHostedRuntimeArtifactFetchTelemetry(
@@ -56,8 +78,35 @@ export function readHostedRuntimeArtifactFetchTelemetry(
   };
 }
 
+export function readHostedRuntimeMediaFetchTelemetry(
+  headers: Headers,
+): HostedRuntimeMediaFetchTelemetry | null {
+  const purpose = headers.get(HOSTED_RUNTIME_MEDIA_READ_PURPOSE_HEADER);
+  const correlationId = headers.get(
+    HOSTED_RUNTIME_MEDIA_FETCH_CORRELATION_ID_HEADER,
+  );
+  if (
+    !purpose
+    || !isHostedRuntimeMediaReadPurpose(purpose)
+    || !correlationId
+    || !HOSTED_RUNTIME_ARTIFACT_FETCH_CORRELATION_ID_PATTERN.test(correlationId)
+  ) {
+    return null;
+  }
+  return {
+    correlationId,
+    purpose,
+  };
+}
+
 function isHostedRuntimeArtifactReadPurpose(
   value: string,
 ): value is HostedRuntimeArtifactReadPurpose {
   return HOSTED_RUNTIME_ARTIFACT_READ_PURPOSE_SET.has(value);
+}
+
+function isHostedRuntimeMediaReadPurpose(
+  value: string,
+): value is HostedRuntimeMediaReadPurpose {
+  return HOSTED_RUNTIME_MEDIA_READ_PURPOSE_SET.has(value);
 }

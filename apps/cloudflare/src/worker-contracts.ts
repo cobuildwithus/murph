@@ -11,6 +11,12 @@ import type {
   HostedPrivateMediaPublishInput,
   HostedPrivateMediaPublishResult,
 } from "./private-media.ts";
+import type {
+  HostedMediaAssetDeletionInput,
+  HostedMediaAssetDescriptor,
+  HostedMediaAssetReadAdmissionResult,
+  HostedMediaAssetRegistrationInput,
+} from "./user-runner/hosted-media-retention.ts";
 import { toStringEnvSource, type StringEnvSource } from "./string-env.ts";
 import type {
   HostedWorkspaceSnapshotOrphanCandidate,
@@ -206,6 +212,15 @@ export interface WorkerUserRunnerStubLike {
     generation: string;
     userId: string;
   }): Promise<boolean>;
+  admitHostedMediaRead?(
+    input: HostedMediaAssetDescriptor,
+  ): Promise<HostedMediaAssetReadAdmissionResult>;
+  recordHostedMediaAsset?(
+    input: HostedMediaAssetRegistrationInput,
+  ): Promise<boolean>;
+  forgetHostedMediaAsset?(
+    input: HostedMediaAssetDeletionInput,
+  ): Promise<boolean>;
   recordRuntimeCompletionFromContainer?(
     input: WorkerRuntimeCompletionReceipt,
   ): Promise<{ completed: boolean }>;

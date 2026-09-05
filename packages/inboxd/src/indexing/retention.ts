@@ -35,6 +35,9 @@ import { openInboxRuntime, type InboxRuntimeStore } from "../kernel/sqlite.js";
 
 export const INBOX_MEDIA_RETENTION_DAYS = 14;
 export const INBOX_MEDIA_RETENTION_WINDOW_MS = INBOX_MEDIA_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+export const INBOX_VIDEO_RETENTION_DAYS = 3;
+export const INBOX_VIDEO_RETENTION_WINDOW_MS =
+  INBOX_VIDEO_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 const INBOX_MEDIA_RETENTION_PROTECTED_RECHECK_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_INBOX_MEDIA_RETENTION_BATCH_SIZE = 100;
 const MAX_PROMOTED_DOCUMENT_EVIDENCE_PATHS = 20;
@@ -54,7 +57,6 @@ export interface RunInboxMediaRetentionInput {
   protectedStoredPaths?: Iterable<string>;
   signal?: AbortSignal | null;
   vaultRoot: string;
-  videoRetentionWindowMs?: number;
 }
 
 export interface InboxMediaRetentionMaterializeResult {
@@ -82,11 +84,6 @@ interface InboxAttachmentRetentionCandidate {
 interface InboxRetentionReferenceInventory {
   durableRawInboxRefs: Set<string>;
   promotedDocumentMaterializationPathsByAttachmentKey: Map<string, Set<string>>;
-}
-
-export interface ListTransientInboxVideoStoredPathsInput {
-  signal?: AbortSignal | null;
-  vaultRoot: string;
 }
 
 export async function runInboxMediaRetention(
@@ -162,10 +159,7 @@ export async function runInboxMediaRetention(
         ) {
           continue;
         }
-        const retentionWindowMs = resolveInboxMediaRetentionWindowMs({
-          kind: attachment.kind,
-          videoRetentionWindowMs: input.videoRetentionWindowMs,
-        });
+        const retentionWindowMs = resolveInboxAttachmentRetentionWindowMs(attachment.kind);
         const cutoffMs = nowMs - retentionWindowMs;
 
         const alreadyRetained =
@@ -547,33 +541,6 @@ export async function runInboxMediaRetention(
   }
 }
 
-export async function listTransientInboxVideoStoredPaths(
-  input: ListTransientInboxVideoStoredPathsInput,
-): Promise<string[]> {
-  throwIfRetentionAborted(input.signal);
-  const [captureRecords, durableRawInboxRefs] = await Promise.all([
-    listInboxCaptureRecords(input.vaultRoot, { rejectInvalidRecords: true }),
-    listInboxRetentionReferenceInventory(input.vaultRoot, { rejectInvalidRecords: true }),
-  ]);
-  throwIfRetentionAborted(input.signal);
-
-  const storedPaths = new Set<string>();
-  for (const capture of captureRecords) {
-    throwIfRetentionAborted(input.signal);
-    for (const attachment of capture.attachments) {
-      if (attachment.kind !== "video") {
-        continue;
-      }
-      const storedPath = normalizeRawInboxMediaPath(attachment.storedPath ?? null);
-      if (storedPath && !durableRawInboxRefs.durableRawInboxRefs.has(storedPath)) {
-        storedPaths.add(storedPath);
-      }
-    }
-  }
-
-  return [...storedPaths].sort();
-}
-
 function uniqueRetentionStoredPaths(paths: readonly string[]): string[] {
   return [...new Set(paths)];
 }
@@ -655,7 +622,6 @@ function buildRetentionRecord(input: {
 
 async function listInboxCaptureRecords(
   vaultRoot: string,
-  options: { rejectInvalidRecords?: boolean } = {},
 ): Promise<InboxCaptureRecord[]> {
   const records: InboxCaptureRecord[] = [];
   const ledgerPaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.inboxCaptureLedgerDirectory, {
@@ -667,10 +633,6 @@ async function listInboxCaptureRecords(
       const result = safeParseContract<InboxCaptureRecord>(inboxCaptureRecordSchema, rawRecord);
       if (result.success) {
         records.push(result.data);
-      } else if (options.rejectInvalidRecords) {
-        throw new Error(
-          "Invalid inbox capture record prevents safe hosted snapshot construction.",
-        );
       }
     }
   }
@@ -705,7 +667,6 @@ export async function listInboxAttachmentRetentionRecords(
 
 async function listInboxRetentionReferenceInventory(
   vaultRoot: string,
-  options: { rejectInvalidRecords?: boolean } = {},
 ): Promise<InboxRetentionReferenceInventory> {
   const durableRawInboxRefs = new Set<string>();
   const promotedDocumentMaterializationPathsByAttachmentKey = new Map<string, Set<string>>();
@@ -723,11 +684,6 @@ async function listInboxRetentionReferenceInventory(
   for (const relativePath of ledgerPaths) {
     for (const rawRecord of await readJsonlRecords({ vaultRoot, relativePath })) {
       const parsed = safeParseContract<EventRecord>(eventRecordSchema, rawRecord);
-      if (!parsed.success && options.rejectInvalidRecords) {
-        throw new Error(
-          "Invalid event record prevents safe hosted snapshot construction.",
-        );
-      }
       const record = parsed.success ? parsed.data : rawRecord;
       for (const referencedPath of collectEventRawReferencePaths(record)) {
         const storedPath = normalizeRawInboxMediaPath(referencedPath);
@@ -871,25 +827,18 @@ function normalizeRetentionBatchSize(value: number | undefined): number {
   return DEFAULT_INBOX_MEDIA_RETENTION_BATCH_SIZE;
 }
 
-function resolveInboxMediaRetentionWindowMs(input: {
-  kind: InboxCaptureAttachmentRecord["kind"];
-  videoRetentionWindowMs: number | undefined;
-}): number {
-  const candidate = input.kind === "video" ? input.videoRetentionWindowMs : undefined;
-  if (
-    typeof candidate === "number"
-    && Number.isFinite(candidate)
-    && candidate >= 0
-  ) {
-    return Math.floor(candidate);
-  }
-  return INBOX_MEDIA_RETENTION_WINDOW_MS;
-}
-
 function isRetainableInboxMediaKind(
   kind: InboxCaptureAttachmentRecord["kind"],
 ): kind is "audio" | "image" | "video" {
   return kind === "audio" || kind === "image" || kind === "video";
+}
+
+function resolveInboxAttachmentRetentionWindowMs(
+  kind: InboxCaptureAttachmentRecord["kind"],
+): number {
+  return kind === "video"
+    ? INBOX_VIDEO_RETENTION_WINDOW_MS
+    : INBOX_MEDIA_RETENTION_WINDOW_MS;
 }
 
 function emptyRetentionResult(input: {
@@ -989,7 +938,7 @@ function resolveActiveAttachmentParseJobProtectionExpiresAt(
   attachment: InboxCaptureAttachmentRecord,
   cutoffMs: number,
 ): string | null {
-  if (attachment.kind !== "audio" && attachment.kind !== "video") {
+  if (!isParserProtectedInboxAttachmentKind(attachment.kind)) {
     return null;
   }
 
@@ -1022,6 +971,12 @@ function resolveActiveAttachmentParseJobProtectionExpiresAt(
   }
 
   return protectionExpiresAt;
+}
+
+function isParserProtectedInboxAttachmentKind(
+  kind: InboxCaptureAttachmentRecord["kind"],
+): kind is "audio" | "image" | "video" {
+  return kind === "audio" || kind === "image" || kind === "video";
 }
 
 function resolveFreshAttachmentParseJobProtectionExpiresAt(input: {

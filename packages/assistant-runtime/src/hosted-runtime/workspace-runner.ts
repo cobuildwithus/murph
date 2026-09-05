@@ -117,6 +117,9 @@ import {
   readHostedCanonicalWriteReceiptLogStatusFingerprint,
 } from "./canonical-write-receipt-log.ts";
 import {
+  externalizeHostedCanonicalWriteMediaPayloads,
+} from "./canonical-write-media.ts";
+import {
   markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort,
 } from "./workspace-restore.ts";
 
@@ -3023,11 +3026,17 @@ function createHostedWorkspaceCanonicalWritePort(input: {
           input.checkpointRequestBuilder.markRuntimeStateDirty();
           input.onAssistantContextSnapshotDirty?.();
         }
+        const canonicalWritePersistence =
+          await externalizeHostedCanonicalWriteMediaPayloads({
+            mediaStore: input.input.platform.mediaStore ?? null,
+            persistence: writeInput,
+            vaultRoot: input.input.vaultRoot,
+          });
         const receiptLogUpdate = await appendHostedCanonicalWriteReceiptToArtifactLog({
           artifactStore: input.input.platform.artifactStore,
-          payloads: writeInput.payloads,
+          payloads: canonicalWritePersistence.payloads,
           previousStatus: input.readPreviousRedactedStatus(),
-          receipt: writeInput.receipt,
+          receipt: canonicalWritePersistence.receipt,
         });
         const receiptLogStatus = hostedCanonicalWriteReceiptLogStatusFields(receiptLogUpdate);
         if (input.deferRuntimeStatusCheckpoint === true) {

@@ -2,11 +2,12 @@ export {
   buildInboxAttachmentRetentionLedgerPath,
   INBOX_MEDIA_RETENTION_DAYS,
   INBOX_MEDIA_RETENTION_WINDOW_MS,
-  listTransientInboxVideoStoredPaths,
+  INBOX_VIDEO_RETENTION_DAYS,
+  INBOX_VIDEO_RETENTION_WINDOW_MS,
+  listInboxAttachmentRetentionRecords,
   runInboxMediaRetention,
   type InboxMediaRetentionMaterializeResult,
   type InboxMediaRetentionResult,
-  type ListTransientInboxVideoStoredPathsInput,
   type RunInboxMediaRetentionInput,
 } from "./indexing/retention.ts";
 export {

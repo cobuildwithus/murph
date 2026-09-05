@@ -124,6 +124,10 @@ export const assistantLocalStateDescriptors: readonly VaultLocalStatePathDescrip
     "Hosted mailbox import watermarks and compact quarantine status that must move with hosted runtime continuity.",
   ),
   definePortableAssistantFile(
+    ".runtime/operations/assistant/hosted-media-refs.json",
+    "Hosted media reference catalogue that lets workspace snapshots externalize bounded image and video bytes while preserving lazy materialization.",
+  ),
+  definePortableAssistantFile(
     ".runtime/operations/assistant/hosted-system-mailbox.json",
     "Hosted system mailbox pending item state that must move with hosted runtime continuity.",
   ),

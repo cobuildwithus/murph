@@ -28,7 +28,10 @@ import type {
   AssistantWorkspaceArtifactMaterializer,
 } from '../assistant/execution-context.js'
 import {
+  listAssistantInputEvents,
+  resolveAssistantInputEventReferenceAt,
   type AssistantInputAttachmentEvidenceItem,
+  type AssistantInputConversationRef,
   type AssistantInputEventRecord,
 } from '../assistant/input-store.js'
 
@@ -115,8 +118,9 @@ export function snapshotAnalyzeVideoAttachmentAuthorities(
   const authorities: AnalyzeVideoAttachmentAuthority[] = []
   for (const event of events) {
     if (
-      event.attachmentEvidence.status !== 'available'
-      && event.attachmentEvidence.status !== 'partial'
+      event.contentRetiredAt
+      || (event.attachmentEvidence.status !== 'available'
+        && event.attachmentEvidence.status !== 'partial')
     ) {
       continue
     }
@@ -147,6 +151,47 @@ export function snapshotAnalyzeVideoAttachmentAuthorities(
     }
   }
   return authorities
+}
+
+export async function readAnalyzeVideoConversationEvents(input: {
+  acceptedEvents: readonly AssistantInputEventRecord[]
+  vaultRoot: string
+}): Promise<AssistantInputEventRecord[]> {
+  const vaultRoot = input.vaultRoot
+  const currentEvents = input.acceptedEvents
+  const events = new Map(currentEvents.map((event) => [event.inputId, event]))
+  if (events.size > 0) {
+    const history = await listAssistantInputEvents({
+      limit: Number.MAX_SAFE_INTEGER,
+      skipInvalidRecords: true,
+      vault: vaultRoot,
+    }).catch(() => ({ events: [] }))
+    for (const event of history.events) {
+      if (currentEvents.some((current) =>
+        resolveAssistantInputEventReferenceAt(event) <= resolveAssistantInputEventReferenceAt(current)
+        && sameVideoConversation(event.conversation, current.conversation)
+      )) {
+        events.set(event.inputId, event)
+      }
+    }
+  }
+
+  return [...events.values()]
+}
+
+function sameVideoConversation(
+  earlier: AssistantInputConversationRef | null,
+  current: AssistantInputConversationRef | null,
+): boolean {
+  if (!earlier || !current || !current.source || !current.threadId) return false
+  return earlier.source === current.source
+    && earlier.accountId === current.accountId
+    && earlier.threadId === current.threadId
+    && earlier.threadIsDirect === current.threadIsDirect
+    && (earlier.sessionId ?? null) === (current.sessionId ?? null)
+    && !earlier.actorIsSelf
+    && (current.threadIsDirect === false
+      || (current.threadIsDirect === true && earlier.actorId === current.actorId))
 }
 
 export const ANALYZE_VIDEO_GEMINI_URL =

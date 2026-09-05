@@ -16,13 +16,16 @@ import {
   createAnalyzeVideoToolRuntimeFromEnv,
   createAnalyzeVideoTurnState,
   executeAnalyzeVideoTool,
+  readAnalyzeVideoConversationEvents,
   snapshotAnalyzeVideoAttachmentAuthorities,
   type AnalyzeVideoAttachmentAuthority,
 } from '../src/assistant-codex/analyze-video-tool.ts'
 import {
   updateAssistantInputAttachmentEvidence,
   upsertAssistantInputEvent,
+  retireAssistantInputEventContent,
   type AssistantInputAttachmentEvidenceItem,
+  type AssistantInputConversationRef,
 } from '../src/assistant/input-store.ts'
 import { createAssistantHostedToolContext } from '../src/assistant/hosted-tool-context.ts'
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
@@ -72,7 +75,7 @@ function answerResponse(text: string): Response {
 }
 
 describe('murph.analyze_video arguments and availability', () => {
-  it('exposes only video authorities in the live accepted-input scope', () => {
+  it('exposes frozen conversation history only while a user action is active', () => {
     const firstInputId = `ain_${'1'.repeat(32)}`
     const steeredInputId = `ain_${'2'.repeat(32)}`
     let acceptedInputIds: readonly string[] = [firstInputId]
@@ -106,15 +109,15 @@ describe('murph.analyze_video arguments and availability', () => {
     })
 
     expect(context.currentAnalyzeVideoAttachmentAuthorities?.())
-      .toEqual([authorities[0]])
+      .toEqual(authorities)
 
     acceptedInputIds = [firstInputId, steeredInputId]
     expect(context.currentAnalyzeVideoAttachmentAuthorities?.())
       .toEqual(authorities)
 
-    acceptedInputIds = [steeredInputId]
+    acceptedInputIds = []
     expect(context.currentAnalyzeVideoAttachmentAuthorities?.())
-      .toEqual([authorities[1]])
+      .toEqual([])
   })
 
   it('parses the video target, question, and optional semantic sampling mode', () => {
@@ -142,6 +145,9 @@ describe('murph.analyze_video arguments and availability', () => {
   })
 
   it('preserves task qualifiers and scopes negative evidence by channel', () => {
+    expect(MURPH_ANALYZE_VIDEO_TOOL.description).toContain(
+      'In code mode, print the complete return value with text(result)',
+    )
     expect(MURPH_ANALYZE_VIDEO_TOOL.description).toContain(
       'Preserve every task-defining qualifier',
     )
@@ -745,6 +751,74 @@ describe('executeAnalyzeVideoTool', () => {
     expect(fetchImpl).not.toHaveBeenCalled()
   })
 
+  it.each([
+    ['direct follow-up', true, 'participant-a', {} , true],
+    ['another group participant', false, 'participant-b', {}, true],
+    ['another thread', true, 'participant-a', { threadId: 'other-thread' }, false],
+    ['another account', true, 'participant-a', { accountId: 'other-account' }, false],
+    ['another channel', true, 'participant-a', { source: 'linq' }, false],
+    ['private clip in a group', true, 'participant-a', { threadIsDirect: false }, false],
+    ['another direct participant', true, 'participant-b', {}, false],
+  ] as const)('scopes retained video authority for %s', async (
+    _name, direct, requester, patch, allowed,
+  ) => {
+    const conversation: AssistantInputConversationRef = {
+      accountId: 'video-account',
+      actorId: 'participant-a',
+      actorIsSelf: false,
+      source: 'telegram',
+      threadId: 'video-thread',
+      threadIsDirect: direct,
+    }
+    const fixture = await createVideoFixture(
+      [{ ordinal: 1, mime: 'video/mp4' }], conversation,
+    )
+    const followup = await upsertAssistantInputEvent({
+      vault: fixture.vaultRoot,
+      event: {
+        content: { text: 'Which direction does the object move in the earlier clip?' },
+        conversation: { ...conversation, actorId: requester, ...patch },
+        occurredAt: '2026-08-20T10:05:00.000Z',
+        receivedAt: '2026-08-20T10:05:00.000Z',
+        sourceRef: { kind: 'inbox-capture', captureId: 'cap_video_followup', source: 'telegram', version: null },
+      },
+    })
+    const authorities = snapshotAnalyzeVideoAttachmentAuthorities(await readAnalyzeVideoConversationEvents({
+      acceptedEvents: [followup],
+      vaultRoot: fixture.vaultRoot,
+    }))
+    expect(authorities).toEqual(allowed ? fixture.attachmentAuthorities : [])
+    const fetchImpl = vi.fn<typeof fetch>(async () => answerResponse('The object moves left.'))
+    const hostedToolContext = createAssistantHostedToolContext({
+      getAnalyzeVideoAttachmentAuthorities: () => authorities,
+      getConversationScope: () => direct ? 'direct' : 'group',
+      getUserActionAcceptedInputIds: () => [followup.inputId],
+      messageInput: { channel: 'telegram' } as never,
+      session: {
+        binding: { channel: 'telegram' },
+        sessionId: 'session_video_followup',
+      } as never,
+    })
+    const result = await executeMurphDynamicToolRequest({
+      analyzeVideoRuntime: createRuntime({ GEMINI_API_KEY: 'sentinel' }, fetchImpl),
+      env: {}, fetchImpl, hostedToolContext, nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: readAnalyzeVideoCall({
+        message_ref: fixture.inputId,
+        question: 'Which direction does the object move in the earlier clip?',
+      })!,
+      vaultRoot: fixture.vaultRoot,
+    })
+    expect(result.rpcResult.success).toBe(allowed)
+    expect(fetchImpl).toHaveBeenCalledTimes(allowed ? 1 : 0)
+
+    await retireAssistantInputEventContent({ inputId: fixture.inputId, vault: fixture.vaultRoot })
+    expect(snapshotAnalyzeVideoAttachmentAuthorities(await readAnalyzeVideoConversationEvents({
+      acceptedEvents: [followup],
+      vaultRoot: fixture.vaultRoot,
+    }))).toEqual([])
+  })
+
   it('executes a valid video request through the dynamic-tool boundary', async () => {
     const fixture = await createVideoFixture([{ ordinal: 1, mime: 'video/mp4' }])
     const fetchImpl = vi.fn<typeof fetch>(async () =>
@@ -950,6 +1024,7 @@ describe('executeAnalyzeVideoTool', () => {
 
 async function createVideoFixture(
   videos: readonly { ordinal: number; mime: string }[],
+  conversation?: AssistantInputConversationRef,
 ): Promise<{
   attachments: AssistantInputAttachmentEvidenceItem[]
   attachmentAuthorities: AnalyzeVideoAttachmentAuthority[]
@@ -963,8 +1038,10 @@ async function createVideoFixture(
   const event = await upsertAssistantInputEvent({
     vault: context.vaultRoot,
     event: {
+      conversation,
       content: { text: 'Please inspect the attached video.' },
       occurredAt: '2026-08-20T10:00:00.000Z',
+      receivedAt: '2026-08-20T10:00:00.000Z',
       sourceRef: {
         dedupeKey: `video-${videos.length}-${videos.map((v) => v.ordinal).join('-')}`,
         eventId: `evt_video_${videos.length}_${videos.map((v) => v.ordinal).join('_')}`,

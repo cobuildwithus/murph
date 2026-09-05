@@ -4651,6 +4651,19 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
       testName:
         'reports plainly when Gemini returns no usable video observation',
     },
+    {
+      expectedAnswerPattern: /blue/iu,
+      expectedFinalPattern: /mat/iu,
+      expectedFps: 1,
+      expectedSamplingMode: null,
+      forbiddenFinalPattern: /resend|re-upload|upload again|Gemini|untrusted|policy/iu,
+      memberText: 'What color is the mat in the video I sent earlier?',
+      providerObservation: 'The mat in the video is blue.',
+      providerQuestion: 'What color is the mat in the video I sent earlier?',
+      scenarioLabel: 'a later turn asks about a retained video without resending it',
+      testName: 'analyzes a retained video on a later real-Codex turn without resending',
+      followup: true,
+    },
   ] as const)(
     '$testName',
     async (scenario) => {
@@ -4668,13 +4681,14 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
       ])
       const sha256 = createHash('sha256').update(videoBytes).digest('hex')
       const providerBodies: unknown[] = []
+      const materializedVideoPaths: string[] = []
 
       try {
         await mkdir(path.join(workingDirectory, path.dirname(rawPath)), {
           recursive: true,
         })
         await writeFile(path.join(workingDirectory, rawPath), videoBytes)
-        const promptResult = buildAssistantAutoReplyPrompt([{
+        const promptInputs: Parameters<typeof buildAssistantAutoReplyPrompt>[0] = [{
           actorIsSelf: false,
           attachmentDescriptors: [],
           attachmentEvidence: {
@@ -4735,12 +4749,14 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
           },
           telegramMetadata: null,
           text: scenario.memberText,
-        }])
+        }]
+        const promptResult = buildAssistantAutoReplyPrompt(promptInputs)
         expect(promptResult.kind).toBe('ready')
         if (promptResult.kind !== 'ready') {
           throw new Error('Expected a ready direct-video prompt.')
         }
 
+        let acceptedVideoInputIds = [messageRef]
         const hostedToolContext = {
           computerToolsAvailable: false,
           currentAnalyzeVideoAttachmentAuthorities: () => [{
@@ -4754,7 +4770,7 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
           currentHostedDeliveryContext: () => null,
           currentHostedMailboxItemIds: () => [],
           currentUserActionScope: () => ({
-            acceptedInputIds: [messageRef],
+            acceptedInputIds: acceptedVideoInputIds,
             conversationId: 'conversation-video-detail',
             conversationScope: 'direct' as const,
             inboundMailboxItemIds: ['mailbox-video-detail'],
@@ -4767,7 +4783,7 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
           }),
           vaultFileSendAvailable: false,
         } satisfies AssistantHostedToolContext
-        const result = await executeRealCodexAppServerTurn({
+        const runVideoTurn = (prompt: string, resumeSessionId?: string | null) => executeRealCodexAppServerTurn({
           analyzeVideoRuntime: {
             apiKey: 'synthetic-gemini-key',
             fetchImpl: async (_request, init) => {
@@ -4820,14 +4836,57 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
           env: config.env,
           excludeResumeTurns: true,
           hostedToolContext,
+          materializeWorkspaceArtifacts: 'followup' in scenario ? async (relativePaths) => {
+            expect(relativePaths).toEqual([rawPath])
+            materializedVideoPaths.push(...relativePaths)
+            await writeFile(path.join(workingDirectory, rawPath), videoBytes)
+            return {
+              materializedArtifactPaths: new Set(relativePaths),
+              missingArtifactPaths: new Set<string>(),
+            }
+          } : null,
           model: config.model,
           modelProvider: config.modelProvider,
-          prompt: promptResult.prompt,
+          prompt,
+          resumeSessionId,
           reasoningEffort: 'low',
           sandbox: 'workspace-write',
           vaultRoot: workingDirectory,
           workingDirectory,
         })
+        let resumeSessionId: string | null = null
+        let prompt = promptResult.prompt
+        if ('followup' in scenario) {
+          const videoInput = promptInputs[0]!
+          const firstPrompt = buildAssistantAutoReplyPrompt([{
+            ...videoInput,
+            text: 'Here is a short clip. I will ask about it in a moment; just acknowledge it for now.',
+          }])
+          if (firstPrompt.kind !== 'ready') throw new Error('Expected initial video prompt.')
+          const first = await runVideoTurn(firstPrompt.prompt)
+          process.stdout.write(`[video-followup-first-turn] ${JSON.stringify({ finalMessage: first.finalMessage })}\n`)
+          expect(providerBodies).toHaveLength(0)
+          expect(materializedVideoPaths).toHaveLength(0)
+          expect(readCapabilityRoutingActions(first.jsonEvents).filter((action) =>
+            action.kind === 'dynamic' && action.tool === MURPH_ANALYZE_VIDEO_TOOL.name
+          )).toHaveLength(0)
+          expect(first.finalMessage.trim()).not.toBe('')
+          expect(first.finalMessage).not.toMatch(/permanent|forever/iu)
+          resumeSessionId = first.sessionId
+          await rm(path.join(workingDirectory, rawPath))
+          acceptedVideoInputIds = [`ain_${'b'.repeat(32)}`]
+          const followupPrompt = buildAssistantAutoReplyPrompt([{
+            ...videoInput,
+            attachmentEvidence: { ...videoInput.attachmentEvidence, attachments: [] },
+            inputId: acceptedVideoInputIds[0]!,
+            occurredAt: '2026-08-26T12:05:00.000Z',
+            receivedAt: '2026-08-26T12:05:01.000Z',
+            text: scenario.memberText,
+          }])
+          if (followupPrompt.kind !== 'ready') throw new Error('Expected video follow-up prompt.')
+          prompt = followupPrompt.prompt
+        }
+        const result = await runVideoTurn(prompt, resumeSessionId)
         const videoCalls = readCapabilityRoutingActions(result.jsonEvents)
           .filter((action) =>
             action.kind === 'dynamic'
@@ -4844,6 +4903,10 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
               && videoCalls[0].success,
           })}\n`,
         )
+        if ('followup' in scenario) {
+          expect(videoCalls).toHaveLength(1)
+          expect(materializedVideoPaths).toEqual([rawPath])
+        }
         expect(videoCalls.length).toBeGreaterThanOrEqual(1)
         const videoCall = videoCalls[0]
         if (videoCall?.kind !== 'dynamic') {

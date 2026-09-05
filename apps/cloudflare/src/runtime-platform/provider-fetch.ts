@@ -544,6 +544,10 @@ const HOSTED_RUNTIME_INTERNAL_OPERATION_DESCRIPTIONS: Record<string, string> = {
   member_action_outcome: "Hosted member action outcome",
   meal_photo_delete: "Hosted meal photo delete",
   meal_photo_read: "Hosted meal photo read",
+  media_delete: "Hosted media delete",
+  media_fetch: "Hosted media fetch",
+  media_record: "Hosted media lifetime registration",
+  media_upload: "Hosted media upload",
   product_feedback_recording: "Hosted product feedback recording",
   runtime_latency_trace: "Hosted runtime latency trace",
   runtime_log_write: "Hosted runtime log write",
@@ -600,6 +604,13 @@ function readHostedRuntimeInternalRequestLogPath(url: URL): string {
     && /^\/objects\/[a-f0-9]{64}$/u.test(url.pathname)
   ) {
     return "/objects/REDACTED";
+  }
+
+  if (
+    url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.mediaStore
+    && /^\/media\/[a-f0-9]{64}$/u.test(url.pathname)
+  ) {
+    return "/media/REDACTED";
   }
 
   if (

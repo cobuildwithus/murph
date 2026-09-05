@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -34,6 +34,9 @@ import { createEncryptedWorkspaceSnapshotFile } from "../src/workspace-snapshot-
 const NOW = "2026-08-27T15:00:00.000Z";
 const SNAPSHOT_NOTE = "Checkpointed synthetic workspace.\n";
 const RESIDENT_NOTE = "Resident workspace must survive rejected restore.\n";
+const MEDIA_BYTES = Buffer.from("Selected restore image bytes");
+const MEDIA_ID = "a".repeat(64);
+const MEDIA_PATH = "raw/captures/note/event_restore/attachment.png";
 const temporaryRoots: string[] = [];
 
 afterEach(async () => {
@@ -91,6 +94,14 @@ describe("container workspace restore preparation", () => {
         expect(request.headers.get(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER)).toBe(job.request.workspaceVersion);
         expect(request.headers.has(HOSTED_PROVIDER_EGRESS_TOKEN_HEADER)).toBe(false);
       }
+      // Cold restore leaves media external; selected access uses the real adapter.
+      await expect(stat(path.join(preparation.vaultRoot, MEDIA_PATH)))
+        .rejects.toMatchObject({ code: "ENOENT" });
+      await result.restored.materializeWorkspaceArtifacts([MEDIA_PATH]);
+      expect(await readFile(path.join(preparation.vaultRoot, MEDIA_PATH))).toEqual(MEDIA_BYTES);
+      expect(requests.filter((request) => new URL(request.url).pathname === `/media/${MEDIA_ID}`))
+        .toHaveLength(1);
+
       const downloads = requests.filter((request) => request.url === fixture.getUrl);
       expect(downloads).toHaveLength(1);
       expect(downloads[0]?.method).toBe("GET");
@@ -162,6 +173,16 @@ async function createFixture() {
   await mkdir(sourceVaultRoot, { recursive: true });
   await mkdir(operatorHomeRoot, { recursive: true });
   await writeFile(path.join(sourceVaultRoot, "note.md"), SNAPSHOT_NOTE);
+  const mediaRefsDirectory = path.join(sourceVaultRoot, ".runtime/operations/assistant");
+  await mkdir(mediaRefsDirectory, { recursive: true });
+  await writeFile(path.join(mediaRefsDirectory, "hosted-media-refs.json"), JSON.stringify({
+    schema: "murph.hosted-media-refs.v1",
+    entries: [{
+      byteSize: MEDIA_BYTES.byteLength, expiresAt: null, mediaId: MEDIA_ID,
+      mediaKind: "image", mimeType: "image/png", recordedAt: NOW,
+      relativePath: MEDIA_PATH, sha256: createHash("sha256").update(MEDIA_BYTES).digest("hex"),
+    }],
+  }));
   const snapshotId = "snapshot_container_restore";
   const objectKey = await hostedWorkspaceSnapshotObjectKey({ snapshotId, userId });
   const aad = buildHostedWorkspaceSnapshotV2Aad({ objectKey, snapshotId, userId });
@@ -258,6 +279,9 @@ function serveSnapshot(fixture: Fixture, workspace = fixture.workspace): Request
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = new Request(input, init);
     requests.push(request);
+    if (request.url === `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.mediaStore}/media/${MEDIA_ID}`) {
+      return new Response(MEDIA_BYTES);
+    }
     if (request.url === workspaceUrl) {
       return Response.json({ fetchedAt: NOW, workspace });
     }

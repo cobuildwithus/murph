@@ -142,6 +142,7 @@ import {
 } from '../assistant-codex/dynamic-tools/phone-calls.js'
 import {
   createAnalyzeVideoTurnState,
+  readAnalyzeVideoConversationEvents,
   snapshotAnalyzeVideoAttachmentAuthorities,
   type AnalyzeVideoAttachmentAuthority,
 } from '../assistant-codex/analyze-video-tool.js'
@@ -844,7 +845,13 @@ export async function sendAssistantMessageLocal(
           inputs: initialAcceptedInputJournal.inputs,
           vault: input.vault,
         })
-        snapshotAnalyzeVideoAuthorities(initialAcceptedEvents)
+        snapshotAnalyzeVideoAuthorities(await readAnalyzeVideoConversationEvents({
+          acceptedEvents: initialAcceptedEvents,
+          vaultRoot: input.vault,
+        }))
+        const initialVideoAuthorityInputIds = new Set(
+          [...analyzeVideoAttachmentAuthorities.values()].map((authority) => authority.messageRef),
+        )
         const threadScope = resolveAssistantCodexThreadScope({})
         const turnTimingStartedAt = lockAcquiredAt
         let currentInput = input
@@ -1011,9 +1018,18 @@ export async function sendAssistantMessageLocal(
                 messageInput: currentInput,
                 session: currentSession,
               }),
-              getAnalyzeVideoAttachmentAuthorities: () => [
-                ...analyzeVideoAttachmentAuthorities.values(),
-              ],
+              getAnalyzeVideoAttachmentAuthorities: () => {
+                const acceptedInputIds = new Set(resolveAssistantUserActionAcceptedInputIds({
+                  acceptedInputItems: acceptedInputItemsForProviderRequest,
+                  turnTrigger: currentInput.turnTrigger ?? null,
+                }))
+                // Retained history is frozen at turn start. Newly steered clips
+                // still require the current provider request's accepted boundary.
+                return [...analyzeVideoAttachmentAuthorities.values()].filter((authority) =>
+                  initialVideoAuthorityInputIds.has(authority.messageRef)
+                  || acceptedInputIds.has(authority.messageRef)
+                )
+              },
               getConversationScope: () =>
                 resolveAssistantConversationScope(
                   sharedPlan.conversationPolicy.audience,

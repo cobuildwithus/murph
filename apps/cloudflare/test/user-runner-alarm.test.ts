@@ -63,6 +63,7 @@ import {
   hostedBundleUserPrefix,
   hostedEmailRawMessageUserPrefix,
   hostedEnvironmentVoiceUserPrefix,
+  hostedMediaObjectKey,
   hostedRunnerSecretsObjectKey,
   hostedWorkspaceSnapshotObjectKey,
   hostedWorkspaceSnapshotUserPrefix,
@@ -7958,6 +7959,202 @@ describe("HostedUserRunner execution coordination", () => {
     expect(alarms.at(-1)).toBe("deleted");
   });
 
+  it("cleans expired hosted media from the runner alarm without waking the workspace", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const bucket = new MemoryEncryptedR2Bucket();
+    const mediaId = "b".repeat(64);
+    const sha256 = "a".repeat(64);
+    const mediaObjectKey = await hostedMediaObjectKey({
+      mediaId,
+      userId: TEST_USER_ID,
+    });
+    await bucket.put(mediaObjectKey, "encrypted-media");
+    const workspaceRead = vi.fn();
+    const { alarms, invoke, runner, sql } = createRunnerHarness({
+      bucket,
+      onWorkspaceRead: workspaceRead,
+    });
+    await activateWorkspaceSnapshotSessionOwner({ runner, sql });
+
+    await expect(runner.recordHostedMediaAsset({
+      attemptId: "attempt_1",
+      byteSize: 15,
+      expiresAt: "2026-04-26T00:00:00.000Z",
+      leaseGeneration: "9",
+      mediaId,
+      mediaKind: "video",
+      sha256,
+      userId: TEST_USER_ID,
+    })).resolves.toBe(true);
+    expect(alarms).toContain("2026-04-26T00:00:00.000Z");
+
+    await runner.alarm();
+
+    expect(bucket.deleted).toContain(mediaObjectKey);
+    expect(bucket.objects.has(mediaObjectKey)).toBe(false);
+    expect(readHostedMediaAssetRowCount(sql)).toBe(0);
+    expect(workspaceRead).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it.each(["alarm", "read"])("rejects preservation after %s claims expiry", async (trigger) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const bucket = new MemoryEncryptedR2Bucket();
+    const { runner, sql, invoke } = createRunnerHarness({ bucket });
+    await activateWorkspaceSnapshotSessionOwner({ runner, sql });
+    const descriptor = {
+      attemptId: "attempt_1", leaseGeneration: "9", userId: TEST_USER_ID,
+      mediaId: "8".repeat(64), sha256: "9".repeat(64), byteSize: 15,
+      mediaKind: "image" as const, expiresAt: "2026-04-26T00:00:00.000Z",
+    };
+    const key = await hostedMediaObjectKey(descriptor);
+    await bucket.put(key, "encrypted-media");
+    await runner.recordHostedMediaAsset(descriptor);
+    const started = createDeferred<void>();
+    const release = createDeferred<void>();
+    const deleteObject = bucket.delete.bind(bucket);
+    vi.spyOn(bucket, "delete").mockImplementation(async (objectKey) => {
+      started.resolve();
+      await release.promise;
+      await deleteObject(objectKey);
+    });
+    const cleanup = trigger === "alarm" ? runner.alarm() : runner.admitHostedMediaRead(descriptor);
+    await started.promise;
+    try {
+      expect(await runner.recordHostedMediaAsset({ ...descriptor, expiresAt: null })).toBe(false);
+    } finally {
+      release.resolve();
+      await cleanup;
+    }
+    expect(bucket.objects.has(key)).toBe(false);
+    expect(await runner.admitHostedMediaRead(descriptor)).toMatchObject({ ok: false, reason: "expired" });
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("preserves bytes when a durable save wins before retirement", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const bucket = new MemoryEncryptedR2Bucket();
+    const { runner, sql } = createRunnerHarness({ bucket });
+    await activateWorkspaceSnapshotSessionOwner({ runner, sql });
+    const descriptor = {
+      attemptId: "attempt_1", leaseGeneration: "9", userId: TEST_USER_ID,
+      mediaId: "6".repeat(64), sha256: "7".repeat(64), byteSize: 15,
+      mediaKind: "image" as const, expiresAt: "2026-04-26T00:00:00.000Z",
+    };
+    const key = await hostedMediaObjectKey(descriptor);
+    await bucket.put(key, "encrypted-media");
+    await runner.recordHostedMediaAsset(descriptor);
+    expect(await runner.recordHostedMediaAsset({ ...descriptor, expiresAt: null })).toBe(true);
+    await runner.alarm();
+    expect(bucket.objects.get(key)).toBe("encrypted-media");
+    expect(await runner.admitHostedMediaRead(descriptor)).toMatchObject({ ok: true, reason: "active" });
+  });
+
+  it.each(["failure", "late-put"])("retains deletion obligations after %s", async (scenario) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const bucket = new MemoryEncryptedR2Bucket();
+    const { runner, sql, invoke } = createRunnerHarness({ bucket });
+    await activateWorkspaceSnapshotSessionOwner({ runner, sql });
+    const descriptor = {
+      attemptId: "attempt_1", leaseGeneration: "9", userId: TEST_USER_ID,
+      mediaId: "4".repeat(64), sha256: "5".repeat(64), byteSize: 15,
+      mediaKind: "video" as const, expiresAt: "2026-04-26T00:00:00.000Z",
+    };
+    const key = await hostedMediaObjectKey(descriptor);
+    await bucket.put(key, "encrypted-media");
+    await runner.recordHostedMediaAsset(descriptor);
+    const deleteObject = bucket.delete.bind(bucket);
+    vi.spyOn(bucket, "delete").mockImplementationOnce(async (objectKey) => {
+      if (scenario === "failure") throw new Error("synthetic delete outage");
+      await deleteObject(objectKey);
+      await bucket.put(key, "encrypted-media");
+      expect(await runner.recordHostedMediaAsset({ ...descriptor, expiresAt: null })).toBe(false);
+    });
+    if (scenario === "failure") await expect(runner.alarm()).rejects.toThrow("synthetic delete outage");
+    else await runner.alarm();
+    expect(bucket.objects.has(key)).toBe(true);
+    const pending = sql.exec<{ retired_at: string; purged_at: null }>(
+      "SELECT retired_at, purged_at FROM runner_hosted_media_asset WHERE media_id = ?", descriptor.mediaId,
+    ).one();
+    expect(pending.retired_at).toBeTruthy();
+    expect(pending.purged_at).toBeNull();
+    await runner.alarm();
+    expect(bucket.objects.has(key)).toBe(false);
+    expect(await runner.admitHostedMediaRead(descriptor)).toMatchObject({ ok: false, reason: "expired" });
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("preserves hosted media rows without retention deadlines", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const bucket = new MemoryEncryptedR2Bucket();
+    const mediaId = "c".repeat(64);
+    const sha256 = "d".repeat(64);
+    const mediaObjectKey = await hostedMediaObjectKey({
+      mediaId,
+      userId: TEST_USER_ID,
+    });
+    await bucket.put(mediaObjectKey, "encrypted-media");
+    const { alarms, runner, sql } = createRunnerHarness({ bucket });
+    await activateWorkspaceSnapshotSessionOwner({ runner, sql });
+
+    await expect(runner.recordHostedMediaAsset({
+      attemptId: "attempt_1",
+      byteSize: 15,
+      expiresAt: null,
+      leaseGeneration: "9",
+      mediaId,
+      mediaKind: "image",
+      sha256,
+      userId: TEST_USER_ID,
+    })).resolves.toBe(true);
+
+    await runner.alarm();
+
+    expect(bucket.deleted).not.toContain(mediaObjectKey);
+    expect(bucket.objects.has(mediaObjectKey)).toBe(true);
+    expect(readHostedMediaAssetRowCount(sql)).toBe(1);
+    expect(alarms).toEqual(["deleted"]);
+  });
+
+  it("forgets hosted media retention rows under the active write fence", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { runner, sql } = createRunnerHarness();
+    await activateWorkspaceSnapshotSessionOwner({ runner, sql });
+    const mediaId = "e".repeat(64);
+
+    await expect(runner.recordHostedMediaAsset({
+      attemptId: "attempt_1",
+      byteSize: 15,
+      expiresAt: null,
+      leaseGeneration: "9",
+      mediaId,
+      mediaKind: "image",
+      sha256: "f".repeat(64),
+      userId: TEST_USER_ID,
+    })).resolves.toBe(true);
+
+    await expect(runner.forgetHostedMediaAsset({
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      mediaId,
+      userId: TEST_USER_ID,
+    })).resolves.toBe(true);
+    await expect(runner.forgetHostedMediaAsset({
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      mediaId,
+      userId: TEST_USER_ID,
+    })).resolves.toBe(true);
+
+    expect(readHostedMediaAssetRowCount(sql)).toBe(0);
+  });
+
   it("moves the shared orphan alarm earlier without scanning or postponing it", async () => {
     const storageList = vi.fn();
     const { alarms, runner } = createRunnerHarness({
@@ -9004,6 +9201,13 @@ async function activateWorkspaceSnapshotSessionOwner(input: {
     FIXED_NOW,
     "4",
   );
+}
+
+function readHostedMediaAssetRowCount(sql: TestSqlStorageLike): number {
+  const row = sql.exec<{ count: number }>(
+    "SELECT count(*) AS count FROM runner_hosted_media_asset WHERE retired_at IS NULL",
+  ).toArray()[0];
+  return row?.count ?? 0;
 }
 
 function createRunnerHarness(input: {

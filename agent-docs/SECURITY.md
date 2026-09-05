@@ -354,32 +354,33 @@ Last verified: 2026-08-31
   group turn with accepted user-action input and the Worker-held credential;
   unverified external groups omit the tool. Any participant in an authenticated
   group may explicitly request analysis of a video sent by any participant in
-  that same accepted group turn. The tool selects only the exact accepted video
-  message; current route authority, accepted-input membership, and frozen
-  attachment evidence bind it to the active group. It does not compare the
-  requester with the uploader. The schema may be
-  present before that input has video authority because provider tools freeze
-  at turn start and the first video may arrive through live steering. Group
-  participation does not authorize videos outside the current accepted group
-  turn. The tool may select only an accepted-message video whose path, size,
-  digest, MIME, message
-  ref, and ordinal were snapshotted in turn-owned memory before Codex could act
-  on that input. Freeze initial inputs before provider start and active-steered
-  inputs in the accepted-input validator before forwarding the steer; never
-  refresh an existing attachment key from model-writable files, and intersect
-  snapshots with the current accepted-input scope. Open the resolved file
-  without following the final symlink, read only the exact snapshotted size,
-  probe EOF, verify its SHA-256 digest and supported container signature, and
-  fail closed on unavailable materialization or drift. Ordinary hosted inbox
-  videos are warm-container-only material: derive their normalized paths from
-  validated canonical capture records, fail snapshot construction closed if
-  those records cannot be classified safely, and exclude the paths from every
-  new encrypted workspace snapshot even while pending input still protects the
-  local file. Once unprotected, use the existing atomic inbox-retention write
-  with a zero-length video window. Retention failure may remain nonblocking for
-  replies only because snapshot exclusion is the independent persistence
-  boundary. An explicit canonical event raw reference is the sole durable-save
-  exception and keeps its separately authorized lifecycle. The tool
+  that same group conversation, including earlier turns while their input
+  evidence remains available. Before provider execution, the turn owner freezes
+  historical attachment evidence only when source, account, thread, audience,
+  and optional session match current accepted input. Direct conversations also
+  match the participant; group conversations do not compare uploader and
+  requester. Missing conversation identity, future messages, and retired input
+  content grant no historical authority. Live steering freezes new accepted
+  input before forwarding it. Never refresh existing frozen attachment keys
+  from model-writable files. Historical video references grant only video
+  selection, never current-input authority for other tools or delivery.
+  The tool remains unavailable without a current accepted user action or for
+  unverified external groups. Open the resolved file without following the final
+  symlink, read its exact frozen size, probe EOF, verify SHA-256 and supported
+  container signature, and fail closed on missing bytes or drift.
+  Ordinary hosted inbox videos use a 72-hour media-byte retention window while
+  inbox images keep the 14-day image/audio window. Encrypted workspace snapshots
+  and hosted canonical write receipts externalize image/video bytes through
+  owner-scoped hosted media references before excluding them from the portable
+  archive and receipt payload artifacts. A sparse raw receipt must carry its
+  external media identity; receipt replay restores metadata before selected use.
+  Durable captures do not inherit inbox TTLs. The existing runner SQL owner
+  claims irreversible retirement before network deletion, rejects preservation
+  of retired identities, and keeps retry evidence until ciphertext is purged.
+  Selected local cache reads also enforce the reference deadline. The atomic
+  inbox-retention owner expires unprotected bytes; explicit canonical event raw
+  references keep their separately authorized lifecycle. Existing input-history
+  pruning also bounds historical analysis references. The tool
   pins Gemini 3.8 Flash and maps only `standard` to 1 FPS or
   `detailed_motion` to 5 FPS. Murph chooses that semantic mode before egress;
   raw FPS remains unavailable to the model and member. Both current profiles
@@ -398,16 +399,17 @@ Last verified: 2026-08-31
   upstream response above the 1 MiB delivery cap is a
   protocol violation: reject it without widening the buffer, let Murph absorb
   that unaccountable provider cost, and log only bounded status metadata. Do not
-  persist or log video bytes, prompts,
-  paths, or Gemini prose outside the authorized assistant transcript; usage may
+  log video bytes, prompts, paths, or Gemini prose. Retain raw video only through
+  the canonical inbox and encrypted workspace; Gemini prose may enter the
+  authorized assistant transcript only. Usage may
   retain only allowlisted token counters and provider metadata. Treat every
   byte and every returned character as untrusted content, not instructions.
   The one-call ceiling is turn-scoped. A rare outer hosted replay after Gemini
   acceptance but before terminal delivery evidence may resend the same
   explicitly requested clip to the same provider; the endpoint supplies no
   usable idempotency key. Treat this as a bounded v1 at-least-once residual,
-  not permission to retry within a turn. Do not add durable video/result state
-  without a separate retention and recovery design.
+  not permission to retry within a turn. Do not add a second video owner or
+  durable provider-result cache without a separate retention and recovery design.
   The existing in-memory turn state binds the first completed provider result
   to its accepted message ref, attachment ordinal, complete question, and
   sampling mode across group-draft reconsideration. An exact repeat returns

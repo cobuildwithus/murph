@@ -22,7 +22,6 @@ import {
   runInboxMediaRetention,
   runInboxTextRetention,
 } from "../src/index.ts";
-import { listTransientInboxVideoStoredPaths } from "../src/retention.ts";
 import type { InboundCapture } from "../src/contracts/capture.ts";
 
 async function makeTempDirectory(name: string): Promise<string> {
@@ -1015,7 +1014,7 @@ test("runInboxMediaRetention applies the cutoff and exact path protections", asy
   assert.equal(await fileExists(vaultRoot, duplicatePath), false);
 });
 
-test("hosted retention can expire unprotected videos immediately without changing image or audio windows", async () => {
+test("video uses a 72-hour window while image/audio and saved video stay durable", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-video-transient-retention");
   const now = "2026-07-05T00:00:00.000Z";
   await initializeVault({ vaultRoot, createdAt: now });
@@ -1091,60 +1090,39 @@ test("hosted retention can expire unprotected videos immediately without changin
       rawRefs: [savedVideoPath],
     },
   });
-  assert.deepEqual(
-    await listTransientInboxVideoStoredPaths({ vaultRoot }),
-    [videoPath],
-  );
 
   const result = await runInboxMediaRetention({
     now,
     vaultRoot,
-    videoRetentionWindowMs: 0,
   });
 
-  assert.equal(result.expiredAttachments, 1);
-  assert.deepEqual(result.records.map((record) => record.storedPath), [videoPath]);
-  assert.equal(result.nextEligibleAt, "2026-07-19T00:00:00.000Z");
+  assert.equal(result.expiredAttachments, 0);
+  assert.equal(result.nextEligibleAt, "2026-07-08T00:00:00.000Z");
+  assert.equal(await fileExists(vaultRoot, videoPath), true);
+  assert.equal(await fileExists(vaultRoot, imagePath), true);
+  assert.equal(await fileExists(vaultRoot, audioPath), true);
+  assert.equal(await fileExists(vaultRoot, savedVideoPath), true);
+
+  const expiredVideo = await runInboxMediaRetention({
+    now: "2026-07-08T00:00:00.001Z",
+    vaultRoot,
+  });
+  assert.equal(expiredVideo.expiredAttachments, 1);
+  assert.equal(expiredVideo.nextEligibleAt, "2026-07-19T00:00:00.000Z");
   assert.equal(await fileExists(vaultRoot, videoPath), false);
   assert.equal(await fileExists(vaultRoot, imagePath), true);
   assert.equal(await fileExists(vaultRoot, audioPath), true);
   assert.equal(await fileExists(vaultRoot, savedVideoPath), true);
-});
 
-test("transient video snapshot exclusion fails closed on an invalid capture record", async () => {
-  const vaultRoot = await makeTempDirectory("murph-inbox-video-snapshot-fail-closed");
-  await initializeVault({ vaultRoot, createdAt: "2026-07-05T00:00:00.000Z" });
-  await appendJsonlRecord({
+  const expiredMedia = await runInboxMediaRetention({
+    now: "2026-07-19T00:00:00.001Z",
     vaultRoot,
-    relativePath: "ledger/inbox-captures/2026/2026-07.jsonl",
-    record: {
-      schemaVersion: "murph.inbox-capture.v2",
-      attachments: "invalid",
-    },
   });
-
-  await assert.rejects(
-    listTransientInboxVideoStoredPaths({ vaultRoot }),
-    /Invalid inbox capture record prevents safe hosted snapshot construction/,
-  );
-});
-
-test("transient video snapshot exclusion fails closed on an invalid durable event record", async () => {
-  const vaultRoot = await makeTempDirectory("murph-inbox-video-event-fail-closed");
-  await initializeVault({ vaultRoot, createdAt: "2026-07-05T00:00:00.000Z" });
-  await appendJsonlRecord({
-    vaultRoot,
-    relativePath: "ledger/events/2026/2026-07.jsonl",
-    record: {
-      schemaVersion: "murph.event.v1",
-      rawRefs: ["raw/inbox/telegram/unclassified-video.mp4"],
-    },
-  });
-
-  await assert.rejects(
-    listTransientInboxVideoStoredPaths({ vaultRoot }),
-    /Invalid event record prevents safe hosted snapshot construction/,
-  );
+  assert.equal(expiredMedia.expiredAttachments, 2);
+  assert.equal(await fileExists(vaultRoot, videoPath), false);
+  assert.equal(await fileExists(vaultRoot, imagePath), false);
+  assert.equal(await fileExists(vaultRoot, audioPath), false);
+  assert.equal(await fileExists(vaultRoot, savedVideoPath), true);
 });
 
 test("runInboxMediaRetention protects every attachment in an active pending capture", async () => {
@@ -1204,7 +1182,6 @@ test("runInboxMediaRetention protects every attachment in an active pending capt
     now: "2026-07-05T00:00:00.000Z",
     protectedCaptureIds: [captureId],
     vaultRoot,
-    videoRetentionWindowMs: 0,
   });
 
   assert.equal(result.expiredAttachments, 0);
@@ -1502,11 +1479,11 @@ test("runInboxMediaRetention reschedules when parser work appears before the loc
   }
 });
 
-test("runInboxMediaRetention ignores stale and unclaimable legacy parser rows", async () => {
-  const vaultRoot = await makeTempDirectory("murph-inbox-media-retention-legacy-parser-row");
+test("runInboxMediaRetention protects image media while parser work is fresh and nonterminal", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-media-retention-image-parser-row");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
   const imageBytes = await createPngBytes();
-  const captureId = "cap_retention_legacy_parser_row";
+  const captureId = "cap_retention_image_parser_row";
 
   const persisted = await persistCanonicalInboxCapture({
     vaultRoot,
@@ -1514,10 +1491,10 @@ test("runInboxMediaRetention ignores stale and unclaimable legacy parser rows", 
     eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2VJ",
     storedAt: "2026-06-01T00:00:00.000Z",
     input: buildOldImageCaptureInput({
-      externalId: "msg-legacy-parser-row",
+      externalId: "msg-image-parser-row",
       imageBytes,
-      text: "old image with legacy parser row",
-      threadId: "thread-legacy-parser-row",
+      text: "old image with parser row",
+      threadId: "thread-image-parser-row",
     }),
   });
   const imageAttachment = persisted.stored.attachments[0];
@@ -1533,7 +1510,62 @@ test("runInboxMediaRetention ignores stale and unclaimable legacy parser rows", 
       captureId,
       createdAt: "2026-07-04T00:00:00.000Z",
       databasePath: runtime.databasePath,
-      jobId: "job_legacy_image_parser_row",
+      jobId: "job_image_parser_row",
+      state: "pending",
+    });
+
+    const protectedResult = await runInboxMediaRetention({
+      now: "2026-07-05T00:00:00.000Z",
+      vaultRoot,
+    });
+    assert.equal(protectedResult.expiredAttachments, 0);
+    assert.equal(protectedResult.nextEligibleAt, "2026-07-18T00:00:00.000Z");
+    assert.equal(await fileExists(vaultRoot, imagePath), true);
+
+    const result = await runInboxMediaRetention({
+      now: "2026-07-18T00:00:00.000Z",
+      vaultRoot,
+    });
+    assert.equal(result.expiredAttachments, 1);
+    assert.equal(result.records[0]?.attachmentId, imageAttachment.attachmentId);
+    assert.equal(await fileExists(vaultRoot, imagePath), false);
+  } finally {
+    runtime.close();
+  }
+});
+
+test("runInboxMediaRetention ignores stale unclaimable legacy image parser rows", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-media-retention-stale-image-parser-row");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
+  const imageBytes = await createPngBytes();
+  const captureId = "cap_retention_stale_image_parser_row";
+
+  const persisted = await persistCanonicalInboxCapture({
+    vaultRoot,
+    captureId,
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2VQ",
+    storedAt: "2026-06-01T00:00:00.000Z",
+    input: buildOldImageCaptureInput({
+      externalId: "msg-stale-image-parser-row",
+      imageBytes,
+      text: "old image with stale parser row",
+      threadId: "thread-stale-image-parser-row",
+    }),
+  });
+  const imageAttachment = persisted.stored.attachments[0];
+  assert.ok(imageAttachment);
+  const imagePath = imageAttachment.storedPath ?? "";
+  assert.ok(imagePath);
+
+  const runtime = await openInboxRuntime({ vaultRoot });
+  try {
+    await rebuildRuntimeFromVault({ enqueueParserJobs: false, vaultRoot, runtime });
+    await insertLegacyAttachmentParseJob({
+      attachmentId: imageAttachment.attachmentId,
+      captureId,
+      createdAt: "2026-06-01T00:00:00.000Z",
+      databasePath: runtime.databasePath,
+      jobId: "job_stale_image_parser_row",
       state: "pending",
     });
 
