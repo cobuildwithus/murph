@@ -6039,7 +6039,7 @@ export function parseHostedRuntimeAssistantConfigurationToolResponse(
           result.requiredPlan,
           "Hosted runtime assistant configuration tool requiredPlan",
         );
-  if (requiredPlan !== null && requiredPlan !== "edge") {
+  if (requiredPlan !== null && requiredPlan !== "edge" && requiredPlan !== "max") {
     throw new TypeError(
       "Hosted runtime assistant configuration tool requiredPlan is not supported.",
     );
@@ -8550,6 +8550,9 @@ export function parseHostedWorkspaceReadResponse(
           record.hostedAssistantSubagentModelOverridesAllowed,
           "Hosted workspace read response hostedAssistantSubagentModelOverridesAllowed",
         );
+  const hostedAssistantAstraAllowed = record.hostedAssistantAstraAllowed === undefined
+    ? null
+    : requireBoolean(record.hostedAssistantAstraAllowed, "Hosted workspace read response hostedAssistantAstraAllowed");
 
   return {
     fetchedAt: requireString(
@@ -8569,6 +8572,7 @@ export function parseHostedWorkspaceReadResponse(
     ...(hostedAssistantSubagentModelOverridesAllowed === null
       ? {}
       : { hostedAssistantSubagentModelOverridesAllowed }),
+    ...(hostedAssistantAstraAllowed === null ? {} : { hostedAssistantAstraAllowed }),
     ...(platformAiUsageAllowed === null ? {} : { platformAiUsageAllowed }),
     workspace:
       record.workspace === null
