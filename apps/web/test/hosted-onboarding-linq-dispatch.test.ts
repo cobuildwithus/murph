@@ -2140,8 +2140,28 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     },
   );
 
-  it("keeps active-member iMessage ingress direct when canonical classification is direct", async () => {
-    const supportedLongText = `${"Context ".repeat(290)}Final question?`;
+  it.each([false, true])("keeps active-member iMessage ingress direct with opening continuation %s", async (continuation) => {
+    const supportedLongText = continuation ? "Yes, ready." : `${"Context ".repeat(290)}Final question?`;
+    if (continuation) {
+      mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
+      mocks.claimHostedLinqInstantFirstTurn.mockImplementationOnce(async () => {
+        expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+        return { kind: "generate", openingTone: "formal" };
+      });
+      mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
+        kind: "reply",
+        message: "What should I call you, and how old are you?",
+        usage: { requestedModel: "gpt-5.6-luna", response: {} },
+      });
+      mocks.completeHostedLinqInstantFirstTurn.mockImplementationOnce(async (input) => ({
+        kind: "accepted",
+        wakeHandoff: {
+          ...input.wakeHandoff,
+          mailboxItemId: "mailbox_opening_identity_question",
+          wakeMailboxCheckpoint: { lane: "conversation", laneSeq: "4" },
+        },
+      }));
+    }
     mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
       handles: [],
       isGroup: false,
@@ -2212,6 +2232,23 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     const outboxCall = mocks.enqueueHostedExecutionOutbox.mock.calls[0]?.[0];
     expect(outboxCall?.envelope.message).not.toHaveProperty("accountLookupKey");
     expect(outboxCall?.envelope.message).not.toHaveProperty("routeAuthority");
+    if (continuation) {
+      expect(mocks.claimHostedLinqInstantFirstTurn).toHaveBeenCalledExactlyOnceWith({
+        continuationOnly: true,
+        linqChatId: "chat_123",
+        prisma,
+        request: expect.objectContaining({ text: "Yes, ready." }),
+      });
+      expect(mocks.completeHostedLinqInstantFirstTurn).toHaveBeenCalledOnce();
+      expect(mocks.abandonHostedLinqInstantFirstTurn).not.toHaveBeenCalled();
+      expect(mocks.classifyHostedLinqFirstContactAdmission).not.toHaveBeenCalled();
+      expect(mocks.ensureHostedLinqInstantStartStarterUsageEnrollment).not.toHaveBeenCalled();
+      expect(mocks.maybeHandoffHostedExecutionWebhookWake).toHaveBeenCalledWith(
+        expect.objectContaining({ wakeHandoff: expect.objectContaining({
+          mailboxItemId: "mailbox_opening_identity_question",
+        }) }),
+      );
+    }
   });
 
   it.each([
@@ -8197,7 +8234,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       .mockImplementationOnce(async () => {
         callOrder.push("activation-continuation");
       });
-    mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({
+    mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({ kind: "unavailable" }).mockResolvedValueOnce({
       kind: "generate",
     });
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
@@ -8746,7 +8783,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         };
       },
     );
-    mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({
+    mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({ kind: "unavailable" }).mockResolvedValueOnce({
       kind: "generate",
     });
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
@@ -9302,7 +9339,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
   it("keeps a model-approved new contact on the signup-link path when routing selects another line", async () => {
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
-    mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({
+    mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({ kind: "unavailable" }).mockResolvedValueOnce({
       kind: "generate",
     });
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
@@ -9500,7 +9537,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   }) => {
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
     configureEnrollment();
-    mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({
+    mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({ kind: "unavailable" }).mockResolvedValueOnce({
       kind: "generate",
     });
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
@@ -9765,7 +9802,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       kind: "block",
       source: "model",
     });
-    mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({
+    mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({ kind: "unavailable" }).mockResolvedValueOnce({
       kind: "generate",
     });
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
@@ -9864,7 +9901,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledOnce();
-    expect(mocks.claimHostedLinqInstantFirstTurn).toHaveBeenCalledOnce();
+    expect(mocks.claimHostedLinqInstantFirstTurn).toHaveBeenCalledTimes(2);
     expect(mocks.startHostedLinqInstantFirstTurnGeneration).toHaveBeenCalledOnce();
     expect(mocks.abandonHostedLinqInstantFirstTurn).toHaveBeenCalledTimes(2);
     expect(mocks.abandonHostedLinqInstantFirstTurn).toHaveBeenLastCalledWith({
@@ -10495,7 +10532,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
     const admissionOrder: string[] = [];
     let transactionOpen = false;
-    mocks.claimHostedLinqInstantFirstTurn.mockImplementationOnce(async () => {
+    mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({ kind: "unavailable" }).mockImplementationOnce(async () => {
       expect(transactionOpen).toBe(false);
       admissionOrder.push("reply-claim");
       return { kind: "generate" };
@@ -11628,7 +11665,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   it("fails open to the signup link, not instant start, when the classifier is unavailable", async () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
-    mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({
+    mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({ kind: "unavailable" }).mockResolvedValueOnce({
       kind: "generate",
     });
     mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({

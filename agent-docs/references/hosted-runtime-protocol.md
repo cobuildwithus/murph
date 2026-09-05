@@ -175,8 +175,9 @@ asynchronous admission and cancels its exact pending process handle.
 
 Detached MultiAgent V2 work does not become a process-memory queue. Before the
 root reply, Murph retains a durable accepted input, canonical fact, or raw
-source and gives each child its exact source words, ids, or refs. A loaded skill
-may assign one independent canonical record family per child, with every write
+source and gives each child its exact source words, ids, or refs. The injected
+opening instructions or a loaded skill may assign one independent canonical
+record family per child, with every write
 idempotently attributable to that source. A terminal lifecycle receipt remains
 advisory; canonical readback is completion proof. If the member needs the result
 in the current reply, the root keeps the work and uses normal progress updates.
@@ -1570,6 +1571,21 @@ they were derived from exact row stamps in an accepted snapshot transaction.
 After rollout, verify that conversation lane floors converge toward
 checkpointed imported prefixes and run a Telegram reply across a controlled
 reload with no duplicate reply or multi-minute stall.
+
+The existing Web instant Linq reply owner may answer the first two opening
+messages of an eligible direct text-only conversation. Its second reply is only
+the bundled identity question after the confirmed canonical welcome. Existing
+chat-locked delivery rows cap the path at two and retain exact-event replay;
+no step field or second outbox exists. Web claims before appending the second
+inbound, and normal runtime egress consults that same ledger. Both confirmed
+outgoing replies enter the ordinary encrypted conversation mailbox with their
+inbound references, so import retains continuity and suppresses another answer.
+Supplied identity, skips, immediate requests, missing history, and later turns
+use the normal runtime. The existing shell/process warmup is unchanged; no
+synthetic user message or speculative onboarding provider turn is introduced.
+New Web with an older compatible runner uses the existing external-reply import
+and egress contract; identity saves remain synchronous until the new prompt is
+loaded. New runner with older Web preserves the runtime first-reply fast path.
 
 Hosted Linq and Telegram conversation webhook routes read the raw body and
 verification headers only in the route/service process. That code verifies the

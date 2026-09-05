@@ -1981,13 +1981,13 @@ describe('assistant Codex turn planning', () => {
       'For that first-reply fast path, do not read the onboarding skill and do not run `vault-cli assistant onboarding resume-context --format json`.',
     )
     expect(plan.developerInstructions).toContain(
-      `For every other onboarding turn, read and follow \`${skillRef}\` before interpreting or acting on an onboarding answer or decision to advance, pause, defer, skip, decline, or complete onboarding`,
+      `Outside these visible opening exchanges—missing or ambiguous history, established later stages, an immediate request, or an overall pause or decline—read and follow \`${skillRef}\` before interpreting or acting on an onboarding answer or decision to advance, pause, defer, skip, decline, or complete onboarding`,
     )
     expect(plan.developerInstructions).not.toContain(
       `Read and follow \`${skillRef}\` before interpreting or acting on any onboarding answer`,
     )
     expect(plan.developerInstructions).toContain(
-      'That skill is the single owner of resume behavior, aspiration capture and parking, foundation checkpoints, the contextual return, persistence, generic defer and skip meaning, and completion.',
+      'That skill is the single owner of resume behavior, aspiration capture and parking, foundation checkpoints, the contextual return, later-stage persistence, generic defer and skip meaning, and completion.',
     )
     const onboardingDecisionContract = [
       'During discovery, a stated health goal is context, not an action request.',

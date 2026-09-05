@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
 import {
+  MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS,
   AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
   AUTOMATION_SUPPORT_SERIES_TAG_PREFIX,
   buildAutomationSupportSeriesTag,
@@ -18,6 +19,7 @@ import {
   parseCalendarEventPayload,
   regimenFrontmatterSchema,
   resolveFloatingIsoTimestampInTimeZone,
+  toLocalDayKey,
   workoutSessionSchema,
 } from '@murphai/contracts'
 import {
@@ -335,11 +337,7 @@ const REAL_CODEX_ONBOARDING_ALLOWED_POLICY_PATHS = {
     ONBOARDING_POLICY_PATHS[0][1],
     ONBOARDING_POLICY_PATHS[1][1],
   ],
-  minimal_identity_answer: [
-    ONBOARDING_POLICY_PATHS[0][1],
-    ONBOARDING_POLICY_PATHS[1][1],
-    ONBOARDING_POLICY_PATHS[2][1],
-  ],
+  minimal_identity_answer: [],
   minimal_identity_prompt: [],
   wearable_connection_offer: [
     ONBOARDING_POLICY_PATHS[0][1],
@@ -898,6 +896,138 @@ describeRealCodex('real Codex child model selection e2e', () => {
 
 describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
   it(
+    'continues the opening while one native child saves real canonical identity',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await prepareRealCodexOnboardingDirectory()
+      const childUsages: AssistantProviderUsageDraft[] = []
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+      const actionTimings: Array<{ elapsedMs: number; phase: string; type: string; tool: string | null }> = []
+      const commandLogPath = path.join(workingDirectory, 'identity-commands.log')
+      try {
+        await initializeVault({ vaultRoot: workingDirectory, timezone: 'America/New_York' })
+        // The executable and loader remain environment values, never copied
+        // machine-specific paths in a generated fixture.
+        await writeFile(path.join(workingDirectory, 'vault-cli'), [
+          '#!/bin/sh',
+          'set -eu',
+          `printf '%s\\n' "$*" >> "$MURPH_ONBOARDING_TEST_COMMAND_LOG"`,
+          'exec "$MURPH_ONBOARDING_TEST_NODE" --import "$MURPH_ONBOARDING_TEST_LOADER" "$MURPH_ONBOARDING_TEST_CLI" "$@" --vault "$MURPH_ONBOARDING_TEST_VAULT"',
+          '',
+        ].join('\n'), { mode: 0o700 })
+        const turnInput = buildRealCodexOnboardingTurnInput({ config, workingDirectory })
+        const startedAt = Date.now()
+        const result = await executeRealCodexAppServerTurn({
+          ...turnInput,
+          configOverrides: CHILD_MODEL_SELECTION_CONFIG_OVERRIDES,
+          developerInstructions: buildDirectConversationDeveloperInstructions(true, [
+            'Visible direct conversation imported from confirmed Web replies:',
+            `Murph: ${ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE}`,
+            'Member: Yes, ready.',
+            `Murph: ${MURPH_ASSISTANT_ONBOARDING_IDENTITY_QUESTIONS.formal}`,
+          ].join('\n\n'), [], new Date(startedAt).toISOString()),
+          dynamicTools: [MURPH_AUTOMATION_TOOL],
+          env: {
+            ...turnInput.env,
+            MURPH_ONBOARDING_TEST_COMMAND_LOG: commandLogPath,
+            MURPH_ONBOARDING_TEST_NODE: process.execPath,
+            MURPH_ONBOARDING_TEST_LOADER: path.resolve(path.dirname(HABITAT_VOICE_E2E_TSX_BIN), '../tsx/dist/loader.mjs'),
+            MURPH_ONBOARDING_TEST_CLI: HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
+            MURPH_ONBOARDING_TEST_VAULT: workingDirectory,
+            TSX_TSCONFIG_PATH: path.resolve(path.dirname(HABITAT_VOICE_E2E_CLI_ENTRYPOINT), '../../../tsconfig.base.json'),
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            automationTool: {
+              request: async (request) => {
+                if (request.action !== 'save' || request.schedule.kind !== 'at') {
+                  throw new Error('Expected one opening check-in save.')
+                }
+                automationRequests.push(request)
+                const saved = await upsertAutomation({
+                  vaultRoot: workingDirectory,
+                  slug: request.slug,
+                  title: request.title,
+                  summary: request.summary,
+                  instructions: request.instructions,
+                  schedule: request.schedule,
+                  tags: [...(request.tags ?? [])],
+                  status: 'active',
+                  continuityPolicy: 'fresh',
+                  route: {
+                    channel: 'linq', deliveryTarget: 'synthetic-opening', identityId: null,
+                    participantId: null, threadId: 'synthetic-opening', threadIsDirect: true,
+                  },
+                })
+                return {
+                  action: 'save', automationId: saved.record.automationId, created: saved.created,
+                  effectiveTimeZone: 'America/New_York', lookupId: saved.record.slug,
+                  occurrenceProjection: { nextOccurrenceAt: request.schedule.at, status: 'resolved' },
+                  routeBinding: 'current_conversation', schedule: request.schedule,
+                  status: 'active', updatedAt: saved.record.updatedAt,
+                }
+              },
+            },
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => { throw new Error('No file sends in onboarding proof.') },
+            vaultFileSendAvailable: false,
+          },
+          onTraceEvent: (event) => {
+            const raw = readRecord(event.rawEvent)
+            const phase = readString(raw?.method)
+            const item = readRecord(readRecord(raw?.params)?.item)
+            if (phase === 'item/started' || phase === 'item/completed') {
+              actionTimings.push({ elapsedMs: Date.now() - startedAt, phase,
+                type: readString(item?.type) ?? 'unknown', tool: readString(item?.tool) })
+            }
+          },
+          onAdditionalUsage: async (usage) => { childUsages.push(usage) },
+          prompt: "Call me Robin. I'm 34 and a guy.",
+        })
+        const replyMs = Date.now() - startedAt
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        process.stdout.write(`[onboarding-opening-e2e] ${JSON.stringify({
+          replyMs, providerActionCount: result.providerActionCount, reply: result.finalMessage.trim(),
+          actionTimings,
+        })}\n`)
+        expect(result.finalMessage).toMatch(/Robin/iu)
+        expect(result.finalMessage).toMatch(/what.*health/iu)
+        expect(result.finalMessage).not.toMatch(/saved|recorded|subagent|checkpoint|still working/iu)
+        expect(await readOnboardingPolicyFiles(actions, path.join(workingDirectory, 'skills'))).toEqual([])
+        expect(actions.filter((action) => action.kind === 'command' && /memory (?:set-name|upsert|update)/u.test(action.command))).toEqual([])
+        expect(automationRequests).toHaveLength(1)
+        expect(automationRequests[0]).toMatchObject({ action: 'save', slug: 'onboarding-early-stall-check-in' })
+        const checkIn = automationRequests[0]
+        expect(checkIn?.action).toBe('save')
+        if (checkIn?.action !== 'save' || checkIn.schedule.kind !== 'at') {
+          throw new Error('Expected the opening one-shot schedule.')
+        }
+        expect(Math.abs(Date.parse(checkIn.schedule.at) - (startedAt + 15 * 60_000))).toBeLessThan(60_000)
+        await waitForWarmCodexBackgroundWork()
+        const memory = await readMemoryDocument(workingDirectory)
+        const identity = memory.records.map((record) => record.text).join('\n')
+        expect(childUsages).toHaveLength(1)
+        expect(identity).toMatch(/Robin/u)
+        expect(identity).toMatch(/34/u)
+        expect(identity).toMatch(/guy|male|man/iu)
+        const commands = await readFile(commandLogPath, 'utf8')
+        expect(commands).toMatch(/memory set-name/u)
+        expect((await showAutomation({ vaultRoot: workingDirectory, slug: 'onboarding-early-stall-check-in' }))?.status).toBe('active')
+        process.stdout.write(`[onboarding-opening-saved-e2e] ${JSON.stringify({
+          replyMs, allWritesVerifiedMs: Date.now() - startedAt,
+          childCount: childUsages.length, memoryRecordCount: memory.records.length, checkInCount: automationRequests.length,
+        })}\n`)
+      } finally {
+        await stopWarmCodexAppServer('onboarding-opening-e2e-complete')
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'routes fresh, ordinary-record, incomplete-resume, and later turns through only their relevant onboarding policy',
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -980,10 +1110,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
         expect(
           identityAnswer.policyFiles.filter((file) => file !== 'SKILL.md'),
           'minimal-identity answer stage policy reads',
-        ).toEqual([
-          'aspiration-foundation-delegation.md',
-          'persistence-recovery-follow-up.md',
-        ])
+        ).toEqual([])
         expect(identityAnswer.finalMessage.trim(), 'aspiration question').toMatch(
           /what would you most like from your health|what do you want to (?:improve|understand|handle)|what.*health/iu,
         )
@@ -1680,7 +1807,7 @@ describe('onboarding policy read detection', () => {
     const skillsRoot = resolveAssistantSkillsRoot()
     const broadOutput = [
       'Hosted onboarding must have capacity for at least three concurrent children.',
-      'Setup drop-off is most likely in these first minutes, so in the same turn',
+      'Route useful answers to their existing canonical owner in the same turn. The',
       'After the foundation is resolved, close it warmly before asking for anything',
     ].join('\n')
     expect(await readOnboardingPolicyFiles([{
@@ -32000,6 +32127,7 @@ function buildDirectConversationDeveloperInstructions(
   assistantContextSnapshotPrompt: string | null = null,
   assistantHostedDeviceConnectProviders:
     readonly AssistantHostedDeviceConnectProvider[] = [],
+  currentInstant: string | null = null,
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
@@ -32014,7 +32142,8 @@ function buildDirectConversationDeveloperInstructions(
       setupCommand: 'murph',
     },
     conversationScope: 'direct',
-    currentLocalDate: '2026-07-29',
+    currentInstant: currentInstant ?? undefined,
+    currentLocalDate: currentInstant ? toLocalDayKey(currentInstant, 'America/New_York') : '2026-07-29',
     currentTimeZone: 'America/New_York',
     hostedRuntime: true,
     modelBehaviorProfile: 'gpt5-agentic',
