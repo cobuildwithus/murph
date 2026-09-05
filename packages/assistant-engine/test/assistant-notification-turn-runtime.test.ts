@@ -229,6 +229,60 @@ afterEach(() => {
   vi.doUnmock('../src/assistant/response-media.js')
   vi.doUnmock('../src/assistant/first-contact.js')
   vi.doUnmock('../src/assistant/cron/output-history.js')
+  vi.doUnmock('../src/assistant/maintenance-evidence.js')
+  vi.doUnmock('../src/assistant/group-room-model.js')
+})
+
+test.each([
+  { profile: 'member-memory', status: 'empty', page: 'missing', skip: true },
+  { profile: 'group-room-model', status: 'empty', page: 'missing', skip: true },
+  { profile: 'member-memory', status: 'unavailable', page: 'missing', skip: false },
+  { profile: 'member-memory', status: 'available', page: 'missing', skip: false },
+  { profile: 'group-room-model', status: 'empty', page: 'present', skip: false },
+  { profile: 'group-room-model', status: 'empty', page: 'unavailable', skip: false },
+  { profile: 'group-room-model', status: 'available', page: 'missing', skip: false },
+  { profile: 'habitat-voice', status: 'not-applicable', page: 'missing', skip: false },
+] as const)('empty maintenance admission: $profile/$status/$page', async ({ profile, status, page, skip }) => {
+  vi.doMock('../src/assistant/maintenance-evidence.js', () => ({
+    readAssistantMaintenanceConversationEvidence: vi.fn(async () => ({
+      prompt: 'Engine-supplied synthetic evidence.',
+      status,
+    })),
+  }))
+  vi.doMock('../src/assistant/group-room-model.js', async (importOriginal) => ({
+    ...await importOriginal<typeof import('../src/assistant/group-room-model.js')>(),
+    readAssistantGroupRoomModelState: vi.fn(async () => page === 'present'
+      ? { kind: page, body: '## Room guide\n'.repeat(2_000), digest: 'a'.repeat(64), status: 'active' }
+      : { kind: page, digest: 'a'.repeat(64) }),
+  }))
+  const { mocks, deliverMessage, sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
+    providerResult: createProviderResult({
+      response: JSON.stringify({ kind: 'skip', privateSummary: 'Silent maintenance complete.' }),
+    }),
+    turnId: 'turn-empty-maintenance',
+  })
+  const onProviderRequestStarted = vi.fn()
+  const result = await sendAssistantNotificationLocal({
+    executionContext: { hosted: null },
+    instructions: 'Perform the authorized silent maintenance.',
+    onProviderRequestStarted,
+    turnPolicy: {
+      kind: 'maintenance-exact-skip',
+      maintenanceProfile: profile,
+      privateSummary: 'Silent maintenance complete.',
+    },
+    vault: '/vaults/empty-maintenance',
+  })
+  expect(result.decision).toEqual({ kind: 'skip', privateSummary: 'Silent maintenance complete.' })
+  expect(result.response).toBeNull()
+  expect(deliverMessage).not.toHaveBeenCalled()
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledTimes(skip ? 0 : 1)
+  if (skip) {
+    expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+    expect(mocks.recordAssistantUsageEvent).not.toHaveBeenCalled()
+    expect(onProviderRequestStarted).not.toHaveBeenCalled()
+    expect(result.session.turnCount).toBe(0)
+  }
 })
 
 test('sendAssistantNotificationLocal scopes cron output history to the resolved conversation session', async () => {
@@ -2240,6 +2294,14 @@ test('sendAssistantNotificationLocal passes user-facing provider text through be
 })
 
 test('sendAssistantNotificationLocal isolates detached provider results without delivering', async () => {
+  vi.doMock('../src/assistant/maintenance-evidence.js', () => ({
+    readAssistantMaintenanceConversationEvidence: vi.fn(async (input: { profile: string }) => ({
+      prompt: input.profile === 'group-room-model'
+        ? '## Group conversation evidence (engine-supplied, bounded, last 7 days)\nSynthetic group context.'
+        : '## Conversation evidence (engine-supplied, bounded, last 7 days)\nSynthetic member context.',
+      status: 'available',
+    })),
+  }))
   const providerSession = createAssistantSession({
     binding: {
       actorId: 'actor-skip',

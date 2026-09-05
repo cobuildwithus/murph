@@ -1,3 +1,4 @@
+import { readWorkflowSkillPolicy } from './support/workflow-skill-policy.js'
 import { existsSync, readFileSync } from 'node:fs'
 import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
@@ -1076,6 +1077,11 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('vault-cli memory upsert')
     expect(raw).toContain('Do not create a memory record for routine success')
     expect(raw).toContain('Finite-supply replenishment check-ins')
+    const replenishment = raw.split('## Finite-supply replenishment check-ins')[1]!.split('## Supplement order completion')[0]!
+    expect(replenishment).toContain('schedule.localAt.timeZone')
+    expect(replenishment).toContain('Omit `slug`; the host generates the automation identity')
+    expect(replenishment).not.toContain('"at": "<ISO')
+    expect(replenishment).not.toContain('`slug`: a stable value')
     expect(raw).toMatch(
       /Treat the browser task as complete only when the site or tool result verifies the\s+requested outcome\./u,
     )
@@ -1182,7 +1188,11 @@ describe('assistant skill assets', () => {
       modelBehaviorProfile: 'gpt5-agentic',
       turnTrigger: null,
     })
-    const skillTexts = await Promise.all(ASSISTANT_SKILLS.map(readSkillFile))
+    const skillTexts = await Promise.all(ASSISTANT_SKILLS.map((skill) =>
+      skill.slug === 'experiment-onboarding'
+        ? readWorkflowSkillPolicy(skill.slug)
+        : readSkillFile(skill),
+    ))
     const registeredSkillText = skillTexts.join('\n')
 
     expectNoDeletedCommonsCommands(systemPrompt)
@@ -1207,7 +1217,7 @@ describe('assistant skill assets', () => {
     )
   })
 
-  it('keeps experiment onboarding details in the skill file, not the prompt', async () => {
+  it('keeps experiment onboarding details in its skill policy, not the prompt', async () => {
     const experimentOnboardingSkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'experiment-onboarding',
     )
@@ -1219,7 +1229,7 @@ describe('assistant skill assets', () => {
       'planned-session support reminders',
     )
 
-    const raw = await readSkillFile(experimentOnboardingSkill)
+    const raw = await readWorkflowSkillPolicy('experiment-onboarding')
 
     expect(raw).toContain(
       'Before asking any experiment onboarding question, perform a bounded vault-first evidence pass',

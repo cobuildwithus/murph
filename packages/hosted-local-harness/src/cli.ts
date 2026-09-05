@@ -545,6 +545,7 @@ async function runDoctor(
     runDoctorCommand("node", ["--version"]),
     runDoctorCommand("pnpm", ["--version"]),
     runDoctorCommand("docker", ["info"]),
+    runDoctorCommand("docker", ["buildx", "version"]),
     runDoctorCommand("createdb", ["--version"]),
   ];
   const result = {
