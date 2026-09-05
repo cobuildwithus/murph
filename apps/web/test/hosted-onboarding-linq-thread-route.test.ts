@@ -6043,6 +6043,40 @@ describe("Linq group chat auto-provision", () => {
     });
   });
 
+  it.each([
+    { participantMemberIds: [] },
+    { participantMemberIds: ["member_recognized_peer"] },
+  ])("keeps handle-only group admission consistent with roster $participantMemberIds", async ({ participantMemberIds }) => {
+    const prisma = {
+      ...createStatefulThreadRoutePrisma(),
+      hostedMemberIdentity: {
+        findMany: vi.fn().mockResolvedValue([{ member: senderCore, memberId: senderCore.id }]),
+      },
+    };
+    prisma.seedActiveManagedLinqLine("+15550000000");
+    pendingGroupSetupMocks.readHostedPendingGroupSetupCandidatesForParticipantsTx
+      .mockImplementation(async ({ participantMemberIds }: { participantMemberIds: string[] }) =>
+        participantMemberIds.includes(senderCore.id)
+          ? [{ id: "hpgs_handle_owner", ownerMemberId: senderCore.id }]
+          : []);
+    const event = buildLinqMessageReceivedEvent({ sender: "group-handle@example.test" });
+
+    const admission = await prepareHostedLinqThreadContainerAdmission({
+      event, participantMemberIds, prisma: prisma as never,
+    });
+    expect(admission.shouldPrepareThreadContainer).toBe(false);
+    const plan = await planHostedOnboardingLinqWebhook({
+      event, prisma: prisma as never,
+      pendingGroupParticipantMemberIds: participantMemberIds,
+      ...(admission.preparedPendingGroupSetup
+        ? { preparedPendingGroupSetup: admission.preparedPendingGroupSetup }
+        : {}),
+    });
+    expect(plan.response).toMatchObject({ ok: true, reason: "sent-group-setup" });
+    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberIdentity.findMany).not.toHaveBeenCalled();
+  });
+
   it("prepares new-container crypto for an active pending-contact sender", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     prisma.seedActiveManagedLinqLine("+15550000000");

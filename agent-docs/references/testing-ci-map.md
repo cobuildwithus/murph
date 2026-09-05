@@ -15,6 +15,14 @@ authenticated encryption with a synthetic local root. With an isolated local
 through `pnpm --dir apps/web test:prepared -- test/<file>`. These prove exact
 same-member ciphertext copying, source/ownership rejection and rollback,
 concurrent creation, and unlink followed by a fresh inbound identity.
+The same local lane runs `hosted-group-start-recovery-postgres.test.ts` through
+the real recovery endpoint, identity writer, routing owner, and activation
+promotion: foreign-owner rejection, exactly one concurrent recovery claimant,
+route-failure rollback, and retained identity/source without verified-email
+authorization. Its external session/token and crypto boundaries are synthetic;
+the separate crypto suite owns authenticated-encryption proof. Recovery route
+and Linq thread-route regressions cover ordered mutation and direct-only group
+admission alongside existing verified and recovered group behavior.
 
 | Command | Purpose | Current coverage |
 | --- | --- | --- |

@@ -3512,6 +3512,14 @@ it never substitutes a verified-email ciphertext with a different field binding
 or grants starter access retroactively. Validation and backfill share one
 transaction-scoped route set; failure rolls back both columns and scratch state.
 The identity keeps the encrypted source after activation clears pending routing.
+Durable-handle admission is direct-only. Group preflight and transaction planning
+both resolve email through verified authorization or an exact pending recovery
+route; a handle alone grants no group admission. Group recovery retains the
+existing identity owner: under contact-before-chat/member locks it rejects a
+foreign handle, binds the authenticated member's handle and encrypted source,
+and writes the exact temporary route atomically. Crypto preparation and current
+routing opens precede the transaction, which permits cached crypto only. Thus
+recovered direct routing and later promotion cannot lose the identity source.
 Canonical verified-email writes and email unlink take the participant contact
 lock before the member lock. A foreign handle blocks a primary email write;
 optional secondary enrichment skips that email while preserving phone or

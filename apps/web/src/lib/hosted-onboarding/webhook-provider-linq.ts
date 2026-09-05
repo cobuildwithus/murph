@@ -349,6 +349,7 @@ export async function resolveHostedLinqDirectPreparationMemberId(input: {
 
   const [identityCandidate, homeChatCandidate] = await Promise.all([
     lookupHostedLinqIdentityCoreCandidate({
+      audience: "direct",
       contact: participantContact,
       prisma: input.prisma,
     }),
@@ -444,6 +445,7 @@ export async function prepareHostedLinqThreadContainerAdmission(input: {
   }
 
   const senderCandidate = await lookupHostedLinqIdentityCoreCandidate({
+    audience: "group",
     contact: participantContact,
     prisma: input.prisma,
   });
@@ -592,6 +594,7 @@ type HostedLinqIdentityCoreCandidate = HostedLinqMemberCoreCandidate & {
 };
 
 async function lookupHostedLinqIdentityCoreCandidate(input: {
+  audience: "direct" | "group";
   contact: HostedLinqParticipantContact;
   prisma: HostedOnboardingReadClient;
 }): Promise<HostedLinqIdentityCoreCandidate | null> {
@@ -609,11 +612,13 @@ async function lookupHostedLinqIdentityCoreCandidate(input: {
       : null;
   }
 
-  const handleLookup = await lookupHostedMemberIdentityByLinqEmailHandle({
-    emailAddress: input.contact.value,
-    prisma: input.prisma,
-    projection: "core",
-  });
+  const handleLookup = input.audience === "direct"
+    ? await lookupHostedMemberIdentityByLinqEmailHandle({
+        emailAddress: input.contact.value,
+        prisma: input.prisma,
+        projection: "core",
+      })
+    : null;
   const verifiedEmailLookup = await lookupHostedMemberByVerifiedEmailAddress({
     address: input.contact.value,
     prisma: input.prisma,
@@ -831,6 +836,7 @@ async function revalidatePreparedHostedLinqDirectRoutingTx(input: {
   }
 
   const identityCandidate = await lookupHostedLinqIdentityCoreCandidate({
+    audience: "direct",
     contact: input.contact,
     prisma: input.prisma,
   });
@@ -1510,6 +1516,7 @@ export async function planHostedOnboardingLinqWebhook(
   }
 
   const existingMemberLookup = await lookupHostedLinqIdentityCoreCandidate({
+    audience: "direct",
     contact: participantContact,
     prisma: input.prisma,
   });
