@@ -922,6 +922,9 @@ export type HostedRuntimeUsageNoticeDeliveryTarget =
       target: string;
     };
 
+// Complete UTF-8 JSON request, including the notice target and usage envelope.
+export const HOSTED_USAGE_RECORD_BODY_LIMIT_BYTES = 16_384;
+
 export interface HostedRuntimeUsageRecordRequest {
   noticeDeliveryTarget?: HostedRuntimeUsageNoticeDeliveryTarget | null;
   usage: AssistantUsageRecord;

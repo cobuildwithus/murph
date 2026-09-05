@@ -18,6 +18,7 @@ afterEach(async () => {
   vi.restoreAllMocks()
   vi.doUnmock('../src/vault-cli-command-routing.js')
   vi.doUnmock('@murphai/assistant-engine/codex-lifecycle')
+  vi.doUnmock('@murphai/runtime-state/node/cli-timing')
   vi.resetModules()
   if (initialEndpoint === undefined) delete process.env.MURPH_CLI_TIMING_ENDPOINT
   else process.env.MURPH_CLI_TIMING_ENDPOINT = initialEndpoint
@@ -111,8 +112,13 @@ test('real scoped and full routes automatically report lifecycle phases with byt
   }
 })
 
-test('actual entry + Incur middleware separate injected setup, dispatch and teardown delay', async () => {
+test('entry lazily loads one shared timing owner before real middleware and teardown', async () => {
   vi.resetModules()
+  let timingLoads = 0
+  vi.doMock('@murphai/runtime-state/node/cli-timing', async (importOriginal) => {
+    timingLoads += 1
+    return importOriginal<typeof import('@murphai/runtime-state/node/cli-timing')>()
+  })
   let clock = 0n
   vi.spyOn(process.hrtime, 'bigint').mockImplementation(() => clock)
   vi.doMock('../src/vault-cli-command-routing.js', () => ({
@@ -128,6 +134,7 @@ test('actual entry + Incur middleware separate injected setup, dispatch and tear
     stopWarmCodexAppServer: async () => { clock += 25_000_000n },
   }))
   const { runMurphCliEntrypoint } = await import('../src/cli-entry.ts')
+  assert.equal(timingLoads, 0, 'Importing entry helpers must not evaluate the timing wire/catalog.')
   const { result, timing } = await collect(() => invoke(
     ['goal', 'list', '--vault', '/tmp/PRIVATE_SENTINEL', '--format', 'json'], false, runMurphCliEntrypoint))
   assert.equal(result.thrown, null)
@@ -137,7 +144,29 @@ test('actual entry + Incur middleware separate injected setup, dispatch and tear
   assert.equal(phases.dispatch, 2_000_000)
   assert.equal(phases.teardown, 25_000)
   assert.equal(phases.total, 2_325_000)
+  assert.equal(timingLoads, 1, 'Entry, serve options and middleware must share the native module instance.')
   assert.equal(JSON.stringify(timing).includes('PRIVATE_SENTINEL'), false)
+})
+
+test('direct actions lazily load timing and keep repeated invocations isolated', async () => {
+  vi.resetModules()
+  let timingLoads = 0
+  vi.doMock('@murphai/runtime-state/node/cli-timing', async (importOriginal) => {
+    timingLoads += 1
+    return importOriginal<typeof import('@murphai/runtime-state/node/cli-timing')>()
+  })
+  const { runMurphCliAction } = await import('../src/cli-entry.ts')
+  assert.equal(timingLoads, 0)
+  for (let invocation = 0; invocation < 2; invocation += 1) {
+    const { result, timing } = await collect(() => invoke(['--version'], false, runMurphCliAction))
+    assert.equal(result.thrown, null)
+    assert.equal(timingLoads, 1)
+    assert.equal(timing.reportCount, 1)
+    assert.equal(timing.commands.length, 1)
+    assert.equal(timing.commands[0]!.calls, 1)
+    assert.equal(timing.commands[0]!.outcome, 'ok')
+    assert.equal(timing.commands[0]!.command, 'other')
+  }
 })
 
 test('batch children are timed exactly once; stop-on-error and compact results stay identical', async () => {

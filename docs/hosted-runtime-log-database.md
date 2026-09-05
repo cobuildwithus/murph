@@ -463,6 +463,21 @@ arguments or result data. Unrecognized names and pre-resolution failures use
 `other`. Standalone setup/discovery paths without that middleware remain
 unattributed; persistent interactive/MCP sessions are not per-RPC measurements.
 
+`cli-entry.ts` loads `runtime-state/node/cli-timing` through native dynamic
+imports at its existing asynchronous entry/action and serve-options boundaries.
+This keeps the timing implementation and closed wire catalog out of the runner's
+static startup closure while native module caching preserves one ALS instance
+for entry, middleware, recursive batch actions and query scopes. The timing-owner
+import completes before the entry/action scope opens; that import is **not**
+included in `total` or relabelled as `setup`. No new loader, cached state owner or
+transport await is introduced. Canonical runner assembly still enforces the
+20,000-byte entry and 33,200-byte static-closure budgets.
+
+Web's own `apps/web/tsconfig.json` paths map includes both timing public subpaths
+from source. Its independent paths map must not rely on the root map or a prior
+runtime-state `dist` build. The existing source resolver and Next configuration
+remain the owners; no alias rewriter or compatibility shim is required.
+
 The existing usage extractor has no subprocess phase payload, and stdout/stderr
 are model-visible tool results. The small metadata seam below bridges only that
 missing boundary; it is not a new persisted log or monitoring service.
@@ -492,7 +507,8 @@ CLI entry + Incur dispatch + shared query-freshness scopes
  -> buildAssistantCodexTurnProfileJson / extractCodexAssistantProviderUsage
  -> existing hosted usage reporting, including detached-assistant-ask forwarding
  -> hosted-execution parseAssistantUsageRecord independent optional normalization
- -> existing /api/internal/hosted-execution/usage/record ingestion
+ -> usage-record-port optional timing fit against the complete HTTP body budget
+ -> existing /api/internal/hosted-execution/usage/record bounded body ingestion
  -> apps/web hosted-execution/usage.ts JSON normalization
  -> existing HostedAiUsage.turnProfileJson / hosted_ai_usage.turn_profile_json
 ```
@@ -574,6 +590,27 @@ exhaustion sets `transportTruncated`; rejected cross-window roots increment
 These counters cannot quantify unreceived packets or hard-killed processes.
 A missing optional object/phase is **unknown**, never a duration of zero. An empty
 activated-window report is not proof every CLI invocation was observed.
+
+The complete usage-request ceiling is separately **16,384 UTF-8 bytes**, owned by
+`HOSTED_USAGE_RECORD_BODY_LIMIT_BYTES` in `hosted-execution/runtime-control` and
+shared by the sender and Web route. Individually bounded datagrams can merge into
+an oversized HTTP payload. `runtime-platform/usage-record-port.ts` therefore
+normalizes/copies only `cliTiming` and measures the entire JSON body, including
+`usage`, the legacy profile and any notice target, before transport serialization
+and signing. It removes whole summaries from the end until the request fits,
+adding their calls to the existing saturating `droppedCalls`. Other counters and
+retained phases are unchanged; HTTP trimming does **not** set `transportTruncated`
+(which describes the packet budget). A counters-only timing object can remain.
+
+If even those counters do not fit, the optional `cliTiming` field is omitted.
+Absence then means unavailable timing, not zero work, and does not distinguish
+body-budget omission from older producers or missing transport. `droppedCalls`
+can only quantify omissions where the timing object survives. All legacy usage,
+provider-request, token, tool and notice-target fields are preserved; the queued
+record is not mutated. An already-oversized legacy request remains oversized and
+follows its existing rejection path rather than sacrificing accounting to fit.
+No request/packet cap, retry or flush behavior changes. The corrected sender works
+with the existing Web ceiling; this fix does not require coordinated deployment.
 
 The exact histogram intervals in milliseconds are `[0,250)`, `[250,1000)`,
 `[1000,2500)`, `[2500,5000)`, `[5000,10000)`, `[10000,30000)`,
@@ -793,6 +830,51 @@ in the repository. Run that explicit gate from the active plan. A current-parser
 roundtrip of field-stripped data is only legacy-shape proof, not mixed-version
 proof. Ordinary runs without the base variable explicitly skip this additional
 history-dependent case.
+
+For source-resolution and startup-loading corrections, run the focused guards
+from the repository root before the existing built hosted proof:
+
+```sh
+pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage \
+  apps/web/test/next-config.test.ts
+pnpm --dir apps/web typecheck:prepared
+pnpm exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage \
+  packages/cli/test/cli-timing.test.ts packages/cli/test/cli-entry.test.ts \
+  packages/cli/test/batch.test.ts packages/cli/test/batch-protocol-error-stages.test.ts \
+  packages/cli/test/assistant-codex.test.ts \
+  packages/cli/test/vault-cli-import-surface-contract.test.ts
+pnpm --dir packages/cli typecheck
+# Canonical production assembly on Linux x86_64; no deploy and no budget override.
+pnpm --dir apps/cloudflare runner:bundle
+```
+
+The Web typecheck uses the normal generated-data preparation prerequisites, not
+prebuilt timing declarations as a substitute for source resolution. Import
+laziness tests are not a replacement for the assembly byte budgets or bundled
+parity probes. Refresh the test CLI artifact after the loading change and rerun
+the enabled hosted gate above; CI still owns exact-head Linux assembly and the
+existing exact-first-parent total-output comparison.
+
+For the merged-profile HTTP budget, run the composed sender/ingestion regression
+and the route's exact byte-limit checks (no built CLI or external service needed):
+
+```sh
+pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage \
+  apps/cloudflare/test/usage-record-port.test.ts
+pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage \
+  apps/web/test/hosted-execution-usage-route.test.ts
+pnpm --dir packages/hosted-execution exec vitest run --config vitest.config.ts \
+  --no-coverage test/assistant-usage.test.ts
+```
+
+The composed test uses real timing scopes/merge, sender and transport serialization,
+then Web's actual bounded body reader and request parser through the existing
+`#hosted-web-testing` seam. Providers, callback authentication, fetch and persistence
+are synthetic; the fixture does not execute CLI handlers or make network requests.
+It covers 24 distinct root summaries, maximum admitted cardinality, UTF-8/notice
+headroom, counters-only and absent timing, and unchanged oversized legacy failure.
+The separate route test checks both declared-length and streamed-byte enforcement
+before allowance settlement. Ordinary source CI runs both owners without a new gate.
 
 The warm `packages/runtime-state/bench/cli-timing.ts` microbenchmark rotates
 baseline, disabled and enabled timing over warm blocks; it excludes transport

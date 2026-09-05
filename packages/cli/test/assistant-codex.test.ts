@@ -167,7 +167,18 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
     const child = new MockChildProcess()
     const expectedWorkingDirectory = path.resolve(workingDirectory)
 
-    assert.deepEqual(args, ['app-server'])
+    // The endpoint belongs to Codex's explicit shell setting, not its process
+    // environment. Validate its shape without including the generated key in
+    // assertion output or a snapshot; retain the exact environment below.
+    assert.ok(
+      args.length === 3 && args[0] === '--config' && args[2] === 'app-server',
+      'Only the timing config override may precede app-server.',
+    )
+    const timingSetting = /^shell_environment_policy\.set\.MURPH_CLI_TIMING_ENDPOINT="(\d{5}):[a-f0-9]{32}"$/u.exec(args[1])
+    assert.ok(timingSetting, 'Expected the private-safe CLI timing shell setting.')
+    const timingPort = Number(timingSetting[1])
+    assert.ok(timingPort >= 49_152 && timingPort <= 65_535, 'Expected an ephemeral UDP port.')
+    assert.deepEqual(Object.keys(options.env).sort(), ['CODEX_HOME', 'PATH'])
     assert.deepEqual(options, {
       cwd: tmpdir(),
       detached: true,

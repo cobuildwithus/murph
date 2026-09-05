@@ -153,6 +153,33 @@ test("hosted web tsconfig resolves Temporal orchestration-control from source", 
   );
 });
 
+test("hosted web resolves both CLI timing imports directly from source", () => {
+  // Use Web's TypeScript version/config, not the root paths map or built dist.
+  const ts: typeof import("typescript") = createRequire(
+    path.join(repoRoot, "apps/web/package.json"),
+  )("typescript");
+  const parsed = ts.getParsedCommandLineOfConfigFile(
+    path.join(repoRoot, "apps/web/tsconfig.json"),
+    {},
+    { ...ts.sys, onUnRecoverableConfigFileDiagnostic: (diagnostic) => {
+      assert.fail(ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"));
+    } },
+  );
+  assert.ok(parsed);
+  assert.deepEqual(parsed.errors, []);
+  for (const [specifier, importer, source] of [
+    ["@murphai/runtime-state/cli-timing", "packages/hosted-execution/src/assistant-usage.ts",
+      "packages/runtime-state/src/cli-timing.ts"],
+    ["@murphai/runtime-state/node/cli-timing", "packages/query/src/query-projection.ts",
+      "packages/runtime-state/src/node/cli-timing.ts"],
+  ] as const) {
+    const resolved: import("typescript").ResolvedModuleFull | undefined = ts.resolveModuleName(
+      specifier, path.join(repoRoot, importer), parsed.options, ts.sys,
+    ).resolvedModule;
+    assert.equal(resolved?.resolvedFileName, path.join(repoRoot, source));
+  }
+});
+
 test("hosted web build tsconfig keeps tests out of Next production checks", () => {
   const tsconfig = JSON.parse(
     readFileSync(path.join(repoRoot, "apps/web/tsconfig.next.json"), "utf8"),
