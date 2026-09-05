@@ -4,6 +4,13 @@ Last verified: 2026-08-12
 
 ## Purpose
 
+Runtime-owned terminal Linq send failures have one bounded retry through the
+existing delivery-message owner. The exact eligibility, content-preservation,
+current route/line checks, and receipt-ordering contract lives in
+`agent-docs/RELIABILITY.md`. This does not permit retrying ambiguous delivery
+failures or bypassing a disabled, opted-out, flagged, critical, or unhealthy
+egress state.
+
 This is required reading for any Murph change that can affect text-message or iMessage behavior. Read it before editing assistant/provider prompts, reply generation, outbound copy, reminder behavior, notification behavior, message scheduling, line selection, delivery monitoring, onboarding copy, or any runtime path that can cause Murph to send a message through a phone-number based channel.
 
 The core rule is simple: design Murph messaging like a real reciprocal conversation, not a broadcast system. The highest-risk pattern is many outbound messages from one line with little or no recipient response.
@@ -65,12 +72,16 @@ Read and apply this guide when touching any of these surfaces:
 
 ## Production conversation canary
 
-The postdeploy Linq canary uses one explicitly configured Photon identity that
+The hourly Linq canary uses one explicitly configured Photon identity that
 exists only to contact Murph. It is a reciprocal three-turn private
 conversation, not a source of new-recipient outreach: Photon sends one greeting,
 waits for Murph, and sends each later turn only after Murph replies. Runs are
-serialized and never canceled in flight, and every run starts by resetting only
-that exact identity through the fixed-target production route.
+serialized and never canceled in flight. Automatic admission comes from one
+staggered hourly schedule; manual dispatch remains available for recovery. Every
+run first proves the scheduled protected-main revision is the exact current
+Vercel production deployment, then resets only that exact identity through the
+fixed-target production route. The recreated canary member uses its existing
+assistant-model preference to keep all runtime turns on GPT-5.6 Luna.
 
 The canary must not log phone numbers, message text, chat or message ids, SDK
 errors, or provider bodies. It reports only bounded reset counts and per-turn
@@ -79,7 +90,7 @@ turns must be non-empty and must not repeat it. All three replies must arrive in
 under twenty seconds. The existing deterministic hosted-local full-stack journey
 owns onboarding follow-up behavior. Do not hold this shared live identity open
 for the multi-day follow-up window or add a second reset lifecycle to the
-postdeploy canary; a separately authorized live follow-up proof must be run in a
+hourly canary; a separately authorized live follow-up proof must be run in a
 serialized maintenance window.
 
 ## Assistant response media
@@ -224,7 +235,7 @@ Linq egress should stay small and obvious:
 - The Web Linq egress owner resolves the canonical delivery target and direct/group audience at send time. Stored automation routes are bounded authority evidence, not a second route-ownership system.
 - Proactive current-home fallback sends do not inherit replay-scoped route authority or inbound context; reply-anchored sends keep their matching inbound context.
 - Egress no longer owns a separate "recent inbound" recency check; hosted automation recency belongs to reconciliation/wake selection.
-- Typing indicators do not call web-owned egress assertions. They are locally throttled to one session per chat, capped at five minutes, with a restart cooldown after a max-length session.
+- Typing indicators do not call web-owned egress assertions. They are locally throttled to one session per chat, capped at five minutes, with a ten-minute restart cooldown after a max-length session. Refreshes serialize stop/start to recover client-cleared indicators and retry at the next scheduled tick after transient failure. Progress acceptance schedules a restart after one second and one follow-up four seconds later before returning to the 45-second cadence. Cleanup releases only its own target claim; provider acceptance remains best-effort UI evidence.
 - On the Linq instant-start path, web fires one best-effort typing start on the inbound chat right after the planner transaction creating the member commits, so a first-ever message is not met with a silent chat while the cold runtime boots. It is a one-shot feedback hint with a short timeout, no retries, no egress assertion, and no effect on webhook handling; on the success path the runtime's own typing session and reply supersede it. If the webhook instead fails after the hint started, web chains one best-effort typing stop behind the in-flight start and registers it with the request's post-response scheduler so the cleanup survives the error response; the later webhook retry starts fresh, and a rare redelivery racing the stop only loses its pre-runtime hint, which the runtime's own typing session re-establishes.
 - Delimiter-generated Linq reply bubbles send the first bubble immediately, then pause 1.5 seconds after each confirmed sibling send. The pause applies only within that reply's existing outbox sequence; it does not pace unrelated sends, retries, reactions, or progress updates.
 - A terminal HTTPS URL may be sent as Linq's native link-only rich-preview part. An unselected existing-chat link-only message, including a payment URL, remains one provider message with no added text. A selected link-only native reply stays one ordinary text message because Linq requires text to carry `reply_to`; it does not trade away the selected target for a preview. When caller-supplied text or media precedes the URL, the existing local or hosted egress owner accepts that primary message first and then sends the link-only preview under the same delivery's deterministic `:link` idempotency-key suffix. The final accepted provider message id remains the scalar compatibility result while the ordered identity list owns cleanup and receipts. Hosted primary requests retain half of the existing ten-second provider budget, while the link half is split across an initial request and one same-key reconciliation attempt. New-chat creation may use that two-step flow only when the caller supplied URL-free text or media for the required first message; link-only, multi-URL, or other URL-bearing first-message input must fail before provider entry instead of inventing or leaking opener copy. Reaction-bound messages keep their URL nonterminal and stay one provider message. In existing chats, embedded, other nonterminal, non-HTTPS, credentialed, and oversized URLs remain ordinary text.

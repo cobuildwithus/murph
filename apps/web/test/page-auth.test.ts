@@ -200,6 +200,53 @@ describe("hosted sidebar auth", () => {
   });
 });
 
+describe("hosted public layout auth", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    mocks.getHostedAppSession.mockResolvedValue(null);
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
+  });
+
+  it("returns ready anonymous auth when the session read completes without a session", async () => {
+    const { getHostedPublicLayoutAuthSnapshot } =
+      await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedPublicLayoutAuthSnapshot()).resolves.toEqual({
+      sidebarAuth: {
+        authenticated: false,
+        label: null,
+      },
+      status: "ready",
+    });
+  });
+
+  it("preserves a session-store outage as unavailable instead of anonymous", async () => {
+    mocks.getHostedAppSession.mockRejectedValue(Object.assign(
+      new Error("Connection refused while opening a database connection."),
+      {
+        code: "P1001",
+        name: "PrismaClientKnownRequestError",
+      },
+    ));
+    const { getHostedPublicLayoutAuthSnapshot } =
+      await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedPublicLayoutAuthSnapshot()).resolves.toEqual({
+      status: "unavailable",
+    });
+  });
+
+  it("rethrows unexpected public layout auth failures", async () => {
+    const error = new Error("session store unavailable");
+    mocks.getHostedAppSession.mockRejectedValue(error);
+    const { getHostedPublicLayoutAuthSnapshot } =
+      await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedPublicLayoutAuthSnapshot()).rejects.toBe(error);
+  });
+});
+
 describe("hosted dashboard page auth", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -431,6 +478,8 @@ describe("hosted dashboard page auth", () => {
 
 function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember {
   return {
+    groupJournalCaptureConsentRequestedAt: null,
+    groupJournalCaptureEnabled: null,
     assistantPersona: null,
     assistantPersonaCausalSeq: null,
     assistantDetail: null,

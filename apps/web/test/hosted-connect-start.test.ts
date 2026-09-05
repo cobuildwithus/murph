@@ -116,6 +116,33 @@ describe("startHostedDeviceSyncConnection", () => {
     );
   });
 
+  it("uses the validated browser origin when a reverse proxy hides the public hostname", async () => {
+    vi.stubEnv(
+      "DEVICE_SYNC_PUBLIC_BASE_URL",
+      "https://local.withmurph.ai:3443/api/device-sync",
+    );
+    const proxiedRequest = new Request(
+      "http://localhost:3197/api/connect-sources/oura/start",
+      {
+        headers: { origin: "https://local.withmurph.ai:3443" },
+        method: "POST",
+      },
+    );
+
+    await expect(startHostedDeviceSyncConnection({
+      defaultReturnTo: "/device-sync/connect/complete?source=connect",
+      request: proxiedRequest,
+      target: OURA_TARGET,
+    })).resolves.toEqual({
+      authorizationUrl: "https://provider.example.test/oauth/start",
+      callbackProofCookie: expect.stringContaining("murph-device-sync-oura="),
+    });
+
+    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(
+      proxiedRequest,
+    );
+  });
+
   it("rejects a cross-host callback before OAuth state or provider authorization begins", async () => {
     vi.stubEnv(
       "DEVICE_SYNC_PUBLIC_BASE_URL",

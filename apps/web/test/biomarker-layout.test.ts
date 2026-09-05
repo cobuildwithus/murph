@@ -119,7 +119,6 @@ test("the dashboard layout is the single shell owner for biomarker pages", async
   assert.match(markup, /data-biomarker-page="true"/);
   assert.match(markup, /data-slot="sidebar-wrapper"/);
   assert.match(markup, /data-slot="sidebar-inset"/);
-  assert.match(markup, /<main class="flex-1 px-4 py-8 md:px-14 md:py-10">/);
   expect(mocks.getHostedDashboardLayoutAuthSnapshot).toHaveBeenCalledWith();
 });
 

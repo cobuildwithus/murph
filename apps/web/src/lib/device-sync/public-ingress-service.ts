@@ -333,7 +333,7 @@ export class HostedDeviceSyncPublicIngressService {
     const connections = (await this.context.store.listConnectionsForUser(userId))
       .filter((connection) =>
         connection.provider === target.provider
-        && connection.status !== "disconnected"
+        && isEstablishedDeviceSyncConnection(connection)
       );
 
     let sourceLifecycleProof: StartConnectionSourceLifecycleProof | null = null;

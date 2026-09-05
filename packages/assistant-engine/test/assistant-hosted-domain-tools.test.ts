@@ -114,6 +114,12 @@ describe('hosted domain dynamic tools', () => {
       'Inspect is read-only and returns the authoritative stored version plus scheduler timing projection',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      "For a later question about an existing automation's timing, inspect it without mutation and answer from the current stored schedule and occurrence projection. If inspection fails, make no timing claim.",
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'merely to verify this returned save or patch result',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'pass expectedUpdatedAt from that readback',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
@@ -121,6 +127,18 @@ describe('hosted domain dynamic tools', () => {
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'a replacement recurring wall-clock schedule that omits schedule.timeZone preserves the stored explicit timezone',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'Pass contextReferences as an array shaped exactly [{"entityKind":"<canonical-kind>","entityId":"<exact-id>"}]',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'both camel-case keys are required on every entry',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'pass an object such as {"model":"gpt-5.6-luna"}',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'Never pass a bare string or Luna, Terra, or Sol.',
     )
   })
 
@@ -1397,6 +1415,13 @@ describe('hosted domain dynamic tools', () => {
   })
 
   it('uses accountId for bounded device actions and rejects credentials', () => {
+    expect(MURPH_DEVICE_TOOL.description).toContain('Apple Health (sourceProvider apple_health_kit)')
+    expect(MURPH_DEVICE_TOOL.description).toContain('WHOOP (sourceProvider whoop_v2)')
+    expect(MURPH_DEVICE_TOOL.description).toContain('A saved result confirms the check-in preference')
+    expect(MURPH_DEVICE_TOOL.description).toContain('Off stops only these check-ins; connection and syncing stay unchanged')
+    expect(readToolRequest('device', {
+      action: 'configure_no_data_outreach', mode: 'off', sourceProvider: 'apple_health_kit',
+    })).toMatchObject({ kind: 'device' })
     expect(MURPH_DEVICE_TOOL.description).toMatch(
       /current private member message/u,
     )

@@ -3,7 +3,9 @@ import { emitHostedExecutionStructuredLog, type HostedExecutionStructuredLogDeta
 import { CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS } from "../internal-hosts.ts";
 import {
   assertAllowedHostedRunnerWebControlRoute,
+  HostedWebControlRouteNotAllowlistedError,
   readHostedRunnerWebControlRoute,
+  type HostedRunnerWebControlOperation,
   type HostedRunnerWebControlRoute,
 } from "../runner-outbound/shared-web-control-policy.ts";
 export {
@@ -43,7 +45,7 @@ import {
   type HostedWorkspaceCheckpointBridgeAuthority,
 } from "./authority-headers.ts";
 
-export type HostedWebControlTransport =
+type HostedWebControlTransportConfig =
   | {
     callbackSigning: HostedWebCallbackSigningEnvironment;
     mode: "direct";
@@ -53,6 +55,18 @@ export type HostedWebControlTransport =
   | {
     mode: "proxy";
   };
+
+export interface HostedWebControlPreflightRejection {
+  method: "GET" | "POST";
+  operation: HostedRunnerWebControlOperation;
+  transport: HostedWebControlTransportConfig["mode"];
+}
+
+export type HostedWebControlTransport = HostedWebControlTransportConfig & {
+  reportPreflightRejection?: (
+    rejection: HostedWebControlPreflightRejection,
+  ) => Promise<void>;
+};
 
 interface HostedWebControlPlaneJsonRequest {
   acceptedStatuses?: readonly number[];
@@ -122,6 +136,30 @@ class HostedWebControlPlaneSensitiveResponseInvalidJsonError extends Error {
   constructor(description: string) {
     super(`${description} returned invalid JSON.`);
     this.name = "HostedWebControlPlaneSensitiveResponseInvalidJsonError";
+  }
+}
+
+async function assertAllowedHostedWebControlPreflight(input: {
+  route: HostedRunnerWebControlRoute;
+  transport: HostedWebControlTransport;
+}): Promise<void> {
+  try {
+    assertAllowedHostedRunnerWebControlRoute(input.route);
+    return;
+  } catch (error) {
+    if (!(error instanceof HostedWebControlRouteNotAllowlistedError)) {
+      throw error;
+    }
+    try {
+      await input.transport.reportPreflightRejection?.({
+        method: input.route.method,
+        operation: error.operation,
+        transport: input.transport.mode,
+      });
+    } catch {
+      // Best-effort telemetry must never replace the fail-closed policy error.
+    }
+    throw error;
   }
 }
 
@@ -251,7 +289,10 @@ async function fetchHostedWebControlPlaneJsonAttempt(
     throw new TypeError("Sensitive web-control response maxBytes must be a non-negative integer.");
   }
 
-  assertAllowedHostedRunnerWebControlRoute(input.route);
+  await assertAllowedHostedWebControlPreflight({
+    route: input.route,
+    transport: input.transport,
+  });
   const method = input.route.method;
   const route = readHostedRunnerWebControlRoute(input.route.path);
   const body = input.body === undefined ? undefined : JSON.stringify(input.body);

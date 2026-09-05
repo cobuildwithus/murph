@@ -3,9 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
-} from "@murphai/contracts/browser-vault";
+import { BROWSER_VAULT_REPLICA_CURRENT_GENERATION } from "@murphai/contracts/browser-vault";
 
 import {
   encodeHostedExecutionSignedRequestPayload,
@@ -85,7 +83,10 @@ function decodeUtf8(buffer: ArrayBuffer): string {
 
 describe("hosted execution coverage gaps", () => {
   it("normalizes hosted-local Codex subscription auth into external-token seed auth", () => {
-    const idToken = buildFakeJwtPayload({ iss: "https://auth.openai.com", sub: "user-1" });
+    const idToken = buildFakeJwtPayload({
+      iss: "https://auth.openai.com",
+      sub: "user-1",
+    });
     const seed = buildHostedLocalCodexSubscriptionSeedAuth({
       OPENAI_API_KEY: null,
       auth_mode: "chatgpt",
@@ -120,7 +121,7 @@ describe("hosted execution coverage gaps", () => {
       parseHostedLocalCodexSubscriptionSeedAuth({
         ...seed,
         auth_mode: "chatgpt",
-      })
+      }),
     ).toThrow(/auth_mode/);
     expect(() =>
       parseHostedLocalCodexSubscriptionSeedAuth({
@@ -129,13 +130,13 @@ describe("hosted execution coverage gaps", () => {
           ...seed.tokens,
           account_id: "",
         },
-      })
+      }),
     ).toThrow(/account_id/);
     expect(() =>
       parseHostedLocalCodexSubscriptionSeedAuth({
         ...seed,
         last_refresh: "2026-06-11",
-      })
+      }),
     ).toThrow(/RFC3339/);
     expect(() =>
       parseHostedLocalCodexSubscriptionSeedAuth({
@@ -144,7 +145,7 @@ describe("hosted execution coverage gaps", () => {
           ...seed.tokens,
           id_token: "id-token",
         },
-      })
+      }),
     ).toThrow(/JWT/);
   });
 
@@ -186,69 +187,94 @@ describe("hosted execution coverage gaps", () => {
     };
     const metricBuckets: HostedBrowserVaultReplicaMetricBucketSetRef = {
       bucketCount: HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT,
-      buckets: Object.fromEntries(HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS.map(
-        (bucketId) => [bucketId, {
-          byteLength: 2_000,
-          contentEncoding: "gzip" as const,
-          encodedByteLength: 300,
-          objectKey: `${ref.objectKey}.metric-bucket-${bucketId}`,
-        }],
-      )) as HostedBrowserVaultReplicaMetricBucketSetRef["buckets"],
+      buckets: Object.fromEntries(
+        HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS.map((bucketId) => [
+          bucketId,
+          {
+            byteLength: 2_000,
+            contentEncoding: "gzip" as const,
+            encodedByteLength: 300,
+            objectKey: `${ref.objectKey}.metric-bucket-${bucketId}`,
+          },
+        ]),
+      ) as HostedBrowserVaultReplicaMetricBucketSetRef["buckets"],
       schema: HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA,
     };
-    expect(parseHostedBrowserVaultReplicaRef({ ...ref, metricBuckets, shards })).toEqual({
+    expect(
+      parseHostedBrowserVaultReplicaRef({ ...ref, metricBuckets, shards }),
+    ).toEqual({
       ...ref,
       metricBuckets,
       shards,
     });
-    expect(() => parseHostedBrowserVaultReplicaRef({
-      ...ref,
-      metricBuckets,
-      shards: { core: shards.core, labs: shards.labs, schema: shards.schema },
-    })).toThrow(/shards\.metricsIndex is required/u);
-    expect(() => parseHostedBrowserVaultReplicaRef({
-      ...ref,
-      metricBuckets,
-      shards: {
-        ...shards,
-        core: { ...shards.core, encodedByteLength: shards.core.byteLength },
-      },
-    })).toThrow(/encodedByteLength must be smaller/u);
-    expect(() => parseHostedBrowserVaultReplicaRef({
-      ...ref,
-      metricBuckets,
-      shards: {
-        ...shards,
-        metricsIndex: { ...shards.metricsIndex, encodedByteLength: 4_999 },
-      },
-    })).toThrow(/encodedByteLength must equal/u);
-    expect(() => parseHostedBrowserVaultReplicaRef({ ...ref, shards }))
-      .toThrow(/shards and .*metricBuckets must be present together/u);
-    const { "1f": _missingBucket, ...incompleteBuckets } = metricBuckets.buckets;
-    expect(() => parseHostedBrowserVaultReplicaRef({
-      ...ref,
-      metricBuckets: { ...metricBuckets, buckets: incompleteBuckets },
-      shards,
-    })).toThrow(/metricBuckets\.buckets\.1f is required/u);
-    expect(() => parseHostedBrowserVaultReplicaRef({
-      ...ref,
-      metricBuckets: {
-        ...metricBuckets,
-        buckets: { ...metricBuckets.buckets, "20": metricBuckets.buckets["00"] },
-      },
-      shards,
-    })).toThrow(/unsupported metric bucket id/u);
-    expect(() => parseHostedBrowserVaultReplicaRef({
-      ...ref,
-      metricBuckets: {
-        ...metricBuckets,
-        buckets: {
-          ...metricBuckets.buckets,
-          "00": { ...metricBuckets.buckets["00"], objectKey: shards.core.objectKey },
+    expect(() =>
+      parseHostedBrowserVaultReplicaRef({
+        ...ref,
+        metricBuckets,
+        shards: { core: shards.core, labs: shards.labs, schema: shards.schema },
+      }),
+    ).toThrow(/shards\.metricsIndex is required/u);
+    expect(() =>
+      parseHostedBrowserVaultReplicaRef({
+        ...ref,
+        metricBuckets,
+        shards: {
+          ...shards,
+          core: { ...shards.core, encodedByteLength: shards.core.byteLength },
         },
-      },
-      shards,
-    })).toThrow(/object keys must be distinct/u);
+      }),
+    ).toThrow(/encodedByteLength must be smaller/u);
+    expect(() =>
+      parseHostedBrowserVaultReplicaRef({
+        ...ref,
+        metricBuckets,
+        shards: {
+          ...shards,
+          metricsIndex: { ...shards.metricsIndex, encodedByteLength: 4_999 },
+        },
+      }),
+    ).toThrow(/encodedByteLength must equal/u);
+    expect(() => parseHostedBrowserVaultReplicaRef({ ...ref, shards })).toThrow(
+      /shards and .*metricBuckets must be present together/u,
+    );
+    const { "1f": _missingBucket, ...incompleteBuckets } =
+      metricBuckets.buckets;
+    expect(() =>
+      parseHostedBrowserVaultReplicaRef({
+        ...ref,
+        metricBuckets: { ...metricBuckets, buckets: incompleteBuckets },
+        shards,
+      }),
+    ).toThrow(/metricBuckets\.buckets\.1f is required/u);
+    expect(() =>
+      parseHostedBrowserVaultReplicaRef({
+        ...ref,
+        metricBuckets: {
+          ...metricBuckets,
+          buckets: {
+            ...metricBuckets.buckets,
+            "20": metricBuckets.buckets["00"],
+          },
+        },
+        shards,
+      }),
+    ).toThrow(/unsupported metric bucket id/u);
+    expect(() =>
+      parseHostedBrowserVaultReplicaRef({
+        ...ref,
+        metricBuckets: {
+          ...metricBuckets,
+          buckets: {
+            ...metricBuckets.buckets,
+            "00": {
+              ...metricBuckets.buckets["00"],
+              objectKey: shards.core.objectKey,
+            },
+          },
+        },
+        shards,
+      }),
+    ).toThrow(/object keys must be distinct/u);
     expect(getHostedBrowserVaultReplicaStorageKeyId(ref)).toBe(ref.keyId);
     const dataKeyRef = {
       ...ref,
@@ -264,12 +290,14 @@ describe("hosted execution coverage gaps", () => {
         },
         rootKeyId: ref.runtimeRootKeyId,
         schema: "murph.hosted-data-key-envelope.v1" as const,
-        wraps: [{
-          ciphertext: "ciphertext",
-          iv: "iv",
-          kind: "domain-root" as const,
-          rootKeyId: ref.runtimeRootKeyId,
-        }],
+        wraps: [
+          {
+            ciphertext: "ciphertext",
+            iv: "iv",
+            kind: "domain-root" as const,
+            rootKeyId: ref.runtimeRootKeyId,
+          },
+        ],
       },
     } satisfies HostedBrowserVaultReplicaRef;
     expect(parseHostedBrowserVaultReplicaRef(dataKeyRef)).toEqual(dataKeyRef);
@@ -280,25 +308,39 @@ describe("hosted execution coverage gaps", () => {
     const legacyRef: Record<string, unknown> = { ...ref };
     delete legacyRef.generation;
     expect(parseHostedBrowserVaultReplicaRef(legacyRef)).toEqual(legacyRef);
-    expect(() => parseHostedBrowserVaultReplicaRef({
-      ...ref,
-      generation: 0,
-    })).toThrow(/generation must be a positive safe integer/u);
+    expect(() =>
+      parseHostedBrowserVaultReplicaRef({
+        ...ref,
+        generation: 0,
+      }),
+    ).toThrow(/generation must be a positive safe integer/u);
     expect(parseHostedExecutionSnapshotRef(undefined)).toBeNull();
-    expect(() => parseHostedBrowserVaultReplicaRef({
-      ...ref,
-      replicaSchema: "murph.other-replica.v1",
-    })).toThrow(/replicaSchema/u);
-    expect(() => parseHostedBrowserVaultReplicaRef({
-      ...ref,
-      schema: "murph.other-browser-vault-replica-ref.v1",
-    })).toThrow(
-      new RegExp(HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"),
+    expect(() =>
+      parseHostedBrowserVaultReplicaRef({
+        ...ref,
+        replicaSchema: "murph.other-replica.v1",
+      }),
+    ).toThrow(/replicaSchema/u);
+    expect(() =>
+      parseHostedBrowserVaultReplicaRef({
+        ...ref,
+        schema: "murph.other-browser-vault-replica-ref.v1",
+      }),
+    ).toThrow(
+      new RegExp(
+        HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA.replace(
+          /[.*+?^${}()|[\]\\]/gu,
+          "\\$&",
+        ),
+        "u",
+      ),
     );
-    expect(() => parseHostedBrowserVaultReplicaRef({
-      ...ref,
-      runtimeRootKeyId: undefined,
-    })).toThrow(/runtimeRootKeyId/u);
+    expect(() =>
+      parseHostedBrowserVaultReplicaRef({
+        ...ref,
+        runtimeRootKeyId: undefined,
+      }),
+    ).toThrow(/runtimeRootKeyId/u);
   });
 
   it("parses latest-hot layered and working snapshot refs without losing old full refs", () => {
@@ -340,51 +382,95 @@ describe("hosted execution coverage gaps", () => {
       schema: HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
     });
     expect(parseHostedExecutionSnapshotRef(base)).toEqual(base);
-    expect(readHostedExecutionSnapshotBaseRef(parseHostedExecutionSnapshotRef(base))).toEqual(base);
-    expect(readHostedExecutionSnapshotHotRef(parseHostedExecutionSnapshotRef(base))).toBeNull();
-    expect(readHostedExecutionSnapshotDeltaRef(parseHostedExecutionSnapshotRef(base))).toBeNull();
+    expect(
+      readHostedExecutionSnapshotBaseRef(parseHostedExecutionSnapshotRef(base)),
+    ).toEqual(base);
+    expect(
+      readHostedExecutionSnapshotHotRef(parseHostedExecutionSnapshotRef(base)),
+    ).toBeNull();
+    expect(
+      readHostedExecutionSnapshotDeltaRef(
+        parseHostedExecutionSnapshotRef(base),
+      ),
+    ).toBeNull();
     expect(parseHostedExecutionSnapshotRef(layered)).toEqual(layered);
-    expect(readHostedExecutionSnapshotBaseRef(parseHostedExecutionSnapshotRef(layered))).toEqual(base);
-    expect(readHostedExecutionSnapshotHotRef(parseHostedExecutionSnapshotRef(layered))).toEqual(hot);
-    expect(readHostedExecutionSnapshotDeltaRef(parseHostedExecutionSnapshotRef(layered))).toBeNull();
+    expect(
+      readHostedExecutionSnapshotBaseRef(
+        parseHostedExecutionSnapshotRef(layered),
+      ),
+    ).toEqual(base);
+    expect(
+      readHostedExecutionSnapshotHotRef(
+        parseHostedExecutionSnapshotRef(layered),
+      ),
+    ).toEqual(hot);
+    expect(
+      readHostedExecutionSnapshotDeltaRef(
+        parseHostedExecutionSnapshotRef(layered),
+      ),
+    ).toBeNull();
     expect(parseHostedExecutionSnapshotRef(working)).toEqual(working);
-    expect(readHostedExecutionSnapshotBaseRef(parseHostedExecutionSnapshotRef(working))).toEqual(base);
-    expect(readHostedExecutionSnapshotHotRef(parseHostedExecutionSnapshotRef(working))).toBeNull();
-    expect(readHostedExecutionSnapshotDeltaRef(parseHostedExecutionSnapshotRef(working))).toEqual(delta);
-    expect(parseHostedExecutionSnapshotRef({
-      base: null,
-      hot: null,
-      schema: HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
-    })).toEqual({
+    expect(
+      readHostedExecutionSnapshotBaseRef(
+        parseHostedExecutionSnapshotRef(working),
+      ),
+    ).toEqual(base);
+    expect(
+      readHostedExecutionSnapshotHotRef(
+        parseHostedExecutionSnapshotRef(working),
+      ),
+    ).toBeNull();
+    expect(
+      readHostedExecutionSnapshotDeltaRef(
+        parseHostedExecutionSnapshotRef(working),
+      ),
+    ).toEqual(delta);
+    expect(
+      parseHostedExecutionSnapshotRef({
+        base: null,
+        hot: null,
+        schema: HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
+      }),
+    ).toEqual({
       base: null,
       hot: null,
       schema: HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
     });
-    expect(() => parseHostedExecutionSnapshotRef({
-      hot,
-      schema: HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
-    })).toThrow(/base is required/u);
-    expect(() => parseHostedExecutionSnapshotRef({
-      base,
-      schema: HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
-    })).toThrow(/hot is required/u);
-    expect(() => parseHostedExecutionSnapshotRef({
-      delta,
-      schema: HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
-    })).toThrow(/base is required/u);
-    expect(() => parseHostedExecutionSnapshotRef({
-      base,
-      schema: HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
-    })).toThrow(/delta is required/u);
-    expect(() => parseHostedExecutionSnapshotRef({
-      base: null,
-      delta,
-      schema: HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
-    })).toThrow(/Hosted execution snapshot ref\.base/u);
+    expect(() =>
+      parseHostedExecutionSnapshotRef({
+        hot,
+        schema: HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
+      }),
+    ).toThrow(/base is required/u);
+    expect(() =>
+      parseHostedExecutionSnapshotRef({
+        base,
+        schema: HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
+      }),
+    ).toThrow(/hot is required/u);
+    expect(() =>
+      parseHostedExecutionSnapshotRef({
+        delta,
+        schema: HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
+      }),
+    ).toThrow(/base is required/u);
+    expect(() =>
+      parseHostedExecutionSnapshotRef({
+        base,
+        schema: HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
+      }),
+    ).toThrow(/delta is required/u);
+    expect(() =>
+      parseHostedExecutionSnapshotRef({
+        base: null,
+        delta,
+        schema: HOSTED_EXECUTION_WORKING_SNAPSHOT_REF_SCHEMA,
+      }),
+    ).toThrow(/Hosted execution snapshot ref\.base/u);
   });
 
   it("centralizes browser-vault replica source hash and refresh decisions", () => {
-    expect(BROWSER_VAULT_REPLICA_CURRENT_GENERATION).toBe(10);
+    expect(BROWSER_VAULT_REPLICA_CURRENT_GENERATION).toBe(15);
     const base = {
       hash: "a".repeat(64),
       key: "cloudflare-workspace-snapshots/base.bundle",
@@ -414,95 +500,119 @@ describe("hosted execution coverage gaps", () => {
       sourceBundleHash: delta.hash,
     } satisfies HostedBrowserVaultReplicaRef;
 
-    expect(assessBrowserVaultReplicaFreshness({
-      currentSourceHash: delta.hash,
-      now: "2026-05-04T00:03:30.000Z",
-      replicaRef: freshReplica,
-    })).toMatchObject({
+    expect(
+      assessBrowserVaultReplicaFreshness({
+        currentSourceHash: delta.hash,
+        now: "2026-05-04T00:03:30.000Z",
+        replicaRef: freshReplica,
+      }),
+    ).toMatchObject({
       freshness: "fresh",
       reason: "current",
       shouldRefresh: false,
     });
-    expect(assessBrowserVaultReplicaFreshness({
-      now: "2026-05-04T00:03:30.000Z",
-      replicaRef: { ...freshReplica, generation: 1 },
-    })).toMatchObject({
+    expect(
+      assessBrowserVaultReplicaFreshness({
+        now: "2026-05-04T00:03:30.000Z",
+        replicaRef: { ...freshReplica, generation: 1 },
+      }),
+    ).toMatchObject({
       freshness: "stale",
       reason: "generation_mismatch",
       shouldRefresh: true,
     });
-    expect(assessBrowserVaultReplicaFreshness({
-      now: "2026-05-04T00:03:30.000Z",
-      replicaRef: { ...freshReplica, generation: undefined },
-    })).toMatchObject({
+    expect(
+      assessBrowserVaultReplicaFreshness({
+        now: "2026-05-04T00:03:30.000Z",
+        replicaRef: { ...freshReplica, generation: undefined },
+      }),
+    ).toMatchObject({
       freshness: "stale",
       reason: "generation_mismatch",
       shouldRefresh: true,
     });
-    expect(assessBrowserVaultReplicaFreshness({
-      now: "2026-05-04T00:03:30.000Z",
-      replicaRef: {
-        ...freshReplica,
-        generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION + 1,
-      },
-    })).toMatchObject({
+    expect(
+      assessBrowserVaultReplicaFreshness({
+        now: "2026-05-04T00:03:30.000Z",
+        replicaRef: {
+          ...freshReplica,
+          generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION + 1,
+        },
+      }),
+    ).toMatchObject({
       freshness: "stale",
       reason: "generation_mismatch",
       shouldRefresh: true,
     });
-    expect(assessBrowserVaultReplicaFreshness({
-      currentSourceHash: base.hash,
-      now: "2026-05-04T00:03:30.000Z",
-      replicaRef: freshReplica,
-    })).toMatchObject({
+    expect(
+      assessBrowserVaultReplicaFreshness({
+        currentSourceHash: base.hash,
+        now: "2026-05-04T00:03:30.000Z",
+        replicaRef: freshReplica,
+      }),
+    ).toMatchObject({
       freshness: "stale",
       reason: "source_mismatch",
       shouldRefresh: true,
     });
-    expect(assessBrowserVaultReplicaFreshness({
-      now: "2026-05-06T00:03:30.000Z",
-      replicaRef: freshReplica,
-    })).toMatchObject({
+    expect(
+      assessBrowserVaultReplicaFreshness({
+        now: "2026-05-06T00:03:30.000Z",
+        replicaRef: freshReplica,
+      }),
+    ).toMatchObject({
       freshness: "stale",
       reason: "max_age_exceeded",
       shouldRefresh: true,
     });
-    expect(assessBrowserVaultReplicaFreshness({
-      now: "2026-05-04T00:03:30.000Z",
-      replicaRef: { ...freshReplica, generatedAt: "not-a-date" },
-    })).toMatchObject({
+    expect(
+      assessBrowserVaultReplicaFreshness({
+        now: "2026-05-04T00:03:30.000Z",
+        replicaRef: { ...freshReplica, generatedAt: "not-a-date" },
+      }),
+    ).toMatchObject({
       freshness: "stale",
       reason: "invalid_generated_at",
       shouldRefresh: true,
     });
-    expect(assessBrowserVaultReplicaFreshness({
-      now: "not-a-date",
-      replicaRef: freshReplica,
-    })).toMatchObject({
+    expect(
+      assessBrowserVaultReplicaFreshness({
+        now: "not-a-date",
+        replicaRef: freshReplica,
+      }),
+    ).toMatchObject({
       freshness: "stale",
       reason: "invalid_now",
       shouldRefresh: true,
     });
-    expect(getBrowserVaultReplicaFreshness({
-      now: "2026-05-04T00:03:30.000Z",
-      replicaRef: freshReplica,
-    })).toBe("fresh");
-    expect(getBrowserVaultReplicaFreshness({
-      currentSourceHash: delta.hash,
-      now: "2026-05-04T00:03:30.000Z",
-      replicaRef: { ...freshReplica, sourceBundleHash: base.hash },
-    })).toBe("stale");
-    expect(shouldScheduleBrowserVaultRefresh({
-      currentReplicaRef: null,
-    })).toEqual({
+    expect(
+      getBrowserVaultReplicaFreshness({
+        now: "2026-05-04T00:03:30.000Z",
+        replicaRef: freshReplica,
+      }),
+    ).toBe("fresh");
+    expect(
+      getBrowserVaultReplicaFreshness({
+        currentSourceHash: delta.hash,
+        now: "2026-05-04T00:03:30.000Z",
+        replicaRef: { ...freshReplica, sourceBundleHash: base.hash },
+      }),
+    ).toBe("stale");
+    expect(
+      shouldScheduleBrowserVaultRefresh({
+        currentReplicaRef: null,
+      }),
+    ).toEqual({
       reason: "missing",
       refresh: true,
     });
-    expect(shouldScheduleBrowserVaultRefresh({
-      currentReplicaRef: freshReplica,
-      currentSourceHash: delta.hash,
-      now: "2026-05-04T00:03:30.000Z",
-    })).toBeNull();
+    expect(
+      shouldScheduleBrowserVaultRefresh({
+        currentReplicaRef: freshReplica,
+        currentSourceHash: delta.hash,
+        now: "2026-05-04T00:03:30.000Z",
+      }),
+    ).toBeNull();
   });
 
   it("reads signature headers and normalizes signed request payloads", () => {
@@ -526,21 +636,23 @@ describe("hosted execution coverage gaps", () => {
           method: " patch ",
           nonce: "  nonce_abc  ",
           path: "internal/hosted-mailbox",
-          payload: "{\"ok\":true}",
+          payload: '{"ok":true}',
           search: "limit=10&sort=desc",
           timestamp: "2026-04-07T00:00:00.000Z",
           userId: "  user_123  ",
         }),
       ),
-    ).toBe(JSON.stringify([
-      "2026-04-07T00:00:00.000Z",
-      "PATCH",
-      "/internal/hosted-mailbox",
-      "?limit=10&sort=desc",
-      "user_123",
-      "nonce_abc",
-      "{\"ok\":true}",
-    ]));
+    ).toBe(
+      JSON.stringify([
+        "2026-04-07T00:00:00.000Z",
+        "PATCH",
+        "/internal/hosted-mailbox",
+        "?limit=10&sort=desc",
+        "user_123",
+        "nonce_abc",
+        '{"ok":true}',
+      ]),
+    );
 
     expect(
       decodeUtf8(
@@ -554,15 +666,17 @@ describe("hosted execution coverage gaps", () => {
           userId: null,
         }),
       ),
-    ).toBe(JSON.stringify([
-      "2026-04-07T00:00:00.000Z",
-      "POST",
-      "/",
-      "",
-      "",
-      "",
-      "payload",
-    ]));
+    ).toBe(
+      JSON.stringify([
+        "2026-04-07T00:00:00.000Z",
+        "POST",
+        "/",
+        "",
+        "",
+        "",
+        "payload",
+      ]),
+    );
   });
 
   it("normalizes hosted execution base URLs and string inputs", () => {
@@ -598,9 +712,9 @@ describe("hosted execution coverage gaps", () => {
     expect(() => normalizeHostedExecutionBaseUrl("http://example.com")).toThrow(
       /HTTPS unless the host is explicitly allowlisted/i,
     );
-    expect(() => normalizeHostedExecutionBaseUrl("https://user:pass@example.com")).toThrow(
-      /embedded credentials/i,
-    );
+    expect(() =>
+      normalizeHostedExecutionBaseUrl("https://user:pass@example.com"),
+    ).toThrow(/embedded credentials/i);
   });
 
   it("exposes stable hosted runtime environment contracts", () => {
@@ -615,7 +729,9 @@ describe("hosted execution coverage gaps", () => {
     expect(
       isHostedRuntimeProcessEnv({ [HOSTED_RUNTIME_PROCESS_ENV]: " 1 " }),
     ).toBe(true);
-    expect(isHostedRuntimeProcessEnv({ [HOSTED_RUNTIME_PROCESS_ENV]: "0" })).toBe(false);
+    expect(
+      isHostedRuntimeProcessEnv({ [HOSTED_RUNTIME_PROCESS_ENV]: "0" }),
+    ).toBe(false);
     expect(isHostedRuntimeProcessEnv({})).toBe(false);
     expect(
       isMurphAndroidAppEnabled({ [MURPH_ANDROID_APP_ENABLED_ENV]: " 1 " }),
@@ -652,8 +768,12 @@ describe("hosted execution coverage gaps", () => {
     expect(HOSTED_EXECUTION_WAKE_NOT_CONFIGURED_ERROR).toBe(
       "Hosted execution wake handling is not configured.",
     );
-    expect(HOSTED_EXECUTION_SIGNATURE_HEADER).toBe("x-hosted-execution-signature");
-    expect(HOSTED_EXECUTION_TIMESTAMP_HEADER).toBe("x-hosted-execution-timestamp");
+    expect(HOSTED_EXECUTION_SIGNATURE_HEADER).toBe(
+      "x-hosted-execution-signature",
+    );
+    expect(HOSTED_EXECUTION_TIMESTAMP_HEADER).toBe(
+      "x-hosted-execution-timestamp",
+    );
     expect(HOSTED_EXECUTION_NONCE_HEADER).toBe("x-hosted-execution-nonce");
     expect(HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER).toBe(
       "x-hosted-execution-signing-key-id",
@@ -714,88 +834,150 @@ describe("hosted execution coverage gaps", () => {
       "./vault-share",
       "./workspace-snapshot-v2",
     ]);
-    expect(exportKeys.filter((key) => key.startsWith("./") && key.slice(2).includes("/")))
-      .toEqual([]);
+    expect(
+      exportKeys.filter(
+        (key) => key.startsWith("./") && key.slice(2).includes("/"),
+      ),
+    ).toEqual([]);
     expect(exportKeys).not.toContain("./dispatch-ref");
     expect(exportKeys).not.toContain("./client");
     expect(exportKeys).not.toContain("./outbox-payload");
 
     const rootModule = await import("@murphai/hosted-execution");
-    const assistantCapabilitiesModule =
-      await import("@murphai/hosted-execution/assistant-capabilities") as Record<string, unknown>;
-    const assistantModelModule =
-      await import("@murphai/hosted-execution/assistant-model") as Record<string, unknown>;
-    const assistantUsageModule =
-      await import("@murphai/hosted-execution/assistant-usage") as Record<string, unknown>;
-    const browserVaultModule =
-      await import("@murphai/hosted-execution/browser-vault") as Record<string, unknown>;
-    const clinicalRecordsModule =
-      await import("@murphai/hosted-execution/clinical-records") as Record<string, unknown>;
-    const legacyDashboardReplicaModule =
-      await import("@murphai/hosted-execution/legacy-dashboard-replica");
-    const legacyDashboardReplicaCompatibilityModule =
-      await import("@murphai/hosted-execution/dashboard-replica");
-    const routeModule = await import("@murphai/hosted-execution/routes") as Record<string, unknown>;
-    const labsModule =
-      await import("@murphai/hosted-execution/labs") as Record<string, unknown>;
-    const subscriptionModule =
-      await import("@murphai/hosted-execution/subscription") as Record<string, unknown>;
-    const runtimeControlModule = await import("@murphai/hosted-execution/runtime-control") as Record<
-      string,
-      unknown
-    >;
+    const assistantCapabilitiesModule = (await import(
+      "@murphai/hosted-execution/assistant-capabilities"
+    )) as Record<string, unknown>;
+    const assistantModelModule = (await import(
+      "@murphai/hosted-execution/assistant-model"
+    )) as Record<string, unknown>;
+    const assistantUsageModule = (await import(
+      "@murphai/hosted-execution/assistant-usage"
+    )) as Record<string, unknown>;
+    const browserVaultModule = (await import(
+      "@murphai/hosted-execution/browser-vault"
+    )) as Record<string, unknown>;
+    const clinicalRecordsModule = (await import(
+      "@murphai/hosted-execution/clinical-records"
+    )) as Record<string, unknown>;
+    const legacyDashboardReplicaModule = await import(
+      "@murphai/hosted-execution/legacy-dashboard-replica"
+    );
+    const legacyDashboardReplicaCompatibilityModule = await import(
+      "@murphai/hosted-execution/dashboard-replica"
+    );
+    const routeModule = (await import(
+      "@murphai/hosted-execution/routes"
+    )) as Record<string, unknown>;
+    const labsModule = (await import(
+      "@murphai/hosted-execution/labs"
+    )) as Record<string, unknown>;
+    const subscriptionModule = (await import(
+      "@murphai/hosted-execution/subscription"
+    )) as Record<string, unknown>;
+    const runtimeControlModule = (await import(
+      "@murphai/hosted-execution/runtime-control"
+    )) as Record<string, unknown>;
     expect("createHostedExecutionDispatchClient" in rootModule).toBe(false);
     expect("buildHostedExecutionOutboxPayload" in rootModule).toBe(false);
-    expect("buildHostedWakeLinqMessageReceivedPayload" in rootModule).toBe(false);
-    expect("buildHostedWakeTelegramMessageReceivedPayload" in rootModule).toBe(false);
-    expect("buildHostedWakeEmailMessageReceivedPayload" in rootModule).toBe(false);
+    expect("buildHostedWakeLinqMessageReceivedPayload" in rootModule).toBe(
+      false,
+    );
+    expect("buildHostedWakeTelegramMessageReceivedPayload" in rootModule).toBe(
+      false,
+    );
+    expect("buildHostedWakeEmailMessageReceivedPayload" in rootModule).toBe(
+      false,
+    );
     expect(assistantModelModule.HOSTED_ASSISTANT_PRODUCT_MODELS).toEqual([
       "gpt-5.6-luna",
       "gpt-5.6-terra",
       "gpt-5.6-sol",
+      "gpt-6-astra",
     ]);
-    expect("parseHostedWakeLinqMessageReceivedPayload" in rootModule).toBe(false);
-    expect("parseHostedWakeTelegramMessageReceivedPayload" in rootModule).toBe(false);
-    expect("parseHostedWakeEmailMessageReceivedPayload" in rootModule).toBe(false);
+    expect("parseHostedWakeLinqMessageReceivedPayload" in rootModule).toBe(
+      false,
+    );
+    expect("parseHostedWakeTelegramMessageReceivedPayload" in rootModule).toBe(
+      false,
+    );
+    expect("parseHostedWakeEmailMessageReceivedPayload" in rootModule).toBe(
+      false,
+    );
     expect("HOSTED_ASSISTANT_CAPABILITY_IDS" in rootModule).toBe(false);
-    expect("HOSTED_ASSISTANT_CAPABILITY_IDS" in assistantCapabilitiesModule).toBe(false);
+    expect(
+      "HOSTED_ASSISTANT_CAPABILITY_IDS" in assistantCapabilitiesModule,
+    ).toBe(false);
     expect("parseHostedClinicalRecordsRunDescriptor" in rootModule).toBe(false);
-    expect(clinicalRecordsModule.parseHostedClinicalRecordsRunDescriptor).toBeTypeOf("function");
+    expect(
+      clinicalRecordsModule.parseHostedClinicalRecordsRunDescriptor,
+    ).toBeTypeOf("function");
     expect(assistantCapabilitiesModule.HOSTED_ELEVENLABS_ENV_NAMES).toEqual([
       "ELEVENLABS_API_KEY",
       "MURPH_ELEVENLABS_MODEL_ID",
       "MURPH_ELEVENLABS_VOICE_ID",
     ]);
     expect(rootModule.parseAssistantUsageRecord).toBeTypeOf("function");
-    expect(assistantUsageModule.parseAssistantUsageRecord).toBeTypeOf("function");
+    expect(assistantUsageModule.parseAssistantUsageRecord).toBeTypeOf(
+      "function",
+    );
     expect("parseHostedRuntimeLogRequest" in browserVaultModule).toBe(false);
-    expect(typeof browserVaultModule.getHostedBrowserVaultReplicaStorageKeyId).toBe("function");
-    expect(typeof browserVaultModule.parseHostedBrowserVaultReplicaRef).toBe("function");
-    expect(typeof browserVaultModule.getBrowserVaultReplicaFreshness).toBe("function");
-    expect(typeof browserVaultModule.shouldScheduleBrowserVaultRefresh).toBe("function");
-    expect(typeof legacyDashboardReplicaModule.getDashboardReplicaFreshness).toBe("function");
-    expect(legacyDashboardReplicaModule.getDashboardReplicaFreshness({
-      replicaRef: null,
-      snapshotRef: null,
-    })).toBe("stale");
-    expect(legacyDashboardReplicaModule.shouldScheduleDashboardReplicaRefresh({
-      currentReplicaRef: null,
-      currentSnapshotRef: null,
-    })).toBeNull();
-    expect(legacyDashboardReplicaModule.readDashboardReplicaSourceStateHash(null)).toBeNull();
-    expect(typeof legacyDashboardReplicaCompatibilityModule.getDashboardReplicaFreshness)
-      .toBe("function");
+    expect(
+      typeof browserVaultModule.getHostedBrowserVaultReplicaStorageKeyId,
+    ).toBe("function");
+    expect(typeof browserVaultModule.parseHostedBrowserVaultReplicaRef).toBe(
+      "function",
+    );
+    expect(typeof browserVaultModule.getBrowserVaultReplicaFreshness).toBe(
+      "function",
+    );
+    expect(typeof browserVaultModule.shouldScheduleBrowserVaultRefresh).toBe(
+      "function",
+    );
+    expect(
+      typeof legacyDashboardReplicaModule.getDashboardReplicaFreshness,
+    ).toBe("function");
+    expect(
+      legacyDashboardReplicaModule.getDashboardReplicaFreshness({
+        replicaRef: null,
+        snapshotRef: null,
+      }),
+    ).toBe("stale");
+    expect(
+      legacyDashboardReplicaModule.shouldScheduleDashboardReplicaRefresh({
+        currentReplicaRef: null,
+        currentSnapshotRef: null,
+      }),
+    ).toBeNull();
+    expect(
+      legacyDashboardReplicaModule.readDashboardReplicaSourceStateHash(null),
+    ).toBeNull();
+    expect(
+      typeof legacyDashboardReplicaCompatibilityModule.getDashboardReplicaFreshness,
+    ).toBe("function");
     expect("getDashboardReplicaFreshness" in rootModule).toBe(false);
     expect("shouldScheduleDashboardReplicaRefresh" in rootModule).toBe(false);
     expect("HOSTED_MAILBOX_LANES" in rootModule).toBe(false);
     expect("parseHostedWorkspaceCheckpointRequest" in rootModule).toBe(false);
-    expect(rootModule.HOSTED_USER_RUNTIME_WORKFLOW_TYPE).toBe("hostedUserRuntimeWorkflow");
-    expect(runtimeControlModule.HOSTED_MAILBOX_LANES).toEqual(["system", "conversation"]);
-    expect("HOSTED_WORKSPACE_INVOCATION_REASONS" in runtimeControlModule).toBe(false);
-    expect(subscriptionModule.parseHostedSubscriptionControlRequest).toBeTypeOf("function");
-    expect(subscriptionModule.parseHostedRuntimeSubscriptionToolResponse).toBeTypeOf("function");
+    expect(rootModule.HOSTED_USER_RUNTIME_WORKFLOW_TYPE).toBe(
+      "hostedUserRuntimeWorkflow",
+    );
+    expect(runtimeControlModule.HOSTED_MAILBOX_LANES).toEqual([
+      "system",
+      "conversation",
+    ]);
+    expect("HOSTED_WORKSPACE_INVOCATION_REASONS" in runtimeControlModule).toBe(
+      false,
+    );
+    expect(subscriptionModule.parseHostedSubscriptionControlRequest).toBeTypeOf(
+      "function",
+    );
+    expect(
+      subscriptionModule.parseHostedRuntimeSubscriptionToolResponse,
+    ).toBeTypeOf("function");
     expect(labsModule.parseHostedRuntimeLabsToolRequest).toBeTypeOf("function");
-    expect(labsModule.parseHostedRuntimeLabsToolResponse).toBeTypeOf("function");
+    expect(labsModule.parseHostedRuntimeLabsToolResponse).toBeTypeOf(
+      "function",
+    );
     expect(runtimeControlModule.HOSTED_WORKSPACE_INVOCATION_STATUSES).toEqual([
       "idle",
       "budget_exhausted",
@@ -806,8 +988,12 @@ describe("hosted execution coverage gaps", () => {
     expect("HOSTED_RUN_TRIGGER_KINDS" in runtimeControlModule).toBe(false);
     expect("HOSTED_RUN_EXECUTOR_KINDS" in runtimeControlModule).toBe(false);
     expect("HOSTED_RUN_LOG_LEVELS" in runtimeControlModule).toBe(false);
-    expect("HOSTED_EXECUTION_RUNNER_TURN_INPUT_REFRESH_PATH" in routeModule).toBe(false);
-    expect("HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH" in routeModule).toBe(false);
+    expect(
+      "HOSTED_EXECUTION_RUNNER_TURN_INPUT_REFRESH_PATH" in routeModule,
+    ).toBe(false);
+    expect("HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH" in routeModule).toBe(
+      false,
+    );
     expect(Object.keys(routeModule).sort()).toEqual([
       "HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_CALLBACK_USER_ID",
       "HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_PATH",
@@ -865,9 +1051,9 @@ describe("hosted execution coverage gaps", () => {
     expect(routeModule.HOSTED_RUNTIME_MEMBER_ACTION_OUTCOME_PATH).toBe(
       "/api/internal/hosted-mailbox/member-action-outcome",
     );
-    expect(routeModule.HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH).toBe(
-      "/api/internal/hosted-runtime/message-volume/outbound-receipt",
-    );
+    expect(
+      routeModule.HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH,
+    ).toBe("/api/internal/hosted-runtime/message-volume/outbound-receipt");
     expect(routeModule.HOSTED_RUNTIME_USAGE_RECORD_PATH).toBe(
       "/api/internal/hosted-execution/usage/record",
     );
@@ -964,148 +1150,197 @@ describe("hosted execution coverage gaps", () => {
       runId: "run_abc123",
     });
 
-    expect(pausePath).toBe("/api/internal/computer/runs/run_abc123/pause-for-user");
+    expect(pausePath).toBe(
+      "/api/internal/computer/runs/run_abc123/pause-for-user",
+    );
     expect(readHostedComputerRunOperationRoute(pausePath)).toEqual({
       operation: "pause-for-user",
       runId: "run_abc123",
     });
-    expect(isHostedComputerWebControlRequest({
-      method: "POST",
-      path: HOSTED_COMPUTER_RUNS_PATH,
-    })).toBe(true);
-    expect(isHostedComputerWebControlRequest({
-      method: "POST",
-      path: pausePath,
-    })).toBe(true);
-    expect(isHostedComputerWebControlRequest({
-      method: "GET",
-      path: pausePath,
-    })).toBe(false);
-    expect(readHostedComputerRunOperationRoute(
-      "/api/internal/computer/runs/run_abc123/observe",
-    )).toBe(null);
-    expect(isHostedComputerWebControlRequest({
-      method: "POST",
-      path: "/api/internal/computer/runs/run_abc123/observe",
-    })).toBe(false);
+    expect(
+      isHostedComputerWebControlRequest({
+        method: "POST",
+        path: HOSTED_COMPUTER_RUNS_PATH,
+      }),
+    ).toBe(true);
+    expect(
+      isHostedComputerWebControlRequest({
+        method: "POST",
+        path: pausePath,
+      }),
+    ).toBe(true);
+    expect(
+      isHostedComputerWebControlRequest({
+        method: "GET",
+        path: pausePath,
+      }),
+    ).toBe(false);
+    expect(
+      readHostedComputerRunOperationRoute(
+        "/api/internal/computer/runs/run_abc123/observe",
+      ),
+    ).toBe(null);
+    expect(
+      isHostedComputerWebControlRequest({
+        method: "POST",
+        path: "/api/internal/computer/runs/run_abc123/observe",
+      }),
+    ).toBe(false);
 
-    expect(() => parseHostedComputerOpenRunRequest({
-      profileKey: "appointments",
-      startUrl: "https://example.test/start",
-    })).toThrow(TypeError);
-    expect(() => parseHostedComputerOpenRunRequest({
-      legacyProfileKey: "appointments",
-      startUrl: "https://example.test/start",
-    })).toThrow(TypeError);
-    expect(() => parseHostedComputerOpenRunRequest({
-      memberScopedProfileRequired: true,
-      startUrl: "https://example.test/start",
-    })).toThrow(TypeError);
-    expect(() => parseHostedComputerOpenRunRequest({
-      resumeRunId: "hcr_paused_run",
-      startUrl: "https://example.test/start",
-    })).toThrow(TypeError);
-    expect(parseHostedComputerOpenRunRequest({
-      goal: "Runner goal.",
-    })).toEqual({
+    expect(() =>
+      parseHostedComputerOpenRunRequest({
+        profileKey: "appointments",
+        startUrl: "https://example.test/start",
+      }),
+    ).toThrow(TypeError);
+    expect(() =>
+      parseHostedComputerOpenRunRequest({
+        legacyProfileKey: "appointments",
+        startUrl: "https://example.test/start",
+      }),
+    ).toThrow(TypeError);
+    expect(() =>
+      parseHostedComputerOpenRunRequest({
+        memberScopedProfileRequired: true,
+        startUrl: "https://example.test/start",
+      }),
+    ).toThrow(TypeError);
+    expect(() =>
+      parseHostedComputerOpenRunRequest({
+        resumeRunId: "hcr_paused_run",
+        startUrl: "https://example.test/start",
+      }),
+    ).toThrow(TypeError);
+    expect(
+      parseHostedComputerOpenRunRequest({
+        goal: "Runner goal.",
+      }),
+    ).toEqual({
       resumeAfterMailboxItemId: null,
       resumeDeliveryContext: null,
       startUrl: null,
     });
-    expect(parseHostedComputerOpenRunRequest({
-    })).toEqual({
+    expect(parseHostedComputerOpenRunRequest({})).toEqual({
       resumeAfterMailboxItemId: null,
       resumeDeliveryContext: null,
       startUrl: null,
     });
-    expect(parseHostedComputerFinishRunRequest({
-      outcome: "failed",
-      summary: "Legacy runner summary.",
-    })).toEqual({
+    expect(
+      parseHostedComputerFinishRunRequest({
+        outcome: "failed",
+        summary: "Legacy runner summary.",
+      }),
+    ).toEqual({
       outcome: "failed",
     });
 
-    expect(parseHostedComputerActRequest({
-      code: "await page.getByRole('button', { name: 'Add to cart' }).click();",
-    })).toEqual({
+    expect(
+      parseHostedComputerActRequest({
+        code: "await page.getByRole('button', { name: 'Add to cart' }).click();",
+      }),
+    ).toEqual({
       code: "await page.getByRole('button', { name: 'Add to cart' }).click();",
       timeoutMs: 15000,
     });
-    expect(parseHostedComputerActRequest({
-      code: "const buttons = page.locator('[data-testid=\"SPC_selectPlaceOrder\"]'); await buttons.last().click(); return { count: await buttons.count() };",
-      timeoutMs: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
-    })).toEqual({
+    expect(
+      parseHostedComputerActRequest({
+        code: "const buttons = page.locator('[data-testid=\"SPC_selectPlaceOrder\"]'); await buttons.last().click(); return { count: await buttons.count() };",
+        timeoutMs: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
+      }),
+    ).toEqual({
       code: "const buttons = page.locator('[data-testid=\"SPC_selectPlaceOrder\"]'); await buttons.last().click(); return { count: await buttons.count() };",
       timeoutMs: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
     });
-    expect(parseHostedComputerOpenRunRequest({
-      startUrl: "about:blank",
-    })).toEqual({
+    expect(
+      parseHostedComputerOpenRunRequest({
+        startUrl: "about:blank",
+      }),
+    ).toEqual({
       resumeAfterMailboxItemId: null,
       resumeDeliveryContext: null,
       startUrl: "about:blank",
     });
-    expect(parseHostedComputerOpenRunRequest({
-      startUrl: "http://127.0.0.1:3000",
-    })).toEqual({
+    expect(
+      parseHostedComputerOpenRunRequest({
+        startUrl: "http://127.0.0.1:3000",
+      }),
+    ).toEqual({
       resumeAfterMailboxItemId: null,
       resumeDeliveryContext: null,
       startUrl: "http://127.0.0.1:3000",
     });
-    expect(() => parseHostedComputerActRequest({
-      action: "click",
-      selector: "button[type=submit]",
-    })).toThrow(/Hosted computer act request is invalid/u);
-    expect(() => parseHostedComputerActRequest({
-      code: "",
-    })).toThrow(/Hosted computer act request is invalid/u);
-    expect(() => parseHostedComputerActRequest({
-      code: "x".repeat(HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH + 1),
-    })).toThrow(/Hosted computer act request is invalid/u);
-    expect(() => parseHostedComputerActRequest({
-      code: "return true;",
-      timeoutMs: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS + 1,
-    })).toThrow(/Hosted computer act request is invalid/u);
+    expect(() =>
+      parseHostedComputerActRequest({
+        action: "click",
+        selector: "button[type=submit]",
+      }),
+    ).toThrow(/Hosted computer act request is invalid/u);
+    expect(() =>
+      parseHostedComputerActRequest({
+        code: "",
+      }),
+    ).toThrow(/Hosted computer act request is invalid/u);
+    expect(() =>
+      parseHostedComputerActRequest({
+        code: "x".repeat(HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH + 1),
+      }),
+    ).toThrow(/Hosted computer act request is invalid/u);
+    expect(() =>
+      parseHostedComputerActRequest({
+        code: "return true;",
+        timeoutMs: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS + 1,
+      }),
+    ).toThrow(/Hosted computer act request is invalid/u);
 
-    expect(parseHostedComputerPauseForUserRequest({
-      handoffPurpose: "managed_login",
-      reason: "login_needed",
-      suggestedReply: "done",
-    })).toEqual({
+    expect(
+      parseHostedComputerPauseForUserRequest({
+        handoffPurpose: "managed_login",
+        reason: "login_needed",
+        suggestedReply: "done",
+      }),
+    ).toEqual({
       handoffPurpose: "managed_login",
       pauseDeliveryContext: null,
       reason: "login_needed",
       suggestedReply: "done",
     });
-    expect(parseHostedComputerPauseForUserRequest({
-      handoffPurpose: "manual_browser_help",
-      reason: "final_confirmation",
-      suggestedReply: "done",
-    })).toEqual({
+    expect(
+      parseHostedComputerPauseForUserRequest({
+        handoffPurpose: "manual_browser_help",
+        reason: "final_confirmation",
+        suggestedReply: "done",
+      }),
+    ).toEqual({
       handoffPurpose: "manual_browser_help",
       pauseDeliveryContext: null,
       reason: "final_confirmation",
       suggestedReply: "done",
     });
-    expect(parseHostedComputerPauseForUserRequest({
-      message: "Please log in.",
-      reason: "login_needed",
-    })).toEqual({
+    expect(
+      parseHostedComputerPauseForUserRequest({
+        message: "Please log in.",
+        reason: "login_needed",
+      }),
+    ).toEqual({
       handoffPurpose: null,
       pauseDeliveryContext: null,
       reason: "login_needed",
       suggestedReply: null,
     });
-    expect(() => parseHostedComputerPauseForUserRequest({
-      awaitingMessage: "Please log in.",
-      reason: "login_needed",
-    })).toThrow(/Hosted computer pause-for-user request is invalid/u);
+    expect(() =>
+      parseHostedComputerPauseForUserRequest({
+        awaitingMessage: "Please log in.",
+        reason: "login_needed",
+      }),
+    ).toThrow(/Hosted computer pause-for-user request is invalid/u);
   });
 });
 
 function buildFakeJwtPayload(payload: Record<string, unknown>): string {
   return [
-    Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" }), "utf8").toString("base64url"),
+    Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" }), "utf8").toString(
+      "base64url",
+    ),
     Buffer.from(JSON.stringify(payload), "utf8").toString("base64url"),
     "signature",
   ].join(".");

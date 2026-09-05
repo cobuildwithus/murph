@@ -1,143 +1,103 @@
 # AGENTS.md
 
-## Default To Deletion And Simplicity
-
-Prefer deletion and the smallest maintainable architecture that satisfies the
-current requirement. Add a dependency, abstraction, service, state owner, or
-process only when concrete product, security, test, or measured performance
-evidence proves the simpler design insufficient.
-
-For roughly 90% of Murph tasks—the ordinary, reversible ones—trust the Codex
-model to follow clear prompt instructions and use its native controls. Prefer
-one direct prompt rule over feature-specific sandboxes, permission profiles,
-supervisors, or state machines, including for memory automation. Add enforcement
-machinery only for a concrete security, privacy, authorization, canonical-write,
-or irreversible-effect boundary, or when production evidence shows prompt
-guidance and native Codex controls are insufficient. Follow
-`docs/contracts/00-invariants.md` § Trust Codex Native Capabilities.
-
-Reject security theater. A control must enforce an independent boundary or
-prove behavior at that boundary. Self-reported metadata, echoed configuration,
-and duplicate checks inside one trust domain are diagnostics, not security
-guarantees. Delete them when they add brittleness without reducing real risk.
-
-Do not treat a validated runtime-authored continuation as a new trust domain
-merely because it arrives asynchronously. Preserve Codex's ordinary native
-capabilities across that continuation and constrain only the external effect at
-its existing authority owner. Do not toggle process-wide capabilities to narrow
-one turn unless an independent security, privacy, or authorization boundary
-requires it.
-
 ## Purpose
 
-This file is the compact routing map for agent work in this repository.
-Durable guidance lives in `agent-docs/`; keep detailed policy there instead of expanding this file.
+Build the requested outcome with the smallest maintainable change. Prefer
+removing, reordering, or deriving existing behavior before adding machinery.
+Keep detailed rules with their owners; this file is the entrypoint.
 
 ## Precedence
 
-1. Explicit user instruction in the current chat turn.
-2. `Hard Rules (Non-Negotiable)` in this file.
-3. `agent-docs/operations/agent-workflow-routing.md`.
-4. Other detailed docs under `agent-docs/**`.
-
-If instructions still conflict after applying this order, ask the user before acting.
+Follow system and developer instructions, then the user's task and established
+authorization. Within repository guidance, this file takes precedence, followed
+by `agent-docs/operations/agent-workflow-routing.md` and the relevant owner doc.
+Skills and examples do not create additional authority or override that order.
+Resolve routine choices yourself; ask when an unresolved conflict materially
+changes scope, product behavior, or permission.
 
 ## Read First
 
-Always read these before repo code/docs/test/config work:
-
-1. `agent-docs/index.md`
-2. `ARCHITECTURE.md`
-3. `docs/contracts/00-invariants.md`
-4. `agent-docs/ARCHITECTURE_GUIDANCE.md`
-5. `agent-docs/references/repo-scope.md`
-6. `agent-docs/operations/agent-workflow-routing.md`
-7. `agent-docs/PRODUCT_SENSE.md`
-8. `agent-docs/PRODUCT_CONSTITUTION.md`
+Read `agent-docs/operations/agent-workflow-routing.md`, then use
+`agent-docs/index.md` to locate the docs relevant to the task. Read the affected
+sections, not the entire documentation library. Completed execution plans are
+immutable historical evidence, never current operating instructions.
 
 ## Task Router
 
-| If the task is about... | Also read | Notes |
-| --- | --- | --- |
-| Review-only inspection with no planned file edits | `agent-docs/operations/verification-and-runtime.md` | No repo-wide checks by default. Add runtime proof only when requested or when static inspection leaves a material gap. |
-| Docs or process only | `agent-docs/operations/verification-and-runtime.md` | Follow the docs/process task class in the workflow router. |
-| Repo code, tests, or config | `agent-docs/operations/completion-workflow.md`, `agent-docs/operations/verification-and-runtime.md` | Use the workflow router for task class, plan needs, audits, verification, and commit path. |
-| Murph assistant behavior, prompts, tools, routing, or replies | `.agents/skills/verify-murph-assistant/SKILL.md` | Add deterministic boundary proof and a focused real-Codex journey, run it locally, and review Murph's actual replies. |
-| User-facing frontend/UI work in `apps/web` | `agent-docs/FRONTEND.md` | Follow the normal task-class implementation route; the completion workflow still controls browser proof and required frontend review. |
-| Auth, secrets, trust boundaries, or external runtime surfaces | `agent-docs/SECURITY.md` | Treat as higher risk by default. |
-| Retries, queues, cron, concurrency, or failure handling | `agent-docs/RELIABILITY.md` | Capture direct proof for operational changes. |
-| Cloudflare infrastructure, Workers, Durable Objects, R2, or deploy/runtime platform APIs | `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`, relevant official Cloudflare docs | Read Cloudflare docs thoroughly before designing; prefer the simplest canonical Cloudflare API or feature, and assume the platform likely already provides the needed primitive before rolling bespoke infrastructure. |
-| Test selection or verification changes | `agent-docs/references/testing-ci-map.md` | Keep test coverage and doc claims aligned. |
-| Product behavior or UX tradeoffs | `agent-docs/PRODUCT_SENSE.md`, `agent-docs/PRODUCT_CONSTITUTION.md`, `agent-docs/operations/product-ux.md` | Plan affected people before code and walk their real experience after code. |
-| iMessage/SMS replies, outbound message copy, reminders, notifications, line health, or phone-number messaging behavior | `agent-docs/operations/imessage-deliverability.md` | Design for reciprocal conversations, safe pacing, link hygiene, cold-contact protection, and fail-closed line health. |
-| Marketing, positioning, copy, or experiment library work | `agent-docs/product-marketing-context.md` | Use the repo marketing context for positioning, differentiation, customer language, and brand voice. |
-| Health Commons content or experiment library structure | `agent-docs/product-specs/health-commons.md` | Generated catalog artifacts are ignored build outputs; commit authored content and intentional generator/schema/test changes only. |
-| Dependency changes | `agent-docs/SECURITY.md` | Follow the dependency supply-chain rules before handoff. |
+| Task | Read before implementation |
+| --- | --- |
+| Code, tests, or config | Relevant `ARCHITECTURE.md` sections, `docs/contracts/00-invariants.md`, `agent-docs/ARCHITECTURE_GUIDANCE.md` |
+| Verification and completion | `agent-docs/operations/verification-and-runtime.md`, `agent-docs/operations/completion-workflow.md` |
+| Product behavior | `agent-docs/PRODUCT_SENSE.md`, `agent-docs/PRODUCT_CONSTITUTION.md`, `agent-docs/operations/product-ux.md` |
+| Hosted Web UI | `agent-docs/FRONTEND.md` |
+| Murph prompts, tools, routing, or replies | `.agents/skills/verify-murph-assistant/SKILL.md` |
+| iMessage/SMS or assistant/provider prompts | `agent-docs/operations/imessage-deliverability.md` |
+| Auth, secrets, dependencies, or external boundaries | `agent-docs/SECURITY.md` |
+| Concurrency, retries, queues, or failure handling | `agent-docs/RELIABILITY.md` |
+| Cloudflare infrastructure | Security and reliability docs above, plus current official Cloudflare docs |
+| Test selection or verification changes | `agent-docs/references/testing-ci-map.md` |
+| Marketing or Health Commons | `agent-docs/product-marketing-context.md`; `agent-docs/product-specs/health-commons.md` for Commons work |
 
 ## Hard Rules (Non-Negotiable)
 
-- Never expose secrets, raw credentials, private keys, tokens, full `Authorization` headers, or downloaded secret values in commits, code, docs, generated files, comments, logs, examples, quoted output, or external artifacts. Keep legal names, local account usernames, and home-directory paths out of committed or published artifacts; for local debugging, prefer repo-relative paths and do not let identifier redaction block root-cause proof.
-- The canonical product domain is `withmurph.ai`. Use `https://www.withmurph.ai` when an absolute hosted Web production URL is required; never use `murph.ai`.
-- Treat screenshots, chat transcripts, and user feedback as confidential evidence, not repository-ready source material. Never copy, closely paraphrase, or hardcode them, including names, handles, images, identifying details, distinctive wording, or exact scenarios, into system prompts, tests, fixtures, snapshots, evals, docs, comments, PR descriptions, or any source that may become public.
-- Treat `.env` and `.env*` as sensitive. Never print, commit, or otherwise expose their contents.
-- Never recursively search the filesystem root, a home directory, or another broad directory to locate repository files or skills. Use exact paths from the provided skill catalog and repository docs, and keep discovery inside an explicit task root with `rg` or `rg --files`. If an expected skill root or path is missing, stop and report the gap; do not widen the search (`find /`, recursive `rg /`, and equivalents are prohibited).
-- Do not pull remote environment variables into local files for inspection. Use provider CLI list/status commands that show names/scopes only, and ask before any operation that would download secret values.
-- Treat production secret values as unavailable to local agents and local commands, even when a provider CLI lists their names. Never begin implementation or execution that depends on reading, downloading, or injecting a production secret locally. Stop first, explain the blocked operation and why secret-free work is insufficient, and ask the user whether to abandon it or authorize a separately reviewed hosted or protected path. Do not build that path before the user decides. The sole local exception is the operator-provisioned Temporal diagnostics path in `agent-docs/references/hosted-temporal-orchestration.md`: use only an already-present credential without inspecting its value, begin read-only, and require explicit current-task authorization before any Temporal mutation.
-- When writing assistant/provider prompts, outbound iMessage/SMS copy, or phone-number messaging behavior, read `agent-docs/operations/imessage-deliverability.md`; avoid automated-outreach framing: acquisition/signup language, `new user` labels, delivery/notification wording, and imperative exact-send phrasing in the same prompt. Prefer in-chat, user-facing task framing.
-- Import sibling workspace packages by package name through declared public entrypoints only; do not reach into another package's `src/` or `dist/`.
-- Keep workspace package dependencies one-way and acyclic. Put shared runtime/domain logic in a lower owning package instead of cross-importing sibling internals or using sibling-to-sibling re-exports.
-- Compatibility shims must be temporary and legacy-facing only. Keep them on the old path pointing at the new owner, and never make the owning package depend on the legacy package for the same surface.
-- Do not reintroduce custom Turbopack loader-based rewriting for repo-local workspace sources.
-- Dependency changes are high-risk: use public-registry specs, update the committed lockfile in the same change, keep pnpm supply-chain exceptions narrow, and do not bypass pnpm dependency verification.
-- Do not use `as any` or lazy `as unknown` / `as unknown as T` casts to silence TypeScript errors. Prove the type with control flow/helpers, or isolate the boundary with a narrow documented assertion.
-- Do not paper over bugs or architectural friction with speculative complexity. Identify the root cause first and choose the simplest durable correction that preserves system invariants.
-- Before adding or changing database-touching collection work, apply `docs/contracts/00-invariants.md` § Database Load And Collection Fanout and evaluate its composed peak load at maximum admitted cardinality.
-- Before implementing a user-facing change, follow `agent-docs/operations/product-ux.md`. Choose the smallest Product UX effort, plan every materially different affected person before code, and replay those people after code. Use the dimensions in that document to select distinct journeys, not a required Cartesian matrix.
-- Before implementing any frontend change, think through the UX and choose the simplest complete implementation that preserves required behavior, states, accessibility, responsiveness, and recovery. The bar is a result Steve Jobs would be proud of.
-- Review/audit findings, including Codex deep-review findings, do not override the repo's simplicity and ownership rules. Reject or redesign fixes that add broad state, queues, managers, lifecycle machinery, or abstractions when deletion, reordering, an existing owner boundary, or one source-of-truth derivation can preserve the invariant.
-- Do not fix safety, reliability, privacy, auth, or review findings by disabling, silently dropping, or degrading existing user-critical flows such as onboarding, welcome delivery, current-inbound replies, billing/access, auth, sync, or privacy/safety controls; follow `docs/contracts/00-invariants.md` § Product-Critical Flow Preservation.
-- When investigating a bug, do not anchor on hunches, guesses, likely causes, or pattern matches. Treat hypotheses only as temporary questions to test. Exhaust the evidence path before fixing: inspect the relevant code, data, logs, runtime state, and recent changes deeply enough to identify the underlying architectural/root cause, then prove that cause with static analysis, code-path evidence, a focused reproduction, or a failing test before choosing a fix. If current observability is insufficient, add targeted diagnostic logging or probes that are secret-safe and concrete enough to reveal the cause; do not substitute assumption, bandaid fixes, or broad rewrites for understanding.
-- Do not invent compatibility, deployment, or runtime requirements. Document them in the matching durable docs and scripts in the same change that introduces them. A hosted deploy environment change is complete only when the public deploy contract, the private `murph-cloud` workflow mapping, its owning GitHub Environment, and post-deploy live binding proof remain aligned; configuration in one repository is not deployment evidence.
-- Do not weaken production runtime, auth, or env invariants for tests, smoke checks, or builds. Fix harnesses with test-only config or wrappers instead.
-- Follow the persisted-state placement gate in `agent-docs/operations/agent-workflow-routing.md` and `ARCHITECTURE.md`; user-facing or queryable product truth must not start in assistant runtime state.
-- Every open database transaction pins one pooled connection, so keep transactions short, bounded, and database-only. Resolve provider/network calls, user input, sleeps, heavy computation, and other unbounded work before opening one; once open, perform only the minimum reads and writes needed for the invariant, apply supported timeouts, avoid concurrent per-item or nested transactions, and release the connection promptly. Follow `docs/contracts/00-invariants.md` § Database Load And Collection Fanout.
-- Historical plan docs under `agent-docs/exec-plans/completed/` are immutable,
-  non-operative snapshots. Never use them as current implementation, deployment,
-  rollback, or incident instructions; the live owner docs indexed in
-  `agent-docs/index.md` prevail.
+- Keep secrets, `.env*` contents, direct personal identifiers, local usernames,
+  home paths, and private production data out of artifacts and published output.
+  Use synthetic examples. Screenshots, transcripts, and feedback are confidential;
+  do not copy or closely paraphrase them into source, fixtures, docs, or PRs.
+- Production secrets are unavailable to local agents. Do not read, download, or
+  inject them, or build a secret-dependent workaround. Explain the blocked step
+  and ask about a separately reviewed hosted path first. The sole local exception
+  is already-provisioned, opaque Temporal diagnostics as documented in
+  `agent-docs/references/hosted-temporal-orchestration.md`; begin read-only and
+  require explicit current-task permission for any Temporal mutation.
+- A Cloudflare rollback, including restoring older versions or repointing aliases,
+  requires explicit permission for that exact rollback.
+- Preserve unrelated edits and active work. Before resuming an existing PR,
+  establish ownership from its head, worktree, and handoff. An ambiguous owner or
+  unexpected head movement blocks mutation until an explicit handoff.
+- Signal only processes this session started and whose exact ownership is proven.
+  Never use broad process-name termination. Do not force worktree cleanup.
+- Keep discovery inside the repository or explicit task roots. Never recursively
+  search a home directory or filesystem root. Report missing required tools;
+  use an available equivalent when it preserves the needed boundary.
+- Use declared public workspace entrypoints and acyclic dependencies. Do not
+  import sibling `src/` or `dist/`, add custom Turbopack workspace rewriting,
+  or silence type errors with `as any` or an unproved `as unknown` cast.
+- Keep dependencies registry-sourced, update the lockfile with manifest changes,
+  and preserve pnpm supply-chain checks.
+- Prove a bug's cause before fixing it. Preserve product-critical success paths,
+  canonical state ownership, and production auth/runtime invariants in tests.
+  For database work, apply the invariants' load/fanout rules: bounded collection
+  work and short database-only transactions, with external work outside them.
+- Use `https://www.withmurph.ai` for absolute production Web URLs.
 
 ## Workflow Defaults
 
-- Apply `agent-docs/operations/agent-workflow-routing.md` § Agent Work Contract for outcomes, evidence, action authority, tool use, progress updates, validation, and stopping.
-- For every edit-authorized repository task, follow `agent-docs/operations/agent-workflow-routing.md` § Developer Friction Logging and `.agents/skills/frog/SKILL.md`; inspect existing Frog entries before a workaround, log qualifying new repository friction, and commit each created entry with the task.
-- Use `agent-docs/operations/agent-workflow-routing.md` to classify task type, plan needs, audit requirements, verification, and commit path.
-- Preserve unrelated working-tree edits in the current checkout. Do not overwrite, discard, or revert work you did not make.
-- Before starting or resuming work on an existing PR, prove exclusive session ownership from the PR head, branch/worktree state, and any active handoff or coordination record. If another agent or session owns it, ownership is ambiguous, or the head moves unexpectedly, stop before editing, committing, or pushing and report the collision; continue only after an explicit handoff. A conflict-free fast-forward is not permission to co-author the same live branch.
-- `apply_patch` targets the current session checkout, not the last shell `workdir`. When editing a separate worktree, use absolute paths in patch headers or verify the target checkout before patching.
-- Default most non-trivial repo code/test/config changes to a separate git worktree on a task branch, then open a PR after the normal scoped commit. Use the current checkout directly for review-only work, vault-only data work, text-only docs/process edits, and tiny copy/static-content changes that qualify for the completion fast path. Prompt-primary, frontend, and coverage-bearing repo changes use the worktree/PR lane when their task class, overlap risk, or exact-head CI needs require it.
-- Create task worktrees only through `scripts/create-worktree`; never bypass its ratcheted worktree-count and free-space guard with raw `git worktree add`. An unauthorized checkout fails its own commit and remains visible to the primary checkout's global audit, but it must not block commits or sanctioned worktree creation in authorized current-version sibling checkouts after the primary guard advances. Primary/task version orders remain argument-compatible, but every preceding-version primary entrypoint stays globally fail-closed around clean raw state until the primary advances; no guard may publish authorization for the raw checkout. If the rejected intermediate authorization-plus-isolation state exists, advance the primary first so its current guard retires authorization first under the existing guard lock; task-local guards never mutate that state. Large data or research work must use `--data-research <reason>`, which locks that checkout with a visible `data/research:` reason. After a task PR is confirmed merged or closed, retire its clean inactive worktree from another checkout with `scripts/retire-worktree <path>`; the task is not complete until that succeeds or its fail-closed blocker is reported. Use `--inactive-no-pr` only when the current user explicitly authorizes cleanup of clean inactive branches with no open PR.
-- Do not create standalone Murph clones or standalone pnpm stores in temp directories; use the ordinary shared pnpm store. Normal Vitest temp files, including private or ignored data/research test lanes, must stay under the shared marked run root; persistent downloaded datasets belong in explicit data/research roots instead of `os.tmpdir()`. Interrupted marked roots use `scripts/cleanup-test-temp.ts`, which is dry-run by default. Follow `agent-docs/operations/local-storage-lifecycle.md` for fail-closed exceptions and build-output cleanup.
-- When opening or updating a PR, follow `agent-docs/operations/completion-workflow.md` § PR Description. Keep the body concise but complete: outcome, Product UX result, direct evidence, non-obvious affected surfaces, architecture and reuse, complexity impact, hot reply path impact, provider-input impact, deployment concerns, changelog, and the required compact added/deleted LOC breakdown by source, tests/fixtures, docs, config/tooling, and generated/other. User-facing hosted Web UI changes also require dedicated design proof.
-- Treat Ready as near-merge admission to expensive CI, not as a development-loop signal. Keep PRs draft through ordinary pushes and known remediation; an authenticated agent should run `gh pr ready <number>` only when focused local proof and the parent candidate review are complete, the exact pushed head is the intended merge candidate, and no PR-specific edit is already known. If a later push returns the PR to draft, re-establish those conditions before marking it Ready again.
-- Reuse an existing component from `/design?tab=components` before adding a near-duplicate, and add new shared components there. Every user-facing hosted Web UI change must have a repository-owned, reviewer-openable representation: production components and consent surfaces on the matching `/design` tab, or composed sections under `/screenshots/<category>`. The PR-body guard validates link and field structure; the parent owns repository origin, reachability, currentness, and representation quality. Refresh expired or inaccessible previews. Add or update a catalog/study representation only when no existing route and anchor render the changed state. Screenshot studies render the real production component with synthetic props only: no live data, no real requests, and interactive controls held `inert`. Evidence must match the changed claim; there is no screenshot quota.
-- Do not create or switch branches in the current checkout as a dirty-worktree workaround. When isolation is needed, use a separate worktree/branch; if unrelated dirty work blocks safe setup or a scoped commit, stop and report the blocker.
-- Before pushing `main` or another shared default branch, fetch and reconcile with ordinary Git history operations (`pull --rebase`, fast-forward, or a normal merge) when possible, then run `pnpm verify:acceptance` once for that direct-push attempt. If the remote advances while acceptance runs, the unchanged accepted patch gets at most one post-acceptance rebase: require no conflicts, prove the patch is unchanged, inspect the intervening base diff, and rerun affected focused checks, but do not restart full acceptance solely for base movement. Push immediately; if that push is rejected because the remote advanced again, report `moving-base race` and stop. The budget remains consumed until push or handoff; another agent turn does not reset it. Do not manufacture sibling-history merge commits with low-level commands such as `git commit-tree`/`git update-ref` just to work around a dirty checkout; if unrelated dirty work blocks a safe pull or rebase, stop and report the blocker.
-- Use `agent-docs/operations/completion-workflow.md` for completion evidence and review gates. Product UX, prompt, frontend, and coverage proof are parent-owned responsibilities; they do not require a specialist audit, preliminary ReviewGPT pass, or local subagent. Every final ReviewGPT `FINDINGS` result pauses candidate mutation except for that section's narrowly proven behavior-preserving `Complexity Collapse` and non-production-only docs/process/PR-evidence or isolated test/fixture remediation paths. A validated final `ROUND_OUTCOME: PASS` proceeds without a user-resume pause. Agents may reject speculative, unproven, or disproportionate findings, and only accepted findings require remediation.
-- Give every long-running ReviewGPT job one completion owner. Prefer the normal tool-owned `--wait` capture; when the review must outlive the active turn, arm detached `cobuild-review-gpt thread wake` so its watcher resumes the owning Codex session only after completion. Do not spend active agent turns repeatedly status-polling ReviewGPT. If completion notification is unavailable and a manual check is necessary, leave at least five minutes between checks. For an intentional implementation handoff, pass `--poll-interval 5m` and, unless the caller already supplied an explicit per-run bound, `--poll-timeout 260m`; preserve explicit caller- or user-supplied bounds. The wake timeout remains separate from ReviewGPT response capture, which defaults to 250 minutes. Follow `agent-docs/operations/pr-reviewgpt-loop.md` § Wait And Wake Ownership.
-- Final ReviewGPT requires the exact pushed head and runs concurrently with CI. Frontend-only PRs keep parent-owned Product UX and UI proof but skip the final cross-cutting gate unless another risk trigger applies. Final round 1 is always a full-patch audit. On later rounds, sensitive, undeclared, or large current PRs get a fresh full-patch audit by default; only explicitly routine PRs below both size cutoffs reuse the current thread with the remediation delta and directly affected paths. Do not rerun merely because `main`/the base advanced, an isolated regression test or explanatory doc changed, or a base-only merge/rebase updated the head; bounded manual conflicts remain exempt only when every resolution is inspected and proven to preserve the already-reviewed PR plus current-base behavior without newly authored behavior or contract changes. Green required CI on the PR-authored head plus a clean current-base `git merge-tree --write-tree` proof is sufficient preparation. At an authorized merge boundary, wait only for routed review gates and required GitHub checks. If strict up-to-date checks block the merge, prefer the merge queue; otherwise perform at most one normal base update for the unchanged reviewed patch and let required CI gate it. If the base advances again after that head is green, do not update or restart CI: rerun the current-base merge-tree and use an already-authorized non-refresh merge path, or report `moving-base race` and stop with the PR and worktree active. Follow `agent-docs/operations/pr-reviewgpt-loop.md` for the exact stopping rule, base-only classification, packaging, immutable final-gate baselines, anomaly retrospectives, and retry counting.
-- Always run the verification required by `agent-docs/operations/verification-and-runtime.md` unless the user explicitly asks not to. If a required check is blocked by a credibly unrelated pre-existing failure, report the command, failing target, and why the current diff did not cause it.
-- For PR-bound work, run the smallest focused local checks and direct proof that exercise the changed behavior; do not require local `pnpm test:diff`, `pnpm test`, `pnpm test:coverage`, or `pnpm verify:acceptance` merely to open or update the PR. Required GitHub Actions on the exact PR head own the broad suite and must be green before completion. If CI fails, inspect that job and reproduce it with the narrowest useful local command, expanding to an umbrella command only when the failure needs broader diagnosis. Canonical remote execution remains available only under the verification guide's rules; never forward `.env`, Vercel development state, or local environment values into a remote lane.
-- Same-turn task completion counts as acceptance unless the user says `review first` or `do not commit`.
-- If repo files changed and the user did not say `review first` or `do not commit`, create a scoped commit before handoff. Use `scripts/finish-task` for the final commit of active-plan work so the plan is archived; use `scripts/committer` only when no active plan is involved.
-- `scripts/committer` intentionally rejects an active `MERGE_HEAD`. The only direct-commit exception is the already-started ordinary base-reconciliation merge documented in `agent-docs/operations/agent-workflow-routing.md`: resolve and stage it, prove no unmerged paths remain, then use ordinary `git commit` without path arguments or hook bypass. This exception does not apply to ordinary task commits.
-- If a plan-bearing task is done or abandoned but a safe scoped commit is blocked by overlapping dirty work, archive the plan with `scripts/close-exec-plan.sh`.
-- Document architecture-significant changes in the matching durable docs, and update `agent-docs/index.md` when durable docs are added, removed, moved, or materially repurposed.
-- If a completed task could break or degrade production when Vercel (`apps/web`) and Cloudflare (`apps/cloudflare`) deploy out of sync, add a final-response section labeled `DEPLOYMENT CONCERNS:` with the recommended safe deployment order, required tandem deploy or compatibility window, and any post-deploy checks.
+- Continue authorized work through focused verification, review, and a scoped
+  commit. Respect `review first`, `do not commit`, and other explicit boundaries.
+- Use the routing doc for worktrees and plan lifecycle; create task checkouts only
+  with `scripts/create-worktree`. Preserve open-PR worktrees and retire completed
+  ones through `scripts/retire-worktree` from another checkout.
+- Follow the routing doc's § Developer Friction Logging and
+  `.agents/skills/frog/SKILL.md`; commit each created entry with the task.
+- The completion workflow owns candidate review, PR evidence, and final gates.
+  Start required ReviewGPT on the stable pushed head concurrently with CI.
+  Keep one completion owner in the original session/thread, preferring `--wait`
+  or paced polling. Reserve detached wake for deliberate handoffs; follow the
+  review loop's waiting and finding-disposition policies.
+- Run checks appropriate to the changed behavior. Once they pass, broaden or
+  repeat only for new changes, failures, or a material evidence gap. Required
+  exact-head CI remains a completion gate; report blockers honestly.
+- Update the durable owner when its contract changes. Update the index when
+  adding, removing, moving, or materially repurposing a document.
 
 ## Notes
 
-- When debugging Codex CLI issues, check for a sibling checkout at `../codex`; if it is missing, clone the Codex CLI repo there so future debugging can reuse that location.
-- Before running `pnpm dev` from a secondary git worktree or branch-isolated checkout, read `agent-docs/operations/hosted-local-worktree-dev.md` and isolate the ports, database, local hosted crypto state, Wrangler state, Next dist dir, optional MinIO data, and webhook tunnel target together.
-- Keep this file short and route-oriented. Move durable detail into `agent-docs/`.
-- For local database inspection and debugging in the main checkout, use repo-local PostgreSQL/Prisma tooling with `DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync`. Use `murph_test` only in test/E2E lanes that explicitly select it; secondary worktrees must use their isolated `murph_dev_<slug>` database.
-- Target roughly 100 lines or fewer and preserve these sections: purpose, precedence, read-first docs, task router, non-negotiables, workflow defaults, and notes.
+- Before secondary-worktree development, read
+  `agent-docs/operations/hosted-local-worktree-dev.md` for coordinated isolation.
+- Primary local database: `postgresql://postgres:postgres@127.0.0.1:5432/murph_device_sync`.
+  Secondary worktrees use `murph_dev_<slug>`; reserve `murph_test` for test lanes.
+- For Codex CLI debugging, reuse `../codex`; clone there if needed.
+- When Graft and `graft/` are available, use `graft map`, `graft ask "question"
+  --source`, or `graft callers <symbol>` as navigation aids. Verify source spans;
+  ranked hits are not exhaustive. Otherwise use repository-scoped `rg` and reads.

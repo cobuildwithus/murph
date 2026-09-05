@@ -7,6 +7,7 @@ import {
 } from "../overview.ts";
 import type { VaultReadModel } from "../read-model.ts";
 import { emptyPersonalPatternReport } from "../personal-patterns.ts";
+import { emptyJournalView, type JournalView } from "../journal-view.ts";
 import {
   selectBrowserVaultExperimentSummary as selectExperimentSummaryFromReplica,
   selectBrowserVaultTrackedExperiments as selectTrackedExperimentsFromReplica,
@@ -36,6 +37,12 @@ export function selectBrowserVaultOverview(client: BrowserVaultCoreCapableQueryC
 
 export function selectBrowserVaultHistory(client: BrowserVaultCoreCapableQueryClient): { timeline: BrowserVaultTimelineRow[] } {
   return { timeline: client.timeline.list().slice(0, TIMELINE_LIMIT) };
+}
+
+export function selectBrowserVaultJournal(
+  client: BrowserVaultCoreCapableQueryClient,
+): JournalView {
+  return client.replica.journal ?? emptyJournalView();
 }
 
 export function selectBrowserVaultTrackedExperiments(client: BrowserVaultCoreCapableQueryClient): OverviewExperiment[] {

@@ -4,7 +4,7 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { test } from "vitest";
 
-import { VaultError, initializeVault } from "../src/index.ts";
+import { VaultError, initializeVault, readEvent } from "../src/index.ts";
 import {
   listHabitatAspects,
   readHabitatAspect,
@@ -66,6 +66,39 @@ test("habitat aspects merge indicators across saves and keep one file per aspect
 
   const listed = await listHabitatAspects(vaultRoot);
   assert.equal(listed.length, 1);
+});
+
+test("habitat value changes create one idempotent Journal context event", async () => {
+  const vaultRoot = await makeTempDirectory("murph-habitat-journal");
+  await initializeVault({ vaultRoot });
+
+  const change = {
+    aspect: "sleep-environment",
+    indicators: { temp_control: "ac", night_temp_c: 19 },
+    recordedAt: "2026-07-01",
+    vaultRoot,
+  } as const;
+  const first = await upsertHabitatAspect(change);
+  const repeated = await upsertHabitatAspect({
+    ...change,
+    indicators: { night_temp_c: 19, temp_control: "ac" },
+  });
+
+  assert.equal(repeated.journalEventId, first.journalEventId);
+  assert.ok(first.journalEventId);
+  const event = await readEvent({ eventId: first.journalEventId, vaultRoot });
+  assert.equal(event.event.lifecycle?.revision, 1);
+  if (event.event.kind !== "note") {
+    throw new Error("Expected an Environment Journal note.");
+  }
+  assert.equal(event.event.noteType, "journal-context");
+  assert.equal(event.event.title, "Bedroom & sleep");
+  assert.equal(
+    event.event.note,
+    "Night temperature: 19; Temperature control: ac",
+  );
+  assert.deepEqual(event.event.tags, ["environment", "key-environment"]);
+  assert.equal(event.event.dayKey, "2026-07-01");
 });
 
 test("habitat upsert rejects unknown aspects and foreign indicators", async () => {

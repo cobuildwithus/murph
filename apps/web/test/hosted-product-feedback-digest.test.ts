@@ -27,6 +27,7 @@ import {
   HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
   HOSTED_PRODUCT_SUPPORT_ESCALATION_RECORD_SUMMARY,
 } from "@/src/lib/hosted-execution/product-feedback";
+import { HOSTED_PATTERN_ENGINE_AUDIT_PREFIX } from "@murphai/hosted-execution/runtime-control";
 
 const feedbackDigestEnv = {
   HOSTED_LINQ_ALERT_EMAIL_FROM: "Murph Alerts <alerts@example.test>",
@@ -221,11 +222,18 @@ describe("hosted product feedback digest", () => {
       kind: {
         in: ["feature_interest", "feature_request", "frustration"],
       },
-      NOT: {
-        summary: {
-          startsWith: "Support escalation:",
+      NOT: [
+        {
+          summary: {
+            startsWith: "Support escalation:",
+          },
         },
-      },
+        {
+          summary: {
+            startsWith: HOSTED_PATTERN_ENGINE_AUDIT_PREFIX,
+          },
+        },
+      ],
       summary: {
         not: null,
       },
@@ -346,11 +354,13 @@ describe("hosted product feedback digest", () => {
     );
     expect(mocks.groupBy).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
-        NOT: {
-          summary: {
-            startsWith: HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
+        NOT: expect.arrayContaining([
+          {
+            summary: {
+              startsWith: HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
+            },
           },
-        },
+        ]),
       }),
     }));
     expect(mocks.findMany).toHaveBeenCalledWith(expect.objectContaining({
@@ -360,11 +370,13 @@ describe("hosted product feedback digest", () => {
         summary: true,
       },
       where: expect.objectContaining({
-        NOT: {
-          summary: {
-            startsWith: HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
+        NOT: expect.arrayContaining([
+          {
+            summary: {
+              startsWith: HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
+            },
           },
-        },
+        ]),
       }),
     }));
   });

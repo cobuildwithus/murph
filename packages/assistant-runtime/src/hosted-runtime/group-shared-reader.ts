@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmod, lstat, mkdir } from "node:fs/promises";
-import path from "node:path";
+import { lstat } from "node:fs/promises";
 
 import {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
@@ -20,11 +19,11 @@ import {
   type HostedVaultShareSelectableProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 import {
-  ASSISTANT_STATE_DIRECTORY_MODE,
-  ASSISTANT_STATE_FILE_MODE,
+  adoptAssistantStateFile,
+  ensureAssistantStateDir,
   readVersionedJsonStateFile,
-  resolveRuntimePaths,
-  writeVersionedJsonStateFile,
+  resolveAssistantStatePaths,
+  writeAssistantStateVersionedJson,
 } from "@murphai/runtime-state/node";
 
 import type { HostedRuntimeGroupToolPort } from "./platform.ts";
@@ -40,10 +39,6 @@ const HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_SCHEMA =
 const HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_SCHEMA_VERSION = 1;
 const HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_LABEL =
   "hosted group participant display-name cache";
-const HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_DIRECTORY =
-  "assistant-runtime";
-const HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_FILE =
-  "group-participant-display-names.json";
 const HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_MAX_BYTES = 2 * 1_024 * 1_024;
 const HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_MAX_ENTRIES = 2_048;
 const HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_KEY_PATTERN =
@@ -382,11 +377,8 @@ export function createHostedGroupParticipantDisplayNameReader(input: {
 export function resolveHostedGroupParticipantDisplayNameCachePath(
   vaultRoot: string,
 ): string {
-  return path.join(
-    resolveRuntimePaths(vaultRoot).cacheRoot,
-    HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_DIRECTORY,
-    HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_FILE,
-  );
+  return resolveAssistantStatePaths(vaultRoot)
+    .groupParticipantDisplayNameCachePath;
 }
 
 async function readHostedGroupParticipantDisplayNameCache(input: {
@@ -395,25 +387,12 @@ async function readHostedGroupParticipantDisplayNameCache(input: {
   vaultRoot: string;
 }): Promise<HostedGroupParticipantDisplayNameCacheRead> {
   try {
-    const cachePath = resolveHostedGroupParticipantDisplayNameCachePathBoundary({
+    const cacheFilePath = resolveHostedGroupParticipantDisplayNameCachePathBoundary({
       cacheFilePath: input.cacheFilePath,
       vaultRoot: input.vaultRoot,
     });
-    await assertHostedGroupParticipantDisplayNameCacheAncestor(
-      cachePath.runtimeRoot,
-    );
-    await assertHostedGroupParticipantDisplayNameCacheAncestor(
-      cachePath.cacheRoot,
-    );
-    await assertHostedGroupParticipantDisplayNameCacheAncestor(
-      cachePath.cacheDirectory,
-    );
-    const cacheFileStats = await lstat(cachePath.cacheFilePath);
-    if (cacheFileStats.isSymbolicLink() || !cacheFileStats.isFile()) {
-      return invalidHostedGroupParticipantDisplayNameCacheRead();
-    }
-    await chmod(cachePath.cacheDirectory, ASSISTANT_STATE_DIRECTORY_MODE);
-    await chmod(cachePath.cacheFilePath, ASSISTANT_STATE_FILE_MODE);
+    await adoptAssistantStateFile(cacheFilePath);
+    const cacheFileStats = await lstat(cacheFilePath);
     if (
       cacheFileStats.size
       > HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_MAX_BYTES
@@ -422,7 +401,7 @@ async function readHostedGroupParticipantDisplayNameCache(input: {
     }
 
     const { value } = await readVersionedJsonStateFile({
-      currentPath: cachePath.cacheFilePath,
+      currentPath: cacheFilePath,
       label: HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_LABEL,
       parseValue: parseHostedGroupParticipantDisplayNameCacheState,
       schema: HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_SCHEMA,
@@ -488,13 +467,15 @@ async function writeHostedGroupParticipantDisplayNameCacheState(input: {
   entries: readonly HostedGroupParticipantDisplayNameCacheStoredEntry[];
   vaultRoot: string;
 }): Promise<void> {
-  const cachePath = await ensureHostedGroupParticipantDisplayNameCacheDirectory({
+  const cacheFilePath = resolveHostedGroupParticipantDisplayNameCachePathBoundary({
     cacheFilePath: input.cacheFilePath,
     vaultRoot: input.vaultRoot,
   });
-  await writeVersionedJsonStateFile({
-    filePath: cachePath.cacheFilePath,
-    mode: ASSISTANT_STATE_FILE_MODE,
+  await ensureAssistantStateDir(
+    resolveAssistantStatePaths(input.vaultRoot).stateDirectory,
+  );
+  await writeAssistantStateVersionedJson({
+    filePath: cacheFilePath,
     schema: HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_SCHEMA,
     schemaVersion: HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_SCHEMA_VERSION,
     value: {
@@ -503,130 +484,18 @@ async function writeHostedGroupParticipantDisplayNameCacheState(input: {
   });
 }
 
-async function ensureHostedGroupParticipantDisplayNameCacheDirectory(
-  input: {
-    cacheFilePath: string;
-    vaultRoot: string;
-  },
-): Promise<HostedGroupParticipantDisplayNameCachePathBoundary> {
-  const cachePath = resolveHostedGroupParticipantDisplayNameCachePathBoundary(input);
-  await ensureHostedGroupParticipantDisplayNameCacheAncestor(
-    cachePath.runtimeRoot,
-  );
-  await ensureHostedGroupParticipantDisplayNameCacheAncestor(
-    cachePath.cacheRoot,
-  );
-  await ensureHostedGroupParticipantDisplayNameCacheAncestor(
-    cachePath.cacheDirectory,
-  );
-  try {
-    const stats = await lstat(cachePath.cacheFilePath);
-    if (stats.isSymbolicLink() || !stats.isFile()) {
-      throw new Error(
-        "Hosted group participant display-name cache path is not a file.",
-      );
-    }
-  } catch (error) {
-    if (!isMissingPathError(error)) {
-      throw error;
-    }
-  }
-  await chmod(cachePath.cacheDirectory, ASSISTANT_STATE_DIRECTORY_MODE);
-  return cachePath;
-}
-
-interface HostedGroupParticipantDisplayNameCachePathBoundary {
-  cacheDirectory: string;
-  cacheFilePath: string;
-  cacheRoot: string;
-  runtimeRoot: string;
-}
-
 function resolveHostedGroupParticipantDisplayNameCachePathBoundary(input: {
   cacheFilePath: string;
   vaultRoot: string;
-}): HostedGroupParticipantDisplayNameCachePathBoundary {
-  const runtimePaths = resolveRuntimePaths(input.vaultRoot);
-  const cacheDirectory = path.join(
-    runtimePaths.cacheRoot,
-    HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_DIRECTORY,
-  );
-  const cacheFilePath = path.join(
-    cacheDirectory,
-    HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_FILE,
-  );
-  if (path.resolve(input.cacheFilePath) !== path.resolve(cacheFilePath)) {
+}): string {
+  const cacheFilePath = resolveAssistantStatePaths(input.vaultRoot)
+    .groupParticipantDisplayNameCachePath;
+  if (input.cacheFilePath !== cacheFilePath) {
     throw new Error(
       "Hosted group participant display-name cache path is outside its boundary.",
     );
   }
-  return {
-    cacheDirectory,
-    cacheFilePath,
-    cacheRoot: runtimePaths.cacheRoot,
-    runtimeRoot: runtimePaths.runtimeRoot,
-  };
-}
-
-async function ensureHostedGroupParticipantDisplayNameCacheAncestor(
-  directoryPath: string,
-): Promise<void> {
-  try {
-    const stats = await lstat(directoryPath);
-    if (stats.isSymbolicLink() || !stats.isDirectory()) {
-      throw new Error(
-        "Hosted group participant display-name cache path is not a directory.",
-      );
-    }
-    return;
-  } catch (error) {
-    if (!isMissingPathError(error)) {
-      throw error;
-    }
-  }
-
-  try {
-    await mkdir(directoryPath, { mode: ASSISTANT_STATE_DIRECTORY_MODE });
-  } catch (error) {
-    if (!isPathExistsError(error)) {
-      throw error;
-    }
-  }
-  const stats = await lstat(directoryPath);
-  if (stats.isSymbolicLink() || !stats.isDirectory()) {
-    throw new Error(
-      "Hosted group participant display-name cache path is not a directory.",
-    );
-  }
-}
-
-async function assertHostedGroupParticipantDisplayNameCacheAncestor(
-  directoryPath: string,
-): Promise<void> {
-  const stats = await lstat(directoryPath);
-  if (stats.isSymbolicLink() || !stats.isDirectory()) {
-    throw new Error(
-      "Hosted group participant display-name cache path is not a directory.",
-    );
-  }
-}
-
-function isMissingPathError(error: unknown): boolean {
-  return Boolean(
-    error
-    && typeof error === "object"
-    && "code" in error
-    && (error as { code?: unknown }).code === "ENOENT"
-  );
-}
-
-function isPathExistsError(error: unknown): boolean {
-  return Boolean(
-    error
-    && typeof error === "object"
-    && "code" in error
-    && (error as { code?: unknown }).code === "EEXIST"
-  );
+  return cacheFilePath;
 }
 
 function parseHostedGroupParticipantDisplayNameCacheState(

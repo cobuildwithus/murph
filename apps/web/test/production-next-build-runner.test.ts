@@ -141,7 +141,7 @@ test("production Next runner owns the cache transition and fail-closed epoch", a
       `Resetting incompatible Next build cache for epoch=${buildCacheEpoch}`,
     );
     expect(coldBuild.stdout).toContain(
-      "compiler=webpack parent_old_space_mb=1024 build_worker_old_space_mb=3072 typecheck_old_space_mb=3584 webpack_cache=disabled webpack_build_worker=on",
+      "compiler=webpack parent_old_space_mb=1024 build_worker_old_space_mb=3072 typecheck_old_space_mb=6144 webpack_cache=disabled webpack_build_worker=on",
     );
     await expect(readFile(staleCacheEntry, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(cacheStamp, "utf8")).resolves.toBe(`${buildCacheEpoch}\n`);
@@ -161,9 +161,9 @@ test("production Next runner owns the cache transition and fail-closed epoch", a
       "",
     ].join("\n"));
     await expect(readFile(fixture.typecheckLog, "utf8")).resolves.toBe([
-      "NODE_OPTIONS=--trace-warnings --max-old-space-size=3584",
+      "NODE_OPTIONS=--trace-warnings --max-old-space-size=6144",
       "TYPECHECK_GATE=",
-      "--max-old-space-size=3584",
+      "--max-old-space-size=6144",
       "/fixture/tsc",
       "-p",
       "tsconfig.next.json",

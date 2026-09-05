@@ -35,6 +35,11 @@
       "from": "protocol_variant:finnish-dry-sauna",
       "to": "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
       "reason": "Legacy modality shorthand now resolves to the Finnish dry-sauna experiment."
+    },
+    {
+      "from": "goal_template:build-aerobic-base",
+      "to": "goal_template:improve-cardio-endurance",
+      "reason": "The overlapping aerobic-base guide now resolves to the canonical cardio-endurance outcome."
     }
   ]
 }

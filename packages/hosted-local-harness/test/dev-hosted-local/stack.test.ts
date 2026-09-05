@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { constants } from "node:fs";
 import { access, copyFile, cp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Writable } from "node:stream";
@@ -76,6 +77,10 @@ const hostedLocalE2eRunnerSmokeOnceEnv =
   "MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE";
 const hostedLocalE2eRunnerSmokeProvedBuildIdEnv =
   "MURPH_HOSTED_LOCAL_E2E_RUNNER_SMOKE_PROVED_BUILD_ID";
+const defaultRunnerBundleManifestText = vi.hoisted(() => JSON.stringify({
+  bundleFingerprint: "fixture-runner-bundle-fingerprint",
+  sourceFingerprint: "fixture-runner-source-fingerprint",
+}));
 
 const runCommand = vi.fn<(
   command: string,
@@ -180,7 +185,18 @@ const collectDockerDevDiagnostics = vi.fn(async () => "Docker diagnostics:\n- do
 const DEFAULT_CODEX_MODEL_CATALOG_TEXT = JSON.stringify({
   models: [
     {
-      name: "GPT-5.5",
+      name: "GPT-5.6-Sol",
+      service_tiers: [
+        {
+          id: "priority",
+          name: "Priority",
+        },
+      ],
+      slug: "gpt-5.6-sol",
+      tool_mode: "code_mode_only",
+    },
+    {
+      name: "GPT-5.6-Terra",
       service_tiers: [
         {
           id: "priority",
@@ -188,6 +204,18 @@ const DEFAULT_CODEX_MODEL_CATALOG_TEXT = JSON.stringify({
         },
       ],
       slug: "gpt-5.6-terra",
+      tool_mode: "code_mode_only",
+    },
+    {
+      name: "GPT-5.6-Luna",
+      service_tiers: [
+        {
+          id: "priority",
+          name: "Priority",
+        },
+      ],
+      slug: "gpt-5.6-luna",
+      tool_mode: "code_mode_only",
     },
     {
       display_name: "GPT-5.4-Mini",
@@ -300,7 +328,10 @@ vi.mock("node:fs/promises", () => ({
   cp: vi.fn(async () => {}),
   mkdir: vi.fn(async () => {}),
   mkdtemp: vi.fn(async () => "/tmp/murph-dev-env-test"),
-  readFile: vi.fn(async () => {
+  readFile: vi.fn(async (filePath) => {
+    if (String(filePath).endsWith(".murph-runner-bundle-manifest.json")) {
+      return defaultRunnerBundleManifestText;
+    }
     const error = new Error("File not found") as Error & { code: string };
     error.code = "ENOENT";
     throw error;
@@ -564,6 +595,18 @@ function createDeferred<T>(): {
   };
 }
 
+function readRunnerBundleManifestFixture(filePath: unknown): string | null {
+  return String(filePath).endsWith(".murph-runner-bundle-manifest.json")
+    ? defaultRunnerBundleManifestText
+    : null;
+}
+
+function createMissingFileError(): Error & { code: string } {
+  const error = new Error("File not found") as Error & { code: string };
+  error.code = "ENOENT";
+  return error;
+}
+
 describe("hosted local dev stack", () => {
   beforeEach(() => {
     vi.stubEnv("HOSTED_EXECUTION_RUNNER_HOST_ALIAS", "host.docker.internal");
@@ -572,10 +615,12 @@ describe("hosted local dev stack", () => {
   afterEach(() => {
     vi.clearAllMocks();
     vi.mocked(cp).mockImplementation(async () => {});
-    vi.mocked(readFile).mockImplementation(async () => {
-      const error = new Error("File not found") as Error & { code: string };
-      error.code = "ENOENT";
-      throw error;
+    vi.mocked(readFile).mockImplementation(async (filePath) => {
+      const manifest = readRunnerBundleManifestFixture(filePath);
+      if (manifest !== null) {
+        return manifest;
+      }
+      throw createMissingFileError();
     });
     runCommand.mockImplementation(async () => {});
     spawnSync.mockImplementation(defaultSpawnSyncImplementation);
@@ -609,6 +654,11 @@ describe("hosted local dev stack", () => {
     const runtimeModule = await import("../../src/dev-hosted-local/runtime.ts");
     const vercelModule = await import("../../src/dev-hosted-local/vercel.ts");
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+    vi.mocked(environmentModule.buildHostedLocalDevOverrides).mockReturnValueOnce({
+      DEVICE_SYNC_PUBLIC_BASE_URL:
+        "https://local.withmurph.ai:3443/api/device-sync",
+      HOSTED_WEB_BASE_URL: "https://local.withmurph.ai:3443",
+    });
     vi.mocked(runtimeModule.assertHostedWebDevServerAvailable).mockImplementationOnce(
       async () => {
         expect(process.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
@@ -628,6 +678,7 @@ describe("hosted local dev stack", () => {
         ...process.env,
         HOSTED_APP_SESSION_HMAC_KEY: inheritedAppSessionHmacKey,
         LINQ_API_BASE_URL: "http://host.docker.internal:4011",
+        MURPH_DEV_WEB_PUBLIC_BASE_URL: "https://local.withmurph.ai:3443",
       },
       webProcessEnvOverrides: {
         LINQ_API_BASE_URL: "http://127.0.0.1:4011",
@@ -636,6 +687,7 @@ describe("hosted local dev stack", () => {
     await stack.ready;
     await stack.stop();
 
+    expect(stack.webBaseUrl).toBe("https://local.withmurph.ai:3443");
     expect(process.env.HOSTED_APP_SESSION_HMAC_KEY).toBeUndefined();
     expect(stack.runtimeEnv.LINQ_API_BASE_URL).toBe(
       "http://host.docker.internal:4011",
@@ -673,9 +725,10 @@ describe("hosted local dev stack", () => {
         "--var",
         "HOSTED_WEB_BASE_URL:http://localhost:3000",
         "--var",
-        "DEVICE_SYNC_PUBLIC_BASE_URL:http://localhost:3000/api/device-sync",
+        "DEVICE_SYNC_PUBLIC_BASE_URL:https://local.withmurph.ai:3443/api/device-sync",
       ],
       expect.objectContaining({
+        HOSTED_WEB_BASE_URL: "http://localhost:3000",
         HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "host.docker.internal",
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK:
           expect.stringContaining("automation-d"),
@@ -1313,6 +1366,10 @@ describe("hosted local dev stack", () => {
     const dockerContext = "desktop-linux";
     const dockerContextId = createHash("sha256").update(dockerContext).digest("hex");
     vi.mocked(readFile).mockImplementation(async (filePath) => {
+      const manifest = readRunnerBundleManifestFixture(filePath);
+      if (manifest !== null) {
+        return manifest;
+      }
       if (/apps[/\\]web[/\\]\.next-smoke-e2e-fixture[/\\]BUILD_ID$/u.test(String(filePath))) {
         return "smoke-build-id\n";
       }
@@ -1325,9 +1382,7 @@ describe("hosted local dev stack", () => {
         });
       }
 
-      const error = new Error("File not found") as Error & { code: string };
-      error.code = "ENOENT";
-      throw error;
+      throw createMissingFileError();
     });
 
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
@@ -1565,13 +1620,15 @@ describe("hosted local dev stack", () => {
       OPENAI_API_KEY: "local-openai-key",
     });
     vi.mocked(readFile).mockImplementation(async (filePath) => {
+      const manifest = readRunnerBundleManifestFixture(filePath);
+      if (manifest !== null) {
+        return manifest;
+      }
       if (/apps[/\\]web[/\\]\.next-smoke-e2e-fixture[/\\]BUILD_ID$/u.test(String(filePath))) {
         return "smoke-build-id\n";
       }
 
-      const error = new Error("File not found") as Error & { code: string };
-      error.code = "ENOENT";
-      throw error;
+      throw createMissingFileError();
     });
     spawnChildProcess
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "cloudflare", pid: 107 }))
@@ -1700,6 +1757,10 @@ describe("hosted local dev stack", () => {
     const dockerContext = "desktop-linux";
     const dockerContextId = createHash("sha256").update(dockerContext).digest("hex");
     vi.mocked(readFile).mockImplementation(async (filePath) => {
+      const manifest = readRunnerBundleManifestFixture(filePath);
+      if (manifest !== null) {
+        return manifest;
+      }
       if (String(filePath).endsWith(`${path.sep}.docker${path.sep}config.json`)) {
         return JSON.stringify({
           auths: { "registry.example.invalid": {} },
@@ -1708,9 +1769,7 @@ describe("hosted local dev stack", () => {
         });
       }
 
-      const error = new Error("File not found") as Error & { code: string };
-      error.code = "ENOENT";
-      throw error;
+      throw createMissingFileError();
     });
     vi.mocked(cp).mockImplementation(async (sourcePath) => {
       if (String(sourcePath).endsWith(path.join("contexts", "tls", dockerContextId))) {
@@ -1758,7 +1817,10 @@ describe("hosted local dev stack", () => {
       `/tmp/murph-dev-env-test/docker-config/contexts/tls/${dockerContextId}`,
       { recursive: true },
     );
-    expect(access).toHaveBeenCalledWith(expect.stringContaining(".docker/cli-plugins"));
+    expect(access).toHaveBeenCalledWith(
+      expect.stringContaining(".docker/cli-plugins/docker-buildx"),
+      constants.X_OK,
+    );
     expect(rm).toHaveBeenCalledWith(
       "/tmp/murph-dev-env-test/docker-config/cli-plugins",
       { force: true, recursive: true },
@@ -1769,6 +1831,71 @@ describe("hosted local dev stack", () => {
       "dir",
     );
   });
+
+  it.each(["missing", "not executable"])(
+    "skips a Docker plugin directory whose Buildx is %s",
+    async (buildxState) => {
+      vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
+      const configModule = await import("../../src/dev-hosted-local/config.ts");
+      vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+        ...defaultConfig,
+        skipLinqWebhookRegister: true,
+        webPort: 31001,
+        workerPersistDir: ".tmp/e2e/wrangler",
+        workerPort: 32001,
+      });
+      const firstDirectory = "/tmp/host-docker-config/cli-plugins";
+      const originalAccess = vi.mocked(access).getMockImplementation();
+      vi.mocked(access).mockImplementation(async (filePath, mode) => {
+        const value = String(filePath);
+        if (value === firstDirectory) {
+          return;
+        }
+        if (value === path.join(firstDirectory, "docker-buildx")) {
+          if (buildxState === "not executable" && mode !== constants.X_OK) {
+            return;
+          }
+          const error = createMissingFileError();
+          error.code = buildxState === "not executable" ? "EACCES" : "ENOENT";
+          throw error;
+        }
+        if (value.endsWith(path.join(".docker", "cli-plugins", "docker-buildx"))) {
+          return;
+        }
+        throw createMissingFileError();
+      });
+      try {
+        const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+        const stack = await startHostedLocalDevStack({
+          env: {
+            ...process.env,
+            DOCKER_CONFIG: "/tmp/host-docker-config",
+            MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+            MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
+            MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
+            NEXT_DIST_DIR_MODE: "smoke",
+            NEXT_DIST_DIR_SUFFIX: "e2e-fixture",
+          },
+        });
+        await stack.ready;
+        await stack.stop();
+        expect(symlink).toHaveBeenCalledWith(
+          expect.stringContaining(path.join(".docker", "cli-plugins")),
+          "/tmp/murph-dev-env-test/docker-config/cli-plugins",
+          "dir",
+        );
+        expect(symlink).not.toHaveBeenCalledWith(
+          firstDirectory,
+          expect.any(String),
+          "dir",
+        );
+      } finally {
+        if (originalAccess) {
+          vi.mocked(access).mockImplementation(originalAccess);
+        }
+      }
+    },
+  );
 
   it("discovers the Apple Silicon Homebrew Docker CLI plugin directory on macOS", async () => {
     const stackModule = await import("../../src/dev-hosted-local/stack.ts");
@@ -2542,13 +2669,15 @@ describe("hosted local dev stack", () => {
     vi.stubEnv(hostedLocalE2eRunnerSmokeOnceEnv, "1");
     vi.stubEnv(hostedLocalE2eRunnerSmokeProvedBuildIdEnv, "");
     vi.mocked(readFile).mockImplementation(async (filePath) => {
+      const manifest = readRunnerBundleManifestFixture(filePath);
+      if (manifest !== null) {
+        return manifest;
+      }
       if (String(filePath).endsWith("runner-smoke-proved.json")) {
         return `${JSON.stringify({ buildId: expectedBuildId })}\n`;
       }
 
-      const error = new Error("File not found") as Error & { code: string };
-      error.code = "ENOENT";
-      throw error;
+      throw createMissingFileError();
     });
     const stderrTarget = new CapturingWritable();
     const configModule = await import("../../src/dev-hosted-local/config.ts");
@@ -2856,7 +2985,18 @@ describe("hosted local dev stack", () => {
           stdout: JSON.stringify({
             models: [
               {
-                name: "GPT-5.5",
+                name: "GPT-5.6-Sol",
+                service_tiers: [
+                  {
+                    id: "priority",
+                    name: "Priority",
+                  },
+                ],
+                slug: "gpt-5.6-sol",
+                tool_mode: "code_mode_only",
+              },
+              {
+                name: "GPT-5.6-Terra",
                 service_tiers: [
                   {
                     id: "priority",
@@ -2864,6 +3004,18 @@ describe("hosted local dev stack", () => {
                   },
                 ],
                 slug: "gpt-5.6-terra",
+                tool_mode: "code_mode_only",
+              },
+              {
+                name: "GPT-5.6-Luna",
+                service_tiers: [
+                  {
+                    id: "priority",
+                    name: "Priority",
+                  },
+                ],
+                slug: "gpt-5.6-luna",
+                tool_mode: "code_mode_only",
               },
               {
                 display_name: "GPT-5.4-Mini",
@@ -2946,7 +3098,22 @@ describe("hosted local dev stack", () => {
           service_tiers: expect.arrayContaining([
             expect.objectContaining({ id: "flex" }),
           ]),
+          slug: "gpt-5.6-sol",
+          tool_mode: "code_mode",
+        },
+        {
+          service_tiers: expect.arrayContaining([
+            expect.objectContaining({ id: "flex" }),
+          ]),
           slug: "gpt-5.6-terra",
+          tool_mode: "code_mode",
+        },
+        {
+          service_tiers: expect.arrayContaining([
+            expect.objectContaining({ id: "flex" }),
+          ]),
+          slug: "gpt-5.6-luna",
+          tool_mode: "code_mode",
         },
         {
           display_name: "GPT-5.4-Mini",
@@ -2978,12 +3145,18 @@ describe("hosted local dev stack", () => {
       stdout: "{not-json",
     },
     {
-      expectedMessage: "Hosted local dev Codex model catalog is missing gpt-5.6-terra.",
+      expectedMessage: "Hosted local dev Codex model catalog is missing gpt-5.6-sol.",
       stdout: JSON.stringify({ models: [] }),
     },
     {
       expectedMessage: "Hosted local dev Codex model catalog is missing gpt-5.4-mini.",
-      stdout: JSON.stringify({ models: [{ slug: "gpt-5.6-terra" }] }),
+      stdout: JSON.stringify({
+        models: [
+          { slug: "gpt-5.6-sol" },
+          { slug: "gpt-5.6-terra" },
+          { slug: "gpt-5.6-luna" },
+        ],
+      }),
     },
   ])(
     "fails closed when Codex bundled model catalog prep fails: $expectedMessage",

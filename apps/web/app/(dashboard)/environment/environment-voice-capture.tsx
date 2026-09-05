@@ -1982,17 +1982,16 @@ export function EnvironmentChatAction({
   return (
     <MurphContactDialog
       options={contactOptions}
-      trigger={(show) =>
+      trigger={
         presentation === "link" ? (
           <button
             className="inline-flex min-h-11 items-center gap-1.5 text-base font-medium text-muted-foreground underline decoration-border underline-offset-4 hover:text-foreground sm:min-h-0 sm:text-sm"
-            onClick={show}
             type="button"
           >
             {content}
           </button>
         ) : (
-          <Button onClick={show} variant="ghost">
+          <Button variant="ghost">
             {content}
           </Button>
         )

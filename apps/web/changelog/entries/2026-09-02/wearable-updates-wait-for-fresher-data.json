@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-09-02",
+  "order": 200,
+  "item": {
+    "id": "wearable-updates-wait-for-fresher-data",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Wearable updates wait for fresher data",
+    "summary": "Murph now favors next-day timing for supported wearable summaries and gives a clearer recovery step when Apple Health data is late.",
+    "details": "Exact requested times and action-timed reminders stay unchanged. In a group, Murph names a participant only after consented shared status shows Apple Health is their sole connected source; missing data remains unknown rather than zero.",
+    "relevanceTags": ["wearables", "reminders", "groups"],
+    "sourcePullRequests": [2767],
+    "tryIt": {
+      "label": "Ask about missing Apple Health data",
+      "prompt": "My Apple Health sleep data for yesterday is missing in Murph. What should I check?"
+    }
+  }
+}

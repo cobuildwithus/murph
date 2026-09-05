@@ -23,6 +23,7 @@ import {
   type AssistantActiveTurnInputCheckpointInput,
 } from '../src/assistant/turn-input.ts'
 import {
+  assistantInputCandidateFromStoredEvent,
   createStoreBackedAssistantInputSource,
   type AssistantInputCandidate,
   type AssistantInputSource,
@@ -9732,6 +9733,136 @@ describe('assistant auto-reply runtime', () => {
     expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
       .toHaveBeenCalledWith(expect.objectContaining({
         inputIds: [initialInput.event.inputId],
+      }))
+  })
+
+  it('keeps a later exact-conversation input behind an earlier group actor from the store', async () => {
+    const context = await createTempVaultContext(
+      'assistant-reply-store-group-order-',
+    )
+    tempRoots.push(context.parentRoot)
+    const stageInput = async (input: {
+      actorId: string
+      laneSeq: string
+      messageId: string
+      occurredAt: string
+      text: string
+    }) => assistantInputCandidateFromStoredEvent(
+      await upsertAssistantInputEvent({
+        event: {
+          content: {
+            text: input.text,
+            userMessageContent: [{ text: input.text, type: 'text' }],
+          },
+          conversation: {
+            accountId: 'safe_acct_store_group_order',
+            actorId: input.actorId,
+            actorIsSelf: false,
+            source: 'linq',
+            threadId: 'hidden_store_group_order_thread',
+            threadIsDirect: false,
+          },
+          occurredAt: input.occurredAt,
+          receivedAt: input.occurredAt,
+          replyTarget: {
+            channel: 'linq',
+            messageId: input.messageId,
+            threadId: 'real_store_group_order_thread',
+          },
+          sourceRef: {
+            dedupeKey: `dedupe_store_group_order_${input.laneSeq}`,
+            eventId: `event_store_group_order_${input.laneSeq}`,
+            itemId: `item_store_group_order_${input.laneSeq}`,
+            kind: 'hosted-mailbox',
+            lane: 'conversation',
+            laneSeq: input.laneSeq,
+            payloadSchema: 'murph.hosted-mailbox-payload.v1',
+            payloadSource: 'inline',
+            source: 'hosted-mailbox',
+            wakeSchema: 'murph.hosted-execution-wake.v1',
+          },
+        },
+        vault: context.vaultRoot,
+      }),
+    )
+    const initial = await stageInput({
+      actorId: 'safe_actor_store_a',
+      laneSeq: '1',
+      messageId: 'store_group_order_message_a1',
+      occurredAt: '2026-04-08T00:03:00.000Z',
+      text: 'first message from actor A',
+    })
+    await stageInput({
+      actorId: 'safe_actor_store_b',
+      laneSeq: '2',
+      messageId: 'store_group_order_message_b1',
+      occurredAt: '2026-04-08T00:04:00.000Z',
+      text: 'intervening message from actor B',
+    })
+    await stageInput({
+      actorId: 'safe_actor_store_a',
+      laneSeq: '3',
+      messageId: 'store_group_order_message_a2',
+      occurredAt: '2026-04-08T00:05:00.000Z',
+      text: 'later message from actor A',
+    })
+    const inputSource = createStoreBackedAssistantInputSource({
+      vault: context.vaultRoot,
+    })
+    let admissionResult: unknown
+    replyMocks.sendAssistantMessage.mockImplementation(async (input: {
+      activeTurnInput?: (admission: {
+        availableInputIds?: readonly string[]
+        sessionId: string
+        turnId: string
+        vault: string
+      }) => Promise<unknown>
+    }) => {
+      admissionResult = await input.activeTurnInput?.({
+        availableInputIds: [],
+        sessionId: 'session-store-group-order',
+        turnId: 'turn-store-group-order',
+        vault: context.vaultRoot,
+      })
+      return {
+        delivery: {
+          channel: 'linq',
+          target: 'real_store_group_order_thread',
+          sentAt: '2026-04-08T00:10:00.000Z',
+        },
+        deliveryDeferred: false,
+        deliveryError: null,
+        deliveryIntentId: 'intent-store-group-order',
+        response: 'response to actor A',
+        session: { sessionId: 'session-store-group-order' },
+      }
+    })
+    const reply = await vi.importActual<typeof import('../src/assistant/automation/reply.ts')>(
+      '../src/assistant/automation/reply.ts',
+    )
+    const group = reply.createAssistantAutoReplyGroupContext([
+      createCapturelessReplyGroupItem(initial),
+    ])
+    if (!group) {
+      throw new Error('expected store-backed group context')
+    }
+
+    const result = await reply.processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: group,
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices({ show: vi.fn() }),
+      inputSource,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: context.vaultRoot,
+    })
+
+    expect(result.replied).toBe(1)
+    expect(admissionResult).toEqual({ kind: 'no-new-input' })
+    expect(evidenceMocks.writeAssistantAutoReplyReplyIntentEvidence)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        inputIds: [initial.event.inputId],
       }))
   })
 

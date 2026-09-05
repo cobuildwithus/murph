@@ -83,6 +83,8 @@ type RunnerContainerLocalStartupFailureStage = Exclude<
 function expectRunnerContainerStartupFailureObservation(input: {
   cleanupUnsettled: boolean;
   expectedElapsedMs?: number;
+  expectedOrchestrationAttemptId?: string;
+  expectedTimeoutMs?: number;
   forbiddenValues?: readonly string[];
   stage: RunnerContainerLocalStartupFailureStage;
 }): void {
@@ -100,6 +102,10 @@ function expectRunnerContainerStartupFailureObservation(input: {
   expect(observation).toEqual({
     component: "container",
     details: {
+      ...(input.expectedOrchestrationAttemptId === undefined
+        ? {}
+        : { orchestrationAttemptId: input.expectedOrchestrationAttemptId }),
+      runtimeStartupConfirmTimeoutMs: input.expectedTimeoutMs ?? expect.any(Number),
       runtimeStartupCleanupUnsettled: input.cleanupUnsettled,
       runtimeStartupFailureElapsedMs: expect.any(Number),
       runtimeStartupFailureStage: input.stage,
@@ -121,6 +127,12 @@ function expectRunnerContainerStartupFailureObservation(input: {
   expect(elapsedMs).toBeLessThanOrEqual(
     RUNNER_CONTAINER_STARTUP_FAILURE_ELAPSED_MAX_MS,
   );
+  const timeoutMs = details.runtimeStartupConfirmTimeoutMs;
+  expect(typeof timeoutMs).toBe("number");
+  if (typeof timeoutMs !== "number") {
+    throw new Error("Expected numeric startup confirmation timeout milliseconds.");
+  }
+  expect(timeoutMs).toBeGreaterThan(0);
   if (input.expectedElapsedMs !== undefined) {
     expect(elapsedMs).toBe(input.expectedElapsedMs);
   }
@@ -2370,6 +2382,7 @@ describe("RunnerContainer", () => {
   });
 
   it("classifies cold start and port-readiness failures", async () => {
+    const orchestrationAttemptId = "test-cold-start-timeout-correlation";
     const privateErrorText = "port wait failed with token=private-start-token";
     const startFailure = new Error(privateErrorText);
     const { container } = createContainerDouble({
@@ -2379,12 +2392,15 @@ describe("RunnerContainer", () => {
     });
 
     await expect(container.ensureReadyForProcessing({
+      orchestrationAttemptId,
       timeoutMs: 15_000,
       userId: "member_private_cold_start",
     })).rejects.toBe(startFailure);
 
     expectRunnerContainerStartupFailureObservation({
       cleanupUnsettled: false,
+      expectedOrchestrationAttemptId: orchestrationAttemptId,
+      expectedTimeoutMs: 15_000,
       forbiddenValues: [privateErrorText, "member_private_cold_start"],
       stage: "cold_start_or_ports",
     });
@@ -4661,6 +4677,24 @@ describe("RunnerContainer", () => {
     expect(containerFetch).toHaveBeenCalledTimes(2);
     expect(container.envVars).toEqual(EXPECTED_RUNNER_CONTAINER_ENV);
     expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the Codex shell diagnostic budget separate from runtime readiness", async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    try {
+      const { container } = createContainerDouble({
+        env: {
+          HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "20000",
+        },
+      });
+
+      await container.smokeHealth();
+
+      expect(timeoutSpy).toHaveBeenCalledWith(20_000);
+      expect(timeoutSpy).toHaveBeenCalledWith(60_000);
+    } finally {
+      timeoutSpy.mockRestore();
+    }
   });
 
   it("can extend deploy smoke to run a direct R2 presigned PUT probe", async () => {
@@ -10262,7 +10296,7 @@ describe("RunnerContainer", () => {
     expect(renewActivityTimeout).not.toHaveBeenCalled();
   });
 
-  it("destroys an idle legacy child that omits the optional warmth watermark", async () => {
+  it("re-arms an idle legacy child that omits the optional warmth watermark", async () => {
     const renewActivityTimeout = vi.fn();
     const { container, destroy } = createContainerDouble({
       initialStatus: "running",
@@ -10279,8 +10313,8 @@ describe("RunnerContainer", () => {
 
     await container.onActivityExpired();
 
-    expect(destroy).toHaveBeenCalledOnce();
-    expect(renewActivityTimeout).not.toHaveBeenCalled();
+    expect(destroy).not.toHaveBeenCalled();
+    expect(renewActivityTimeout).toHaveBeenCalledOnce();
   });
 
   it("re-arms cleanup when child health is unavailable", async () => {
@@ -11405,6 +11439,7 @@ function createCodexShellSmokeResult() {
     cliSurfaceContractBytes: 37282,
     cliSurfaceHotPathProofCount: 5,
     client: "codex-app-server",
+    healthCommonsCliGoalProofCount: 6,
     murphPathBytes: 28,
     noteAddBytes: 128,
     stderrBytes: 0,

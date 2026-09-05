@@ -137,10 +137,18 @@ export type {
 } from "./browser-replica/lab-results.ts";
 export {
   selectBrowserVaultHistory,
+  selectBrowserVaultJournal,
   selectBrowserVaultOverview,
   selectBrowserVaultExperimentSummary,
   selectBrowserVaultTrackedExperiments,
 } from "./browser-replica/views.ts";
+export { buildJournalView, emptyJournalView } from "./journal-view.ts";
+export type {
+  JournalDay,
+  JournalEvent,
+  JournalRecord,
+  JournalView,
+} from "./journal-view.ts";
 export {
   BROWSER_VAULT_BIOMARKER_PANEL_SCHEMA,
   selectBrowserVaultBiomarkerPanel,

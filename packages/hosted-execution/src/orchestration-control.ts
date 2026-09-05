@@ -83,6 +83,8 @@ export const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS = [
   "device-sync.wake",
   "environment-interview.completed",
   "health.daily-metric.reported",
+  "journal.group-fact.recorded",
+  "member.channels.updated",
   "runtime.browser-vault-refresh-requested",
   "runtime.maintenance-requested",
 ] as const satisfies readonly HostedMailboxKind[];
@@ -129,6 +131,7 @@ export function classifyHostedSystemMailboxExecutionClass(input: {
 
 export interface HostedRuntimeEnsureProcessingRequest {
   assistantExecutionBlocked?: true;
+  conversationWorkPending?: true;
   orchestrationAttemptId: string;
   processingMode?: HostedRuntimeProcessingMode | null;
 }

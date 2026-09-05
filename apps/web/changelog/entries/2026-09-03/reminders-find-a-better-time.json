@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-09-03",
+  "order": 100,
+  "item": {
+    "id": "reminders-find-a-better-time",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Vague reminders now find a better time",
+    "summary": "When you ask for a reminder in the morning, afternoon, or another broad window, Murph can use your known routine and connected calendar to choose a specific time that fits.",
+    "details": "Exact times stay exact. Calendar checks use an existing connection, and the saved reminder remains a fixed time you can change.",
+    "relevanceTags": ["reminders", "personal-context"],
+    "sourcePullRequests": [2769],
+    "tryIt": {
+      "label": "Plan a reminder",
+      "prompt": "Tomorrow afternoon, remind me to do my mobility exercises. Choose a time that fits."
+    }
+  }
+}

@@ -36,6 +36,7 @@ import {
 } from "../src/deploy-smoke-live-model.ts";
 
 import {
+  assertSmokeCodexShellResult,
   buildVersionOverrideHeaders,
   resolveSmokeExpectedStandbyMode,
   resolveSmokeRunnerManifestPath,
@@ -117,6 +118,7 @@ function createCodexShellSmokeResult() {
     cliSurfaceContractBytes: 37282,
     cliSurfaceHotPathProofCount: 5,
     client: "codex-app-server",
+    healthCommonsCliGoalProofCount: 6,
     murphPathBytes: 28,
     noteAddBytes: 128,
     stderrBytes: 0,
@@ -125,6 +127,22 @@ function createCodexShellSmokeResult() {
     vaultShowBytes: 256,
   };
 }
+
+describe("assertSmokeCodexShellResult", () => {
+  it("requires the exact bounded public Goal proof count", () => {
+    for (const healthCommonsCliGoalProofCount of [5, 7, 6.5]) {
+      expect(() => assertSmokeCodexShellResult({
+        ...createCodexShellSmokeResult(),
+        healthCommonsCliGoalProofCount,
+      })).toThrow(
+        "runner container Codex shell smoke did not prove public Goal CLI round trips.",
+      );
+    }
+    expect(() => assertSmokeCodexShellResult(
+      createCodexShellSmokeResult(),
+    )).not.toThrow();
+  });
+});
 
 describe("buildVersionOverrideHeaders", () => {
   it("formats the Cloudflare version override header when the worker name and version id are present", () => {
@@ -1057,6 +1075,82 @@ describe("runSmokeHostedDeploy", () => {
     // Distinct attempt values are what give each retry a fresh smoke Durable
     // Object, so a pre-rollout container cannot be re-read for the whole run.
     expect(smokeAttempts).toEqual(["1", "2", "3"]);
+  });
+
+  it("retries a pre-rollout container before asserting the current smoke schema", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-smoke-stale-schema-"));
+    const manifestPath = path.join(
+      root,
+      ".deploy",
+      "runner-bundle",
+      ".murph-runner-bundle-manifest.json",
+    );
+    await mkdir(path.dirname(manifestPath), { recursive: true });
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify({
+        buildSkipped: false,
+        bundleFingerprint: "expected-bundle",
+        releaseSha: TEST_PUBLIC_RELEASE_SHA,
+        sourceFingerprint: "expected-source",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+
+    const smokeAttempts: (string | null)[] = [];
+    const fetchImpl = async (url: RequestInfo | URL) => {
+      if (String(url).endsWith("/")) {
+        return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner" }), {
+          status: 200,
+        });
+      }
+      if (String(url).endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      if (isContainerSmokeRequest(String(url))) {
+        const attempt = new URL(String(url)).searchParams.get("attempt");
+        smokeAttempts.push(attempt);
+        const stale = smokeAttempts.length === 1;
+        return new Response(JSON.stringify({
+          ok: true,
+          runnerContainer: {
+            codexShell: stale ? null : createCodexShellSmokeResult(),
+            ok: true,
+            runnerBundle: stale
+              ? {
+                  buildSkipped: false,
+                  bundleFingerprint: "stale-bundle",
+                  releaseSha: "89abcdef0123456789abcdef0123456789abcdef",
+                  sourceFingerprint: "stale-source",
+                }
+              : {
+                  buildSkipped: false,
+                  bundleFingerprint: "expected-bundle",
+                  releaseSha: TEST_PUBLIC_RELEASE_SHA,
+                  sourceFingerprint: "expected-source",
+                },
+            service: "cloudflare-hosted-runner-node",
+          },
+        }), { status: 200 });
+      }
+
+      throw new Error(`Unexpected smoke request: ${String(url)}`);
+    };
+
+    await runSmokeHostedDeploy({
+      fetchImpl,
+      log() {},
+      source: {
+        HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+        HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: manifestPath,
+        HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS: "2",
+        HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS: "0",
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+      },
+    });
+
+    expect(smokeAttempts).toEqual(["1", "2"]);
   });
 
   it("runs the live model turn against the container the bundle phase proved current", async () => {

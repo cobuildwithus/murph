@@ -29,10 +29,7 @@ export function ReferralSection({
       <div className="mx-auto grid max-w-[1200px] overflow-hidden rounded-[1.75rem] border border-[#d7bd8a]/45 bg-[#fff9ef] lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <div className="flex flex-col justify-between bg-[#3f4c2e] px-6 py-9 sm:px-10 sm:py-11 lg:min-h-[27rem] lg:px-12">
           <div>
-            <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#d4b87a]">
-              Murph referrals
-            </p>
-            <h2 className="mt-5 font-serif text-[clamp(2rem,7.5vw,2.75rem)] font-semibold leading-[0.98] tracking-[-0.035em] text-[#fff8eb] lg:text-4xl xl:text-[2.75rem]">
+            <h2 className="font-serif text-[clamp(2rem,7.5vw,2.75rem)] font-semibold leading-[0.98] tracking-[-0.035em] text-[#fff8eb] lg:text-4xl xl:text-[2.75rem]">
               <span className="block" data-referral-headline-lead>
                 Bring your people.
               </span>{" "}
@@ -57,10 +54,7 @@ export function ReferralSection({
 
         <div className="flex flex-col bg-[#fff9ef] px-6 py-9 sm:px-10 sm:py-11 lg:px-12">
           <div>
-            <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#7d6a4a]">
-              Choose your way
-            </p>
-            <p className="mt-2 font-serif text-2xl font-semibold tracking-[-0.025em] text-[#3f4c2e]">
+            <p className="font-serif text-2xl font-semibold tracking-[-0.025em] text-[#3f4c2e]">
               Referral rewards, your way.
             </p>
           </div>

@@ -2253,9 +2253,10 @@ async function applyHostedLinqDeliveryMessageReceiptTx(input: {
       : [input.event.messageLookupKey];
   const message = await messageClient.findFirst({
     where: {
-      messageLookupKey: {
-        in: messageLookupKeys,
-      },
+      OR: [
+        { messageLookupKey: { in: messageLookupKeys } },
+        { terminalRetryOriginalMessageLookupKey: { in: messageLookupKeys } },
+      ],
     },
     select: {
       delivery: {
@@ -2270,12 +2271,28 @@ async function applyHostedLinqDeliveryMessageReceiptTx(input: {
         },
       },
       id: true,
+      messageLookupKey: true,
+      terminalRetryOriginalMessageLookupKey: true,
     },
   });
   if (!message) {
     return null;
   }
   const delivery = message.delivery;
+  // Once replaced, receipts for the definitively failed original cannot
+  // overwrite the retry's lifecycle or reopen any sending authority.
+  if (
+    message.terminalRetryOriginalMessageLookupKey
+    && !messageLookupKeys.includes(message.messageLookupKey)
+  ) {
+    return {
+      advanced: false,
+      deliveryId: delivery.id,
+      phoneNumberLookupKey: delivery.phoneNumberLookupKey,
+      reopenOnboardingLink: null,
+      restoreOnboardingLink: null,
+    };
+  }
   const deliveryOnboardingLink = resolveHostedLinqReopenOnboardingLink(delivery);
   if (deliveryOnboardingLink) {
     await lockHostedMemberRow(input.prisma, deliveryOnboardingLink.memberId);
@@ -2285,6 +2302,7 @@ async function applyHostedLinqDeliveryMessageReceiptTx(input: {
   const updated = await input.prisma.hostedLinqDeliveryMessage.updateMany({
     where: {
       id: message.id,
+      messageLookupKey: { in: messageLookupKeys },
       OR: buildHostedLinqDeliveryMessageReceiptOrderingWhere(receipt),
     },
     data: buildHostedLinqDeliveryMessageReceiptUpdate(receipt),
@@ -2349,9 +2367,10 @@ export async function readHostedLinqDeliveryForProviderMessageTx(input: {
   const ownedMessage = input.prisma.hostedLinqDeliveryMessage
     ? await input.prisma.hostedLinqDeliveryMessage.findFirst({
         where: {
-          messageLookupKey: {
-            in: messageLookupKeys,
-          },
+          OR: [
+            { messageLookupKey: { in: messageLookupKeys } },
+            { terminalRetryOriginalMessageLookupKey: { in: messageLookupKeys } },
+          ],
         },
         select: {
           delivery: {
@@ -2571,9 +2590,7 @@ async function applyLatestHostedLinqDeliveryReceiptsForOwnedMessagesTx(input: {
     const message = await input.prisma.hostedLinqDeliveryMessage.findFirst({
       where: {
         deliveryId: input.deliveryId,
-        messageLookupKey: {
-          in: messageLookupKeys,
-        },
+        messageLookupKey: { in: messageLookupKeys },
       },
       select: { id: true },
     });
@@ -2611,6 +2628,81 @@ async function applyLatestHostedLinqDeliveryReceiptsForOwnedMessagesTx(input: {
       ? selectLatestHostedLinqReceiptData(terminalReceipts)
       : null,
   };
+}
+
+export async function recordHostedLinqTerminalRetryAcceptedTx(input: {
+  acceptedAt: Date;
+  deliveryId: string;
+  messageRowId: string;
+  messageId: string;
+  phoneNumberLookupKey: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  await lockHostedLinqDeliveryRow(input.prisma, input.deliveryId);
+  const messageLookupKey = requireHostedLinqMessageLookupKey(input.messageId);
+  const messageLookupKeyCandidates =
+    createHostedLinqMessageLookupKeyReadCandidates(input.messageId);
+  const original = await input.prisma.hostedLinqDeliveryMessage.findUnique({
+    where: { id: input.messageRowId },
+    select: { messageLookupKey: true },
+  });
+  if (!original) return;
+  const updated = await input.prisma.hostedLinqDeliveryMessage.updateMany({
+    where: {
+      id: input.messageRowId,
+      deliveryId: input.deliveryId,
+      terminalRetryAttemptedAt: { not: null },
+      terminalRetryOriginalMessageLookupKey: null,
+    },
+    data: {
+      acceptedAt: input.acceptedAt,
+      terminalRetryOriginalMessageLookupKey: original.messageLookupKey,
+      messageLookupKey,
+      messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId),
+      deliveredAt: null,
+      failedAt: null,
+      failureCode: null,
+      failureReason: null,
+      lastProviderEventId: null,
+      lastReceiptAt: null,
+      status: "accepted",
+    },
+  });
+  if (updated.count !== 1) return;
+  // Keep the existing active-key contract readable during a rolling Web deploy.
+  await input.prisma.hostedLinqDelivery.updateMany({
+    where: { id: input.deliveryId, messageLookupKey: original.messageLookupKey },
+    data: { messageLookupKey, messageIdSuffix: toHostedOnboardingLogIdSuffix(input.messageId) },
+  });
+  const echo = await readHostedLinqOutboundEchoForAcceptedMessageTx({
+    messageLookupKey,
+    messageLookupKeyCandidates,
+    prisma: input.prisma,
+  });
+  if (!echo) {
+    await projectHostedLinqLineOutboundAcceptedTx({
+      acceptedAt: input.acceptedAt,
+      phoneNumberLookupKey: input.phoneNumberLookupKey,
+      prisma: input.prisma,
+    });
+  }
+  await recomputeHostedLinqDeliveryFromMessagesTx(input);
+  const catchup = await applyLatestHostedLinqDeliveryReceiptsForOwnedMessagesTx({
+    deliveryId: input.deliveryId,
+    messageIds: [input.messageId],
+    prisma: input.prisma,
+  });
+  if (catchup.advanced && catchup.receipt && !catchup.receipt.phoneNumberLookupKey) {
+    await projectHostedLinqLineForDeliveryReceiptTx({
+      deliveryStatus: catchup.receipt.deliveryStatus,
+      eventId: catchup.receipt.eventId,
+      failureCode: catchup.receipt.failureCode,
+      failureReason: catchup.receipt.failureReason,
+      lineLookupKey: input.phoneNumberLookupKey,
+      prisma: input.prisma,
+      providerCreatedAt: catchup.receipt.providerCreatedAt,
+    });
+  }
 }
 
 async function recordHostedLinqDeliveryMessagesTx(input: {

@@ -16,6 +16,7 @@ export interface PublicTrustPageContent {
   action?: PublicTrustPageAction;
   eyebrow: string;
   introduction: string;
+  layout?: "editorial" | "compact";
   sections: readonly {
     action?: PublicTrustPageAction;
     paragraphs: readonly string[];
@@ -62,30 +63,32 @@ export const ABOUT_MURPH_CONTENT: PublicTrustPageContent = {
 
 export const CONTACT_MURPH_CONTENT: PublicTrustPageContent = {
   action: {
-    detail: "Account, billing, connected-service, and product support",
+    detail: "Account, billing, connected services, and product help",
     href: `mailto:${MURPH_SUPPORT_EMAIL}`,
     label: MURPH_SUPPORT_EMAIL,
   },
   eyebrow: "Contact",
   introduction:
-    "The support inbox is the main public contact for Murph product help. Use it for account access, billing, connected services, product questions, or unexpected behavior. A clear subject and a short description of the problem help the team understand where to start. Privacy and formal legal requests use the legal contact listed below.",
+    "Email support for help with your account, billing, connected services, or the product. For privacy or legal requests, use the contact below.",
+  layout: "compact",
   sections: [
     {
-      title: "Product and account help",
+      title: "Product support",
       paragraphs: [
-        "Email support when sign-in, billing, a connected service, an export, or another product flow is not working as expected. Include the page or feature involved, what you expected, and what happened instead. Screenshots can help, but remove unrelated health details, access codes, payment information, and other private material first.",
-        "Murph will never need a password, one-time sign-in code, private key, or full payment-card number in a support email. Do not send those credentials. If identity or account ownership must be verified, support will use an appropriate verification path rather than asking for a secret by email.",
+        "Tell us what happened, what you expected, and which page or feature you were using. Screenshots are welcome, but remove health details and other private information first.",
+        "Never email passwords, sign-in codes, private keys, or full card numbers. Murph support will not ask for them.",
       ],
     },
     {
-      title: "Privacy and data requests",
+      title: "Privacy and legal",
       action: {
         detail: "Privacy and formal legal requests",
         href: `mailto:${MURPH_LEGAL_EMAIL}`,
         label: MURPH_LEGAL_EMAIL,
       },
       paragraphs: [
-        `Privacy questions, access requests, correction requests, export questions, and deletion requests can begin at ${MURPH_LEGAL_EMAIL}. Say that the message concerns privacy and identify the request you want to make. The privacy policy and consumer health data notice explain available rights, verification, retention, and appeal paths.`,
+        "For privacy questions or requests to access, correct, export, or delete your data, use the legal contact below.",
+        `Formal correspondence can also be mailed to ${MURPH_ORGANIZATION_LEGAL_NAME}, ${MURPH_ORGANIZATION_POSTAL_ADDRESS.streetAddress}, ${MURPH_ORGANIZATION_POSTAL_ADDRESS.addressLocality}, ${MURPH_ORGANIZATION_POSTAL_ADDRESS.addressRegion} ${MURPH_ORGANIZATION_POSTAL_ADDRESS.postalCode}, ${MURPH_ORGANIZATION_POSTAL_ADDRESS.addressCountry}.`,
       ],
     },
     {
@@ -96,21 +99,15 @@ export const CONTACT_MURPH_CONTENT: PublicTrustPageContent = {
         label: MURPH_SUPPORT_EMAIL,
       },
       paragraphs: [
-        "If you believe you found a security problem, put “Security” in the subject and describe the affected Murph surface and the minimum steps needed to reproduce it. Do not include another person's data, exploit a live account, or send secrets. The public security page explains Murph's hosted and local security model.",
+        "Found a security issue? Put “Security” in the subject and include the affected Murph surface and the minimum steps needed to reproduce it. Do not include another person's data or any secrets.",
       ],
     },
     {
-      title: "Medical and urgent help",
+      title: "Urgent help",
       paragraphs: [
-        "The support inbox is not monitored as an emergency or clinical service. Do not use it for urgent symptoms or time-sensitive medical decisions. Contact local emergency services for an emergency and a qualified clinician for diagnosis, treatment, medication, or other medical advice.",
-      ],
-    },
-    {
-      title: "Formal and legal contact",
-      paragraphs: [
-        `Murph is offered by ${MURPH_ORGANIZATION_LEGAL_NAME} Formal legal and privacy correspondence can be sent to ${MURPH_LEGAL_EMAIL} or mailed to ${MURPH_ORGANIZATION_POSTAL_ADDRESS.streetAddress}, ${MURPH_ORGANIZATION_POSTAL_ADDRESS.addressLocality}, ${MURPH_ORGANIZATION_POSTAL_ADDRESS.addressRegion} ${MURPH_ORGANIZATION_POSTAL_ADDRESS.postalCode}, ${MURPH_ORGANIZATION_POSTAL_ADDRESS.addressCountry}.`,
+        "Murph support is not an emergency or clinical service. For urgent symptoms, contact local emergency services. For diagnosis or treatment, contact a qualified clinician.",
       ],
     },
   ],
-  title: "Start with the right inbox.",
+  title: "Contact Murph.",
 };

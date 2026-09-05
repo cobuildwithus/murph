@@ -6,8 +6,8 @@ import {
   buildHostedExecutionAssistantNotificationRequestedWake,
 } from "@murphai/hosted-execution";
 import {
-  isPushPrimarySourceRecoveryNoticeEligible,
-  readPushPrimarySourceRecoveryNoticePolicy,
+  isSourceRecoveryNoticeEligible,
+  readSourceRecoveryNoticePolicy,
 } from "@murphai/device-syncd/source-staleness";
 
 import {
@@ -75,6 +75,11 @@ export async function materializeHostedSourceDeliveryStallNotice(input: {
     return;
   }
   const notificationKey = buildHostedSourceDeliveryStallNoticeKey(input.candidate);
+  const messageKey = input.candidate.sourceProviderSlug === "apple_health_kit"
+    ? "linq.apple_health_delivery_stalled"
+    : input.candidate.sourceProviderSlug === "whoop_v2"
+    ? "linq.device_connection_check"
+    : "linq.device_delivery_stalled";
   const dedupeKey = `assistant.notification.requested:${notificationKey}`;
   const existing = await readHostedMailboxItemByDedupeKey({
     dedupeKey,
@@ -90,6 +95,7 @@ export async function materializeHostedSourceDeliveryStallNotice(input: {
         select: {
           connection: { select: { status: true, userId: true } },
           lastDataAt: true,
+          lastErrorCode: true,
           lifecycleEpoch: true,
           sourceProviderSlug: true,
           status: true,
@@ -116,8 +122,9 @@ export async function materializeHostedSourceDeliveryStallNotice(input: {
         || source.lastDataAt?.toISOString() !== input.candidate.lastDataAt
         || source.sourceProviderSlug !== input.candidate.sourceProviderSlug
         || !outreachPolicy?.enabled
-        || !isPushPrimarySourceRecoveryNoticeEligible({
+        || !isSourceRecoveryNoticeEligible({
           lastDataAt: source.lastDataAt?.toISOString() ?? null,
+          lastErrorCode: source.lastErrorCode,
           now: input.now,
           silentHours: outreachPolicy.silentHours,
           sourceProviderSlug: source.sourceProviderSlug,
@@ -146,7 +153,7 @@ export async function materializeHostedSourceDeliveryStallNotice(input: {
       ) {
         return null;
       }
-      const policy = readPushPrimarySourceRecoveryNoticePolicy(source.sourceProviderSlug);
+      const policy = readSourceRecoveryNoticePolicy(source.sourceProviderSlug);
       if (!policy) {
         return null;
       }
@@ -156,7 +163,7 @@ export async function materializeHostedSourceDeliveryStallNotice(input: {
           deviceDisplayName: policy.deviceDisplayName,
           providerDisplayName: policy.providerDisplayName,
         },
-        key: "linq.device_delivery_stalled",
+        key: messageKey,
         seed: notificationKey,
       }).text;
       const text = `${checkIn} If this gap is expected, tell me to wait 5–30 days or stop these check-ins.`;

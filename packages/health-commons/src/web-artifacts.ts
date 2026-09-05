@@ -7,6 +7,7 @@ import type {
   HealthCommonsClaim,
   HealthCommonsEntityType,
   HealthCommonsEvidenceAppraisal,
+  HealthCommonsGoalTemplate,
   HealthCommonsMeasurementMethod,
   HealthCommonsMeasurementPlanPath,
   HealthCommonsMechanismChainStep,
@@ -29,6 +30,10 @@ import {
   type HealthCommonsWebBiomarkerProjectionArtifact,
   type HealthCommonsWebBiomarkerProjectionKey,
 } from "./biomarker-web-artifacts.ts";
+import {
+  extractHealthCommonsGoalSources,
+  type HealthCommonsGoalSource,
+} from "./goal-sources.ts";
 import { isRunnableProtocolStatus } from "./protocol-publishing.ts";
 
 export {
@@ -46,6 +51,10 @@ export const HEALTH_COMMONS_WEB_EXPERIMENT_INDEX_SCHEMA_VERSION =
   "murph.commons.web.experiment-index.v1" as const;
 export const HEALTH_COMMONS_WEB_BIOMARKER_INDEX_SCHEMA_VERSION =
   "murph.commons.web.biomarker-index.v3" as const;
+export const HEALTH_COMMONS_WEB_GOAL_INDEX_SCHEMA_VERSION =
+  "murph.commons.web.goal-index.v2" as const;
+export const HEALTH_COMMONS_WEB_GOAL_PAGE_SCHEMA_VERSION =
+  "murph.commons.web.goal-page.v2" as const;
 export const HEALTH_COMMONS_WEB_EXPERIMENT_RESEARCH_TAB_SCHEMA_VERSION =
   "murph.commons.web.experiment-research-tab.v1" as const;
 export const HEALTH_COMMONS_WEB_EXPERIMENT_SHELL_SCHEMA_VERSION =
@@ -56,6 +65,7 @@ export const HEALTH_COMMONS_WEB_EXPERIMENT_RESULTS_PUBLIC_SCHEMA_VERSION =
   "murph.commons.web.experiment-results-public.v1" as const;
 
 export type HealthCommonsWebProjectionKey =
+  | "goal.page"
   | "experiment.shell"
   | "experiment.protocol"
   | "experiment.research"
@@ -99,7 +109,12 @@ export interface HealthCommonsWebRevisionRef {
   pageRevisionId: string;
   recipeHash?: string | null;
   runSpecRevisionId?: string | null;
+  workflowSpecRevisionId?: string | null;
 }
+
+export type HealthCommonsWebGoalRevisionRef = HealthCommonsWebRevisionRef & {
+  workflowSpecRevisionId: string;
+};
 
 export interface HealthCommonsWebReverseRelation {
   relation: HealthCommonsRelation;
@@ -198,6 +213,55 @@ export interface HealthCommonsWebBiomarkerIndex {
   biomarkers: HealthCommonsWebBiomarkerIndexEntry[];
   catalogHash: string;
   schemaVersion: typeof HEALTH_COMMONS_WEB_BIOMARKER_INDEX_SCHEMA_VERSION;
+}
+
+export interface HealthCommonsWebGoalIndexEntry {
+  aliases: string[];
+  bundlePath: string;
+  category: HealthCommonsGoalTemplate["category"];
+  goalPhrase: string;
+  key: string;
+  outcomeKind: HealthCommonsGoalTemplate["outcomeKind"];
+  pagePath: string;
+  parentGoalKey: string | null;
+  quality: string;
+  revision: HealthCommonsWebGoalRevisionRef;
+  routeId: string;
+  safetyTier: HealthCommonsSafety["cautionLevel"];
+  slug: string;
+  startPrompt: string;
+  status: string;
+  sources: HealthCommonsGoalSource[];
+  successSignals: HealthCommonsGoalTemplate["successSignals"];
+  summary: string;
+  title: string;
+  workflow: HealthCommonsGoalTemplate["workflow"];
+}
+
+export interface HealthCommonsWebGoalIndex {
+  catalogHash: string;
+  goals: HealthCommonsWebGoalIndexEntry[];
+  schemaVersion: typeof HEALTH_COMMONS_WEB_GOAL_INDEX_SCHEMA_VERSION;
+}
+
+export interface HealthCommonsWebGoalPage {
+  aliases: string[];
+  body: string;
+  catalogHash: string;
+  goal: Omit<HealthCommonsGoalTemplate, "evidenceSourceKeys">;
+  key: string;
+  revision: HealthCommonsWebGoalRevisionRef;
+  route: {
+    aliases: string[];
+    entityType: "goal_template";
+    routeId: string;
+    slug: string;
+  };
+  safety: HealthCommonsSafety;
+  schemaVersion: typeof HEALTH_COMMONS_WEB_GOAL_PAGE_SCHEMA_VERSION;
+  sources: HealthCommonsGoalSource[];
+  summary: string;
+  title: string;
 }
 
 export type HealthCommonsWebExperimentResearchStudyType =
@@ -481,11 +545,13 @@ export type HealthCommonsWebExperimentProjectionArtifact =
 
 export type HealthCommonsWebProjectionArtifact =
   | HealthCommonsWebBiomarkerProjectionArtifact
-  | HealthCommonsWebExperimentProjectionArtifact;
+  | HealthCommonsWebExperimentProjectionArtifact
+  | HealthCommonsWebGoalPage;
 
 export interface HealthCommonsWebGeneratedArtifacts {
   biomarkerIndex: HealthCommonsWebBiomarkerIndex;
   experimentIndex: HealthCommonsWebExperimentIndex;
+  goalIndex: HealthCommonsWebGoalIndex;
   projectionArtifacts: Map<string, HealthCommonsWebProjectionArtifact>;
   routeBundles: Map<string, HealthCommonsWebRouteBundle>;
   routeIndex: HealthCommonsWebRouteIndex;
@@ -493,6 +559,7 @@ export interface HealthCommonsWebGeneratedArtifacts {
 
 const WEB_BUNDLE_ENTITY_TYPES = new Set<HealthCommonsEntityType>([
   "biomarker",
+  "goal_template",
   "measurement_method",
   "protocol_variant",
 ]);
@@ -572,7 +639,7 @@ export function buildHealthCommonsWebGeneratedArtifacts(
     if (!WEB_BUNDLE_ENTITY_TYPES.has(entity.entityType)) {
       continue;
     }
-    if (entity.entityType === "protocol_variant" && !isPublicProtocolVariant(entity)) {
+    if (!isPublicWebBundleEntity(entity)) {
       continue;
     }
 
@@ -642,6 +709,8 @@ export function buildHealthCommonsWebGeneratedArtifacts(
       );
     }
   }
+
+  addGoalPageArtifacts(routeBundles, entitiesByKey, projectionArtifacts);
 
   for (const bundle of routeBundles.values()) {
     if (bundle.route.entityType !== "biomarker") {
@@ -755,6 +824,42 @@ export function buildHealthCommonsWebGeneratedArtifacts(
         .sort((left, right) => left.title.localeCompare(right.title)),
       schemaVersion: HEALTH_COMMONS_WEB_EXPERIMENT_INDEX_SCHEMA_VERSION,
     },
+    goalIndex: {
+      catalogHash: catalog.catalogHash,
+      goals: [...routeBundles.values()]
+        .filter((bundle) => bundle.route.entityType === "goal_template")
+        .flatMap((bundle) => {
+          const entity = entitiesByKey.get(bundle.primaryKey);
+          if (!isPublicGoalTemplate(entity)) {
+            return [];
+          }
+
+          return [{
+            aliases: entity.aliases ?? [],
+            bundlePath: bundlePathForEntity(entity.entityType, bundle.route.routeId),
+            category: entity.goal.category,
+            goalPhrase: entity.goal.goalPhrase,
+            key: entity.key,
+            outcomeKind: entity.goal.outcomeKind,
+            pagePath: goalPagePathForRouteId(bundle.route.routeId),
+            parentGoalKey: entity.goal.parentGoalKey ?? null,
+            quality: entity.quality,
+            revision: goalRevisionRefForEntity(entity),
+            routeId: bundle.route.routeId,
+            safetyTier: entity.safety.cautionLevel,
+            slug: entity.slug,
+            startPrompt: entity.goal.startPrompt,
+            status: entity.status,
+            sources: extractHealthCommonsGoalSources(entity.body),
+            successSignals: entity.goal.successSignals,
+            summary: entity.summary,
+            title: entity.title,
+            workflow: entity.goal.workflow,
+          }];
+        })
+        .sort((left, right) => left.title.localeCompare(right.title)),
+      schemaVersion: HEALTH_COMMONS_WEB_GOAL_INDEX_SCHEMA_VERSION,
+    },
     projectionArtifacts,
     routeBundles,
     routeIndex: {
@@ -763,6 +868,75 @@ export function buildHealthCommonsWebGeneratedArtifacts(
       schemaVersion: HEALTH_COMMONS_WEB_ROUTE_INDEX_SCHEMA_VERSION,
     },
   };
+}
+
+function isPublicWebBundleEntity(entity: HealthCommonsCatalogEntity): boolean {
+  if (entity.entityType === "protocol_variant") {
+    return isPublicProtocolVariant(entity);
+  }
+  if (entity.entityType === "goal_template") {
+    return isPublicGoalTemplate(entity);
+  }
+  return true;
+}
+
+function addGoalPageArtifacts(
+  routeBundles: ReadonlyMap<string, HealthCommonsWebRouteBundle>,
+  entitiesByKey: ReadonlyMap<string, HealthCommonsCatalogEntity>,
+  projectionArtifacts: Map<string, HealthCommonsWebProjectionArtifact>,
+): void {
+  for (const bundle of routeBundles.values()) {
+    if (bundle.route.entityType !== "goal_template") {
+      continue;
+    }
+    const goal = entitiesByKey.get(bundle.primaryKey);
+    if (!isPublicGoalTemplate(goal)) {
+      continue;
+    }
+    projectionArtifacts.set(
+      goalPagePathForRouteId(bundle.route.routeId),
+      buildGoalPage({ bundle, goal }),
+    );
+  }
+}
+
+function buildGoalPage(input: {
+  bundle: HealthCommonsWebRouteBundle;
+  goal: HealthCommonsCatalogEntity & {
+    entityType: "goal_template";
+    goal: HealthCommonsGoalTemplate;
+    quality: string;
+    safety: HealthCommonsSafety;
+    status: string;
+    summary: string;
+  };
+}): HealthCommonsWebGoalPage {
+  return {
+    aliases: input.goal.aliases ?? [],
+    body: input.goal.body,
+    catalogHash: input.bundle.catalogHash,
+    goal: toWebGoalTemplate(input.goal.goal),
+    key: input.goal.key,
+    revision: goalRevisionRefForEntity(input.goal),
+    route: {
+      aliases: input.bundle.route.aliases,
+      entityType: "goal_template",
+      routeId: input.bundle.route.routeId,
+      slug: input.goal.slug,
+    },
+    safety: input.goal.safety,
+    schemaVersion: HEALTH_COMMONS_WEB_GOAL_PAGE_SCHEMA_VERSION,
+    sources: extractHealthCommonsGoalSources(input.goal.body),
+    summary: input.goal.summary,
+    title: input.goal.title,
+  };
+}
+
+function toWebGoalTemplate(
+  goal: HealthCommonsGoalTemplate,
+): Omit<HealthCommonsGoalTemplate, "evidenceSourceKeys"> {
+  const { evidenceSourceKeys: _legacyEvidenceSourceKeys, ...webGoal } = goal;
+  return webGoal;
 }
 
 function buildRouteBundle(input: {
@@ -2300,6 +2474,12 @@ function projectionPathsForRoute(
   entity: HealthCommonsCatalogEntity,
   routeId: string,
 ): Partial<Record<HealthCommonsWebProjectionKey, string>> | null {
+  if (isPublicGoalTemplate(entity)) {
+    return {
+      "goal.page": goalPagePathForRouteId(routeId),
+    };
+  }
+
   if (isPublicProtocolVariant(entity)) {
     const projections: Partial<Record<HealthCommonsWebProjectionKey, string>> = {};
     for (const spec of EXPERIMENT_PROJECTION_SPECS) {
@@ -2408,6 +2588,8 @@ function collectRouteClosureKeys(
     addKey(signal.biomarkerKey);
   }
 
+  addGoalClosureKeys(primary, addKey);
+
   if (primary.entityType === "biomarker") {
     for (const entity of catalog.entities) {
       if (!isPublicProtocolVariant(entity)) {
@@ -2438,6 +2620,19 @@ function collectRouteClosureKeys(
   }
 
   return keys;
+}
+
+function addGoalClosureKeys(
+  primary: HealthCommonsCatalogEntity,
+  addKey: (key: string | null | undefined) => void,
+): void {
+  if (primary.entityType !== "goal_template" || !primary.goal) {
+    return;
+  }
+  addKey(primary.goal.parentGoalKey);
+  for (const sourceKey of primary.goal.evidenceSourceKeys) {
+    addKey(sourceKey);
+  }
 }
 
 function prepareEntityForWebBundle(
@@ -2485,6 +2680,7 @@ function prepareEntityForWebBundle(
     communityOutcomeSummary: entity.communityOutcomeSummary,
     expectedSignalDescriptions: entity.expectedSignalDescriptions,
     experimentOnboarding: entity.experimentOnboarding,
+    goal: entity.goal,
     interpretationFrame: entity.interpretationFrame,
     lineage: options.primary ? entity.lineage : undefined,
     measurementContexts: entity.measurementContexts,
@@ -2541,6 +2737,21 @@ function revisionRefForEntity(entity: HealthCommonsCatalogEntity): HealthCommons
     pageRevisionId: entity.revision.pageRevisionId,
     recipeHash: entity.revision.recipeHash ?? null,
     runSpecRevisionId: entity.revision.runSpecRevisionId ?? null,
+    workflowSpecRevisionId: entity.revision.workflowSpecRevisionId ?? null,
+  };
+}
+
+function goalRevisionRefForEntity(
+  entity: HealthCommonsCatalogEntity,
+): HealthCommonsWebGoalRevisionRef {
+  const workflowSpecRevisionId = entity.revision.workflowSpecRevisionId;
+  if (!workflowSpecRevisionId) {
+    throw new Error(`Goal ${entity.key} is missing workflowSpecRevisionId.`);
+  }
+
+  return {
+    ...revisionRefForEntity(entity),
+    workflowSpecRevisionId,
   };
 }
 
@@ -2568,6 +2779,35 @@ function selectPrimaryRouteId(
 
 function bundlePathForEntity(entityType: HealthCommonsEntityType, routeId: string): string {
   return `bundles/${entityType}/${routeId}.json`;
+}
+
+function goalPagePathForRouteId(routeId: string): string {
+  return `pages/goals/${routeId}.json`;
+}
+
+function isPublicGoalTemplate(
+  entity: HealthCommonsCatalogEntity | undefined,
+): entity is HealthCommonsCatalogEntity & {
+  entityType: "goal_template";
+  goal: HealthCommonsGoalTemplate;
+  quality: string;
+  safety: HealthCommonsSafety;
+  status: string;
+  summary: string;
+} {
+  return entity?.entityType === "goal_template"
+    && entity.goal !== undefined
+    && entity.goal.indexable
+    && entity.hidden !== true
+    && entity.safety !== undefined
+    && entity.summary !== undefined
+    && entity.quality !== undefined
+    && entity.quality !== "stub"
+    && (
+      entity.status === "field-testing"
+      || entity.status === "reviewed"
+      || entity.status === "community"
+    );
 }
 
 function isPublishedBiomarkerIndexEntity(

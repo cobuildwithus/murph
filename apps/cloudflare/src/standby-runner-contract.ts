@@ -84,6 +84,13 @@ export interface HostedStandbyRunnerContainerStubLike
   }>;
   readStandbySlotCoordinatorState(): Promise<HostedStandbySlotCoordinatorState>;
   readStandbySlotBinding(): Promise<HostedStandbySlotBinding>;
+  /** Proves exact warm retention or settles the existing one-way retirement. */
+  resolveRetainedStandbySlot(input: {
+    currentReleaseId: string;
+    region: typeof HOSTED_STANDBY_REGION;
+    slotName: string;
+    userId: string;
+  }): Promise<HostedStandbySlotBinding>;
   retireStandbySlot(input: {
     claimId?: string;
   }): Promise<{ retired: true }>;

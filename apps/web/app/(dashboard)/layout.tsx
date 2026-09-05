@@ -1,10 +1,17 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import type { ReactNode } from "react";
 
 import { DashboardCriticalLoadError } from "@/src/components/dashboard/dashboard-critical-load-error";
 import { DashboardShell } from "@/src/components/dashboard/dashboard-shell";
+import { DevelopmentPersonaSwitcher } from "@/src/components/dashboard/development-persona-switcher";
 import { DashboardLegalConsentGate } from "@/src/components/legal/dashboard-legal-consent-gate";
 import { BrowserVaultProvider } from "@/src/lib/browser-vault/context";
+import {
+  DEVELOPMENT_PERSONA_COOKIE,
+  isDevelopmentPersonaId,
+} from "@/src/lib/browser-vault/development-personas";
+import { buildDevelopmentPersonaReplica } from "@/src/lib/browser-vault/development-personas.server";
 import { getHostedDashboardLayoutAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import {
   hasHostedHistoricalLaunchConsent,
@@ -33,6 +40,13 @@ export default async function DashboardLayout({
   }
 
   const authenticatedMember = auth.pageAuth.authenticatedMember;
+  const developmentPersona =
+    process.env.NODE_ENV === "development"
+      ? await readDevelopmentPersona()
+      : null;
+  const developmentReplica = developmentPersona
+    ? await buildDevelopmentPersonaReplica(developmentPersona)
+    : null;
   const consentStatus = authenticatedMember
     ? await readDashboardConsentReminderStatus(authenticatedMember.id)
     : null;
@@ -45,11 +59,15 @@ export default async function DashboardLayout({
 
   return (
     <BrowserVaultProvider
+      developmentReplica={developmentReplica}
       initialMemberId={authenticatedMember?.id ?? null}
       loadEnabled={browserVaultLoadEnabled}
     >
       <DashboardShell sidebarAuth={auth.sidebarAuth}>
         {children}
+        {process.env.NODE_ENV === "development" ? (
+          <DevelopmentPersonaSwitcher activePersona={developmentPersona} />
+        ) : null}
         {consentStatus && !consentStatus.launchGranted ? (
           <DashboardLegalConsentGate
             initialStatus={consentStatus}
@@ -65,6 +83,12 @@ export default async function DashboardLayout({
   );
 }
 
+async function readDevelopmentPersona() {
+  const cookieStore = await cookies();
+  const value = cookieStore.get(DEVELOPMENT_PERSONA_COOKIE)?.value ?? null;
+  return isDevelopmentPersonaId(value) ? value : null;
+}
+
 async function readDashboardConsentReminderStatus(memberId: string) {
   try {
     return await readHostedConsentStatus({
@@ -72,7 +96,9 @@ async function readDashboardConsentReminderStatus(memberId: string) {
       prisma: getPrisma(),
     });
   } catch {
-    console.warn("Dashboard legal consent reminder is temporarily unavailable.");
+    console.warn(
+      "Dashboard legal consent reminder is temporarily unavailable.",
+    );
     return null;
   }
 }

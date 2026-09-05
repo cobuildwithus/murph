@@ -20,6 +20,12 @@ export const ASSISTANT_SKILLS = [
       'Use when direct first-run Murph onboarding is open and the assistant needs to establish the broad private relationship, capture and park one or two change/understand/handle/explore aspiration threads, resolve the six progressive foundation-context checkpoints, return with context, choose a first step together, mark completion, or record an overall decline. Immediate requests and safety needs come first; answering a discovery question is not permission for a plan.',
   },
   {
+    slug: 'goal-setup',
+    name: 'goal-setup',
+    triggerHint:
+      'Use when a person explicitly asks Murph to help start, resume, pause, or change a concrete health, fitness, behavior, biomarker, skill, or event outcome, including a public Murph Goals handoff such as "Hey Murph, help me improve my deep sleep." It resolves an exact public goal template when available, reuses an equivalent private Goal, previews the smallest useful plan, and composes existing domain and persistence owners. Do not use for a purely informational question, an onboarding aspiration answer without an action request, an acute train-or-rest decision, or a request specifically for an experiment.',
+  },
+  {
     slug: 'hosted-low-usage',
     name: 'hosted-low-usage',
     triggerHint:
@@ -192,6 +198,12 @@ export const ASSISTANT_SKILLS = [
     name: 'connected-apps',
     triggerHint:
       'Use when Murph needs connected email, calendar, documents, storage, notes, or tasks; an approved accountless service such as weather, places, provider registry, product search, or Instacart; account connection or removal; connected-app context for another action; or a verified manual export or one-time import fallback for a health or fitness source without a proven direct Murph connection. Owns account selection, narrow discovery and reads, limited calendar writes, verified provider export handoffs, privacy, and untrusted provider content.',
+  },
+  {
+    slug: 'journal-connected-context',
+    name: 'journal-connected-context',
+    triggerHint:
+      'Use for automatic private Journal context from newly connected calendars or narrow email travel confirmations, and when a member changes or stops that capture. Owns the private connection notice, new-account baseline, category filters, normalized Journal plans, reconciliation, follow-ups, and opt-outs.',
   },
   {
     slug: 'computer-use',

@@ -318,7 +318,7 @@ async function expectGeminiUsageRows(expectedCount: number): Promise<void> {
         inputTokens: 320,
         outputTokens: 18,
         reasoningTokens: 7,
-        requestedModel: "gemini-3.7-flash",
+        requestedModel: "gemini-3.8-flash",
         totalTokens: 345,
         triggerKind: "analyze-video",
       });

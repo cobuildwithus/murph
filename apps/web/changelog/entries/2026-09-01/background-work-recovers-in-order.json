@@ -6,9 +6,9 @@
     "kind": "improvement",
     "priority": 4,
     "title": "Background work recovers in order",
-    "summary": "Murph now resumes delayed connected-health and routine background work in order instead of repeatedly waking without making progress.",
-    "details": "Current conversations and approved actions still run first. A delayed item waits for its recovery time, then its queued follow-ups continue without needing an unrelated message to restart them.",
+    "summary": "Murph now resumes delayed connected-health and routine background work in order instead of repeatedly waking without progress or letting an older retry delay fresh device data.",
+    "details": "Current conversations and approved actions still run first. Existing provider retries keep their recovery timing, while a fresh device update can start a bounded sync pass without needing an unrelated message.",
     "relevanceTags": ["wearables", "assistant", "reliability"],
-    "sourcePullRequests": [2682, 2693, 2700, 2710]
+    "sourcePullRequests": [2682, 2693, 2700, 2710, 2723, 2770]
   }
 }

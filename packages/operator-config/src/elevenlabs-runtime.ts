@@ -1,8 +1,4 @@
-import {
-  ElevenLabsClient,
-  ElevenLabsError,
-  ElevenLabsTimeoutError,
-} from '@elevenlabs/elevenlabs-js'
+import type { ElevenLabsClient } from '@elevenlabs/elevenlabs-js'
 
 import type {
   AssistantVoiceMemoGeneration,
@@ -248,6 +244,9 @@ async function requestElevenLabsAudio(input: {
     )
   }
 
+  // Configuration and ordinary replies do not need the generated audio SDK.
+  const { ElevenLabsClient, ElevenLabsError, ElevenLabsTimeoutError } =
+    await import('@elevenlabs/elevenlabs-js')
   const timeout = createTimeoutAbortController(input.signal, input.timeoutMs)
   const diagnostics: ElevenLabsRequestDiagnostics = {
     errorBodyText: null,

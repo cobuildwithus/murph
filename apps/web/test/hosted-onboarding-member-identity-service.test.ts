@@ -49,6 +49,8 @@ describe("hosted-onboarding member-identity-service", () => {
   const previousHostedContactPrivacyKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
   const previousHostedContactPrivacyCurrentKeyVersion =
     process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
+  const previousLinqProductionCanaryPhoneNumber =
+    process.env.HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_PHONE_NUMBER;
 
   beforeEach(() => {
     process.env.HOSTED_CONTACT_PRIVACY_KEYS = `v1:${TEST_CONTACT_PRIVACY_KEY}`;
@@ -63,6 +65,10 @@ describe("hosted-onboarding member-identity-service", () => {
     restoreEnvValue(
       "HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION",
       previousHostedContactPrivacyCurrentKeyVersion,
+    );
+    restoreEnvValue(
+      "HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_PHONE_NUMBER",
+      previousLinqProductionCanaryPhoneNumber,
     );
     clearHostedOnboardingEnvCache();
   });
@@ -147,15 +153,18 @@ describe("hosted-onboarding member-identity-service", () => {
   });
 
   it("reports creation while persisting a provider-verified phone identity", async () => {
+    process.env.HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_PHONE_NUMBER =
+      "+15551234567";
     const createdMember = makeMember({
       id: "member_created",
     });
     const participantContactLock = vi.fn().mockResolvedValue(0);
     const identityCreateMany = vi.fn(async () => ({ count: 1 }));
+    const memberCreate = vi.fn().mockResolvedValue(createdMember);
     const prisma = asRootPrisma({
       $executeRaw: participantContactLock,
       hostedMember: {
-        create: vi.fn().mockResolvedValue(createdMember),
+        create: memberCreate,
         delete: vi.fn(),
       },
       hostedMemberIdentity: {
@@ -182,6 +191,11 @@ describe("hosted-onboarding member-identity-service", () => {
       }),
       skipDuplicates: true,
     });
+    expect(memberCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        assistantModelPreference: "gpt-5.6-luna",
+      }),
+    }));
     expect(participantContactLock).toHaveBeenCalledTimes(1);
     expect(participantContactLock.mock.invocationCallOrder[0])
       .toBeLessThan(identityCreateMany.mock.invocationCallOrder[0] ?? 0);
@@ -452,6 +466,79 @@ describe("hosted-onboarding member-identity-service", () => {
     })).rejects.toMatchObject({
       code: "PRIVY_EMAIL_REQUIRED",
       httpStatus: 400,
+    });
+
+    expect(identityUpsert).not.toHaveBeenCalled();
+  });
+
+  it("rejects verified Privy email when its Linq handle belongs to another member", async () => {
+    const identityUpsert = vi.fn();
+    const prisma = asRootPrisma({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(makeMember()),
+        update: vi.fn(),
+      },
+      hostedMemberIdentity: {
+        findMany: vi.fn().mockResolvedValue([{
+          createdAt: NOW,
+          linqEmailHandleLookupKey: requireHostedEmailLookupKey("person@example.com"),
+          maskedPhoneNumberHint: null,
+          member: makeMember({ id: "member_linq_email" }),
+          memberId: "member_linq_email",
+          phoneLookupKey: null,
+          phoneNumberEncrypted: null,
+          phoneNumberVerifiedAt: null,
+          privyUserIdEncrypted: null,
+          privyUserLookupKey: null,
+          signupPhoneCodeSendAttemptId: null,
+          signupPhoneCodeSendAttemptStartedAt: null,
+          signupPhoneCodeSentAt: null,
+          signupPhoneNumberEncrypted: null,
+          updatedAt: NOW,
+          walletAddressEncrypted: null,
+          walletAddressLookupKey: null,
+          walletChainType: null,
+          walletCreatedAt: null,
+          walletProvider: null,
+        }]),
+        findUnique: vi.fn().mockResolvedValue({
+          maskedPhoneNumberHint: null,
+          memberId: "member_123",
+          phoneLookupKey: null,
+          phoneNumberEncrypted: null,
+          phoneNumberVerifiedAt: null,
+          privyUserIdEncrypted: null,
+          privyUserLookupKey: null,
+          signupPhoneCodeSendAttemptId: null,
+          signupPhoneCodeSendAttemptStartedAt: null,
+          signupPhoneCodeSentAt: null,
+          signupPhoneNumberEncrypted: null,
+          walletAddressEncrypted: null,
+          walletAddressLookupKey: null,
+          walletChainType: null,
+          walletCreatedAt: null,
+          walletProvider: null,
+        }),
+        upsert: identityUpsert,
+      },
+    });
+
+    await expect(reconcileHostedPrivyIdentityOnMember({
+      authMethod: "email",
+      identity: makeIdentity({
+        email: {
+          address: "person@example.com",
+          verifiedAt: 1_788_555_160,
+        },
+        phone: null,
+      }),
+      member: makeMember(),
+      now: NOW,
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EMAIL_HANDLE_IDENTITY_CONFLICT",
+      httpStatus: 409,
     });
 
     expect(identityUpsert).not.toHaveBeenCalled();
