@@ -214,6 +214,7 @@ import {
 } from '../src/assistant/notification-turn.ts'
 import {
   buildAssistantMaintenanceConversationEvidence,
+  readAssistantMaintenanceConversationEvidence,
 } from '../src/assistant/maintenance-evidence.ts'
 import { readAssistantCurrentStatePrompt } from '../src/assistant/current-state.ts'
 import {
@@ -15024,11 +15025,13 @@ describeRealCodex('real Codex member-memory result compaction e2e', () => {
         if (!automation) {
           throw new Error('Expected overnight memory consolidation automation.')
         }
-        const evidence = await buildAssistantMaintenanceConversationEvidence({
+        const maintenanceEvidence = await readAssistantMaintenanceConversationEvidence({
           now: new Date('2026-08-27T12:00:00.000Z'),
           profile: 'member-memory',
           vault: workingDirectory,
         })
+        expect(maintenanceEvidence.status).toBe('available')
+        const evidence = maintenanceEvidence.prompt
         const before = await readMemoryDocument(workingDirectory)
         expect(before.records).toHaveLength(24)
 
