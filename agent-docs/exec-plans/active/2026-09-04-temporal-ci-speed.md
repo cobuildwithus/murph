@@ -35,3 +35,7 @@ Focused Web tests (53) and harness tests (52), Web/harness typechecks, and the c
 Private controller fixtures also passed unchanged assertions with two concurrent isolated subprocesses: 127 tests in 742 seconds versus the local serial baseline of 1674 seconds (56% less wall time). All 687 private Temporal coverage tests passed with two file workers. This is separate from the hosted E2E critical path and does not establish under-ten-minute release admission.
 
 Prepared candidates proceed through exact-head PR/CI review; public support must land before private consumption. The initial ReviewGPT consultation is design input, not a final PR gate. The complete admission performance target remains open until measured in private GitHub CI.
+
+## Cached compiler memory follow-up
+
+A real isolated Web CI build exhausted the existing 3 GB compiler heap with persistent caching enabled. Next configures an unlimited additional memory cache for production. The follow-up retains disk caching while setting `maxMemoryGenerations: 0`, and explicitly exercises that opt-in in hosted-Web CI under the existing memory guard and heap limits. Full private integration and cold/warm performance validation remain required; the ten-minute goal is still unproven.

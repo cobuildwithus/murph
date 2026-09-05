@@ -312,6 +312,15 @@ export function configureHostedWebWebpack(
     // Vercel keeps cold compilation. CI jobs that persist the compiler cache
     // explicitly opt in and let Webpack validate its source dependencies.
     config.cache = false;
+  } else if (
+    !context.dev
+    && config.cache
+    && typeof config.cache === "object"
+    && "type" in config.cache
+    && config.cache.type === "filesystem"
+  ) {
+    // Disk reuse must fit the same bounded compiler heap as cold compilation.
+    Object.assign(config.cache, { maxMemoryGenerations: 0 });
   }
 
   if (!hasOptionalModule("@farcaster/mini-app-solana")) {
