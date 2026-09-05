@@ -148,6 +148,7 @@ import {
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import {
   requestAssistantVaultFileSend,
+  supportsAssistantVaultFileDelivery,
   resolveAssistantVaultFileSendTargetFingerprint,
 } from './vault-file-send.js'
 import {
@@ -1002,12 +1003,12 @@ export async function sendAssistantMessageLocal(
           input.deliverResponse === true
           && currentAudienceReplyDeliveryAvailable
           && actionApprovalPort != null
-          && currentDeliveryFields.channel?.trim().toLowerCase() === 'linq'
+          && supportsAssistantVaultFileDelivery(currentDeliveryFields)
           && vaultFileSendTargetFingerprint !== null
         const pendingVaultFilesAvailable =
           input.deliverResponse === true
           && currentAudienceReplyDeliveryAvailable
-          && currentDeliveryFields.channel?.trim().toLowerCase() === 'linq'
+          && supportsAssistantVaultFileDelivery(currentDeliveryFields)
         const hostedToolContext = hostedExecutionContext
           ? createAssistantHostedToolContext({
               computerToolsAvailable: hostedComputerToolsAvailable,
@@ -1089,10 +1090,10 @@ export async function sendAssistantMessageLocal(
                         session: currentSession,
                         sharedPlan,
                       })
-                      if (deliveryFields.channel?.trim().toLowerCase() !== 'linq') {
+                      if (!supportsAssistantVaultFileDelivery(deliveryFields)) {
                         throw new VaultCliError(
                           'ASSISTANT_VAULT_FILE_CHANNEL_UNSUPPORTED',
-                          'Vault files can only be sent to the current iMessage conversation.',
+                          'Vault files cannot be sent to this conversation.',
                         )
                       }
                       if (!resolveAssistantVaultFileSendTargetFingerprint(deliveryFields)) {

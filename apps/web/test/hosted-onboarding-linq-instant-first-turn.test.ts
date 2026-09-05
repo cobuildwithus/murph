@@ -294,12 +294,15 @@ describe("hosted Linq instant first turn", () => {
 
   it("limits the web path to a direct, plain-text-only iMessage", () => {
     expect(isHostedLinqInstantFirstTurnRequestEligible(REQUEST)).toBe(true);
+    expect(isHostedLinqInstantFirstTurnRequestEligible({
+      ...REQUEST,
+      participantContactKind: "email",
+    })).toBe(true);
     for (const request of [
       { ...REQUEST, partTypes: ["text", "text"] },
       { ...REQUEST, partTypes: ["text", "image"] },
       { ...REQUEST, partTypes: ["image"] },
       { ...REQUEST, service: "sms" as const },
-      { ...REQUEST, participantContactKind: "email" as const },
       { ...REQUEST, text: "   " },
       { ...REQUEST, textWasTruncated: true },
     ]) {

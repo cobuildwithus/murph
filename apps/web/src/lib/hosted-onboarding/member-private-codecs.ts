@@ -30,7 +30,9 @@ const HOSTED_MEMBER_ROUTING_PENDING_LINQ_CHAT_FIELD =
   "hosted-member-routing.pending-linq-chat-id";
 const HOSTED_MEMBER_ROUTING_PENDING_LINQ_RECIPIENT_PHONE_FIELD =
   "hosted-member-routing.pending-linq-recipient-phone";
-const HOSTED_MEMBER_ROUTING_PENDING_LINQ_PARTICIPANT_CONTACT_FIELD =
+// Keep the original participant encryption context when its same-member
+// ciphertext moves from pending routing to durable identity.
+export const HOSTED_MEMBER_LINQ_PARTICIPANT_CONTACT_FIELD =
   "hosted-member-routing.pending-linq-participant-contact";
 const HOSTED_MEMBER_ROUTING_TELEGRAM_USER_FIELD = "hosted-member-routing.telegram-user-id";
 const HOSTED_MEMBER_ROUTING_TELEGRAM_PRIVATE_STATE_CURRENT_SCHEMA =
@@ -75,6 +77,7 @@ export interface HostedMemberBillingPrivateState {
 }
 
 export async function buildHostedMemberIdentityPrivateColumns(input: {
+  linqEmailHandle?: string | null;
   memberId: string;
   phoneNumber: string | null;
   preparedRoot?: PreparedHostedWebEncryptionRoot;
@@ -113,6 +116,12 @@ export async function buildHostedMemberIdentityPrivateColumns(input: {
     input.signupPhoneNumber,
   );
   return {
+    ...(input.linqEmailHandle === undefined
+      ? {}
+      : { linqEmailHandleEncrypted: await encryptPrivateField(
+          HOSTED_MEMBER_LINQ_PARTICIPANT_CONTACT_FIELD,
+          input.linqEmailHandle,
+        ) }),
     phoneNumberEncrypted,
     privyUserIdEncrypted,
     signupPhoneCodeSendAttemptId: normalizeNullableString(input.signupPhoneCodeSendAttemptId),
@@ -258,7 +267,7 @@ export async function buildHostedMemberRoutingPrivateColumns(input: {
     input.pendingLinqRecipientPhone,
   );
   const pendingLinqParticipantContactEncrypted = await encryptPrivateField(
-    HOSTED_MEMBER_ROUTING_PENDING_LINQ_PARTICIPANT_CONTACT_FIELD,
+    HOSTED_MEMBER_LINQ_PARTICIPANT_CONTACT_FIELD,
     input.pendingLinqParticipantContact,
   );
   const telegramUserIdEncrypted = await encryptPrivateField(
@@ -338,7 +347,7 @@ export async function readHostedMemberRoutingPrivateState(
       memberId: routing.memberId,
       value: routing.pendingLinqChatIdEncrypted,
     }, {
-      field: HOSTED_MEMBER_ROUTING_PENDING_LINQ_PARTICIPANT_CONTACT_FIELD,
+      field: HOSTED_MEMBER_LINQ_PARTICIPANT_CONTACT_FIELD,
       memberId: routing.memberId,
       value: routing.pendingLinqParticipantContactEncrypted,
     }, {

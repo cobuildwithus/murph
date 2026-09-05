@@ -755,3 +755,9 @@ subagent usage without mistaking multiple requests for one long-context request.
 Changing this bound requires request-level long-context metering first. Astra
 selection remains owned by the Web Max-plan eligibility check. Venice mappings
 remain limited to Luna, Terra, and Sol.
+
+## Workspace restore benchmark
+
+See [the restore benchmark](scripts/benchmark-workspace-restore.md) for a
+synthetic 50 MiB encrypted snapshot, real local HTTP transport, production
+restore timings, content verification, and a fixed-resource Linux command.

@@ -200,6 +200,22 @@ that narrow state tool through canonical core memory operations. The turn uses
 the shared restricted maintenance configuration and needs no separate
 permission profile or filesystem mutation path; native controls are not an
 additional memory owner, and the host suppresses their effects in this lane.
+The evidence owner distinguishes a successfully empty bounded conversation
+window from collection failures. An empty member-memory window skips before
+provider admission. An empty group window skips only when its room-model page
+is also genuinely missing; existing pages remain eligible for cleanup, and
+unavailable evidence or pages keep the ordinary maintenance path. The rolling
+evidence window remains intact so corrections and late committed events are
+not hidden behind a last-run timestamp.
+
+The canonical cron lifecycle skips a managed Journal connected-context pass
+only when its ledger is genuinely missing and its complete connected-account
+inventory is empty. Existing ledgers, new accounts, unavailable ports, and
+failed reads keep the normal pass, preserving notices and due follow-ups.
+The account inventory owner rejects malformed pages instead of presenting them
+as empty. Journal and Personal Patterns retain the common hosted cron policy:
+eligible first attempts request Flex; failed-attempt retries use Standard, and
+the provider boundary validates model and catalog support before selecting Flex.
 Reminder availability uses no
 model turn or separate automation: the existing hosted background automation
 pass deterministically scans active private automations that explicitly store
@@ -1130,7 +1146,14 @@ field. Provider and reasoning stay fixed to OpenAI and `low`; no participant
 identity, plan state, or private preference enters the room path.
 Idle maintenance attributes compaction usage to the model actually bound to the
 warm thread, not a future preference, and skips provider work when that model
-cannot be priced. The
+cannot be priced. On fresh threads, pinned Codex raw completion notifications
+provide exact idle-compaction token buckets, deduplicated by provider response
+identity in the existing usage ledger. A successful compaction without usable
+raw evidence retains the explicit context-size estimate; cold-resumed threads
+cannot opt into raw events in Codex 0.151.0. Measured responses remain billable
+when the encompassing compaction fails. Raw provider content is excluded from
+persisted turn events and stdout. Automatic compaction accounting is unchanged.
+The
 runtime and web control plane
 accept only the input-bound update shape; approval-shaped configuration
 callbacks are rejected. The personalization response
@@ -2032,6 +2055,7 @@ application code.
 - Local assistant runtime state is non-canonical under `vault/.runtime/operations/assistant/**`, including sessions, transcripts, outbox/receipt artifacts, diagnostics, status, and other execution residue. Durable user-facing memory, typed preferences, compiled wiki pages, and scheduled prompt configuration do not live in assistant runtime state; they live under `bank/memory.md`, `bank/preferences.json`, `derived/knowledge/**`, and `bank/automations/*.md`. The canonical preferences singleton owns stable user intent such as workout unit defaults and desired wearable providers. The hosted mailbox owner serializes one immutable per-member causal sequence across conversation and system lanes at append; each Web-approved sparse preference delta enters local pending state with its own event sequence, while the bounded canonical companion `bank/assistant-preference-mutations.json` retains only each field's last-applied event sequence. The preference value document stays strict and contains no runtime mutation metadata. An older or equal approved event terminally no-ops only its stale fields while non-stale siblings apply, so post-commit replay needs no event receipt, reservation lifecycle, or capacity policy. Distinct conversational commands from one accepted turn receive distinct event sequences and apply in command order. Tokenless legacy pending work is sequence zero: it drains, but cannot overwrite a field already touched by any legacy conversational or sequenced mutation. The canonical runtime projection never reorders emitted deltas by Web timestamps; the Web owner approves sparse deltas before mailbox delivery. The canonical assistant-input selector admits a bounded, cursor-ordered compound batch from one direct conversation and one provider-native reply anchor, or from one authenticated non-direct provider room across actor and reply-anchor changes, only when each positive mailbox causal sequence is the exact successor of the previous one. Every admitted group message remains a separate prompt entry with its own provider sender label, opaque accepted-message ref, text/attachments, and native reply context; if any Linq input has an explicit reply anchor, only exact per-message anchors are used and the unanchored latest-reply fallback is disabled for that compound turn. Foreground starts at the oldest fresh input in the current wake and never pulls older pending backlog ahead of it; background starts at the oldest replyable pending input. Any boundary change, sequence gap, legacy sequence-zero input, or 50-input bound ends the batch and leaves the remainder pending. For web-owned tone/voice updates and local `murph.assistant_style` commands, the runtime forwards the terminal provider-accepted input id from that validated batch; web resolves its live member-owned conversation row and derives the causal sequence. Exact-successor proof prevents the terminal input from crossing an intervening Settings mutation. Actual wearable OAuth/account/runtime state remains device-sync-owned operational state. Session persistence stores one canonical Codex App Server assistant target plus separate resume-state metadata rather than duplicating provider config across multiple runtime records, and turn execution resolves boundary defaults, persisted session target, and per-turn overrides through one explicit execution-plan seam before Codex request shaping. Provider-native resume state is the continuity authority when present: onboarding/bootstrap overlays must not clear a valid provider resume handle, and flat-prompt native-resume providers such as Codex receive Murph's system/bootstrap instructions only on bootstrap turns rather than as repeated resumed-turn user content. Active same-conversation input otherwise follows one lifecycle: the initial hosted mailbox compound batch is frozen against broad rediscovery before Codex starts, but an exact staged input notification may join the live Codex turn when it is the next positive causal-sequence successor and preserves the direct-conversation actor/reply-anchor boundary or, for an authenticated non-direct group room, the room, delivery route, account/audience, projection readiness, and reaction boundary. A projection-pending input is a causal barrier until the existing projection-completion notification retries it; terminal projection failure remains replyable through the normal fallback. Duplicate staging and projection-completion notifications at or behind the newest queued or committed frontier are ignored before successor proof. After the provider acknowledges `turn/steer`, Murph journals and checkpoints the accepted live input before any hosted tool effect or final delivery may proceed; any missing input, gap, boundary change, or missed live window remains pending for a normal later turn. Final-delivery and hosted-tool effect keys use the newest accepted causal input as their stable anchor while answered-mailbox evidence retains the full set; recipient identity is room-scoped for non-direct group delivery and remains actor-scoped for direct conversations. Participant-specific group effects use the existing accepted-message resolver at effect time, derive only provider-authenticated sender evidence from the exact opaque message ref, and leave canonical member resolution plus current membership checks to Web without accepting or persisting a model-supplied member id. Input with a strict active-turn target fails closed when that target is no longer live. For ordinary interactive Linq/iMessage and Telegram group auto-replies only, provider request 0 remains an in-memory draft through a four-second admission window; one same-thread provider request 1 may keep, replace, or suppress it, and only the selected result crosses `commit-started` into transcript and outbox state. Request 1 is the hard cap, while completed tools and progress effects remain authoritative. Murph may replay recent raw transcript turns plus bounded sanitized tool/provider audit entries during bootstrap or fallback continuity, and rely on provider-native resume or compaction for continuity, but that runtime context still must never be treated as canonical health memory or vault truth.
 - Assistant user transcripts stamp the original inbound receipt on every new entry and expire text only from that stamp. Legacy entries without the stamp are a bounded rollout exception: phase one preserves them because settled-snapshot cleanup may already have deleted every trustworthy receipt join, and phase two may retire them only after 14 complete days of verified stamping-capable runner convergence. Transcript projection time and compacted runtime residue never become receipt authority.
 - Assistant-generated one-time delivery staging has one flat runtime-owned ref shape: `.runtime/operations/assistant/generated-deliveries/<filename>`. The assistant may create and adopt a direct single-link regular file there only when the same turn establishes the delivery obligation and calls `send_vault_file` with a semantic provider call id; generated-file calls run on the existing serialized dynamic-tool chain, and missing call identity fails before adoption. Runtime parents are tightened to `0700`, the file to `0600`, and the friendly source is transferred to its deterministic owned ref with atomic no-clobber link/unlink plus exact interrupted-link recovery. This non-canonical private residue is included in encrypted hosted checkpoints while an exact filename/type/size/SHA-256 descriptor is active and is omitted from portable support bundles with the rest of `.runtime/**`. Snapshot construction first removes runtime-owned operator-home symlinks, then materializes deferred skipped-inline files before state-aware quiescent cleanup. The generated-delivery pass runs independently before unrelated pending-input compaction and broad residue maintenance, validates the complete direct-file inventory and outbox state, and removes only terminal, changed, or orphaned owned files; later archive planning cannot reintroduce removed residue. An orphan hardlink removes only its runtime link. Legacy nested directories are retained as opaque, counted residue without vetoing independently trusted direct-file cleanup; an active hardlink, unsafe direct name, symlink, special root entry, or untrusted live inventory still fails closed. `exports/assistant-deliveries/**` remains ordinary vault data and receives no ownership, deletion, or packaging-exclusion semantics. The reader-compatible phase-one release is the rollback floor while any persisted outbox or checkpoint can contain the runtime ref.
+- Secure vault-file delivery uses the same approval and outbox owners for iMessage and private Telegram conversations. Telegram exposes `send_vault_file` only with a confirmed direct audience, concrete current destination, and hosted approval port. Telegram file dispatch first publishes its prepared non-idempotent sending claim through the existing durable-checkpoint barrier, including ordinary retries. After that checkpoint, dispatch consumes the exact file-and-destination approval, reloads verified bytes, and sends one multipart `sendDocument` through the Worker-owned Telegram egress boundary. Cold recovery of that claim retains an uncertain terminal outcome instead of replaying a possibly accepted upload. Document delivery shares binary upload and definitive-rejection retry handling with voice; it never follows chat migration away from the approved destination or automatically retries an ambiguous upload. Deploy the Worker allowlist before enabling the new runner capability, and retain compatible runners once Telegram file intents exist.
 - Hosted `murph.assistant_style` resolves the selected turn's Humor, Push,
   Detail, and conversational-only Unhinged sequence at mutation time through the signed Web personalization port.
   Web binds the terminal provider-accepted input id from the validated compound
@@ -3509,16 +3533,49 @@ non-2xx responses, malformed output, non-completed responses, max-output
 exhaustion, and OpenAI quota or credits exhaustion, intentionally fail open by
 recording a deterministic allow decision so a legitimate first contact is not
 permanently dropped. With enforcement off, only a genuinely unknown member on a
-provider-authenticated direct iMessage from a configured E.164 phone prefix may
-use a persisted model-source allow to enter instant start. The selected
+provider-authenticated direct iMessage whose participant is either on a
+configured E.164 phone prefix or is a normalized email handle may use a
+persisted model-source allow to enter instant start. The selected
 permanent home line must be the same line the person contacted. The first
-planner transaction creates the canonical member, verified phone identity,
-pending route, and invite. That invite carries only the event id of the
+planner transaction creates the canonical member, either verified phone
+identity or a unique blinded Linq email-handle identity with its encrypted
+normalized source, the pending route,
+and the invite. A provider-observed email handle is routing identity only and
+never asserts verified email authorization. Privy email authentication must
+later converge the Linq handle owner, verified-email owner, and Privy
+principal owner when more than one exists; any disagreement fails closed.
+The additive migration copies each route's blinded key and matching same-member
+pending participant ciphertext, preserving its existing encryption context.
+It rejects active-only or missing-source history before changing identity;
+it never substitutes a verified-email ciphertext with a different field binding
+or grants starter access retroactively. Validation and backfill share one
+transaction-scoped route set; failure rolls back both columns and scratch state.
+The identity keeps the encrypted source after activation clears pending routing.
+Durable-handle admission is direct-only. Group preflight and transaction planning
+both resolve email through verified authorization or an exact pending recovery
+route; a handle alone grants no group admission. Group recovery retains the
+existing identity owner: under contact-before-chat/member locks it rejects a
+foreign handle, binds the authenticated member's handle and encrypted source,
+and writes the exact temporary route atomically. Crypto preparation and current
+routing opens precede the transaction, which permits cached crypto only. Thus
+recovered direct routing and later promotion cannot lose the identity source.
+Direct inbound resolution uses the existing handle or verified-email authority
+without rewriting either. A member's retained iMessage handle and separate
+verified email can both resolve to that member; verified email is not copied
+into the single retained-handle slot. Handle writes belong to new identity
+creation, explicit recovery, and owner-controlled source re-derivation.
+Canonical verified-email writes and email unlink take the participant contact
+lock before the member lock. A foreign handle blocks a primary email write;
+optional secondary enrichment skips that email while preserving phone or
+Telegram sign-in. Unlink clears only the matching handle and encrypted source.
+Email identity lookup and
+creation use the existing participant contact lock, with the unique index as
+the final backstop. That invite carries only the event id of the
 persisted model-source allow and is the single-owner token for that exact
 original inbound. Only the transaction creating a genuinely new member may
 mint that token; an existing inactive member without the exact same-event token
-remains on the signup path. The phone identity owner reports whether its unique
-insert actually won; a stale outer lookup that loses that insert exits
+remains on the signup path. The participant identity owner reports whether it
+created the member; a stale outer lookup that resolves an existing owner exits
 retryably before invite or accounting work. While the token remains pending, a
 different inbound for the inactive member exits retryably before counting or
 creating an effect; it cannot continue or cancel the admitted start. The
@@ -3527,7 +3584,7 @@ exact invite and event, appends the one semantic-keyed $4.50 starter grant when
 absent, activates the member, and clears the token atomically. It creates no
 Stripe Customer or Subscription. A second ordinary planner pass counts and
 appends the original inbound exactly once after active access is visible. Any
-block, deterministic fail-open, unsupported prefix/channel, cross-line route,
+block, deterministic fail-open, unsupported phone prefix or channel, cross-line route,
 existing member, conflicting billing history, or definitive enrollment failure
 keeps the existing signup-link or ignored behavior. Active members, explicit thread routes, own
 messages, group chats, local guard rejects, deterministic URL/STOP-style spam,

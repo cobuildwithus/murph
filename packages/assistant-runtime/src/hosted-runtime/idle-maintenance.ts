@@ -400,63 +400,96 @@ export async function runHostedIdleCheckpointMaintenance(input: {
       );
     }
 
-    const boundModel = outcome.kind === "compacted"
-      ? outcome.model
-      : null;
-    if (
-      outcome.kind === "compacted"
-      && boundModel
-      && input.recordUsage
-      && input.resolveAssistantSessionId
-    ) {
-      // The entire accounting path (session resolution + record write) is
-      // fire-and-forget: billing telemetry must never break the idle
-      // checkpoint nor delay a pending wake.
-      const { recordUsage, resolveAssistantSessionId } = input;
-      const { threadId, usage } = outcome;
-      const model = boundModel;
-      void (async () => {
-        const assistantSessionId = await resolveAssistantSessionId(threadId);
-        if (!assistantSessionId) {
-          // No matching session: skip rather than write an ambiguous identity.
-          return;
-        }
-        const usageExtraction = usage.source === "estimated"
-          ? {
-              usageExtractionSourcePath:
-                ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
-              usageExtractionVersion: ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
-            }
-          : {};
-        const tokenPricingBasis = resolveHostedAiUsageTokenPricingBasis({
-          model,
-          providerName: usageProviderName,
-          serviceTier: outcome.serviceTier,
-        });
-        await recordUsage(
-          buildAssistantMaintenanceUsageRecord({
-            assistantSessionId,
-            codexThreadId: threadId,
-            credentialSource: input.credentialSource,
-            featureKey: "assistant_idle_compact",
-            memberId: input.memberId,
-            model,
-            occurredAt: compactStartedAt,
-            providerName: usageProviderName,
-            tokenPricingBasis,
-            triggerKind: "automation_idle_compact",
-            usage,
-            ...usageExtraction,
-          }),
-        );
-      })().catch(() => undefined);
-    }
+    // Session resolution and record writes must never delay an idle checkpoint
+    // or a pending foreground wake.
+    void recordIdleCompactionUsage({
+      outcome,
+      credentialSource: input.credentialSource,
+      memberId: input.memberId,
+      occurredAt: compactStartedAt,
+      providerName: usageProviderName,
+      recordUsage: input.recordUsage,
+      resolveAssistantSessionId: input.resolveAssistantSessionId,
+    }).catch(() => undefined);
 
     return attachInboxMediaRetentionWake(outcome, retentionWake);
   } finally {
     input.shutdownSignal?.removeEventListener("abort", onShutdownAbort);
     wakeWatchAbort.abort();
     await wakeWatch;
+  }
+}
+
+async function recordIdleCompactionUsage(input: {
+  outcome: CodexWarmThreadCompactionOutcome;
+  credentialSource: AssistantUsageCredentialSource;
+  memberId: string;
+  occurredAt: string;
+  providerName: string | null;
+  recordUsage: ((record: AssistantUsageRecord) => Promise<void>) | null;
+  resolveAssistantSessionId: ((threadId: string) => Promise<string | null>) | null;
+}): Promise<void> {
+  const { outcome, recordUsage, resolveAssistantSessionId } = input;
+  if (outcome.kind === "skipped" || !outcome.usage || !outcome.model
+    || !recordUsage || !resolveAssistantSessionId) return;
+  const { threadId, usage, model } = outcome;
+  const assistantSessionId = await resolveAssistantSessionId(threadId);
+  if (!assistantSessionId) {
+    // No matching session: skip rather than write an ambiguous identity.
+    return;
+  }
+  const usageExtraction = usage.source === "estimated"
+    ? {
+        usageExtractionSourcePath:
+          ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
+        usageExtractionVersion: ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
+      }
+    : {};
+  const tokenPricingBasis = resolveHostedAiUsageTokenPricingBasis({
+    model,
+    providerName: input.providerName,
+    serviceTier: outcome.serviceTier,
+  });
+  const operations = usage.source === "measured" && usage.responses?.length
+    ? usage.responses.map((response) => ({
+        providerRequestId: response.responseId,
+        providerRequestOutcome: outcome.kind === "failed" ? "failed" as const : "succeeded" as const,
+        usage: {
+          cachedInputTokens: response.cachedInputTokens,
+          cacheWriteTokens: response.cacheWriteInputTokens,
+          inputTokens: response.inputTokens,
+          outputTokens: response.outputTokens,
+          reasoningTokens: response.reasoningOutputTokens,
+          totalTokens: response.totalTokens,
+          rawUsageJson: {
+            cachedInputTokens: response.cachedInputTokens,
+            cacheWriteInputTokens: response.cacheWriteInputTokens,
+            inputTokens: response.inputTokens,
+            outputTokens: response.outputTokens,
+            reasoningOutputTokens: response.reasoningOutputTokens,
+            totalTokens: response.totalTokens,
+          },
+        },
+        usageExtractionSourcePath: "rawResponse.completed.usage",
+        usageExtractionVersion: "codex-idle-compaction-raw-v1",
+      }))
+    : [{ usage, ...usageExtraction }];
+  for (const operation of operations) {
+    const record = buildAssistantMaintenanceUsageRecord({
+      assistantSessionId,
+      codexThreadId: threadId,
+      credentialSource: input.credentialSource,
+      featureKey: "assistant_idle_compact",
+      memberId: input.memberId,
+      model,
+      occurredAt: input.occurredAt,
+      providerName: input.providerName,
+      tokenPricingBasis,
+      triggerKind: "automation_idle_compact",
+      ...operation,
+    });
+    // A failed telemetry write must not discard later measured operations.
+    await recordUsage(record).catch(() => undefined);
   }
 }
 
