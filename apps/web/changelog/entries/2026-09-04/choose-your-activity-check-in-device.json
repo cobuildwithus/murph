@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-04",
+  "order": 100,
+  "item": {
+    "id": "choose-your-activity-check-in-device",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Choose the device for activity check-ins",
+    "summary": "Ask Murph to follow activities from Garmin, Oura, or Fitbit when setting up an activity check-in, or change the device on an existing check-in.",
+    "details": "Check-ins wait for matching activity to sync from the selected device. WHOOP filters remain available, and check-ins without a selected device continue to follow all activity sources.",
+    "relevanceTags": ["automations", "devices"],
+    "sourcePullRequests": []
+  }
+}

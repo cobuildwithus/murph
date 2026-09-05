@@ -93,6 +93,9 @@ export const automationTimeScheduleKindValues = [
 export const automationDeviceActivitySourceValues = [
   "whoop",
   "whoop_v2",
+  "garmin",
+  "oura",
+  "fitbit",
 ] as const;
 
 // Non-authoritative examples for help text and autocomplete surfaces. The
@@ -261,7 +264,9 @@ export const automationScheduleDeviceActivitySchema = z
     afterOccurredAt: isoTimestampSchema().optional(),
     afterEntityId: z.string().min(1).optional(),
     source: z.enum(automationDeviceActivitySourceValues).optional(),
-    activityKind: automationDeviceActivityKindSchema.optional(),
+    activityKind: automationDeviceActivityKindSchema.optional().describe(
+      'Use "workout" for workouts, "sleep" for sleep, or the requested lowercase kebab-case activity kind (for example, "running"). Omit only to match all recorded activity kinds, including sleep.',
+    ),
   })
   .superRefine((schedule, ctx) => {
     const hasScalarOccurredAt = schedule.afterOccurredAt !== undefined;

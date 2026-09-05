@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
+import { automationDeviceActivitySourceValues } from '@murphai/contracts'
 
 import { deriveAutomationModelInputSchema } from '../src/assistant-codex/dynamic-tools/automation-model-input-schema.js'
 import {
   MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA,
   MURPH_AUTOMATION_TOOL,
+  readAutomationDynamicToolRequest,
 } from '../src/assistant-codex/dynamic-tools/automation.js'
 
 type JsonSchemaObject = Record<string, unknown>
@@ -139,6 +141,71 @@ function collectKeys(value: unknown, key: string): unknown[] {
 }
 
 describe('automation model input schema', () => {
+  it('advertises the canonical device source enum in runtime and model schemas', () => {
+    for (const schema of [MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA, MURPH_AUTOMATION_TOOL.inputSchema]) {
+      const sources = collectKeys(schema, 'source')
+      expect(sources.length).toBeGreaterThan(0)
+      for (const source of sources) {
+        expect(asObject(source).enum).toEqual(automationDeviceActivitySourceValues)
+      }
+    }
+  })
+
+  it('explains workout and sleep filtering versus all recorded activity kinds', () => {
+    for (const schema of [MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA, MURPH_AUTOMATION_TOOL.inputSchema]) {
+      const kinds = collectKeys(schema, 'activityKind')
+      expect(kinds.length).toBeGreaterThan(0)
+      for (const kind of kinds) {
+        const description = asObject(kind).description
+        expect(description).toContain('Use "workout" for workouts, "sleep" for sleep')
+        expect(description).toContain('Omit only to match all recorded activity kinds, including sleep.')
+      }
+    }
+  })
+
+  it('explains device activity selectors alongside canonical schedule shapes', () => {
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      '{"kind":"deviceActivity","activityKind":"workout","source":"garmin","after":"2026-01-01T00:00:00.000Z"}',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'with the requested lowercase source and exact recorded-after cutoff',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'set schedule.activityKind to workout for workout requests',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'omitted activityKind matches all recorded kinds including sleep, and omitted source matches all providers',
+    )
+  })
+
+  it.each([undefined, 'whoop', 'whoop_v2', 'garmin', 'oura', 'fitbit', 'google_health', 'google-health', 'unknown-provider'])(
+    'validates device source %s for hosted save and patch',
+    (source) => {
+      const schedule = {
+        kind: 'deviceActivity',
+        activityKind: 'workout',
+        after: '2026-06-07T11:00:00.000Z',
+        ...(source === undefined ? {} : { source }),
+      }
+      const accepted = source === undefined
+        || automationDeviceActivitySourceValues.some((value) => value === source)
+      for (const args of [
+        { action: 'save', title: 'Activity check-in', instructions: 'Ask how the activity felt.', schedule },
+        { action: 'patch', lookup: 'auto_activity', expectedUpdatedAt: '2026-06-07T10:00:00.000Z', schedule },
+      ]) {
+        const result = readAutomationDynamicToolRequest({
+          arguments: args,
+          tool: MURPH_AUTOMATION_TOOL.name,
+        })
+        expect(result?.kind).toBe(accepted ? 'automation' : 'invalid-automation-arguments')
+        if (result?.kind === 'automation') {
+          expect(result.request).toMatchObject({ action: args.action, schedule })
+          expect(result.request).not.toHaveProperty('retargetToCurrentConversation')
+        }
+      }
+    },
+  )
+
   it('advertises Terra as the reminder default and Luna only for a fixed cue', () => {
     const schemaDescriptions = collectKeys(
       MURPH_AUTOMATION_TOOL.inputSchema,
