@@ -1411,43 +1411,6 @@ async function resolveHostedLinqPlanningEvent(input: {
   const webhookIsGroup = messageEvent.data.chat?.is_group;
   if (webhookIsGroup === true) {
     logHostedLinqChatClassification("webhook-group");
-    const threadRoute = await readHostedThreadRouteByThreadIdentity({
-      channel: "linq",
-      prisma: input.prisma,
-      threadId: messageEvent.data.chat_id,
-    });
-    const pendingGroupRoster =
-      !messageEvent.data.is_from_me && !threadRoute
-        ? await resolveHostedLinqPendingGroupParticipantMemberIds({
-            chatId: messageEvent.data.chat_id,
-            prisma: input.prisma,
-            signal: input.signal,
-          })
-        : null;
-    return {
-      event: messageEvent,
-      ...(pendingGroupRoster?.initialGroupDisplayName
-        ? { initialGroupDisplayName: pendingGroupRoster.initialGroupDisplayName }
-        : {}),
-      ...(pendingGroupRoster?.participantMemberIds == null
-        ? {}
-        : {
-            pendingGroupParticipantMemberIds:
-              pendingGroupRoster.participantMemberIds,
-          }),
-      ...(pendingGroupRoster?.unavailable === true
-        ? { pendingGroupRosterUnavailable: true }
-        : {}),
-      ...(pendingGroupRoster?.handles == null
-        ? {}
-        : {
-            requestLocalGroupRoster: {
-              chatId: messageEvent.data.chat_id,
-              handles: pendingGroupRoster.handles,
-            },
-          }),
-      threadRoute,
-    };
   }
 
   const threadRoute = await readHostedThreadRouteByThreadIdentity({
@@ -1464,7 +1427,9 @@ async function resolveHostedLinqPlanningEvent(input: {
 
   let resolvedIsGroup: boolean;
   let canonicalSummary: HostedLinqChatSummary | null = null;
-  if (threadRoute) {
+  if (webhookIsGroup === true) {
+    resolvedIsGroup = true;
+  } else if (threadRoute) {
     logHostedLinqChatClassification("thread-route-group");
     resolvedIsGroup = true;
   } else {
@@ -1515,17 +1480,19 @@ async function resolveHostedLinqPlanningEvent(input: {
         })
       : null;
   return {
-    event: {
-      ...messageEvent,
-      data: {
-        ...messageEvent.data,
-        chat: {
-          id: messageEvent.data.chat_id,
-          ...(messageEvent.data.chat ?? {}),
-          is_group: resolvedIsGroup,
+    event: webhookIsGroup === true
+      ? messageEvent
+      : {
+          ...messageEvent,
+          data: {
+            ...messageEvent.data,
+            chat: {
+              id: messageEvent.data.chat_id,
+              ...(messageEvent.data.chat ?? {}),
+              is_group: resolvedIsGroup,
+            },
+          },
         },
-      },
-    },
     ...(pendingGroupRoster?.initialGroupDisplayName
       ? { initialGroupDisplayName: pendingGroupRoster.initialGroupDisplayName }
       : {}),
