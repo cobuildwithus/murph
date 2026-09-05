@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   readHostedIngressLatencyTraceForTest,
@@ -35,10 +35,10 @@ const hostedLinqCometRiderAssistantReplyText =
 const hostedLinqImageAssistantReplyText = "Reviewed the image attachment.";
 const hostedLinqPdfAssistantReplyText = "Read the PDF attachment.";
 const hostedLinqAppCardAssistantReplyText = "Handled the app card.";
-const hostedLinqTypingPrewarmAssistantReplyText =
-  "The typing prewarm kept the normal reply path intact.";
-const hostedLinqMessageRoutingPrewarmAssistantReplyText =
-  "The message-routing prewarm stayed attached to this reply.";
+const hostedLinqAfterTypingAssistantReplyText =
+  "The normal reply arrived after the typing hint.";
+const hostedLinqIdleMessageAssistantReplyText =
+  "The idle message reached the normal reply path.";
 const hostedLinqParticipantAdditionGroupContext =
   "One or more participants were recently added to this group chat.";
 const hostedLinqParticipantAddedDetailedContext =
@@ -165,7 +165,7 @@ describe("hosted local Linq webhook e2e", () => {
     ).toBe(true);
   }, 300_000);
 
-  it("attributes an idle direct message prewarm to its delivered reply", async () => {
+  it("delivers an idle direct message reply without shell prewarming", async () => {
     const { chatId, replyChatPath, userId } =
       await createActiveLinqWebhookMember("message-routing-prewarm");
     await requireScenario().waitForHostedIdle(userId);
@@ -176,7 +176,7 @@ describe("hosted local Linq webhook e2e", () => {
     const messageEventId = `evt_message_routing_prewarm_${userId}`;
 
     requireScenario().queueAssistantResponses([
-      hostedLinqMessageRoutingPrewarmAssistantReplyText,
+      hostedLinqIdleMessageAssistantReplyText,
     ], {
       matchInputContains: messageText,
     });
@@ -202,58 +202,16 @@ describe("hosted local Linq webhook e2e", () => {
       userId,
     });
     expect(requireLinqStub().readObservedMessageText(reply)).toBe(
-      hostedLinqMessageRoutingPrewarmAssistantReplyText,
+      hostedLinqIdleMessageAssistantReplyText,
     );
     expect(requireScenario().assistantProviderRequests).toHaveLength(
       providerCountBeforeReply + 1,
     );
 
-    const latencyTrace = await waitForShellPrewarmLatencyTrace({
+    await expectNoShellPrewarmLatencyTrace({
       mailboxDedupeKey: messageEventId,
       userId,
     });
-    const orchestration = latencyTrace.phaseBreakdown?.orchestration;
-    expect(orchestration).toMatchObject({
-      shellPrewarmAdmissionReadFinishedAtEpochMs: expect.any(Number),
-      shellPrewarmAdmissionReadStartedAtEpochMs: expect.any(Number),
-      shellPrewarmCloudflareRouteReceivedAtEpochMs: expect.any(Number),
-      shellPrewarmConsentLockAcquiredAtEpochMs: expect.any(Number),
-      shellPrewarmExpectedOrchestrationAttemptId:
-        expect.stringMatching(/^web-prewarm-[0-9a-f-]{36}$/u),
-      shellPrewarmFirstHintAtEpochMs: expect.any(Number),
-      shellPrewarmHintCount: expect.any(Number),
-      shellPrewarmOrchestrationAttemptId:
-        expect.stringMatching(/^web-prewarm-[0-9a-f-]{36}$/u),
-      shellPrewarmOutcome: expect.stringMatching(
-        /^(?:cold_start_observed|start_issued_warm)$/u,
-      ),
-      shellPrewarmRequestStartedAtEpochMs: expect.any(Number),
-      shellPrewarmRuntimeControlAuthFinishedAtEpochMs: expect.any(Number),
-      shellPrewarmRuntimeControlAuthStartedAtEpochMs: expect.any(Number),
-      shellPrewarmSource: "linq-message-routing",
-      shellPrewarmUserRunnerConstructorFinishedAtEpochMs: expect.any(Number),
-      shellPrewarmUserRunnerConstructorStartedAtEpochMs: expect.any(Number),
-      shellPrewarmUserRunnerRpcStartedAtEpochMs: expect.any(Number),
-    });
-    expect(orchestration?.shellPrewarmExpectedOrchestrationAttemptId).toBe(
-      orchestration?.shellPrewarmOrchestrationAttemptId,
-    );
-    expectNondecreasingEpochs(
-      orchestration?.shellPrewarmRequestStartedAtEpochMs,
-      orchestration?.shellPrewarmRuntimeControlAuthStartedAtEpochMs,
-      orchestration?.shellPrewarmRuntimeControlAuthFinishedAtEpochMs,
-      orchestration?.shellPrewarmCloudflareRouteReceivedAtEpochMs,
-      orchestration?.shellPrewarmUserRunnerRpcStartedAtEpochMs,
-    );
-    expectNondecreasingEpochs(
-      orchestration?.shellPrewarmUserRunnerConstructorStartedAtEpochMs,
-      orchestration?.shellPrewarmUserRunnerConstructorFinishedAtEpochMs,
-      orchestration?.shellPrewarmUserRunnerRpcStartedAtEpochMs,
-      orchestration?.shellPrewarmConsentLockAcquiredAtEpochMs,
-      orchestration?.shellPrewarmAdmissionReadStartedAtEpochMs,
-      orchestration?.shellPrewarmAdmissionReadFinishedAtEpochMs,
-      orchestration?.shellPrewarmFirstHintAtEpochMs,
-    );
   }, 300_000);
 
   it("reduces an inbound iMessage app card to fallback text and replies in the same chat", async () => {
@@ -315,7 +273,7 @@ describe("hosted local Linq webhook e2e", () => {
     expect(assistantProviderBody).not.toContain(privateCardSentinel);
   }, 300_000);
 
-  it("prewarms from signed typing before the later durable message and reply", async () => {
+  it("ignores signed typing and delivers the later durable message reply", async () => {
     const { chatId, replyChatPath, userId } =
       await createActiveLinqWebhookMember("typing-prewarm");
     const idleBeforeTyping = await requireScenario().waitForHostedIdle(userId);
@@ -362,7 +320,7 @@ describe("hosted local Linq webhook e2e", () => {
     const messageText = "Does the normal reply still arrive after typing?";
     const messageEventId = `evt_after_typing_prewarm_${userId}`;
     requireScenario().queueAssistantResponses([
-      hostedLinqTypingPrewarmAssistantReplyText,
+      hostedLinqAfterTypingAssistantReplyText,
     ], {
       matchInputContains: messageText,
     });
@@ -388,7 +346,7 @@ describe("hosted local Linq webhook e2e", () => {
       userId,
     });
     expect(requireLinqStub().readObservedMessageText(reply)).toBe(
-      hostedLinqTypingPrewarmAssistantReplyText,
+      hostedLinqAfterTypingAssistantReplyText,
     );
     expect(requireLinqStub().countObservedSends(replyChatPath)).toBe(
       outboundCountBeforeTyping + 1,
@@ -396,24 +354,10 @@ describe("hosted local Linq webhook e2e", () => {
     expect(requireScenario().assistantProviderRequests).toHaveLength(
       providerCountBeforeTyping + 1,
     );
-    const latencyTrace = await waitForShellPrewarmLatencyTrace({
+    await expectNoShellPrewarmLatencyTrace({
       mailboxDedupeKey: messageEventId,
       userId,
     });
-    expect(latencyTrace.phaseBreakdown?.orchestration).toMatchObject({
-      shellPrewarmFirstHintAtEpochMs: expect.any(Number),
-      shellPrewarmHintCount: expect.any(Number),
-      shellPrewarmOutcome: expect.stringMatching(
-        /^(?:cold_start_observed|start_issued_warm)$/u,
-      ),
-      shellPrewarmSource: "linq-typing-started",
-    });
-    const acceptedAtEpochMs = Date.parse(latencyTrace.acceptedAt);
-    const firstHintAtEpochMs =
-      latencyTrace.phaseBreakdown?.orchestration?.shellPrewarmFirstHintAtEpochMs;
-    expect(acceptedAtEpochMs).not.toBeNaN();
-    expect(firstHintAtEpochMs).toEqual(expect.any(Number));
-    expect(firstHintAtEpochMs).toBeLessThanOrEqual(acceptedAtEpochMs);
   }, 300_000);
 
   it("keeps Linq context when two signed webhooks arrive before hosted completion catches up", async () => {
@@ -1032,49 +976,24 @@ function signLinqWebhook(secret: string, payload: string, timestamp: string): st
   return `sha256=${signature}`;
 }
 
-async function waitForShellPrewarmLatencyTrace(input: {
+async function expectNoShellPrewarmLatencyTrace(input: {
   mailboxDedupeKey: string;
   userId: string;
-}) {
-  const startedAt = Date.now();
-  let lastError: unknown = null;
-  while (Date.now() - startedAt < 30_000) {
-    try {
-      const mailboxItem = await readHostedMailboxItemForTest({
-        dedupeKey: input.mailboxDedupeKey,
-        environment: requireScenario().runtimeEnv,
-        userId: input.userId,
-      });
-      const trace = await readHostedIngressLatencyTraceForTest({
-        environment: requireScenario().runtimeEnv,
-        mailboxItemId: mailboxItem.id,
-        userId: input.userId,
-      });
-      if (
-        trace.phaseBreakdown?.orchestration?.shellPrewarmOutcome
-        && trace.phaseBreakdown.orchestration.shellPrewarmSource
-      ) {
-        return trace;
-      }
-    } catch (error) {
-      lastError = error;
-    }
-    await sleep(100);
-  }
-
-  throw new Error(
-    `Timed out waiting for the shell-prewarm latency trace: ${String(lastError)}`,
-  );
-}
-
-function expectNondecreasingEpochs(...values: unknown[]): void {
-  for (const value of values) {
-    expect(value).toEqual(expect.any(Number));
-  }
-  const epochValues = values as number[];
-  for (let index = 1; index < epochValues.length; index += 1) {
-    expect(epochValues[index]).toBeGreaterThanOrEqual(epochValues[index - 1] ?? 0);
-  }
+}): Promise<void> {
+  const trace = await vi.waitFor(async () => {
+    const mailboxItem = await readHostedMailboxItemForTest({
+      dedupeKey: input.mailboxDedupeKey,
+      environment: requireScenario().runtimeEnv,
+      userId: input.userId,
+    });
+    return await readHostedIngressLatencyTraceForTest({
+      environment: requireScenario().runtimeEnv,
+      mailboxItemId: mailboxItem.id,
+      userId: input.userId,
+    });
+  }, { interval: 100, timeout: 30_000 });
+  expect(Object.keys(trace.phaseBreakdown?.orchestration ?? {})
+    .filter((key) => key.startsWith("shellPrewarm"))).toEqual([]);
 }
 
 function parseAssistantProviderRequestBody(body: string | undefined): Record<string, unknown> {
