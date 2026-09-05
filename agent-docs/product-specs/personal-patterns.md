@@ -1,6 +1,6 @@
 # Personal Patterns
 
-Last verified: 2026-08-31
+Last verified: 2026-09-05
 
 ## Product boundary
 
@@ -162,9 +162,15 @@ uses the existing operational email channel and does not change the member's
 message. A complete platform outage requires an external uptime monitor,
 because the runtime cannot report while it is offline.
 
-Only a new grade A-D identity can trigger that daily message. Murph describes D
-as an Early signal and A-C as a Pattern. Grade E Observations remain visible on
-the page but stay quiet. A saved private ledger deduplicates result identities.
+Only a new grade A-D identity can trigger that daily message. Letter grades and
+report classifications stay internal to selection and bookkeeping. Messages
+lead with the finding in everyday language, convey repeated support for A/B,
+tentativeness for C, and limited evidence for D, and state supporting counts in
+the report's actual unit. They preserve comparison and outcome timing without
+implying cause or prescribing habit changes. Links use the full
+`https://www.withmurph.ai/patterns` URL on its own final line; a bare route is
+never a message link. Grade E Observations remain visible on the page but stay
+quiet. A saved private ledger deduplicates result identities.
 It also stores factor or result mutes requested in conversation. Grade changes
 do not create separate messages. The weekly health insight can mention a useful
 strengthening, weakening, or removed result.
