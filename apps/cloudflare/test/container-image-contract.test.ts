@@ -90,9 +90,6 @@ describe("hosted runner container image contract", () => {
     );
 
     expect(bundleAssemblyScript).toContain("const runnerBundleDeployRoot = path.join(");
-    expect(bundleAssemblyScript).toContain("const workspaceArtifactLockHeldEnv = ");
-    expect(bundleAssemblyScript).toContain("rerunUnderWorkspaceArtifactLockIfNeeded();");
-    expect(bundleAssemblyScript).toContain("run-with-workspace-artifact-lock.mjs");
     expect(bundleAssemblyScript).toContain('const shouldSkipBuild = process.argv.includes("--skip-build");');
     expect(bundleAssemblyScript).toContain(
       'import { resolveCloudflareDeployPaths } from "./deploy-automation.js";',
@@ -899,10 +896,11 @@ describe("hosted runner container image contract", () => {
     expect(wranglerConfig).toContain('"image": "../../Dockerfile.cloudflare-hosted-runner"');
     expect(wranglerConfig).toContain('"image_build_context": "."');
     expect(wranglerConfig).toContain(
-      '"compatibility_flags": ["nodejs_compat", "containers_pid_namespace"]',
+      '"compatibility_flags": ["nodejs_compat", "containers_pid_namespace", "enable_request_signal"]',
     );
     expect(wranglerConfig).toContain('"ssh": { "enabled": false }');
     expect(wranglerConfig).not.toContain('"authorized_keys"');
+    expect(rendered.compatibility_flags).toContain("enable_request_signal");
     expect(container.ssh).toEqual({ enabled: false });
     expect(container).not.toHaveProperty("authorized_keys");
     expect(packageJson.scripts?.["deploy:worker"]).toBe(

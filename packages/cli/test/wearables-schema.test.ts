@@ -59,7 +59,9 @@ test("wearables activity schema preserves bounded workout features", () => {
     vault: "/tmp/example-vault",
   });
 
-  assert.deepEqual(parsed.items[0]?.workoutFeatures?.[0]?.splits, []);
+  const workout = parsed.items[0]?.workoutFeatures?.[0];
+  assert.ok(workout && "splits" in workout);
+  assert.deepEqual(workout.splits, []);
   assert.equal(parsed.items[0]?.activityAverageHeartRate?.value, 106);
   assert.equal(parsed.items[0]?.minimumHeartRate?.value, 52);
   assert.equal(parsed.items[0]?.workoutFeatures?.[0]?.cadenceUnit, "rpm");
@@ -74,6 +76,17 @@ test("wearables activity schema preserves bounded workout features", () => {
     false,
   );
   assert.equal("vault" in parsed, false);
+  const { splits: _splits, ...summaryWorkout } = workout;
+  const summaryInput = {
+    ...parsed,
+    items: [{ ...parsed.items[0], workoutFeatures: [{ ...summaryWorkout, splitsOmitted: true }] }],
+  };
+  const summary = wearablesActivityListResultSchema.parse(summaryInput);
+  assert.deepEqual(summary.items[0]?.workoutFeatures?.[0], { ...summaryWorkout, splitsOmitted: true });
+  assert.equal(wearablesActivityListResultSchema.safeParse({
+    ...parsed,
+    items: [{ ...parsed.items[0], workoutFeatures: [summaryWorkout] }],
+  }).success, false);
 });
 
 test("wearables day schema preserves compact fallback metadata", () => {

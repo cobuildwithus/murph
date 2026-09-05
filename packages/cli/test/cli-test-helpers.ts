@@ -88,6 +88,18 @@ const forwardedCliEnvKeys = [
   'TZ',
   'VAULT',
 ] as const
+const assistantCommandSourcePath = path.join(
+  repoRoot,
+  'packages/assistant-cli/src/commands/assistant.ts',
+)
+const assistantCommandJavaScriptPath = path.join(
+  repoRoot,
+  'packages/assistant-cli/dist/commands/assistant.js',
+)
+const assistantCommandDeclarationPath = path.join(
+  repoRoot,
+  'packages/assistant-cli/dist/commands/assistant.d.ts',
+)
 const requiredRuntimeArtifactPaths = [
   path.join(repoRoot, 'packages/contracts/dist/index.js'),
   path.join(repoRoot, 'packages/contracts/dist/index.d.ts'),
@@ -125,6 +137,8 @@ const requiredRuntimeArtifactPaths = [
   path.join(repoRoot, 'packages/inboxd/dist/index.d.ts'),
   path.join(repoRoot, 'packages/parsers/dist/index.js'),
   path.join(repoRoot, 'packages/parsers/dist/index.d.ts'),
+  assistantCommandJavaScriptPath,
+  assistantCommandDeclarationPath,
   binPath,
   cliIndexPath,
   path.join(repoRoot, 'packages/cli/dist/cli-entry.js'),
@@ -464,7 +478,8 @@ export async function ensureCliRuntimeArtifactsWithOptions(options?: {
   if (
     options?.forceReverify !== true &&
     cliRuntimeArtifactsVerified &&
-    requiredRuntimeArtifactPaths.every((artifactPath) => existsSync(artifactPath))
+    requiredRuntimeArtifactPaths.every((artifactPath) => existsSync(artifactPath)) &&
+    await verifyAssistantCommandFreshness()
   ) {
     return
   }
@@ -889,10 +904,27 @@ async function verifyCliRuntimeArtifacts(): Promise<boolean> {
     return false
   }
 
+  if (!(await verifyAssistantCommandFreshness())) {
+    cliRuntimeArtifactsVerified = false
+    return false
+  }
+
   cliRuntimeArtifactsVerified = (
     await Promise.all(importSmokeArtifactPaths.map((artifactPath) => canImportArtifact(artifactPath)))
   ).every(Boolean)
   return cliRuntimeArtifactsVerified
+}
+
+async function verifyAssistantCommandFreshness(): Promise<boolean> {
+  try {
+    const [artifact, source] = await Promise.all([
+      stat(assistantCommandJavaScriptPath),
+      stat(assistantCommandSourcePath),
+    ])
+    return artifact.mtimeMs >= source.mtimeMs
+  } catch {
+    return false
+  }
 }
 
 async function waitForCliRuntimeArtifacts(): Promise<boolean> {

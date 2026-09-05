@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-04",
+  "order": 100,
+  "item": {
+    "id": "missing-wiki-page-recovery",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Clearer recovery for missing wiki pages",
+    "summary": "When a saved wiki page is missing, Murph can explain that it is unavailable and move on without repeating the same failed lookup.",
+    "details": "Asking to read a missing page does not authorize creating a replacement.",
+    "relevanceTags": ["wiki", "reliability"],
+    "sourcePullRequests": [2849]
+  }
+}

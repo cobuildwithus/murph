@@ -1,0 +1,23 @@
+{
+  "publishedOn": "2026-09-04",
+  "order": 100,
+  "item": {
+    "id": "nutrition-cards-use-saved-targets-together",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Fewer repeated checks for nutrition cards",
+    "summary": "When you ask for a daily nutrition card, Murph checks your saved meals and applicable nutrition targets together.",
+    "details": "Conflicting or incompatible targets still produce an explanation instead of a card, and the check does not change your goals.",
+    "relevanceTags": [
+      "nutrition",
+      "goals"
+    ],
+    "sourcePullRequests": [
+      2878
+    ],
+    "tryIt": {
+      "label": "Review today’s nutrition",
+      "prompt": "Send my daily nutrition card for today."
+    }
+  }
+}

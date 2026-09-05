@@ -240,6 +240,51 @@ test("memory show returns onboarding demographic context from the complete canon
   );
 });
 
+test("record-only memory reads and compact mutation receipts preserve exact records", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext("murph-memory-receipts-");
+  cleanupPaths.push(parentRoot);
+  const cli = Cli.create("vault-cli", { description: "memory receipt test", version: "0.0.0-test" });
+  registerMemoryCommands(cli);
+  const records = await seedPrivateFreeMemoryFixture(vaultRoot);
+  const selected = records[0];
+  assert.ok(selected);
+  const execute = (args: string[]) => runInProcessJsonCli(cli, ["memory", ...args, "--vault", vaultRoot]);
+  const full = await execute(["show", selected.id]);
+  const exact = await execute(["show", selected.id, "--record-only"]);
+  assert.equal(full.envelope.ok, true);
+  assert.equal(exact.envelope.ok, true);
+  assert.deepEqual(exact.envelope.data, { memory: (full.envelope.data as { memory: unknown }).memory });
+  assert.ok(JSON.stringify(exact.envelope.data).length < JSON.stringify(full.envelope.data).length / 10);
+  const missingId = await execute(["show", "--record-only"]);
+  assert.equal(missingId.envelope.ok, false);
+  const unknown = await execute(["show", "missing-record", "--record-only"]);
+  assert.equal(unknown.envelope.ok, false);
+
+  for (const args of [
+    ["upsert", "Synthetic preference for short summaries.", "--section", "Preferences"],
+    ["update", selected.id, "Synthetic corrected context."],
+    ["set-name", "Sample"],
+  ]) {
+    const saved = await execute([...args, "--compact"]);
+    assert.equal(saved.envelope.ok, true);
+    const receipt = saved.envelope.data as { created: boolean; memory: { id: string } };
+    assert.deepEqual(Object.keys(receipt).sort(), ["created", "memory"]);
+    const readback = await execute(["show", receipt.memory.id, "--record-only"]);
+    assert.equal(readback.envelope.ok, true);
+    assert.deepEqual(readback.envelope.data, { memory: receipt.memory });
+  }
+  const removed = await execute(["forget", selected.id, "--compact"]);
+  assert.equal(removed.envelope.ok, true);
+  const receipt = removed.envelope.data as { existed: boolean; memory: { id: string } };
+  assert.deepEqual(Object.keys(receipt).sort(), ["existed", "memory"]);
+  assert.equal(receipt.existed, true);
+  assert.equal(receipt.memory.id, selected.id);
+  assert.equal((await execute(["show", selected.id, "--record-only"])).envelope.ok, false);
+  const after = await readMemoryDocumentFromCore(vaultRoot);
+  assert.equal(after.records.some((record) => record.id === selected.id), false);
+  assert.ok(records.slice(1).every((record) => after.records.some((current) => current.id === record.id && current.text === record.text)));
+});
+
 test("memory show compact preserves all canonical facts while materially reducing serialized output", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-memory-compact-cli-",

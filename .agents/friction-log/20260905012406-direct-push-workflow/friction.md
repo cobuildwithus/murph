@@ -1,6 +1,7 @@
 ---
 title: 'Direct-push workflow stops for a meaning-preserving docs conflict'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2902'
 ---
 
 ## Expected Behavior

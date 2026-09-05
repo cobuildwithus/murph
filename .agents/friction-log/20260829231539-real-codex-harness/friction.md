@@ -1,6 +1,7 @@
 ---
-title: "Real-Codex harness login shell discards injected fixture PATH"
-severity: "minor"
+title: 'Real-Codex harness login shell discards injected fixture PATH'
+severity: 'minor'
+issue: 'cobuildwithus/murph#2729'
 ---
 
 ## Expected Behavior

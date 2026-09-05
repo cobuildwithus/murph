@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT precedence test invokes real pnpm with a temporary HOME'
 severity: 'major'
+issue: 'cobuildwithus/murph#2791'
 ---
 
 ## Expected Behavior

@@ -84,7 +84,7 @@ export function buildHostedWranglerDeployConfig(
     name: environment.workerName,
     main: "../src/index.ts",
     compatibility_date: environment.compatibilityDate,
-    compatibility_flags: ["nodejs_compat", "containers_pid_namespace"],
+    compatibility_flags: ["nodejs_compat", "containers_pid_namespace", "enable_request_signal"],
     placement: {
       mode: "smart",
     },
