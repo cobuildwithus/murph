@@ -3576,10 +3576,11 @@ function isHostedJunctionDataSourceUnknown(
   }
   const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug);
   // Historical completion has no delivered data to attribute. Its already
-  // prepared exact-source fetch still needs durable admission; the provider
-  // read/import owners prove data provenance and migration authority later.
+  // prepared exact-source fetch still needs durable admission. Google Health
+  // must retain the migration fence: its executor skips imports before cutover.
   const sourceScopedHistoryFetch = input.eventType.startsWith("historical.data.")
     && sourceProviderSlug !== null
+    && sourceProviderSlug !== JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
     && input.dirtyResources.length > 0
     && input.dirtyResources.every((resource) =>
       resource.jobKind === "resource"

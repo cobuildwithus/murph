@@ -9795,7 +9795,7 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.upsertDirtyConnection).toHaveBeenCalledOnce();
   });
 
-  it.each(["fitbit", "garmin", "google_health"])(
+  it.each(["fitbit", "garmin"])(
     "admits a data-less %s historical fetch while legacy Fitbit remains active",
     async (sourceProviderSlug) => {
       mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
@@ -9844,6 +9844,54 @@ describe("hosted device-sync wakes", () => {
     },
   );
 
+  it("retains Google Health history until Fitbit is terminal, then admits the original window", async () => {
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(
+      buildWebhookAdmissionRecord({ provider: "junction", setupPhase: "source_confirmed" }),
+    );
+    mockFitbitMigrationAdmissionSources();
+    const payload = {
+      eventType: "historical.data.sleep.created",
+      resource: "sleep",
+      resourceCategory: "summary",
+      sourceProviderSlug: "google_health",
+      windowStart: "2026-02-01T00:00:00.000Z",
+      windowEnd: "2026-02-03T00:00:00.000Z",
+    };
+    const replay = () => handleHostedDeviceSyncWebhookAccepted({
+      account: { connectedAt: "2026-03-26T12:00:00.000Z", id: "dsc_123", provider: "junction" },
+      claimToken: "claim-token",
+      now: "2026-03-26T12:00:00.000Z",
+      ownerId: "user-123",
+      processingAttemptedAt: "2026-03-26T12:00:00.000Z",
+      store: new PrismaDeviceSyncControlPlaneStore({ prisma: getPrisma() }),
+      traceId: "trace_retained_google_health_history",
+      webhook: {
+        acceptanceMode: "durable_webhook_work",
+        dataSourceProviderSlug: null,
+        eventType: payload.eventType,
+        jobs: [{ kind: "resource", payload }],
+        sourceProviderSlug: "google_health",
+      },
+    });
+
+    await expect(replay()).rejects.toMatchObject({ code: "WEBHOOK_SOURCE_NOT_READY", retryable: true });
+    expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+
+    mockFitbitMigrationAdmissionSources({
+      legacyLastErrorCode: "SOURCE_USER_DISCONNECTED",
+      legacyStatus: "disconnected",
+    });
+    await expect(replay()).resolves.toBeUndefined();
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledOnce();
+    expect(mocks.upsertDirtyConnection).toHaveBeenCalledWith(expect.objectContaining({
+      resources: [expect.objectContaining({ jobKind: "resource", payload, sourceProviderSlug: "google_health" })],
+    }));
+    expect(mocks.markConnectionSourceDataReceived).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledOnce();
+  });
+
   it.each([
     { label: "inline data", eventType: "historical.data.sleep.created", extraPayload: { webhookDataJson: "{}" } },
     { label: "daily data", eventType: "daily.data.sleep.created", extraPayload: {} },
@@ -9855,12 +9903,17 @@ describe("hosted device-sync wakes", () => {
       buildWebhookAdmissionRecord({ provider: "junction", setupPhase: "source_confirmed" }),
     );
     mockFitbitMigrationAdmissionSources();
+    mocks.resolveConnectionSourceAdmissionCandidate.mockResolvedValue(
+      buildHostedConnectionSourceAdmissionCandidate(
+        buildHostedConnectionSource("dsc_123", "garmin"),
+      ),
+    );
 
     const validPayload = {
       eventType,
       resource: "sleep",
       resourceCategory: "summary",
-      sourceProviderSlug: "google_health",
+      sourceProviderSlug: "garmin",
       windowStart: "2026-03-20T00:00:00.000Z",
       windowEnd: "2026-03-25T00:00:00.000Z",
     };
@@ -9879,7 +9932,7 @@ describe("hosted device-sync wakes", () => {
           { kind: "resource", payload: validPayload },
           { kind: "resource", payload: { ...validPayload, ...extraPayload } },
         ],
-        sourceProviderSlug: "google_health",
+        sourceProviderSlug: "garmin",
       },
     })).rejects.toMatchObject({ code: "WEBHOOK_SOURCE_NOT_READY", retryable: true });
 
