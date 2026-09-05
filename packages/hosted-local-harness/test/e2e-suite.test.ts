@@ -104,6 +104,67 @@ describe("hosted-local E2E suite preparation", () => {
     vi.unstubAllEnvs();
   });
 
+  test("process shards partition the actual unsharded Vitest invocations exactly once", async () => {
+    const commands = () => runForegroundCommand.mock.calls
+      .map(([input]) => input)
+      .filter((input) => input.args.includes("vitest"))
+      .map((input) => input.args);
+    await runHostedLocalE2eSuite({ env: {}, prepareRunnerBundle: false, scenario: "foreground-reply-priority" });
+    const complete = commands();
+    expect(complete).toHaveLength(2);
+    runForegroundCommand.mockClear();
+    for (const processShard of ["1/2", "2/2"]) {
+      await runHostedLocalE2eSuite({ env: {}, prepareRunnerBundle: false, scenario: "foreground-reply-priority", processShard });
+    }
+    expect(commands()).toEqual(complete);
+  });
+
+  test.each(["", "0/2", "3/2", "1/1", "1/3", "1/2junk", "9007199254740993/2"])(
+    "rejects invalid or stale process inventory %s before setup",
+    async (processShard) => {
+      await expect(runHostedLocalE2eSuite({ env: {}, scenario: "foreground-reply-priority", processShard })).rejects.toThrow("complete declared process inventory");
+      expect(runForegroundCommand).not.toHaveBeenCalled();
+      expect(cleanupHostedRunnerContainers).not.toHaveBeenCalled();
+    },
+  );
+
+  test("does not shard an aggregate suite or a scenario without process groups", async () => {
+    for (const scenario of ["all", "linq-webhook"]) {
+      await expect(runHostedLocalE2eSuite({ env: {}, scenario, processShard: "1/2" })).rejects.toThrow("complete declared process inventory");
+    }
+    expect(runForegroundCommand).not.toHaveBeenCalled();
+  });
+
+  test("prepares generated inputs once for one scenario with two processes", async () => {
+    await runHostedLocalE2eSuite({
+      env: {}, prepareRunnerBundle: false, scenario: "foreground-reply-priority",
+    });
+    const calls = runForegroundCommand.mock.calls.map(([call]) => call);
+    expect(calls.filter((call) => call.args.includes("prisma:generate"))).toHaveLength(1);
+    expect(calls.filter((call) => call.args.includes("health-commons:generate"))).toHaveLength(1);
+    const children = calls.filter((call) => call.args.includes("vitest"));
+    expect(children).toHaveLength(2);
+    for (const child of children) {
+      expect(child.env).toEqual(expect.objectContaining({
+        MURPH_HOSTED_WEB_PRISMA_GENERATED_PREPARED: "1",
+        MURPH_HEALTH_COMMONS_GENERATED_PREPARED: "1",
+      }));
+    }
+  });
+
+  test.each(["prisma:generate", "health-commons:generate"])(
+    "does not launch either foreground process when %s preparation fails",
+    async (failedCommand) => {
+      runForegroundCommand.mockImplementation(async (input) => {
+        if (input.args.includes(failedCommand)) throw new Error("generation failed");
+      });
+      await expect(runHostedLocalE2eSuite({
+        env: {}, prepareRunnerBundle: false, scenario: "foreground-reply-priority",
+      })).rejects.toThrow("generation failed");
+      expect(runForegroundCommand.mock.calls.some(([call]) => call.args.includes("vitest"))).toBe(false);
+    },
+  );
+
   test("prepares generated web artifacts once for aggregate scenario runs", async () => {
     const env: NodeJS.ProcessEnv = {};
 

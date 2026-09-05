@@ -79,7 +79,7 @@ const automationTagsSchema = z
 const hostedAutomationAssistantTargetOverrideSchema = z
   .object({
     model: z
-      .enum(HOSTED_ASSISTANT_PRODUCT_MODELS)
+      .enum(HOSTED_ASSISTANT_PRODUCT_MODELS.filter((model) => model !== 'gpt-6-astra'))
       .optional()
       .describe(
         'Optional model for this automation turn only. For a reminder, use Luna only when the complete future turn is a fixed, fully self-contained cue whose stored instructions already contain everything it needs to say. Use Terra for all reminders that do not meet that Luna exception; when unsure, use Terra. A Luna reminder must need no reads, tools, conversation-history interpretation, ambiguity resolution, personalization beyond the stored instructions, multi-step work, judgment, or safety reasoning. For a non-reminder automation, use Luna for similarly self-contained work with no reads or tools, Terra for bounded contextual judgment or a few targeted reads, and inherit the conversation model for broad context, research, complex or sensitive reasoning, or whenever that selected model materially matters.',
@@ -968,6 +968,8 @@ function serializeAutomationToolResponse(
         executionInspection: response.executionInspection,
         automationId: response.automationId,
         contextReferences: response.contextReferences,
+        instructions: response.instructions,
+        title: response.title,
         effectiveTimeZone: response.effectiveTimeZone,
         occurrenceProjection: response.occurrenceProjection,
         routeBinding: response.routeBinding,
@@ -979,7 +981,12 @@ function serializeAutomationToolResponse(
   }
   try {
     const text = JSON.stringify(payload) ?? 'null'
-    return new TextEncoder().encode(text).byteLength <= AUTOMATION_TOOL_RESULT_MAX_BYTES
+    // Inspect also returns up to 50,000 instruction characters and a 160-character
+    // title. JSON escaping can use six bytes per character; keep metadata's budget.
+    const maxBytes = response.action === 'inspect'
+      ? AUTOMATION_TOOL_RESULT_MAX_BYTES + (50_000 + 160) * 6
+      : AUTOMATION_TOOL_RESULT_MAX_BYTES
+    return new TextEncoder().encode(text).byteLength <= maxBytes
       ? text
       : null
   } catch {

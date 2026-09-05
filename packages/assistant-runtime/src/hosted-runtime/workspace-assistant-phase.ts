@@ -1962,6 +1962,8 @@ async function buildHostedAutomationToolResponse(
         input.vaultRoot,
         record.automationId,
       ),
+      instructions: record.instructions,
+      title: record.title,
       routeBinding: "preserved" as const,
     };
   }

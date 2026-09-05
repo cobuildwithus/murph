@@ -604,15 +604,21 @@ const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_MODEL_PRICES: Record<
   HostedAiUsageAllowancePricedModel,
   HostedAiUsageAllowanceModelPrice
 > = {
+  "gpt-6-astra": {
+    cachedInputUsdMicrosPerMillionTokens: 1_000_000n,
+    cacheWriteUsdMicrosPerMillionTokens: 12_500_000n,
+    inputUsdMicrosPerMillionTokens: 10_000_000n,
+    outputUsdMicrosPerMillionTokens: 50_000_000n,
+  },
   "gpt-5.6-sol": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_SOL_MODEL_PRICE,
   "gpt-5.6-terra": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TERRA_MODEL_PRICE,
   "gpt-5.6-luna": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_LUNA_MODEL_PRICE,
 };
 
-const HOSTED_AI_USAGE_ALLOWANCE_VENICE_MODEL_PRICES: Record<
+const HOSTED_AI_USAGE_ALLOWANCE_VENICE_MODEL_PRICES: Partial<Record<
   HostedAiUsageAllowancePricedModel,
   HostedAiUsageAllowanceModelPrice
-> = {
+>> = {
   "gpt-5.6-sol": {
     cachedInputUsdMicrosPerMillionTokens: 630_000n,
     cacheWriteUsdMicrosPerMillionTokens: 7_810_000n,
@@ -660,6 +666,18 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES = {
 } as const;
 
 const HOSTED_AI_USAGE_ALLOWANCE_MODEL_TOKEN_PRICING_BASES = {
+  "gpt-6-astra": {
+    "openai-flex": {
+      ...HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES["openai-flex"],
+      pricingSource: "https://developers.openai.com/api/docs/models/gpt-6-astra",
+      pricingVersion: "openai-api-pricing-2026-09-04-gpt-6-astra-openai-flex",
+    },
+    standard: {
+      ...HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES.standard,
+      pricingSource: "https://developers.openai.com/api/docs/models/gpt-6-astra",
+      pricingVersion: "openai-api-pricing-2026-09-04-gpt-6-astra-standard",
+    },
+  },
   "gpt-5.6-sol": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES,
   "gpt-5.6-terra": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES,
   "gpt-5.6-luna": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES,
@@ -3646,7 +3664,7 @@ function buildHostedAiUsageAllowanceModelSnapshot(
         && isHostedAiUsageVeniceTokenPricingProviderName(record.providerName)
       ? {
         providerModel:
-          HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS[resolution.model],
+          HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS[resolution.model] ?? null,
       }
       : {}),
     requestedModel: resolution.requestedModel,
@@ -3658,9 +3676,27 @@ function resolveHostedAiUsageAllowanceModelPrices(input: {
   model: HostedAiUsageAllowancePricedModel;
   record: AssistantUsageRecord;
 }): HostedAiUsageAllowanceModelPrice {
-  return isHostedAiUsageVeniceTokenPricingProviderName(input.record.providerName)
+  const prices = isHostedAiUsageVeniceTokenPricingProviderName(input.record.providerName)
     ? HOSTED_AI_USAGE_ALLOWANCE_VENICE_MODEL_PRICES[input.model]
     : HOSTED_AI_USAGE_ALLOWANCE_OPENAI_MODEL_PRICES[input.model];
+  if (!prices) {
+    throw new TypeError("Hosted AI usage allowance pricing is missing for the provider model.");
+  }
+  // Hosted Codex caps Astra context at 272K (validated in the runner catalog).
+  // Its turn deltas sum multiple requests; cumulative input is not context size.
+  const cumulativeCodexUsage = input.record.usageExtractionSourcePath
+    ?.endsWith("tokenUsage.total.delta") === true;
+  // Exact individual requests above 272K pay long-context rates in every bucket.
+  if (input.model === "gpt-6-astra" && !cumulativeCodexUsage
+      && normalizeTokenCount(input.record.inputTokens) > 272_000n) {
+    return {
+      cachedInputUsdMicrosPerMillionTokens: prices.cachedInputUsdMicrosPerMillionTokens * 2n,
+      cacheWriteUsdMicrosPerMillionTokens: (prices.cacheWriteUsdMicrosPerMillionTokens ?? 0n) * 2n,
+      inputUsdMicrosPerMillionTokens: prices.inputUsdMicrosPerMillionTokens * 2n,
+      outputUsdMicrosPerMillionTokens: prices.outputUsdMicrosPerMillionTokens * 3n / 2n,
+    };
+  }
+  return prices;
 }
 
 function isHostedAiUsageVeniceTokenPricingProviderName(

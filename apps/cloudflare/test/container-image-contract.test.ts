@@ -36,6 +36,7 @@ const runnerPythonPathFinallyCleanupBlock = `} finally {
   }`;
 
 const hostedRunnerProductModelSlugs = [
+  "gpt-6-astra",
   "gpt-5.6-sol",
   "gpt-5.6-terra",
   "gpt-5.6-luna",
@@ -615,7 +616,7 @@ describe("hosted runner container image contract", () => {
     expect(finalDockerfile).not.toContain("future_gpt_model_from");
     expect(finalDockerfile).toContain('"id":"flex"');
     expect(finalDockerfile).toContain(
-      'jq -s -e \'length == 1 and (.[0] as $catalog | ([$catalog.models[]?.slug] | sort) == (["gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna"] | sort)',
+      'jq -s -e \'length == 1 and (.[0] as $catalog | ([$catalog.models[]?.slug] | sort) == (["gpt-6-astra","gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna"] | sort)',
     );
     expect(finalDockerfile).toContain(
       'LABEL murph.hosted.local-build-id="${HOSTED_RUNNER_LOCAL_BUILD_ID}"',
@@ -731,9 +732,14 @@ describe("hosted runner container image contract", () => {
       new URL("../../../Dockerfile.cloudflare-hosted-runner", import.meta.url),
       "utf8",
     );
-    const { patchFilter, validationFilter } = readFinalImageCodexModelCatalogJqFilters(finalDockerfile);
+    const { patchFilter, standardFilter, validationFilter } = readFinalImageCodexModelCatalogJqFilters(finalDockerfile);
     const stockCatalogWithoutFlex: CodexModelCatalog = {
       models: [
+        {
+          slug: "gpt-6-astra",
+          context_window: 272_000,
+          service_tiers: [{ id: "priority", name: "Priority" }],
+        },
         {
           slug: "gpt-5.5",
           service_tiers: [{ id: "priority", name: "Priority" }],
@@ -769,6 +775,13 @@ describe("hosted runner container image contract", () => {
     const patchedCatalogJson = runJqFilter(patchFilter, stockCatalogWithoutFlex);
     const patchedCatalog = parseCodexModelCatalogJson(patchedCatalogJson);
 
+    const standardCatalog = parseCodexModelCatalogJson(runJqFilter(standardFilter, patchedCatalog));
+    expect(readCodexModelSlugs(standardCatalog)).toEqual([
+      "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+    ]);
+    expect(standardCatalog.models).toEqual(patchedCatalog.models.filter((model) => model.slug !== "gpt-6-astra"));
+    expect(finalDockerfile).toContain('"${MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON}.astra"');
+
     expect(readCodexModelSlugs(patchedCatalog)).toEqual(hostedRunnerProductModelSlugs);
     for (const slug of hostedRunnerProductModelSlugs) {
       expect(readCodexModelServiceTierIds(patchedCatalog, slug)).toEqual(["priority", "flex"]);
@@ -787,6 +800,22 @@ describe("hosted runner container image contract", () => {
       display_name: "GPT-5.6-Luna",
     });
     expect(runJqFilter(validationFilter, patchedCatalog, { slurp: true }).trim()).toBe("true");
+    const legacyLinuxCatalog = parseCodexModelCatalogJson(runJqFilter(patchFilter, {
+      models: stockCatalogWithoutFlex.models.filter((model) => model.slug !== "gpt-6-astra"),
+    }));
+    expect(readCodexModelSlugs(legacyLinuxCatalog).sort()).toEqual([...hostedRunnerProductModelSlugs].sort());
+    expect(readCodexModel(legacyLinuxCatalog, "gpt-6-astra")).toMatchObject({
+      slug: "gpt-6-astra",
+      display_name: "GPT-6-Astra",
+      context_window: 272_000,
+    });
+    expect(runJqFilter(validationFilter, legacyLinuxCatalog, { slurp: true }).trim()).toBe("true");
+    expect(parseCodexModelCatalogJson(runJqFilter(patchFilter, legacyLinuxCatalog)))
+      .toEqual(legacyLinuxCatalog);
+    expect(runJqFilter(validationFilter, {
+      models: patchedCatalog.models.map((model) => model.slug === "gpt-6-astra"
+        ? { ...model, context_window: 1_050_000 } : model),
+    }, { slurp: true }).trim()).toBe("false");
 
     expect(runJqFilter(
       validationFilter,
@@ -1097,6 +1126,7 @@ type CodexModelCatalog = {
 
 function readFinalImageCodexModelCatalogJqFilters(dockerfile: string): {
   patchFilter: string;
+  standardFilter: string;
   validationFilter: string;
 } {
   const patchMatch = new RegExp(
@@ -1108,12 +1138,14 @@ function readFinalImageCodexModelCatalogJqFilters(dockerfile: string): {
     "u",
   ).exec(dockerfile);
 
-  if (patchMatch === null || validationMatch === null) {
+  const standardMatch = /&& jq '([^']+)' \/tmp\/murph-codex-model-catalog\.openai-flex\.json > \/tmp\/murph-codex-model-catalog\.standard\.json/u.exec(dockerfile);
+  if (patchMatch === null || validationMatch === null || standardMatch === null) {
     throw new Error("Final image Codex model catalog patch or validation jq filter is missing");
   }
 
   return {
     patchFilter: patchMatch[1],
+    standardFilter: standardMatch[1],
     validationFilter: validationMatch[1],
   };
 }

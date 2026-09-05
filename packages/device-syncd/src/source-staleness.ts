@@ -74,6 +74,12 @@ const SOURCE_RECOVERY_NOTICE_POLICIES: ReadonlyMap<string, SourceRecoveryNoticeP
     providerDisplayName: "Apple Health",
     silentHours: 3 * 24,
   }],
+  ["whoop_v2", {
+    companionAppName: "WHOOP",
+    deviceDisplayName: "WHOOP",
+    providerDisplayName: "WHOOP",
+    silentHours: 5 * 24,
+  }],
 ]);
 
 export type PushPrimarySourceStalenessReason = "never_delivered" | "stopped_delivering";
@@ -118,12 +124,18 @@ export function readSourceRecoveryNoticePolicy(
 
 export function isSourceRecoveryNoticeEligible(input: {
   lastDataAt: string | null;
+  lastErrorCode?: string | null;
   now: string;
   silentHours?: number;
   sourceProviderSlug: string;
   status: string;
 }): boolean {
-  if (input.status !== "connected" || input.lastDataAt === null) {
+  // A confirmed WHOOP refresh failure also stops delivery. Keep it in the same
+  // silence episode so status changes cannot generate a second check-in.
+  const whoopRefreshFailed = input.sourceProviderSlug.trim().toLowerCase() === "whoop_v2"
+    && input.status === "error"
+    && input.lastErrorCode?.trim().toUpperCase() === "TOKEN_REFRESH_FAILED";
+  if ((input.status !== "connected" && !whoopRefreshFailed) || input.lastDataAt === null) {
     return false;
   }
   const policy = readSourceRecoveryNoticePolicy(input.sourceProviderSlug);

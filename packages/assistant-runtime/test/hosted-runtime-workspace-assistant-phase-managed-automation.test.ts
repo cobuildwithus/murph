@@ -2948,6 +2948,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("checkpoints
           recentRuns: [],
         }),
         contextReferences: [],
+        instructions: beforeInspect.instructions,
+        title: beforeInspect.title,
         effectiveTimeZone: "America/Chicago",
         lookupId: "daily-evening-reminder",
         occurrenceProjection: {

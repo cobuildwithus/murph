@@ -35,3 +35,11 @@ test("workspace reads preserve an additive Venice provider override", () => {
     workspace: null,
   });
 });
+
+ test("workspace reads preserve Astra for the next invocation", () => {
+  assert.equal(parseHostedWorkspaceReadResponse({
+    fetchedAt: "2026-09-04T00:00:00.000Z",
+    hostedAssistantModelOverride: "gpt-6-astra",
+    workspace: null,
+  }).hostedAssistantModelOverride, "gpt-6-astra");
+});

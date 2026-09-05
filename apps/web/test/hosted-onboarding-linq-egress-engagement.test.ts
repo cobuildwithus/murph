@@ -1874,7 +1874,7 @@ describe("hosted Linq egress authority", () => {
     { expectedStatus: 409, recovered: true, reminderAfterDays: undefined },
     { expectedStatus: 409, recovered: false, reminderAfterDays: 30 },
     { expectedStatus: 409, recovered: false, reminderAfterDays: null },
-  ].flatMap((scenario) => ["garmin", "apple_health_kit"].map((sourceProviderSlug) => ({
+  ].flatMap((scenario) => ["garmin", "apple_health_kit", "whoop_v2"].map((sourceProviderSlug) => ({
     ...scenario, sourceProviderSlug,
   }))))(
     "revalidates a queued $sourceProviderSlug silence episode at provider entry (recovered=$recovered, wait=$reminderAfterDays)",
@@ -1903,7 +1903,8 @@ describe("hosted Linq egress authority", () => {
         lifecycleEpoch: 1,
         sourceInstanceKey: `junction:${sourceProviderSlug}`,
         sourceProviderSlug,
-        status: "connected",
+        status: sourceProviderSlug === "whoop_v2" ? "error" : "connected",
+        lastErrorCode: sourceProviderSlug === "whoop_v2" ? "TOKEN_REFRESH_FAILED" : null,
       });
       prisma.deviceSourceNoDataOutreachPreference.findUnique.mockResolvedValue(
         reminderAfterDays === undefined ? null : { reminderAfterDays },

@@ -6,6 +6,7 @@ Last verified: 2026-09-04
 
 | Command | Purpose | Current coverage |
 | --- | --- | --- |
+| `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm --dir apps/web test:prepared test/hosted-onboarding-linq-terminal-retry-postgres.test.ts` | Opt-in real-PostgreSQL proof for one terminal Linq send retry; requires an isolated loopback test database with the current schema. | Concurrent claims, provider ambiguity, direct/group and multipart recovery, both acceptance/receipt arrival orders, replacement receipt projection, and current route/access/line/chat blocks. Companion terminal-retry, HTTP, and delivery-route tests prove exact failure matching, preserved payloads, disabled SDK retries, and post-response scheduling. |
 | `pnpm test:assistant:live -- --test "<name-pattern>"` | Required focused local real-Codex journey for assistant-behavior changes after deterministic proof. Defaults to the local ChatGPT/Codex subscription and `gpt-5.6-terra`; `--auth provider` preserves the isolated provider-key lane. | One selected `assistant-codex-real-e2e.test.ts` journey, including exact required/forbidden effects and printed synthetic replies for manual `Ready`/`Hold` UX review. Routine CI leaves the paid gate unset. |
 | `.github/workflows/foreground-reply-state-cardinality.yml` | Every-PR asymptotic gate that requires foreground reply filesystem work to saturate as unrelated persisted state grows. | The shared meter, convention-discovered `*-state-cardinality.test.ts` probes, fail-closed primitive coverage, and maintenance rules are specified in `agent-docs/references/README.md#foreground-reply-state-cardinality`. |
 | `pnpm exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage packages/cli/test/release-script-coverage-audit.test.ts -t 'review-gpt runner|ReviewGPT|review-gpt managed|Product UX|attests one fresh|fails closed marked'` | Focused PR review-tool contracts. | Packet vocabulary and completion outcomes, executable preset selection, full/delta packaging, protected config, and response capture. Narrative wording is not frozen; parent readback owns the realistic serious-bug and material Complexity Collapse thresholds, excluding speculation, minor refactoring, and disclosure findings. |
@@ -1179,6 +1180,20 @@ keep the one-second presentation-only deadline and late-result rejection.
   data/crypto/control plane plus environment-scoped Cloudflare credentials and
   R2 resources.
 - The tag-driven release workflow is present and uses npm trusted publishing for package publication. Its preflight mode validates release metadata, syntax-checks and tests the final-tarball secret guard, performs the clean workspace build, and runs typecheck plus doc gardening; isolated required jobs then own package coverage, fixture coverage, hosted-web build and test shards, and Cloudflare verification before the final clean pack checkout may run. The full local `release:check` command remains the monolithic `pnpm verify:acceptance` extension used outside that tag DAG. The guard's focused Node tests cover accepted source literals, exact public metadata and placeholders, declaration-only `.d.ts` colon syntax, invalid `.d.ts` equals assignments, and the existing external pack-output contract. Negative cases cover sensitive filenames, provider tokens, private key/JWK/wallet material, credentialed URLs and form/query parameters including JWT-shaped values, separator- and camel-case credential names, JSON/bracket/setter/tuple authorization serialization, quoted and unquoted generic assignments with command prefixes, shell operators, terminators, and comments, credential-bearing archive segments and tarball names with all artifact names hidden by default, archive links, and tarball-inventory drift. `incur` remains an explicit bundled `@murphai/murph` runtime dependency so the reviewed Murph error-envelope and canonical skill-hash patch plus the framework's runtime and source entrypoints ship together; Incur 0.5.1 now owns lazy optional YAML and MCP loading upstream. The three proven non-runtime upstream test sources that previously required scanner exceptions are omitted so every shipped file receives one unconditional scan policy. The CLI release-workflow guard locks the scan ordering ahead of manifest write, npm provider access, and GitHub Release upload plus the handoff's one-day retention. The workflow is only exercised on real `v*.*.*` tag pushes rather than during ordinary repo verification. npm trust is package-level rather than repo-level, so this monorepo also ships `pnpm release:trust:github` for the one-time bootstrap that binds every publishable `@murphai/*` package to `cobuildwithus/murph` and `.github/workflows/release.yml`; if a package already has the wrong trusted publisher entry, that npm-side state still needs manual revoke-and-recreate repair, which local repo checks cannot fully prove.
+
+## Temporal integration compiler cache
+
+The harness suite and CLI tests prove that the explicit `--process-shard i/n`
+invocations partition the original foreground Vitest commands exactly once,
+reject invalid or stale inventories before setup, and preserve the default
+complete run. Private CI requires both foreground process results.
+
+`MURPH_HOSTED_WEB_WEBPACK_CACHE=1` retains Next's compiler-owned cache for CI
+jobs that persist it. Default production builds keep caching disabled. Existing
+Web config and production-build-runner tests cover opt-in/default behavior,
+route type generation, and the independently earned TypeScript gate. Private
+integration restores compiler inputs while retaining full builds, exact-source
+handoffs, and every hosted E2E assertion.
 
 ## Update Rule
 
