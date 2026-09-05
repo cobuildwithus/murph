@@ -52,7 +52,7 @@ The authorized September FHIR refactor covers correctness, policy/contract delet
 - Postdeploy contract SQL applied successfully to the isolated database; the six concurrency tests still pass. Complexity guard passes with no increased per-file debt.
 - All affected typechecks and the workspace incremental build pass. Changelog archive proof adds nine passing cases.
 - PR #2918 is draft; 461 focused cases, the workspace build, affected typechecks, boundary and complexity guards pass. Screenshots are attached to the PR.
-- Preview deployment requires an accepted Git author. Use the repository’s existing neutral Codex identity for remaining commits; no personal attribution is needed. Exact-head CI and final ReviewGPT remain.
+- Preview build exposed one obsolete refresh-token write in authorization expiry handling. Removed it and stale fixture fields; 52 affected tests and the production Next TypeScript check pass. Exact-head CI, a reachable preview and final ReviewGPT remain.
 
 ## Progress
 

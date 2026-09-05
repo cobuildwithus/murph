@@ -1143,7 +1143,6 @@ async function markClinicalConnectionNeedsReauth(input: {
         accessTokenExpiresAt: null,
         lastErrorCode: HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
         patientIdEncrypted: null,
-        refreshTokenEncrypted: null,
         status: "needs_reauth",
       },
       where: {

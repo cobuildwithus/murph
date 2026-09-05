@@ -901,7 +901,6 @@ describe("Clinical Records retrieval control plane", () => {
     expect(unauthorized.state.run.connection).toMatchObject({
       accessTokenEncrypted: null,
       patientIdEncrypted: null,
-      refreshTokenEncrypted: null,
       status: "needs_reauth",
     });
     expect(unauthorized.state.run.status).toBe("needs_reauth");
@@ -1172,7 +1171,6 @@ describe("Clinical Records retrieval control plane", () => {
     expect(harness.state.run.connection).toMatchObject({
       accessTokenEncrypted: null,
       patientIdEncrypted: null,
-      refreshTokenEncrypted: null,
       status: "needs_reauth",
     });
     expect(harness.state.run.status).toBe("needs_reauth");
@@ -1587,7 +1585,6 @@ function buildRun(
         })
       : null as Record<string, unknown> | null,
     retrievalProtocol,
-    resourceTypesJson: resourceTypes,
     reviewCount: 0,
     status: "queued",
   };

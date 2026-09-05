@@ -98,7 +98,7 @@ describe("Clinical Records connection lifecycle", () => {
       lastSyncCompletedAt: new Date("2026-07-10T18:05:00.000Z"),
       patientIdEncrypted: "sealed-patient-id",
       providerDirectoryEntryId: "epic-example",
-      refreshTokenEncrypted: "sealed-refresh-token",
+      patientBindingEncrypted: "sealed-patient-binding",
       retrievalRuns: [{
         completedAt: new Date("2026-07-10T18:05:00.000Z"),
         id: "crr_1",
