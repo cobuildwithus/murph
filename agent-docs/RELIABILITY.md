@@ -1654,6 +1654,15 @@ Last verified: 2026-09-04
   unresolved provider authority behind the existing replay/recovery fence.
   Every pass reacquires authority and consent; classification never precedes
   that fence.
+- Connection upsert prepares its device-domain encryption root outside the
+  member transaction, after advisory member and health-consent admission. The
+  transaction repeats admission under the member lock and retains exact
+  provider-application, connection ownership and refresh-lease checks. At the
+  credential-write boundary it commits/revalidates the exact prepared root and
+  seals tokens and account identity locally; KMS never participates in those
+  credential writes while locks are held. A competing root winner retries via
+  the existing bounded upsert owner with a fresh attempt-scoped cache. No
+  caller-supplied ciphertext, new key owner or cross-request cache is added.
 - Queue-enabled provider webhooks verify once, freeze a versioned prepared
   event, and encrypt before any Postgres read. Raw provider signature headers
   and payload bytes do not enter Queue state. The prepared event enters one

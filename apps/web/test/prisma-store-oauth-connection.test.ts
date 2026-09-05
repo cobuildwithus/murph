@@ -410,7 +410,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       prisma: tx,
     });
     expect(lockHostedMemberRowMock.mock.invocationCallOrder[0]).toBeLessThan(
-      readHostedHealthDataConsentStateMock.mock.invocationCallOrder[0] ?? 0,
+      readHostedHealthDataConsentStateMock.mock.invocationCallOrder[1] ?? 0,
     );
 
     expect(created.id).toMatch(/^dsc_[A-Za-z0-9_-]+$/u);
@@ -1343,7 +1343,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       userId: "user-123",
     });
     expect(lockHostedMemberRowMock.mock.invocationCallOrder[0]).toBeLessThan(
-      readHostedHealthDataConsentStateMock.mock.invocationCallOrder[0] ?? 0,
+      readHostedHealthDataConsentStateMock.mock.invocationCallOrder[1] ?? 0,
     );
     expect(readHostedHealthDataConsentStateMock.mock.invocationCallOrder[0]).toBeLessThan(
       supersedeDirtyStateMock.mock.invocationCallOrder[0] ?? 0,
