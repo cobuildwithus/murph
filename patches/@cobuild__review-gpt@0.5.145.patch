@@ -141,6 +141,38 @@ index dfdd71b7d5f53e0aed0ad438cb9b95c7892912d0..16caf02fa705b92cb231152d6a834c85
          candidate.precedingUserTurnIndex === committedUserTurn.turnIndex &&
          matchesStoredCaptureValue(candidate.precedingUserMessageSignature, capture.committedUserTurn.signature),
      );
+diff --git a/src/prepare-chatgpt-draft.js b/src/prepare-chatgpt-draft.js
+index 420aced0c8030a23f61e41e5112823fb90d8b0d8..6c99f01ff93167be8ec68317805da6a6b00c5e1f 100644
+--- a/src/prepare-chatgpt-draft.js
++++ b/src/prepare-chatgpt-draft.js
+@@ -1304,9 +1304,8 @@ function markedResponseDurationFailure({
+   responseMarker: requiredMarker,
+   responseElapsedMs,
+   minimumResponseMs = 5 * 60 * 1000,
+-  hasConcreteModelEvidence = false,
+ }) {
+-  if (!requiredMarker || isCurrentSelectionTarget(targetModel) || hasConcreteModelEvidence) {
++  if (!requiredMarker || isCurrentSelectionTarget(targetModel)) {
+     return '';
+   }
+ 
+@@ -1327,7 +1326,7 @@ function markedResponseDurationFailure({
+   const minimumLabel = Number.isSafeInteger(requiredMinimumMs) && requiredMinimumMs > 0
+     ? formatDurationMs(requiredMinimumMs)
+     : 'invalid configured duration';
+-  return `Assistant response reached the required completion marker after ${elapsedSeconds}s, below the ${minimumLabel} minimum for a marked concrete-model review without compatible response-model metadata. The response is untrusted and was not attested.`;
++  return `Assistant response reached the required completion marker after ${elapsedSeconds}s, below the ${minimumLabel} minimum for a marked concrete-model review. The response is untrusted and was not attested.`;
+ }
+ 
+ function formatDurationMs(durationMs) {
+@@ -5758,7 +5757,6 @@ async function main() {
+           responseMarker,
+           responseElapsedMs: Date.now() - responseWaitStartedAt,
+           minimumResponseMs: minimumMarkedResponseMs,
+-          hasConcreteModelEvidence: Boolean(modelAttestation.evidence),
+         });
+         if (responseDurationFailure) {
+           return {
 diff --git a/src/thread-cli.mts b/src/thread-cli.mts
 index 0159d95b3196142b6d407e3c773aa512bdc31b7a..f9d04169a1f277bf03bc32bd9316d65e7de8f28f 100644
 --- a/src/thread-cli.mts
