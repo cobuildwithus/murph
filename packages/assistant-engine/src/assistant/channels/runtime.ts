@@ -80,6 +80,7 @@ type TelegramParsedTarget = TelegramThreadTarget
 type TelegramSendOperation =
   | 'sendMessage'
   | 'sendPhoto'
+  | 'sendDocument'
   | 'sendRichMessage'
   | 'sendVoice'
 type TelegramImageResponseMedia = Extract<
@@ -499,6 +500,53 @@ async function prepareTelegramPhoto(
   }
 }
 
+export async function sendTelegramFileMessage(
+  input: {
+    file: Extract<AssistantResponseMedia, { kind: 'vault_file' }>
+    replyToMessageId?: string | null
+    target: string
+  },
+  dependencies: TelegramRuntimeDependencies = {},
+): Promise<{ providerMessageId: string | null; target: string }> {
+  const env = dependencies.env ?? process.env
+  const token = resolveTelegramBotToken(env)
+  if (!token) {
+    throw new VaultCliError(
+      'ASSISTANT_TELEGRAM_TOKEN_REQUIRED',
+      'Outbound Telegram delivery requires TELEGRAM_BOT_TOKEN.',
+    )
+  }
+  const fetchImplementation = dependencies.fetchImplementation ?? globalThis.fetch?.bind(globalThis)
+  if (!fetchImplementation || typeof FormData !== 'function' || typeof Blob !== 'function') {
+    throw new VaultCliError('ASSISTANT_TELEGRAM_UNAVAILABLE', 'Telegram file delivery requires fetch, FormData, and Blob support.')
+  }
+  if (!dependencies.loadVaultFile) {
+    throw new VaultCliError('ASSISTANT_VAULT_FILE_LOADER_REQUIRED', 'File delivery requires a trusted vault-file loader.')
+  }
+  const target = parseTelegramTargetOrThrow(input.target)
+  const targetLabel = serializeTelegramThreadTarget(target)
+  // An approved file must never follow a provider migration to another destination.
+  assertTelegramAuthorityBoundTarget({ authorityBoundTarget: dependencies.authorityBoundTarget, target: targetLabel })
+  const bytes = await dependencies.loadVaultFile(input.file)
+  if (bytes.byteLength === 0 || bytes.byteLength !== input.file.sizeBytes || bytes.byteLength > 50 * 1024 * 1024) {
+    throw new VaultCliError('ASSISTANT_VAULT_FILE_SIZE_UNSUPPORTED', 'Telegram file bytes must match the approved size and fit the upload limit.')
+  }
+  return await sendTelegramBinaryMessage({
+    authorityBoundTarget: targetLabel,
+    baseUrl: (resolveTelegramApiBaseUrl(env) ?? 'https://api.telegram.org').replace(/\/$/u, ''),
+    bytes,
+    contentType: input.file.contentType,
+    fetchImplementation,
+    filename: input.file.filename,
+    operation: 'sendDocument',
+    replyToMessageId: normalizeTelegramReplyToMessageId(input.replyToMessageId),
+    signal: dependencies.signal,
+    target,
+    targetLabel,
+    token,
+  })
+}
+
 export async function sendTelegramVoiceMemoMessage(
   input: {
     filename: string
@@ -620,7 +668,8 @@ export async function sendPreparedTelegramVoiceMemoMessage(
     ? serializeTelegramThreadTarget(target)
     : input.targetLabel
 
-  return await sendTelegramVoiceMemo({
+  return await sendTelegramBinaryMessage({
+    operation: 'sendVoice',
     authorityBoundTarget: dependencies.authorityBoundTarget,
     baseUrl: input.baseUrl,
     bytes: input.bytes,
@@ -1812,11 +1861,12 @@ async function sendTelegramPhoto(input: {
   }
 }
 
-async function sendTelegramVoiceMemo(input: {
+async function sendTelegramBinaryMessage(input: {
+  operation: 'sendVoice' | 'sendDocument'
   authorityBoundTarget?: string | null
   baseUrl: string
   bytes: Uint8Array
-  contentType: 'audio/mpeg'
+  contentType: string
   fetchImplementation: TelegramFetchImplementation
   filename: string
   replyToMessageId: string | null
@@ -1841,8 +1891,9 @@ async function sendTelegramVoiceMemo(input: {
 
   while (true) {
     const outcome = resolveTelegramSendAttemptOutcome({
-      operation: 'sendVoice',
-      result: await sendTelegramVoiceMemoOnce({
+      operation: input.operation,
+      result: await sendTelegramBinaryMessageOnce({
+        operation: input.operation,
         baseUrl: input.baseUrl,
         bytes: input.bytes,
         contentType: input.contentType,
@@ -2045,9 +2096,10 @@ function buildTelegramPhotoFormData(input: {
   return form
 }
 
-function buildTelegramVoiceMemoFormData(input: {
+function buildTelegramBinaryFormData(input: {
+  operation: 'sendVoice' | 'sendDocument'
   bytes: Uint8Array
-  contentType: 'audio/mpeg'
+  contentType: string
   filename: string
   replyToMessageId: string | null
   target: TelegramParsedTarget
@@ -2058,7 +2110,7 @@ function buildTelegramVoiceMemoFormData(input: {
   }
   appendTelegramFormField(form, 'reply_to_message_id', input.replyToMessageId)
   form.append(
-    'voice',
+    input.operation === 'sendVoice' ? 'voice' : 'document',
     new Blob([copyUint8ArrayToArrayBuffer(input.bytes)], {
       type: input.contentType,
     }),
@@ -2508,10 +2560,11 @@ async function sendTelegramPhotoOnce(input: {
   }
 }
 
-async function sendTelegramVoiceMemoOnce(input: {
+async function sendTelegramBinaryMessageOnce(input: {
+  operation: 'sendVoice' | 'sendDocument'
   baseUrl: string
   bytes: Uint8Array
-  contentType: 'audio/mpeg'
+  contentType: string
   fetchImplementation: TelegramFetchImplementation
   filename: string
   replyToMessageId: string | null
@@ -2523,7 +2576,8 @@ async function sendTelegramVoiceMemoOnce(input: {
   try {
     const result = await sendTelegramBotApiRequest({
       baseUrl: input.baseUrl,
-      body: buildTelegramVoiceMemoFormData({
+      body: buildTelegramBinaryFormData({
+        operation: input.operation,
         bytes: input.bytes,
         contentType: input.contentType,
         filename: input.filename,
@@ -2531,7 +2585,7 @@ async function sendTelegramVoiceMemoOnce(input: {
         target: input.target,
       }),
       fetchImplementation: input.fetchImplementation,
-      operation: 'sendVoice',
+      operation: input.operation,
       signal: input.signal,
       token: input.token,
     })
@@ -2541,12 +2595,20 @@ async function sendTelegramVoiceMemoOnce(input: {
       ...result,
     }
   } catch (error) {
+    if (input.operation === 'sendDocument' && providerRequestWasSkipped(error)) {
+      throw error
+    }
     return {
       kind: 'request-error',
-      failure: createTelegramVoiceMemoAmbiguousDeliveryFailure({
-        error,
-        target: input.targetLabel,
-      }),
+      failure: input.operation === 'sendVoice'
+        ? createTelegramVoiceMemoAmbiguousDeliveryFailure({ error, target: input.targetLabel })
+        : markTelegramDeliveryAmbiguous(
+            new VaultCliError(
+              'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+              'Telegram file delivery could not be confirmed after calling the Bot API.',
+            ),
+            input.targetLabel,
+          ),
     }
   }
 }

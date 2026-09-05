@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { MURPH_PRODUCT_ORIGIN } from '@murphai/contracts'
 
 import { resolveAssistantSkillsRoot } from '../src/assistant-skill-assets.js'
+import { resolveMurphDynamicTools } from '../src/assistant-codex/dynamic-tool-catalog.js'
 import {
   buildAssistantSystemPromptLayers,
   type AssistantSystemPromptInput,
@@ -28,6 +29,30 @@ const baseConversationInput: AssistantSystemPromptInput = {
 }
 
 describe('assistant dynamic context prompt blocks', () => {
+  it.each(['linq', 'telegram'])('composes existing-file attachment guidance for private %s replies', (channel) => {
+    const layers = buildAssistantSystemPromptLayers({
+      ...baseConversationInput,
+      channel,
+      conversationScope: 'direct',
+      hostedRuntime: true,
+    })
+    const prompt = [
+      layers.staticCacheableCorePrompt,
+      layers.stableRouteCapabilityPrompt,
+      layers.threadContextPrompt,
+      layers.dynamicTurnContextPrompt,
+    ].join('\n')
+    const tool = resolveMurphDynamicTools({ vaultFileSendAvailable: true })
+      .find(tool => tool.name === 'send_vault_file')
+    expect(tool).toBeDefined()
+    const existingFileGuidance = 'For an existing saved file, pass its current vault-relative ref directly'
+    expect(prompt).toContain(existingFileGuidance)
+    expect(tool!.description).toContain(existingFileGuidance)
+    expect(prompt).toContain('never move or copy existing, user-owned, canonical, or durable files there')
+    expect(prompt).toContain('the runtime adds the exact approval link outside model context')
+    expect(prompt).not.toMatch(/only (?:be sent to|for) (?:the current |your )?iMessage/iu)
+  })
+
   it('assembles the CLI error-recovery rule exactly once', () => {
     const layers = buildAssistantSystemPromptLayers(baseConversationInput)
     const prompt = [

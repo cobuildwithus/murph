@@ -74,6 +74,8 @@ import {
   startLiveWorkout,
 } from '@murphai/vault-usecases/workouts'
 import { afterAll, describe, expect, it } from 'vitest'
+import { requestAssistantVaultFileSend } from '../src/assistant/vault-file-send.ts'
+import { listAssistantOutboxIntents } from '../src/assistant/outbox.ts'
 
 import {
   buildAssistantRealCodexRunEnv,
@@ -505,6 +507,74 @@ const CHILD_MODEL_SELECTION_CONFIG_OVERRIDES = [
 const REAL_NUTRITION_CARD_CONVERSATION_INPUT = {
   groupConversation: false,
 } as const satisfies Pick<CodexAppServerTurnInput, 'groupConversation'>
+
+describeRealCodex('real Codex Telegram file delivery e2e', () => {
+  it('hands a saved Telegram PDF to the secure file tool and explains pending approval', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-telegram-pdf-e2e-'))
+    const refs: string[] = []
+    const approvalUrl = 'https://murph.test/approve/synthetic'
+    try {
+      await initializeVault({ vaultRoot: workingDirectory, timezone: 'UTC' })
+      await mkdir(path.join(workingDirectory, 'documents'), { recursive: true })
+      await writeFile(path.join(workingDirectory, 'documents/report.pdf'), '%PDF-1.4\nSynthetic saved report\n%%EOF\n')
+      const context: AssistantHostedToolContext = {
+        ...createRealCodexSupportHostedToolContext('direct'),
+        vaultFileSendAvailable: true,
+        sendVaultFile: async (ref, toolCallId) => {
+          refs.push(ref)
+          return await requestAssistantVaultFileSend({
+            actionApprovalPort: {
+              read: async () => { throw new Error('No existing approval expected') },
+              request: async () => ({
+                status: 'pending', approvalId: `haa_${'a'.repeat(32)}`,
+                approvalUrl,
+                expiresAt: '2030-01-01T12:00:00.000Z',
+              }),
+            },
+            bindingDelivery: { kind: 'thread', target: '123' },
+            channel: 'telegram', deliveryTransportIdempotent: false,
+            ref, sessionId: 'session-pdf', threadId: '123', threadIsDirect: true,
+            toolCallId, turnId: 'turn-pdf', vault: workingDirectory,
+          })
+        },
+      }
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantContextSnapshotPrompt: null,
+          assistantHostedDeviceConnectAvailable: false, assistantHostedDeviceConnectProviders: [],
+          assistantKnowledgeToolsAvailable: false, channel: 'telegram',
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'direct', currentLocalDate: '2026-09-04', currentTimeZone: 'UTC',
+          hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic', onboardingGuidance: false, turnTrigger: null,
+        }),
+        dynamicTools: resolveMurphDynamicTools({ vaultFileSendAvailable: true }).filter(tool =>
+          ['send_vault_file', 'finish_without_reply'].includes(tool.name)),
+        env: config.env, hostedToolContext: context,
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'Please send my saved documents/report.pdf to this private Telegram chat. Use the existing file.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const reply = result.finalMessage.trim()
+      process.stdout.write(`[telegram-pdf-approval-e2e] ${JSON.stringify({ reply, fileCalls: refs.length })}\n`)
+      expect(refs).toEqual(['documents/report.pdf'])
+      const intents = await listAssistantOutboxIntents(workingDirectory)
+      expect(intents).toHaveLength(1)
+      expect(intents[0]).toMatchObject({ channel: 'telegram', status: 'awaiting_approval', media: [expect.objectContaining({ kind: 'vault_file', ref: 'documents/report.pdf' })] })
+      expect(reply).toMatch(/approv/iu)
+      const modelMessages = readCompletedAgentMessages(result.jsonEvents)
+      expect(modelMessages.length).toBeGreaterThan(0)
+      expect(modelMessages.map(message => message.text).join('\n')).not.toMatch(/https?:/iu)
+      expect(reply.match(/https?:\/\/\S+/gu)).toEqual([approvalUrl])
+      expect(reply).not.toMatch(/(?:i(?:'ve| have)?|successfully) (?:sent|attached)|documents\/|iMessage/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
 
 describeRealCodex('real Codex direct route planning e2e', () => {
   it(
