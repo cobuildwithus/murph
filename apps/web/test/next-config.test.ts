@@ -654,6 +654,7 @@ test("the Webpack callback retains Next compiler caching only for explicit CI op
   const cache = {
     type: "filesystem",
     version: "next-owned",
+    maxMemoryGenerations: Infinity,
     buildDependencies: { config: ["next.config.ts"] },
   };
   for (const value of [undefined, "0", "true", "1"]) {
@@ -665,11 +666,14 @@ test("the Webpack callback retains Next compiler caching only for explicit CI op
     assert(webpack);
     webpack(config, { dev: false } as Parameters<typeof webpack>[1]);
     assert.equal(config.cache, value === "1" ? cache : false);
+    assert.equal(cache.maxMemoryGenerations, value === "1" ? 0 : Infinity);
+    assert.equal(cache.version, "next-owned");
+    assert.deepEqual(cache.buildDependencies, { config: ["next.config.ts"] });
   }
 });
 
 test("configureHostedWebWebpack preserves development caching", () => {
-  const cache = { type: "filesystem" };
+  const cache = { type: "filesystem", maxMemoryGenerations: Infinity };
   const webpackConfig = {
     cache,
     resolve: {},
@@ -678,6 +682,7 @@ test("configureHostedWebWebpack preserves development caching", () => {
   configureHostedWebWebpack(webpackConfig, { dev: true });
 
   assert.equal(webpackConfig.cache, cache);
+  assert.equal(cache.maxMemoryGenerations, Infinity);
 });
 
 test("resolvePrivyBaseDomainOrigin normalizes base-domain inputs into a Privy origin", () => {
