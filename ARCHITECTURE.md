@@ -1673,28 +1673,27 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   group-room model, Temporal, and Cloudflare own no sponsorship state,
   financial fact, expiration scheduler, or second delivery queue.
 - `apps/cloudflare`: hosted execution plane for ensure-processing requests (callback-signed from the Temporal orchestrator, or Vercel OIDC-authenticated best-effort direct ingress wakes from `apps/web`) plus Vercel OIDC-authenticated browser-vault session, deletion, status, and web-owned Telegram usage-limit notice requests, plus signed memberless `bindings-v1` admission and deploy-smoke callbacks used to admit the versioned Temporal worker and verify the managed container image, with per-user coordination via container-enabled Durable Objects, active write-fence wake/replace behavior, encrypted hosted workspace snapshots, legacy encrypted artifact objects, encrypted runner-secret blobs, short-lived DO-local coordination metadata, derived gateway projections, and a native Cloudflare container image that runs one-shot inbox/parser/assistant/device-sync execution through `packages/assistant-runtime`; it owns execution coordination, configured env profile selection, user-secret allowlisting, image-owned native parser tool paths, Worker-owned provider credential injection through runner HTTPS egress interception, and adapter transport details such as local loopback URL rewriting, while runtime launch semantics and profile key sets come from `packages/assistant-runtime`. Web applies its hosted access-and-usage decision before exhausted runnable mailbox work reaches Temporal or the runner. Cloudflare receives no billing or credit projection, cannot grant usage, and performs no Stripe call. Web preserves hosted conversation input before admission, and allowance accounting runs after usage exists. Cloudflare/runner #587 or newer is the permanent rollback floor while Web omits the retired callback route. Cloudflare carries the signed plan-usage read as a transport-only runtime port and cannot select a member, billing action, or usage interpretation; it owns opaque runtime blobs only, not canonical hosted product facts outside the encrypted workspace snapshot, and it may verify signed ingress/runtime root envelopes and unwrap its P-256 recipient wrap without holding GCP KMS decrypt authority; foreground runtime work may defer intermediate checkpoints, the active invocation remains dirty until the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint succeeds, RunnerContainer never records pending checkpoint intent, and activity expiry is cleanup-only
-- Its optional warm-standby path keeps at most one release-scoped pristine ENAM
-  container outside any member trust boundary. A memberless coordinator owns
-  readiness and atomic availability only; the per-member `UserRunner` persists
-  the exact opaque stop target, binds it once, then owns the ordinary write
-  fence, workspace restore, invocation, retention, and retirement. Standby
-  allocation is available to fence-free `default` work from OIDC-authenticated
-  Web-direct ingress with a validated direct-attempt identity or an authenticated
-  request carrying `conversationWorkPending: true`. Temporal derives that fact
-  from current admitted conversation lag, not a wake pointer or generic default
-  processing. Background-only requests retain the exact-user target. A foreground request that
-  has finished preempting an exact-user background child may claim the ready
-  standby instead of reusing the child while it shuts down. A previously
-  reserved standby is reconciled before this eligibility check so retries and
-  replacements already bound to a standby cannot split ownership. In
-  `allocate` mode the standby coordinator is the sole shell-prewarm owner; the
-  exact-user prewarm hint is skipped so it cannot reserve a competing target
-  before the claim, while the normal exact-user start remains the claim-miss
-  fallback.
-  Standby readiness warms the image, heavy runtime, and a disposable
-  content-free Codex initialization, while the member-specific resident Codex
-  process remains post-restore. Claimed containers are never returned for
-  another member.
+- Fresh member execution uses one globally eligible `RunnerContainer` fleet.
+  Warm inventory is an allocation optimization within that fleet: the memberless
+  coordinator maintains a configurable number of pristine current-release slots
+  (two by default), and atomically removes a slot when claimed. Warm and cold
+  starts use the same opaque identity, immutable binding, invocation, retention,
+  and retirement lifecycle. `UserRunner` persists the exact target before binding
+  and remains the sole member execution, write-fence, and workspace owner.
+  Only fence-free `default` work from authenticated Web-direct ingress or an
+  authenticated request with `conversationWorkPending: true` may claim ready
+  inventory. Temporal derives that fact from fresh admitted conversation lag.
+  Background-only work may reuse its member-owned warm container or start a
+  cold target in the same fleet, but never consumes shared ready inventory.
+  Pending targets reconcile before new allocation; uncertain binding or stop
+  results retain that exact target and cannot create a second execution owner.
+  The inventory coordinator owns all speculative shell prewarming. Readiness
+  warms the image, heavy runtime, and disposable content-free Codex initialization;
+  the member-specific resident process starts only after workspace restore.
+  Bound slots never return to inventory or change members. Legacy exact-user and
+  ENAM standby references retain their original namespace for recovery and drain;
+  they are not fresh allocation paths. One fleet budget includes the temporary
+  legacy application reservation until that application drains.
 - `UserRunner` remains the sole durable runtime write-fence owner when a
   `RunnerContainer` Durable Object activation is replaced. After a successful
   invocation, the container entrypoint first clears its wake and abort pointers,
@@ -3266,21 +3265,13 @@ window to a well-formed past-or-near-present range. The shared Exa
 research-scout request recipe, query shape, and structured-output schema live
 in `@murphai/contracts` so local CLI and hosted Worker validation cannot drift.
 
-Hosted Linq typing-start events are verified and parsed strictly. For Linq's
-supported direct-chat signal, Web acknowledges before post-response work reads
-only the private home-chat blind index plus active access and crypto-root
-eligibility, then issues the existing best-effort runtime shell-prewarm hint.
-Unknown, ambiguous, inactive, or ineligible chats remain no-ops. Typing never
-plans onboarding, binds a route, appends mailbox work, starts processing,
-signals Temporal, sends a receipt, or adds reconciliation work. Cloudflare
-still rechecks live Web-owned admission under the per-user consent-mutation
-barrier before it starts a container, so Web's lookup grants no runtime
-authority. The optional Cloudflare owner admits a hint only when its existing
-consent-mutation lock is idle; repeated hints and hints arriving during
-authoritative ensure, withdrawal, or deletion are dropped before the FIFO.
-The single admitted hint then relies on the existing container lifecycle's
-coalescing instead of a second dedupe or warm-state owner. The Temporal mailbox
-signal remains the only durable wake authority for hosted runtime work. For a
+Hosted Linq typing-start events are verified, parsed strictly, and acknowledged
+without scheduling member lookup or runtime work. Current Web no longer sends
+member-specific shell-prewarm hints from typing, message routing, or instant
+start. The old authenticated receiver remains an accepting no-op during mixed
+Web/Worker deployment. The inventory coordinator owns speculative preparation;
+normal admitted execution remains the only member-binding path. The Temporal
+mailbox signal remains the durable wake authority for hosted runtime work. For a
 committed known-checkpoint Linq message, Web first verifies the checkpoint owner
 and canonical participant-aware live access as part of the unconditional
 Temporal pointer signal. Assistant Ask request and completion handlers likewise

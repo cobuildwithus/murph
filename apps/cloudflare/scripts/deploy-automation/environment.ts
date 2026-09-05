@@ -4,6 +4,10 @@ import {
 } from "@murphai/hosted-execution/env";
 
 import {
+  readHostedStandbyTarget,
+} from "../../src/standby-runner-contract.ts";
+
+import {
   HOSTED_WORKER_OPTIONAL_VAR_DEFAULTS,
   HOSTED_WORKER_REQUIRED_VAR_NAMES,
   HOSTED_WORKER_TRIMMED_OPTIONAL_VAR_NAMES,
@@ -47,13 +51,13 @@ const DEFAULT_CONTAINER_INSTANCE_TYPE: HostedContainerInstanceType = {
   memory_mib: 6144,
   vcpu: 2,
 };
-const DEFAULT_CONTAINER_MAX_INSTANCES = 1000;
 const RUNNER_COMMIT_RESPONSE_MARGIN_MS = 5_000;
 
 // Deploy-only inputs stay separate from Worker vars so private deployment
 // policy can validate forwarding without exposing them to the runtime.
 export const HOSTED_DEPLOY_AUTOMATION_OPTIONAL_VAR_NAMES = [
-  "CF_STANDBY_CONTAINER_MAX_INSTANCES",
+  "CF_CONTAINER_MAX_INSTANCES",
+  "CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES",
   "HOSTED_EXECUTION_DEPLOY_TAG",
 ] as const;
 
@@ -64,7 +68,7 @@ export interface HostedDeployAutomationEnvironment {
   compatibilityDate: string;
   containerInstanceType: HostedContainerInstanceType;
   containerMaxInstances: number;
-  standbyContainerMaxInstances: number;
+  legacyStandbyContainerMaxInstances: number;
   logHeadSamplingRate: number;
   maxEventAttempts: string;
   retryDelayMs: string;
@@ -119,11 +123,15 @@ export function readHostedDeployAutomationEnvironment(
   const workerName = requireConfiguredString(source.CF_WORKER_NAME, "CF_WORKER_NAME");
   const timeouts = readHostedDeployAutomationTimeouts(source);
   const workerVars = readHostedWorkerVars(source);
-  const containerMaxInstances = normalizePositiveInteger(
-    source.CF_CONTAINER_MAX_INSTANCES,
-    DEFAULT_CONTAINER_MAX_INSTANCES,
-    "CF_CONTAINER_MAX_INSTANCES",
-  );
+  const capacity = readHostedRunnerContainerCapacity(source);
+  const standbyTarget = readHostedStandbyTarget(source);
+  if (standbyTarget > capacity.containerMaxInstances - capacity.legacyStandbyContainerMaxInstances) {
+    throw new Error(
+      "HOSTED_EXECUTION_STANDBY_TARGET must not exceed CF_CONTAINER_MAX_INSTANCES "
+      + "minus CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES.",
+    );
+  }
+  workerVars.HOSTED_EXECUTION_STANDBY_TARGET = String(standbyTarget);
   assertHostedR2Configuration({
     bundlesBucketName,
     workerVars,
@@ -139,7 +147,7 @@ export function readHostedDeployAutomationEnvironment(
       DEFAULT_CONTAINER_INSTANCE_TYPE,
       "CF_CONTAINER_INSTANCE_TYPE",
     ),
-    containerMaxInstances,
+    ...capacity,
     logHeadSamplingRate: normalizeSamplingRate(
       source.CF_LOG_HEAD_SAMPLING_RATE,
       DEFAULT_LOG_HEAD_SAMPLING_RATE,
@@ -161,11 +169,6 @@ export function readHostedDeployAutomationEnvironment(
       "20000",
       "CF_RUNNER_READY_TIMEOUT_MS",
     ),
-    standbyContainerMaxInstances: normalizePositiveInteger(
-      source.CF_STANDBY_CONTAINER_MAX_INSTANCES,
-      containerMaxInstances,
-      "CF_STANDBY_CONTAINER_MAX_INSTANCES",
-    ),
     traceHeadSamplingRate: normalizeSamplingRate(
       source.CF_TRACE_HEAD_SAMPLING_RATE,
       DEFAULT_TRACE_HEAD_SAMPLING_RATE,
@@ -175,6 +178,56 @@ export function readHostedDeployAutomationEnvironment(
     workerName,
     workerVars,
   };
+}
+
+function readHostedRunnerContainerCapacity(
+  source: EnvSource,
+): Pick<HostedDeployAutomationEnvironment, "containerMaxInstances" | "legacyStandbyContainerMaxInstances"> {
+  if (source.CF_STANDBY_CONTAINER_MAX_INSTANCES !== undefined) {
+    throw new Error(
+      "CF_STANDBY_CONTAINER_MAX_INSTANCES is obsolete. Remove it; set "
+      + "CF_CONTAINER_MAX_INSTANCES to the total member capacity (excluding smoke), "
+      + "and CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES to the temporary legacy reservation.",
+    );
+  }
+  const containerMaxInstances = readContainerCapacity(
+    source.CF_CONTAINER_MAX_INSTANCES, 1000, "CF_CONTAINER_MAX_INSTANCES", 1,
+  );
+  if (source.CF_CONTAINER_MAX_INSTANCES !== undefined
+    && source.CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES === undefined) {
+    throw new Error(
+      "CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES must be explicit when "
+      + "CF_CONTAINER_MAX_INSTANCES is configured; preserve the existing legacy "
+      + "capacity during migration, or set 0 after its exact references and instances drain.",
+    );
+  }
+  const legacyStandbyContainerMaxInstances = readContainerCapacity(
+    source.CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES,
+    0,
+    "CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES",
+    0,
+  );
+  if (legacyStandbyContainerMaxInstances >= containerMaxInstances) {
+    throw new Error(
+      "CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES must be less than CF_CONTAINER_MAX_INSTANCES.",
+    );
+  }
+  return { containerMaxInstances, legacyStandbyContainerMaxInstances };
+}
+
+function readContainerCapacity(
+  value: string | undefined,
+  fallback: number,
+  label: string,
+  minimum: 0 | 1,
+): number {
+  if (value === undefined) return fallback;
+  const normalized = value.trim();
+  const parsed = Number(normalized);
+  if (!/^(?:0|[1-9][0-9]*)$/u.test(normalized) || !Number.isSafeInteger(parsed) || parsed < minimum) {
+    throw new Error(`${label} must be a ${minimum === 0 ? "nonnegative" : "positive"} safe integer.`);
+  }
+  return parsed;
 }
 
 function assertHostedR2Configuration(input: {
@@ -208,20 +261,6 @@ function readHostedWorkerVars(source: EnvSource): Record<string, string> {
       ? { [MURPH_ANDROID_APP_ENABLED_ENV]: "1" }
       : {}),
   };
-}
-
-function normalizePositiveInteger(
-  value: string | undefined,
-  fallback: number,
-  label: string,
-): number {
-  const normalized = normalizeOptionalString(value);
-
-  if (!normalized) {
-    return fallback;
-  }
-
-  return parsePositiveInteger(normalized, label, "positive integer");
 }
 
 function isNamedContainerInstanceType(value: string): value is NamedContainerInstanceType {

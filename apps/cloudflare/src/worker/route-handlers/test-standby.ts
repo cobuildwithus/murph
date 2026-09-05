@@ -1,8 +1,8 @@
 import {
-  HOSTED_STANDBY_LOCATION_HINT,
-  HOSTED_STANDBY_REGION,
+  HOSTED_RUNNER_REGION,
   readHostedStandbyMode,
   readHostedStandbyReleaseId,
+  readHostedStandbyTarget,
   resolveHostedStandbyCoordinatorName,
   type HostedStandbyCoordinatorState,
 } from "../../standby-runner-contract.ts";
@@ -59,9 +59,8 @@ export async function handleTestEnsureStandbyReadyRoute(
   const coordinator = namespace.getByName(
     resolveHostedStandbyCoordinatorName({
       releaseId,
-      region: HOSTED_STANDBY_REGION,
+      region: HOSTED_RUNNER_REGION,
     }),
-    { locationHint: HOSTED_STANDBY_LOCATION_HINT },
   );
   if (!coordinator.readStandbyCoordinatorState) {
     return json({ error: "Hosted standby state inspection is unavailable." }, 503);
@@ -69,10 +68,11 @@ export async function handleTestEnsureStandbyReadyRoute(
 
   let state: HostedStandbyCoordinatorState =
     await coordinator.readStandbyCoordinatorState();
-  if (!state.readySlotName && !state.provisioningSlotName) {
+  const target = readHostedStandbyTarget(context.env);
+  if (state.readySlotNames.length + state.provisioningSlotNames.length !== target) {
     await coordinator.ensureReadyStandby({
       releaseId,
-      region: HOSTED_STANDBY_REGION,
+      region: HOSTED_RUNNER_REGION,
     });
     state = await coordinator.readStandbyCoordinatorState();
   }

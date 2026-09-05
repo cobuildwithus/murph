@@ -1384,6 +1384,7 @@ describe("buildWranglerVarArgs", () => {
         HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: "bundle-fingerprint",
         HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: "source-fingerprint",
         HOSTED_EXECUTION_STANDBY_MODE: "allocate",
+        HOSTED_EXECUTION_STANDBY_TARGET: "3",
         HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "45000",
       }),
     ).toEqual([
@@ -1395,6 +1396,8 @@ describe("buildWranglerVarArgs", () => {
       "HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT:source-fingerprint",
       "--var",
       "HOSTED_EXECUTION_STANDBY_MODE:allocate",
+      "--var",
+      "HOSTED_EXECUTION_STANDBY_TARGET:3",
       "--var",
       "HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS:45000",
     ]);
@@ -1527,6 +1530,7 @@ describe("buildWranglerEnvFileText", () => {
       HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: "bundle-fingerprint",
       HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: "source-fingerprint",
       HOSTED_EXECUTION_STANDBY_MODE: "allocate",
+      HOSTED_EXECUTION_STANDBY_TARGET: "3",
       HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "45000",
       MURPH_ELEVENLABS_MODEL_ID: "eleven_multilingual_v2",
       MURPH_ELEVENLABS_VOICE_ID: "voice-murph",
@@ -1539,6 +1543,7 @@ describe("buildWranglerEnvFileText", () => {
     expect(text).toContain('HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT="bundle-fingerprint"');
     expect(text).toContain('HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT="source-fingerprint"');
     expect(text).toContain('HOSTED_EXECUTION_STANDBY_MODE="allocate"');
+    expect(text).toContain('HOSTED_EXECUTION_STANDBY_TARGET="3"');
     expect(text).toContain('HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS="45000"');
     expect(text).toContain('MURPH_ELEVENLABS_MODEL_ID="eleven_multilingual_v2"');
     expect(text).toContain('MURPH_ELEVENLABS_VOICE_ID="voice-murph"');
@@ -1643,6 +1648,28 @@ describe("buildWranglerEnvFileText", () => {
 });
 
 describe("buildWranglerLocalDevConfig", () => {
+  it.each(["off", "shadow", "allocate"])("preserves %s mode and target overrides", (mode) => {
+    const source = {
+      HOSTED_EXECUTION_STANDBY_MODE: mode,
+      HOSTED_EXECUTION_STANDBY_TARGET: "0",
+      CF_CONTAINER_MAX_INSTANCES: "748",
+      CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES: "100",
+    };
+    expect(buildWranglerLocalDevConfig(source).vars).toMatchObject({
+      HOSTED_EXECUTION_STANDBY_MODE: mode,
+      HOSTED_EXECUTION_STANDBY_TARGET: "0",
+    });
+    expect(buildWranglerVarArgs(source)).toEqual([
+      "--var", `HOSTED_EXECUTION_STANDBY_MODE:${mode}`,
+      "--var", "HOSTED_EXECUTION_STANDBY_TARGET:0",
+    ]);
+    const envFile = buildWranglerEnvFileText(source);
+    expect(envFile).toContain(`HOSTED_EXECUTION_STANDBY_MODE="${mode}"`);
+    expect(envFile).toContain('HOSTED_EXECUTION_STANDBY_TARGET="0"');
+    expect(envFile).not.toContain("CF_CONTAINER_MAX_INSTANCES");
+    expect(envFile).not.toContain("CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES");
+  });
+
   it("passes an explicit account to Wrangler local dev", () => {
     expect(
       buildWranglerLocalDevConfig({
@@ -1669,6 +1696,13 @@ describe("buildWranglerLocalDevConfig", () => {
 
     expect(config.main).toBe("../src/index.ts");
     expect(config.name).toBe("murph-hosted");
+    expect(container.max_instances).toBe(50);
+    expect(container).not.toHaveProperty("constraints");
+    expect(standbyContainer).not.toHaveProperty("rollout_step_percentage");
+    expect(config.vars).toMatchObject({
+      HOSTED_EXECUTION_STANDBY_MODE: "off",
+      HOSTED_EXECUTION_STANDBY_TARGET: "2",
+    });
     expect(config.vars).not.toHaveProperty("HOSTED_EXECUTION_RUNNER_DESTROY_TIMEOUT_MS");
     expect(containers.map((entry) => entry.class_name)).toEqual([
       "RunnerContainer",
@@ -1767,7 +1801,7 @@ describe("buildWranglerLocalDevConfig", () => {
         HOSTED_RUNNER_LOCAL_BUILD_ID: "local",
         HOSTED_RUNNER_LOCAL_WORKER_NAME: "murph-hosted",
       },
-      max_instances: 50,
+      max_instances: 0,
     });
   });
 

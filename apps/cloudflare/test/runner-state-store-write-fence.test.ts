@@ -49,6 +49,7 @@ describe("RunnerStateStore write-fence state", () => {
     const { db, store } = createHarness();
     const runnerContainerName =
       "standby--v-release_1--0123456789abcdef0123456789abcdef";
+    await store.reserveRunnerContainerStopTarget({ runnerContainerName, userId: "member_123" });
     const token = await store.beginWriteFence({
       runnerContainerName,
       userId: "member_123",
@@ -120,6 +121,7 @@ describe("RunnerStateStore write-fence state", () => {
     const { store } = createHarness();
     const runnerContainerName =
       "standby--v-release_1--0123456789abcdef0123456789abcdef";
+    await store.reserveRunnerContainerStopTarget({ runnerContainerName, userId: "member_123" });
     const token = await store.beginWriteFence({
       runnerContainerName,
       userId: "member_123",
@@ -348,6 +350,7 @@ describe("RunnerStateStore write-fence state", () => {
     const { db, store } = createHarness();
     const runnerContainerName =
       "standby--v-release_1--fedcba9876543210fedcba9876543210";
+    await store.reserveRunnerContainerStopTarget({ runnerContainerName, userId: "member_123" });
     const token = await store.beginWriteFence({
       runnerContainerName,
       userId: "member_123",

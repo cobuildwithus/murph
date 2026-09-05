@@ -509,44 +509,29 @@ Last verified: 2026-09-04
 
 ## Runtime Expectations
 
-- Cloudflare standby allocation is an optional one-slot optimization, not a
-  scheduler. `off` is the source-controlled default, `shadow` maintains and
-  re-proves one current-release ENAM slot without allocating it, and `allocate`
-  offers one 250 ms claim/bind deadline to fence-free `default` work from
-  authenticated Web-direct ingress or an authenticated request carrying
-  `conversationWorkPending: true`. Temporal derives that positive-only fact
-  from fresh admitted conversation lag on every attempt. System-only work,
-  scheduled default work, and provider/runtime wakes without conversation lag
-  keep the ordinary exact-user target. After foreground preemption has cleared an
-  exact-user background fence, the trusted foreground replacement may claim
-  the ready standby instead of reusing the child while it shuts down. A miss
-  before slot ownership uses the same exact-user fallback; an ambiguous bind
-  after the per-member stop target is durably reserved retries that exact
-  target instead of risking two live containers. Pending targets are reconciled
-  before fresh-claim eligibility. A claimed slot counts as retained only when
-  its existing container owner proves explicit native warmth while validating
-  the exact slot, release, and member in one bounded RPC; a durable binding
-  alone never authorizes reuse. The warm proof renews the handoff window.
-  Explicit stop or an exact prior-release binding uses the same one-way
-  transition (`unbound` to `bound` to `retiring` to `retired`), and `UserRunner`
-  clears the exact stop target only after retirement settles. Only then may the
-  same eligible trusted foreground request attempt one fresh claim. Unknown
-  liveness, foreign or contradictory identity, and failed retirement keep the
-  old target assigned and start no second container. In `allocate` mode the
-  standby coordinator is the only shell-prewarm owner; the exact-user prewarm
-  hint is skipped so it cannot reserve a competing target before a fresh claim.
-  The ordinary exact-user start remains the fallback after a claim miss.
-  Every accepted fresh start records the bounded standby allocation outcome,
-  exact reason, and elapsed milliseconds in the existing latency phase
-  breakdown. The same metadata-only fields are emitted immediately in the
-  Worker structured log, including starts that exhaust the caller response
-  budget before an accepted runtime invocation exists.
-  A coordinator transaction admits at most one winner, then replacement
-  provisioning runs under `waitUntil`; alarms re-prove readiness, retry failed
-  retirement, expire unbound claim tombstones, and drain stale releases. A
-  claimed slot is never rebound or returned to ready; group conversations are
-  not lifecycle owners because allocation remains per member. Mode `off` retires
-  only coordinator-owned slots and never interrupts bound member work.
+- Cloudflare ready inventory is a bounded allocation optimization within the
+  unified runner fleet. `off` is the source default; `shadow` maintains the
+  configured current-release global inventory, and `allocate` offers it only
+  to authenticated foreground conversation work. The ready target defaults to
+  two and is bounded to 0–32. Background-only work never claims inventory;
+  member-owned warm reuse and fresh cold allocation share the normal lifecycle.
+  Claims atomically remove one pristine slot. Refill counts only ready and
+  provisioning slots, runs with bounded parallelism, and does not serialize
+  new capacity behind abandoned-handoff cleanup. Durable recovery is scheduled
+  before asynchronous preparation; coalesced maintenance and staggered reproof
+  avoid withdrawing the entire ready inventory together. Cleanup batches are
+  indexed and bounded, with deadlines and retry fairness. Late preparation
+  cannot republish a slot after its coordinator has drained or retired it.
+  `UserRunner` reserves the exact target before binding. Pending targets reconcile
+  before new allocation, so ambiguous bind or stop results never open a second
+  execution owner. Reuse requires exact identity and native warmth in one bounded
+  container RPC; a bound row alone is insufficient. The one-way lifecycle moves
+  from unbound to bound to retiring to retired, with no cross-member recycling.
+  Foreign or contradictory identity and unsettled retirement retain the exact
+  stop target for retry. Legacy references keep their original namespace until
+  safely retired. Mode `off` drains only coordinator-owned inventory and does
+  not interrupt bound member work. Allocation outcome, reason, and duration remain
+  metadata in the existing latency phase breakdown and immediate Worker log.
 - Initial onboarding has one Postgres completion owner across website and
   native clients. Existing members are backfilled complete. During the
   migration-first rolling deploy, a temporary database default also completes
@@ -833,8 +818,7 @@ Last verified: 2026-09-04
   provider payload contains one non-empty text part. Source-part cardinality is
   preserved rather than deduplicated by type, so two text parts cannot enter
   the fast path after their text is joined. Web then runs one bounded
-  tool-free Murph reply generation beside the admission classifier, enrollment,
-  and shell prewarm. After the planner converges and before any fallback side
+  tool-free Murph reply generation beside the admission classifier and enrollment. After the planner converges and before any fallback side
   effect, only an exact model-approved active direct wake retains that claim for
   Web delivery; every other successfully planned outcome marks the same row
   skipped. A caught planning failure also skips an attempted row before

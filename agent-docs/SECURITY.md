@@ -37,32 +37,14 @@ Last verified: 2026-08-31
   for the per-user Cloudflare execution barrier to serialize behind earlier
   ensures, re-read the Web-owned grant, clear its write fence, and stop the
   runner. Every later ensure re-reads the grant; renewal waits behind the stop
-  before granting. An instant-start, authenticated established-direct-chat
-  typing, or eligible established-direct-message shell-prewarm hint uses that
-  same per-user barrier and live admission read. The message producer may start
-  only after direct routing preparation resolves an extant active member,
-  before KMS and transaction work; the planner still
-  repeats authority inside the transaction. The typing producer resolves only
-  the private home-chat blind index and performs an advisory active-access/root
-  check after acknowledging the webhook. Neither producer receives a member id
-  from Linq or grants runtime authority. The shared
-  HTTP route obtains the named runner stub without binding durable state.
-  Because this hint is optional, it is admitted only when the barrier is idle;
-  repeated hints and hints arriving during authoritative ensure, withdrawal, or
-  deletion return without joining the FIFO. The
-  optional read abandons after a fixed 250 ms
-  deadline so it cannot hold authoritative processing, withdrawal, or deletion
-  behind the ordinary Web-control timeout; only allowed admission reserves and
-  binds its exact versioned container in the existing user-control stop-target
-  field, then waits for the container to register the hint before releasing the
-  barrier. Withdrawal and account deletion consume that exact target, while
-  container destruction supersedes a pending platform wait before stopping it.
-  Web admission also requires an
-  extant, non-suspended member, so a hint queued behind account deletion cannot
-  treat the deleted consent row as a compatible legacy grant and recreate
-  runner state. Cleanup failure must never restore authority. Keep Settings,
-  export, and deletion available without waking the paused runtime; only
-  renewed consent may restore processing.
+  before granting. Current Web producers no longer send member-specific shell
+  prewarm hints. The authenticated compatibility receiver accepts older callers
+  under its existing bounded admission barrier but creates no container or
+  member binding. Pristine global inventory is content-free and memberless;
+  only normal admitted execution binds it to a member. Web admission requires
+  an extant, non-suspended member, and cleanup failure never restores authority.
+  Keep Settings, export, and deletion available without waking the paused
+  runtime; only renewed consent may restore processing.
 - Treat suspected breaches, unauthorized access, unauthorized disclosures, vendor incidents, and accidental tracking disclosures involving identifiable health data as FTC HBNR triage events; use `agent-docs/compliance/ftc-hbnr-incident-plan.md` before deciding that notice is not required.
 - Do not add third-party advertising pixels, retargeting SDKs, behavioral ad attribution, customer-list matching, tag-manager destinations, or analytics destinations that receive health data or health-context metadata; use `agent-docs/compliance/health-data-tracking-and-ads-rule.md` for any telemetry or marketing-tool review.
 - Hosted Web must keep the global `Referrer-Policy` at `strict-origin` or
@@ -1506,11 +1488,13 @@ locally readable.
   isolation flag enabled until the configured compatibility date provides the
   same boundary by default. Use structured logs, Durable Object status,
   Container inventory, and managed deploy smoke as the diagnostic boundary.
-- The ENAM runner standby must remain content-free and memberless until an
+- Ready inventory in the global runner fleet must remain content-free and memberless until an
   exact `UserRunner` claim. Its coordinator may persist only release/region,
   opaque slot names, and opaque claim tombstones; it must never receive a
   member id, workspace reference, provider credential, or canonical product
-  fact. The slot's immutable binding is the sole opaque-name-to-member mapping.
+  fact. The container's immutable binding is the sole opaque-name-to-member mapping
+  for both warm and cold allocations. Legacy ENAM targets preserve their original
+  region and namespace; new global targets must never be parsed as member names.
   Before provider credential minting, invocation, wake, or cleanup, the
   per-member owner must re-read that binding and require the exact member,
   release, region, and slot. A claimed slot is never reusable across members;
