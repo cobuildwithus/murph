@@ -4,6 +4,11 @@ Last verified: 2026-09-04
 
 ## Purpose
 
+Runtime-owned terminal Linq send recovery and replacement receipt ownership
+are specified by `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, and
+`agent-docs/SECURITY.md`; focused provider and PostgreSQL proof is indexed in
+`agent-docs/references/testing-ci-map.md`.
+
 Device-sync metadata priority within the existing bounded envelope is specified
 by `agent-docs/RELIABILITY.md`; Junction's progress keys remain provider-owned.
 

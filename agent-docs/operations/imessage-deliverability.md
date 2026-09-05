@@ -4,6 +4,13 @@ Last verified: 2026-08-12
 
 ## Purpose
 
+Runtime-owned terminal Linq send failures have one bounded retry through the
+existing delivery-message owner. The exact eligibility, content-preservation,
+current route/line checks, and receipt-ordering contract lives in
+`agent-docs/RELIABILITY.md`. This does not permit retrying ambiguous delivery
+failures or bypassing a disabled, opted-out, flagged, critical, or unhealthy
+egress state.
+
 This is required reading for any Murph change that can affect text-message or iMessage behavior. Read it before editing assistant/provider prompts, reply generation, outbound copy, reminder behavior, notification behavior, message scheduling, line selection, delivery monitoring, onboarding copy, or any runtime path that can cause Murph to send a message through a phone-number based channel.
 
 The core rule is simple: design Murph messaging like a real reciprocal conversation, not a broadcast system. The highest-risk pattern is many outbound messages from one line with little or no recipient response.

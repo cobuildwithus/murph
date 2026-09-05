@@ -2290,6 +2290,8 @@ model HostedLinqDeliveryMessage {
   deliveryId          String   @map("delivery_id")
   ordinal             Int
   messageLookupKey    String   @unique @map("message_lookup_key")
+  terminalRetryAttemptedAt DateTime? @map("terminal_retry_attempted_at")
+  terminalRetryOriginalMessageLookupKey String? @unique(map: "hosted_linq_delivery_message_terminal_retry_key") @map("terminal_retry_original_message_lookup_key")
   messageIdSuffix     String?  @map("message_id_suffix")
   status              String   @default("accepted")
   acceptedAt          DateTime @map("accepted_at")
