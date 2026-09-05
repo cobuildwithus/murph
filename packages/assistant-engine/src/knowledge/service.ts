@@ -633,10 +633,7 @@ export async function getKnowledgePage(
     )) {
       throw knowledgePageInvalidError(slug)
     }
-    throw new VaultCliError(
-      'knowledge_page_not_found',
-      `No derived knowledge page exists for slug "${input.slug}".`,
-    )
+    throw knowledgePageNotFoundError(input.slug)
   }
 
   const absolutePath = await resolveAssistantVaultPath(input.vault, page.relativePath, 'file path')
@@ -648,10 +645,7 @@ export async function getKnowledgePage(
     throw knowledgePageInvalidError(slug)
   }
   if (exactPage.slug !== slug) {
-    throw new VaultCliError(
-      'knowledge_page_not_found',
-      `No derived knowledge page exists for slug "${input.slug}".`,
-    )
+    throw knowledgePageNotFoundError(input.slug)
   }
 
   return {
@@ -659,6 +653,18 @@ export async function getKnowledgePage(
     page: toKnowledgePage(exactPage, markdown),
     vault: input.vault,
   }
+}
+
+function knowledgePageNotFoundError(slug: string): VaultCliError {
+  return new VaultCliError(
+    'knowledge_page_not_found',
+    `No derived knowledge page exists for slug "${slug}".`,
+    {
+      hint: 'Do not retry the same missing slug. If discovering a saved page, use `knowledge list` or `knowledge search`. If this was an existence check before an authorized write, continue with `knowledge upsert` or `knowledge append-section`, which create missing pages. Otherwise continue without the page.',
+      retryable: false,
+      stage: 'read',
+    },
+  )
 }
 
 function malformedKnowledgePageMatchesSlug(

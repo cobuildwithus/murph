@@ -249,3 +249,12 @@ An exact action retry may continue; a conflicting action requires new eligible
 member input. That binding proves current authority, not the meaning of the
 message. The result exposes a Stripe-hosted URL only when payment is required,
 and the tool never exposes a general billing or Stripe client.
+
+## Experiment support policy
+
+The experiment-onboarding entrypoint retains safety, protocol resolution, run
+creation, and active-session logging rules. First-session guidance and support
+mechanics live in the co-packaged `references/session-support.md`, which must be
+read before support questions or effects. Normal recursive skill packaging and
+filesystem reads remain the owners. Keep that reference in focused real-Codex
+fixtures when changing support policy.
