@@ -9,6 +9,6 @@
     "summary": "Murph can resend a reply once when iMessage confirms that the original send failed.",
     "details": "Recovery keeps the same conversation and content, respects current messaging restrictions, and stops after one attempt. It covers text, links, and non-audio attachments; voice memos, interactive cards, and uncertain delivery failures keep their existing behavior.",
     "relevanceTags": ["imessage", "reliability"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [2857]
   }
 }
