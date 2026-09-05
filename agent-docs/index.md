@@ -107,6 +107,7 @@ not a guarantee that every claim was checked in this cleanup.
 | `agent-docs/references/README.md` | Reference-pack overview and maintenance rules. | Reference pack conventions | Medium | 2026-03-12 |
 | `agent-docs/references/repo-scope.md` | Concrete repo scope and routing boundaries. | Repo ownership boundary | High | 2026-04-06 |
 | `agent-docs/references/testing-ci-map.md` | Verification map for packages, apps, smoke flows, exact-head PR CI, protected-main runtime proof, canonical executors, and current coverage owners. | Testing and CI truth | High | 2026-09-02 |
+| `packages/core/bench/README.md` | Secret-free Docker import and hydration reproduction, required one-vCPU latency CI budgets, and sizing evidence limits. | Container CPU benchmark | Medium | 2026-09-04 |
 | `agent-docs/references/health-entity-taxonomy-seam.md` | Shared owner seam for health taxonomy metadata. | Health taxonomy seam | Medium | 2026-04-06 |
 | `agent-docs/references/hosted-runtime-protocol.md` | Hosted mailbox/workspace checkpoints, exact ownership and idle restore publication, and accepted-work monitoring boundaries. | Hosted execution architecture | High | 2026-09-04 |
 | `agent-docs/references/hosted-temporal-orchestration.md` | Hosted Temporal orchestration target. | Hosted Temporal orchestration target | High | 2026-09-03 |
