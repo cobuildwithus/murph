@@ -71,10 +71,10 @@ const TELEGRAM_SEND_TIMEOUT_MS = 30_000
 const TELEGRAM_MAX_VOICE_MEMO_BYTES = 10 * 1024 * 1024
 const LINQ_TYPING_REFRESH_MS = 45_000
 const LINQ_TYPING_MAX_SESSION_MS = 5 * 60_000
-// Linq accepts message sends asynchronously and clears typing when the message
-// actually sends. Restart after that short provider settle window instead of
-// racing the auto-clear immediately after the HTTP acceptance response.
+// Message acceptance precedes delivery. Restart promptly, then once more to
+// recover when a delayed send clears the first restart.
 const LINQ_TYPING_POST_MESSAGE_REFRESH_MS = 1_000
+const LINQ_TYPING_POST_MESSAGE_FOLLOWUP_MS = 4_000
 
 type TelegramParsedTarget = TelegramThreadTarget
 type TelegramSendOperation =
@@ -1169,6 +1169,7 @@ export async function startTelegramTypingIndicator(
 
 export async function startAssistantChannelActivitySession(input: {
   afterMessageRefreshMs?: number | null
+  afterMessageFollowupMs?: number
   refresh?: ((signal: AbortSignal) => Promise<void>) | null
   refreshMs: number
   maxSessionMs?: number | null
@@ -1214,7 +1215,10 @@ export async function startAssistantChannelActivitySession(input: {
     ...(afterMessageRefreshMs === null
       ? {}
       : {
-          refreshAfterMessage: async () => scheduleRefresh(afterMessageRefreshMs),
+          refreshAfterMessage: async () => scheduleRefresh(
+            afterMessageRefreshMs,
+            input.afterMessageFollowupMs ?? refreshMs,
+          ),
         }),
     refreshNow: async () => {
       clearRefreshTimer()
@@ -1227,8 +1231,8 @@ export async function startAssistantChannelActivitySession(input: {
     stop: stopActivity,
   }
 
-  function scheduleRefresh(delayMs: number): void {
-    if (stopped || linkedStopSignal.signal.aborted || refreshFailure) {
+  function scheduleRefresh(delayMs: number, nextDelayMs = refreshMs): void {
+    if (stopped || linkedStopSignal.signal.aborted) {
       return
     }
 
@@ -1238,7 +1242,7 @@ export async function startAssistantChannelActivitySession(input: {
       refreshTimer = null
       void enqueueRefresh().then(() => {
         if (scheduleVersion === refreshScheduleVersion) {
-          scheduleRefresh(refreshMs)
+          scheduleRefresh(nextDelayMs)
         }
       })
     }, delayMs)
@@ -1247,16 +1251,18 @@ export async function startAssistantChannelActivitySession(input: {
 
   function enqueueRefresh(): Promise<void> {
     refreshTail = refreshTail.then(async () => {
-      if (stopped || linkedStopSignal.signal.aborted || refreshFailure) {
+      if (stopped || linkedStopSignal.signal.aborted) {
         return
       }
 
-      await refresh(linkedStopSignal.signal)
-        .catch((error) => {
-          if (!linkedStopSignal.signal.aborted) {
-            refreshFailure = error
-          }
-        })
+      try {
+        await refresh(linkedStopSignal.signal)
+        refreshFailure = null
+      } catch (error) {
+        if (!linkedStopSignal.signal.aborted) {
+          refreshFailure = error
+        }
+      }
     })
     return refreshTail
   }
@@ -1372,6 +1378,7 @@ export async function startLinqTypingIndicator(
 
   return startAssistantChannelActivitySession({
     afterMessageRefreshMs: LINQ_TYPING_POST_MESSAGE_REFRESH_MS,
+    afterMessageFollowupMs: LINQ_TYPING_POST_MESSAGE_FOLLOWUP_MS,
     refreshMs: dependencies.refreshMs ?? LINQ_TYPING_REFRESH_MS,
     maxSessionMs: dependencies.maxSessionMs ?? LINQ_TYPING_MAX_SESSION_MS,
     signal: dependencies.signal,
@@ -1385,6 +1392,21 @@ export async function startLinqTypingIndicator(
         signal,
       },
     ),
+    // A repeated start cannot restore an indicator cleared by reopening an
+    // unread chat. Serialize stop/start with other refreshes and final cleanup.
+    refresh: async (signal) => {
+      await stopLinqChatTypingIndicator({ chatId }, {
+        env,
+        fetchImplementation: dependencies.fetchImplementation,
+        signal,
+      })
+      signal.throwIfAborted()
+      await startLinqChatTypingIndicator({ chatId }, {
+        env,
+        fetchImplementation: dependencies.fetchImplementation,
+        signal,
+      })
+    },
     stop: () => stopLinqChatTypingIndicator(
       {
         chatId,

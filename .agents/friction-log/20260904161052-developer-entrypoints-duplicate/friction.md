@@ -1,6 +1,7 @@
 ---
 title: 'Developer entrypoints duplicate and contradict completion instructions'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2830'
 ---
 
 ## Expected Behavior

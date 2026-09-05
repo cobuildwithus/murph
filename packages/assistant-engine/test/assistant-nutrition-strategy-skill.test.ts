@@ -256,16 +256,16 @@ describe('assistant nutrition strategy skill', () => {
       'Use the target-authority and canonical-discovery rules below after every explicit interactive request to set nutrition targets or receive a numeric daily nutrition card, even when the visible context appears to contain a complete bundle.',
     )
     expect(compactGoals).toContain(
-      'run `vault-cli goal list --status active --limit 200 --format json`.',
+      'run `vault-cli meal totals --from <date> --to <same-date> --resolve-goals --format json`.',
     )
     expect(compactGoals).toContain(
-      'If it returns 200 records, the bounded read may be incomplete: fail closed with ordinary text, no Goal or measurement mutation, and no card.',
+      '`conflict`, `incompatible`, or `capacity` means ordinary text, no Goal or measurement mutation, and no card.',
     )
     expect(compactGoals).toContain(
-      'run `vault-cli goal show <goal-id> --format json` for every returned active Goal whose list item reports a nonzero `data.metricTargetsCount`.',
+      'do not repeat goal list/show to re-resolve active authority.',
     )
     expect(compactGoals).toContain(
-      'Do not select detail reads by title, slug, domain, context-snapshot visibility, or the default list prefix.',
+      'This query owns the complete active target scan and deterministic rules below;',
     )
     expect(compactGoals).toContain(
       'Keep this active-target authority read separate from the all-status lookup used below to reuse or honor Murph\'s managed paused or abandoned proposal',

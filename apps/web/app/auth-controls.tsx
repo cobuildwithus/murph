@@ -6,7 +6,6 @@ import { type ReactNode, useState } from "react";
 import {
   AuthDialog,
   preloadHostedAuthPanelIsland,
-  useHostedAuthPanelIslandIdlePreload,
 } from "@/src/components/hosted-onboarding/auth-dialog";
 import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { navigateHostedAuthRedirect } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
@@ -166,7 +165,6 @@ export function LandingAuthActions({
   leadingIcon,
   loginLabel = "Log in",
   onDarkSurface = false,
-  preloadAuthPanel = false,
   splitUnauthenticated = false,
   signupLabel = "Signup",
 }: {
@@ -176,15 +174,10 @@ export function LandingAuthActions({
   leadingIcon?: ReactNode;
   loginLabel?: string;
   onDarkSurface?: boolean;
-  preloadAuthPanel?: boolean;
   splitUnauthenticated?: boolean;
   signupLabel?: string;
 }) {
-  const auth = useAuth();
   const styles = getLandingAuthClasses(context, onDarkSurface);
-  const shouldPreload = preloadAuthPanel && !authenticated;
-
-  useHostedAuthPanelIslandIdlePreload(shouldPreload && !auth.shared);
 
   if (authenticated) {
     const showArrow = context !== "nav";

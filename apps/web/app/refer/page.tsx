@@ -35,7 +35,6 @@ export default async function ReferPage() {
         authenticated={authenticated}
         darkTop
         githubStarCount={githubStarCount}
-        preloadAuthPanel
       />
       <ReferralPageContent
         authenticated={authenticated}

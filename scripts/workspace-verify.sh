@@ -5,9 +5,9 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/.." && pwd)"
 cd "$repo_root"
 
-workspace_artifact_lock_label="workspace-verify"
+verification_label="workspace-verify"
 if [[ "$#" -gt 0 ]]; then
-  workspace_artifact_lock_label+=" $1"
+  verification_label+=" $1"
 fi
 
 if [[ -n "${MURPH_VERIFY_SHARED_HOST+x}" ]]; then
@@ -36,17 +36,6 @@ esac
 readonly verification_profile
 export MURPH_VERIFY_PROFILE="$verification_profile"
 
-command_requires_workspace_artifact_lock() {
-  case "${1:-}" in
-    "typecheck" | "typecheck:packages" | "test" | "test:packages" | "test:apps" | "test:diff" | "test:packages:coverage" | "test:coverage" | "verify:acceptance" | "verify:cli")
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
 command_requires_host_verification_slot() {
   case "${1:-}" in
     "typecheck" | "typecheck:packages" | "test" | "test:packages" | "test:apps" | "test:packages:coverage" | "test:coverage" | "verify:acceptance" | "verify:cli")
@@ -58,13 +47,8 @@ command_requires_host_verification_slot() {
   esac
 }
 
-if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" != "1" ]] && command_requires_workspace_artifact_lock "${1:-}"; then
-  exec node "$repo_root/scripts/run-with-workspace-artifact-lock.mjs" "$workspace_artifact_lock_label" -- \
-    bash "$repo_root/scripts/workspace-verify.sh" "$@"
-fi
-
 if [[ "$shared_host_mode" == "1" && "${MURPH_VERIFY_HOST_SLOT_HELD:-0}" != "1" ]] && command_requires_host_verification_slot "$verification_command"; then
-  exec node "$repo_root/scripts/run-with-host-verification-slot.mjs" "$workspace_artifact_lock_label" -- \
+  exec node "$repo_root/scripts/run-with-host-verification-slot.mjs" "$verification_label" -- \
     bash "$repo_root/scripts/workspace-verify.sh" "$@"
 fi
 
@@ -100,7 +84,6 @@ readonly node_syntax_check_scripts=(
   "scripts/benchmark-typescript.mjs"
   "scripts/run-typescript.mjs"
   "scripts/run-with-host-verification-slot.mjs"
-  "scripts/run-with-workspace-artifact-lock.mjs"
   "scripts/check-workspace-package-cycles.mjs"
   "scripts/check-runner-bundle-budget-ci.mjs"
   "scripts/check-hosted-crypto-hardcut.mjs"
@@ -681,7 +664,7 @@ run_typecheck_packages() {
   fi
 
   if [[ "$contracts_prerequisite_required" == "1" ]]; then
-    run_diff_contracts_build_with_workspace_artifact_lock || return $?
+    run_command_with_retry "Incremental contracts prerequisite" pnpm --dir "packages/contracts" build:incremental || return $?
   fi
 
   for package_dir in "${package_dirs[@]}"; do
@@ -926,15 +909,6 @@ run_test_apps() {
 
   run_app_verify_command_with_retry "apps/web" "$skip_app_typechecks" "$health_commons_generated_prepared" "$hosted_web_prisma_generated_prepared" || return $?
   run_app_verify_command_with_retry "apps/cloudflare" "$skip_app_typechecks" "$health_commons_generated_prepared" "$hosted_web_prisma_generated_prepared"
-}
-
-run_test_apps_with_workspace_artifact_lock() {
-  if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" == "1" ]]; then
-    run_test_apps "$@" || return $?
-    return 0
-  fi
-
-  bash "$repo_root/scripts/workspace-verify.sh" test:apps
 }
 
 prepare_repo_vitest_runtime_artifacts() {
@@ -1347,32 +1321,6 @@ run_diff_package_boundary_verification() {
   esac
 }
 
-run_diff_contracts_test_with_workspace_artifact_lock() {
-  if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" == "1" ]]; then
-    run_package_command_with_retry "packages/contracts" test || return $?
-    return 0
-  fi
-
-  run_command_with_retry \
-    "Package command for packages/contracts (test)" \
-    node "$repo_root/scripts/run-with-workspace-artifact-lock.mjs" "test:diff contracts" -- \
-      pnpm --dir "packages/contracts" test
-}
-
-run_diff_contracts_build_with_workspace_artifact_lock() {
-  if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" == "1" ]]; then
-    run_command_with_retry \
-      "Incremental contracts prerequisite" \
-      pnpm --dir "packages/contracts" build:incremental || return $?
-    return 0
-  fi
-
-  run_command_with_retry \
-    "Incremental contracts prerequisite" \
-    node "$repo_root/scripts/run-with-workspace-artifact-lock.mjs" "test:diff contracts build" -- \
-      pnpm --dir "packages/contracts" build:incremental
-}
-
 run_test_diff_package_tests() {
   local package_dirs=("$@")
   local filter_args=()
@@ -1395,7 +1343,7 @@ run_test_diff_package_tests() {
 
   # Diff selection can reach CLI command tests through a changed source
   # dependency without selecting the dedicated verify:cli lane. Prepare the
-  # shared runtime once under test:diff's workspace artifact lock so individual
+  # shared runtime once before package fanout so individual
   # Vitest workers never contend on the fallback repair lock.
   if [[ "$cli_selected" == "1" ]]; then
     run_timed_step \
@@ -1405,10 +1353,10 @@ run_test_diff_package_tests() {
   fi
   package_test_env+=(MURPH_VITEST_MAX_WORKERS="$test_diff_vitest_max_workers")
 
-  # Contracts verification rebuilds shared dist artifacts. Complete it under
-  # the artifact lock before source-first dependents start importing them.
+  # Contracts verification rebuilds shared dist artifacts. Complete it before
+  # source-first dependents start importing them.
   if [[ "$contracts_selected" == "1" ]]; then
-    run_diff_contracts_test_with_workspace_artifact_lock || return $?
+    run_package_command_with_retry "packages/contracts" test || return $?
   fi
 
   if [[ "${#filter_args[@]}" -gt 0 ]]; then
@@ -1442,7 +1390,7 @@ run_test_diff_app_verification() {
   done
 
   if [[ "$has_cloudflare" == "1" && "$has_web" == "1" ]]; then
-    run_test_apps_with_workspace_artifact_lock || return $?
+    run_test_apps || return $?
     return 0
   fi
 
@@ -1770,7 +1718,7 @@ run_test_diff() {
   fi
 
   if [[ "$diff_run_verify_cli" == "1" ]]; then
-    run_timed_step "CLI targeted verification" run_verify_cli_with_workspace_artifact_lock
+    run_timed_step "CLI targeted verification" run_verify_cli
   fi
 
   if [[ "$run_repo_tools_tests" == "1" ]]; then
@@ -1798,15 +1746,6 @@ run_verify_cli() {
   run_timed_step \
     "CLI workspace Vitest" \
     env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_CLI_RELEASE_TARBALL_TEST=1 pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" "${cli_verify_test_files[@]}" --no-coverage
-}
-
-run_verify_cli_with_workspace_artifact_lock() {
-  if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" == "1" ]]; then
-    run_verify_cli || return $?
-    return 0
-  fi
-
-  bash "$repo_root/scripts/workspace-verify.sh" verify:cli
 }
 
 log_acceptance_resource_plan() {

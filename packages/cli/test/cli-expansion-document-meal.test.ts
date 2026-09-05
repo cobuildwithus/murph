@@ -1489,3 +1489,27 @@ test.sequential(
   },
   60_000,
 )
+
+
+test('meal totals resolves same-date goal context through the canonical query without changing ordinary totals', async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), 'murph-meal-context-'))
+  const vaultRoot = path.join(workspace, 'vault')
+  try {
+    await initializeVault({ vaultRoot, createdAt: '2026-07-30T12:00:00.000Z' })
+    const cli = createDocumentMealSchemaCli()
+    const common = ['meal', 'totals', '--from', '2026-07-30', '--to', '2026-07-30', '--vault', vaultRoot]
+    const ordinary = await runInProcessJsonCli<Record<string, unknown>>(cli, common)
+    const resolved = await runInProcessJsonCli<Record<string, unknown>>(cli, [...common, '--resolve-goals'])
+    assert.equal(ordinary.envelope.ok, true)
+    assert.equal(resolved.envelope.ok, true)
+    const { goalContext, ...totals } = requireData(resolved.envelope)
+    assert.deepEqual(totals, requireData(ordinary.envelope))
+    assert.deepEqual(goalContext, {
+      localDate: '2026-07-30', status: 'missing', activeGoalCount: 0, compatibility: 'canonical',
+      targets: Object.fromEntries(['calories', 'proteinGrams', 'carbsGrams', 'fatGrams', 'fiberGrams'].map((key) =>
+        [key, { status: 'missing', target: null, provenance: [] }])),
+    })
+    const invalid = await runInProcessJsonCli(cli, ['meal', 'totals', '--resolve-goals', '--vault', vaultRoot])
+    assert.equal(invalid.envelope.ok, false)
+  } finally { await rm(workspace, { recursive: true, force: true }) }
+})

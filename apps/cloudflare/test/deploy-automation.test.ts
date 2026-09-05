@@ -433,6 +433,7 @@ describe("hosted deploy automation helpers", () => {
     expect(config.compatibility_flags).toEqual([
       "nodejs_compat",
       "containers_pid_namespace",
+      "enable_request_signal",
     ]);
     expect(config.placement).toEqual({ mode: "smart" });
     expect(config.r2_buckets).toEqual([
@@ -883,6 +884,7 @@ describe("hosted deploy automation helpers", () => {
     expect(config.compatibility_flags).toEqual([
       "nodejs_compat",
       "containers_pid_namespace",
+      "enable_request_signal",
     ]);
     expect(config.containers).toHaveLength(3);
     for (const container of config.containers) {

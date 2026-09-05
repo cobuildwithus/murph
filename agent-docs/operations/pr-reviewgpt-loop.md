@@ -78,32 +78,32 @@ restart.
 
 ## Wait And Wake Ownership
 
-Give every ReviewGPT run one completion owner. For a normal active review run,
-use `--wait` and let that invocation own response capture until it returns on
-completion, timeout, or failure. Waiting on that completion-returning process is
-not status polling. Do not spend the active agent turn repeatedly reopening the
-thread, querying the process, or otherwise asking whether the review is done.
+Give every ReviewGPT run one completion owner in the original Codex
+session/thread. Prefer `--wait` and let that invocation own response capture
+until completion, timeout, or failure. Keep the same session active and watch
+that process through the tool's wait/resume facility, including across yielded
+tool calls. A slow review alone is not a reason to end the turn, arm an
+automatic continuation, or move completion work into a new session.
 
-When an accepted ReviewGPT request must outlive the active turn, prefer a
-detached `cobuild-review-gpt thread wake` handoff. Bind it to the exact thread,
-capture metadata, owning Codex session, repository checkout, and managed browser
-lane. The detached watcher owns the wait and resumes Codex only after the
-response is complete; the active agent does not remain in a progress-check
-loop. Use `--poll-interval 5m` so watcher checks are no more frequent than once
-every five minutes. Unless an explicit caller- or user-supplied per-run bound
-already applies, use `--poll-timeout 260m`; preserve any explicit bound. That
-wake timeout is independent of the normal ReviewGPT response-capture timeout,
-which defaults to 250 minutes.
+When a completion-returning wait is unavailable, poll the exact accepted
+ReviewGPT thread from the same Codex session, leaving at least five minutes
+between status checks. Use interruptible waits between checks and honor the
+existing per-run timeout. Waiting for output from the existing `--wait` process
+is not a separate status poll; do not add a second thread-status polling loop
+while that process owns capture.
 
-Manual status polling is a fallback only when neither a completion-returning
-wait nor a completion watcher can notify the owning model and the task cannot
-safely proceed without a check. In that case, leave at least five minutes
-between checks and stop polling as soon as one completion owner is available.
-Do not stack a manual polling loop on top of a live `--wait` process or detached
-wake watcher.
+Reserve detached `cobuild-review-gpt thread wake` for a deliberate handoff when
+the current session cannot remain active or the user requests it. Bind it to
+the exact thread, capture metadata, owning Codex session, repository checkout,
+and managed browser lane. Once handed off, the watcher owns completion; do
+not also run a manual polling loop. Use `--poll-interval 5m` and, unless an
+explicit caller- or user-supplied per-run bound already applies,
+`--poll-timeout 260m`. Preserve explicit bounds. That wake timeout remains
+independent of normal ReviewGPT response capture, which defaults to 250
+minutes.
 
-The completion watcher does not relax exact-head, exact-thread, attachment,
-model, timeout, or response-marker validation.
+Same-session waiting, polling, and deliberate handoffs all preserve exact-head,
+exact-thread, attachment, model, timeout, and response-marker validation.
 
 ## Finding Disposition Boundary
 
@@ -552,26 +552,23 @@ required GitHub checks. Do not wait for optional or non-required status checks
 after those gates are green unless a failing check is relevant to the changed
 surface or the user explicitly requested it.
 
-When strict up-to-date checks block the merge, prefer the merge queue. If no
-queue is available, the unchanged reviewed patch has a one-update budget for
-this completion attempt: perform one normal base update, record any conflict
-paths and preservation reasons, run focused verification for affected surfaces,
-and let required PR CI gate that head. The budget remains consumed until merge
-or handoff; a later base advance, CI retry, or agent turn does not reset it. Do
-not rerun ReviewGPT solely for that update. If any resolution authors behavior
-not already represented by the reviewed PR or current base, materially changes
-the implemented contract, includes another branch-authored change, or cannot be
-confidently classified as mechanical, use the ordinary next-substantive-round
-rule instead of the base-only budget.
+When the authorized merge path needs a current base, prefer the merge queue
+when available. Otherwise reconcile the base with a normal merge or rebase,
+record any conflict paths and preservation reasons, run focused verification for
+affected surfaces, and let required PR CI gate the resulting head. Preserve
+published history unless rewriting it is explicitly authorized. Do not rerun
+ReviewGPT solely for a behavior-preserving base update. If a resolution authors
+behavior not already represented by the reviewed PR or current base, materially
+changes the implemented contract, or cannot be confidently classified as
+mechanical, use the ordinary next-substantive-round rule.
 
-If the base advances again after required CI is green on that one updated head,
-do not update the branch or restart CI. Fetch the current base and rerun
-`git merge-tree --write-tree`. When it is clean, use only an already-authorized
-non-refresh merge path: the merge queue or an explicit stale-head/admin bypass.
-Such a bypass may relax only strict-current status; it never bypasses required
-CI or routed review gates. If the merge-tree conflicts, or no non-refresh path
-is both available and authorized, report `moving-base race`, leave the PR and
-worktree active, and stop. Do not poll for a quiet base.
+There is no numerical limit on base updates. If the base advances again, inspect
+the new diff and current mergeability, then continue necessary reconciliation
+within the existing merge authorization. Base movement alone does not require
+another prompt. Avoid updates that the merge path does not need; use green CI on
+the unchanged PR head when branch protections permit it. A changed PR head still
+requires its own required CI. Never bypass required checks, routed review gates,
+or unresolved ownership or product decisions to finish a merge.
 
 ## Stop Condition
 

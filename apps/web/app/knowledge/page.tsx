@@ -75,7 +75,6 @@ export default async function KnowledgePage() {
         <StickyNav
           authenticated={authenticated}
           githubStarCount={githubStarCount}
-          preloadAuthPanel
         />
         <KnowledgeHero />
         <ComparisonSection />

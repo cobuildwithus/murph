@@ -25,6 +25,19 @@ pnpm hosted-local run -- pnpm --dir apps/cloudflare test:workers
 
 Root `pnpm dev` is a thin alias for `pnpm hosted-local up`.
 
+`e2e --no-bundle` reuses the existing runner bundle, then builds the Worker's
+production workspace dependency closure once before launching any scenarios.
+This refreshes copied Worker imports without assembling the runner bundle again or
+repeating package preparation for each scenario. Builds use the existing
+`MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY` setting (default `1`); failure or
+interruption stops scenario admission. Dev-only dependencies and unrelated
+workspace packages are excluded.
+
+Standalone `up` keeps its normal runner-bundle preparation. Direct callers
+setting the internal `MURPH_DEV_SKIP_RUNNER_BUNDLE=1` flag supply both an existing
+runner bundle and prepared workspace artifacts; the public `--no-bundle` E2E
+command owns the workspace preparation described above.
+
 `doctor` reports Docker daemon and Buildx prerequisites separately. Isolated
 Docker configuration selects the first candidate plugin directory containing an
 executable `docker-buildx`, so an empty or unusable earlier directory cannot hide

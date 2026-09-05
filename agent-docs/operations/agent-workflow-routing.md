@@ -37,6 +37,8 @@ can hold implementation, Product UX, and verification decisions.
   first, then the relevant matrix row or runtime procedure.
 - `pr-reviewgpt-loop.md`: only for a required or explicitly requested final
   ReviewGPT run; owns capture, finding disposition, retries, and merge readiness.
+  Prefer `--wait` or paced polling in the original Codex session/thread; reserve
+  detached wake for deliberate handoffs under its Wait And Wake Ownership rule.
 - `product-ux.md`: plan and replay materially different affected journeys for
   user-facing behavior. No separate specialist review is required.
 - `local-storage-lifecycle.md`: worktree and build/test residue ownership.
