@@ -805,8 +805,9 @@ Private integration pins one public source before independent runner-bundle and
 Web builds. Its Web job may set `MURPH_HOSTED_WEB_WEBPACK_CACHE=1` and persist the
 Next compiler cache plus `.next/cache` TypeScript metadata. The full Web build,
 route type generation, and both TypeScript checks still run after restoration.
-Vercel and ordinary builds retain cold Webpack compilation unless explicitly
-opted in; heap and static-generation limits are unchanged. Focused proof lives
+Public CI, Vercel, and ordinary builds retain cold Webpack compilation unless
+explicitly opted in. The public CI cache experiment exhausted its compiler heap
+and was disabled; heap and static-generation limits remain unchanged. Focused proof lives
 in `apps/web/test/next-config.test.ts` and
 `apps/web/test/production-next-build-runner.test.ts`. Cross-repository timing
 must be measured in the actual private integration workflow, including queue,
