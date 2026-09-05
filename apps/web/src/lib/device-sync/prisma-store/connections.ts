@@ -90,6 +90,7 @@ import {
   type HostedRuntimeApplyTokenWritePreparation,
 } from "./connection-secrets";
 import {
+  createDirtyPayloadClassificationPendingError,
   isHostedDirtyPayloadClassificationPendingError,
   supersedeHostedCredentialScopedDirtyStateForConnectionTx,
 } from "./dirty-connections";
@@ -333,7 +334,7 @@ export class PrismaHostedConnectionStore {
       if (existing) {
         assertHostedUpsertExistingConnectionGuard(existing, input.existingAccountGuard ?? null);
 
-        if (ownerId && existing.userId !== ownerId) {
+        if (existing.userId !== ownerId) {
           throw deviceSyncError({
             code: "CONNECTION_OWNERSHIP_CONFLICT",
             message: "This provider account is already connected to a different Murph user.",
@@ -364,8 +365,6 @@ export class PrismaHostedConnectionStore {
             existing,
             input.existingAccountPolicy,
           )
-          && ownerId
-          && existing.userId === ownerId
         ) {
           await requireExactOAuthClaimResolutionTx(tx, input.oauthClaim);
           return {
@@ -384,6 +383,17 @@ export class PrismaHostedConnectionStore {
               }),
             )
           : replacementMetadata;
+
+        if (existing.connectedAt.getTime() !== connectedAt.getTime()) {
+          const dirtyState = await supersedeHostedCredentialScopedDirtyStateForConnectionTx({
+            connectionId: existing.id,
+            tx,
+            userId: existing.userId,
+          });
+          if (dirtyState === "classification_pending") {
+            return null;
+          }
+        }
 
         const credentialWrite = await buildHostedConnectionCredentialWrite({
           connectionId: existing.id,
@@ -430,13 +440,6 @@ export class PrismaHostedConnectionStore {
           },
           ...hostedConnectionRecordArgs,
         });
-        if (existing.connectedAt.getTime() !== connectedAt.getTime()) {
-          await supersedeHostedCredentialScopedDirtyStateForConnectionTx({
-            connectionId: existing.id,
-            tx,
-            userId: existing.userId,
-          });
-        }
         await requireExactOAuthClaimResolutionTx(tx, input.oauthClaim);
         return {
           record: updated,
@@ -499,6 +502,12 @@ export class PrismaHostedConnectionStore {
         previousRecord: null,
       };
     });
+
+    if (!result) {
+      // Commit legacy annotations before retrying; no connection epoch, token,
+      // dirty-marker reset, payload deletion or OAuth claim changed in this pass.
+      throw createDirtyPayloadClassificationPendingError();
+    }
 
     return {
       account: await this.buildDurableConnectionRecord(result.record),

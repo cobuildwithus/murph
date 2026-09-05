@@ -23,7 +23,7 @@ const {
   readHostedMemberSuspensionAfterLockTxMock: vi.fn(
     async (): Promise<"active" | "missing" | "suspended"> => "active",
   ),
-  supersedeDirtyStateMock: vi.fn(async () => undefined),
+  supersedeDirtyStateMock: vi.fn(async (): Promise<"classification_pending" | void> => undefined),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/shared", async (importOriginal) => ({
@@ -1268,7 +1268,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(tx.deviceConnection.update).not.toHaveBeenCalled();
   });
 
-  it("retries legacy classification once behind the consent and dirty-marker transaction", async () => {
+  it("commits legacy classification before retrying connection replacement", async () => {
     let stored = createConnection({
       accessTokenEncrypted: null,
       id: "dsc_classification_retry",
@@ -1314,10 +1314,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     });
     supersedeDirtyStateMock
-      .mockRejectedValueOnce({
-        code: "HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_CLASSIFICATION_PENDING",
-        retryable: true,
-      })
+      .mockResolvedValueOnce("classification_pending")
       .mockResolvedValueOnce(undefined);
 
     await expect(store.upsertConnection({
@@ -1352,6 +1349,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       supersedeDirtyStateMock.mock.invocationCallOrder[0] ?? 0,
     );
     expect(transaction).toHaveBeenCalledTimes(2);
+    expect(tx.deviceConnection.update).toHaveBeenCalledOnce();
   });
 
   it("bounds repeated connection unique-conflict recovery to one retry", async () => {
