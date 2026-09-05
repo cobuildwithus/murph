@@ -51,7 +51,8 @@ The authorized September FHIR refactor covers correctness, policy/contract delet
 - Phone (390 px) and desktop (1280 px) real-component studies and signed-out route inspected; Playwright overflow and keyboard proof passed. No live provider journey has been exercised.
 - Postdeploy contract SQL applied successfully to the isolated database; the six concurrency tests still pass. Complexity guard passes with no increased per-file debt.
 - All affected typechecks and the workspace incremental build pass. Changelog archive proof adds nine passing cases.
-- PR #2918 is draft; branch preview, exact-head CI and final ReviewGPT remain.
+- PR #2918 is draft; 461 focused cases, the workspace build, affected typechecks, boundary and complexity guards pass. Screenshots are attached to the PR.
+- Preview deployment requires an accepted Git author. Use the repository’s existing neutral Codex identity for remaining commits; no personal attribution is needed. Exact-head CI and final ReviewGPT remain.
 
 ## Progress
 
