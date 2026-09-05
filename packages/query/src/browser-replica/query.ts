@@ -182,9 +182,10 @@ export function createBrowserVaultInteractiveQueryClient(
     metricBuckets,
   );
   const labsReplica = assembleBrowserVaultLabsReplica(core, labs);
-  const replica = deepFreezeBrowserVaultValue({
+  // The metrics client already deeply froze the shared core and metrics graph.
+  const replica = Object.freeze({
     ...metricsClient.replica,
-    labResultRows: labsReplica.labResultRows,
+    labResultRows: deepFreezeBrowserVaultValue(labsReplica.labResultRows),
   });
   return {
     ...metricsClient,
