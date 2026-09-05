@@ -31,6 +31,7 @@ import {
 import {
   readHostedLinqProductionCanaryMemberId,
   readHostedLinqProductionCanaryPhoneNumber,
+  resolveHostedLinqProductionCanaryAssistantModelPreference,
 } from "@/src/lib/hosted-onboarding/linq-production-canary";
 
 const CONFIGURED_ENVIRONMENT = {
@@ -55,6 +56,21 @@ describe("Hosted Linq production canary identity", () => {
 
     expect(readHostedLinqProductionCanaryPhoneNumber(source))
       .toBe("+15551234567");
+  });
+
+  it("selects Luna only for the fixed production canary phone", () => {
+    expect(resolveHostedLinqProductionCanaryAssistantModelPreference(
+      "+1 (555) 123-4567",
+      CONFIGURED_ENVIRONMENT,
+    )).toBe("gpt-5.6-luna");
+    expect(resolveHostedLinqProductionCanaryAssistantModelPreference(
+      "+15550000000",
+      CONFIGURED_ENVIRONMENT,
+    )).toBeUndefined();
+    expect(resolveHostedLinqProductionCanaryAssistantModelPreference(
+      "+15551234567",
+      {},
+    )).toBeUndefined();
   });
 
   it("resolves the current canary member through the canonical identity lookup", async () => {

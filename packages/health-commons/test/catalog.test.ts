@@ -372,6 +372,13 @@ describe("health commons catalog", () => {
       }),
     );
 
+    expect(catalog.redirects).toContainEqual(
+      expect.objectContaining({
+        from: "goal_template:build-aerobic-base",
+        to: "goal_template:improve-cardio-endurance",
+      }),
+    );
+
     const artifacts = catalog.artifactManifests.flatMap((manifest) => manifest.artifacts);
     expect(artifacts.find((artifact) => artifact.artifactId === "art_pmid_25705824_pdf")).toMatchObject({
       storage: "cloudflare-r2",

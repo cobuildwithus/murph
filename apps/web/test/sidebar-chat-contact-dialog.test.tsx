@@ -1,28 +1,58 @@
 import assert from "node:assert/strict";
 
-import { act, createElement, type HTMLAttributes, type ReactNode } from "react";
+import {
+  act,
+  createElement,
+  type HTMLAttributes,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import { test, vi } from "vitest";
 
 import { renderClientComponent } from "./render-client-component";
 
-vi.mock("@/src/components/ui/dialog", () => ({
-  Dialog: ({
-    children,
-    open,
-  }: {
-    children?: ReactNode;
-    open?: boolean;
-    onOpenChange?: (open: boolean) => void;
-  }) => open ? createElement("div", { "data-dialog-open": "true" }, children) : null,
-  DialogContent: ({ children, className }: HTMLAttributes<HTMLDivElement>) =>
-    createElement("div", { className, "data-dialog-content": "true" }, children),
-  DialogDescription: (props: HTMLAttributes<HTMLParagraphElement>) =>
-    createElement("p", props),
-  DialogHeader: (props: HTMLAttributes<HTMLDivElement>) =>
-    createElement("div", props),
-  DialogTitle: (props: HTMLAttributes<HTMLHeadingElement>) =>
-    createElement("h2", props),
-}));
+vi.mock("@/src/components/ui/dialog", async () => {
+  const { cloneElement, createContext, useContext } = await import("react");
+  const DialogContext = createContext({
+    onOpenChange: undefined as ((open: boolean) => void) | undefined,
+    open: false,
+  });
+
+  return {
+    Dialog: ({
+      children,
+      open,
+      onOpenChange,
+    }: {
+      children?: ReactNode;
+      open?: boolean;
+      onOpenChange?: (open: boolean) => void;
+    }) => createElement(
+      DialogContext.Provider,
+      { value: { onOpenChange, open: Boolean(open) } },
+      children,
+    ),
+    DialogContent: ({ children, className }: HTMLAttributes<HTMLDivElement>) =>
+      useContext(DialogContext).open
+        ? createElement("div", { className, "data-dialog-content": "true" }, children)
+        : null,
+    DialogDescription: (props: HTMLAttributes<HTMLParagraphElement>) =>
+      createElement("p", props),
+    DialogHeader: (props: HTMLAttributes<HTMLDivElement>) =>
+      createElement("div", props),
+    DialogTitle: (props: HTMLAttributes<HTMLHeadingElement>) =>
+      createElement("h2", props),
+    DialogTrigger: ({ render }: { render: ReactElement<{ onClick?: () => void }> }) => {
+      const { onOpenChange } = useContext(DialogContext);
+      return cloneElement(render, {
+        onClick: () => {
+          render.props.onClick?.();
+          onOpenChange?.(true);
+        },
+      });
+    },
+  };
+});
 
 vi.mock("@/src/components/ui/sidebar", () => ({
   SidebarMenuButton: ({

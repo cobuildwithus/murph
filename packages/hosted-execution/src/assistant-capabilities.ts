@@ -11,7 +11,16 @@ const HOSTED_ELEVENLABS_ENV = {
 export const HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV = "GEMINI_API_KEY";
 export const HOSTED_GEMINI_VIDEO_ANALYSIS_API_BASE_URL =
   "https://generativelanguage.googleapis.com";
-export const HOSTED_GEMINI_VIDEO_ANALYSIS_MODEL = "gemini-3.7-flash";
+export const HOSTED_GEMINI_VIDEO_ANALYSIS_MODEL = "gemini-3.8-flash";
+// Rollout-only reader for warm runners built before the 3.8 model upgrade.
+// Remove after the runner rollback floor and every warm container have advanced.
+export const HOSTED_GEMINI_VIDEO_ANALYSIS_PREVIOUS_MODEL = "gemini-3.7-flash";
+export const HOSTED_GEMINI_VIDEO_ANALYSIS_ROLLOUT_MODELS = [
+  HOSTED_GEMINI_VIDEO_ANALYSIS_MODEL,
+  HOSTED_GEMINI_VIDEO_ANALYSIS_PREVIOUS_MODEL,
+] as const;
+export type HostedGeminiVideoAnalysisRolloutModel =
+  typeof HOSTED_GEMINI_VIDEO_ANALYSIS_ROLLOUT_MODELS[number];
 export const HOSTED_GEMINI_VIDEO_ANALYSIS_SAMPLING_MODES = [
   "standard",
   "detailed_motion",

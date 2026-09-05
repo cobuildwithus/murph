@@ -1016,10 +1016,10 @@ describe("hosted AI usage allowance pricing", () => {
     });
   });
 
-  it("prices Gemini 3.7 Flash video analysis with thinking in the output bucket", () => {
+  it("prices Gemini 3.8 Flash video analysis with thinking in the output bucket", () => {
     const usage = buildHostedGeminiVideoAnalysisUsageRecord({
       memberId: "member_123",
-      model: "gemini-3.7-flash",
+      model: "gemini-3.8-flash",
       occurredAt: "2026-08-20T12:00:00.000Z",
       providerRequestId: "gemini_request_123",
       usage: {
@@ -1036,7 +1036,7 @@ describe("hosted AI usage allowance pricing", () => {
       counted: true,
       pricingSnapshot: {
         credentialSource: "platform",
-        model: "gemini-3.7-flash",
+        model: "gemini-3.8-flash",
         modelSource: "requested",
         pricingSource: "https://ai.google.dev/gemini-api/docs/pricing",
         pricingWindow: {
@@ -1048,7 +1048,7 @@ describe("hosted AI usage allowance pricing", () => {
           input: "750000",
           outputIncludingThinking: "3750000",
         },
-        requestedModel: "gemini-3.7-flash",
+        requestedModel: "gemini-3.8-flash",
         schema: "murph.hosted-ai-usage-allowance-pricing.v1",
         servedModel: null,
         standardCostUsdMicros: "620",
@@ -1068,7 +1068,7 @@ describe("hosted AI usage allowance pricing", () => {
         },
       },
       pricingVersion:
-        "gemini-3.7-flash-video-pricing-through-2026-12-31",
+        "gemini-3.8-flash-video-pricing-through-2026-12-31",
     });
 
     expect(priceHostedAiUsageForAllowance({
@@ -1087,14 +1087,38 @@ describe("hosted AI usage allowance pricing", () => {
           outputIncludingThinking: "7500000",
         },
       },
-      pricingVersion: "gemini-3.7-flash-video-pricing-from-2027-01-01",
+      pricingVersion: "gemini-3.8-flash-video-pricing-from-2027-01-01",
+    });
+
+    const previousModelUsage = buildHostedGeminiVideoAnalysisUsageRecord({
+      memberId: "member_123",
+      model: "gemini-3.7-flash",
+      occurredAt: "2026-08-20T12:00:00.000Z",
+      providerRequestId: "gemini_request_123",
+      usage: {
+        cachedContentTokenCount: 16,
+        candidatesTokenCount: 80,
+        promptTokenCount: 320,
+        thoughtsTokenCount: 24,
+        totalTokenCount: 424,
+      },
+    });
+
+    expect(priceHostedAiUsageForAllowance(previousModelUsage)).toMatchObject({
+      counted: true,
+      pricingSnapshot: {
+        model: "gemini-3.7-flash",
+        requestedModel: "gemini-3.7-flash",
+      },
+      pricingVersion:
+        "gemini-3.7-flash-video-pricing-through-2026-12-31",
     });
   });
 
   it("fails closed when Gemini video usage drifts from its Worker-authored shape", () => {
     const usage = buildHostedGeminiVideoAnalysisUsageRecord({
       memberId: "member_123",
-      model: "gemini-3.7-flash",
+      model: "gemini-3.8-flash",
       occurredAt: "2026-08-20T12:00:00.000Z",
       usage: {
         candidatesTokenCount: 80,
@@ -1153,7 +1177,7 @@ describe("hosted AI usage allowance pricing", () => {
   it("prices Gemini input-only usage when a blocked response omits candidates", () => {
     const usage = buildHostedGeminiVideoAnalysisUsageRecord({
       memberId: "member_123",
-      model: "gemini-3.7-flash",
+      model: "gemini-3.8-flash",
       occurredAt: "2026-08-20T12:00:00.000Z",
       usage: {
         promptTokenCount: 320,

@@ -2038,6 +2038,125 @@ describe("executeHostedMailboxEvent", () => {
     });
   });
 
+  it("carries direct email binding authority for legacy signup welcomes", async () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_notification_email_welcome",
+      memberId: "member_123",
+      notification: {
+        deliveryDispatchMode: "queue-only",
+        deliveryDedupeToken: "signup-welcome:member_123",
+        deliveryIdempotencyKey: "signup-welcome:member_123",
+        firstContact: {
+          markSeenOnDeliveryAccepted: true,
+        },
+        instructions: "Send exactly the signup welcome.",
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: "Welcome to Murph.",
+        },
+        route: {
+          actorId: null,
+          channel: "email",
+          delivery: {
+            kind: "explicit",
+            target: "member@example.test",
+          },
+          identityId: "hid_email_identity_123",
+          threadId: null,
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    await executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      forceQueueOnlyAssistantNotification: true,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      sourceMailboxItemId: "hmi_legacy_email_welcome_123",
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.sendAssistantNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingDeliveryTarget: "member@example.test",
+        channel: "email",
+        deliveryKind: null,
+        deliveryTarget: "member@example.test",
+        threadIsDirect: true,
+      }),
+    );
+  });
+
+  it.each([
+    {
+      channel: "email" as const,
+      label: "another member's direct email",
+      memberId: "member_other",
+      target: "other-member@example.test",
+      threadIsDirect: true,
+    },
+    {
+      channel: "email" as const,
+      label: "the same member's non-direct email",
+      memberId: "member_123",
+      target: "group@example.test",
+      threadIsDirect: false,
+    },
+    {
+      channel: "linq" as const,
+      label: "an explicit Linq target without route authority",
+      memberId: "member_123",
+      target: "linq-unverified-target",
+      threadIsDirect: true,
+    },
+  ])("keeps $label out of the binding", async ({
+    channel,
+    memberId,
+    target,
+    threadIsDirect,
+  }) => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: `evt_notification_unverified_${channel}`,
+      memberId,
+      notification: {
+        instructions: "Prepare a synthetic notification.",
+        route: {
+          actorId: null,
+          channel,
+          delivery: {
+            kind: "explicit",
+            target,
+          },
+          identityId: null,
+          threadId: null,
+          threadIsDirect,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    await executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      forceQueueOnlyAssistantNotification: true,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.sendAssistantNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingDeliveryTarget: null,
+        channel,
+        deliveryTarget: target,
+        threadIsDirect,
+      }),
+    );
+  });
+
   it("maps a closed group context handoff into one output-only group notification", async () => {
     const eventId =
       `assistant.notification.requested:group-context-handoff:${"a".repeat(64)}`;
@@ -2800,6 +2919,53 @@ describe("executeHostedMailboxEvent", () => {
       nextWakeAt: seededNextWakeAt,
       nextWakeReason: "assistant",
     });
+  });
+
+  it("carries direct email binding authority for embedded activation welcomes", async () => {
+    const wake = buildHostedExecutionMemberActivatedWake({
+      eventId: "member.activated:email:member_123:evt_email_welcome",
+      memberChannels: {
+        email: true,
+        linq: false,
+        telegram: false,
+      },
+      memberId: "member_123",
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      signupWelcome: {
+        route: {
+          actorId: null,
+          channel: "email",
+          delivery: {
+            kind: "explicit",
+            target: "member@example.test",
+          },
+          identityId: "hid_email_identity_123",
+          threadId: null,
+          threadIsDirect: true,
+        },
+        text: "Welcome to Murph.",
+      },
+    });
+
+    await executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      forceQueueOnlyAssistantNotification: true,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      sourceMailboxItemId: "hmi_activation_email_welcome_123",
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.sendAssistantNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingDeliveryTarget: "member@example.test",
+        channel: "email",
+        deliveryKind: null,
+        deliveryTarget: "member@example.test",
+        threadIsDirect: true,
+      }),
+    );
   });
 
   it("seeds onboarding follow-up while suppressing embedded Telegram signup welcomes", async () => {

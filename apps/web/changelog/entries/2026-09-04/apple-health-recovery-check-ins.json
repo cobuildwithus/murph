@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-04",
+  "order": 100,
+  "item": {
+    "id": "apple-health-recovery-check-ins",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "A check-in when Apple Health goes quiet",
+    "summary": "Murph can check in privately on iMessage after three days without an Apple Health update, with a reminder to open Murph and check for new data.",
+    "details": "You'll get one check-in per gap, in an existing active conversation. Ask Murph to wait 5–30 days or stop these check-ins; your connection and syncing stay on. A gap alone does not mean your app was closed or your connection broke.",
+    "relevanceTags": ["apple-health", "device-sync"],
+    "sourcePullRequests": [2829]
+  }
+}

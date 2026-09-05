@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT,
+} from "@murphai/device-syncd/hosted-runtime";
 
 import {
   ASSISTANT_RUNTIME_ISSUE_SCHEMA,
@@ -38,6 +41,7 @@ import {
   HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_REASON_STATUS_KEY,
   HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_STATUS_KEY,
   HOSTED_RUNTIME_LOG_EVENT_CODES,
+  HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT,
   HOSTED_RUNTIME_ORCHESTRATION_LATENCY_DIAGNOSTICS_HEADER,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
   HOSTED_WORKSPACE_INVOCATION_STATUSES,
@@ -1685,6 +1689,9 @@ describe("hosted runtime control contracts", () => {
         replacementFenceClearElapsedMs: 5,
         replacedStaleFence: true,
         freshStartRequestedAtEpochMs: 1_777_000_000_070,
+        standbyAllocationElapsedMs: 250,
+        standbyAllocationOutcome: "fallback",
+        standbyAllocationReason: "claim_no_ready_slot",
         freshStartFenceBoundAtEpochMs: 1_777_000_000_080,
         freshStartContainerReadinessRequestedAtEpochMs: 1_777_000_000_081,
         freshStartContainerLifecycleLockAcquiredAtEpochMs: 1_777_000_000_082,
@@ -1981,6 +1988,19 @@ describe("hosted runtime control contracts", () => {
       { directEnsureResultKind: "retry_later", directEnsureRetryReason: "container_rpc_timeout" }, // retry reasons remain in structured logs only
       { directEnsureResultKind: "retry_later", directEnsureAction: "woken" }, // accepted metadata must match the result
       { directEnsureResultKind: "runtime_processing_accepted", directEnsureAction: "woken" }, // accepted results require a runtime id
+      { standbyAllocationOutcome: "fallback" }, // allocation timing, outcome, and reason are one diagnostic fact
+      { standbyAllocationReason: "claim_no_ready_slot" }, // allocation timing, outcome, and reason are one diagnostic fact
+      { standbyAllocationElapsedMs: 87 }, // allocation timing, outcome, and reason are one diagnostic fact
+      {
+        standbyAllocationElapsedMs: 87,
+        standbyAllocationOutcome: "fallback",
+        standbyAllocationReason: "raw_coordinator_error",
+      }, // allocation reasons are a bounded enum
+      {
+        standbyAllocationElapsedMs: 87,
+        standbyAllocationOutcome: "claimed",
+        standbyAllocationReason: "claim_no_ready_slot",
+      }, // allocation reasons must match their outcome
       {
         directEnsureResultKind: "runtime_processing_accepted",
         directEnsureAction: "woken",
@@ -2327,6 +2347,9 @@ describe("hosted runtime control contracts", () => {
       extraLeaf: 1,
       freshStartRequestedAtEpochMs: -1,
       replacedStaleFence: "true",
+      standbyAllocationElapsedMs: 87,
+      standbyAllocationOutcome: "fallback",
+      standbyAllocationReason: "claim_no_ready_slot",
       runtimeControlAuthFinishedAtEpochMs: 1_777_000_000_110,
       runtimeControlAuthStartedAtEpochMs: 1_777_000_000_090,
       runtimeInvocationPreparationElapsedMs: 120,
@@ -2351,6 +2374,9 @@ describe("hosted runtime control contracts", () => {
       directEnsureRuntimeAttemptId: "runtime-attempt-direct",
       runtimeControlAuthFinishedAtEpochMs: 1_777_000_000_110,
       runtimeControlAuthStartedAtEpochMs: 1_777_000_000_090,
+      standbyAllocationElapsedMs: 87,
+      standbyAllocationOutcome: "fallback",
+      standbyAllocationReason: "claim_no_ready_slot",
       runtimeInvocationPreparationElapsedMs: 120,
       runtimeStoreEnsureElapsedMs: 80,
       tokenAcquiredAtEpochMs: 1_777_000_000_010,
@@ -2844,6 +2870,32 @@ describe("hosted runtime control contracts", () => {
     expect(() => parseHostedRuntimeRedactedJson({
       source: "retrying hosted-user-runtime:opaque-test",
     }, "Hosted runtime redacted JSON")).toThrow(/direct identifier/u);
+  });
+
+  it("bounds device-sync continuation owners to the runtime connection authority", () => {
+    expect(HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT).toBe(
+      HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT,
+    );
+    const continuationSeqs = Array.from(
+      { length: HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT },
+      (_, index) => String(index + 1),
+    );
+    expect(parseHostedRuntimeRedactedJson({
+      hostedMailboxSystemDeviceSyncContinuationSeqs: continuationSeqs,
+    }, "Hosted runtime redacted JSON")).toEqual({
+      hostedMailboxSystemDeviceSyncContinuationSeqs: continuationSeqs,
+    });
+    expect(() => parseHostedRuntimeRedactedJson({
+      hostedMailboxSystemDeviceSyncContinuationSeqs: [
+        ...continuationSeqs,
+        String(HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT + 1),
+      ],
+    }, "Hosted runtime redacted JSON")).toThrow(
+      new RegExp(
+        `at most ${HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT} redacted values`,
+        "u",
+      ),
+    );
   });
 
   it("accepts retired device-sync environment logs from warm runners", () => {

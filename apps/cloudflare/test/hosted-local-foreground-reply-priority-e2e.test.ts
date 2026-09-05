@@ -113,6 +113,7 @@ const promptReplyDeadlineMs = 30_000;
 const duplicateReplyObservationMs = 3_000;
 const activeTurnDuplicateReplyObservationMs = 22_000;
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
+const expectedStandbyMode = process.env.MURPH_E2E_EXPECT_STANDBY_MODE?.trim();
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
 const localDatabaseUrl = process.env.DATABASE_URL?.trim() || undefined;
 
@@ -203,6 +204,11 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       streamLogs: streamDevLogs,
       testControls: true,
     });
+    if (expectedStandbyMode) {
+      expect(scenario.runtimeEnv.HOSTED_EXECUTION_STANDBY_MODE).toBe(
+        expectedStandbyMode,
+      );
+    }
   }, 600_000);
 
   afterAll(async () => {
@@ -546,18 +552,17 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     const providerRequestBaseline =
       requireScenario().assistantProviderRequests.length;
     const predecessorEventId =
-      `member.channels.updated:environment-ordering:${runId}`;
+      `member.preferences.updated:environment-ordering:${runId}`;
     const predecessor = await appendHostedExecutionWakeForTest({
       environment: requireScenario().runtimeEnv,
-      wake: buildHostedExecutionMemberChannelsUpdatedWake({
+      wake: buildHostedExecutionMemberPreferencesUpdatedWake({
         eventId: predecessorEventId,
-        memberChannels: {
-          email: false,
-          linq: true,
-          telegram: false,
-        },
         memberId: environmentOrderingProbe.userId,
         occurredAt: new Date().toISOString(),
+        preferences: {
+          personality: { detail: 6 },
+          tone: "casual",
+        },
       }),
     });
     expect(predecessor.inserted).toBe(true);
@@ -626,7 +631,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       environment: requireScenario().runtimeEnv,
       userId: environmentOrderingProbe.userId,
     })).resolves.toMatchObject({
-      kind: "member.channels.updated",
+      kind: "member.preferences.updated",
       lane: "system",
     });
     expect(requireScenario().assistantProviderRequests).toHaveLength(

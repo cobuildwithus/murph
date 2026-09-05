@@ -24,6 +24,9 @@ For every PR, make one explicit decision:
 Do not defer eligible entries to a later catch-up PR. A follow-up changelog is
 acceptable only when reconstructing already-merged omissions.
 
+For an internal-only diff, record the not-applicable reason and stop here.
+The authoring and visual steps below apply only when changelog content changes.
+
 ## 1. Read the product contract
 
 Before editing, read the repository's required first-read documents and the
@@ -212,8 +215,8 @@ then the Web typecheck. Render the design study and latest archive at desktop
 and mobile widths, inspect the full screenshots, and check overflow, wrapping,
 contrast, accessible labels, and visual rhythm.
 
-Follow the repository completion workflow for specialist review, exact-head
-CI, design-proof uploads, commit, and PR creation.
+Follow the repository completion workflow for parent review, applicable final
+ReviewGPT, exact-head CI, design-proof uploads, commit, and PR creation.
 
 ## 7. Complete the PR declaration
 

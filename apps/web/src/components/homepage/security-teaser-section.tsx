@@ -11,13 +11,7 @@ export function SecurityTeaserSection() {
     <section className="bg-[#ebdfc6] px-5 py-20 sm:px-10 lg:px-16 lg:py-28">
       <div className="mx-auto grid max-w-[1120px] items-center gap-x-16 gap-y-14 lg:grid-cols-[1.15fr_0.85fr]">
         <div>
-          <div className="flex items-center gap-4">
-            <span aria-hidden="true" className="h-px w-10 bg-[#3a4a1e]/70" />
-            <span className="font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-[#3a4a1e]">
-              Security &amp; privacy
-            </span>
-          </div>
-          <h2 className="mt-6 max-w-[18ch] font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.05] tracking-[-0.03em] text-balance text-[#2d3436]">
+          <h2 className="max-w-[18ch] font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.05] tracking-[-0.03em] text-balance text-[#2d3436]">
             Your health data{" "}
             <span className="italic text-[#8a6a3a]">stays</span> yours.
           </h2>

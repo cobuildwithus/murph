@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-02",
+  "order": 90,
+  "item": {
+    "id": "group-replies-start-sooner",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Group replies start sooner",
+    "summary": "Established group conversations now skip avoidable setup work before Murph starts a reply.",
+    "details": "Previously resolved speaker names can be reused after a restart, while first-time group setup still refreshes the information needed to activate the conversation.",
+    "relevanceTags": ["groups", "performance"],
+    "sourcePullRequests": [2762]
+  }
+}

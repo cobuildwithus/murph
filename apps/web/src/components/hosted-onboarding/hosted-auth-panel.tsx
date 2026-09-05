@@ -410,8 +410,6 @@ export function HostedAuthPanel({
                 && selectedAuthMethod !== "telegram"
               }
               onAuthCancel={() => cancelAuthMethod("telegram")}
-              onAuthQueue={() => queueAuthMethod("telegram")}
-              onAuthQueueCancel={() => clearQueuedAuthMethod("telegram")}
               onAuthStart={() => beginAuthMethod("telegram")}
               onAuthenticated={completion.completeAuth}
               onActivate={() => {

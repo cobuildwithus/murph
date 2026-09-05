@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-03",
+  "order": 100,
+  "item": {
+    "id": "video-analysis-gemini-3-8",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Video analysis uses Gemini 3.8 Flash",
+    "summary": "When you ask Murph about a video, the analysis now uses Google's latest Flash model while keeping standard and detailed-motion sampling.",
+    "details": "Each request remains one bounded analysis call. Older in-flight requests stay compatible during the rollout.",
+    "relevanceTags": ["assistant", "video", "reliability"],
+    "sourcePullRequests": [2789]
+  }
+}

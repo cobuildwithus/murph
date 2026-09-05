@@ -30,8 +30,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify deployed commit is from main
-        id: production-branch
+      - name: Verify deployed commit is current main
         shell: bash
         env:
           DEPLOYED_SHA: ${{ github.event.deployment.sha || inputs.deployed_sha }}
@@ -39,40 +38,25 @@ jobs:
           set -euo pipefail
 
           git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
-
-          if git merge-base --is-ancestor "${DEPLOYED_SHA}" origin/main; then
-            echo "should_run=true" >> "${GITHUB_OUTPUT}"
-            if [ "${DEPLOYED_SHA}" = "$(git rev-parse origin/main)" ]; then
-              echo "should_require_current=true" >> "${GITHUB_OUTPUT}"
-            else
-              echo "should_require_current=false" >> "${GITHUB_OUTPUT}"
-              echo "::notice::The deployed SHA is from main but is no longer its tip; a newer ready main deployment owns production convergence."
-            fi
-            exit 0
+          main_sha="$(git rev-parse origin/main)"
+          if [ "${DEPLOYED_SHA}" != "${main_sha}" ]; then
+            echo "::error::Vercel production may advance only to the exact current main revision."
+            exit 1
           fi
 
-          echo "should_run=false" >> "${GITHUB_OUTPUT}"
-          echo "should_require_current=false" >> "${GITHUB_OUTPUT}"
-          echo "::notice::Skipping hosted web contract migrations because deployed SHA is not reachable from origin/main."
-
       - name: Setup pnpm
-        if: ${{ steps.production-branch.outputs.should_run == 'true' }}
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
 
       - name: Setup Node
-        if: ${{ steps.production-branch.outputs.should_run == 'true' }}
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 24.14.1
           cache: pnpm
 
       - name: Install deps
-        if: ${{ steps.production-branch.outputs.should_run == 'true' }}
         run: pnpm install --frozen-lockfile
 
       - name: Verify current Vercel production deployment
-        id: current-production
-        if: ${{ steps.production-branch.outputs.should_run == 'true' }}
         shell: bash
         env:
           DEPLOYED_SHA: ${{ github.event.deployment.sha || inputs.deployed_sha }}
@@ -82,7 +66,6 @@ jobs:
           HOSTED_WEB_VERCEL_TEAM_ID: ${{ vars.HOSTED_WEB_VERCEL_TEAM_ID }}
           HOSTED_WEB_VERCEL_TOKEN: ${{ secrets.HOSTED_WEB_VERCEL_TOKEN }}
           HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS: ${{ vars.HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS || '300' }}
-          SHOULD_REQUIRE_CURRENT: ${{ steps.production-branch.outputs.should_require_current }}
         run: |
           set -euo pipefail
 
@@ -116,13 +99,8 @@ jobs:
           )"
 
           if [ "${current_sha}" != "${DEPLOYED_SHA}" ]; then
-            if [ "${SHOULD_REQUIRE_CURRENT}" = "true" ]; then
-              echo "::error::The current main Vercel deployment is Ready, but the production base domain still serves another commit."
-              exit 1
-            fi
-            echo "should_apply=false" >> "${GITHUB_OUTPUT}"
-            echo "::notice::Skipping hosted web contract migrations because current Vercel production is ${current_sha}, not ${DEPLOYED_SHA}."
-            exit 0
+            echo "::error::The current main Vercel deployment is Ready, but the production base domain still serves another commit."
+            exit 1
           fi
 
           verified_sha="$(
@@ -142,13 +120,8 @@ jobs:
             pnpm --dir apps/web exec tsx scripts/resolve-vercel-production-alias-sha.ts
           )"
           if [ "${current_sha}" != "${DEPLOYED_SHA}" ]; then
-            if [ "${SHOULD_REQUIRE_CURRENT}" = "true" ]; then
-              echo "::error::The current main Vercel deployment changed during the prior-function drain."
-              exit 1
-            fi
-            echo "should_apply=false" >> "${GITHUB_OUTPUT}"
-            echo "::notice::Skipping hosted web contract migrations because Vercel production advanced during the prior-function drain."
-            exit 0
+            echo "::error::The current main Vercel deployment changed during the prior-function drain."
+            exit 1
           fi
 
           verified_sha="$(
@@ -159,10 +132,7 @@ jobs:
             exit 1
           fi
 
-          echo "should_apply=true" >> "${GITHUB_OUTPUT}"
-
       - name: Apply contract migrations
-        if: ${{ steps.production-branch.outputs.should_run == 'true' && steps.current-production.outputs.should_apply == 'true' }}
         shell: bash
         env:
           DEPLOYED_SHA: ${{ github.event.deployment.sha || inputs.deployed_sha }}
@@ -171,7 +141,6 @@ jobs:
           HOSTED_WEB_VERCEL_PROJECT_ID: ${{ vars.HOSTED_WEB_VERCEL_PROJECT_ID }}
           HOSTED_WEB_VERCEL_TEAM_ID: ${{ vars.HOSTED_WEB_VERCEL_TEAM_ID }}
           HOSTED_WEB_VERCEL_TOKEN: ${{ secrets.HOSTED_WEB_VERCEL_TOKEN }}
-          SHOULD_REQUIRE_CURRENT: ${{ steps.production-branch.outputs.should_require_current }}
           DIRECT_DATABASE_URL: ${{ secrets.HOSTED_WEB_DIRECT_DATABASE_URL }}
           MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS: "1"
           MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS: "1"
@@ -192,12 +161,8 @@ jobs:
           )"
 
           if [ "${current_sha}" != "${DEPLOYED_SHA}" ]; then
-            if [ "${SHOULD_REQUIRE_CURRENT}" = "true" ]; then
-              echo "::error::The current main Vercel deployment changed immediately before contract migrations."
-              exit 1
-            fi
-            echo "::notice::Skipping hosted web contract migrations because current Vercel production is ${current_sha}, not ${DEPLOYED_SHA}."
-            exit 0
+            echo "::error::The current main Vercel deployment changed immediately before contract migrations."
+            exit 1
           fi
 
           verified_sha="$(

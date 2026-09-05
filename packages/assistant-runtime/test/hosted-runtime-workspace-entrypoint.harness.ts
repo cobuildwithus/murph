@@ -172,6 +172,7 @@ type HostedWorkspaceEntrypointMockName =
   | "drainHostedPreparedAssistantDeliveries"
   | "enqueueHostedPendingAssistantInputId"
   | "executeConsentedReadOnlyAssistantAsk"
+  | "executeOperatorDiagnostic"
   | "executeReadOnlyAssistantAsk"
   | "hasCompleteAssistantAutoReplyDeliveryTerminalEvidence"
   | "maintainAssistantAutoReplyRouteState"
@@ -229,6 +230,7 @@ const mocks: HostedWorkspaceEntrypointMocks = vi.hoisted(() => ({
     vi.fn<DrainHostedPreparedAssistantDeliveries>(),
   enqueueHostedPendingAssistantInputId: vi.fn(),
   executeConsentedReadOnlyAssistantAsk: vi.fn(),
+  executeOperatorDiagnostic: vi.fn(),
   executeReadOnlyAssistantAsk: vi.fn(),
   hasCompleteAssistantAutoReplyDeliveryTerminalEvidence:
     vi.fn<HasCompleteAssistantAutoReplyDeliveryTerminalEvidence>(),
@@ -306,6 +308,10 @@ vi.mock("@murphai/assistant-engine/assistant-ask", async (importOriginal) => {
     executeConsentedReadOnlyAssistantAsk:
       mocks.executeConsentedReadOnlyAssistantAsk.mockImplementation(
         actual.executeConsentedReadOnlyAssistantAsk,
+      ),
+    executeOperatorDiagnostic:
+      mocks.executeOperatorDiagnostic.mockImplementation(
+        actual.executeOperatorDiagnostic,
       ),
     executeReadOnlyAssistantAsk:
       mocks.executeReadOnlyAssistantAsk.mockImplementation(

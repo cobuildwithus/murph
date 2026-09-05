@@ -250,7 +250,7 @@ import {
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
-  MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+  MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.ts'
 import type { AssistantRunEvent } from '../src/assistant/automation/shared.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
@@ -4337,8 +4337,12 @@ describe('assistant cron runtime orchestration', () => {
     })
 
     const providerInput = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
-      | { instructions?: string }
+      | {
+          instructions?: string
+          outboxAutomationContextReferences?: AssistantOutboxIntent['automationContextReferences']
+        }
       | undefined
+    expect(providerInput?.outboxAutomationContextReferences).toBeNull()
     expect(providerInput?.instructions).toContain(
       'Independent automation authority (engine-supplied):',
     )
@@ -9723,7 +9727,7 @@ describe('assistant cron runtime orchestration', () => {
   })
 
   it.each([
-    ['static', MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID],
+    ['static', MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID],
     ['dynamic onboarding', MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID],
   ] as const)(
     'skips a %s member managed automation on a group route before lifecycle or model work',
@@ -9828,9 +9832,9 @@ describe('assistant cron runtime orchestration', () => {
   })
 
   it.each([
-    ['static group from an unspecified route', MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID, undefined, 'mismatch'],
-    ['static group from a direct route', MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID, true, 'mismatch'],
-    ['static direct chat from an unspecified route', MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID, undefined, 'direct'],
+    ['static group from an unspecified route', MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID, undefined, 'mismatch'],
+    ['static group from a direct route', MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID, true, 'mismatch'],
+    ['static direct chat from an unspecified route', MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID, undefined, 'direct'],
     ['dynamic onboarding direct chat from an old route', MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID, true, 'direct'],
   ] as const)(
     'enforces a member managed automation when live Linq authority resolves a %s',
@@ -9854,7 +9858,7 @@ describe('assistant cron runtime orchestration', () => {
             ? 'preserve'
             : 'fresh',
         createdAt: '2026-04-12T16:00:00.000Z',
-        instructions: 'Send product notes.',
+        instructions: 'Send the weekly health digest.',
         route: {
           channel: 'linq',
           deliverySource: null,
@@ -9867,11 +9871,11 @@ describe('assistant cron runtime orchestration', () => {
             : { threadIsDirect: savedThreadIsDirect }),
         },
         schedule: { at: '2026-04-12T18:00:00.000Z', kind: 'at' },
-        slug: 'weekly-product-updates',
+        slug: 'weekly-health-digest',
         status: 'active',
         summary: null,
         tags: ['assistant', 'scheduled', 'murph-managed'],
-        title: 'Murph product notes',
+        title: 'Weekly health digest',
         updatedAt: '2026-04-12T16:00:00.000Z',
       })
       const resolveScheduledLinqRoute = liveAuthority === 'mismatch'
@@ -9951,10 +9955,10 @@ describe('assistant cron runtime orchestration', () => {
       'assistant-cron-runtime-member-owner-live-route-change-',
     )
     getVaultAutomationStore(vaultRoot).push({
-      automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+      automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
       continuityPolicy: 'fresh',
       createdAt: '2026-04-12T16:00:00.000Z',
-      instructions: 'Send product notes.',
+      instructions: 'Send the weekly health digest.',
       route: {
         channel: 'linq',
         deliverySource: null,
@@ -9965,11 +9969,11 @@ describe('assistant cron runtime orchestration', () => {
         threadIsDirect: true,
       },
       schedule: { at: '2026-04-12T18:00:00.000Z', kind: 'at' },
-      slug: 'weekly-product-updates',
+      slug: 'weekly-health-digest',
       status: 'active',
       summary: null,
       tags: ['assistant', 'scheduled', 'murph-managed'],
-      title: 'Murph product notes',
+      title: 'Weekly health digest',
       updatedAt: '2026-04-12T16:00:00.000Z',
     })
     const resolveScheduledLinqRoute = vi.fn()
@@ -10033,7 +10037,7 @@ describe('assistant cron runtime orchestration', () => {
     const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
     const runtimeRecord = runtimeStore.jobs.find(
       (record) =>
-        record.jobId === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+        record.jobId === MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
     )
     expect(runtimeRecord?.state.pendingOccurrenceAt ?? null).toBeNull()
     expect(runtimeRecord?.state.retryAfterAt ?? null).toBeNull()
@@ -10116,6 +10120,55 @@ describe('assistant cron runtime orchestration', () => {
     const result = await executeClaimedAssistantCronJob({
       executionContext: {
         hosted: { memberId: 'retired-group-runtime', userEnvKeys: [] },
+      },
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run).toMatchObject({
+      outcome: 'skipped_gate',
+      reason: 'managed_automation_retired',
+      status: 'skipped',
+    })
+    expect(cronMocks.runExperimentLifecycleOutcomePrecondition).not.toHaveBeenCalled()
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+  })
+
+  it('skips a persisted product-notes occurrence after the seed is retired', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-03T18:10:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-retired-product-notes-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+      continuityPolicy: 'fresh',
+      createdAt: '2026-09-03T16:00:00.000Z',
+      instructions: 'Legacy biweekly product-note instructions.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'legacy-member-chat',
+        identityId: null,
+        participantId: null,
+        threadId: 'legacy-member-chat',
+        threadIsDirect: true,
+      },
+      schedule: { at: '2026-09-03T18:00:00.000Z', kind: 'at' },
+      slug: 'weekly-product-updates',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: 'Murph product notes',
+      updatedAt: '2026-09-03T16:00:00.000Z',
+    })
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+
+    const result = await executeClaimedAssistantCronJob({
+      executionContext: {
+        hosted: { memberId: 'retired-product-notes-runtime', userEnvKeys: [] },
       },
       job: claimed,
       paths,

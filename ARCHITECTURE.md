@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-08-30
+Last verified: 2026-08-31
 
 ## Accepted-Message Targeting
 
@@ -320,6 +320,14 @@ existing explicit `authenticated-group` owner scope; any feature-specific
 activity, evidence, identity, or participant policy must be designed with that
 feature rather than embedded in the generic ownership boundary.
 
+The removed biweekly product-notes automation follows the same permanent
+retirement contract. Its historical immutable ID is not a seed:
+reconciliation archives active or paused persisted copies, and a claimed
+occurrence fails closed before lifecycle or model work. Direct product-update
+questions remain supported through the ordinary conversation prompt and its
+canonical public changelog and feature-catalog feeds; retirement removes only
+the unsolicited recurring note.
+
 Web then captures the current roster and exact active grants, decrypts the
 bounded encrypted snapshots owned by those share rows, and returns every member
 with every requested scope as `not_granted`, `granted` plus `missing`, or
@@ -383,11 +391,13 @@ reuse `assistant.notification.requested` and the ordinary transcript/outbox
 delivery path. The exported Web admission function is the single entry point
 for Ops, workflows, and future cron callers; callers supply a stable
 idempotency key rather than creating another scheduler or delivery owner.
-The diagnostic answer candidate starts in an isolated working directory and
-receives the exact targeted workspace path as immutable host prompt data. It may
-use Codex's native read tools under the existing `murph-group-read` profile.
-The separate disclosure reviewer remains tool-free and isolated from that
-workspace; diagnostics have no network, dynamic effect tool, or delivery port.
+The diagnostic starts one direct `executeOperatorDiagnostic` turn. Trusted
+runtime code binds the exact target workspace plus, when present, only the
+hosted Codex `sessions/` directory. The read-only child can inspect `.runtime`
+but cannot write, use the network, load workspace configuration, or invoke
+effect or delivery tools. Its answer returns directly to the existing
+encrypted, expiring Ops-only result owner; it does not enter the member
+disclosure-review composition.
 
 Assistant Ask is one typed request/reply primitive over the existing encrypted
 hosted mailbox. `assistant.ask.requested` carries one bounded question to an
@@ -610,22 +620,16 @@ account-deletion owners.
 
 The target runtime keeps its resident foreground Murph as the sole
 model-authored canonical-content writer and outbound sender. Beside it, at most
-one `executeReadOnlyAssistantAsk` call may start a separate one-shot Codex App
-Server process. The trusted target adapter supplies the authorized root
-and bounded committed conversation evidence; the model cannot choose either.
-The native `murph-group-read` permission profile then exposes the live target
-read: exact workspace roots are read-only, `.runtime/**`, `.codex/**`, and
-retired vault-share projection roots, and environment files are denied; tool
-network is off, shell commands inherit no secrets, and no child receives mutation
-or delivery authority. Joined-group asks receive only the consent-aware narrow
-legacy `murph.group/read_shared` dynamic tool; consented and operator candidates
-and disclosure reviewers receive no dynamic tools.
-The thread request supplies the exact profile, roots, disabled instruction sources,
-and approval policy. Every candidate and reviewer uses an empty working
-directory; an authenticated operator diagnostic selected for read-tool inspection
-receives the exact target path as quoted host prompt data. The App Server response is
-not an authorization boundary; production-like Linux smoke proves the
-profile's actual filesystem, environment, and network enforcement.
+one detached read-only child may start a separate one-shot Codex App Server
+process. Group/member asks keep `executeReadOnlyAssistantAsk` and
+`murph-group-read`, which hides private runtime state. Authenticated operator
+tasks instead call `executeOperatorDiagnostic` with
+`murph-operator-diagnostic-read`, the bound workspace including `.runtime`, and
+only the hosted Codex `sessions/` directory as an optional second root. The
+model chooses neither roots nor profile. All detached children start in an empty
+temporary working directory with approval policy `never`, no inherited shell
+environment, and no network, project configuration, mutation, effect, or
+delivery authority. Only member disclosure flows use the separate reviewer.
 The child never shares the resident process, provider thread, interruption
 domain, or route grant. Before checkpoint, invocation return, fence loss,
 workspace replacement, or shutdown, the runtime aborts and awaits the exact
@@ -1089,8 +1093,17 @@ Web exposes the native field only when its existing assistant-configuration
 resolution confirms that the current managed runtime is authorized for the
 full product-model catalog; missing authority and custom inference fail closed.
 The production image gives Codex a catalog containing exactly Luna, Terra, and
-Sol, so Codex's native spawn validation rejects other bundled models before a
-provider request.
+Sol. Those entries force mixed Code Mode so the code executor and native
+`tool_search` remain available together; individual dynamic-tool
+`deferLoading` values still decide which schemas stay out of the initial
+model-visible surface. Codex's native spawn validation rejects other bundled
+models before a provider request.
+Code-only `ALL_TOOLS` still contains generated input declarations, but Codex
+0.151.0 renders the automation schema's action branches without combining their
+shared sibling properties, exposing fields such as `contextReferences` as
+`unknown`. Mixed mode provides native JSON-schema discovery around that lossy
+conversion; it does not repair the converter. Keep the structured schema and
+runtime validation authoritative rather than duplicating them in prompts.
 The runtime may request an update only from eligible user input in the active
 bounded exact-successor provider batch and
 forwards only that batch's terminal input id; inside the mutation transaction,
@@ -1178,7 +1191,7 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
 - `packages/contracts`: canonical Zod contracts, shared event-envelope/lifecycle parse and revision-collapse helpers, TypeScript types, generated JSON Schema artifacts, the canonical static lookup-ID family catalog/classifiers consumed by query and vault-usecases, and the shared vault-family registry/layout/query-source metadata consumed by core, query, and inboxd
 - `packages/clinical-records`: workspace-private pure Clinical Records Intake contract owner for raw FHIR retrieval manifests, explicit completed-resource-family declarations, canonical FHIR base/patient/page hashing helpers, facet-free resource-level FHIR external references, and one-decision-per-resource `upsert | retract | review` import plans; it does not own OAuth, provider credentials, raw-file writes, assistant behavior, or canonical vault mutation
 - `packages/hosted-execution`: shared hosted control-plane contracts, HMAC signing/verification helpers, vendor-neutral env readers, route builders, computer-use request schemas, phone-call start contracts, and side-effect codecs; it no longer owns Cloudflare worker-host topology or proxy-client inference, and app-local adapters now own deployment-specific transport, hostname, and token policy
-- `cobuildwithus/murph-cloud` (private external owner): owns the hosted Temporal worker, Workflows, Activities, Schedule/client helpers, production bundle, replay gates, supported-reader compatibility manifest, and Render deployment. Public Murph contains only shared pointer-level contracts, Web signaling/status adapters, the hosted-local external-worker seam, and the trusted exact-SHA controller that translates private reader attestation into one public required status; it must not contain a Temporal worker implementation, production bundle, or private reader policy. Hosted-local Temporal requires `MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR` to select the private package, or it must be disabled explicitly. Temporal workflow state must not store raw webhook payloads, mailbox bodies, prompts, transcripts, provider responses, provider tokens, dirty resource bodies, or workspace snapshot contents.
+- `cobuildwithus/murph-cloud` (private external owner): owns the hosted Temporal worker, Workflows, Activities, Schedule/client helpers, production bundle, replay gates, live Current/Ramping reader discovery and attestation, and Render deployment. Public Murph contains only shared cross-repository wire contracts, Web signaling/status adapters, the hosted-local external-worker seam, and the trusted exact-private-main controller that translates private reader attestation over bounded public-produced fixtures into one public required status; it must not contain a Temporal worker implementation, production bundle, or private reader policy. Private CI never checks out or imports public pull-request candidate code for Temporal compatibility: the protected pull-request gate is fixture-only. Exact released integration is a separate private mode that may check out only resolved public `main`, selects the canonical foreground-priority lane with standby allocation enabled, and emits a receipt bound to both main SHAs, that lane, and the public protected environment's expected production Temporal target digest for the existing Web production Deployment Check. Hosted-local Temporal requires `MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR` to select the private package, or it must be disabled explicitly. Temporal workflow state must not store raw webhook payloads, mailbox bodies, prompts, transcripts, provider responses, provider tokens, dirty resource bodies, or workspace snapshot contents.
 - `packages/runtime-state`: workspace-private shared hosted email/env/loopback/id helpers plus pure hosted bundle identity types/equality on the root package, a worker-safe `@murphai/runtime-state/assistant-generated-deliveries` exact-ref contract, an explicit `@murphai/runtime-state/node` subpath for hosted bundle codec/materialization, an explicit `@murphai/runtime-state/node/assistant-state-fs` subpath for assistant runtime-state write/audit/repair permission policy, explicit `.runtime` taxonomy/path resolution (`operations` vs `projections` vs `cache/tmp`), assistant runtime path/security helpers, process scoping, versioned JSON helpers, and SQLite-backed Node-only migration seams
 - `packages/core`: workspace-private canonical mutation owner for live local-vault evolution, with current-format canonical reads/writes failing closed on non-current `formatVersion` values; it also owns the shared raw-attachment staging/manifests and canonical event attachment metadata used by document, meal, workout, and measurement writes, the dedicated `addActivitySession` and `addBodyMeasurement` seams for workout-session and body-measurement persistence, provider-agnostic wearable storage repair primitives for proven legacy/debug telemetry bloat, the verified raw-to-gzip transition and streaming gzip read/amendment path for closed monthly integration-ingest shards, the bounded dual-format read plus streaming archive and atomic amendment path for lossless closed monthly event-ledger gzip shards, and the shared event-spine envelope assembly used by generic events and health-event writes over the single `ledger/events` seam. Hosted idle maintenance activates event archive creation only after the reader-compatible release has drained; the current UTC month stays plain. Public bulk event import accepts legacy payload batches plus explicit upsert/retract decision batches and reconciles strict ISO `externalRef.version` values monotonically at that owner: it orders same-identity decisions by source revision within a batch, ignores retrieval-local provenance for source-semantically equal replay, rejects equal-version conflicts, supersedes newer same-kind values, tombstones and replaces newer kind changes, and tombstones newer retractions. Core also owns bounded raw-reference lookup, using a fixed number of event-shard passes per lookup set so compatibility resolution does not become one ledger walk per imported row. An unseen retraction is persisted as an invisible deleted source marker in the same event ledger, preventing stale resurrection without a parallel watermark store. Blood tests stay canonical `kind: "test"` records behind a projected user-facing view.
 - `packages/importers`: workspace-private ingestion adapters that parse external files or provider API snapshots, normalize them behind registry-based adapters, and delegate all writes to core. It owns the bounded, non-writing workout CSV planner, including explicit Strong/Hevy dialect selection, exact-signature/provider-marker inference, fail-closed shared-header and provider-conflict handling, vault-timezone normalization, explicit unit gates, aggregate repair/omission reporting, provider-neutral privacy-safe source-session keys for snapshot overlap, and provider-scoped public source identities. The clinical FHIR adapter validates each raw page exactly once for file integrity, declared resource family, manifest patient plus FHIR-base binding, same-base root-reachable pagination, and FHIR modifier semantics before emitting one upsert, retract, or review decision per resource
@@ -1259,8 +1272,21 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   any job created by that wake is retryable. Before checkpoint publication the
   item is narrowed to unfinished job hints with their original kind, payload,
   dedupe identity, next retry time, and remaining attempt limit; after terminal
-  success or failure it advances normally. Web dirty rows independently remain
-  authoritative for dirty resource/deletion work until terminal acknowledgement.
+  success or failure, full control-plane reconciliation must be accepted before
+  a checkpointed post-record with zero retained jobs may publish the retained
+  provider cadence and remove the item within that same runtime admission,
+  followed by the existing removal checkpoint. A version conflict performs one
+  fresh canonical hydration without admitting wake hints or dirty work again,
+  carries the same-epoch pass's provider cadence and dirty terminal evidence,
+  and repeats the full reconciliation; another conflict fails without clearing
+  mailbox authority.
+  Publication also requires
+  the wake's non-null connection epoch to match a current active connection.
+  Restored records return to the ordinary full-reconciliation path, while
+  legacy epoch-less, replaced, missing, or terminal connection records have no
+  cadence authority and drain without a write. Web dirty rows
+  independently remain authoritative for dirty resource/deletion work until
+  terminal acknowledgement.
   Hosted snapshots intentionally exclude the device-sync SQLite execution cache,
   so a cold runner reconstructs unfinished work from those existing durable
   owners. Mailbox ordering is per connection, preventing one connection's future
@@ -1287,6 +1313,16 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   path, query, fragment, account data, prompt, health content, or message
   content. Ordinary browser technical metadata still reaches incident.io and
   is disclosed in the public subprocessor register.
+
+  The public Food comparison may search for brand logos directly through
+  Brandfetch when its optional client identifier is configured. The browser
+  sends only a bounded brand name plus a broad food category to the fixed search
+  origin with no referrer or credentials. It sends no user search term, UPC,
+  nutrition, test, account, or health data. The client accepts only matching
+  brand names and fixed Brandfetch CDN image URLs. A missing or failed logo uses
+  local category art. Hosted Web stores no logo copy and runs no proxy. Results
+  are deduplicated in page memory. CSP admits only the fixed Brandfetch API and
+  image origins.
 
   Nullable hosted-member model and reasoning preferences are web-owned,
   billing-gated control facts. Active personal members may select Luna or
@@ -1595,9 +1631,11 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   readiness and atomic availability only; the per-member `UserRunner` persists
   the exact opaque stop target, binds it once, then owns the ordinary write
   fence, workspace restore, invocation, retention, and retirement. Standby
-  allocation is available only to a fence-free, OIDC-authenticated Web-direct
-  `default` request with a validated direct-attempt identity. Background modes
-  and Temporal requests retain the exact-user target. A foreground request that
+  allocation is available to fence-free `default` work from OIDC-authenticated
+  Web-direct ingress with a validated direct-attempt identity or an authenticated
+  request carrying `conversationWorkPending: true`. Temporal derives that fact
+  from current admitted conversation lag, not a wake pointer or generic default
+  processing. Background-only requests retain the exact-user target. A foreground request that
   has finished preempting an exact-user background child may claim the ready
   standby instead of reusing the child while it shuts down. A previously
   reserved standby is reconciled before this eligibility check so retries and
@@ -1915,17 +1953,44 @@ supplement generic search and the public projection retain their pre-existing
 ranking and candidate contracts. Existing labels databases must receive the
 foods name-rank and exact-name-rank indexes before this private-food query shape
 is deployed. The public
-projection of that database is Murph Safe at `/search` and the
+projection of that database is Murph Safe at `/search` and the branded-food
+comparison at `/food`, plus the
 read-only Murph Product Data API under `/api/public/v1`. Wire contracts belong
 to `@murphai/contracts`; one web-owned service maps bounded database records to
 those contracts. Browser search posts to the public route, while the
 server-rendered detail page calls the same service directly. The public catalog
 excludes generic food origins, never returns raw labels wholesale, and links
 tests only by the selected row's exact foreign key. Public search uses bounded
-SQL candidate sets; detail reads cap stored label transfer and aggregate DTO
-size. One Vercel-aware singleton pool is shared by public and private label
+SQL candidate sets. Its optional food evidence order checks indexed exact test
+links only inside the 250-row public candidate bound. The food comparison also
+has an optional category-popularity order. It matches a dated US Google Shopping
+brand snapshot against at most 10,000 indexed text candidates. Soda searches
+may add at most 900 rows through bounded probes of the existing `foods(brand)`
+index. The query then retains 250 rows, spreads early results across brands, and
+applies indexed exact test counts as a secondary signal. Comparison-ready
+search also rejects empty, zero-only, and physically impossible per-100-gram
+nutrition. Queries without a matching snapshot keep the stable relevance
+fallback. Detail reads cap stored label transfer and aggregate DTO size.
+One Vercel-aware singleton pool is shared by public and private label
 readers. Vercel custom firewall rules sit in front of public search and detail,
 and the production build verifies their exact active configuration.
+
+`/food` keeps temporary comparison state in the browser and derives six
+nutrition comparisons plus a separate exact-evidence summary from existing
+public DTOs. Its share URL contains only public product references and the
+nutrition basis; the raw search query stays out of the URL. It derives
+related-search categories from its existing local food
+taxonomy and does not persist them as product truth. A nutrition winner exists only when every compared product has the
+metric. Evidence keeps the DTO's returned, total, and truncated observation
+scope. The evidence meter and drawer statuses derive only from DTO fields
+(nutrition rows, serving mass, ingredients, returned observations and their
+screening results), and the drawer renders the DTO-owned unknown entries. Compatible browsers receive four page-scoped
+WebMCP tools through
+`document.modelContext.registerTool`. These tools call the same bounded page
+actions as manual controls. Their comparison result carries the same four
+metric values, completeness, ties, and winners as the visible table, plus the
+per-product row-win counts behind its rows-led caption. The tools disappear when the page unmounts. They do not
+create a remote MCP service, a second data owner, or an authenticated path.
 
 Each product-test observation may preserve evidence and sampling context,
 sample or lot identity, result bounds and qualifiers, analytical limits, and
@@ -3079,7 +3144,22 @@ adds no durable image job, mailbox kind, scheduler, reservation, allowance
 implementation, or image-specific usage lifecycle; unfinished provider work
 may be lost with the runner invocation.
 
-Reconciliation evaluates engagement and AI-usage authorization for runnable model work even when deterministic system lag is present. Authorized conversation/default work owns the foreground pass and imports system items before the assistant phase without letting a retryable system item starve fresh conversation. When model work is blocked, or system lag is the only work, the existing `system_mailbox` mode imports only the system lane and returns before assistant execution. It adds no queue, scheduler, cursor, or durable state owner.
+Reconciliation evaluates engagement and AI-usage authorization for runnable
+model work even when deterministic system lag is present. Authorized
+conversation/default work owns the foreground pass and imports system items
+before the assistant phase without letting a retryable system item starve fresh
+conversation. An established conversation-first pass reuses the one
+post-restore conversation and system mailbox snapshot for that first system
+page. A workspace whose system watermark is still zero refreshes the system
+lane once to preserve the first-activation race boundary. A pass whose initial
+import already fetched the system lane also refreshes it before assistant
+execution; `system_mailbox` uses that post-import check as an ordering barrier
+for newly arrived asks. Later system rows behind the conversation-first
+snapshot remain durable work for their normal wake or a later pass. System-only
+mailbox reads do not query the optional group sponsorship presentation bit.
+When model work is blocked, or system lag is the only work, the existing
+`system_mailbox` mode imports only the system lane and returns before assistant
+execution. It adds no queue, scheduler, cursor, or durable state owner.
 
 Linq group-avatar mutation is the one private-image provider boundary that
 requires a fetchable URL. After the group tool preflights current chat
@@ -3269,12 +3349,12 @@ contact evidence, while overflow remains operation-local.
 
 The assistant-runtime Linq presentation adapter owns the compound operation
 memo and one bounded private file cache at
-`vault/.runtime/cache/assistant-runtime/group-participant-display-names.json`.
+`vault/.runtime/operations/assistant/state/group-participant-display-names.json`.
 Initial prompt preparation reads unresolved unique handles in one batch; later
 live admissions reuse operation-local positive, negative, and fail-soft entries
-and read only new handles. Across ordinary turns that reuse the same local
-workspace, validated profile and owner-shared contact labels have a fixed
-14-day TTL. Web separately returns `nameMissSenderHandles` only for exact
+and read only new handles. Across ordinary turns and encrypted hosted workspace
+restore, validated profile and owner-shared contact labels have a fixed 14-day
+TTL. Web separately returns `nameMissSenderHandles` only for exact
 requested handles where every applicable authorized profile/contact source was
 successfully checked and no safe label exists; only that explicit evidence has
 a fixed six-hour TTL. An omitted handle without this evidence remains
@@ -3290,11 +3370,12 @@ timeouts, rollout skew, policy-limited contact reads, malformed or ambiguous
 responses, suspension, and authorization loss remain operation-local and are
 never written. There is no second resident
 cross-operation cache, single-flight owner, mutation invalidation, lock manager,
-or distributed coordination. `.runtime/cache/**` is excluded from hosted
-workspace checkpoints, so the file can bridge fresh reader or process instances
-only while the same local workspace survives; a cold restore or replacement
-re-reads Web. Neither the operation memo nor the cache becomes profile or
-contact truth. Profile and owner-contact labels remain presentation only, and
+or distributed coordination. The file is explicitly portable, rebuildable
+assistant operational state and therefore travels inside the encrypted hosted
+workspace snapshot. A restored label can remain visible until its existing TTL
+after a profile rename or authorization change, but neither the operation memo
+nor the cache becomes profile or contact truth. Profile and owner-contact labels
+remain presentation only, and
 the name read returns no member or participant identifier. For
 participant-scoped effects, the opaque `Message ref` plus trusted server
 derivation remains the sole path; display labels and handles are never
@@ -3703,8 +3784,19 @@ The hosted Temporal hard-cut target is documented in
 canonical target for replacing Vercel Workflow nudge handoff and Cloudflare
 semantic scheduling with pointer-only Temporal orchestration while keeping web
 as reconciliation-facts/status owner, Cloudflare as execution adapter, and
-Murph runtime as the owner of Codex and business logic. The completed execution snapshot and
-subagent prompt record is `agent-docs/exec-plans/completed/TEMPORAL.md`.
+Murph runtime as the owner of Codex and business logic. Public-to-private
+compatibility does not persist a per-release private SHA or tag. The trusted
+public controller resolves private `main` through its repository-scoped GitHub
+App token before dispatch, dispatches only the fixed private workflow at
+`main`, accepts only the returned first-attempt run at the pre-resolved private
+SHA and workflow identity, and re-reads private `main` before success. The
+private protected job derives the live Current and Ramping reader SHAs and,
+while the private standby guard remains, includes the active legacy Render
+worker's exact live deploy revision. Final protected attestation re-reads that
+reader set and fails on identity or routing drift before integration, replay,
+canary, and deployment admission can succeed. The completed execution snapshot
+and subagent prompt record is
+`agent-docs/exec-plans/completed/TEMPORAL.md`.
 
 ## CLI Framework Notes
 
@@ -3730,10 +3822,9 @@ subagent prompt record is `agent-docs/exec-plans/completed/TEMPORAL.md`.
 
 The repository uses the current verification commands described in
 `agent-docs/operations/verification-and-runtime.md`. Their dispatcher is local
-by default and exposes two explicit, fail-closed, secret-free remote executors:
-Crabbox's first-party static SSH provider for a dedicated macOS worker account,
-and its direct Blacksmith Testbox provider for the bounded paid fallback. The
-static lane validates explicit operator-local host, user, and port routing,
+by default and exposes one explicit, fail-closed, secret-free remote executor:
+Crabbox's first-party static SSH provider for a dedicated macOS worker account.
+The static lane validates explicit operator-local host, user, and port routing,
 passes those facts only as Crabbox CLI arguments, derives one opaque lease id
 per initiating worktree, and creates a unique remote directory for every
 invocation. After admission, the dispatcher
@@ -3863,7 +3954,7 @@ the digest and MP4/QuickTime/WebM signature, and only then permits external
 egress.
 
 The tool makes one inline legacy `generateContent` request to the fixed
-`gemini-3.7-flash` model. Murph chooses one semantic sampling mode before
+`gemini-3.8-flash` model. Murph chooses one semantic sampling mode before
 egress: omitted or `standard` maps to `videoMetadata.fps = 1`, while
 `detailed_motion` maps to 5 FPS for rapid movement, exercise phases, quick
 scene changes, or brief events. Both modes use medium thinking and new requests
@@ -3905,11 +3996,13 @@ Hosted execution carries only the Gemini sentinel in the runner. The exact
 Google host, model path, method, JSON shape, MIME set, sampling profile,
 thinking level, request/response limits, and manual redirect posture are
 revalidated by the Cloudflare egress interceptor before the Worker substitutes
-its credential. During the rollout compatibility window, that reader also
-admits only the exact previously deployed 1 FPS, low-thinking,
-1,800-output-token profile from a warm old runner. New runners never emit that
-legacy shape; remove the reader branch only after warm runners and the rollback
-floor have advanced.
+its credential. During the model rollout compatibility window, that reader also
+admits the exact previous `gemini-3.7-flash` path with either current request
+profile or the previously deployed 1 FPS, low-thinking, 1,800-output-token
+profile from an older warm runner. The capped profile remains invalid on the
+3.8 path. Usage records retain the model derived from the admitted path. New
+runners emit only the 3.8 path and current profiles; remove the 3.7 reader only
+after warm runners and the rollback floor have advanced.
 The narrow raw HTTP owner is intentional: the Google SDK does not expose the
 request-scoped fetch injection required by Murph's identity-bound provider
 boundary, while the current Interactions API cannot explicitly set video FPS.

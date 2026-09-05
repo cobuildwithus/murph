@@ -224,6 +224,7 @@ import {
   enqueueHostedSystemMailboxItem,
   prepareHostedSystemMailboxItemForCheckpoint,
   recordHostedSystemMailboxItemAfterCheckpoint,
+  resolveHostedDeviceSyncCompletionRecordInput,
   retainHostedSystemMailboxItemUntilDeliveryWake,
   resolveHostedBrowserVaultRefreshAttempt,
   resolveHostedSystemMailboxNextWakeCandidate,
@@ -243,6 +244,7 @@ import {
   isHostedSystemMailboxModelFreeExactNotificationItem,
   readHostedSystemMailboxState,
   readHostedSystemMailboxHandledThroughSeq,
+  readHostedSystemMailboxProgress,
   type HostedSystemMailboxPendingItem,
 } from "./hosted-runtime/system-mailbox-state.ts";
 import {
@@ -440,8 +442,10 @@ const HOSTED_INITIAL_CONVERSATION_MAILBOX_IMPORT_LANES = ["conversation"] as con
 const HOSTED_INITIAL_BOOTSTRAP_MAILBOX_IMPORT_LANES = ["system", "conversation"] as const;
 const HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES = ["conversation", "system"] as const;
 const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS = [
+  "apply-member-channels-update",
   "apply-runtime-control-request",
   "dispatch-assistant-notification",
+  "import-group-journal-fact",
   "import-reported-daily-metric",
   "run-device-sync-wake",
   "run-environment-interview",
@@ -1083,6 +1087,17 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
     },
     outboxWake,
   ]);
+  const deviceSyncWake = selectEarliestHostedRuntimeWake([
+    ...(input.extraCandidates ?? []).filter((candidate) =>
+      candidate.reason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
+    ),
+    createHostedRuntimeWakeCandidate(
+      systemMailboxWake.reason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON
+        ? systemMailboxWake.at
+        : null,
+      HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
+    ),
+  ]);
   const assistantWake = selectEarliestHostedRuntimeWake([
     outboxWake,
     systemMailboxWakes.defaultOwned,
@@ -1106,7 +1121,36 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
     ? modelFreeWake.nextWakeAt
       ? modelFreeWake
       : assistantWake
+    : deviceSyncWake.nextWakeAt
+    ? selectEarliestHostedRuntimeWake([
+        {
+          at: deviceSyncWake.nextWakeAt,
+          reason: deviceSyncWake.nextWakeReason,
+        },
+        ...(input.extraCandidates ?? []).filter((candidate) =>
+          !hostedRuntimeWakeReasonUsesAssistantPhase(candidate.reason)
+        ),
+        {
+          at: systemMailboxWake.executionClass === "model_free"
+            ? systemMailboxWake.at
+            : null,
+          reason: systemMailboxWake.executionClass === "model_free"
+            ? systemMailboxWake.reason
+            : null,
+        },
+        createHostedRuntimeWakeCandidate(
+          input.mailboxImportRetryAt ?? null,
+          "mailbox",
+        ),
+      ])
     : (() => {
+        const foregroundCandidates = [
+          outboxWake,
+          createHostedRuntimeWakeCandidate(
+            pendingAssistantInputWakeAt,
+            HOSTED_ASSISTANT_WAKE_REASON,
+          ),
+        ];
         const selected = selectHostedRuntimeOwnerWakeCandidate({
           backgroundCandidates: [
             {
@@ -1119,13 +1163,7 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
               "mailbox",
             ),
           ],
-          foregroundCandidates: [
-            outboxWake,
-            createHostedRuntimeWakeCandidate(
-              pendingAssistantInputWakeAt,
-              HOSTED_ASSISTANT_WAKE_REASON,
-            ),
-          ],
+          foregroundCandidates,
           nowMs: input.nowMs,
           systemMailboxWake,
         });
@@ -3436,6 +3474,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               : runtimeAbortController.signal;
             try {
               const recordResult = await recordHostedSystemMailboxItemAfterCheckpoint({
+                ...resolveHostedDeviceSyncCompletionRecordInput({
+                  item: recordInput.item,
+                  preparation,
+                }),
                 item: recordInput.item,
                 operatorHomeRoot: restored.operatorHomeRoot,
                 runtime: foregroundRuntime,
@@ -3465,7 +3507,9 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                   ? null
                   : preparationWake,
               ]);
-              rememberSystemMailboxPostRecordWake(recordWake);
+              rememberSystemMailboxPostRecordWake(
+                recordResult.deviceSyncWake ?? recordWake,
+              );
               await checkpointSystemMailboxMode(
                 `${inputItem.stagePrefix}.checkpoint.record`,
                 recordWake.at ? [recordWake] : [],
@@ -5567,12 +5611,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             wakeInput.providerStartCriticalPath,
             "foregroundPassStartedAtMonotonicMs",
           );
-        const resolveForegroundRerunAssistantInputBatch = (
-          passResult: HostedWorkspaceRunnerResult,
-        ): HostedWorkspaceRunnerAssistantInputBatch | null =>
-          hostedAssistantInputBatchHasWork(passResult.latestAssistantInputBatch)
-            ? passResult.latestAssistantInputBatch
-            : null;
         const shouldContinueForegroundCausalPass = (
           passResult: HostedWorkspaceRunnerResult,
         ): boolean =>
@@ -5636,36 +5674,15 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           );
           return result;
         };
-
-        let passResult = await runSingleForegroundPass(
-          providerStartAtForegroundPass
-            ? {
-                ...wakeInput,
-                providerStartCriticalPath: providerStartAtForegroundPass,
-              }
-            : wakeInput,
-        );
-        // Generation can finish during a provider pass. Stage it before
-        // choosing the rerun batch so it enters the next Codex context ahead
-        // of conversation input captured by the live foreground watcher.
-        await flushImageGenerationWork();
-        // irreducible: "late foreground input during system work runs before idle checkpointing" fails without this.
-        let rerunAssistantInputBatch =
-          runtimeOwnerHandoffRequested
-            ? null
-            : prependReadyImageCompletionInputs(
-                resolveForegroundRerunAssistantInputBatch(passResult),
-              );
-        let continueForegroundCausalPass =
-          !runtimeOwnerHandoffRequested
-          && shouldContinueForegroundCausalPass(passResult);
-        const requestDueRuntimeOwnerHandoffIfForegroundIdle = (): void => {
+        const requestDueRuntimeOwnerHandoffIfForegroundIdle = (
+          passResult: HostedWorkspaceRunnerResult,
+          foregroundWorkPending: boolean,
+        ): void => {
           if (
-            runtimeOwnerHandoffRequested
-            || rerunAssistantInputBatch !== null
-            || continueForegroundCausalPass
-            || (input.request.processingMode ?? "default") !== "default"
-            || !hostedRuntimeForegroundIdleWakeRequestsOwnerHandoff({
+            !runtimeOwnerHandoffRequested
+            && !foregroundWorkPending
+            && (input.request.processingMode ?? "default") === "default"
+            && hostedRuntimeForegroundIdleWakeRequestsOwnerHandoff({
               assistantProgressed:
                 passResult.assistantPhaseResult?.progressed === true,
               nextWakeReason: pendingWake.nextWakeReason,
@@ -5673,18 +5690,37 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                 passResult.assistantPhaseResult
                   ?.runtimeProjectionCheckpointRequested === true,
             })
-            || !hostedRuntimeWakeIsDue(pendingWake.nextWakeAt)
+            && hostedRuntimeWakeIsDue(pendingWake.nextWakeAt)
           ) {
-            return;
+            runtimeOwnerHandoffRequested = true;
+            markIdleCheckpointTimerAfterDirtyWork();
           }
-          runtimeOwnerHandoffRequested = true;
-          markIdleCheckpointTimerAfterDirtyWork();
         };
-        requestDueRuntimeOwnerHandoffIfForegroundIdle();
-        while (
-          options.shutdownSignal?.aborted !== true
-          && (rerunAssistantInputBatch || continueForegroundCausalPass)
-        ) {
+        let singleWakeInput: typeof wakeInput = providerStartAtForegroundPass
+          ? { ...wakeInput, providerStartCriticalPath: providerStartAtForegroundPass }
+          : wakeInput;
+        while (true) {
+          const passResult = await runSingleForegroundPass(singleWakeInput);
+          // Stage generation completed during this pass ahead of conversation
+          // input captured by the live foreground watcher.
+          await flushImageGenerationWork();
+          // irreducible: "late foreground input during system work runs before idle checkpointing" fails without this.
+          const rerunAssistantInputBatch = runtimeOwnerHandoffRequested
+            ? null
+            : prependReadyImageCompletionInputs(
+                hostedAssistantInputBatchHasWork(passResult.latestAssistantInputBatch)
+                  ? passResult.latestAssistantInputBatch
+                  : null,
+              );
+          const continueForegroundCausalPass =
+            !runtimeOwnerHandoffRequested
+            && shouldContinueForegroundCausalPass(passResult);
+          const foregroundWorkPending =
+            rerunAssistantInputBatch !== null || continueForegroundCausalPass;
+          requestDueRuntimeOwnerHandoffIfForegroundIdle(passResult, foregroundWorkPending);
+          if (options.shutdownSignal?.aborted === true || !foregroundWorkPending) {
+            return passResult;
+          }
           const projectedPendingEffectsContinuationWakeKey =
             rerunAssistantInputBatch === null
             && continueForegroundCausalPass
@@ -5696,7 +5732,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               : null;
           // The mailbox-import boundary belongs only to the first foreground
           // pass. A rerun is a new causal pass and must not inherit that tick.
-          passResult = await runSingleForegroundPass({
+          singleWakeInput = {
             foregroundCausalOnly:
               rerunAssistantInputBatch === null
               && continueForegroundCausalPass,
@@ -5714,20 +5750,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             projectedAssistantWakeKey: projectedPendingEffectsContinuationWakeKey,
             requestIdKind: "checkpoint-interrupt",
             signal: wakeInput.signal,
-          });
-          await flushImageGenerationWork();
-          rerunAssistantInputBatch =
-            runtimeOwnerHandoffRequested
-              ? null
-              : prependReadyImageCompletionInputs(
-                  resolveForegroundRerunAssistantInputBatch(passResult),
-                );
-          continueForegroundCausalPass =
-            !runtimeOwnerHandoffRequested
-            && shouldContinueForegroundCausalPass(passResult);
-          requestDueRuntimeOwnerHandoffIfForegroundIdle();
+          };
         }
-        return passResult;
       };
       const runForegroundMailboxWakeIfWork = async (input: {
         includeReadyImageCompletion?: boolean;
@@ -8525,6 +8549,10 @@ async function withHostedMailboxProgressStatus(input: {
   const mailboxState = await readHostedMailboxImportState({
     vaultRoot: input.vaultRoot,
   });
+  const systemMailboxProgress = await readHostedSystemMailboxProgress({
+    importedSeq: mailboxState.watermarks.system,
+    vaultRoot: input.vaultRoot,
+  });
   return {
     ...(input.redactedStatus ?? {}),
     ...(mailboxState.watermarks.conversation !== "0"
@@ -8539,10 +8567,11 @@ async function withHostedMailboxProgressStatus(input: {
       : {}),
     hostedMailboxSystemImportedSeq: mailboxState.watermarks.system,
     hostedMailboxSystemHandledThroughSeq:
-      await readHostedSystemMailboxHandledThroughSeq({
-        importedSeq: mailboxState.watermarks.system,
-        vaultRoot: input.vaultRoot,
-      }),
+      systemMailboxProgress.handledThroughSeq,
+    hostedMailboxSystemFirstPendingSeq:
+      systemMailboxProgress.firstPendingSeq,
+    hostedMailboxSystemDeviceSyncContinuationSeqs:
+      systemMailboxProgress.deviceSyncContinuationSeqs,
   };
 }
 

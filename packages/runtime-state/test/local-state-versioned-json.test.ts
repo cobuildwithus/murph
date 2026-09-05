@@ -34,6 +34,7 @@ import {
   resolveParserRuntimePaths,
   resolveRuntimePaths,
 } from "../src/runtime-paths.ts";
+import { resolveAssistantStatePaths } from "../src/assistant-state.ts";
 import {
   buildProcessCommand,
   fingerprintHost,
@@ -293,6 +294,17 @@ describe("runtime-state taxonomy and runtime paths", () => {
     assert.equal(
       resolveParserRuntimePaths("vault").parserToolchainConfigPath,
       path.join(path.resolve("vault"), ".runtime", "operations", "parsers", "toolchain.json"),
+    );
+    assert.equal(
+      resolveAssistantStatePaths("vault").groupParticipantDisplayNameCachePath,
+      path.join(
+        path.resolve("vault"),
+        ".runtime",
+        "operations",
+        "assistant",
+        "state",
+        "group-participant-display-names.json",
+      ),
     );
   });
 });

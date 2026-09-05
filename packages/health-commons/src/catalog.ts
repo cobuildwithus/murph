@@ -18,11 +18,22 @@ import {
 } from "@murphai/contracts";
 
 import { readHealthCommonsContent, type HealthCommonsContentSet, type HealthCommonsSourcePage } from "./load.ts";
+import { extractHealthCommonsGoalSources } from "./goal-sources.ts";
 import { sha256StableJson } from "./normalize.ts";
 
 export interface BuildHealthCommonsCatalogOptions {
   contentRoot: string;
 }
+
+export const HEALTH_COMMONS_INDEXABLE_GOAL_BODY_MIN_CHARACTERS = 1_800;
+export const HEALTH_COMMONS_INDEXABLE_GOAL_REQUIRED_HEADINGS = [
+  "## What to do",
+  "## A simple plan",
+  "## How to know it is working",
+  "## If you get stuck",
+  "## A quick note",
+  "## Sources",
+] as const;
 
 export async function buildHealthCommonsCatalog(
   options: BuildHealthCommonsCatalogOptions,
@@ -98,6 +109,8 @@ export function validateHealthCommonsContent(content: HealthCommonsContentSet): 
   );
 
   for (const page of content.pages) {
+    validateGoalTemplateReferences(page, keys, pagesByKey);
+
     for (const relation of page.frontmatter.relations ?? []) {
       assertTargetExists(keys, relation.target, `${page.frontmatter.key} relation ${relation.type}`);
       if (
@@ -257,6 +270,9 @@ export function validateHealthCommonsContent(content: HealthCommonsContentSet): 
     }
   }
 
+  assertNoGoalParentCycles(pagesByKey);
+  validateGoalBodyLinks(content.pages, content.redirects, pagesByKey);
+
   for (const redirect of content.redirects) {
     if (keys.has(redirect.from)) {
       throw new Error(`Redirect source ${redirect.from} is also an active health commons page.`);
@@ -289,6 +305,178 @@ export function validateHealthCommonsContent(content: HealthCommonsContentSet): 
   const artifactSourceKeys = collectArtifactSourceKeys(content.artifactManifests);
   assertSourceFindingArtifactReferences(content.pages, artifactIds, artifactSourceKeys);
   warnDuplicateRecipeHashes(content.pages);
+}
+
+function validateGoalTemplateReferences(
+  page: HealthCommonsSourcePage,
+  keys: ReadonlyMap<string, string>,
+  pagesByKey: ReadonlyMap<string, HealthCommonsSourcePage>,
+): void {
+  if (page.frontmatter.entityType !== "goal_template" || !page.frontmatter.goal) {
+    return;
+  }
+  if (page.frontmatter.goal.indexable) {
+    validateIndexableGoalBody(page);
+  }
+
+  const parentGoalKey = page.frontmatter.goal.parentGoalKey;
+  if (parentGoalKey) {
+    assertTargetExists(keys, parentGoalKey, `${page.frontmatter.key} goal.parentGoalKey`);
+    assertTargetEntityType(
+      pagesByKey,
+      parentGoalKey,
+      "goal_template",
+      `${page.frontmatter.key} goal.parentGoalKey`,
+    );
+  }
+
+  for (const sourceKey of page.frontmatter.goal.evidenceSourceKeys) {
+    assertTargetExists(keys, sourceKey, `${page.frontmatter.key} goal.evidenceSourceKeys`);
+    assertTargetEntityType(
+      pagesByKey,
+      sourceKey,
+      "source_artifact",
+      `${page.frontmatter.key} goal.evidenceSourceKeys`,
+    );
+  }
+}
+
+function validateIndexableGoalBody(page: HealthCommonsSourcePage): void {
+  const body = page.body.trim();
+  if (body.length < HEALTH_COMMONS_INDEXABLE_GOAL_BODY_MIN_CHARACTERS) {
+    throw new Error(
+      `${page.frontmatter.key} must include an independently useful article body of at least ${HEALTH_COMMONS_INDEXABLE_GOAL_BODY_MIN_CHARACTERS.toLocaleString("en-US")} characters before it is indexable.`,
+    );
+  }
+
+  const lines = body.split(/\r?\n/u);
+  const lineSet = new Set(lines);
+  const missingHeadings = HEALTH_COMMONS_INDEXABLE_GOAL_REQUIRED_HEADINGS.filter(
+    (heading) => !lineSet.has(heading),
+  );
+  if (missingHeadings.length > 0) {
+    throw new Error(
+      `${page.frontmatter.key} is missing required goal article headings: ${missingHeadings.join(", ")}.`,
+    );
+  }
+
+  const visibleSources = extractHealthCommonsGoalSources(body);
+  if (visibleSources.length < 2) {
+    throw new Error(
+      `${page.frontmatter.key} must include at least two visible Markdown source links under ## Sources before it is indexable.`,
+    );
+  }
+}
+
+function assertNoGoalParentCycles(
+  pagesByKey: ReadonlyMap<string, HealthCommonsSourcePage>,
+): void {
+  const visitState = new Map<string, "visiting" | "visited">();
+  const path: string[] = [];
+
+  const visit = (key: string): void => {
+    const state = visitState.get(key);
+    if (state === "visited") {
+      return;
+    }
+    if (state === "visiting") {
+      const cycleStart = path.indexOf(key);
+      const cycle = [...path.slice(cycleStart), key];
+      throw new Error(`Goal parentGoalKey cycle detected: ${cycle.join(" -> ")}.`);
+    }
+
+    visitState.set(key, "visiting");
+    path.push(key);
+
+    const page = pagesByKey.get(key);
+    const parentTarget = page?.frontmatter.entityType === "goal_template"
+      ? page.frontmatter.goal?.parentGoalKey
+      : undefined;
+    const parentKey = parentTarget
+      ? resolveHealthCommonsKey(pagesByKey, parentTarget)
+      : null;
+    if (parentKey && pagesByKey.get(parentKey)?.frontmatter.entityType === "goal_template") {
+      visit(parentKey);
+    }
+
+    path.pop();
+    visitState.set(key, "visited");
+  };
+
+  const goalKeys = [...pagesByKey.entries()]
+    .filter(([, page]) => page.frontmatter.entityType === "goal_template")
+    .map(([key]) => key)
+    .sort();
+  for (const key of goalKeys) {
+    visit(key);
+  }
+}
+
+function validateGoalBodyLinks(
+  pages: readonly HealthCommonsSourcePage[],
+  redirects: readonly HealthCommonsRedirect[],
+  pagesByKey: ReadonlyMap<string, HealthCommonsSourcePage>,
+): void {
+  const publicGoalRouteIds = collectPublicGoalRouteIds(pages, redirects, pagesByKey);
+
+  for (const page of pages) {
+    if (page.frontmatter.entityType !== "goal_template") {
+      continue;
+    }
+    for (const match of page.body.matchAll(
+      /(?<!!)\[[^\]\r\n]+\]\((\/goals\/[^)\s]+)(?:\s+(?:"[^"]*"|'[^']*'))?\)/gu,
+    )) {
+      const destination = match[1] ?? "";
+      const routePath = destination.split(/[?#]/u)[0]?.replace(/\/+$/u, "") ?? "";
+      const routeId = routePath.replace(/^\/goals\//u, "");
+      if (!routeId || routeId.includes("/") || !publicGoalRouteIds.has(routeId)) {
+        throw new Error(
+          `${page.frontmatter.key} links to missing public goal route ${destination}.`,
+        );
+      }
+    }
+  }
+}
+
+function collectPublicGoalRouteIds(
+  pages: readonly HealthCommonsSourcePage[],
+  redirects: readonly HealthCommonsRedirect[],
+  pagesByKey: ReadonlyMap<string, HealthCommonsSourcePage>,
+): Set<string> {
+  const publicGoalRouteIds = new Set<string>();
+  const publicGoalKeys = new Set<string>();
+
+  for (const page of pages) {
+    if (
+      page.frontmatter.entityType !== "goal_template"
+      || page.frontmatter.goal?.indexable !== true
+    ) {
+      continue;
+    }
+    publicGoalKeys.add(page.frontmatter.key);
+    publicGoalRouteIds.add(
+      page.frontmatter.slug.split("/").at(-1) ?? page.frontmatter.slug,
+    );
+    if (page.frontmatter.preferredRouteId) {
+      publicGoalRouteIds.add(page.frontmatter.preferredRouteId);
+    }
+  }
+
+  for (const redirect of redirects) {
+    const targetKey = stripRevision(redirect.to);
+    const target = pagesByKey.get(targetKey);
+    if (
+      publicGoalKeys.has(targetKey)
+      && target?.frontmatter.entityType === "goal_template"
+      && stripRevision(redirect.from).startsWith("goal_template:")
+    ) {
+      publicGoalRouteIds.add(
+        stripRevision(redirect.from).replace(/^goal_template:/u, "").split("/").at(-1)
+          ?? redirect.from,
+      );
+    }
+  }
+  return publicGoalRouteIds;
 }
 
 export function buildHealthCommonsSourceIndex(catalog: HealthCommonsCatalog): HealthCommonsSourceIndex {
@@ -387,6 +575,24 @@ function toCatalogEntity(page: HealthCommonsSourcePage): HealthCommonsCatalogEnt
 
 function computeRevision(frontmatter: HealthCommonsPageFrontmatter, body: string) {
   const pageRevisionId = sha256StableJson({ body, frontmatter });
+
+  if (frontmatter.entityType === "goal_template" && frontmatter.goal) {
+    const workflowSpecRevisionId = sha256StableJson({
+      outcomeKind: frontmatter.goal.outcomeKind,
+      goalPhrase: frontmatter.goal.goalPhrase,
+      successSignals: frontmatter.goal.successSignals,
+      workflow: frontmatter.goal.workflow,
+      startPrompt: frontmatter.goal.startPrompt,
+      safety: frontmatter.safety ?? null,
+    });
+
+    return {
+      pageRevisionId,
+      recipeHash: null,
+      runSpecRevisionId: null,
+      workflowSpecRevisionId,
+    };
+  }
 
   if (frontmatter.entityType !== "protocol_variant") {
     return {

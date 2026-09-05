@@ -490,6 +490,7 @@ describe("hosted runtime internal web routes", () => {
     expect(response.status).toBe(200);
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledTimes(1);
     expect(mocks.fetchHostedRuntimeMailboxProjection).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedActiveGroupRunningBit).toHaveBeenCalledTimes(1);
     expect(mocks.fetchHostedRuntimeMailboxProjection).toHaveBeenCalledWith({
       cursorMode: "imported_seq",
       lanes: [
@@ -1294,6 +1295,7 @@ describe("hosted runtime internal web routes", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.readHostedActiveGroupRunningBit).not.toHaveBeenCalled();
   });
 
   it("does not AI-gate non-manual system mailbox consumption", async () => {

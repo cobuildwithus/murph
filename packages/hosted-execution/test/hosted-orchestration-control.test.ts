@@ -338,6 +338,10 @@ describe("hosted orchestration control contracts", () => {
       kind: "environment-interview.completed",
     })).toBe("model_free");
     expect(classifyHostedSystemMailboxExecutionClass({
+      dedupeKey: "member.channels.updated:settings-change",
+      kind: "member.channels.updated",
+    })).toBe("model_free");
+    expect(classifyHostedSystemMailboxExecutionClass({
       dedupeKey: "assistant.ask.completed:request",
       kind: "assistant.ask.completed",
     })).toBe("default_owned");
@@ -352,6 +356,10 @@ describe("hosted orchestration control contracts", () => {
     expect(classifyHostedSystemMailboxExecutionClass({
       dedupeKey: "health.daily-metric.reported:synthetic",
       kind: "health.daily-metric.reported",
+    })).toBe("model_free");
+    expect(classifyHostedSystemMailboxExecutionClass({
+      dedupeKey: "journal.group-fact.recorded:synthetic",
+      kind: "journal.group-fact.recorded",
     })).toBe("model_free");
   });
 
@@ -493,6 +501,43 @@ describe("hosted orchestration control contracts", () => {
     });
 
   });
+
+  it.each([undefined, null, "default"] as const)(
+    "preserves pending conversation work for default processing mode %s",
+    (processingMode) => {
+      const request = {
+        conversationWorkPending: true,
+        orchestrationAttemptId: "orchestration_attempt_conversation",
+        ...(processingMode === undefined ? {} : { processingMode }),
+      };
+      expect(parseHostedRuntimeEnsureProcessingRequest(request)).toEqual(request);
+    },
+  );
+
+  it.each([false, null, "true", 1])(
+    "rejects non-true conversation work marker %s",
+    (conversationWorkPending) => {
+      expect(() => parseHostedRuntimeEnsureProcessingRequest({
+        conversationWorkPending,
+        orchestrationAttemptId: "orchestration_attempt_conversation",
+      })).toThrow(
+        "Hosted runtime ensure-processing request conversationWorkPending must be true.",
+      );
+    },
+  );
+
+  it.each(["system_mailbox", "inbox_media_retention"] as const)(
+    "rejects pending conversation work for background mode %s",
+    (processingMode) => {
+      expect(() => parseHostedRuntimeEnsureProcessingRequest({
+        conversationWorkPending: true,
+        orchestrationAttemptId: "orchestration_attempt_conversation",
+        processingMode,
+      })).toThrow(
+        "Hosted runtime ensure-processing request conversationWorkPending requires default processingMode.",
+      );
+    },
+  );
 
   it("rejects raw payload-shaped fields and completion shortcuts in ensure-processing contracts", () => {
     expect(() => parseHostedRuntimeEnsureProcessingRequest({

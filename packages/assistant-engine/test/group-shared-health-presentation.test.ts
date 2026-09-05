@@ -71,7 +71,7 @@ describe('group shared metric presentation prompt', () => {
 
     expect(none).not.toContain('Hosted groups:')
     expect(none).not.toContain('action="read_shared"')
-    expect(none).not.toContain('call exact-scope `read_shared` once first')
+    expect(none).not.toContain('call exact-scope `read_shared` exactly once')
 
     expect(sharedRead).toContain('`murph.group action="read_shared"`')
     expect(sharedRead).not.toContain('`murph.group_data')
@@ -85,6 +85,43 @@ describe('group shared metric presentation prompt', () => {
     expect(families).toContain('`murph.group_email action="send_email"`')
     expect(families).toContain('`action="read_chat_participants"`')
     expect(families).toContain('`action="share_contact_card"`')
+  })
+
+  it('limits group Apple Health recovery to consented same-row evidence', () => {
+    const prompt = buildHostedGroupSharedPrompt()
+    const noSharedPrompt = buildHostedGroupSharedPrompt('none')
+    const diagnosticRule =
+      'For a requested missing or stale shared wearable diagnosis'
+
+    expect(prompt.split(diagnosticRule)).toHaveLength(2)
+    expect(noSharedPrompt).not.toContain(diagnosticRule)
+    expect(prompt).toContain(
+      'include its exact metric scope and `device-sync-status.v0` in that read',
+    )
+    expect(prompt).toContain('The metric alone never identifies Apple Health')
+    expect(prompt).toContain(
+      'same member row has an unambiguous `displayName`',
+    )
+    expect(prompt).toContain(
+      'exactly one connected source whose public `label` is `Apple Health`',
+    )
+    expect(prompt).toContain(
+      'ask that named person whether Murph is open on their iPhone',
+    )
+    expect(prompt).toContain('opening Murph lets the Apple Health import run')
+    expect(prompt).toContain(
+      'without claiming it caused the missing metric',
+    )
+    expect(prompt).toContain(
+      'Never expose provider or account state beyond that consented projection, borrow a name or source across rows',
+    )
+    expect(prompt).toContain(
+      "say opening Apple's Health app refreshes Murph, promise immediate sync",
+    )
+    expect(prompt).toContain('Keep setup and connection actions private')
+    expect(prompt).toContain(
+      'If the evidence is absent or ambiguous, keep the cause unknown',
+    )
   })
 
   it('chooses one best-supported cross-source value by default', () => {
@@ -101,7 +138,13 @@ describe('group shared metric presentation prompt', () => {
     expect(prompt).toContain(
       'Mention alternate values or the selected source only when',
     )
-    expect(prompt).not.toMatch(/\b(?:Apple Health|Garmin|Oura|WHOOP)\b/u)
+    const crossSourceRule = prompt
+      .split('\n- ')
+      .find((rule) => rule.startsWith('For cross-source presentation'))
+    expect(crossSourceRule).toBeDefined()
+    expect(crossSourceRule ?? '').not.toMatch(
+      /\b(?:Apple Health|Garmin|Oura|WHOOP)\b/u,
+    )
   })
 
 })

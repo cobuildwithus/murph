@@ -12,7 +12,9 @@ import {
 } from "@/src/lib/hosted-onboarding/telegram";
 import {
   resolveHostedLinqVisibleSecondaryReply,
+  resolveHostedPublicGoalTelegramResumeUrl,
   resolveHostedTelegramVisibleSecondaryReply,
+  resolvePublicMurphTelegramBotUrl,
   type HostedOnboardingLinqWebhookHandler,
   type HostedOnboardingTelegramWebhookHandler,
   type HostedVisibleSecondaryLinqDependencies,
@@ -234,6 +236,38 @@ describe("visible secondary webhook outcomes", () => {
     })).toBeNull();
   });
 
+  it("restores only an exact published public-goal prompt", async () => {
+    const startPrompt = "Hey Murph, help me improve my deep sleep.";
+    const resumeUrl = await resolveHostedPublicGoalTelegramResumeUrl({
+      botUrl: "https://t.me/withmurph_bot?start=discard_me",
+      inboundText: startPrompt,
+    });
+
+    expect(resumeUrl).not.toBeNull();
+    expect(new URL(resumeUrl ?? "https://invalid.example").searchParams.get("text"))
+      .toBe(startPrompt);
+    expect(new URL(resumeUrl ?? "https://invalid.example").searchParams.has("start"))
+      .toBe(false);
+    await expect(resolveHostedPublicGoalTelegramResumeUrl({
+      botUrl: "https://t.me/withmurph_bot",
+      inboundText: "Here are private details that are not a public goal prompt.",
+    })).resolves.toBeNull();
+  });
+
+  it("uses the same Telegram bot precedence as the public Goal CTA", () => {
+    expect(resolvePublicMurphTelegramBotUrl({
+      MURPH_TELEGRAM_USERNAME_OVERRIDE: "@murph_preview_bot",
+      TELEGRAM_BOT_USERNAME: "murph_legacy_bot",
+    })).toBe("https://t.me/murph_preview_bot");
+    expect(resolvePublicMurphTelegramBotUrl({
+      MURPH_TELEGRAM_USERNAME_OVERRIDE: "not valid",
+      TELEGRAM_BOT_USERNAME: "murph_legacy_bot",
+    })).toBe("https://t.me/murph_legacy_bot");
+    expect(resolvePublicMurphTelegramBotUrl({})).toBe(
+      "https://t.me/withmurph_bot",
+    );
+  });
+
   it("maps a Family draft conflict to the exact invite recovery URL", () => {
     expect(resolveHostedTelegramVisibleSecondaryReply({
       familyInviteCode: "invite_visible_recovery",
@@ -400,7 +434,8 @@ describe("visible secondary webhook outcomes", () => {
     }));
   });
 
-  it("gives an unlinked direct Telegram sender a signup path", async () => {
+  it("gives an unlinked public-goal sender a signup path and restores the exact prompt", async () => {
+    const startPrompt = "Hey Murph, help me improve my deep sleep.";
     const update = parseHostedTelegramWebhookUpdate(JSON.stringify({
       message: {
         chat: {
@@ -415,11 +450,13 @@ describe("visible secondary webhook outcomes", () => {
           is_bot: false,
         },
         message_id: 7,
-        text: "/start",
+        text: startPrompt,
       },
       update_id: 123,
     }));
-    const sendHostedTelegramTextMessage = vi.fn(async () => {});
+    const sendHostedTelegramTextMessage = vi.fn<
+      HostedVisibleSecondaryTelegramDependencies["sendHostedTelegramTextMessage"]
+    >(async () => {});
     const handler: HostedOnboardingTelegramWebhookHandler = vi.fn(async () => ({
       ignored: true,
       ok: true as const,
@@ -428,6 +465,7 @@ describe("visible secondary webhook outcomes", () => {
     const dependencies: HostedVisibleSecondaryTelegramDependencies = {
       parseHostedTelegramWebhookUpdate: vi.fn(() => update),
       requireHostedOnboardingPublicBaseUrl: vi.fn(() => "https://withmurph.ai"),
+      resolveMurphTelegramBotUrl: vi.fn(() => "https://t.me/withmurph_bot"),
       sendHostedTelegramTextMessage,
       summarizeHostedTelegramWebhook,
     };
@@ -445,10 +483,15 @@ describe("visible secondary webhook outcomes", () => {
       reason: "visible-secondary-reply:unlinked-telegram",
     });
     expect(sendHostedTelegramTextMessage).toHaveBeenCalledWith(expect.objectContaining({
-      message: expect.stringMatching(/choose Telegram: https:\/\/withmurph\.ai\//),
+      message: expect.stringMatching(/choose Telegram: https:\/\/withmurph\.ai\/.*restored goal message: https:\/\/t\.me\/withmurph_bot\?text=/s),
       replyToMessageId: 7,
       target: expect.objectContaining({ chatId: "42" }),
     }));
+    const sentMessage = sendHostedTelegramTextMessage.mock.calls[0]?.[0]?.message ?? "";
+    const resumeUrl = sentMessage.match(/https:\/\/t\.me\/[^\s]+$/u)?.[0] ?? null;
+    expect(resumeUrl).not.toBeNull();
+    expect(new URL(resumeUrl ?? "https://invalid.example").searchParams.get("text"))
+      .toBe(startPrompt);
   });
 
   it("gives a relink race repair guidance without a signup URL", async () => {

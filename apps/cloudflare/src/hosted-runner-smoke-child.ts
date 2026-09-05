@@ -51,6 +51,9 @@ import {
   createHostedRunnerNativeParserToolchain,
 } from "./runner-native-parser-toolchain.ts";
 import {
+  runHostedGoalCliSmoke,
+} from "./hosted-goal-cli-smoke.js";
+import {
   HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT,
@@ -180,6 +183,7 @@ async function runSmokeChecks(input: {
   }
 
   const healthCommonsRuntime = await runHealthCommonsSmoke();
+  await resetCanonicalGoalRegistryForSmoke(input.vaultRoot);
   const healthCommonsCli = await runHealthCommonsCliSmoke();
 
   const wavPath = path.join(input.vaultRoot, input.wavRelativePath);
@@ -251,6 +255,7 @@ async function runSmokeChecks(input: {
     codexHostedShellVaultCliLlmsBytes: hostedCodexConfig.vaultCliLlmsBytes,
     codexVersion: codexPreflight.version,
     healthCommonsCatalogHash: healthCommonsRuntime.catalogHash,
+    healthCommonsCliGoalProofCount: healthCommonsCli.goalProofCount,
     healthCommonsCliProtocolListBytes: healthCommonsCli.protocolListBytes,
     healthCommonsFinnishDrySaunaTitle: healthCommonsRuntime.finnishDrySaunaTitle,
     healthCommonsRuntimeProtocolHitKeys: healthCommonsRuntime.runtimeProtocolHitKeys,
@@ -2467,6 +2472,7 @@ function parsePositiveByteCount(value: string | undefined, label: string): numbe
 }
 
 async function runHealthCommonsCliSmoke(): Promise<{
+  goalProofCount: number;
   protocolListBytes: number;
 }> {
   const protocolListOutput = await runTextCommand("vault-cli", [
@@ -2490,9 +2496,26 @@ async function runHealthCommonsCliSmoke(): Promise<{
     );
   }
 
+  const goalSmoke = await runHostedGoalCliSmoke({
+    async runCommand(_label, args) {
+      return await runTextCommand("vault-cli", [...args]);
+    },
+  });
+
   return {
+    goalProofCount: goalSmoke.proofCount,
     protocolListBytes: Buffer.byteLength(protocolListOutput, "utf8"),
   };
+}
+
+async function resetCanonicalGoalRegistryForSmoke(vaultRoot: string): Promise<void> {
+  // The shared Web fixture carries historical hv/goal@v1 query examples in
+  // bank/goals. They are not canonical Goal-bank documents, so the disposable
+  // hosted write round trip owns a clean registry instead of mutating them.
+  await rm(path.join(vaultRoot, "bank", "goals"), {
+    force: true,
+    recursive: true,
+  });
 }
 
 async function runCommand(
