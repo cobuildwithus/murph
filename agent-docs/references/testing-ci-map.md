@@ -1,8 +1,14 @@
 # Testing And CI Map
 
-Last verified: 2026-09-04
+Last verified: 2026-09-05
 
 ## Current Repo Checks
+
+`apps/cloudflare/test/hosted-local-e2e-support.test.ts` proves the shared hosted
+E2E tool-advertisement assertion across structured and code-mode requests.
+Code-mode fixtures omit deferred response, exercise-routine, and Telegram rich
+content cards from resident descriptions while requiring discovery. Both plain
+and namespaced code-mode wrappers retain an exact resident-tool inventory check.
 
 Linq email identity remediation is covered by the focused
 `hosted-onboarding-linq-email-authority.test.ts` and
