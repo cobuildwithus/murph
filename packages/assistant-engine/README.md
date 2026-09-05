@@ -258,3 +258,16 @@ mechanics live in the co-packaged `references/session-support.md`, which must be
 read before support questions or effects. Normal recursive skill packaging and
 filesystem reads remain the owners. Keep that reference in focused real-Codex
 fixtures when changing support policy.
+
+## Real-Codex test fixtures
+
+Synthetic real-Codex journeys that need fixture executables can opt into
+`executeRealCodexAppServerTurn`'s `fixtureBinDirectory`. The test harness adds
+that directory to PATH and creates a private login profile beneath the journey's
+working directory, whose existing cleanup owns it. Ordinary calls retain their
+supplied environment. An explicit caller `ZDOTDIR` remains caller-owned and
+cannot be combined with automatic fixture-profile preparation. Deterministic
+harness tests exercise actual `zsh -lc` selection when zsh is installed; that
+integration case explicitly skips when the executable is absent. Portable
+profile quoting, provider-key exclusion, and caller-profile ownership remain
+covered without zsh. These tests do not start Codex or make a model request.

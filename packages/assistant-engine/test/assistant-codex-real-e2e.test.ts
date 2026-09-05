@@ -1,6 +1,7 @@
 import { WORKFLOW_SKILL_REFERENCES } from './support/workflow-skill-policy.js'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
@@ -12043,11 +12044,6 @@ describeRealCodex('real Codex Personal Patterns first complete digest e2e', () =
         ledgerCapturePath,
         vocabularyCapturePath,
       })
-      await writeFile(
-        path.join(workingDirectory, '.zprofile'),
-        `export PATH=${JSON.stringify(binDirectory)}:$PATH\n`,
-        'utf8',
-      )
       const result = await executeRealCodexAppServerTurn({
         allowFinishWithoutReply: true,
         approvalPolicy: 'never',
@@ -12057,11 +12053,8 @@ describeRealCodex('real Codex Personal Patterns first complete digest e2e', () =
         codexHome: config.codexHome,
         developerInstructions: buildWeeklyHealthInsightDeveloperInstructions(),
         dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
-        env: {
-          ...config.env,
-          PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
-          ZDOTDIR: workingDirectory,
-        },
+        env: config.env,
+        fixtureBinDirectory: binDirectory,
         excludeResumeTurns: true,
         model: config.model,
         modelProvider: config.modelProvider,
@@ -12174,11 +12167,6 @@ describeRealCodex('real Codex Personal Patterns vocabulary normalization e2e', (
         ledgerCapturePath,
         vocabularyCapturePath,
       })
-      await writeFile(
-        path.join(workingDirectory, '.zprofile'),
-        `export PATH=${JSON.stringify(binDirectory)}:$PATH\n`,
-        'utf8',
-      )
       const result = await executeRealCodexAppServerTurn({
         allowFinishWithoutReply: true,
         approvalPolicy: 'never',
@@ -12188,11 +12176,8 @@ describeRealCodex('real Codex Personal Patterns vocabulary normalization e2e', (
         codexHome: config.codexHome,
         developerInstructions: buildWeeklyHealthInsightDeveloperInstructions(),
         dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
-        env: {
-          ...config.env,
-          PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
-          ZDOTDIR: workingDirectory,
-        },
+        env: config.env,
+        fixtureBinDirectory: binDirectory,
         excludeResumeTurns: true,
         model: config.model,
         modelProvider: config.modelProvider,
@@ -24618,6 +24603,145 @@ describe('real Codex app-server cache usage e2e harness', () => {
     ])
   })
 
+  it.skipIf(!existsSync('/bin/zsh'))('preserves explicit fixture PATH through the login-shell launch pipeline', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'murph-fixture-path-'))
+    const home = path.join(directory, 'home')
+    const ambientBin = path.join(directory, 'ambient-bin')
+    const fixtureBin = path.join(directory, "fixture bin ' $literal")
+    try {
+      await Promise.all([home, ambientBin, fixtureBin].map((entry) => mkdir(entry)))
+      await writeFile(
+        path.join(home, '.zprofile'),
+        `export PATH=${quoteNutritionShellLiteral(ambientBin)}:/usr/bin:/bin\n`,
+      )
+      await writeFile(path.join(ambientBin, 'fixture-tool'),
+        '#!/bin/sh\nprintf ambient\n', { mode: 0o755 })
+      await writeFile(path.join(fixtureBin, 'fixture-tool'),
+        '#!/bin/sh\nprintf fixture\n', { mode: 0o755 })
+      const env = buildRealCodexE2eEnv({
+        apiKeyEnv: 'PROVIDER_AUTH',
+        sourceEnv: {
+          PATH: `${fixtureBin}:/usr/bin:/bin`,
+          PROVIDER_AUTH: 'synthetic-provider-value',
+        },
+      })
+      env.HOME = home
+      const originalEnv = { ...env }
+      expect((await execFileAsync('/bin/zsh', ['-c', 'fixture-tool'], { env })).stdout).toBe('fixture')
+      expect((await execFileAsync('/bin/zsh', ['-lc', 'fixture-tool'], { env })).stdout).toBe('ambient')
+      let selectedTool: string | undefined
+      let shellProviderValue: string | undefined
+      let observedProfile: string | undefined
+      let observedOverrides: readonly string[] | undefined
+      await expect(executeRealCodexAppServerTurn({
+        configOverrides: ['features.shell_tool=false'],
+        dynamicTools: [],
+        env,
+        fixtureBinDirectory: fixtureBin,
+        prompt: 'Exercise the synthetic fixture shell.',
+        workingDirectory: directory,
+      }, async (input) => {
+        observedOverrides = input.configOverrides
+        observedProfile = input.env?.ZDOTDIR
+        const includeOnly = input.configOverrides?.find((value) =>
+          value.startsWith('shell_environment_policy.include_only='))
+        if (!includeOnly) throw new Error('Expected an explicit shell environment policy.')
+        const keys: string[] = JSON.parse(includeOnly.slice(includeOnly.indexOf('=') + 1))
+        const shellEnv = Object.fromEntries(
+          Object.entries(input.env ?? {}).filter(([key]) => keys.includes(key)),
+        )
+        selectedTool = (await execFileAsync('/bin/zsh', ['-lc', 'fixture-tool'], { env: shellEnv })).stdout
+        shellProviderValue = (await execFileAsync('/bin/zsh',
+          ['-lc', 'printf "%s" "${PROVIDER_AUTH-unset}"'], { env: shellEnv })).stdout
+        throw new Error('Stop after the synthetic shell proof.')
+      })).rejects.toThrow('Real Codex turn failed')
+      expect(selectedTool).toBe('fixture')
+      expect(shellProviderValue).toBe('unset')
+      expect(observedOverrides?.at(-1)).toBe('features.shell_tool=false')
+      if (!observedProfile) throw new Error('Expected an owned fixture profile.')
+      expect(path.dirname(observedProfile)).toBe(directory)
+      expect(env).toEqual(originalEnv)
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
+
+  it('preserves fixture profile quoting and provider-key exclusion without zsh', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'murph-portable-profile-'))
+    try {
+      const fixtureBin = path.join(directory, "fixture bin ' $literal")
+      await mkdir(fixtureBin)
+      await writeFile(path.join(fixtureBin, 'fixture-tool'),
+        '#!/bin/sh\nprintf fixture\n', { mode: 0o755 })
+      const env = buildRealCodexE2eEnv({
+        apiKeyEnv: 'PROVIDER_AUTH',
+        sourceEnv: { PATH: '/usr/bin:/bin', PROVIDER_AUTH: 'synthetic-provider-value' },
+      })
+      const originalEnv = { ...env }
+      let shellOutput: string | undefined
+      let observedOverrides: readonly string[] | undefined
+      await expect(executeRealCodexAppServerTurn({
+        configOverrides: ['features.shell_tool=false'],
+        dynamicTools: [],
+        env,
+        fixtureBinDirectory: fixtureBin,
+        prompt: 'Exercise the generated fixture profile.',
+        workingDirectory: directory,
+      }, async (input) => {
+        observedOverrides = input.configOverrides
+        const includeOnly = input.configOverrides?.find((value) =>
+          value.startsWith('shell_environment_policy.include_only='))
+        if (!includeOnly) throw new Error('Expected an explicit shell environment policy.')
+        const keys: string[] = JSON.parse(includeOnly.slice(includeOnly.indexOf('=') + 1))
+        const shellEnv = Object.fromEntries(
+          Object.entries(input.env ?? {}).filter(([key]) => keys.includes(key)),
+        )
+        shellOutput = (await execFileAsync('/bin/sh', ['-c',
+          'PATH=/usr/bin:/bin; . "$ZDOTDIR/.zprofile"; fixture-tool; printf ":%s" "${PROVIDER_AUTH-unset}"',
+        ], { env: shellEnv })).stdout
+        throw new Error('Stop after the portable profile proof.')
+      })).rejects.toThrow('Real Codex turn failed')
+      expect(shellOutput).toBe('fixture:unset')
+      expect(observedOverrides?.at(-1)).toBe('features.shell_tool=false')
+      expect(env).toEqual(originalEnv)
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
+
+  it('preserves a caller-owned login profile and rejects conflicting fixture intent', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'murph-caller-profile-'))
+    try {
+      const profile = path.join(directory, '.zprofile')
+      const contents = 'export CALLER_PROFILE=preserved\n'
+      await writeFile(profile, contents)
+      const env = { PATH: '/usr/bin:/bin', ZDOTDIR: directory }
+      const originalEnv = { ...env }
+      let calls = 0
+      const executeTurn: typeof executeCodexAppServerTurn = async (input) => {
+        calls += 1
+        expect(input.env).toBe(env)
+        throw new Error('Stop after observing caller-owned input.')
+      }
+      const input = {
+        dynamicTools: [],
+        env,
+        prompt: 'Preserve the caller profile.',
+        workingDirectory: directory,
+      }
+      await expect(executeRealCodexAppServerTurn(input, executeTurn)).rejects.toThrow('Real Codex turn failed')
+      await expect(executeRealCodexAppServerTurn(
+        { ...input, fixtureBinDirectory: directory }, executeTurn,
+      )).rejects.toThrow('explicit ZDOTDIR')
+      expect(calls).toBe(1)
+      expect(env).toEqual(originalEnv)
+      expect(await readFile(profile, 'utf8')).toBe(contents)
+      expect(await readdir(directory)).toEqual(['.zprofile'])
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
+
   it('pins live turns to the hosted shell and plugin boundaries', async () => {
     let observedConfigOverrides: readonly string[] | undefined
 
@@ -30622,15 +30746,25 @@ async function executeRealCodexOnboardingProbe(
 async function executeRealCodexAppServerTurn(
   input: Omit<CodexAppServerTurnInput, 'dynamicTools'> & {
     dynamicTools?: CodexAppServerTurnInput['dynamicTools']
+    fixtureBinDirectory?: string
   },
   executeTurn: typeof executeCodexAppServerTurn = executeCodexAppServerTurn,
 ): ReturnType<typeof executeCodexAppServerTurn> {
+  const { fixtureBinDirectory, ...turnInput } = input
+  const env = fixtureBinDirectory === undefined
+    ? input.env
+    : await prepareRealCodexFixtureShellEnvironment({
+      binDirectory: fixtureBinDirectory,
+      env: input.env,
+      workingDirectory: input.workingDirectory,
+    })
   try {
     const result = await executeTurn({
-      ...input,
+      ...turnInput,
+      env,
       configOverrides: [
         ...REAL_CODEX_HOSTED_CONFIG_OVERRIDES,
-        ...buildRealCodexShellEnvironmentConfigOverrides(input.env),
+        ...buildRealCodexShellEnvironmentConfigOverrides(env),
         ...(input.configOverrides ?? []),
       ],
       dynamicTools: input.dynamicTools ?? resolveMurphDynamicTools({
@@ -30707,6 +30841,40 @@ function recordRealCodexProviderUsage(usage: AssistantProviderUsage): void {
   realCodexSuiteUsage.outputTokens += usage.outputTokens ?? 0
   realCodexSuiteUsage.reasoningTokens += usage.reasoningTokens ?? 0
   realCodexSuiteUsage.totalTokens += usage.totalTokens ?? 0
+}
+
+async function prepareRealCodexFixtureShellEnvironment(input: {
+  binDirectory: string
+  env: NodeJS.ProcessEnv | undefined
+  workingDirectory: string
+}): Promise<NodeJS.ProcessEnv> {
+  if (input.env?.ZDOTDIR !== undefined) {
+    throw new Error(
+      'An explicit ZDOTDIR already owns login profiles; omit fixtureBinDirectory and prepare the caller profile.',
+    )
+  }
+  const binDirectory = path.resolve(input.workingDirectory, input.binDirectory)
+  // The journey's existing working-directory cleanup owns this private profile.
+  const profileDirectory = await mkdtemp(
+    path.join(input.workingDirectory, '.codex-fixture-shell-'),
+  )
+  await writeFile(
+    path.join(profileDirectory, '.zprofile'),
+    `export PATH=${quoteNutritionShellLiteral(binDirectory)}:$PATH\n`,
+    { mode: 0o600 },
+  )
+  const env = {
+    ...input.env,
+    PATH: [binDirectory, input.env?.PATH].filter(Boolean).join(path.delimiter),
+    ZDOTDIR: profileDirectory,
+  }
+  const providerApiKeyEnv = input.env
+    ? realCodexProviderApiKeyEnvByEnvironment.get(input.env)
+    : undefined
+  if (providerApiKeyEnv !== undefined) {
+    realCodexProviderApiKeyEnvByEnvironment.set(env, providerApiKeyEnv)
+  }
+  return env
 }
 
 function buildRealCodexShellEnvironmentConfigOverrides(
