@@ -81,8 +81,8 @@ review completed for the opening behavior.
   failure remains visible; the original broad opt-in regression stays intact.
 - Complete first provider input was captured through the pinned real App Server
   and local scripted Responses stub with identical fixtures. o200k_harmony:
-  direct 26,742 to 27,862 tokens (+1,120), 124,070 to 129,588 UTF-8 bytes
-  (+5,518); group unchanged at 22,008 tokens and 102,259 bytes. Only the direct
+  direct 26,835 to 27,955 tokens (+1,120), 124,475 to 129,993 UTF-8 bytes
+  (+5,518); group unchanged at 22,056 tokens and 102,447 bytes. Only the direct
   assembled instruction message changes; tools and other input are identical
   after normalizing fixture paths and generated ids.
 
@@ -94,14 +94,29 @@ review completed for the opening behavior.
   resolution and preserves group vetoes, delivery cap, and final egress checks.
   The regression uses the real route reader with empty thread-route rows and
   exercises claim, generation, send, and outgoing mailbox append.
-  All 280 focused continuation, dispatch, direct-member target, and mailbox
-  preparation tests pass. Web typecheck, workspace boundaries, complexity,
-  and diff checks pass. Existing live prompt evidence is unchanged.
+  Parent review also reproduced generation admission after consent withdrawal
+  or inactive access. The existing AI-access decision now runs before history
+  reads or new continuation generation; persisted replay recovery is preserved.
+  After merging main, all 279 focused continuation, dispatch, direct-member
+  target, and mailbox preparation tests pass. All 210 selected assistant prompt,
+  planning, and asset tests pass (7 opt-in cases skipped). Web and Assistant
+  Engine typechecks, complexity, and diff checks pass; workspace boundaries
+  passed before the base merge.
+- The final live identity journey passed again: reply at 19.743 seconds, all
+  writes verified at 49.272 seconds, one native child, one root automation,
+  two canonical identity records, zero policy reads, and no premature save
+  claim. Subscription homes that failed cache preparation performed no actions;
+  the first usable authorized home completed the journey.
+- Complete provider-input measurement was repeated against main commit
+  `0b897a8eb42447b82dc3cbaf82841f95f19df23e` with the same real App Server
+  capture method. The updated numbers above preserve the +1,120-token direct
+  delta; normalized group input is byte-for-byte identical.
 - The original ReviewGPT response identified that error, but its capture failed
   model validation because the configured current-Pro alias disagreed with
   response metadata. Recovered exact-turn output is diagnostic evidence, not a
-  passing final gate. Preserve the original reviewed-head lineage when sending
-  the corrected full snapshot with a supported explicit Pro target.
+  passing final gate. Main now supplies ReviewGPT 0.5.145 and the supported
+  gpt-6-pro target. Preserve the original reviewed-head lineage in the new full
+  snapshot review.
 
 - Push the scoped candidate, update PR evidence, and run the required
   cross-cutting ReviewGPT/CI gates. PR remains draft; no merge is authorized.

@@ -18,3 +18,5 @@ Run the repository's normal waited PR review on a signed-in current-Pro lane. Se
 ## Context
 
 This blocks the final review gate and can lead to a duplicate full review. Keep alias selection and response validation consistent in the owning ReviewGPT package; use an explicit supported current-model target for an individual retry.
+
+Resolved for the current candidate by merging main and installing its frozen lockfile: ReviewGPT 0.5.145 and the repository config both target gpt-6-pro. The earlier failed capture still cannot serve as a passing final gate.

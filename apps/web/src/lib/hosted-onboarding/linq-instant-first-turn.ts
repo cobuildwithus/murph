@@ -75,7 +75,7 @@ import {
   readHostedMemberRoutingRecord,
 } from "./hosted-member-routing-store";
 import { resolveHostedMemberDirectRoute } from "../hosted-routing/member-direct-route";
-import { readActiveHostedMemberAccess } from "./member-access";
+import { readActiveHostedMemberAccess, readHostedRuntimeAiAccessDecision } from "./member-access";
 import {
   createHostedLinqChatLookupKeyReadCandidates,
   createHostedLinqMessageLookupKeyReadCandidates,
@@ -214,6 +214,10 @@ async function readHostedLinqOpeningContinuationTone(input: {
   if (prior.length !== 1 || !prior[0]?.acceptedAt || !prior[0].messageLookupKey) {
     return undefined;
   }
+  if (!(await readHostedRuntimeAiAccessDecision({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  })).allowed) return undefined;
   // Only the immediately preceding confirmed welcome admits the second turn.
   // Exact webhook replay may already have appended this inbound message.
   const ids = await readHostedMailboxRecentLiveConversationItemIds({

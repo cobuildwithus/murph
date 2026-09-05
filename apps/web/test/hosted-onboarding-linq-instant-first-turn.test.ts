@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => ({
   prepareHostedMailboxEnvelopeAppend: vi.fn(),
   projectHostedMemberRoutingState: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
+  readHostedRuntimeAiAccessDecision: vi.fn(),
   readHostedMemberRoutingRecord: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
   recordHostedAiUsageRecords: vi.fn(),
@@ -58,6 +59,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
 vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/src/lib/hosted-onboarding/member-access")>(),
   readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
+  readHostedRuntimeAiAccessDecision: mocks.readHostedRuntimeAiAccessDecision,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -280,6 +282,7 @@ describe("hosted Linq instant first turn", () => {
     mocks.hostedMailboxItemUpdateMany.mockResolvedValue({ count: 2 });
     mocks.projectHostedMemberRoutingState.mockResolvedValue({ route: "linq" });
     mocks.readActiveHostedMemberAccess.mockResolvedValue({ id: "access_123" });
+    mocks.readHostedRuntimeAiAccessDecision.mockResolvedValue({ allowed: true });
     mocks.readHostedMemberRoutingRecord.mockResolvedValue({
       memberId: WAKE_HANDOFF.userId,
     });
@@ -372,6 +375,18 @@ describe("hosted Linq instant first turn", () => {
       linqChatId: "chat_123", prisma: createPrisma(), request: REQUEST,
     })).resolves.toEqual({ kind: "unavailable" });
     expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+  });
+
+  it.each(["health_data_consent_withdrawn", "hosted_access_inactive"])("does not start a continuation model call when %s", async (reason) => {
+    prepareContinuation();
+    mocks.readHostedRuntimeAiAccessDecision.mockResolvedValue({ allowed: false, reason });
+    const claim = await claimHostedLinqInstantFirstTurn({
+      continuationMemberId: WAKE_HANDOFF.userId,
+      linqChatId: "chat_123", prisma: createPrisma(), request: REQUEST,
+    });
+    expect(claim).toEqual({ kind: "unavailable" });
+    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+    expect(mocks.readHostedMailboxWakeByItemId).not.toHaveBeenCalled();
   });
 
   it("uses the prior confirmed welcome for one second reply and the existing ledger for the cap", async () => {
