@@ -141,6 +141,7 @@ describe("hosted source no-data outreach policy", () => {
   it.each([
     { sourceProviderSlug: "garmin", defaultDays: 5 },
     { sourceProviderSlug: "apple_health_kit", defaultDays: 3 },
+    { sourceProviderSlug: "whoop_v2", defaultDays: 5 },
   ])("saves, disables, and restores $sourceProviderSlug through one canonical row", async ({ sourceProviderSlug, defaultDays }) => {
     const store = createPreferenceStore();
     mocks.getPrisma.mockReturnValue(store.prisma);
