@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { constants } from "node:fs";
 import { access, copyFile, cp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Writable } from "node:stream";
@@ -1816,7 +1817,10 @@ describe("hosted local dev stack", () => {
       `/tmp/murph-dev-env-test/docker-config/contexts/tls/${dockerContextId}`,
       { recursive: true },
     );
-    expect(access).toHaveBeenCalledWith(expect.stringContaining(".docker/cli-plugins"));
+    expect(access).toHaveBeenCalledWith(
+      expect.stringContaining(".docker/cli-plugins/docker-buildx"),
+      constants.X_OK,
+    );
     expect(rm).toHaveBeenCalledWith(
       "/tmp/murph-dev-env-test/docker-config/cli-plugins",
       { force: true, recursive: true },
@@ -1827,6 +1831,71 @@ describe("hosted local dev stack", () => {
       "dir",
     );
   });
+
+  it.each(["missing", "not executable"])(
+    "skips a Docker plugin directory whose Buildx is %s",
+    async (buildxState) => {
+      vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
+      const configModule = await import("../../src/dev-hosted-local/config.ts");
+      vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+        ...defaultConfig,
+        skipLinqWebhookRegister: true,
+        webPort: 31001,
+        workerPersistDir: ".tmp/e2e/wrangler",
+        workerPort: 32001,
+      });
+      const firstDirectory = "/tmp/host-docker-config/cli-plugins";
+      const originalAccess = vi.mocked(access).getMockImplementation();
+      vi.mocked(access).mockImplementation(async (filePath, mode) => {
+        const value = String(filePath);
+        if (value === firstDirectory) {
+          return;
+        }
+        if (value === path.join(firstDirectory, "docker-buildx")) {
+          if (buildxState === "not executable" && mode !== constants.X_OK) {
+            return;
+          }
+          const error = createMissingFileError();
+          error.code = buildxState === "not executable" ? "EACCES" : "ENOENT";
+          throw error;
+        }
+        if (value.endsWith(path.join(".docker", "cli-plugins", "docker-buildx"))) {
+          return;
+        }
+        throw createMissingFileError();
+      });
+      try {
+        const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+        const stack = await startHostedLocalDevStack({
+          env: {
+            ...process.env,
+            DOCKER_CONFIG: "/tmp/host-docker-config",
+            MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+            MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
+            MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
+            NEXT_DIST_DIR_MODE: "smoke",
+            NEXT_DIST_DIR_SUFFIX: "e2e-fixture",
+          },
+        });
+        await stack.ready;
+        await stack.stop();
+        expect(symlink).toHaveBeenCalledWith(
+          expect.stringContaining(path.join(".docker", "cli-plugins")),
+          "/tmp/murph-dev-env-test/docker-config/cli-plugins",
+          "dir",
+        );
+        expect(symlink).not.toHaveBeenCalledWith(
+          firstDirectory,
+          expect.any(String),
+          "dir",
+        );
+      } finally {
+        if (originalAccess) {
+          vi.mocked(access).mockImplementation(originalAccess);
+        }
+      }
+    },
+  );
 
   it("discovers the Apple Silicon Homebrew Docker CLI plugin directory on macOS", async () => {
     const stackModule = await import("../../src/dev-hosted-local/stack.ts");
