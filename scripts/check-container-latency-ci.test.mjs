@@ -13,7 +13,7 @@ import {
   runContainer,
 } from "./check-container-latency-ci.mjs";
 
-const require = createRequire(import.meta.url);
+const require = createRequire(new URL("../apps/cloudflare/package.json", import.meta.url));
 const { build } = require("esbuild");
 
 function rows(value = 1_000) {
