@@ -1431,7 +1431,7 @@ describe('assistant skill assets', () => {
       'A direct request to check back later authorizes that exact check-in.',
     )
     expect(compact).toContain(
-      'A request such as "remind me" or "remind me every other day" authorizes the cue only.',
+      'Outside the bounded attached check above, a request such as "remind me" or "remind me every other day" authorizes the cue only.',
     )
     expect(compact).toContain(
       'Otherwise create the check-in only after a clear yes to that exact bounded offer.',
@@ -1446,7 +1446,7 @@ describe('assistant skill assets', () => {
       'Create both only when the user requested or accepted both; a check-in-only request does not authorize an extra cue.',
     )
     expect(compact).toContain(
-      'Scheduled turns can skip or send their own occurrence; they do not create or mutate future automations.',
+      'Scheduled turns can skip or send their own occurrence; they do not create or mutate future automations, except for attaching the single optional follow-up to their own original message as described above.',
     )
     expect(compact).toContain(
       'Read the latest relevant conversation for a completion report, correction, cancellation, reschedule, or changed plan.',
