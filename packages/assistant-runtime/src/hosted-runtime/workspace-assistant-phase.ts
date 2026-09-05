@@ -2965,7 +2965,7 @@ export async function runHostedWorkspaceAssistantPhase(
         }),
         assistantCronWakeAfterPassCandidate,
       ]);
-      const postDelivery = await drainHostedPostCheckpointDelivery({
+      const postDelivery = await drainHostedDeliveryWithFileCheckpoint({
         assistantMetrics,
         assistantDeliveryEffects: deliveryEffects,
         assistantDeliveryPreparation: deliveryEffectsPreparation,
@@ -3151,7 +3151,7 @@ export async function runHostedWorkspaceAssistantPhase(
                   },
                 };
               }
-              return await drainHostedPostCheckpointDelivery({
+              return await drainHostedDeliveryWithFileCheckpoint({
                 assistantMetrics,
                 assistantDeliveryEffects: deliveryEffects,
                 assistantDeliveryPreparation: deliveryEffectsPreparation,
@@ -4177,7 +4177,7 @@ async function finalizeHostedBackgroundMaintenanceResult(input: {
     baseNextWake: HostedRuntimeWakeCandidate,
   ) => {
     assertHostedAssistantPhaseLiveness(input.input.signal);
-    return await drainHostedPostCheckpointDelivery({
+    return await drainHostedDeliveryWithFileCheckpoint({
       assistantDeliveryEffects: [],
       baseNextWake,
       checkpointReason: "provider_cleanup",
@@ -6961,7 +6961,7 @@ async function runSystemMailboxPostCheckpointPhase(input: {
           redactedStatus: deliveryInput.redactedStatus,
         };
       }
-      return await drainHostedPostCheckpointDelivery({
+      return await drainHostedDeliveryWithFileCheckpoint({
         afterDurableCheckpoint,
         ...deliveryInput,
       });
@@ -7167,7 +7167,7 @@ async function runForegroundAssistantReplyPhase(input: {
       systemMailboxWake: input.systemMailboxWake,
       systemMailboxWakeAt: input.systemMailboxWakeAt,
     });
-    const postDelivery = await drainHostedPostCheckpointDelivery({
+    const postDelivery = await drainHostedDeliveryWithFileCheckpoint({
       assistantMetrics: input.assistantMetrics,
       assistantDeliveryEffects: deliveryEffects,
       assistantDeliveryPreparation: preparedDeliveryEffects.preparation,
@@ -7323,7 +7323,7 @@ async function runForegroundAssistantReplyPhase(input: {
               input.skippedDeviceSyncWake,
               input.systemMailboxWake,
             ]);
-            const postDelivery = await drainHostedPostCheckpointDelivery({
+            const postDelivery = await drainHostedDeliveryWithFileCheckpoint({
               assistantMetrics: input.assistantMetrics,
               assistantDeliveryEffects: deliveryEffects,
               assistantDeliveryPreparation: preparedDeliveryEffects.preparation,
@@ -7456,6 +7456,30 @@ async function runHostedProviderCleanupPostCheckpointStep(input: {
     redactedStatus: providerCleanupRedactedStatus,
     wake: providerCleanupWake,
   };
+}
+
+async function drainHostedDeliveryWithFileCheckpoint(
+  input: Parameters<typeof drainHostedPostCheckpointDelivery>[0],
+): Promise<HostedWorkspaceRunnerAssistantPhasePostCheckpoint> {
+  // afterCheckpoint only marks local state dirty. The durable hook runs after
+  // publication of the prepared sending claim, before the file upload.
+  if (input.assistantDeliveryEffects.some((effect) =>
+    effect.payload.channel === "telegram"
+    && effect.payload.media.some((media) => media.kind === "vault_file")
+  )) {
+    const afterDurableCheckpoint = composeHostedAssistantPhaseDurableCheckpointEffects(
+      input.afterDurableCheckpoint ?? null,
+      deferHostedDeliveryUntilDurableCheckpoint(input),
+    );
+    return {
+      ...(afterDurableCheckpoint ? { afterDurableCheckpoint } : {}),
+      checkpointReason: "outbox_sending",
+      nextWakeAt: input.baseNextWake.at,
+      nextWakeReason: input.baseNextWake.reason,
+      redactedStatus: input.redactedStatus ?? {},
+    };
+  }
+  return await drainHostedPostCheckpointDelivery(input);
 }
 
 async function drainHostedPostCheckpointDelivery(input: {

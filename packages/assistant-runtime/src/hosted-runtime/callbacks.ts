@@ -1940,8 +1940,10 @@ function shouldPrepareHostedAssistantDeliveryEffectForDispatch(
   effect: HostedAssistantDeliveryEffect,
   explicitlyPrepareNonIdempotent: boolean,
 ): boolean {
-  return !hasHostedAssistantVaultFileMedia(effect.payload)
-    && (explicitlyPrepareNonIdempotent
+  if (hasHostedAssistantVaultFileMedia(effect.payload)) {
+    return effect.payload.channel === "telegram";
+  }
+  return (explicitlyPrepareNonIdempotent
       || effect.payload.transportIdempotent
       || isHostedAssistantReactionOnlyEffect(effect)
       || hasHostedAssistantVoiceMemoMedia(effect.payload)
