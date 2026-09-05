@@ -1661,6 +1661,11 @@ Last verified: 2026-09-04
   instant. Only `accepted` and `duplicate` results ack one Queue
   message; all failed, missing, malformed, tampered, ambiguous, or unavailable
   results retain only that encrypted message for retry and DLQ recovery.
+  Batch completion logs distinguish source-readiness failures with bounded
+  reason counts derived only from the admission owners' fixed messages.
+  Unknown messages map to `unclassified`; logs retain no exception message,
+  provider payload, or event/account identity. These counters do not change
+  admission dispositions or create another retry owner.
   Current provider registration, connection epoch/status, consent, source
   lifecycle, and provider-application authority are revalidated at admission.
   When an authenticated canonical Junction source attribution targets an active
