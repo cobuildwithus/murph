@@ -82,6 +82,7 @@ import {
   HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS,
   prepareHostedCodexRuntimeEnvironment,
   projectHostedRuntimeProcessEnvironment,
+  resolveHostedCodexModelCatalogPath,
 } from "./hosted-runtime/codex-config.ts";
 import {
   HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
@@ -1954,8 +1955,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       nextWakeAt: workspaceRead.workspace?.nextWakeAt ?? null,
       nextWakeReason: workspaceRead.workspace?.nextWakeReason ?? null,
     });
-    const imageCodexModelCatalogJson =
-      process.env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]?.trim();
+    const imageCodexModelCatalogJson = resolveHostedCodexModelCatalogPath({
+      imageCatalogPath: process.env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV],
+      astraAllowed: workspaceRead.hostedAssistantAstraAllowed,
+    });
     const imageHealthCommonsPackageRoot =
       process.env["MURPH_HEALTH_COMMONS_PACKAGE_ROOT"]?.trim();
     const baseRuntimeEnv = {
@@ -5611,12 +5614,6 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             wakeInput.providerStartCriticalPath,
             "foregroundPassStartedAtMonotonicMs",
           );
-        const resolveForegroundRerunAssistantInputBatch = (
-          passResult: HostedWorkspaceRunnerResult,
-        ): HostedWorkspaceRunnerAssistantInputBatch | null =>
-          hostedAssistantInputBatchHasWork(passResult.latestAssistantInputBatch)
-            ? passResult.latestAssistantInputBatch
-            : null;
         const shouldContinueForegroundCausalPass = (
           passResult: HostedWorkspaceRunnerResult,
         ): boolean =>
@@ -5680,36 +5677,15 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           );
           return result;
         };
-
-        let passResult = await runSingleForegroundPass(
-          providerStartAtForegroundPass
-            ? {
-                ...wakeInput,
-                providerStartCriticalPath: providerStartAtForegroundPass,
-              }
-            : wakeInput,
-        );
-        // Generation can finish during a provider pass. Stage it before
-        // choosing the rerun batch so it enters the next Codex context ahead
-        // of conversation input captured by the live foreground watcher.
-        await flushImageGenerationWork();
-        // irreducible: "late foreground input during system work runs before idle checkpointing" fails without this.
-        let rerunAssistantInputBatch =
-          runtimeOwnerHandoffRequested
-            ? null
-            : prependReadyImageCompletionInputs(
-                resolveForegroundRerunAssistantInputBatch(passResult),
-              );
-        let continueForegroundCausalPass =
-          !runtimeOwnerHandoffRequested
-          && shouldContinueForegroundCausalPass(passResult);
-        const requestDueRuntimeOwnerHandoffIfForegroundIdle = (): void => {
+        const requestDueRuntimeOwnerHandoffIfForegroundIdle = (
+          passResult: HostedWorkspaceRunnerResult,
+          foregroundWorkPending: boolean,
+        ): void => {
           if (
-            runtimeOwnerHandoffRequested
-            || rerunAssistantInputBatch !== null
-            || continueForegroundCausalPass
-            || (input.request.processingMode ?? "default") !== "default"
-            || !hostedRuntimeForegroundIdleWakeRequestsOwnerHandoff({
+            !runtimeOwnerHandoffRequested
+            && !foregroundWorkPending
+            && (input.request.processingMode ?? "default") === "default"
+            && hostedRuntimeForegroundIdleWakeRequestsOwnerHandoff({
               assistantProgressed:
                 passResult.assistantPhaseResult?.progressed === true,
               nextWakeReason: pendingWake.nextWakeReason,
@@ -5717,18 +5693,37 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                 passResult.assistantPhaseResult
                   ?.runtimeProjectionCheckpointRequested === true,
             })
-            || !hostedRuntimeWakeIsDue(pendingWake.nextWakeAt)
+            && hostedRuntimeWakeIsDue(pendingWake.nextWakeAt)
           ) {
-            return;
+            runtimeOwnerHandoffRequested = true;
+            markIdleCheckpointTimerAfterDirtyWork();
           }
-          runtimeOwnerHandoffRequested = true;
-          markIdleCheckpointTimerAfterDirtyWork();
         };
-        requestDueRuntimeOwnerHandoffIfForegroundIdle();
-        while (
-          options.shutdownSignal?.aborted !== true
-          && (rerunAssistantInputBatch || continueForegroundCausalPass)
-        ) {
+        let singleWakeInput: typeof wakeInput = providerStartAtForegroundPass
+          ? { ...wakeInput, providerStartCriticalPath: providerStartAtForegroundPass }
+          : wakeInput;
+        while (true) {
+          const passResult = await runSingleForegroundPass(singleWakeInput);
+          // Stage generation completed during this pass ahead of conversation
+          // input captured by the live foreground watcher.
+          await flushImageGenerationWork();
+          // irreducible: "late foreground input during system work runs before idle checkpointing" fails without this.
+          const rerunAssistantInputBatch = runtimeOwnerHandoffRequested
+            ? null
+            : prependReadyImageCompletionInputs(
+                hostedAssistantInputBatchHasWork(passResult.latestAssistantInputBatch)
+                  ? passResult.latestAssistantInputBatch
+                  : null,
+              );
+          const continueForegroundCausalPass =
+            !runtimeOwnerHandoffRequested
+            && shouldContinueForegroundCausalPass(passResult);
+          const foregroundWorkPending =
+            rerunAssistantInputBatch !== null || continueForegroundCausalPass;
+          requestDueRuntimeOwnerHandoffIfForegroundIdle(passResult, foregroundWorkPending);
+          if (options.shutdownSignal?.aborted === true || !foregroundWorkPending) {
+            return passResult;
+          }
           const projectedPendingEffectsContinuationWakeKey =
             rerunAssistantInputBatch === null
             && continueForegroundCausalPass
@@ -5740,7 +5735,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               : null;
           // The mailbox-import boundary belongs only to the first foreground
           // pass. A rerun is a new causal pass and must not inherit that tick.
-          passResult = await runSingleForegroundPass({
+          singleWakeInput = {
             foregroundCausalOnly:
               rerunAssistantInputBatch === null
               && continueForegroundCausalPass,
@@ -5758,20 +5753,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             projectedAssistantWakeKey: projectedPendingEffectsContinuationWakeKey,
             requestIdKind: "checkpoint-interrupt",
             signal: wakeInput.signal,
-          });
-          await flushImageGenerationWork();
-          rerunAssistantInputBatch =
-            runtimeOwnerHandoffRequested
-              ? null
-              : prependReadyImageCompletionInputs(
-                  resolveForegroundRerunAssistantInputBatch(passResult),
-                );
-          continueForegroundCausalPass =
-            !runtimeOwnerHandoffRequested
-            && shouldContinueForegroundCausalPass(passResult);
-          requestDueRuntimeOwnerHandoffIfForegroundIdle();
+          };
         }
-        return passResult;
       };
       const runForegroundMailboxWakeIfWork = async (input: {
         includeReadyImageCompletion?: boolean;
@@ -8590,6 +8573,8 @@ async function withHostedMailboxProgressStatus(input: {
       systemMailboxProgress.handledThroughSeq,
     hostedMailboxSystemFirstPendingSeq:
       systemMailboxProgress.firstPendingSeq,
+    hostedMailboxSystemDeviceSyncContinuationSeqs:
+      systemMailboxProgress.deviceSyncContinuationSeqs,
   };
 }
 

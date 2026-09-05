@@ -131,6 +131,7 @@ export function classifyHostedSystemMailboxExecutionClass(input: {
 
 export interface HostedRuntimeEnsureProcessingRequest {
   assistantExecutionBlocked?: true;
+  conversationWorkPending?: true;
   orchestrationAttemptId: string;
   processingMode?: HostedRuntimeProcessingMode | null;
 }

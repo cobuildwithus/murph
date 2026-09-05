@@ -83,6 +83,8 @@ type RunnerContainerLocalStartupFailureStage = Exclude<
 function expectRunnerContainerStartupFailureObservation(input: {
   cleanupUnsettled: boolean;
   expectedElapsedMs?: number;
+  expectedOrchestrationAttemptId?: string;
+  expectedTimeoutMs?: number;
   forbiddenValues?: readonly string[];
   stage: RunnerContainerLocalStartupFailureStage;
 }): void {
@@ -100,6 +102,10 @@ function expectRunnerContainerStartupFailureObservation(input: {
   expect(observation).toEqual({
     component: "container",
     details: {
+      ...(input.expectedOrchestrationAttemptId === undefined
+        ? {}
+        : { orchestrationAttemptId: input.expectedOrchestrationAttemptId }),
+      runtimeStartupConfirmTimeoutMs: input.expectedTimeoutMs ?? expect.any(Number),
       runtimeStartupCleanupUnsettled: input.cleanupUnsettled,
       runtimeStartupFailureElapsedMs: expect.any(Number),
       runtimeStartupFailureStage: input.stage,
@@ -121,6 +127,12 @@ function expectRunnerContainerStartupFailureObservation(input: {
   expect(elapsedMs).toBeLessThanOrEqual(
     RUNNER_CONTAINER_STARTUP_FAILURE_ELAPSED_MAX_MS,
   );
+  const timeoutMs = details.runtimeStartupConfirmTimeoutMs;
+  expect(typeof timeoutMs).toBe("number");
+  if (typeof timeoutMs !== "number") {
+    throw new Error("Expected numeric startup confirmation timeout milliseconds.");
+  }
+  expect(timeoutMs).toBeGreaterThan(0);
   if (input.expectedElapsedMs !== undefined) {
     expect(elapsedMs).toBe(input.expectedElapsedMs);
   }
@@ -2370,6 +2382,7 @@ describe("RunnerContainer", () => {
   });
 
   it("classifies cold start and port-readiness failures", async () => {
+    const orchestrationAttemptId = "test-cold-start-timeout-correlation";
     const privateErrorText = "port wait failed with token=private-start-token";
     const startFailure = new Error(privateErrorText);
     const { container } = createContainerDouble({
@@ -2379,12 +2392,15 @@ describe("RunnerContainer", () => {
     });
 
     await expect(container.ensureReadyForProcessing({
+      orchestrationAttemptId,
       timeoutMs: 15_000,
       userId: "member_private_cold_start",
     })).rejects.toBe(startFailure);
 
     expectRunnerContainerStartupFailureObservation({
       cleanupUnsettled: false,
+      expectedOrchestrationAttemptId: orchestrationAttemptId,
+      expectedTimeoutMs: 15_000,
       forbiddenValues: [privateErrorText, "member_private_cold_start"],
       stage: "cold_start_or_ports",
     });

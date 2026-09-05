@@ -660,7 +660,7 @@ export const MURPH_ASSISTANT_CONFIGURATION_TOOL = {
   namespace: 'murph',
   name: 'assistant_configuration',
   description:
-    'Read the current hosted turn model, provider, and reasoning effort plus the choices available for the next turn, or directly save an explicit user-requested change. OpenAI and Venice are the supported core-reply providers when listed as available; specialized tools may still use their own managed providers. Internally, Luna is the most usage-efficient model, Terra is the default, and Sol requires an active paid Edge plan. Do not assume the member knows model names or introduce them unless the member asks; otherwise describe the usage-saving option as “a less capable model that uses less AI usage.” The lowest supported reasoning effort is low; these hosted models do not support none. Use action="read" whenever configuration facts are needed. Use action="update" only when the current user-sourced turn explicitly asks for the exact change. Never switch models, providers, or reasoning automatically because usage is low. Do not claim a change is saved unless the result says updated or unchanged. A saved update does not change the running turn and takes effect on the next turn.',
+    'Read the current hosted turn model, provider, and reasoning effort plus the choices available for the next turn, or directly save an explicit user-requested change. OpenAI and Venice are the supported core-reply providers when listed as available; specialized tools may still use their own managed providers. Internally, Luna is the most usage-efficient model, Terra is the default, Sol and Astra require an active paid Edge or Max plan, and Astra requires OpenAI. Do not assume the member knows model names or introduce them unless the member asks; otherwise describe the usage-saving option as “a less capable model that uses less AI usage.” The lowest supported reasoning effort is low; these hosted models do not support none. Use action="read" whenever configuration facts are needed. Use action="update" only when the current user-sourced turn explicitly asks for the exact change. Never switch models, providers, or reasoning automatically because usage is low. Do not claim a change is saved unless the result says updated or unchanged. A saved update does not change the running turn and takes effect on the next turn.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -717,7 +717,7 @@ export const MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL = {
           },
           model: {
             type: 'string',
-            enum: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
+            enum: HOSTED_ASSISTANT_PRODUCT_MODELS.filter((model) => model !== 'gpt-6-astra'),
             description: 'Required next-turn group room model.',
           },
         },

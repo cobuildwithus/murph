@@ -3,7 +3,7 @@ import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promise
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Cli } from 'incur'
-import { test } from 'vitest'
+import { test, vi } from 'vitest'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import {
   buildEffectiveSnapshotFromCommonsProtocol,
@@ -14,7 +14,7 @@ import { registerMeasurementCommands } from '../src/commands/measurement.js'
 import { registerProtocolCommands } from '../src/commands/protocol.js'
 import { registerReadCommands } from '../src/commands/read.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
-import { createIntegratedVaultServices } from '@murphai/vault-usecases'
+import { createIntegratedVaultServices, type VaultServices } from '@murphai/vault-usecases'
 import { createIntegratedInboxServices } from '@murphai/inbox-services'
 import { commonsProtocolRefSchema } from '@murphai/contracts'
 import { loadGeneratedHealthCommonsProtocolRunSpecs } from '@murphai/health-commons/runtime'
@@ -28,7 +28,7 @@ import {
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData } from './cli-test-helpers.js'
 
-function createSliceCli(input: { config?: boolean } = {}) {
+function createSliceCli(input: { config?: boolean; services?: VaultServices } = {}) {
   const cli = Cli.create('vault-cli', {
     ...(input.config
       ? {
@@ -42,7 +42,7 @@ function createSliceCli(input: { config?: boolean } = {}) {
     version: '0.0.0-test',
   })
   cli.use(incurErrorBridge)
-  const services = createIntegratedVaultServices()
+  const services = input.services ?? createIntegratedVaultServices()
 
   registerVaultCommands(cli, services, createIntegratedInboxServices())
   registerExperimentCommands(cli, services)
@@ -56,7 +56,7 @@ function createSliceCli(input: { config?: boolean } = {}) {
 
 async function runSliceCli<TData>(
   args: string[],
-  input: { config?: boolean } = {},
+  input: { config?: boolean; services?: VaultServices } = {},
 ): Promise<CliEnvelope<TData>> {
   const cli = createSliceCli(input)
   const output: string[] = []
@@ -2687,6 +2687,92 @@ test.sequential(
     }
   },
 )
+
+test.sequential('experiment edit preserves canonical write order and failure cutoffs', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-edit-order-'))
+  const services = createIntegratedVaultServices()
+  const run = (args: string[]) => runSliceCli(args, { services })
+  const edit = (options: string[]) => run([
+    'experiment', 'edit', 'dispatch-proof', ...options, '--vault', vaultRoot,
+  ])
+  const calls: { kind: string; hasStatus: boolean; status: string | undefined }[] = []
+  const update = services.core.updateExperiment.bind(services.core)
+  const apply = services.core.applyExperimentOnboarding.bind(services.core)
+  const updateSpy = vi.spyOn(services.core, 'updateExperiment').mockImplementation((input) => {
+    calls.push({
+      kind: input.runPlan ? 'hydrate' : 'scalar',
+      hasStatus: Object.hasOwn(input, 'status'),
+      status: input.status,
+    })
+    return update(input)
+  })
+  const applySpy = vi.spyOn(services.core, 'applyExperimentOnboarding').mockImplementation((input) => {
+    calls.push({ kind: 'structured', hasStatus: Object.hasOwn(input, 'status'), status: input.status })
+    return apply(input)
+  })
+  try {
+    assert.equal((await run(['init', '--vault', vaultRoot, '--timezone', 'UTC'])).ok, true)
+    const created = await run([
+      'experiment', 'start', 'dispatch-proof',
+      '--from-protocol', 'protocol_variant:dry-sauna/murph-finnish-standard-3x-week',
+      '--test-plan-id', 'rhr-21d', '--intervention-start', '2026-04-08',
+      '--onboarding-completed-at', '2026-04-07T15:00:00.000Z',
+      '--vault', vaultRoot,
+    ])
+    assert.equal(created.ok, true, created.ok ? undefined : created.error.message)
+
+    const scenarios = [
+      { flags: ['--title', 'Dispatch proof'], kinds: ['scalar'] },
+      { flags: ['--status', 'paused'], kinds: ['scalar'] },
+      { flags: ['--target-sessions', '8'], kinds: ['structured'] },
+      { flags: ['--target-sessions', '9', '--title', 'Mixed proof', '--status', 'active'], kinds: ['structured', 'scalar'] },
+      { flags: ['--hydrate-protocol-defaults'], kinds: ['hydrate'] },
+      { flags: ['--hydrate-protocol-defaults', '--title', 'Hydrated proof'], kinds: ['hydrate', 'scalar'] },
+      { flags: ['--hydrate-protocol-defaults', '--status', 'paused'], kinds: ['hydrate', 'structured'] },
+      { flags: ['--hydrate-protocol-defaults', '--analysis-note', 'Synthetic analysis note', '--title', 'Full proof', '--status', 'active'], kinds: ['hydrate', 'structured', 'scalar'] },
+    ]
+    for (const scenario of scenarios) {
+      calls.length = 0
+      assert.equal((await edit(scenario.flags)).ok, true, scenario.flags.join(' '))
+      assert.deepEqual(calls.map((call) => call.kind), scenario.kinds)
+      const scalar = calls.find((call) => call.kind === 'scalar')
+      if (scalar) {
+        assert.equal(scalar.hasStatus, scenario.kinds.length === 1)
+      }
+      for (const call of calls) {
+        if (call.kind !== 'scalar' && scenario.flags.includes('--status')) {
+          assert.equal(call.status, scenario.flags[scenario.flags.indexOf('--status') + 1])
+        }
+      }
+    }
+
+    calls.length = 0
+    assert.equal((await edit([])).ok, false)
+    assert.equal(calls.length, 0)
+
+    calls.length = 0
+    applySpy.mockRejectedValueOnce(new Error('Synthetic structured write failure'))
+    assert.equal((await edit(['--hydrate-protocol-defaults', '--target-sessions', '10', '--title', 'Must not write'])).ok, false)
+    assert.deepEqual(calls.map((call) => call.kind), ['hydrate'])
+
+    calls.length = 0
+    updateSpy.mockRejectedValueOnce(new Error('Synthetic hydration failure'))
+    assert.equal((await edit(['--hydrate-protocol-defaults', '--target-sessions', '11', '--title', 'Must not write'])).ok, false)
+    assert.equal(calls.length, 0)
+
+    calls.length = 0
+    updateSpy.mockRejectedValueOnce(new Error('Synthetic scalar write failure'))
+    assert.equal((await edit(['--target-sessions', '12', '--title', 'Must not write'])).ok, false)
+    assert.deepEqual(calls.map((call) => call.kind), ['structured'])
+    const shown = await services.query.showExperiment({ vault: vaultRoot, requestId: null, lookup: 'dispatch-proof' })
+    assert.equal(requireRecord(shown.entity.data.runPlan, 'run plan').targetSessions, 12)
+    assert.equal(shown.entity.title, 'Full proof')
+  } finally {
+    updateSpy.mockRestore()
+    applySpy.mockRestore()
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
 
 test.sequential(
   'experiment edit, checkpoint, and stop mutate the experiment page and append lifecycle events',

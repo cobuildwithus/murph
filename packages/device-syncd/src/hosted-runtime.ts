@@ -1006,11 +1006,13 @@ export function parseHostedExecutionDeviceSyncNoDataOutreachResponse(
         record.effectiveAfterDays,
         "Hosted device-sync no-data outreach response effectiveAfterDays",
       );
+  const minimumDays = record.setting === "default"
+    && record.sourceProviderSlug === "apple_health_kit" ? 3 : 5;
   if (
     (record.setting === "off" && effectiveAfterDays !== null)
     || (record.setting !== "off" && (
       effectiveAfterDays === null
-      || effectiveAfterDays < 5
+      || effectiveAfterDays < minimumDays
       || effectiveAfterDays > 30
     ))
   ) {

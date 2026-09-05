@@ -4,6 +4,14 @@ Last verified: 2026-08-31
 
 ## Accepted-Message Targeting
 
+Terminal Linq send recovery extends the Web-owned `HostedLinqDeliveryMessage`
+receipt owner with one attempt timestamp and a blinded original identity.
+It reuses current route/access and egress policy, retrieves the original
+provider message transiently, and resends only that failed message. It creates
+no assistant turn, outbox owner, scheduler, or durable message-body copy.
+`agent-docs/RELIABILITY.md` specifies the supported content, ordering, limits,
+and conservative behavior after an ambiguous retry.
+
 Exact-message replies and reactions share one accepted-message targeting
 primitive. The model sees only an existing `AssistantInputEvent.inputId` as a
 `Message ref` beside eligible accepted Linq iMessage input or Telegram input
@@ -1084,9 +1092,23 @@ native `spawn_agent.model` field and never mutates that saved configuration.
 Web exposes the native field only when its existing assistant-configuration
 resolution confirms that the current managed runtime is authorized for the
 full product-model catalog; missing authority and custom inference fail closed.
-The production image gives Codex a catalog containing exactly Luna, Terra, and
-Sol, so Codex's native spawn validation rejects other bundled models before a
-provider request.
+The production image defaults to a catalog containing exactly Luna, Terra, and
+Sol. Web separately derives Astra authority from the canonical available models
+and managed OpenAI provider; only an explicitly authorized workspace selects the
+expanded image-owned Astra catalog. Missing authority retains the three-model
+catalog, preserving Edge and group delegation while Codex's native validation
+rejects Astra before a provider request. Catalog selection changes the native
+launch key, so a warm process cannot retain an earlier catalog after access changes.
+Those entries force mixed Code Mode so the code executor and native
+`tool_search` remain available together; individual dynamic-tool
+`deferLoading` values still decide which schemas stay out of the initial
+model-visible surface. Code-only `ALL_TOOLS` still contains generated input
+declarations, but Codex
+0.151.0 renders the automation schema's action branches without combining their
+shared sibling properties, exposing fields such as `contextReferences` as
+`unknown`. Mixed mode provides native JSON-schema discovery around that lossy
+conversion; it does not repair the converter. Keep the structured schema and
+runtime validation authoritative rather than duplicating them in prompts.
 The runtime may request an update only from eligible user input in the active
 bounded exact-successor provider batch and
 forwards only that batch's terminal input id; inside the mutation transaction,
@@ -1614,9 +1636,11 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   readiness and atomic availability only; the per-member `UserRunner` persists
   the exact opaque stop target, binds it once, then owns the ordinary write
   fence, workspace restore, invocation, retention, and retirement. Standby
-  allocation is available only to a fence-free, OIDC-authenticated Web-direct
-  `default` request with a validated direct-attempt identity. Background modes
-  and Temporal requests retain the exact-user target. A foreground request that
+  allocation is available to fence-free `default` work from OIDC-authenticated
+  Web-direct ingress with a validated direct-attempt identity or an authenticated
+  request carrying `conversationWorkPending: true`. Temporal derives that fact
+  from current admitted conversation lag, not a wake pointer or generic default
+  processing. Background-only requests retain the exact-user target. A foreground request that
   has finished preempting an exact-user background child may claim the ready
   standby instead of reusing the child while it shuts down. A previously
   reserved standby is reconciled before this eligibility check so retries and

@@ -45,6 +45,9 @@ import {
   MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
 import {
+  HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
+} from '@murphai/hosted-execution/env'
+import {
   createAssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
 import {
@@ -94,6 +97,7 @@ import {
 } from '../src/assistant-ask.ts'
 import {
   MURPH_ANALYZE_VIDEO_TOOL,
+  MURPH_ASSISTANT_CONFIGURATION_TOOL,
   MURPH_ASSISTANT_STYLE_TOOL,
   MURPH_AUTOMATION_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
@@ -253,6 +257,9 @@ import type {
 import {
   createVersionedAutomationPatchFixture,
 } from './support/automation-live-fixture.ts'
+import {
+  writeHostedOpenAiMixedModeModelCatalogJson,
+} from './support/codex-model-catalog.ts'
 import { createDeferred } from './test-helpers.ts'
 
 const RUN_REAL_CODEX_E2E = process.env.MURPH_RUN_REAL_CODEX_E2E === '1'
@@ -817,6 +824,71 @@ describeRealCodex('real Codex voice memo attachment evidence e2e', () => {
   )
 })
 
+describeRealCodex('real Codex Astra configuration e2e', () => {
+  it('saves Astra exactly once for the next Edge query', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-astra-selection-'))
+    const updates: unknown[] = []
+    const snapshot: import('@murphai/hosted-execution/runtime-control').HostedRuntimeAssistantConfigurationSnapshot = {
+      availableModels: ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-6-astra'],
+      availableProviders: ['openai'] as const,
+      availableReasoningEfforts: ['low', 'medium', 'high', 'xhigh'] as const,
+      configurationAvailable: true,
+      dormantSolPreference: false,
+      model: 'gpt-5.6-terra' as const,
+      provider: 'openai' as const,
+      reasoningEffort: 'low' as const,
+      solAvailable: true,
+    }
+    try {
+      await initializeVault({ timezone: 'America/New_York', vaultRoot: workingDirectory })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildDirectConversationDeveloperInstructions(),
+        dynamicTools: [MURPH_ASSISTANT_CONFIGURATION_TOOL],
+        env: config.env,
+        excludeResumeTurns: true,
+        hostedToolContext: {
+          assistantConfigurationTool: {
+            async request(request) {
+              if (request.action === 'read') return { action: 'read', result: snapshot }
+              updates.push(request)
+              snapshot.model = request.model ?? snapshot.model
+              return { action: 'update', result: { ...snapshot, appliesAt: 'next_turn', requiredPlan: null, status: 'updated' } }
+            },
+          },
+          computerToolsAvailable: false,
+          currentAssistantInputId: () => 'ain_00000000000000000000000000000061',
+          currentAssistantTarget: () => ({ model: 'gpt-5.6-terra', provider: 'openai', reasoningEffort: 'low' }),
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => ({ filename: 'unused', status: 'denied' }),
+          vaultFileSendAvailable: false,
+        },
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: 'I am on the paid Edge plan. Please use GPT-6 Astra for my future queries. Keep my provider and reasoning settings as they are.',
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        vaultRoot: workingDirectory,
+        workingDirectory,
+      })
+      process.stdout.write(`[astra-selection-e2e] ${JSON.stringify({ reply: result.finalMessage, updates: updates.length })}\n`)
+      expect(updates).toEqual([{ action: 'update', assistantInputId: 'ain_00000000000000000000000000000061', model: 'gpt-6-astra' }])
+      expect(result.finalMessage).toMatch(/Astra/iu)
+      expect(result.finalMessage).toMatch(/next|future|going forward/iu)
+      expect(result.finalMessage).not.toMatch(/upgrade|payment|cannot|unable/iu)
+      expect(readCapabilityRoutingActions(result.jsonEvents).filter((action) => action.kind === 'command')).toEqual([])
+    } finally {
+      await stopWarmCodexAppServer('astra-selection-e2e-complete')
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 180_000)
+})
+
 describeRealCodex('real Codex child model selection e2e', () => {
   it(
     'runs a Luna child through native collaboration',
@@ -1117,7 +1189,7 @@ describeRealCodex('real Codex onboarding progressive disclosure e2e', () => {
           },
           prompt: [
             "I've already seen your welcome and I'm ready to continue.",
-            "I'd like Murph's help building a steadier evening routine.",
+            "I'd like help building a healthier sleep routine.",
           ].join(' '),
         })
         const actions = readCapabilityRoutingActions(result.jsonEvents)
@@ -2308,6 +2380,8 @@ describe('real Codex live fixture contracts', () => {
       'I don’t see a hosted group for this chat.',
       'This room isn’t connected to a hosted group yet.',
       'This chat does not currently have a Murph hosted group set up.',
+      'No Murph hosted group is configured for this room.',
+      'No hosted group has been created here.',
     ]) {
       expect(hasNoCurrentHostedGroupMeaning(text), text).toBe(true)
     }
@@ -2316,6 +2390,7 @@ describe('real Codex live fixture contracts', () => {
       'I could not determine the current group status.',
       'The hosted group has already been set up.',
       'There is no issue with the current hosted group.',
+      'No group is configured here. The hosted group is active.',
     ]) {
       expect(hasNoCurrentHostedGroupMeaning(text), text).toBe(false)
     }
@@ -2412,6 +2487,8 @@ describeRealCodex('real Codex workout capture default e2e', () => {
       const commandLogPath = path.join(workingDirectory, 'workout-commands.log')
 
       try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await cp(resolveAssistantSkillsRoot(), skillsRoot, { recursive: true })
         await initializeVault({
           title: 'Synthetic workout capture default proof',
           timezone: 'UTC',
@@ -2469,6 +2546,7 @@ describeRealCodex('real Codex workout capture default e2e', () => {
           dynamicTools: [],
           env: {
             ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
             PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
           },
           excludeResumeTurns: true,
@@ -2539,13 +2617,17 @@ describeRealCodex('real Codex workout capture default e2e', () => {
         expect(workouts[0]?.attributes.activityType).toBe('yoga')
         expect(reported.finalMessage).toMatch(/logged|saved|recorded/iu)
         expect(reported.finalMessage).toMatch(/yoga/iu)
-        expect(reported.finalMessage).not.toMatch(/how long|duration|\?/iu)
+        expect(reported.finalMessage).not.toMatch(/how long|\?/iu)
 
         expect(
-          commands.filter((command) => command.startsWith('workout defaults set ')),
+          commands.filter((command) =>
+            command.startsWith('workout defaults set ')
+            && !isRecordedVaultHelpCommand(command)
+          ),
         ).toHaveLength(1)
         const workoutAddCommands = commands.filter((command) =>
-          command.startsWith('workout add '),
+          command.startsWith('workout add ')
+          && !isRecordedVaultHelpCommand(command),
         )
         expect(workoutAddCommands).toHaveLength(1)
         expect(workoutAddCommands[0]).toMatch(/--type(?:=|\s)yoga\b/iu)
@@ -2587,7 +2669,7 @@ describeRealCodex('real Codex workout capture default e2e', () => {
         expect(explicitWorkouts.at(-1)?.attributes.activityType).toBe('swimming')
         expect(explicitWorkoutCommand).toMatch(/--duration(?:=|\s)35\b/u)
         expect(explicitWorkoutCommand).toMatch(/--type(?:=|\s)(?:swim|swimming)\b/iu)
-        expect(explicitReported.finalMessage).not.toMatch(/how long|duration|\?/iu)
+        expect(explicitReported.finalMessage).not.toMatch(/how long|\?/iu)
         expect(explicitReported.runtimeIssueInputs).toEqual([])
 
         const routeReported = await executeRealCodexAppServerTurn({
@@ -2598,6 +2680,9 @@ describeRealCodex('real Codex workout capture default e2e', () => {
         const routeVault = await readVaultRawTolerant(workingDirectory)
         const routeWorkouts = routeVault.events.filter(
           (event) => event.kind === 'activity_session',
+        )
+        const routeWorkout = routeWorkouts.find(
+          (event) => event.attributes.activityType === 'running',
         )
         const routeCommands = (await readFile(commandLogPath, 'utf8'))
           .trim()
@@ -2613,7 +2698,7 @@ describeRealCodex('real Codex workout capture default e2e', () => {
         process.stdout.write(
           `[workout-capture-default-e2e] ${JSON.stringify({
             durationMinutes:
-              routeWorkouts.at(-1)?.attributes.durationMinutes ?? null,
+              routeWorkout?.attributes.durationMinutes ?? null,
             finalMessage: routeReported.finalMessage,
             routeEstimateCommand: routeEstimateCommand ?? null,
             routeWorkoutCommand: routeWorkoutCommand ?? null,
@@ -2623,12 +2708,12 @@ describeRealCodex('real Codex workout capture default e2e', () => {
         )
 
         expect(routeWorkouts).toHaveLength(3)
-        expect(routeWorkouts.at(-1)?.attributes.durationMinutes).toBe(60)
+        expect(routeWorkout?.attributes.durationMinutes).toBe(60)
         expect(routeEstimateCommand).toBeDefined()
         expect(routeWorkoutCommand).toBeDefined()
         expect(routeWorkoutCommand).not.toMatch(/--duration(?:=|\s)/u)
         expect(routeWorkoutCommand).toMatch(/--type(?:=|\s)(?:run|running)\b/iu)
-        expect(routeReported.finalMessage).not.toMatch(/how long|duration|\?/iu)
+        expect(routeReported.finalMessage).not.toMatch(/how long|\?/iu)
         expect(routeReported.runtimeIssueInputs).toEqual([])
       } finally {
         await removeRealCodexTemporaryPaths([
@@ -3248,6 +3333,211 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
       }
     },
     360_000,
+  )
+
+  it(
+    'recovers a reference-free workout reminder and preserves subsequent set identity',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-reminder-workout-recovery-e2e-'),
+      )
+      const automationDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-reminder-definition-e2e-'),
+      )
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      const commandLogPath = path.join(workingDirectory, 'workout-commands.log')
+      const inspections: string[] = []
+
+      try {
+        await initializeVault({
+          title: 'Synthetic reminder recovery proof',
+          timezone: 'UTC',
+          vaultRoot: workingDirectory,
+        })
+        await initializeVault({
+          title: 'Synthetic hosted reminder storage',
+          timezone: 'UTC',
+          vaultRoot: automationDirectory,
+        })
+        await Promise.all([
+          ...(['strength-training', 'tracked-table'] as const).map((slug) =>
+            materializeAssistantSkill({ skillsRoot, slug }),
+          ),
+          materializeAssistantSkillAsset({
+            relativePath: 'shared/exercise-catalog-runtime.md',
+            skillsRoot,
+          }),
+          materializeRealWorkoutVaultCli({
+            binDirectory,
+            commandLogPath,
+            vaultRoot: workingDirectory,
+          }),
+        ])
+        const older = await startLiveWorkout({
+          exercises: [{ mode: 'bodyweight', name: 'Calf raise', setCount: 2 }],
+          name: 'Earlier practice',
+          startedAt: new Date(Date.now() - 86_400_000).toISOString(),
+          vault: workingDirectory,
+        })
+        const olderBefore = await showWorkoutRecord(workingDirectory, older.eventId)
+        const saved = await upsertAutomation({
+          continuityPolicy: 'preserve',
+          instructions: [
+            'The member requested standalone live-workout logging for Afternoon movement:',
+            'three sets of Bodyweight squat spread across the day.',
+            'Send the second-set cue and ask them to reply with the completed set number and repetitions.',
+          ].join(' '),
+          now: new Date('2030-01-15T10:00:00.000Z'),
+          route: {
+            channel: 'linq', deliveryTarget: 'synthetic-workout-reminder',
+            identityId: null, participantId: null,
+            threadId: 'synthetic-workout-reminder', threadIsDirect: true,
+          },
+          schedule: { kind: 'dailyLocal', localTime: '14:00', timeZone: 'UTC' },
+          slug: 'synthetic-afternoon-movement',
+          status: 'active',
+          tags: [],
+          title: 'Afternoon movement',
+          vaultRoot: automationDirectory,
+        })
+        expect(saved.record.contextReferences).toEqual([])
+        const dynamicTools = [MURPH_AUTOMATION_TOOL, MURPH_ATTACH_RESPONSE_CARD_TOOL]
+        const commonInput: Omit<CodexAppServerTurnInput, 'prompt'> = {
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome,
+          configOverrides: WORKOUT_E2E_CODEX_CONFIG_OVERRIDES,
+          developerInstructions: buildAssistantSystemPrompt({
+            assistantCliContract: [
+              'vault-cli workout start [name] --exercise <spec> --format json',
+              'vault-cli workout show <event-id> --format json',
+              'vault-cli workout set log <exercise> --workout-id <event-id> --set-order <n> --reps <n>',
+            ].join('\n'),
+            assistantContextSnapshotPrompt: null,
+            assistantHostedDeviceConnectAvailable: false,
+            assistantHostedDeviceConnectProviders: [],
+            assistantKnowledgeToolsAvailable: false,
+            channel: 'linq',
+            cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+            conversationScope: 'direct',
+            currentLocalDate: '2030-01-15',
+            currentTimeZone: 'UTC',
+            hostedRuntime: true,
+            modelBehaviorProfile: 'gpt5-agentic',
+            onboardingGuidance: false,
+            turnTrigger: null,
+          }),
+          dynamicTools,
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          },
+          excludeResumeTurns: true,
+          groupConversation: false,
+          hostedToolContext: {
+            automationTool: {
+              async request(request) {
+                expect(request).toEqual({ action: 'inspect', lookup: saved.record.automationId })
+                if (request.action !== 'inspect') throw new Error('Reminder writes are forbidden.')
+                inspections.push(request.lookup)
+                const record = await showAutomation({
+                  automationId: request.lookup, vaultRoot: automationDirectory,
+                })
+                if (!record) throw new Error('Expected the saved reminder.')
+                return {
+                  action: 'inspect', automationId: record.automationId,
+                  contextReferences: record.contextReferences,
+                  instructions: record.instructions, title: record.title,
+                  effectiveTimeZone: 'UTC', lookupId: record.slug,
+                  occurrenceProjection: { nextOccurrenceAt: '2030-01-16T14:00:00.000Z', status: 'resolved' },
+                  routeBinding: 'preserved', schedule: record.schedule,
+                  status: record.status, updatedAt: record.updatedAt,
+                }
+              },
+            },
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => { throw new Error('File sends are forbidden.') },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        }
+        const recovered = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: resolveAssistantProviderPrompt({
+            dynamicTools,
+            prompt: 'Set 2 done, 11 reps.',
+            providerConfig: normalizeAssistantProviderConfig({ provider: 'codex-cli' }),
+            turnContextPrompt: [
+              'Conversation context:',
+              'The assistant previously sent this provider-accepted reminder in the same private conversation:',
+              `- automationId: ${saved.record.automationId}`,
+              '- providerAcceptedAt: 2030-01-15T14:00:00.000Z',
+              'Text: Bodyweight squat, set 2. Reply when done.',
+              'No workout context reference was supplied with this reminder.',
+              'Use this context to interpret the reply; it does not prove any workout exists or that any earlier set was completed.',
+            ].join('\n'),
+            workingDirectory,
+          }),
+        })
+        const references = recovered.responseContextReferences
+        const eventId = references?.[0]?.entityId
+        process.stdout.write(`[reminder-workout-recovery-e2e] ${JSON.stringify({
+          reply: recovered.finalMessage, inspectionCount: inspections.length,
+          referenceCount: references?.length ?? 0,
+          commands: (await readFile(commandLogPath, 'utf8')).trim().split('\n'),
+        })}\n`)
+        expect(inspections.length).toBeGreaterThan(0)
+        expect(new Set(inspections)).toEqual(new Set([saved.record.automationId]))
+        expect(references).toHaveLength(1)
+        expect(references?.[0]?.entityKind).toBe('activity_session')
+        if (!eventId) throw new Error('Expected one recovered workout identity.')
+        expect(eventId).not.toBe(older.eventId)
+        const first = workoutSessionSchema.parse(
+          (await showWorkoutRecord(workingDirectory, eventId)).entity.data.workout,
+        )
+        expect(first.exercises).toHaveLength(1)
+        expect(first.exercises[0]?.sets.map((set) => set.reps)).toEqual([undefined, 11, undefined])
+        expect(recovered.finalMessage).not.toMatch(/which workout|what workout|\?/iu)
+
+        const continued = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          trustedContextReferences: references,
+          prompt: `Host-preserved contextReferences: ${JSON.stringify(references)}\nCurrent member message: Set 3 done, 9 reps.`,
+        })
+        const final = workoutSessionSchema.parse(
+          (await showWorkoutRecord(workingDirectory, eventId)).entity.data.workout,
+        )
+        const commands = (await readFile(commandLogPath, 'utf8')).trim().split('\n')
+          .filter((command) => !/(?:^|\s)(?:--help|-h|--schema)(?:\s|$)/u.test(command))
+        process.stdout.write(`[reminder-workout-continuation-e2e] ${JSON.stringify({
+          reply: continued.finalMessage,
+          loggedSets: final.exercises[0]?.sets.map((set) => set.reps ?? null),
+        })}\n`)
+        expect(final.exercises[0]?.sets.map((set) => set.reps)).toEqual([undefined, 11, 9])
+        expect(commands.filter((command) => command.startsWith('workout start '))).toHaveLength(1)
+        const writes = commands.filter((command) => command.startsWith('workout set log '))
+        expect(writes).toHaveLength(2)
+        for (const command of writes) expect(command).toContain(eventId)
+        expect(continued.responseContextReferences).toEqual(references)
+        expect(continued.finalMessage).not.toMatch(/which workout|what workout|\?/iu)
+        expect(await showWorkoutRecord(workingDirectory, older.eventId)).toEqual(olderBefore)
+        expect(await showAutomation({ automationId: saved.record.automationId, vaultRoot: automationDirectory }))
+          .toEqual(saved.record)
+      } finally {
+        await removeRealCodexTemporaryPaths([workingDirectory, automationDirectory, ...config.temporaryPaths])
+      }
+    },
+    720_000,
   )
 
   it(
@@ -7005,6 +7295,10 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           && action.tool === MURPH_GROUP_MEMBERSHIP_TOOL.name
         )
 
+        process.stdout.write(`[group-status-e2e] ${JSON.stringify({
+          requestCount: groupRequests.length,
+          reply: result.finalMessage,
+        })}\n`)
         expect(groupCall).toBeDefined()
         expect(groupRequests).toEqual([{ action: 'read_current' }])
         expect(
@@ -9383,7 +9677,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       targetAvailability: 'available' as const,
     },
   ])(
-    'gives truthful no-queue recovery when $label',
+    'keeps dynamic-tool handoff recovery truthful when $label',
     async ({ targetAvailability }) => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -9511,6 +9805,13 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           workingDirectory,
         })
 
+        process.stdout.write(
+          `[dynamic-tool-handoff-recovery] ${JSON.stringify({
+            scenario: targetAvailability,
+            requestCount: groupRequests.length,
+            reply: result.finalMessage.trim(),
+          })}\n`,
+        )
         const expectedRequestCount = targetAvailability === 'available' ? 2 : 1
         expect(groupRequests).toHaveLength(expectedRequestCount)
         expect(groupRequests[0]).toEqual({ action: 'list_memberships' })
@@ -9518,6 +9819,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           expect(groupRequests[1]).toMatchObject({
             action: 'handoff',
             membershipId: 'membership_former_trail_crew',
+            originAssistantInputId: 'input_group_unavailable_recovery',
           })
         }
         expect(result.finalMessage).toMatch(/Former Trail Crew/iu)
@@ -11051,6 +11353,85 @@ describeRealCodex('real Codex official weather-alert context e2e', () => {
 })
 
 describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
+  it.each([
+    { label: 'Apple Health', sourceProvider: 'apple_health_kit' },
+    { label: 'WHOOP', sourceProvider: 'whoop_v2' },
+  ])('stops $label no-data check-ins once from a private member request', async ({ label, sourceProvider }) => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-wearable-checkin-preference-e2e-'),
+    )
+    const requests: AssistantHostedDeviceToolRequest[] = []
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAdaptiveWearableDeveloperInstructions({
+          conversationScope: 'direct', scheduled: false,
+        }),
+        dynamicTools: [MURPH_DEVICE_TOOL],
+        env: config.env,
+        excludeResumeTurns: true,
+        hostedToolContext: {
+          computerToolsAvailable: false,
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          currentInvocationScope: () => ({
+            conversationScope: 'direct',
+            origin: {
+              assistantInputId: 'ain_00000000000000000000000000000026',
+              kind: 'accepted_input',
+              sessionId: 'session-wearable-preference',
+            },
+            originSessionId: 'session-wearable-preference',
+          }),
+          deviceTool: {
+            request: async (request) => {
+              requests.push(request)
+              if (request.action !== 'configure_no_data_outreach'
+                || request.sourceProvider !== sourceProvider
+                || request.mode !== 'off') {
+                throw new Error('Only the requested source check-in opt-out is supported.')
+              }
+              return {
+                action: 'configure_no_data_outreach',
+                effectiveAfterDays: null,
+                setting: 'off',
+                sourceProvider,
+                status: 'saved',
+              }
+            },
+          },
+          sendVaultFile: async () => { throw new Error('No file send is expected.') },
+          vaultFileSendAvailable: false,
+        },
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: `Please stop the ${label} no-data check-ins. Keep the connection and syncing on.`,
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+      process.stdout.write(`[wearable-checkin-opt-out-e2e] ${JSON.stringify({
+        actions: readCapabilityRoutingActions(result.jsonEvents),
+        finalMessage: result.finalMessage,
+      })}\n`)
+      expect(requests).toEqual([{
+        action: 'configure_no_data_outreach',
+        mode: 'off',
+        sourceProvider,
+      }])
+      expect(hasNoFurtherWearableCheckinMeaning(result.finalMessage), result.finalMessage).toBe(true)
+      expect(result.finalMessage).not.toMatch(/could not|cannot|can't|couldn't|unable|unconfirmed|not confirm/iu)
+      expect(result.finalMessage).not.toMatch(/(?:disconnected|disabled|stopped) (?:your )?(?:Apple Health|WHOOP|syncing)|force.quit/iu)
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 300_000)
+
   it(
     'maps private preferences and keeps unsupported, group, and stale-only turns quiet',
     async () => {
@@ -15138,6 +15519,8 @@ describeRealCodex('real Codex Habitat voice maintenance e2e', () => {
 })
 
 const PUBLIC_GOAL_SETUP_KEY = 'goal_template:improve-deep-sleep'
+const PUBLIC_GOAL_SLEEP_THROUGH_NIGHT_KEY =
+  'goal_template:sleep-through-the-night'
 
 interface PublicGoalSetupRecord {
   goalPhrase: string
@@ -15336,6 +15719,164 @@ type PublicGoalSetupAutomationSaveRequest = Extract<
 >
 
 describeRealCodex('real Codex public goal setup e2e', () => {
+  it(
+    'resolves an achievable sleep Goal before asking one setup question',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const publicGoal = await readPublicGoalSetupRecord(
+        PUBLIC_GOAL_SLEEP_THROUGH_NIGHT_KEY,
+      )
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-public-sleep-goal-routing-e2e-'),
+      )
+      const skillsRoot = path.join(workingDirectory, 'skills')
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const vaultRoot = path.join(workingDirectory, 'vault')
+      const commandLogPath = path.join(workingDirectory, 'goal-commands.log')
+
+      try {
+        await initializeVault({
+          timezone: 'America/New_York',
+          vaultRoot,
+        })
+        await Promise.all([
+          materializeAssistantSkill({ skillsRoot, slug: 'goal-setup' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'sleep-improvement' }),
+          materializeAssistantSkill({
+            skillsRoot,
+            slug: 'sleep-recovery-readiness',
+          }),
+          materializePublicGoalSetupVaultCli({
+            binDirectory,
+            commandLogPath,
+            vaultRoot,
+          }),
+        ])
+        const inheritedPath = normalizeEnvString(config.env.PATH)
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildPublicGoalSetupDeveloperInstructions(),
+          dynamicTools: [MURPH_AUTOMATION_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            PATH: inheritedPath
+              ? `${binDirectory}${path.delimiter}${inheritedPath}`
+              : binDirectory,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: publicGoal.startPrompt,
+          reasoningEffort: 'medium',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const commandAttempts = readGoalSetupVaultCommands(actions, {
+          successfulOnly: false,
+        })
+        const reply = result.finalMessage.trim()
+        process.stdout.write(
+          `[public-goal-setup-e2e] ${JSON.stringify({
+            reply,
+            scenario: 'sleep-through-the-night-routing',
+          })}\n`,
+        )
+
+        const publicGoalListRead = actions.find(
+          isSuccessfulPublicGoalListAction,
+        )
+        const publicGoalShowRead = actions.find((action) =>
+          isSuccessfulPublicGoalShowActionFor(
+            action,
+            'sleep-through-the-night',
+          )
+        )
+        const goalInventoryRead = actions.find(
+          isSuccessfulGoalInventoryReadAction,
+        )
+        const memoryRead = actions.find(isSuccessfulCompactMemoryReadAction)
+        const normalizeWhitespace = (value: string) =>
+          value.replace(/\s+/gu, ' ').trim()
+        const goalSetupSkillPathSuffix =
+          `${path.sep}goal-setup${path.sep}SKILL.md`
+        const goalSetupSkillReads = actions.filter(
+          (candidate): candidate is Extract<
+            CapabilityRoutingAction,
+            { kind: 'command' }
+          > => candidate.kind === 'command'
+            && candidate.ok
+            && candidate.command.includes(goalSetupSkillPathSuffix),
+        )
+        expect(
+          goalSetupSkillReads.length,
+          'goal-setup read actions before setup',
+        ).toBeGreaterThan(0)
+        const expectedGoalSetupSkill = await readFile(
+          path.join(skillsRoot, 'goal-setup', 'SKILL.md'),
+          'utf8',
+        )
+        expect(
+          normalizeWhitespace(
+            goalSetupSkillReads.map((action) => action.output).join('\n'),
+          ),
+          'goal-setup full-file read before setup',
+        ).toContain(normalizeWhitespace(expectedGoalSetupSkill))
+        expect(publicGoalListRead, 'exact public Goal search').toBeDefined()
+        expect(publicGoalListRead?.output).toContain(
+          PUBLIC_GOAL_SLEEP_THROUGH_NIGHT_KEY,
+        )
+        expect(publicGoalShowRead, 'exact public Goal read').toBeDefined()
+        expect(goalInventoryRead, 'all-status Goal inventory').toBeDefined()
+        expect(memoryRead, 'compact memory read').toBeDefined()
+        expect(commandAttempts.some(isGoalSetupMutationCommand)).toBe(false)
+        expect(actions.filter((action) => action.kind === 'dynamic')).toHaveLength(0)
+
+        const firstQuestion = readCompletedAgentMessages(result.jsonEvents)
+          .find((message) => message.text.includes('?'))
+        expect(firstQuestion, 'one grounded setup question').toBeDefined()
+        if (
+          !firstQuestion
+          || !publicGoalListRead
+          || !publicGoalShowRead
+          || !goalInventoryRead
+          || !memoryRead
+        ) {
+          throw new Error('Expected Goal grounding before the setup question.')
+        }
+        for (const groundingRead of [
+          publicGoalListRead,
+          publicGoalShowRead,
+          goalInventoryRead,
+          memoryRead,
+          ...goalSetupSkillReads,
+        ]) {
+          expect(groundingRead.eventIndex).toBeLessThan(firstQuestion.eventIndex)
+        }
+        expect(reply.match(/\?/gu) ?? []).toHaveLength(1)
+        expect(reply).toMatch(/sleep|night|waking|awakening/iu)
+        expect(reply).not.toMatch(
+          /Health Commons|commons goal|goal_template:|sha256:/iu,
+        )
+        expect(reply).not.toMatch(
+          /(?:no|did not|didn't|could not|couldn't).{0,40}(?:matching|match|entry|goal)/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
   it(
     'grounds from memory, persists finite support, and reuses one Goal package in a fresh session',
     async () => {
@@ -16337,7 +16878,9 @@ function buildPublicGoalSetupDeveloperInstructions(): string {
   })
 }
 
-async function readPublicGoalSetupRecord(): Promise<PublicGoalSetupRecord> {
+async function readPublicGoalSetupRecord(
+  key = PUBLIC_GOAL_SETUP_KEY,
+): Promise<PublicGoalSetupRecord> {
   const artifactPath = fileURLToPath(new URL(
     '../../health-commons/generated/web/browse/goals.json',
     import.meta.url,
@@ -16346,7 +16889,7 @@ async function readPublicGoalSetupRecord(): Promise<PublicGoalSetupRecord> {
   const goals = Array.isArray(artifact?.goals) ? artifact.goals : []
   const goal = goals
     .map((value) => readRecord(value))
-    .find((value) => value?.key === PUBLIC_GOAL_SETUP_KEY)
+    .find((value) => value?.key === key)
   const revision = readRecord(goal?.revision)
   const goalPhrase = readString(goal?.goalPhrase)
   const pageRevisionId = readString(revision?.pageRevisionId)
@@ -16362,13 +16905,13 @@ async function readPublicGoalSetupRecord(): Promise<PublicGoalSetupRecord> {
     || !workflowSpecRevisionId
   ) {
     throw new Error(
-      `Generated Goal index is missing ${PUBLIC_GOAL_SETUP_KEY}.`,
+      `Generated Goal index is missing ${key}.`,
     )
   }
 
   return {
     goalPhrase,
-    key: PUBLIC_GOAL_SETUP_KEY,
+    key,
     pageRevisionId,
     startPrompt,
     workflowSpecRevisionId,
@@ -16534,15 +17077,29 @@ function isSuccessfulGoalSetupEntityShowAction(
 function isSuccessfulPublicGoalShowAction(
   action: CapabilityRoutingAction,
 ): boolean {
+  return isSuccessfulPublicGoalShowActionFor(action, 'improve-deep-sleep')
+}
+
+function escapeGoalSetupRegularExpression(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
+}
+
+function isSuccessfulPublicGoalShowActionFor(
+  action: CapabilityRoutingAction,
+  slug: string,
+): boolean {
+  const escapedSlug = escapeGoalSetupRegularExpression(slug)
   return action.kind === 'command'
     && action.ok
     && (
       (
         action.command.includes('commons goal show')
-        && action.command.includes('improve-deep-sleep')
+        && action.command.includes(slug)
       )
-      || /"argv":\s*\[\s*"commons",\s*"goal",\s*"show",\s*"(?:goal_template:)?improve-deep-sleep"/u
-        .test(action.output)
+      || new RegExp(
+        `"argv":\\s*\\[\\s*"commons",\\s*"goal",\\s*"show",\\s*"(?:goal_template:)?${escapedSlug}"`,
+        'u',
+      ).test(action.output)
     )
 }
 
@@ -17013,8 +17570,13 @@ describeRealCodex('real Codex repeated-set resolution e2e', () => {
       const result = await runRepeatedSetResolutionProbe('ambiguous')
       const mutations = result.commandLog.filter((command) =>
         /(?:experiment session log|experiment edit|regimen (?:add|edit)|automation (?:add|create|edit|reconcile))/u.test(command)
+        && !isRecordedVaultHelpCommand(command)
       )
 
+      process.stdout.write(`[repeated-set-ambiguity-e2e] ${JSON.stringify({
+        mutationCount: mutations.length,
+        reply: result.finalMessage,
+      })}\n`)
       expect(mutations).toEqual([])
       expect(result.finalMessage).toMatch(/Movement Alpha|Movement Beta|exercise|target/iu)
       expect(result.finalMessage.match(/\?/gu) ?? []).toHaveLength(1)
@@ -21478,6 +22040,272 @@ describeRealCodex('real Codex Kernel browser continuation e2e', () => {
 })
 
 describeRealCodex('real Codex app-server cache usage e2e', () => {
+  it.each([
+    { guided: true, journey: 'prescribed schema discovery' },
+    { guided: false, journey: 'ordinary reminder request' },
+  ])(
+    'mixed Terra saves one referenced rehabilitation reminder: $journey',
+    async ({ guided }) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-mixed-tool-search-reminder-e2e-'),
+      )
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLog = path.join(workingDirectory, 'vault-commands.log')
+      const conditionId = 'condition_rehabilitation_knee'
+      const codexCommand =
+        normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+        ?? path.resolve(
+          path.dirname(fileURLToPath(import.meta.url)),
+          '../node_modules/.bin/codex',
+        )
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+      let isolatedCodexHome: string | null = null
+      const isolatedCodexHomePaths: string[] = []
+
+      try {
+        await mkdir(binDirectory, { recursive: true })
+        await writeFile(
+          path.join(binDirectory, 'vault-cli'),
+          [
+            '#!/bin/sh',
+            'set -eu',
+            `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(commandLog)}`,
+            'case "$*" in',
+            `  "condition show ${conditionId} --format json") printf '%s\\n' ${quoteNutritionShellLiteral(JSON.stringify({
+              entity: {
+                data: { clinicalStatus: 'active' },
+                id: conditionId,
+                kind: 'condition',
+                title: 'Knee rehabilitation',
+              },
+              vault: 'synthetic-vault',
+            }))} ;;`,
+            '  *) printf \'unsupported mixed-mode fixture command: %s\\n\' "$*" >&2; exit 64 ;;',
+            'esac',
+            '',
+          ].join('\n'),
+          { encoding: 'utf8', mode: 0o700 },
+        )
+        const materializedCodexHome =
+          await materializeRealCodexHostedPermissionHome(config, {
+            trustedProjectRoot: workingDirectory,
+          })
+        isolatedCodexHome = materializedCodexHome.codexHome
+        isolatedCodexHomePaths.push(...materializedCodexHome.temporaryPaths)
+        const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
+          codexCommand,
+          directory: workingDirectory,
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand,
+          codexHome: isolatedCodexHome,
+          developerInstructions: buildAssistantSystemPrompt({
+            assistantCliContract: guided ? [
+              'Use vault-cli for canonical member data.',
+              `For this exact regression, read the condition once with: vault-cli condition show ${conditionId} --format json`,
+              'After that read, use native tool_search to load the deferred murph.automation schema before the first automation call.',
+              'Do not inspect ALL_TOOLS or invoke murph.automation through exec.',
+              'Call the loaded automation dynamic tool directly and at most once.',
+            ].join('\n') : [
+              'Use vault-cli for canonical member data.',
+              'Read a condition with: vault-cli condition show <condition-id> --format json',
+            ].join('\n'),
+            assistantContextSnapshotPrompt: null,
+            assistantHostedAutomationAvailable: true,
+            assistantHostedDeviceConnectAvailable: false,
+            assistantHostedDeviceConnectProviders: [],
+            assistantKnowledgeToolsAvailable: false,
+            channel: 'linq',
+            cliAccess: {
+              rawCommand: 'vault-cli',
+              setupCommand: 'murph',
+            },
+            conversationScope: 'direct',
+            currentLocalDate: '2026-09-04',
+            currentTimeZone: 'America/New_York',
+            hostedRuntime: true,
+            modelBehaviorProfile: 'gpt5-agentic',
+            onboardingGuidance: false,
+            turnTrigger: null,
+          }),
+          dynamicTools: [MURPH_AUTOMATION_TOOL],
+          env: {
+            ...config.env,
+            [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+            PATH: [binDirectory, config.env.PATH]
+              .filter((value): value is string => Boolean(value))
+              .join(path.delimiter),
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            automationTool: {
+              request: async (request) => {
+                if (request.action !== 'save') {
+                  throw new Error('Expected one automation save request.')
+                }
+                automationRequests.push(request)
+                return {
+                  action: 'save',
+                  automationId: 'automation_rehabilitation_knee',
+                  contextReferences: request.contextReferences,
+                  created: true,
+                  effectiveTimeZone: 'America/New_York',
+                  lookupId: 'rehabilitation-knee-reminder',
+                  occurrenceProjection: {
+                    nextOccurrenceAt: '2026-09-05T13:00:00.000Z',
+                    status: 'resolved' as const,
+                  },
+                  routeBinding: 'current_conversation',
+                  schedule: request.schedule,
+                  status: 'active',
+                  updatedAt: '2026-09-04T12:00:00.000Z',
+                }
+              },
+            },
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: 'gpt-5.6-terra',
+          modelProvider: config.modelProvider,
+          prompt: [
+            `My knee rehabilitation condition is saved as ${conditionId}.`,
+            'Read that exact condition, then save a reminder here every day at 9:00 AM',
+            'to complete my knee rehabilitation exercises.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+
+        const commands = (await readFile(commandLog, 'utf8'))
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const rolloutEvidence = guided
+          ? await readMixedToolSearchRolloutEvidence({
+            codexHome: isolatedCodexHome,
+            conditionId,
+          })
+          : null
+        const conditionReads = actions.filter((action) =>
+          action.kind === 'command'
+          && action.command.includes(
+            `vault-cli condition show ${conditionId} --format json`,
+          )
+        )
+        const automationCalls = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_AUTOMATION_TOOL.name
+        )
+
+        expect(commands).toEqual([
+          `condition show ${conditionId} --format json`,
+        ])
+        expect(conditionReads).toHaveLength(1)
+        if (rolloutEvidence) {
+          const toolSearches = rolloutEvidence.toolSearchCalls
+          expect(toolSearches).toHaveLength(1)
+          expect(JSON.stringify(toolSearches[0]?.argumentsValue)).toMatch(
+            /automation|reminder|context/iu,
+          )
+          expect(toolSearches[0]?.lineIndex).toBeGreaterThan(
+            rolloutEvidence.conditionOutputLineIndex,
+          )
+          const automationSearchTool = rolloutEvidence.toolSearchOutputTools
+            .flatMap((candidate) => {
+              const tool = readRecord(candidate)
+              if (tool?.name === 'automation') {
+                return [tool]
+              }
+              return Array.isArray(tool?.tools)
+                ? tool.tools.map(readRecord).filter((item) => item !== null)
+                : []
+            })
+            .find((tool) => tool.name === 'automation')
+          expect(automationSearchTool).not.toBeUndefined()
+          const automationParameters = readRecord(automationSearchTool?.parameters)
+          const automationProperties = readRecord(automationParameters?.properties)
+          const contextReferences = readRecord(
+            automationProperties?.contextReferences,
+          )
+          const contextReferenceItem = readRecord(contextReferences?.items)
+          expect(contextReferences).toMatchObject({
+            items: {
+              additionalProperties: false,
+              required: expect.arrayContaining(['entityKind', 'entityId']),
+              type: 'object',
+            },
+            type: 'array',
+          })
+          expect(readRecord(contextReferenceItem?.properties)).toMatchObject({
+            entityId: { type: 'string' },
+            entityKind: { type: 'string' },
+          })
+          expect(rolloutEvidence.automationCallLineIndex).toBeGreaterThan(
+            toolSearches[0]?.lineIndex ?? Number.POSITIVE_INFINITY,
+          )
+        }
+        expect(automationCalls).toHaveLength(1)
+        expect(automationCalls[0]).toMatchObject({ success: true })
+        expect(actions.indexOf(automationCalls[0]!)).toBeGreaterThan(
+          actions.indexOf(conditionReads[0]!),
+        )
+        expect(automationRequests).toHaveLength(1)
+        const savedRequest = automationRequests[0]
+        if (savedRequest?.action !== 'save') {
+          throw new Error('Expected one saved rehabilitation reminder.')
+        }
+        expect(savedRequest.contextReferences).toEqual([{
+          entityId: conditionId,
+          entityKind: 'condition',
+        }])
+        expect(['gpt-5.6-luna', 'gpt-5.6-terra']).toContain(
+          savedRequest.assistantTargetOverride?.model,
+        )
+        if (savedRequest.schedule.kind === 'dailyLocal') {
+          expect(savedRequest.schedule.localTime).toBe('09:00')
+        } else if (savedRequest.schedule.kind === 'cron') {
+          expect(savedRequest.schedule.expression).toMatch(/^0\s+9\s+/u)
+        } else {
+          throw new Error('Expected one daily wall-clock reminder.')
+        }
+        expect(result.finalMessage).toMatch(
+          /active|created|saved|scheduled|set(?: up)?|will remind/iu,
+        )
+        expect(result.finalMessage).toMatch(
+          /rehab|rehabilitation|knee/iu,
+        )
+        expect(result.finalMessage).toMatch(/9(?::00)?\s*(?:a\.?m\.?|in the morning)/iu)
+        expect(result.finalMessage).not.toMatch(/schema|tool_search|entityKind|entityId/iu)
+        process.stdout.write(
+          `[mixed-tool-search-reminder-e2e] ${JSON.stringify({
+            automationCalls: automationCalls.length,
+            canonicalReads: conditionReads.length,
+            reply: result.finalMessage.trim(),
+            journey: guided ? 'prescribed schema discovery' : 'ordinary reminder request',
+            toolSearches: rolloutEvidence?.toolSearchCalls.length ?? 'not prescribed',
+          })}\n`,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...isolatedCodexHomePaths,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
   it(
     'loads each moved capability owner before its representative tool call',
     async () => {
@@ -25671,9 +26499,13 @@ describeRealCodex('real Codex steered acknowledgement no-reply e2e', () => {
       expect(result.finalAction).toEqual({ kind: 'none' })
       expect(result.finalActionExplicit).toBe(true)
       expect(result.finalMessage).toBe('')
+      expect(result.providerAuthoredFinalMessage).toBe('')
+      expect(result.transcriptMessage).toBeNull()
+      expect(result.responseDeliveryContextOrdinal).toBe(1)
       expect(result.responseMedia).toEqual([])
       expect(result.responseCard).toBeNull()
       expect(finishAttempts).toHaveLength(1)
+      expect(readDynamicToolAttempts(result.jsonEvents)).toEqual(finishAttempts)
     } finally {
       await removeRealCodexTemporaryPaths([
         workingDirectory,
@@ -27437,6 +28269,24 @@ async function runRealPriorMealNutritionRecovery(input: {
 }
 
 describe('recorded vault command parsing', () => {
+  it('distinguishes help inspection from actual writes', () => {
+    for (const command of [
+      'workout add --help',
+      'workout defaults set --help --format json',
+      'experiment session log -h',
+    ]) {
+      expect(isRecordedVaultHelpCommand(command), command).toBe(true)
+    }
+    for (const command of [
+      'workout add Mobility --type yoga',
+      'workout defaults set --duration 45',
+      'experiment session log experiment_example --set 2',
+      'workout add Helpdesk break --type walking',
+    ]) {
+      expect(isRecordedVaultHelpCommand(command), command).toBe(false)
+    }
+  })
+
   it('normalizes global format options and flattens batch commands', () => {
     expect(expandRecordedVaultCommands([
       '--format json meal edit meal_example --nutrition-source inherited',
@@ -27449,6 +28299,12 @@ describe('recorded vault command parsing', () => {
     ])
   })
 })
+
+function isRecordedVaultHelpCommand(command: string): boolean {
+  return command.split(/\s+/u).some((token) =>
+    token === '--help' || token === '-h'
+  )
+}
 
 function recordedVaultCommandStartsWith(
   commands: readonly string[],
@@ -32628,11 +33484,15 @@ function buildRoutinePresentationDeveloperInstructions(input: {
 
 function hasNoCurrentHostedGroupMeaning(text: string): boolean {
   const normalized = text.replaceAll(/\s+/gu, ' ').trim()
+  const withoutAbsentGroupSubjects = normalized.replaceAll(
+    /\bno (?:Murph )?(?:hosted )?group\b/giu,
+    'absent subject',
+  )
   const reportsPresentGroup = [
     /\b(?:hosted )?group\b[^.!?\n]{0,40}\b(?:is|remains) (?:active|available|configured|existing|set up)\b/iu,
     /\b(?:hosted )?group\b[^.!?\n]{0,40}\b(?:exists|has (?:already )?been (?:configured|created|set up))\b/iu,
     /\bno (?:issue|problem|concern)\b[^.!?\n]{0,48}\b(?:with )?(?:the )?(?:current |active |existing )?(?:hosted )?group\b/iu,
-  ].some((pattern) => pattern.test(normalized))
+  ].some((pattern) => pattern.test(withoutAbsentGroupSubjects))
   if (reportsPresentGroup) {
     return false
   }
@@ -32833,6 +33693,101 @@ interface DynamicToolAttempt {
   argumentsValue: Record<string, unknown>
   eventIndex: number
   tool: string
+}
+
+interface RolloutToolSearchCall {
+  argumentsValue: Record<string, unknown>
+  lineIndex: number
+}
+
+interface MixedToolSearchRolloutEvidence {
+  automationCallLineIndex: number
+  conditionOutputLineIndex: number
+  toolSearchCalls: RolloutToolSearchCall[]
+  toolSearchOutputTools: unknown[]
+}
+
+async function readMixedToolSearchRolloutEvidence(input: {
+  codexHome: string
+  conditionId: string
+}): Promise<MixedToolSearchRolloutEvidence> {
+  const rolloutPaths = await listCodexRolloutPaths(
+    path.join(input.codexHome, 'sessions'),
+  )
+  if (rolloutPaths.length !== 1) {
+    throw new Error(
+      `Expected one isolated Codex rollout, received ${rolloutPaths.length}.`,
+    )
+  }
+  const rollout = await readFile(
+    rolloutPaths[0] ?? '',
+    'utf8',
+  )
+  const responseItems = rollout
+    .split('\n')
+    .flatMap((line, lineIndex) => {
+      if (line.trim() === '') {
+        return []
+      }
+      const record = readRecord(JSON.parse(line))
+      if (record?.type !== 'response_item') {
+        return []
+      }
+      const payload = readRecord(record.payload)
+      return payload ? [{ lineIndex, payload }] : []
+    })
+  const toolSearchCalls = responseItems.flatMap<RolloutToolSearchCall>(
+    ({ lineIndex, payload }) => payload.type === 'tool_search_call'
+      ? [{
+          argumentsValue: readArgumentsRecord(payload.arguments),
+          lineIndex,
+        }]
+      : [],
+  )
+  const conditionOutputLineIndex = responseItems.find(
+    ({ payload }) =>
+      payload.type === 'function_call_output'
+      && JSON.stringify(payload.output).includes(input.conditionId),
+  )?.lineIndex
+  const automationCallLineIndex = responseItems.find(
+    ({ payload }) =>
+      payload.type === 'function_call'
+      && payload.name === MURPH_AUTOMATION_TOOL.name,
+  )?.lineIndex
+  if (
+    conditionOutputLineIndex === undefined
+    || automationCallLineIndex === undefined
+  ) {
+    throw new Error(
+      'Codex rollout was missing the condition output or automation call.',
+    )
+  }
+  return {
+    automationCallLineIndex,
+    conditionOutputLineIndex,
+    toolSearchCalls,
+    toolSearchOutputTools: responseItems.flatMap(({ payload }) =>
+      payload.type === 'tool_search_output' && Array.isArray(payload.tools)
+        ? payload.tools
+        : []
+    ),
+  }
+}
+
+async function listCodexRolloutPaths(directory: string): Promise<string[]> {
+  const entries = await readdir(directory, { withFileTypes: true })
+  const paths = await Promise.all(entries.map(async (entry) => {
+    const entryPath = path.join(directory, entry.name)
+    if (entry.isDirectory()) {
+      return listCodexRolloutPaths(entryPath)
+    }
+    return entry.isFile()
+      && entry.name.startsWith('rollout-')
+      && entry.name.endsWith('.jsonl')
+      ? [entryPath]
+      : []
+  }))
+  return paths.flat().sort()
 }
 
 function readDynamicToolAttempts(

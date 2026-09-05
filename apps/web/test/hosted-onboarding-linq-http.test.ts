@@ -24,6 +24,8 @@ import {
   getHostedLinqChatSummary,
   getHostedLinqReactionTargetMessage,
   readHostedLinqExplicitGroupDisplayName,
+  readHostedLinqFailedMessage,
+  resendHostedLinqMessage,
   sendHostedLinqReactionBoundChatMessage,
   shareHostedLinqContactCard,
   startHostedLinqChatTypingIndicator,
@@ -31,6 +33,48 @@ import {
 
 const originalFetch = globalThis.fetch;
 const describe = baseDescribe.sequential;
+
+describe("terminal retry provider boundary", () => {
+  it("retrieves the exact message and resends the supplied body in the same chat", async () => {
+    const original = { id: "retry-original", chat_id: "retry-chat", delivery_status: "failed" };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(createJsonResponse(original, 200))
+      .mockResolvedValueOnce(createJsonResponse({
+        chat_id: "retry-chat", message: { id: "retry-replacement" },
+      }, 201));
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await readHostedLinqFailedMessage("retry-original")).toEqual(original);
+    const message = {
+      idempotency_key: "terminal-retry:synthetic",
+      parts: [{ type: "text" as const, value: "The document is ready." }],
+    };
+    expect(await resendHostedLinqMessage({ chatId: "retry-chat", message })).toEqual({
+      chatId: "retry-chat", messageId: "retry-replacement",
+    });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      DEFAULT_LINQ_API_BASE_URL + "/messages/retry-original",
+    );
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe(
+      DEFAULT_LINQ_API_BASE_URL + "/chats/retry-chat/messages",
+    );
+    expect(readJsonRequestBody(fetchMock.mock.calls[1]?.[1])).toEqual({ message });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not let SDK retries multiply the single resend on a server error", async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(createJsonResponse({ error: { code: 4001 } }, 500)));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(resendHostedLinqMessage({
+      chatId: "retry-chat",
+      message: {
+        idempotency_key: "terminal-retry:synthetic",
+        parts: [{ type: "text", value: "The document is ready." }],
+      },
+    })).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
 
 beforeEach(() => {
   linqRuntimeConfig.apiBaseUrl = DEFAULT_LINQ_API_BASE_URL;

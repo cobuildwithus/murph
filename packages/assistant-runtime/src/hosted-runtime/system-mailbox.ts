@@ -1121,6 +1121,7 @@ async function retainHostedDeviceSyncSystemMailboxItem(input: {
         if (index === retainedIndex) {
           return {
             ...input.item,
+            deviceSyncContinuationOwner: true,
             lastErrorCode: null,
             lastErrorMessage: null,
             nextAttemptAt: input.nextAttemptAt,
@@ -1396,6 +1397,7 @@ function hostedSystemMailboxPendingItemsMatchForClaim(
   right: HostedSystemMailboxPendingItem,
 ): boolean {
   return left.itemId === right.itemId
+    && left.deviceSyncContinuationOwner === right.deviceSyncContinuationOwner
     && left.attemptCount === right.attemptCount
     && left.lastAttemptAt === right.lastAttemptAt
     && left.mailboxDedupeKey === right.mailboxDedupeKey
