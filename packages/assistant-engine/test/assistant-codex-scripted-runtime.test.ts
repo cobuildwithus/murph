@@ -7015,6 +7015,7 @@ if (!tool) {
       const scenario = await prepareScriptedTurnScenario()
       scenario.stub.captureProviderRequestDiagnostics()
       scenario.stub.queue(
+        { toolSearchCall: { query: 'murph attach_response_card private structured compact_table daily_nutrition', limit: 1 } },
         {
           functionCall: {
             arguments: { card },
@@ -7036,9 +7037,16 @@ if (!tool) {
         scenario.stub.requestSummariesSinceBaseline()[0]
           ?.providerRequestDiagnostics,
       ).toMatchObject({
-        includesResponseCardCompactTableShape: true,
-        includesResponseCardNutritionV2Shape: true,
+        includesResponseCardCompactTableShape: false,
+        includesResponseCardNutritionV2Shape: false,
       })
+      const discovered = scenario.stub.requestSummariesSinceBaseline()[1]?.toolSearchOutputTools
+      expect(JSON.stringify(discovered)).toContain('compact_table')
+      expect(JSON.stringify(discovered)).toContain('daily_nutrition')
+      expect(JSON.stringify(discovered)).toContain(
+        'meal totals --from <date> --to <same-date> --resolve-goals --format json',
+      )
+      expect(JSON.stringify(discovered)).not.toContain('goal list --status active')
       expect(result.runtimeIssueInputs).toEqual([])
       if ('workout' in card) {
         expect(result.responseCard).toMatchObject({
@@ -8273,22 +8281,19 @@ text(JSON.stringify(result));
       serviceTier: null,
       threadId: seeded.threadId,
     })
-    // Usage attribution must never regress to the zero-row production failure:
-    // Codex 0.135 does not expose a compact-specific usage event, so the engine
-    // records a nonzero lower-bound estimate from the pre-compact thread size.
+    // The pinned runtime exposes the scripted provider's exact usage through
+    // raw completion events for this opted-in warm thread.
     expect(compacted.kind).toBe('compacted')
     if (compacted.kind !== 'compacted') {
       throw new Error('Expected idle compaction to complete.')
     }
     expect(compacted.usage).toMatchObject({
-      cachedInputTokens: null,
-      inputTokens: expect.any(Number),
-      outputTokens: null,
-      source: 'estimated',
-      totalTokens: expect.any(Number),
+      cachedInputTokens: 0,
+      inputTokens: 12,
+      outputTokens: 7,
+      source: 'measured',
+      totalTokens: 19,
     })
-    expect(compacted.usage.inputTokens).toBeGreaterThan(0)
-    expect(compacted.usage.totalTokens).toBeGreaterThan(0)
 
     // Repeat guard: a successful compact clears the thread vitals, so an
     // immediate second idle pass must skip without provider traffic instead

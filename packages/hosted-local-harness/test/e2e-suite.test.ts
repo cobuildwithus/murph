@@ -1,3 +1,7 @@
+import * as fs from "node:fs/promises";
+import { execFile } from "node:child_process";
+import path from "node:path";
+import { tmpdir } from "node:os";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   ForegroundCommandSignalError,
@@ -98,6 +102,77 @@ function emitCapturedSignal(
 }
 
 describe("hosted-local E2E suite preparation", () => {
+  test("prepares stale Worker imports once before every no-bundle scenario", async () => {
+    const fixture = await fs.mkdtemp(path.join(tmpdir(), "hosted-local-workspace-artifacts-"));
+    const packageDir = path.join(fixture, "packages", "hosted-execution");
+    const scenarioArtifacts: string[] = [];
+    try {
+      await fs.mkdir(path.join(packageDir, "src"), { recursive: true });
+      await fs.mkdir(path.join(packageDir, "dist"), { recursive: true });
+      await fs.mkdir(path.join(fixture, "apps", "cloudflare"), { recursive: true });
+      await fs.writeFile(path.join(fixture, "pnpm-workspace.yaml"), "packages:\n  - packages/*\n  - apps/*\n");
+      await fs.writeFile(path.join(fixture, "package.json"), JSON.stringify({ private: true }));
+      await fs.writeFile(path.join(fixture, "apps", "cloudflare", "package.json"), JSON.stringify({
+        name: "@murphai/cloudflare-runner",
+        dependencies: { "@murphai/hosted-execution": "workspace:*" },
+        devDependencies: { "@murphai/dev-only-fixture": "workspace:*" },
+        scripts: { build: "node -e 'process.exit(1)'" },
+      }));
+      await fs.writeFile(path.join(packageDir, "package.json"), JSON.stringify({
+        name: "@murphai/hosted-execution",
+        dependencies: { "@murphai/runtime-state": "workspace:*" },
+        scripts: { build: "node build.cjs" },
+      }));
+      const transitiveDir = path.join(fixture, "packages", "runtime-state");
+      await fs.mkdir(transitiveDir, { recursive: true });
+      await fs.writeFile(path.join(transitiveDir, "package.json"), JSON.stringify({
+        name: "@murphai/runtime-state",
+        scripts: { build: "node build.cjs" },
+      }));
+      await fs.writeFile(path.join(transitiveDir, "build.cjs"), "require('node:fs').writeFileSync('built.cjs', 'currentState');\n");
+      await fs.writeFile(path.join(transitiveDir, "built.cjs"), "staleState");
+      for (const name of ["dev-only-fixture", "unrelated-fixture"]) {
+        const dir = path.join(fixture, "packages", name);
+        await fs.mkdir(dir, { recursive: true });
+        await fs.writeFile(path.join(dir, "package.json"), JSON.stringify({
+          name: `@murphai/${name}`,
+          scripts: { build: "node -e 'process.exit(1)'" },
+        }));
+      }
+      await fs.writeFile(path.join(packageDir, "build.cjs"), [
+        "const fs = require('node:fs');",
+        "if (fs.readFileSync('../runtime-state/built.cjs', 'utf8') !== 'currentState') process.exit(1);",
+        "fs.copyFileSync('src/index.cjs', 'dist/index.cjs');",
+      ].join("\n"));
+      await fs.writeFile(path.join(packageDir, "src", "index.cjs"), "exports.newRouteHelper = () => 'current';\n");
+      await fs.writeFile(path.join(packageDir, "dist", "index.cjs"), "exports.oldRouteHelper = () => 'stale';\n");
+      runForegroundCommand.mockImplementation(async ({ command, args }) => {
+        if (args.includes("--filter-prod")) {
+          await new Promise<void>((resolve, reject) => {
+            execFile(command, [...args], { cwd: fixture }, (error) => error ? reject(error) : resolve());
+          });
+        }
+        if (args.includes("vitest")) {
+          scenarioArtifacts.push(await fs.readFile(path.join(packageDir, "dist", "index.cjs"), "utf8"));
+        }
+      });
+      await runHostedLocalE2eSuite({
+        env: {},
+        prepareRunnerBundle: false,
+        scenario: ["checkpoint-baseline", "foreground-reply-priority"],
+      });
+      expect(scenarioArtifacts.length).toBeGreaterThan(1);
+      for (const artifact of scenarioArtifacts) {
+        expect(artifact).toContain("newRouteHelper");
+        expect(artifact).not.toContain("oldRouteHelper");
+      }
+      expect(runForegroundCommand.mock.calls.filter(([call]) => call.args.includes("--filter-prod"))).toHaveLength(1);
+      expect(runForegroundCommand.mock.calls.some(([call]) => call.args.includes("runner:bundle:hosted-local"))).toBe(false);
+    } finally {
+      await fs.rm(fixture, { recursive: true, force: true });
+    }
+  });
+
   afterEach(() => {
     vi.clearAllMocks();
     runForegroundCommand.mockResolvedValue(undefined);
@@ -583,6 +658,39 @@ describe("hosted-local E2E suite preparation", () => {
         MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
       }),
     );
+  });
+
+  test("stops before scenario launch when Worker dependency preparation fails", async () => {
+    runForegroundCommand.mockRejectedValueOnce(new Error("synthetic Worker dependency build failed"));
+    await expect(runHostedLocalE2eSuite({
+      env: {}, prepareRunnerBundle: false, scenario: "checkpoint-baseline",
+    })).rejects.toThrow("synthetic Worker dependency build failed");
+    expect(runForegroundCommand).toHaveBeenCalledTimes(1);
+    expect(runForegroundCommand.mock.calls[0]?.[0].args).toContain("--filter-prod");
+    expect(cleanupHostedRunnerImages).toHaveBeenCalledTimes(1);
+  });
+
+  test("closes scenario admission when Worker dependency preparation is interrupted", async () => {
+    const signals = captureSuiteSignalHandlers();
+    const originalExitCode = process.exitCode;
+    process.exitCode = undefined;
+    runForegroundCommand.mockImplementationOnce(async (input) => {
+      expect(input.args).toContain("--filter-prod");
+      emitCapturedSignal(signals.handlers, "SIGTERM");
+      throw new ForegroundCommandSignalError(input.label, "SIGTERM");
+    });
+    try {
+      await expect(runHostedLocalE2eSuite({
+        env: {}, prepareRunnerBundle: false, scenario: "checkpoint-baseline",
+      })).resolves.toEqual({ terminationSignal: "SIGTERM" });
+      expect(runForegroundCommand).toHaveBeenCalledTimes(1);
+      expect(process.exitCode).toBe(143);
+      expect(signals.handlers.get("SIGTERM")).toEqual([]);
+      expect(cleanupHostedRunnerImages).toHaveBeenCalledTimes(1);
+    } finally {
+      process.exitCode = originalExitCode;
+      signals.restore();
+    }
   });
 
   test("scrubs inherited web session authority before E2E preparation", async () => {

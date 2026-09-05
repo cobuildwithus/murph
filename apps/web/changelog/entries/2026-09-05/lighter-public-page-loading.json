@@ -1,0 +1,23 @@
+{
+  "publishedOn": "2026-09-05",
+  "order": 100,
+  "item": {
+    "id": "lighter-public-page-loading",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Lighter public pages",
+    "summary": "Public pages load less code while you browse.",
+    "details": "Sign-in tools load when you approach a sign-in control or open it, and sign-out keeps its existing retry behavior.",
+    "relevanceTags": [
+      "website",
+      "performance"
+    ],
+    "sourcePullRequests": [
+      2909
+    ],
+    "tryIt": {
+      "label": "Explore Murph",
+      "href": "/goals"
+    }
+  }
+}

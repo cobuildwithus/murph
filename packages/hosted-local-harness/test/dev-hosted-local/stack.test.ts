@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { constants } from "node:fs";
 import { access, copyFile, cp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Writable } from "node:stream";
@@ -960,6 +961,7 @@ describe("hosted local dev stack", () => {
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
     expect(waitForHealthyHttpEndpoint).toHaveBeenCalledTimes(2);
     expect(waitForHealthyHttpEndpoint).toHaveBeenNthCalledWith(1, {
+      signal: expect.any(AbortSignal),
       host: "127.0.0.1",
       label: "cloudflare",
       path: "/health",
@@ -967,6 +969,7 @@ describe("hosted local dev stack", () => {
       protocol: "http",
     });
     expect(waitForHealthyHttpEndpoint).toHaveBeenNthCalledWith(2, {
+      signal: expect.any(AbortSignal),
       host: "localhost",
       label: "web",
       path: "/api/internal/health",
@@ -1202,6 +1205,7 @@ describe("hosted local dev stack", () => {
     expect(stack.processes.temporalServer).toBe(temporalServer);
     expect(stack.processes.temporalWorker).toBe(temporalWorker);
     expect(waitForHealthyHttpEndpoint).toHaveBeenCalledWith({
+      signal: expect.any(AbortSignal),
       host: "127.0.0.1",
       label: "cloudflare",
       path: "/health",
@@ -1816,7 +1820,10 @@ describe("hosted local dev stack", () => {
       `/tmp/murph-dev-env-test/docker-config/contexts/tls/${dockerContextId}`,
       { recursive: true },
     );
-    expect(access).toHaveBeenCalledWith(expect.stringContaining(".docker/cli-plugins"));
+    expect(access).toHaveBeenCalledWith(
+      expect.stringContaining(".docker/cli-plugins/docker-buildx"),
+      constants.X_OK,
+    );
     expect(rm).toHaveBeenCalledWith(
       "/tmp/murph-dev-env-test/docker-config/cli-plugins",
       { force: true, recursive: true },
@@ -1827,6 +1834,71 @@ describe("hosted local dev stack", () => {
       "dir",
     );
   });
+
+  it.each(["missing", "not executable"])(
+    "skips a Docker plugin directory whose Buildx is %s",
+    async (buildxState) => {
+      vi.stubEnv("OPENAI_API_KEY", "local-openai-key");
+      const configModule = await import("../../src/dev-hosted-local/config.ts");
+      vi.mocked(configModule.resolveHostedLocalDevConfig).mockReturnValueOnce({
+        ...defaultConfig,
+        skipLinqWebhookRegister: true,
+        webPort: 31001,
+        workerPersistDir: ".tmp/e2e/wrangler",
+        workerPort: 32001,
+      });
+      const firstDirectory = "/tmp/host-docker-config/cli-plugins";
+      const originalAccess = vi.mocked(access).getMockImplementation();
+      vi.mocked(access).mockImplementation(async (filePath, mode) => {
+        const value = String(filePath);
+        if (value === firstDirectory) {
+          return;
+        }
+        if (value === path.join(firstDirectory, "docker-buildx")) {
+          if (buildxState === "not executable" && mode !== constants.X_OK) {
+            return;
+          }
+          const error = createMissingFileError();
+          error.code = buildxState === "not executable" ? "EACCES" : "ENOENT";
+          throw error;
+        }
+        if (value.endsWith(path.join(".docker", "cli-plugins", "docker-buildx"))) {
+          return;
+        }
+        throw createMissingFileError();
+      });
+      try {
+        const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+        const stack = await startHostedLocalDevStack({
+          env: {
+            ...process.env,
+            DOCKER_CONFIG: "/tmp/host-docker-config",
+            MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
+            MURPH_DEV_SKIP_LINQ_WEBHOOK_REGISTER: "1",
+            MURPH_DEV_SKIP_STRIPE_LISTEN: "1",
+            NEXT_DIST_DIR_MODE: "smoke",
+            NEXT_DIST_DIR_SUFFIX: "e2e-fixture",
+          },
+        });
+        await stack.ready;
+        await stack.stop();
+        expect(symlink).toHaveBeenCalledWith(
+          expect.stringContaining(path.join(".docker", "cli-plugins")),
+          "/tmp/murph-dev-env-test/docker-config/cli-plugins",
+          "dir",
+        );
+        expect(symlink).not.toHaveBeenCalledWith(
+          firstDirectory,
+          expect.any(String),
+          "dir",
+        );
+      } finally {
+        if (originalAccess) {
+          vi.mocked(access).mockImplementation(originalAccess);
+        }
+      }
+    },
+  );
 
   it("discovers the Apple Silicon Homebrew Docker CLI plugin directory on macOS", async () => {
     const stackModule = await import("../../src/dev-hosted-local/stack.ts");
@@ -2120,12 +2192,85 @@ describe("hosted local dev stack", () => {
     });
     await stack.ready;
 
+    const exitListeners = process.listeners("exit");
     const stopPromise = stack.stop();
     await Promise.resolve();
 
+    const retainedExitListeners = process.listeners("exit");
     expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
     releaseFirstTermination();
     await stopPromise;
+    expect(retainedExitListeners).toEqual(exitListeners);
+    expect(process.listeners("exit").length).toBe(exitListeners.length - 1);
+  });
+
+  it("cancels and joins pending readiness when stopped before health succeeds", async () => {
+    let healthCancelled = false;
+    waitForHealthyHttpEndpoint.mockImplementationOnce((input) => new Promise((_, reject) => {
+      input.signal?.addEventListener("abort", () => {
+        healthCancelled = true;
+        reject(new DOMException("Readiness cancelled", "AbortError"));
+      }, { once: true });
+    }));
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+    const stack = await startHostedLocalDevStack({ env: process.env });
+    const ready = expect(stack.ready).rejects.toThrow("Readiness cancelled");
+    await stack.stop();
+    await ready;
+    expect(healthCancelled).toBe(true);
+    expect(terminateChildProcessAndWait).toHaveBeenCalledTimes(2);
+  });
+
+  it("retains the pending MinIO child for parent-exit fallback before startup returns", async () => {
+    const minioChild = createBufferedChild({ exitCode: null, name: "minio", pid: 903 });
+    let rejectMinio: (error: Error) => void = () => {};
+    maybeStartHostedLocalMinio.mockImplementationOnce((input) => {
+      input.onProcessStarted?.(minioChild);
+      return new Promise((_, reject) => { rejectMinio = reject; });
+    });
+    const existingExitListeners = new Set(process.listeners("exit"));
+    const abortController = new AbortController();
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+    const startup = startHostedLocalDevStack({ abortSignal: abortController.signal, env: process.env });
+    const outcome = expect(startup).rejects.toThrow("MinIO cancelled");
+    await vi.waitFor(() => expect(maybeStartHostedLocalMinio).toHaveBeenCalledOnce());
+    abortController.abort();
+    const parentExitListener = process.listeners("exit").find((listener) => !existingExitListeners.has(listener));
+    parentExitListener?.(0);
+    const signalled = terminateChildProcess.mock.calls.some(([child, signal]) => child === minioChild.child && signal === "SIGKILL");
+    rejectMinio(new Error("MinIO cancelled"));
+    await outcome;
+    expect(signalled).toBe(true);
+    expect(process.listeners("exit").every((listener) => existingExitListeners.has(listener))).toBe(true);
+  });
+
+  it("signals its exact child processes when the parent exits", async () => {
+    const cloudflareChild = createBufferedChild({ exitCode: null, name: "cloudflare", pid: 101 });
+    const webChild = createBufferedChild({ exitCode: null, name: "web", pid: 102 });
+    spawnChildProcess
+      .mockReturnValueOnce(cloudflareChild)
+      .mockReturnValueOnce(webChild);
+    const existingExitListeners = new Set(process.listeners("exit"));
+
+    const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
+
+    const stack = await startHostedLocalDevStack({
+      env: process.env,
+    });
+    await stack.ready;
+    const parentExitListener = process.listeners("exit").find(
+      (listener) => !existingExitListeners.has(listener),
+    );
+    expect(parentExitListener).toBeDefined();
+    terminateChildProcess.mockClear();
+    spawnSync.mockClear();
+
+    parentExitListener?.(0);
+
+    expect(terminateChildProcess).toHaveBeenCalledWith(cloudflareChild.child, "SIGKILL");
+    expect(terminateChildProcess).toHaveBeenCalledWith(webChild.child, "SIGKILL");
+    expect(spawnSync.mock.calls.filter(([command]) => command === "pkill")).toEqual([]);
+    await stack.stop();
   });
 
   it("runs stop cleanup once when stop is called repeatedly while termination is pending", async () => {
@@ -3519,6 +3664,7 @@ describe("hosted local dev stack", () => {
       },
     });
 
+    await stack.ready;
     // An ordinary dev stack must not observe the whole Docker daemon.
     expect(spawnHostedLocalDockerEventsForensics).not.toHaveBeenCalled();
     await stack.stop("SIGTERM");
@@ -3541,7 +3687,9 @@ describe("hosted local dev stack", () => {
         stdoutText: '{"Action":"kill","Actor":{"Attributes":{"signal":"9"}}}',
       }),
     );
-    waitForHealthyHttpEndpoint.mockImplementationOnce(() => new Promise(() => {}));
+    waitForHealthyHttpEndpoint.mockImplementationOnce((input) => new Promise((_, reject) => {
+      input.signal?.addEventListener("abort", () => reject(new DOMException("Cancelled", "AbortError")), { once: true });
+    }));
     waitForFirstChildExit.mockResolvedValueOnce(cloudflareChild);
 
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
@@ -3570,7 +3718,9 @@ describe("hosted local dev stack", () => {
     spawnChildProcess
       .mockReturnValueOnce(cloudflareChild)
       .mockReturnValueOnce(createBufferedChild({ exitCode: null, name: "web", pid: 502 }));
-    waitForHealthyHttpEndpoint.mockImplementationOnce(() => new Promise(() => {}));
+    waitForHealthyHttpEndpoint.mockImplementationOnce((input) => new Promise((_, reject) => {
+      input.signal?.addEventListener("abort", () => reject(new DOMException("Cancelled", "AbortError")), { once: true });
+    }));
     waitForFirstChildExit.mockResolvedValueOnce(cloudflareChild);
 
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
@@ -3614,7 +3764,9 @@ describe("hosted local dev stack", () => {
         pid: 504,
         stdoutText: "y".repeat(4_000),
       }));
-    waitForHealthyHttpEndpoint.mockImplementationOnce(() => new Promise(() => {}));
+    waitForHealthyHttpEndpoint.mockImplementationOnce((input) => new Promise((_, reject) => {
+      input.signal?.addEventListener("abort", () => reject(new DOMException("Cancelled", "AbortError")), { once: true });
+    }));
     waitForFirstChildExit.mockResolvedValueOnce(cloudflareChild);
 
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");

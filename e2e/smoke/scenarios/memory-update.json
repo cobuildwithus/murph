@@ -1,6 +1,6 @@
 {
   "id": "memory-update",
-  "command": "vault-cli memory update <memoryId> <text> --vault <path> [--section <section>]",
+  "command": "vault-cli memory update <memoryId> <text> --vault <path> [--compact] [--section <section>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/CORE.md"

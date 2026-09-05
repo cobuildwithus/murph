@@ -345,6 +345,9 @@
       "@murphai/device-syncd/public-provider-descriptors": [
         "../../packages/device-syncd/src/public-provider-descriptors.ts"
       ],
+      "@murphai/device-syncd/service": [
+        "../../packages/device-syncd/src/service.ts"
+      ],
       "@murphai/device-syncd/source-staleness": [
         "../../packages/device-syncd/src/source-staleness.ts"
       ],

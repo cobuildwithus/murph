@@ -1,6 +1,7 @@
 ---
 title: 'Shared prompt compaction left route-plan and skill-router fixtures stale'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2826'
 ---
 
 ## Expected Behavior

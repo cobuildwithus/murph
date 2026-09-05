@@ -1,6 +1,7 @@
 ---
 title: 'Hosted-local preserves legacy invalid KMS key-version state'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2763'
 ---
 
 ## Expected Behavior

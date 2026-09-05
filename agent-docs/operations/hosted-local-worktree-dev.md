@@ -384,6 +384,15 @@ The helper uses small, typed primitives:
 
 Do not add a generic port manager, background daemon, or second process
 supervisor. The hosted-local harness already owns process lifecycle.
+Hosted-local E2E scenario setup records that ownership before its first
+asynchronous resource starts. File teardown aborts and joins any setup that has
+not returned from `beforeAll`, while the stack's parent-exit handler signals
+only the exact child handles retained by that stack. One setup record owns all
+bounded port retries; cancellation cannot admit a later attempt. A ready
+scenario stops gracefully without aborting its startup signal. Stack stop
+cancels and joins HTTP readiness, runner smoke, and pending MinIO restarts.
+MinIO publishes each spawned child before awaiting health, and parent-exit
+fallback remains registered until asynchronous cleanup settles.
 
 ## Agent Workflow
 

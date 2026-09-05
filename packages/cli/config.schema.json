@@ -4429,6 +4429,10 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
+                        "recordOnly": {
+                          "description": "Return only the exact requested record, including its verification metadata. Requires a memory id; omit for complete memory context.",
+                          "type": "boolean"
+                        },
                         "compact": {
                           "description": "Return only document existence plus each record's id, section, and text.",
                           "type": "boolean"
@@ -4439,7 +4443,19 @@
                 },
                 "set-name": {
                   "type": "object",
-                  "additionalProperties": false
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "compact": {
+                          "description": "Return the mutation outcome and exact affected record without the full memory document.",
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
                 },
                 "upsert": {
                   "type": "object",
@@ -4449,6 +4465,10 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
+                        "compact": {
+                          "description": "Return the mutation outcome and exact affected record without the full memory document.",
+                          "type": "boolean"
+                        },
                         "section": {
                           "type": "string",
                           "enum": [
@@ -4471,6 +4491,10 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
+                        "compact": {
+                          "description": "Return the mutation outcome and exact affected record without the full memory document.",
+                          "type": "boolean"
+                        },
                         "section": {
                           "description": "Optional replacement memory section. Defaults to the current section.",
                           "type": "string",
@@ -4487,7 +4511,19 @@
                 },
                 "forget": {
                   "type": "object",
-                  "additionalProperties": false
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "compact": {
+                          "description": "Return the mutation outcome and exact affected record without the full memory document.",
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -5367,6 +5403,10 @@
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 128
+                        },
+                        "resolveGoals": {
+                          "description": "Resolve applicable nutrition goal points with conflicts and provenance. Requires identical explicit from/to dates; read-only and never approves suitability or activates proposals.",
+                          "type": "boolean"
                         },
                         "from": {
                           "description": "Optional inclusive lower date bound in YYYY-MM-DD form.",
@@ -11337,9 +11377,14 @@
                                   "exclusiveMinimum": 0,
                                   "maximum": 200
                                 },
+                                "includeWorkoutSummaries": {
+                                  "default": false,
+                                  "description": "Include bounded per-workout facts without lap/split rows. Use for workout counts, types, start times, duration, distance, heart rate, cadence, power, or speed. Each workout marks splitsOmitted true; this never proves splits are absent. Use --include-workout-details instead when the question needs splits; full detail wins if both options are true.",
+                                  "type": "boolean"
+                                },
                                 "includeWorkoutDetails": {
                                   "default": false,
-                                  "description": "Include bounded workoutFeatures and splits (up to 32 workouts per day and 64 splits per workout). Choose compact or detailed output from the question before the first and only activity-list data read; never use compact output as a probe before retrying with detail. Omit this option only when the answer is entirely available from day-level sessionCount, sessionMinutes, and distinct activityTypes. Pass it truthy whenever selecting, comparing, grouping, ordering, or attributing individual workouts, including type-specific count, duration, distance, start time, provider, heart rate, cadence, power, speed, or splits.",
+                                  "description": "Include bounded workoutFeatures and splits (up to 32 workouts per day and 64 splits per workout). Use when the question needs lap or split rows. Prefer --include-workout-summaries for individual workout facts without splits; omit both options for day totals. Choose the required level before the first and only activity-list data read; never use a smaller output as a probe before retrying with detail.",
                                   "type": "boolean"
                                 }
                               }

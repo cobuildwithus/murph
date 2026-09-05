@@ -3,7 +3,7 @@ set -euo pipefail
 
 parent_old_space_mb=1024
 build_worker_old_space_mb=3072
-typecheck_old_space_mb=3584
+typecheck_old_space_mb=6144
 build_cache_epoch=webpack-next-16.3-v6-isolated-worker-no-webpack-cache
 build_cache_stamp=.next/cache/murph-production-build-epoch
 prepared_typecheck_env=MURPH_HOSTED_WEB_PREPARED_TYPECHECK

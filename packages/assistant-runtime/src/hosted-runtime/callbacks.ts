@@ -81,6 +81,7 @@ import {
 } from "@murphai/runtime-state";
 import {
   sendTelegramImageMessage,
+  sendTelegramFileMessage,
   sendTelegramRichMessage,
 } from "@murphai/assistant-engine/assistant-channel-runtime";
 import type {
@@ -1939,8 +1940,10 @@ function shouldPrepareHostedAssistantDeliveryEffectForDispatch(
   effect: HostedAssistantDeliveryEffect,
   explicitlyPrepareNonIdempotent: boolean,
 ): boolean {
-  return !hasHostedAssistantVaultFileMedia(effect.payload)
-    && (explicitlyPrepareNonIdempotent
+  if (hasHostedAssistantVaultFileMedia(effect.payload)) {
+    return effect.payload.channel === "telegram";
+  }
+  return (explicitlyPrepareNonIdempotent
       || effect.payload.transportIdempotent
       || isHostedAssistantReactionOnlyEffect(effect)
       || hasHostedAssistantVoiceMemoMedia(effect.payload)
@@ -3708,6 +3711,59 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             providerDispatchEntered = true;
           }
           const result = await sendTelegramRichMessage(request, dependencies);
+          await assertHostedDeliveryLiveNow(input);
+          return result;
+        },
+        sendTelegramFile: async (request) => {
+          const intent = mirrorState.intent;
+          if (
+            !intent
+            || intent.channel !== "telegram"
+            || intent.threadIsDirect !== true
+            || readHostedAssistantDeliveryPayloadTarget(
+              buildHostedAssistantDeliveryPayloadFromIntent(intent),
+            ).target !== request.target
+          ) {
+            throw createAssistantDeliveryTerminalError(
+              "ASSISTANT_VAULT_FILE_IDENTITY_CONFLICT",
+              "Secure vault-file delivery target or audience changed after approval.",
+            );
+          }
+          await assertHostedDeliveryCanEnterProvider(input);
+          const verifiedFiles = await preloadApprovedHostedAssistantVaultFiles({
+            actionApprovalPort: input.actionApprovalPort,
+            expectedDedupeKey: input.assistantDeliveryEffect.fingerprint,
+            intentId: intent.intentId,
+            media: [request.file],
+            vaultRoot: input.vaultRoot,
+          });
+          const dependencies = requireHostedProviderFetchDependencies({
+            env: input.telegramEnv,
+            fetchImplementation: createHostedProviderFetchBoundary({
+              assertProviderEntryLive: async () => {
+                try {
+                  await assertHostedDeliveryCanEnterProvider(input);
+                } catch (error) {
+                  throw markHostedDeliveryPreProvider(error);
+                }
+              },
+              onProviderDispatchEntered: () => { providerDispatchEntered = true; },
+              operation: "Hosted assistant Telegram file delivery",
+              providerFetch: input.providerFetch,
+            }),
+            ...(input.signal ? { signal: input.signal } : {}),
+            loadVaultFile: async (file: typeof request.file) => {
+              const bytes = verifiedFiles.get(buildHostedVaultFileMediaIdentity(file));
+              if (!bytes) {
+                throw new VaultCliError(
+                  "ASSISTANT_VAULT_FILE_IDENTITY_CONFLICT",
+                  "The prepared vault file no longer matches the approved action.",
+                );
+              }
+              return bytes;
+            },
+          }, "Hosted assistant Telegram file delivery");
+          const result = await sendTelegramFileMessage(request, dependencies);
           await assertHostedDeliveryLiveNow(input);
           return result;
         },
