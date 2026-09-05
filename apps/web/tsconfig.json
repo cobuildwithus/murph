@@ -234,6 +234,9 @@
       "@murphai/query/browser-replica-server": [
         "../../packages/query/src/browser-replica-server.ts"
       ],
+      "@murphai/vault-usecases/clinical-records": [
+        "../../packages/vault-usecases/src/clinical-records.ts"
+      ],
       "@murphai/core": [
         "../../packages/core/src/index.ts"
       ],
