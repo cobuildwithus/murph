@@ -24227,9 +24227,9 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
     360_000,
   )
 
-  it(
-    'confirms an active device trigger without claiming future delivery is exhausted',
-    async () => {
+  it.each(['WHOOP', 'Garmin', 'Oura', 'Fitbit'] as const)(
+    'confirms an active %s device trigger without claiming future delivery is exhausted',
+    async (provider) => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
         path.join(tmpdir(), 'murph-next-workout-trigger-e2e-'),
@@ -24284,7 +24284,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           model: config.model,
           modelProvider: config.modelProvider,
           prompt: [
-            'After my next WHOOP workout recorded after',
+            `After my next ${provider} workout recorded after`,
             '2026-08-10T12:00:00.000Z, ask me here how it felt.',
             'Save that event-triggered check-in now.',
           ].join(' '),
@@ -24293,6 +24293,19 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           workingDirectory,
         })
 
+        process.stdout.write(`${JSON.stringify({
+          scenario: `${provider} device activity source selection`,
+          reply: result.finalMessage,
+          requestedSchedules: readCapabilityRoutingActions(result.jsonEvents)
+            .filter((action) => action.kind === 'dynamic'
+              && action.tool === MURPH_AUTOMATION_TOOL.name)
+            .map((action) => action.kind === 'dynamic'
+              ? action.argumentsValue?.schedule
+              : undefined),
+          savedSchedule: automationRequests[0]?.action === 'save'
+            ? automationRequests[0].schedule
+            : undefined,
+        })}\n`)
         expect(automationRequests).toHaveLength(1)
         expect(automationRequests[0]).toMatchObject({
           action: 'save',
@@ -24300,10 +24313,12 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
             activityKind: expect.stringMatching(/workout/iu),
             after: '2026-08-10T12:00:00.000Z',
             kind: 'deviceActivity',
-            source: expect.stringMatching(/^whoop(?:_v2)?$/u),
+            source: provider === 'WHOOP'
+              ? expect.stringMatching(/^whoop(?:_v2)?$/u)
+              : provider.toLowerCase(),
           },
         })
-        expect(result.finalMessage).toMatch(/whoop|workout/iu)
+        expect(result.finalMessage).toMatch(new RegExp(provider, 'iu'))
         expect(result.finalMessage).toMatch(
           /active|created|saved|scheduled|set(?: up)?/iu,
         )
@@ -24313,7 +24328,11 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         expect(result.finalMessage).not.toMatch(
           /could not verify|couldn't verify|unable to verify|inspect or update/iu,
         )
-        expect(result.finalMessage).not.toMatch(
+        const replyWithoutRequestedCutoff = result.finalMessage.replace(
+          /\brecorded after August 10 at 12:00 PM UTC\b/giu,
+          'recorded after the requested cutoff',
+        )
+        expect(replyWithoutRequestedCutoff).not.toMatch(
           /\bat\s+\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)|new time|reschedul|tomorrow|tonight/iu,
         )
       } finally {

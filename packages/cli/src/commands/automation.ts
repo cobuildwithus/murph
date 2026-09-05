@@ -10,6 +10,7 @@ import {
   automationContextReferencesSchema,
   automationPlannedOccurrenceOffsetMsSchema,
   automationDeviceActivityKindSchema,
+  automationDeviceActivitySourceValues,
   automationRouteSchema,
   automationScaffoldPayloadSchema,
   automationScheduleSchema,
@@ -931,7 +932,7 @@ const automationSharedOptionSchemas = {
   triggerTimeZone: timeZoneSchema
     .optional()
     .describe("Optional IANA timezone for cron or dailyLocal wall-clock fields."),
-  deviceSource: z.enum(["whoop", "whoop_v2"]).optional().describe("Optional device activity source filter."),
+  deviceSource: z.enum(automationDeviceActivitySourceValues).optional().describe("Optional device activity source filter."),
   activityKind: z
     .string()
     .min(1)

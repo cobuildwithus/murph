@@ -157,10 +157,14 @@
               "type": "string",
               "enum": [
                 "whoop",
-                "whoop_v2"
+                "whoop_v2",
+                "garmin",
+                "oura",
+                "fitbit"
               ]
             },
             "activityKind": {
+              "description": "Use \"workout\" for workouts, \"sleep\" for sleep, or the requested lowercase kebab-case activity kind (for example, \"running\"). Omit only to match all recorded activity kinds, including sleep.",
               "type": "string",
               "minLength": 1,
               "maxLength": 80,

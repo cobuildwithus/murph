@@ -117,6 +117,15 @@ vault-cli knowledge list
 vault-cli knowledge lint
 ```
 
+## Activity check-ins
+
+Device-activity automations accept `--device-source garmin`, `oura`, or `fitbit`,
+alongside the existing `whoop` and `whoop_v2` filters. Omit the source filter to
+match activity from any provider. The Fitbit filter recognizes both current
+Google Health imports and legacy Fitbit imports. Use `automation edit` with
+`--trigger-kind deviceActivity --device-source <source>` to change the selected
+source on the same automation; its activity cursor restarts at the edit time.
+
 ## What you get
 
 - a file-native health vault with canonical writes owned by `@murphai/core`
