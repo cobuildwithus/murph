@@ -4,6 +4,18 @@ Last verified: 2026-08-31
 
 ## Non-Negotiable Rules
 
+- Terminal Linq retry authority comes only from an existing runtime-owned
+  failed delivery, current exact chat/sender routing, consent-aware runtime
+  access, and current line/chat egress policy. The existing runtime access owner
+  must allow recovery both before content retrieval and at attempt claiming;
+  explicit health-data consent withdrawal denies it at either checkpoint.
+  Provider retrieval must match the original
+  message, chat, outbound direction, failed status, iMessage service, and
+  sender. Never use provider content to select a recipient or line. The retry
+  stores only its timestamp and blinded original-message correlation on
+  the existing delivery-message row. Retrieved bodies and attachment URLs stay
+  request-local and never enter logs, mailbox input, or another content store.
+
 - Treat `.env` and `.env.*` files as secret inputs. Murph's CLI may load local `.env.local` and `.env` files at runtime for operator credentials, but agents and runtime logs must never print, fixture, package, or commit their contents.
 - Do not share raw filesystem archives of a repo clone for review or support. Ignored local `.env` files and build output such as `.next/` can leak through a clone/archive even when git has no tracked secret diff; use the guarded `scripts/package-audit-context.sh` / `pnpm zip:src` path instead, because it stages git-visible files and filters blocked local residue from the bundle.
 - Public npm and GitHub Release publication must scan the final packed tarballs, not only tracked source. `scripts/release-artifact-secret-guard.mjs` owns that fail-closed boundary: packing runs it before writing the pack manifest, publishing reruns it before the first npm request, and the release workflow reruns it after downloading the handoff artifact and before creating permanent release assets. Pack manifests may point to the established caller-selected external output directory, but every listed tarball must remain a relative `.tgz` path in one exact inventory. Credential-key classification is shared across assignments and parameters and recognizes separator- and camel-case names; authorization serialization, command-prefixed shell assignments, and quoted JS/TS literals are scanned without treating opaque value shape as proof of safety. Unquoted JS/TS right-hand sides remain code expressions, while `KEY=value` in declaration files remains invalid and suspicious. Do not weaken scanning for bundled fixtures: omit proven non-runtime upstream test sources from the public payload and scan every file that ships under the same policy. Treat every artifact name and archive-entry path as untrusted in diagnostics and release logs: report only a tarball index, a fixed archive-entry marker, and rule ids. Keep the handoff artifact on one-day retention.

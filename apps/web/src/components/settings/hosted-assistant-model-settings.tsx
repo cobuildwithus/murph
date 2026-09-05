@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  HOSTED_ASSISTANT_ASTRA_MODEL,
   HOSTED_ASSISTANT_DEFAULT_PROVIDER,
   HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_OPENAI_PROVIDER,
@@ -94,10 +95,17 @@ const MODEL_OPTIONS = [
   },
   {
     artwork: "sol",
-    description: "Highest health intelligence",
+    description: "Deep health intelligence",
     model: HOSTED_ASSISTANT_SOL_MODEL,
     name: "Sol",
     usage: "High usage",
+  },
+  {
+    artwork: "astra",
+    description: "Frontier health intelligence",
+    model: HOSTED_ASSISTANT_ASTRA_MODEL,
+    name: "Astra",
+    usage: "Highest usage",
   },
 ] as const satisfies ReadonlyArray<{
   artwork: AssistantModelArtworkVariant;
@@ -140,6 +148,7 @@ const PROVIDER_OPTIONS = [
 }>;
 
 interface AssistantModelSettingsResponse {
+  availableModels?: readonly HostedAssistantProductModel[];
   dormantSolPreference: boolean;
   model: HostedAssistantProductModel;
   ok: true;
@@ -154,6 +163,7 @@ interface AssistantModeResponse {
 }
 
 interface HostedAssistantModelSettingsProps {
+  availableModels?: readonly HostedAssistantProductModel[];
   canUpgradeToEdge: boolean;
   chatCompletionsAvailable?: boolean;
   configurationAvailable: boolean;
@@ -496,7 +506,7 @@ export function HostedAssistantModelSettings(
   const initialConnection = props.initialConnection ?? null;
   return (
     <HostedAssistantModelSettingsForm
-      key={`${props.initialModel}:${initialProvider}:${String(props.initialDormantSolPreference)}:${String(props.solAvailable)}:${String(props.configurationAvailable)}:${String(props.canUpgradeToEdge)}:${String(props.veniceAvailable === true)}:${String(props.customInferenceAvailable === true)}:${String(initialConnection?.revision ?? "none")}:${String(initialConnection?.selected === true)}`}
+      key={`${props.availableModels?.join(",")}:${props.initialModel}:${initialProvider}:${String(props.initialDormantSolPreference)}:${String(props.solAvailable)}:${String(props.configurationAvailable)}:${String(props.canUpgradeToEdge)}:${String(props.veniceAvailable === true)}:${String(props.customInferenceAvailable === true)}:${String(initialConnection?.revision ?? "none")}:${String(initialConnection?.selected === true)}`}
       {...props}
       initialConnection={initialConnection}
       initialProvider={initialProvider}
@@ -523,6 +533,7 @@ function HostedAssistantModelSettingsForm(
     props.initialDormantSolPreference,
   );
   const [solAvailable, setSolAvailable] = useState(props.solAvailable);
+  const [availableModels, setAvailableModels] = useState(props.availableModels);
   const [veniceAvailable, setVeniceAvailable] = useState(
     props.veniceAvailable === true,
   );
@@ -609,6 +620,7 @@ function HostedAssistantModelSettingsForm(
         setCurrentProvider(provider);
         setDormantSolPreference(response.dormantSolPreference);
         setSolAvailable(response.solAvailable);
+        setAvailableModels(response.availableModels);
         return {
           dormantSolPreference: response.dormantSolPreference,
           model: response.model,
@@ -736,7 +748,7 @@ function HostedAssistantModelSettingsForm(
               : "Choose one model for new Murph replies."}
           </FieldDescription>
           <RadioGroup
-            className="grid gap-3 lg:grid-cols-3"
+            className="grid gap-3 sm:grid-cols-2"
             disabled={controlsDisabled}
             value={draftModel}
             onValueChange={(value) => {
@@ -751,7 +763,10 @@ function HostedAssistantModelSettingsForm(
             {MODEL_OPTIONS.map((option) => {
               const selected = draftModel === option.model;
               const unavailable =
-                option.model === HOSTED_ASSISTANT_SOL_MODEL && !solAvailable;
+                (option.model === HOSTED_ASSISTANT_SOL_MODEL && !solAvailable)
+                || (option.model === HOSTED_ASSISTANT_ASTRA_MODEL
+                  && (!availableModels?.includes(HOSTED_ASSISTANT_ASTRA_MODEL)
+                    || draftRouting !== HOSTED_ASSISTANT_OPENAI_PROVIDER));
               const current = option.model === currentModel;
               const badge = readModelOptionBadge({
                 current,
@@ -777,7 +792,9 @@ function HostedAssistantModelSettingsForm(
                   key={option.model}
                   meta={
                     unavailable
-                      ? `${option.usage} · Edge required`
+                      ? `${option.usage} · ${option.model === HOSTED_ASSISTANT_ASTRA_MODEL
+                        ? availableModels?.includes(HOSTED_ASSISTANT_ASTRA_MODEL) ? "OpenAI required" : "Edge required"
+                        : "Edge required"}`
                       : option.usage
                   }
                   title={option.name}
@@ -919,10 +936,11 @@ function ModelOptionBadge({ children }: { children: React.ReactNode }) {
 }
 
 function readModelName(model: HostedAssistantProductModel): string {
-  return `GPT-5.6 ${readProductModelName(model)}`;
+  return `${model === HOSTED_ASSISTANT_ASTRA_MODEL ? "GPT-6" : "GPT-5.6"} ${readProductModelName(model)}`;
 }
 
 function readProductModelName(model: HostedAssistantProductModel): string {
+  if (model === HOSTED_ASSISTANT_ASTRA_MODEL) return "Astra";
   if (model === HOSTED_ASSISTANT_LUNA_MODEL) {
     return "Luna";
   }

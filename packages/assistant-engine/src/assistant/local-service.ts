@@ -1764,36 +1764,40 @@ export async function sendAssistantMessageLocal(
             sinceProviderResultMs: 0,
             stage: 'provider-result-returned',
           })
+          if (providerOutcome.kind !== 'failed_terminal') {
+            onFirstAssistantResponseCompleted()
+          }
+          const completedContinuation = providerOutcome.kind === 'failed_terminal'
+            ? providerOutcome.codexContinuation
+            : providerOutcome.providerTurn.codexContinuation
+          if (!providerRequestJournal) {
+            providerRequestJournal =
+              await runtimeState.turns.acceptedInputs.recordProviderRequest({
+                continuation: completedContinuation,
+                ordinal: providerRequestOrdinal,
+                providerAttemptId: null,
+                turnId: currentUserTurn.turnId,
+              })
+            providerRequestAcceptedInputIds =
+              providerRequestJournal?.inputIds ?? acceptedInputIdsForProviderRequest
+            providerRequestAcceptedInputItems =
+              providerRequestJournal?.inputs ?? acceptedInputItemsForProviderRequest
+          } else {
+            providerRequestJournal =
+              await runtimeState.turns.acceptedInputs.updateProviderRequest({
+                continuation: completedContinuation,
+                ordinal: providerRequestOrdinal,
+                providerAttemptId: null,
+                turnId: currentUserTurn.turnId,
+              }) ?? providerRequestJournal
+            providerRequestAcceptedInputIds =
+              providerRequestJournal?.inputIds ?? providerRequestAcceptedInputIds
+            providerRequestAcceptedInputItems =
+              providerRequestJournal?.inputs ?? providerRequestAcceptedInputItems
+          }
+          acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
+          acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
           if (providerOutcome.kind === 'failed_terminal') {
-            if (!providerRequestJournal) {
-              providerRequestJournal =
-                await runtimeState.turns.acceptedInputs.recordProviderRequest({
-                  continuation: providerOutcome.codexContinuation,
-                  ordinal: providerRequestOrdinal,
-                  providerAttemptId: null,
-                  turnId: currentUserTurn.turnId,
-                })
-              providerRequestAcceptedInputIds =
-                providerRequestJournal?.inputIds ?? acceptedInputIdsForProviderRequest
-              providerRequestAcceptedInputItems =
-                providerRequestJournal?.inputs ?? acceptedInputItemsForProviderRequest
-              acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
-              acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
-            } else {
-              providerRequestJournal =
-                await runtimeState.turns.acceptedInputs.updateProviderRequest({
-                  continuation: providerOutcome.codexContinuation,
-                  ordinal: providerRequestOrdinal,
-                  providerAttemptId: null,
-                  turnId: currentUserTurn.turnId,
-                }) ?? providerRequestJournal
-              providerRequestAcceptedInputIds =
-                providerRequestJournal?.inputIds ?? providerRequestAcceptedInputIds
-              providerRequestAcceptedInputItems =
-                providerRequestJournal?.inputs ?? providerRequestAcceptedInputItems
-              acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
-              acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
-            }
             const failedProviderResult = {
               attemptCount: providerOutcome.attemptCount,
               provider: providerOutcome.route.provider,
@@ -2041,37 +2045,7 @@ export async function sendAssistantMessageLocal(
             throw providerOutcome.error
           }
 
-          onFirstAssistantResponseCompleted()
           const currentProviderResult = providerOutcome.providerTurn
-          if (!providerRequestJournal) {
-            providerRequestJournal =
-              await runtimeState.turns.acceptedInputs.recordProviderRequest({
-                continuation: currentProviderResult.codexContinuation,
-                ordinal: providerRequestOrdinal,
-                providerAttemptId: null,
-                turnId: currentUserTurn.turnId,
-              })
-            providerRequestAcceptedInputIds =
-              providerRequestJournal?.inputIds ?? acceptedInputIdsForProviderRequest
-            providerRequestAcceptedInputItems =
-              providerRequestJournal?.inputs ?? acceptedInputItemsForProviderRequest
-            acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
-            acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
-          } else {
-            providerRequestJournal =
-              await runtimeState.turns.acceptedInputs.updateProviderRequest({
-                continuation: currentProviderResult.codexContinuation,
-                ordinal: providerRequestOrdinal,
-                providerAttemptId: null,
-                turnId: currentUserTurn.turnId,
-              }) ?? providerRequestJournal
-            providerRequestAcceptedInputIds =
-              providerRequestJournal?.inputIds ?? providerRequestAcceptedInputIds
-            providerRequestAcceptedInputItems =
-              providerRequestJournal?.inputs ?? providerRequestAcceptedInputItems
-            acceptedInputIdsForProviderRequest = providerRequestAcceptedInputIds
-            acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
-          }
           await drainLiveSteeredActiveTurnInputs({
             continuation: currentProviderResult.codexContinuation,
             sessionId: currentProviderResult.session.sessionId,

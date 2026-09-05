@@ -1184,6 +1184,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260830150000_hosted_system_progress_projection",
       "20260830170000_hosted_account_cleanup_temporal",
       "20260831150000_group_journal_capture",
+      "20260905010000_linq_terminal_message_retry",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(

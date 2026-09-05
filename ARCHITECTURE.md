@@ -4,6 +4,14 @@ Last verified: 2026-08-31
 
 ## Accepted-Message Targeting
 
+Terminal Linq send recovery extends the Web-owned `HostedLinqDeliveryMessage`
+receipt owner with one attempt timestamp and a blinded original identity.
+It reuses current route/access and egress policy, retrieves the original
+provider message transiently, and resends only that failed message. It creates
+no assistant turn, outbox owner, scheduler, or durable message-body copy.
+`agent-docs/RELIABILITY.md` specifies the supported content, ordering, limits,
+and conservative behavior after an ambiguous retry.
+
 Exact-message replies and reactions share one accepted-message targeting
 primitive. The model sees only an existing `AssistantInputEvent.inputId` as a
 `Message ref` beside eligible accepted Linq iMessage input or Telegram input
@@ -1084,13 +1092,18 @@ native `spawn_agent.model` field and never mutates that saved configuration.
 Web exposes the native field only when its existing assistant-configuration
 resolution confirms that the current managed runtime is authorized for the
 full product-model catalog; missing authority and custom inference fail closed.
-The production image gives Codex a catalog containing exactly Luna, Terra, and
-Sol. Those entries force mixed Code Mode so the code executor and native
+The production image defaults to a catalog containing exactly Luna, Terra, and
+Sol. Web separately derives Astra authority from the canonical available models
+and managed OpenAI provider; only an explicitly authorized workspace selects the
+expanded image-owned Astra catalog. Missing authority retains the three-model
+catalog, preserving Edge and group delegation while Codex's native validation
+rejects Astra before a provider request. Catalog selection changes the native
+launch key, so a warm process cannot retain an earlier catalog after access changes.
+Those entries force mixed Code Mode so the code executor and native
 `tool_search` remain available together; individual dynamic-tool
 `deferLoading` values still decide which schemas stay out of the initial
-model-visible surface. Codex's native spawn validation rejects other bundled
-models before a provider request.
-Code-only `ALL_TOOLS` still contains generated input declarations, but Codex
+model-visible surface. Code-only `ALL_TOOLS` still contains generated input
+declarations, but Codex
 0.151.0 renders the automation schema's action branches without combining their
 shared sibling properties, exposing fields such as `contextReferences` as
 `unknown`. Mixed mode provides native JSON-schema discovery around that lossy

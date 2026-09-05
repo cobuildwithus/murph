@@ -1846,6 +1846,48 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["individual Edge", "launch_edge_monthly", null, false, "openai", true],
+    ["Family Edge", null, "edge", false, "openai", true],
+    ["individual Pulse", "launch_monthly", null, false, "openai", false],
+    ["Family Pulse", null, "pulse", false, "openai", false],
+    ["Edge on Venice", "launch_edge_monthly", null, false, "venice", false],
+    ["group", "launch_max_monthly", null, true, "openai", false],
+    ["individual Max", "launch_max_monthly", null, false, "openai", true],
+    ["Family Max", null, "max", false, "openai", true],
+    ["Max on Venice", "launch_max_monthly", null, false, "venice", false],
+  ] as const)("projects native Astra authority from canonical %s eligibility", async (
+    _name, plan, familyPlan, group, provider, astraAllowed,
+  ) => {
+    process.env.HOSTED_VENICE_ENABLED = "1";
+    const { resolveHostedMemberAssistantModel } = await vi.importActual<
+      typeof import("@/src/lib/hosted-onboarding/assistant-model-preference")
+    >("@/src/lib/hosted-onboarding/assistant-model-preference");
+    const configuration = resolveHostedMemberAssistantModel({
+      accountGroupMemberships: familyPlan ? [{
+        group: { billingStatus: "active", suspendedAt: null },
+        planCode: familyPlan,
+        status: "active",
+      }] : [],
+      assistantModelPreference: null,
+      assistantProviderPreference: provider,
+      assistantReasoningEffortPreference: null,
+      billingRef: plan ? { currentBillingPhase: "paid", currentBillingPlanCode: plan } : null,
+      billingStatus: familyPlan ? "not_started" : "active",
+      inferenceConnection: null,
+      suspendedAt: null,
+      threadContainer: group ? { memberId: "synthetic_group_member" } : null,
+    });
+    mocks.readHostedMemberAssistantModelPreference.mockResolvedValueOnce(configuration);
+    const response = await workspaceRoute.GET(new Request(
+      "https://join.example.test/api/internal/hosted-workspace",
+    ));
+    expect(response.status).toBe(200);
+    const workspace = parseHostedWorkspaceReadResponse(await response.json());
+    expect(workspace.hostedAssistantAstraAllowed).toBe(astraAllowed);
+    expect(workspace.hostedAssistantSubagentModelOverridesAllowed).toBe(!["individual Pulse", "Family Pulse"].includes(_name));
+  });
+
   it("reads workspace state and checkpoints with the workspace CAS fence", async () => {
     process.env.HOSTED_VENICE_ENABLED = "1";
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
