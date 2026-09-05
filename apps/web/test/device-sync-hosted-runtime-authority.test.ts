@@ -1,5 +1,5 @@
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
-import { SqliteDeviceSyncStore } from "@murphai/device-syncd";
+import { SqliteDeviceSyncStore } from "@murphai/device-syncd/service";
 import {
   addJunctionExtendedTimeseriesHistoryBackfillCoverage,
   resolveJunctionExtendedTimeseriesHistoryBackfillVersion,
