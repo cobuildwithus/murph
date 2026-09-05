@@ -1187,6 +1187,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260830170000_hosted_account_cleanup_temporal",
       "20260831150000_group_journal_capture",
       "20260904190000_linq_email_handle_identity",
+      "20260905000000_clinical_record_reader_cleanup",
       "20260905010000_linq_terminal_message_retry",
       "migration_lock.toml",
     ]);

@@ -983,11 +983,16 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       throw input.signal.reason instanceof Error ? input.signal.reason : error;
     }
     const normalized = normalizeHostedSystemMailboxError(error);
-    let retryMs = HOSTED_SYSTEM_MAILBOX_RETRY_DELAY_MS;
-    if (normalized.code === HOSTED_VAULT_SHARE_PROJECTION_CONTINUE_ERROR_CODE) {
-      retryMs = HOSTED_VAULT_SHARE_PROJECTION_CONTINUE_RETRY_MS;
-    } else if (normalized.code === HOSTED_VAULT_SHARE_PROJECTION_DEFERRED_ERROR_CODE) {
-      retryMs = HOSTED_VAULT_SHARE_PROJECTION_DEFERRED_RETRY_MS;
+    const retryMs = hostedSystemMailboxRecordRetryDelay(input.item.postCheckpointRecord, normalized.code);
+    if (retryMs === null) {
+      await removeHostedSystemMailboxPendingItemIfCurrent({ item: input.item, vaultRoot: input.vaultRoot });
+      return {
+        errorCode: normalized.code,
+        errorMessage: normalized.message,
+        failed: 1,
+        recorded: 0,
+        nextWakeAt: await resolveHostedSystemMailboxNextWakeAt({ vaultRoot: input.vaultRoot }),
+      };
     }
     const retryAt = new Date(Date.now() + retryMs).toISOString();
     await updateHostedSystemMailboxPendingItem({
@@ -1669,6 +1674,24 @@ function earliestHostedSystemMailboxWakeAt(left: string | null, right: string | 
   }
 
   return Date.parse(left) <= Date.parse(right) ? left : right;
+}
+
+function hostedSystemMailboxRecordRetryDelay(
+  record: HostedSystemMailboxPendingItem["postCheckpointRecord"],
+  code: string,
+): number | null {
+  if (record?.kind === "clinical-records.outcome-recorded" && [
+    "CLINICAL_RECORD_OUTCOME_CONFLICT",
+    "CLINICAL_RECORD_OUTCOME_COUNT_MISMATCH",
+    "CLINICAL_RECORD_RUN_STALE",
+  ].includes(code)) return null;
+  if (code === HOSTED_VAULT_SHARE_PROJECTION_CONTINUE_ERROR_CODE) {
+    return HOSTED_VAULT_SHARE_PROJECTION_CONTINUE_RETRY_MS;
+  }
+  if (code === HOSTED_VAULT_SHARE_PROJECTION_DEFERRED_ERROR_CODE) {
+    return HOSTED_VAULT_SHARE_PROJECTION_DEFERRED_RETRY_MS;
+  }
+  return HOSTED_SYSTEM_MAILBOX_RETRY_DELAY_MS;
 }
 
 function normalizeHostedSystemMailboxError(error: unknown): {

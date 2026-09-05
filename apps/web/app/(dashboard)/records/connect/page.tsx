@@ -35,9 +35,8 @@ export default async function RecordsConnectPage({
           Medical records
         </Link>
         <PageHeader
-          eyebrow="Medical records"
           title="Connect medical records"
-          description="Find a hospital or clinic Murph supports. You will sign in to its patient portal, then Murph will copy available lab results and report summaries once."
+          description="Sign in on your portal’s website to allow a one-time import of available labs, reports, medications, allergies, and other chart records. Recent history is limited; some records are kept only as source evidence."
         />
       </div>
       <RecordsConnectClient
