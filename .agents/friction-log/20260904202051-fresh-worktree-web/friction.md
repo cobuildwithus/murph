@@ -23,3 +23,7 @@ In a fresh repository checkout, run `pnpm install --frozen-lockfile`, then `pnpm
 ## Context
 
 Focused connected-app tests pass, but the missing unrelated declaration blocks the full Web typecheck for a narrow assistant background-work change.
+
+## Related entrypoint
+
+The same missing source-mapping prerequisite also affected the declared `@murphai/vault-usecases/clinical-records` entrypoint used by the clinical retrieval test. Add that entrypoint to the existing Web TypeScript paths so a fresh Web build does not depend on a prior vault-usecases package build.
