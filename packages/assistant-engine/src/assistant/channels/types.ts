@@ -44,6 +44,7 @@ export interface TelegramRuntimeDependencies {
   loadVaultImage?: (
     media: AssistantVaultImageResponseMedia,
   ) => Promise<Uint8Array>
+  loadVaultFile?: (media: AssistantVaultFileResponseMedia) => Promise<Uint8Array>
   maxDeliveryAttempts?: number
   signal?: AbortSignal
 }
@@ -126,6 +127,11 @@ export interface AssistantChannelDependencies {
       }
     | void
   >
+  sendTelegramFile?: (input: {
+    file: AssistantVaultFileResponseMedia
+    replyToMessageId?: string | null
+    target: string
+  }) => Promise<{ providerMessageId: string | null; target: string }>
   sendTelegramImage?: (input: {
     idempotencyKey?: string | null
     media: readonly AssistantImageResponseMedia[]

@@ -2031,7 +2031,7 @@ describe("hosted web production migration guard", () => {
     assert.match(productionNextBuildScript, /^#!\/usr\/bin\/env bash\nset -euo pipefail$/mu);
     assert.match(productionNextBuildScript, /parent_old_space_mb=1024/u);
     assert.match(productionNextBuildScript, /build_worker_old_space_mb=3072/u);
-    assert.match(productionNextBuildScript, /typecheck_old_space_mb=3584/u);
+    assert.match(productionNextBuildScript, /typecheck_old_space_mb=6144/u);
     assert.match(
       productionNextBuildScript,
       /build_cache_epoch=webpack-next-16\.3-v6-isolated-worker-no-webpack-cache/u,
@@ -2163,16 +2163,12 @@ describe("hosted web production migration guard", () => {
       4,
       "skipping the TypeScript 7 source check must preserve every Next build path",
     );
-    const artifactLockGuardIndex = verifyFastScript.indexOf(
-      'if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" != "1" ]]',
-    );
     const hostSlotGuardIndex = verifyFastScript.indexOf(
       'if [[ "$shared_host_mode" == "1" && "${MURPH_VERIFY_HOST_SLOT_HELD:-0}" != "1" ]]',
     );
-    assert.ok(artifactLockGuardIndex >= 0, "workspace artifact-lock guard must remain present");
     assert.ok(
-      hostSlotGuardIndex > artifactLockGuardIndex,
-      "shared-host admission must happen inside the workspace artifact lock",
+      hostSlotGuardIndex >= 0,
+      "shared-host admission must remain present",
     );
     assert.ok(
       verifyFastScript.includes(

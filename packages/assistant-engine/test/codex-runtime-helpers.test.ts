@@ -1054,6 +1054,84 @@ describe('Codex assistant registry helpers', () => {
     expect(parsed.turnProfileJson).toEqual(usage.turnProfileJson)
   })
 
+  it('classifies knowledge calls and failures without persisting private command or error data', () => {
+    const cases = [
+      ['show', 'knowledge_page_not_found', 1],
+      ['show', 'knowledge_page_invalid', 1],
+      ['upsert', 'knowledge_page_conflict', 1],
+      ['append-section', 'knowledge_duplicate_slug', 1],
+      ['search', 'private-error-code', 1],
+      ['list', null, 0],
+      ['lint', null, 0],
+      ['show', null, 1],
+      ['show', 'knowledge_page_not_found', 0],
+    ] as const
+    const profile = buildAssistantCodexTurnProfileJson({
+      turnId: 'turn_knowledge_counts',
+      rawEvents: cases.map(([operation, code, exitCode], index) => ({
+        method: 'item/completed',
+        params: { item: {
+          type: 'commandExecution',
+          command: `vault-cli knowledge ${operation} private-slug`,
+          exitCode,
+          aggregatedOutput: code === null ? 'private non-json output' : JSON.stringify(index === 0
+            ? { code, message: 'private page content', retryable: false }
+            : { ok: false, error: { code, message: 'private page content', hint: 'private-path' } }),
+        } },
+      })),
+    })
+    expect(profile?.tools).toEqual([expect.objectContaining({
+      calls: 9,
+      failedCalls: 6,
+      label: 'vault-cli knowledge',
+      knowledgeCounts: {
+        showCalls: 4, listCalls: 1, searchCalls: 1, writeCalls: 2, otherCalls: 1,
+        notFoundFailures: 1, invalidFailures: 1, conflictFailures: 2, otherFailures: 2,
+      },
+    })])
+    expect(JSON.stringify(profile)).not.toMatch(/private-slug|private-error-code|private page|private-path/u)
+  })
+
+  it.each([false, true])('preserves finite batch attribution alongside direct knowledge counters (batch first: %s)', (batchFirst) => {
+    const items = [{
+      type: 'commandExecution', command: 'vault-cli knowledge list', exitCode: 0,
+      aggregatedOutput: '[]',
+    }, {
+      type: 'commandExecution', command: 'vault-cli batch --compact', exitCode: 1,
+      aggregatedOutput: JSON.stringify({
+        schema: VAULT_CLI_BATCH_RESULT_SCHEMA, vault: '/synthetic/vault', count: 1, failed: 1,
+        commands: [{
+          index: 0, argv: ['knowledge', 'show', 'private-slug'], durationMs: 1,
+          ok: false, outputBytes: 0, outputChars: 0, stdout: '',
+          error: { code: 'knowledge_page_not_found', message: 'private page detail' },
+        }],
+      }),
+    }]
+    const profile = buildAssistantCodexTurnProfileJson({
+      turnId: 'turn_mixed_knowledge',
+      rawEvents: (batchFirst ? items.reverse() : items).map((item) => ({
+        method: 'item/completed', params: { item },
+      })),
+    })
+    expect(profile?.tools).toEqual([expect.objectContaining({
+      calls: 1, failedCalls: 1, label: 'other',
+    }), expect.objectContaining({
+      calls: 1, failedCalls: 0, label: 'vault-cli knowledge',
+      knowledgeCounts: {
+        showCalls: 0, listCalls: 1, searchCalls: 0, writeCalls: 0, otherCalls: 0,
+        notFoundFailures: 0, invalidFailures: 0, conflictFailures: 0, otherFailures: 0,
+      },
+    })])
+    expect((profile?.tools as Record<string, unknown>[])[0]).not.toHaveProperty('knowledgeCounts')
+    expect(parseAssistantUsageRecord({
+      attemptCount: 1, credentialSource: 'platform', inputTokens: 1, outputTokens: 1,
+      occurredAt: '2026-06-10T12:00:00.000Z', provider: 'codex-cli', schema: ASSISTANT_USAGE_SCHEMA,
+      sessionId: 'asst_synthetic', turnId: 'turn_mixed_knowledge',
+      usageId: 'turn_mixed_knowledge.attempt-1', turnProfileJson: profile,
+    }).turnProfileJson).toEqual(profile)
+    expect(JSON.stringify(profile)).not.toMatch(/private-slug|private page detail/u)
+  })
+
   it('separates tool kinds and distinguishes unknown duration from measured zero', () => {
     const profile = buildAssistantCodexTurnProfileJson({
       rawEvents: [

@@ -8483,6 +8483,41 @@ test("Junction temporal feature import accepts the dense fidelity bound and reje
   );
 });
 
+for (const resource of ["blood_oxygen", "stress_level"] as const) {
+  test(`Junction ${resource} temporal response bound includes every source instance`, () => {
+    const buildPayload = (length: number) => normalizeCompleteTemporalSourceDay({
+      importedAt: "2026-04-08T12:00:00.000Z",
+      timeseries: {
+        [resource]: {
+          groups: {
+            garmin: Array.from({ length: Math.ceil(length / 1_440) }, (_, sourceIndex) => ({
+              source: { provider: "garmin", type: "watch", device_id: `synthetic-watch-${sourceIndex}` },
+              data: Array.from({ length: Math.min(1_440, length - sourceIndex * 1_440) }, (_, index) => ({
+                timestamp: new Date(Date.UTC(2026, 3, 1) + index * 60_000).toISOString(),
+                value: resource === "blood_oxygen" ? 98 : index % 2 === 0 ? 20 : 80,
+              })),
+            })),
+          },
+        },
+      },
+    }, "2026-04-01");
+    const payload = buildPayload(25_000);
+    const artifacts = findJunctionTemporalFeatureArtifacts(payload, resource.replaceAll("_", "-"));
+    assert.equal(artifacts.length, 18);
+    assert.equal(artifacts.reduce((count, artifact) => {
+      const content = artifact.content as Record<string, unknown>;
+      assert.notEqual(content.status, "suppressed_input_cap");
+      return count + Number(content.sampleCount);
+    }, 0), 25_000);
+    assert.equal(payload.samples?.length ?? 0, 0);
+    assert.ok((payload.events?.length ?? 0) <= JUNCTION_TEMPORAL_FEATURE_MAX_OBSERVATIONS_PER_DAY);
+    assert.throws(
+      () => buildPayload(25_001),
+      new RegExp(`Junction ${resource} response has 25001 records; maximum admitted is 25000`, "u"),
+    );
+  }, 180_000);
+}
+
 test("Junction temporal source day rejects an over-bound sibling day without partial facts", () => {
   const overBoundDaySamples = Array.from({ length: 1_441 }, (_, index) => ({
     timestamp: new Date(Date.UTC(2026, 3, 22) + index * 10_000).toISOString(),

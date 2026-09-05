@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-09-04",
+  "order": 100,
+  "item": {
+    "id": "focused-workout-and-memory-reads",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less overhead for workout facts and saved preferences",
+    "summary": "Murph can answer individual workout questions and verify saved preference changes without loading unrelated detail.",
+    "details": "Workout summaries retain timing, distance, provider, and other workout facts. Lap and split details remain available when your question needs them, and saved preference changes still use canonical records.",
+    "relevanceTags": [
+      "assistant",
+      "workouts",
+      "personal-context",
+      "efficiency"
+    ],
+    "sourcePullRequests": []
+  }
+}

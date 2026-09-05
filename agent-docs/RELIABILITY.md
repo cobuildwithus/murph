@@ -4,6 +4,45 @@ Last verified: 2026-09-04
 
 ## Current Guardrails
 
+- Runtime-owned Linq iMessages with code `4001` and the exact terminal
+  reason `Message send failed` may resend each failed provider message once.
+  The existing delivery-message row owns the permanent attempt timestamp and
+  original lookup key; a parent delivery lock serializes competing claims.
+  Acceptance replaces the existing active message key (and matching parent
+  scalar key), preserving the established receipt-reader contract. Receipt
+  updates recheck that active key after acquiring the parent lock.
+  Duplicate webhooks, callback replay, and a failed or transport-ambiguous
+  replacement never create another attempt. The original failure remains
+  observable, while replacement receipts advance the same logical delivery;
+  receipts for a replaced original cannot regress it. Group multi-message
+  delivery retries only the failed part and preserves no-receipt status.
+  Recovery runs after failure ingestion and after runtime acceptance to cover
+  both receipt/acceptance arrival orders. It is limited to deliveries accepted
+  within 24 hours and current configured sender, route, account access, and
+  line/chat egress policy. Read the exact failed outbound through the official
+  SDK (three-second limit), then claim in a short database-only transaction,
+  then resend once (five-second limit, SDK retries disabled) into that same
+  chat with a stable retry idempotency key. Retrieved content stays in memory.
+  Text, native links, and non-audio attachments preserve their send shape;
+  voice memos, app cards, absent/expired content, and other non-reconstructible
+  formats retain the original failure instead of changing their semantics.
+  Web-owned onboarding sends and manual/provider-only sends retain their
+  existing recovery owners. Other `4001` reasons and `4006` remain excluded
+  because they can still deliver late. Scheduling failure cannot invalidate an
+  accepted runtime handoff. An unavailable provider response or interrupted
+  post-dispatch recording may leave failure evidence unresolved; the consumed
+  claim deliberately prevents a further resend.
+  The post-response acceptance check performs one exact failed-delivery lookup
+  per provider ID (at most ten, sequentially), with no provider work on normal
+  success. Recovery reads at most eleven child rows to reject an oversized
+  delivery, reuses bounded canonical access reads, and opens at most one
+  transaction/connection per invocation at a time. Network calls occur between
+  the claim and acceptance transactions; there is no collection worker,
+  scheduler, or new retry queue.
+  Apply the additive delivery-message migration before deploying the new Web
+  reader/writer. Existing Web readers continue using the active message key;
+  the new nullable fields do not require a Cloudflare runtime deployment.
+
 - Keep behavior deterministic and documented as the first modules are added.
 - Prefer explicit failure paths and actionable errors over silent fallback behavior.
 - A successful Vercel build is not production convergence. For the current
@@ -1305,6 +1344,47 @@ Last verified: 2026-09-04
   transport/status reason. Write-fence, lease, authority, deterministic 4xx,
   malformed-data, parser, and unclassified failures remain terminal; the runtime
   must not create a second artifact or checkpoint retry queue.
+  Within an artifact PUT request only, `handleRunnerArtifactRequest` admits one
+  repeat storage attempt for an actual R2 binding `put: ... (10001)` or
+  `put: ... (10043)` Error, per the [R2 binding error contract](https://developers.cloudflare.com/r2/api/error-codes/).
+  `createHostedArtifactStore` hashes and encrypts once and reuses the exact
+  serialized envelope, authenticated artifact identity and user-scoped object
+  key. Other store callers and generic crypto/storage writes remain single-attempt.
+  A 100 ms abortable delay precedes a fresh live write-fence check. Cancellation
+  before or during that delay, or before a repeat PUT, prevents the repeat effect;
+  a revoked fence returns the existing 401 response. Both the checked-in and
+  rendered Worker configuration enable `enable_request_signal`, required by the
+  [Workers cancellation contract](https://developers.cloudflare.com/workers/configuration/compatibility-flags/#enable-requestsignal-for-incoming-requests).
+  Recovery admission ends at the earlier of one second from route entry and the
+  container's existing upload deadline, forwarded as
+  `x-hosted-runtime-artifact-upload-deadline-ms`. The header only reduces the
+  local window: absent headers retain the short window for older callers,
+  malformed deadlines suppress recovery, and later deadlines cannot extend it.
+  Admission reserves the delay plus a 100 ms margin before waiting, and checks
+  the remaining margin again after waiting and after fence revalidation. Initial
+  authorization, crypto, body, encryption and first-PUT time consume this budget;
+  no caller timeout is restarted or extended. The R2 binding PUT itself has no
+  cancellation option: an already-issued write is awaited, never raced into an
+  overlapping retry or detached task.
+  Two failed PUTs rethrow the original failure unchanged for the existing typed
+  transport classification and durable device-sync job backoff. Generic fetch or
+  TypeError, unknown/non-service codes (including quota/rate-limit), HTTP/auth,
+  lease, hash, body, encryption and client-abort failures do not admit recovery.
+  The existing structured artifact events add only `artifactR2Code` (10001/10043),
+  `artifactStorageStage` (`r2_put`), `artifactWriteAttempt` (1/2), and the finite
+  `artifactWriteDisposition` (backoff, recovered, exhausted, budget_exhausted,
+  unauthorized, cancelled). They record the original service code, not raw
+  provider prose. Recovery is reported only after the repeated PUT resolves;
+  it is persistence completion, not a new production readback claim. Synthetic
+  tests in `apps/cloudflare/test/runner-outbound.test.ts` prove HEAD, decrypted
+  GET bytes/hash, exact ciphertext reuse, exclusion/cancellation/fence/budget
+  behavior and bounded private metadata through the actual route/storage owner.
+  Composed container-upload tests retain one fetch and content-addressed dedupe;
+  `packages/assistant-runtime/test/hosted-device-sync-runtime.test.ts` keeps
+  collection/import behind the existing job backoff rather than a second loop.
+  This is member-visible recovery, not a diagnostic-only change; its changelog
+  fragment follows `apps/web/changelog/README.md` without claiming recovery from
+  prolonged outages or bypassing permissions.
 - Hosted device-sync provider cadence and local job continuation are separate
   wake domains. Web's canonical `nextReconcileAt` carries only the provider
   schedule consumed by the global due-reconcile sweep. The first durable
@@ -1407,6 +1487,12 @@ Last verified: 2026-09-04
   `device-sync.maintenance_failed`, and activity scheduling uses
   `assistant.device_activity_automation_failed`; none increments the
   failed-attempt metric.
+  For `JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE`, the existing failed-attempt
+  event may also carry `junctionEcgBindingReason`, checked against the same
+  finite service-owned reason set before generic log sanitization. Missing,
+  malformed, and unknown reasons are omitted. ECG recording/sample counts,
+  identifiers, raw errors, URLs, paths, and payloads remain excluded. This reason
+  describes local binding validation, not proof of an upstream HTTP response.
   Junction sync-result metadata preserves the existing historical progress and
   coverage keys before optional diagnostics when the 16-entry envelope fills.
   The provider owner supplies that priority to the shared sanitized merge for

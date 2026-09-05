@@ -54,6 +54,23 @@ function invalidInitialExercise(message: string): never {
   throw new VaultCliError('invalid_option', message)
 }
 
+function rejectEmbeddedExerciseFields(
+  fields: ReadonlyMap<string, string>,
+): void {
+  // Notes remain free text; other fields must not swallow supported assignments.
+  for (const [key, value] of fields) {
+    if (key === 'note') continue
+    for (const match of value.matchAll(/[,\s]([A-Za-z][A-Za-z0-9]*)\s*=/gu)) {
+      const embeddedField = match[1]
+      if (embeddedField !== undefined && initialExerciseFields.has(embeddedField)) {
+        invalidInitialExercise(
+          `--exercise field "${key}" contains "${embeddedField}=" without a semicolon separator. Use ";${embeddedField}=..." to start a separate field.`,
+        )
+      }
+    }
+  }
+}
+
 function parseInitialExercise(
   entry: string,
 ): StartLiveWorkoutExerciseInput {
@@ -68,6 +85,7 @@ function parseInitialExercise(
     initialExerciseFields,
     invalidInitialExercise,
   )
+  rejectEmbeddedExerciseFields(fields)
   const setCount = compactInteger(
     fields,
     'sets',

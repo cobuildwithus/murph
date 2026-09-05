@@ -2913,7 +2913,7 @@ test('sendAssistantMessageLocal journals live-steered input before terminal prov
     await providerInput.onProviderRequestPlanned?.({
       providerAttemptId: null,
       codexContinuation: {
-        kind: 'explicit-structured-history',
+        kind: 'provider-state-optimization',
       },
     })
     const releaseLiveTurn = providerInput.activeTurnSteering?.registerLiveProviderTurn({
@@ -3015,6 +3015,15 @@ test('sendAssistantMessageLocal journals live-steered input before terminal prov
     mocks.recordAssistantUsageEvent.mock.calls[0]?.[0]
       ?.providerRequestAcceptedInputIds,
   ).toEqual(['initial', 'manual-1'])
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateProviderRequest.mock.calls
+      .map((call) => call[0]),
+  ).toContainEqual({
+    continuation: { kind: 'explicit-structured-history' },
+    ordinal: 0,
+    providerAttemptId: null,
+    turnId: 'turn-1',
+  })
 })
 
 test('sendAssistantMessageLocal registers manual steering before prompt persistence completes', async () => {

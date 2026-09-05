@@ -36,7 +36,6 @@ vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
     );
   },
   preloadHostedAuthPanelIsland: mocks.panelPreload,
-  useHostedAuthPanelIslandIdlePreload: vi.fn(),
 }));
 
 vi.mock("@/src/components/hosted-onboarding/homepage-auth-runtime-loader", () => ({
@@ -114,7 +113,7 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-test("warms one shared Privy runtime in the background and reuses it on click", async () => {
+test("waits for focus intent before warming one shared runtime and reuses it on click", async () => {
   vi.useFakeTimers();
   const { HomepageAuthRuntimeProvider } = await import(
     "@/src/components/hosted-onboarding/homepage-auth-runtime-provider"
@@ -128,7 +127,6 @@ test("warms one shared Privy runtime in the background and reuses it on click", 
         authLabel: "Get started",
         authenticated: false,
         context: "hero",
-        preloadAuthPanel: true,
       }),
     ),
     { location: bareHomepageLocation() },
@@ -142,7 +140,17 @@ test("warms one shared Privy runtime in the background and reuses it on click", 
   expect(mocks.authDialogProps?.privyRuntime).toBeUndefined();
 
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(1_200);
+    await vi.advanceTimersByTimeAsync(10_000);
+  });
+  await flushRuntimeLoad();
+
+  expect(mocks.runtimeLoad).not.toHaveBeenCalled();
+  expect(mocks.runtimeMount).not.toHaveBeenCalled();
+
+  await act(async () => {
+    rendered.button.dispatchEvent(
+      new rendered.window.Event("focusin", { bubbles: true }),
+    );
   });
   await flushRuntimeLoad();
 
@@ -193,7 +201,7 @@ test("leaves authenticated homepage children on the ordinary root auth owner", a
   expect(mocks.authDialogProps).toBeNull();
 });
 
-test("keeps a standalone auth session stable and retries a failed background load", async () => {
+test("keeps a standalone auth session stable and retries a failed intent load", async () => {
   vi.useFakeTimers();
   mocks.runtimeFailuresRemaining = 1;
   const { HomepageAuthRuntimeProvider } = await import(
@@ -215,7 +223,9 @@ test("keeps a standalone auth session stable and retries a failed background loa
   cleanupRender = rendered.cleanup;
 
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(1_200);
+    rendered.button.dispatchEvent(
+      new rendered.window.Event("pointerdown", { bubbles: true }),
+    );
   });
   await flushRuntimeLoad();
 

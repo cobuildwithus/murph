@@ -61,9 +61,11 @@ import {
 } from './channel-adapters.js'
 import { withAssistantTurnLock } from './turn-lock.js'
 import {
-  buildAssistantMaintenanceConversationEvidence,
+  readAssistantMaintenanceConversationEvidence,
+  type AssistantMaintenanceConversationEvidence,
   type AssistantMaintenanceProfile,
 } from './maintenance-evidence.js'
+import { readAssistantGroupRoomModelState } from './group-room-model.js'
 import type {
   AssistantDeliveryOutcome,
   AssistantMessageInput,
@@ -319,12 +321,13 @@ export async function sendAssistantNotificationLocal(
   // Built before the turn lock so evidence reads never extend the window in
   // which fresh foreground input waits on lock admission.
   const maintenanceEvidence = isAssistantNotificationMaintenanceExactSkip(input)
-    ? await buildAssistantMaintenanceConversationEvidence({
+    ? await readAssistantMaintenanceConversationEvidence({
         now: new Date(),
         profile: requireAssistantNotificationMaintenanceProfile(input),
         vault: input.vault,
       })
     : null
+  const maintenanceEvidencePrompt = maintenanceEvidence?.prompt ?? null
 
   return withAssistantTurnLock({
     abortSignal: input.abortSignal,
@@ -337,7 +340,7 @@ export async function sendAssistantNotificationLocal(
       }
       const resolutionMessageInput = buildAssistantNotificationMessageInput(
         input,
-        maintenanceEvidence,
+        maintenanceEvidencePrompt,
       )
       let groupEmailSendResult:
         | AssistantNotificationPostTurnDeliveryExpectations['groupEmailSendResult']
@@ -362,7 +365,7 @@ export async function sendAssistantNotificationLocal(
         ? resolutionMessageInput
         : buildAssistantNotificationMessageInput(
             preparedInput,
-            maintenanceEvidence,
+            maintenanceEvidencePrompt,
           )
       await emitHostedAssistantContextSessionResolvedTrace({
         message: messageInput,
@@ -400,36 +403,14 @@ export async function sendAssistantNotificationLocal(
         sharedPlan,
       })
 
-      if (
-        input.firstContactPolicy?.markSeenOnDeliveryAccepted === true &&
-        firstContactDocIds.length > 0 &&
-        await hasAssistantSeenFirstContact({
-          docIds: firstContactDocIds,
-          vault: input.vault,
-        })
-      ) {
+      const skipSummary = await resolveAssistantNotificationSkipSummary({
+        firstContactDocIds,
+        input,
+        maintenanceEvidence,
+      })
+      if (skipSummary !== null) {
         return withPostTurnDeliveryExpectations({
-          decision: {
-            kind: 'skip',
-            privateSummary: 'First-contact notification already accepted for this route.',
-          },
-          response: null,
-          session: resolved.session,
-        })
-      }
-
-      if (
-        shouldSkipAutomationOccurrenceForAvailability({
-          instructions: input.instructions,
-          occurrenceAt: input.scheduledOccurrenceAt,
-          scheduleKind: input.scheduledAutomationScheduleKind,
-        })
-      ) {
-        return withPostTurnDeliveryExpectations({
-          decision: {
-            kind: 'skip',
-            privateSummary: 'Scheduled occurrence overlaps an authorized calendar conflict.',
-          },
+          decision: { kind: 'skip', privateSummary: skipSummary },
           response: null,
           session: resolved.session,
         })
@@ -1825,6 +1806,59 @@ function isAssistantNotificationMaintenanceExactSkip(
   input: AssistantNotificationInput,
 ): boolean {
   return input.turnPolicy?.kind === 'maintenance-exact-skip'
+}
+
+async function resolveAssistantNotificationSkipSummary(input: {
+  firstContactDocIds: readonly string[]
+  input: AssistantNotificationInput
+  maintenanceEvidence: AssistantMaintenanceConversationEvidence | null
+}): Promise<string | null> {
+  const maintenanceSummary = await resolveEmptyAssistantMaintenanceSummary(input)
+  if (maintenanceSummary !== null) {
+    return maintenanceSummary
+  }
+  if (
+    input.input.firstContactPolicy?.markSeenOnDeliveryAccepted === true &&
+    input.firstContactDocIds.length > 0 &&
+    await hasAssistantSeenFirstContact({
+      docIds: input.firstContactDocIds,
+      vault: input.input.vault,
+    })
+  ) {
+    return 'First-contact notification already accepted for this route.'
+  }
+  if (shouldSkipAutomationOccurrenceForAvailability({
+    instructions: input.input.instructions,
+    occurrenceAt: input.input.scheduledOccurrenceAt,
+    scheduleKind: input.input.scheduledAutomationScheduleKind,
+  })) {
+    return 'Scheduled occurrence overlaps an authorized calendar conflict.'
+  }
+  return null
+}
+
+async function resolveEmptyAssistantMaintenanceSummary(input: {
+  input: AssistantNotificationInput
+  maintenanceEvidence: AssistantMaintenanceConversationEvidence | null
+}): Promise<string | null> {
+  const policy = input.input.turnPolicy
+  if (
+    policy?.kind !== 'maintenance-exact-skip' ||
+    input.maintenanceEvidence?.status !== 'empty'
+  ) {
+    return null
+  }
+  // Existing room pages can need cleanup even without new conversation.
+  // Unreadable pages and evidence retain the ordinary maintenance path.
+  if (policy.maintenanceProfile === 'group-room-model') {
+    const state = await readAssistantGroupRoomModelState({
+      vaultRoot: input.input.vault,
+    })
+    if (state.kind !== 'missing') {
+      return null
+    }
+  }
+  return policy.privateSummary
 }
 
 function requireAssistantNotificationMaintenanceProfile(

@@ -315,7 +315,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
     expect(secondPersistCanonicalWrite).toHaveBeenCalled()
   })
 
-  it('trusts tagged turn/started when the turn/start response omits the turn id', async () => {
+  it('trusts tagged starts and retains first notification timing across duplicates', async () => {
     const workingDirectory = await createTempDir('assistant-codex-local-prestart-tagged-work-')
     const codexHome = await createTempDir('assistant-codex-local-prestart-tagged-home-')
     const realDateNow = Date.now.bind(Date)
@@ -406,6 +406,16 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
               },
             },
           }))
+          controlledNowMs = secondProviderStartedAtMs + 60
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-local-prestart-tagged-2',
+                status: 'completed',
+              },
+            },
+          }))
         })()
       })
 
@@ -456,7 +466,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       .at(-1)
     expect(secondTurnCompletedTiming).toEqual(expect.objectContaining({
       codexTimingProviderRequestOrdinal: 7,
-      codexTimingTurnCompleteElapsedMs: 50,
+      codexTimingTurnCompleteElapsedMs: 60,
       codexTimingTurnCompletedNotificationElapsedMs: 50,
       codexTimingTurnStartAckElapsedMs: 30,
       codexTimingTurnStartedNotificationElapsedMs: 10,

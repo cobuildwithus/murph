@@ -82,6 +82,7 @@ import {
   HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS,
   prepareHostedCodexRuntimeEnvironment,
   projectHostedRuntimeProcessEnvironment,
+  resolveHostedCodexModelCatalogPath,
 } from "./hosted-runtime/codex-config.ts";
 import {
   HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
@@ -243,7 +244,6 @@ import {
   isHostedApprovedContinuationSystemMailboxItem,
   isHostedSystemMailboxModelFreeExactNotificationItem,
   readHostedSystemMailboxState,
-  readHostedSystemMailboxHandledThroughSeq,
   readHostedSystemMailboxProgress,
   type HostedSystemMailboxPendingItem,
 } from "./hosted-runtime/system-mailbox-state.ts";
@@ -1954,8 +1954,10 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       nextWakeAt: workspaceRead.workspace?.nextWakeAt ?? null,
       nextWakeReason: workspaceRead.workspace?.nextWakeReason ?? null,
     });
-    const imageCodexModelCatalogJson =
-      process.env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]?.trim();
+    const imageCodexModelCatalogJson = resolveHostedCodexModelCatalogPath({
+      imageCatalogPath: process.env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV],
+      astraAllowed: workspaceRead.hostedAssistantAstraAllowed,
+    });
     const imageHealthCommonsPackageRoot =
       process.env["MURPH_HEALTH_COMMONS_PACKAGE_ROOT"]?.trim();
     const baseRuntimeEnv = {
@@ -6448,7 +6450,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           workspace: committedWorkspace,
         });
         const runtimeDirtyAfterForeground = result.runtimeStateDirty
-          || hostedVaultStartupPreparation.mutated;
+          || hostedVaultStartupPreparation.mutated
+          || await hasRestoredSystemMailboxProgressAheadOfWorkspace({
+            importedSeq: result.latestMailboxImport.state.watermarks.system,
+            redactedStatus: committedWorkspace?.redactedStatus ?? null,
+            vaultRoot: restored.vaultRoot,
+          });
         runtimeStateDirty ||=
           runtimeDirtyAfterForeground || committedInboxMediaRetentionWakeDue;
         if (runtimeDirtyAfterForeground) {
@@ -8528,17 +8535,22 @@ async function hasRestoredSystemMailboxProgressAheadOfWorkspace(input: {
   }
 
   const localImportedSeq = BigInt(input.importedSeq);
-  const localHandledThroughSeq = BigInt(
-    await readHostedSystemMailboxHandledThroughSeq({
-      importedSeq: input.importedSeq,
-      vaultRoot: input.vaultRoot,
-    }),
-  );
+  const localProgress = await readHostedSystemMailboxProgress({
+    importedSeq: input.importedSeq,
+    vaultRoot: input.vaultRoot,
+  });
+  const localHandledThroughSeq = BigInt(localProgress.handledThroughSeq);
+  const canonicalContinuationSeqs =
+    input.redactedStatus?.hostedMailboxSystemDeviceSyncContinuationSeqs;
   return localImportedSeq >= canonicalImportedSeq
     && localHandledThroughSeq >= canonicalHandledThroughSeq
     && (
       localImportedSeq > canonicalImportedSeq
       || localHandledThroughSeq > canonicalHandledThroughSeq
+      || localProgress.deviceSyncContinuationSeqs.some((seq) =>
+        !Array.isArray(canonicalContinuationSeqs)
+        || !canonicalContinuationSeqs.some((owner) => owner === seq)
+      )
     );
 }
 

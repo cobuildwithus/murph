@@ -414,7 +414,7 @@ describe("countAssistantCliSurfaceHotPathProofs", () => {
       "- `goal save`: args [title]; options --status=active|paused|completed|abandoned, --horizon=short_term|medium_term|long_term|ongoing, --priority=integer, repeat --domain=string.",
       "- `device account list`: options --provider=string, --source-provider=string.",
       "- `device connect`: args <provider>; options --returnTo=string.",
-      "- `wearables activity list`: options --date=string, --includeWorkoutDetails; hint One data read only. Day totals (`sessionCount`, `sessionMinutes`, distinct `activityTypes`): omit detail; no false flag or schema read. Workout/subset facts: include detail first.",
+      "- `wearables activity list`: options --date=string, --includeWorkoutSummaries, --includeWorkoutDetails; hint One read: day totals omit flags; workout facts use --include-workout-summaries; lap/split facts use --include-workout-details. Choose first; never probe and retry.",
     ].join("\n");
 
     expect(countAssistantCliSurfaceHotPathProofs(detailedContract)).toBe(
@@ -425,6 +425,11 @@ describe("countAssistantCliSurfaceHotPathProofs", () => {
         detailedContract.replace("args [title]", "args <title>"),
       ),
     ).toBe(HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT - 1);
+    for (const option of ["--includeWorkoutSummaries", "--includeWorkoutDetails"]) {
+      expect(countAssistantCliSurfaceHotPathProofs(
+        detailedContract.replace(option, ""),
+      )).toBe(HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT - 1);
+    }
     expect(countAssistantCliSurfaceHotPathProofs("- `memory upsert`: Add a memory.")).toBe(0);
     expect(countAssistantCliSurfaceHotPathProofs([
       "- `device connect`: Create a browser-based OAuth connection link.",

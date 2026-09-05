@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   prepareHostedMemberVerifiedEmailReplyAlias: vi.fn(),
   prismaClient: {
     label: "test-prisma",
+    $executeRaw: vi.fn(),
     $transaction: vi.fn(),
   },
   readHostedMemberEmailAuthorization: vi.fn(),
@@ -129,6 +130,7 @@ describe("settings email sync route", () => {
       },
     });
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
+    mocks.prismaClient.$executeRaw.mockResolvedValue(1);
     mocks.readHostedMemberEmailAuthorization.mockResolvedValue(null);
     mocks.prepareHostedMemberVerifiedEmailReplyAlias.mockResolvedValue({
       generation: 0,

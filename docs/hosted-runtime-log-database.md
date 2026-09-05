@@ -239,6 +239,28 @@ Return only those aggregates. Never return `subject_key` values or raw JSON.
 If natural traffic produces no recurrence, report zero events; do not generate
 production traffic to exercise the telemetry.
 
+### Foreground checkpoint lease drift diagnostics
+
+The existing `runner.error` / `foreground_mailbox_import_failed` row adds only
+`checkpointResponseCheckpointed` and `checkpointLeaseMatchesResponse` booleans
+when the local `HostedRuntimeBridgeCheckpointLeaseError` reports
+`stale_workspace_version` at `after_web_checkpoint`. The second boolean compares
+the already-read live lease's workspace version with `response.workspace.version`;
+the first distinguishes accepted (`true`) from conflict (`false`) Web responses.
+A match describes that observation only: it does not prove why the lease moved
+or why a conversation reply was delayed.
+
+`checkpoint-bridge.ts` derives the pair at the existing validation owner, without
+another lease read. `workspace-runner.ts` explicitly projects both booleans from
+that typed error onto the foreground failure row. It does not spread arbitrary
+error properties or metadata, traverse arbitrary causes, or change the shared
+safe-error diagnostics or redacted-JSON parser. Both fields are omitted for
+other errors/stages, missing or non-boolean metadata, successful calls, and other
+log events. The existing code, stage, message, request-version validation,
+checkpoint result handling, retry behavior, and snapshot effects are unchanged.
+No raw versions, attempts, generations, identities, paths, user content, provider
+payloads, credentials, or additional error strings enter this projection.
+
 ## Append and deletion serialization
 
 Every append runs in one short transaction:

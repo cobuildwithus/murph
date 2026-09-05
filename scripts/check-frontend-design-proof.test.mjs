@@ -416,7 +416,7 @@ test("CLI validates GitHub-rendered design proof", async () => {
 async function createCliFixture() {
   const directory = await mkdtemp(join(tmpdir(), "murph-design-proof-"));
   execFileSync("git", ["init", "--quiet"], { cwd: directory });
-  execFileSync("git", ["config", "user.email", "fixture@example.invalid"], {
+  execFileSync("git", ["config", "user.email", "fixture@users.noreply.github.com"], {
     cwd: directory,
   });
   execFileSync("git", ["config", "user.name", "Test Fixture"], {

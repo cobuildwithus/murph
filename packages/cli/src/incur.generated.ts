@@ -214,7 +214,7 @@ declare module 'incur' {
       'meal nutrients': { args: {}; options: { requestId?: string; from?: string; to?: string } }
       'meal remove-photo': { args: { id: string }; options: { requestId?: string } }
       'meal show': { args: { id: string }; options: { requestId?: string } }
-      'meal totals': { args: {}; options: { requestId?: string; from?: string; to?: string } }
+      'meal totals': { args: {}; options: { requestId?: string; resolveGoals?: boolean; from?: string; to?: string } }
       'measurement add': { args: {}; options: { requestId?: string; metric?: string[]; value?: number[]; unit?: string[]; qualifier?: string[]; measurementNote?: string[]; note?: string; title?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; media?: string[]; tag?: string[]; timeZone?: string } }
       'measurement entry list': { args: {}; options: { requestId?: string; metric: string[]; from?: string; to?: string; limit: number } }
       'measurement import-json': { args: {}; options: { requestId?: string; input: string; note?: string; title?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; media?: string[] } }
@@ -222,11 +222,11 @@ declare module 'incur' {
       'measurement manifest': { args: { id: string }; options: { requestId?: string } }
       'measurement show': { args: { id: string }; options: { requestId?: string } }
       'medication history add': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; stoppedOn?: string; schedule?: string; substance?: string; dose?: number; unit?: string; group?: string; note?: string; relatedGoalId?: string[]; relatedConditionId?: string[]; relatedRegimenId?: string[]; startedOn: string } }
-      'memory forget': { args: { memoryId: string }; options: {} }
-      'memory set-name': { args: { displayName: string }; options: {} }
-      'memory show': { args: { memoryId?: string }; options: { compact?: boolean } }
-      'memory update': { args: { memoryId: string; text: string }; options: { section?: "Identity" | "Preferences" | "Instructions" | "Context" } }
-      'memory upsert': { args: { text: string }; options: { section: "Identity" | "Preferences" | "Instructions" | "Context" } }
+      'memory forget': { args: { memoryId: string }; options: { compact?: boolean } }
+      'memory set-name': { args: { displayName: string }; options: { compact?: boolean } }
+      'memory show': { args: { memoryId?: string }; options: { recordOnly?: boolean; compact?: boolean } }
+      'memory update': { args: { memoryId: string; text: string }; options: { compact?: boolean; section?: "Identity" | "Preferences" | "Instructions" | "Context" } }
+      'memory upsert': { args: { text: string }; options: { compact?: boolean; section: "Identity" | "Preferences" | "Instructions" | "Context" } }
       'model': { args: {}; options: { show?: boolean; preset?: "codex"; model?: string; modelProvider?: string; codexCommand?: string; profile?: string; codexHome?: string; reasoningEffort?: "low" | "medium" | "high" | "xhigh"; oss?: boolean } }
       'protocol import-json': { args: {}; options: { requestId?: string; input: string } }
       'protocol list': { args: {}; options: { requestId?: string; status?: "available" | "archived"; commonsProtocol?: string; limit: number } }
@@ -309,7 +309,7 @@ declare module 'incur' {
       'vitals payload-schema': { args: {}; options: {} }
       'vitals save': { args: {}; options: { requestId?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; timeZone?: string; systolic?: number; diastolic?: number; heartRate?: number; respiratoryRate?: number; temperatureF?: number; temperatureC?: number; spo2?: number; weightLb?: number; heightIn?: number } }
       'vitals scaffold': { args: {}; options: { requestId?: string } }
-      'wearables activity list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number; includeWorkoutDetails: boolean } }
+      'wearables activity list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number; includeWorkoutSummaries: boolean; includeWorkoutDetails: boolean } }
       'wearables body list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
       'wearables day': { args: { date: string }; options: { requestId?: string; provider?: string[] } }
       'wearables drift': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; windowDays: number } }

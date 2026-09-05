@@ -1357,7 +1357,7 @@ describe('monorepo release flow coverage audit', () => {
       'review_gpt_reject_repository_policy_overrides "$@"',
     )
     expect(reviewGptPrHeadPreflight).toContain(
-      '--minimum-marked-response-time 5m \\\n    "$@"',
+      '--minimum-marked-response-time 270s \\\n    "$@"',
     )
     expect(reviewGptPrHeadPreflight).not.toContain(
       'export ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS=',
@@ -2167,7 +2167,7 @@ describe('monorepo release flow coverage audit', () => {
         'Idle draft cleanup: close hidden, inactive unsent drafts after 1800000ms',
       )
       expect(defaultResult.stdout).toContain(
-        'Minimum marked response time: 300000ms',
+        'Minimum marked response time: 270000ms',
       )
 
       writeHarnessFile(
@@ -2181,7 +2181,7 @@ describe('monorepo release flow coverage audit', () => {
         'Response capture: enabled (7654321ms timeout)',
       )
       expect(localResult.stdout).toContain(
-        'Minimum marked response time: 300000ms',
+        'Minimum marked response time: 270000ms',
       )
 
       writeHarnessFile(
@@ -2197,7 +2197,7 @@ describe('monorepo release flow coverage audit', () => {
       const callbackResult = runRepositoryDry()
       expect(callbackResult.status, callbackResult.stderr).toBe(0)
       expect(callbackResult.stdout).toContain(
-        'Minimum marked response time: 300000ms',
+        'Minimum marked response time: 270000ms',
       )
 
       const weakConfigPath = path.join(harnessRoot, 'weak-review-gpt.sh')
@@ -3315,20 +3315,20 @@ printf '%s\n' "\${review_gpt_managed_ports[*]}"
     ).toBe('')
 
     const configuredHarness = loadReviewGptOpenTargetHarness(1, undefined, {
-      minimumMarkedResponseMs: 30_000,
+      minimumMarkedResponseMs: 270_000,
     })
     expect(
       configuredHarness.markedResponseDurationFailure(
         'gpt-5.6-sol',
         'ROUND_OUTCOME:',
-        29_999,
+        269_999,
       ),
-    ).toContain('below the 30s minimum')
+    ).toContain('below the 270s minimum')
     expect(
       configuredHarness.markedResponseDurationFailure(
         'gpt-5.6-sol',
         'ROUND_OUTCOME:',
-        30_000,
+        270_000,
       ),
     ).toBe('')
     expect(() =>
@@ -6050,19 +6050,14 @@ exec "\${MURPH_TEST_REAL_WC:?}" "$@"
     }
   })
 
-  it('keeps diff-aware CLI escalation behind the nested lock handoff instead of locking every test:diff run', () => {
+  it('keeps diff-aware CLI escalation on the targeted verification lane', () => {
     const workspaceVerifyScript = readFileSync(
       path.join(repoRoot, 'scripts', 'workspace-verify.sh'),
       'utf8',
     )
 
-    expect(workspaceVerifyScript).toContain('command_requires_workspace_artifact_lock()')
     expect(workspaceVerifyScript).toContain(
-      'if [[ "${MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}" != "1" ]] && command_requires_workspace_artifact_lock "${1:-}"; then',
-    )
-    expect(workspaceVerifyScript).toContain('run_verify_cli_with_workspace_artifact_lock')
-    expect(workspaceVerifyScript).toContain(
-      'run_timed_step "CLI targeted verification" run_verify_cli_with_workspace_artifact_lock',
+      'run_timed_step "CLI targeted verification" run_verify_cli',
     )
   })
 })

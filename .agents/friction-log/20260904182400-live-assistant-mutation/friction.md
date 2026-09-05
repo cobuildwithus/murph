@@ -1,6 +1,7 @@
 ---
 title: 'Live assistant mutation assertions count read-only CLI help'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2845'
 ---
 
 ## Expected Behavior
