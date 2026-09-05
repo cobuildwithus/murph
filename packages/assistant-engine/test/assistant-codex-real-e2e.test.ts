@@ -22285,6 +22285,113 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
     360_000,
   )
 
+  it('preserves appointment timing and single-write readback with compact shared instructions', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-compact-appointment-e2e-'))
+    const requests: AssistantHostedAutomationToolRequest[] = []
+    const layers = buildAssistantSystemPromptLayers({
+      assistantCliContract: null,
+      assistantHostedAutomationAvailable: true,
+      assistantHostedDeviceConnectAvailable: false,
+      assistantHostedDeviceConnectProviders: [],
+      assistantKnowledgeToolsAvailable: false,
+      assistantProgressUpdatesAvailable: false,
+      channel: 'linq',
+      cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+      conversationScope: 'direct',
+      currentLocalDate: '2026-09-06',
+      currentInstant: '2026-09-07T00:00:00.000Z',
+      currentTimeZone: 'America/New_York',
+      hostedRuntime: true,
+      modelBehaviorProfile: 'gpt5-agentic',
+      onboardingGuidance: false,
+      ordinaryInboundTurn: true,
+    })
+
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: [
+          layers.staticCacheableCorePrompt,
+          layers.stableRouteCapabilityPrompt,
+          layers.threadContextPrompt,
+        ].join('\n\n'),
+        dynamicTools: [MURPH_AUTOMATION_TOOL],
+        env: config.env,
+        excludeResumeTurns: true,
+        hostedToolContext: {
+          automationTool: {
+            request: async (request) => {
+              requests.push(request)
+              if (request.action !== 'save' || request.schedule.kind !== 'at') {
+                throw new Error('Expected one appointment reminder save, without follow-up inspection.')
+              }
+              return {
+                action: 'save',
+                automationId: 'automation-compact-appointment',
+                created: true,
+                effectiveTimeZone: 'America/New_York',
+                lookupId: 'automation-compact-appointment',
+                occurrenceProjection: {
+                  nextOccurrenceAt: request.schedule.at,
+                  status: 'resolved' as const,
+                },
+                routeBinding: 'current_conversation',
+                schedule: request.schedule,
+                status: 'active',
+                updatedAt: '2026-09-07T00:00:00.000Z',
+              }
+            },
+          },
+          computerToolsAvailable: false,
+          currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => {
+            throw new Error('File sending is unavailable in this fixture.')
+          },
+          vaultFileSendAvailable: false,
+        },
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          layers.dynamicTurnContextPrompt,
+          'My dentist appointment is booked for September 7, 2026 at 11 AM New York time. This is the first time I have mentioned it here.',
+        ].join('\n\n'),
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+      process.stdout.write(`[compact-appointment-e2e] ${JSON.stringify({ model: config.model, requests, reply: result.finalMessage })}\n`)
+      expect(requests).toHaveLength(1)
+      expect(requests[0]).toMatchObject({
+        action: 'save',
+        schedule: { kind: 'at', at: '2026-09-07T12:00:00.000Z' },
+      })
+      expect(requests[0]).not.toHaveProperty('slug')
+      const actions = readCapabilityRoutingActions(result.jsonEvents)
+        .filter((action) => action.kind === 'dynamic' && action.tool === MURPH_AUTOMATION_TOOL.name)
+      expect(actions).toHaveLength(1)
+      expect(actions[0]).toMatchObject({
+        argumentsValue: {
+          action: 'save',
+          schedule: {
+            kind: 'at',
+            localAt: { time: '08:00', timeZone: 'America/New_York' },
+          },
+        },
+        success: true,
+      })
+      expect(result.finalMessage).toMatch(/remind|reminder/iu)
+      expect(result.finalMessage).toMatch(/8(?::00)?\s*a\.?m\.?/iu)
+      expect(result.finalMessage).not.toMatch(/would you like|want me to|shall I|unconfirmed|could not|couldn't|failed|8(?::00)?\s*p\.?m\.?/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
   it(
     'saves an explicit midnight Linq reminder without off-hours confirmation',
     async () => {
