@@ -7015,6 +7015,7 @@ if (!tool) {
       const scenario = await prepareScriptedTurnScenario()
       scenario.stub.captureProviderRequestDiagnostics()
       scenario.stub.queue(
+        { toolSearchCall: { query: 'murph attach_response_card private structured compact_table daily_nutrition', limit: 1 } },
         {
           functionCall: {
             arguments: { card },
@@ -7036,9 +7037,13 @@ if (!tool) {
         scenario.stub.requestSummariesSinceBaseline()[0]
           ?.providerRequestDiagnostics,
       ).toMatchObject({
-        includesResponseCardCompactTableShape: true,
-        includesResponseCardNutritionV2Shape: true,
+        includesResponseCardCompactTableShape: false,
+        includesResponseCardNutritionV2Shape: false,
       })
+      const discovered = scenario.stub.requestSummariesSinceBaseline()[1]?.toolSearchOutputTools
+      expect(JSON.stringify(discovered)).toContain('compact_table')
+      expect(JSON.stringify(discovered)).toContain('daily_nutrition')
+      expect(JSON.stringify(discovered)).toContain('goal list --status active')
       expect(result.runtimeIssueInputs).toEqual([])
       if ('workout' in card) {
         expect(result.responseCard).toMatchObject({

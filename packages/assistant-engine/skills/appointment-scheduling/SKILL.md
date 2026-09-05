@@ -359,19 +359,17 @@ unverified booking is not enough. Create the reminder before the appointment
 workflow's final report or stop, without separate confirmation unless the user
 opts out.
 
-The timing defaults below apply only when the member supplied neither an exact
+Appointment timing defaults apply only when the member supplied neither an exact
 clock time nor a broad time window for the reminder. Member-specified exact or
 broad-window timing follows the shared one-shot reminder policy; never replace
 an exact member time with an appointment default.
 
-Use the appointment's stated timezone, otherwise the vault timezone. For an
-appointment before noon local, schedule the prior evening at a known pre-bed
-reminder time or 8:00 PM. For noon or later, schedule 8:00 AM local that day.
-If that default instant is already past while the appointment is still future,
-use the earliest useful future time. If only the date is known, use 8:00 PM the
-prior evening. If no date is known, ask only for it.
-
-Reuse one stable automation identity for repeated mentions. Patch it when a
+Follow the developer prompt's **Private appointment follow-through** policy
+for reminder timing, timezone, missing details, and elapsed defaults. It owns
+these defaults, including reminders for bookings reported outside this skill.
+Never guess a missing appointment date or start time.
+Reuse the existing reminder when conversation or tool evidence identifies it;
+never invent a stable recipe key. Patch it when a
 reschedule is confirmed and archive it when cancellation is confirmed. Keep
 the subject privacy-safe but unmistakable, include the appointment time when
 known, and follow the existing save-verification rules before claiming it is
