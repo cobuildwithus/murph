@@ -15613,7 +15613,7 @@ describeRealCodex('real Codex public goal setup e2e', () => {
   )
 
   it(
-    'uses workflow references to ground, persist finite support, and reuse one Goal package',
+    'grounds from memory, persists finite support, and reuses one Goal package in a fresh session',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const publicGoal = await readPublicGoalSetupRecord()
@@ -15668,10 +15668,7 @@ describeRealCodex('real Codex public goal setup e2e', () => {
             normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
             ?? undefined,
           codexHome: config.codexHome,
-          developerInstructions: [
-            buildPublicGoalSetupDeveloperInstructions(),
-            'This local source CLI can yield while loading. Print the full exec_command result with text(result), including session_id; when it is still running, continue that session with write_stdin until completion. Do not rerun a pending command or replace a canonical CLI read with raw-file inspection.',
-          ].join('\n\n'),
+          developerInstructions: buildPublicGoalSetupDeveloperInstructions(),
           dynamicTools: [MURPH_AUTOMATION_TOOL],
           env: {
             ...config.env,
@@ -15857,16 +15854,6 @@ describeRealCodex('real Codex public goal setup e2e', () => {
             scenario: 'improve-deep-sleep-discovery',
           })}\n`,
         )
-        process.stdout.write(`[workflow-setup-policy-e2e] ${JSON.stringify(discoveryActions.map((action) =>
-          action.kind === 'command' ? {
-            command: action.command.replaceAll(workingDirectory, '<fixture>'),
-            outputChars: action.output.length,
-            behaviorRoot: action.output.includes('# Behavior follow-through'),
-            setup: action.output.includes('## Setup workflow'),
-            launch: action.output.includes('### 7. Mark the first launch'),
-            ok: action.ok,
-          } : { kind: action.kind },
-        ))}\n`)
         const publicGoalListRead = discoveryActions.find(
           isSuccessfulPublicGoalListAction,
         )
@@ -15914,13 +15901,6 @@ describeRealCodex('real Codex public goal setup e2e', () => {
             return actions
           }))
         ).flat()
-        const setupPolicyRead = discoveryActions.find((action) =>
-          action.kind === 'command' && action.ok
-          && action.output.includes('## Setup workflow')
-          && action.output.includes('### 7. Mark the first launch')
-        )
-
-        expect(setupPolicyRead, 'complete launch policy during grounded setup').toBeDefined()
         const discoveryMemoryRead = discoveryActions.find(
           isSuccessfulCompactMemoryReadAction,
         )
@@ -17034,16 +17014,6 @@ describeRealCodex('real Codex experiment onboarding e2e', () => {
           && action.command.includes('experiment-onboarding/SKILL.md')
           && action.output.includes('# Experiment onboarding')
         )
-        process.stdout.write(`[workflow-support-e2e] ${JSON.stringify({
-          reply: result.finalMessage,
-          actions: actions.map((action) => action.kind === 'command' ? {
-            command: action.command.replaceAll(workingDirectory, '<fixture>'),
-            entrypoint: action.output.includes('# Experiment onboarding'),
-            supportPolicy: action.output.includes('## Experiment automation mechanics'),
-            ok: action.ok,
-          } : { kind: action.kind }),
-          automationRequests,
-        })}\n`)
         const listCall = actions.find((action) =>
           action.kind === 'command'
           && action.ok
@@ -17071,10 +17041,11 @@ describeRealCodex('real Codex experiment onboarding e2e', () => {
         expect(reconcileCall?.eventIndex).toBeGreaterThan(
           supportPolicy?.eventIndex ?? Number.POSITIVE_INFINITY,
         )
-        // A support-only repair must not load unrelated setup or logging policy.
+        // Common setup and logging safeguards remain available during repair.
         const policyOutput = actions.filter((action) => action.kind === 'command')
           .map((action) => action.output).join('\n')
-        expect(policyOutput).not.toContain('## Protocol resolution')
+        // Run-setup policy remains in the entrypoint for conservative routing.
+        expect(policyOutput).toContain('## Protocol resolution')
         // Active-session safeguards stay in the entrypoint even during repair.
         expect(policyOutput).toContain('## Active experiment support')
         expect(skillRead, 'experiment-onboarding skill read').toBeDefined()
@@ -17299,7 +17270,7 @@ describeRealCodex('real Codex repeated-set resolution e2e', () => {
       const policyOutput = result.actions.filter((action) => action.kind === 'command')
         .map((action) => action.output).join('\n')
       expect(policyOutput.includes('## Active experiment support'), 'active policy read').toBe(true)
-      expect(policyOutput).not.toContain('## Creating the run')
+      expect(policyOutput).toContain('## Creating the run')
       expect(policyOutput).not.toContain('## First-session prep reminders')
       const alphaWrites = result.commandLog.filter((command) =>
         command.includes(`experiment session log ${REPEATED_SET_ALPHA_EXPERIMENT_ID}`)
@@ -29883,7 +29854,7 @@ async function materializeAssistantSkill(input: {
     relativePath: path.join(input.slug, 'SKILL.md'),
     skillsRoot: input.skillsRoot,
   })
-  if (input.slug === 'behavior-followthrough' || input.slug === 'experiment-onboarding') {
+  if (input.slug === 'experiment-onboarding') {
     await Promise.all(WORKFLOW_SKILL_REFERENCES[input.slug].map((reference) =>
       materializeAssistantSkillAsset({
         relativePath: path.join(input.slug, reference),

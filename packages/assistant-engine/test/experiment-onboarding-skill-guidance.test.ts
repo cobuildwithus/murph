@@ -30,7 +30,10 @@ describe('experiment onboarding skill guidance', () => {
       throw new Error('behavior-followthrough skill is not registered')
     }
 
-    return readWorkflowSkillPolicy('behavior-followthrough')
+    return readFile(
+      path.join(resolveAssistantSkillsRoot(), skill.slug, 'SKILL.md'),
+      'utf8',
+    )
   }
 
   async function readSelfManagementExperimentsSkill() {

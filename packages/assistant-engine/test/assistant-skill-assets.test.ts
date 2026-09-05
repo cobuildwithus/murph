@@ -1187,7 +1187,7 @@ describe('assistant skill assets', () => {
       turnTrigger: null,
     })
     const skillTexts = await Promise.all(ASSISTANT_SKILLS.map((skill) =>
-      skill.slug === 'behavior-followthrough' || skill.slug === 'experiment-onboarding'
+      skill.slug === 'experiment-onboarding'
         ? readWorkflowSkillPolicy(skill.slug)
         : readSkillFile(skill),
     ))
@@ -1283,7 +1283,7 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('.codex-hosted')
   })
 
-  it('keeps behavior follow-through policy in its skill owner with only compact bridges elsewhere', async () => {
+  it('keeps behavior follow-through policy in the skill file with only compact bridges elsewhere', async () => {
     const behaviorSkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'behavior-followthrough',
     )
@@ -1307,7 +1307,7 @@ describe('assistant skill assets', () => {
     }
 
     const [raw, stressRaw] = await Promise.all([
-      readWorkflowSkillPolicy('behavior-followthrough'),
+      readSkillFile(behaviorSkill),
       readSkillFile(stressSkill),
     ])
     const compact = raw.replace(/\s+/gu, ' ')

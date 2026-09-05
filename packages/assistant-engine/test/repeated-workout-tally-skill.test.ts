@@ -11,7 +11,7 @@ import {
 import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
 
 async function readSkill(slug: string) {
-  if (slug === 'experiment-onboarding' || slug === 'behavior-followthrough') {
+  if (slug === 'experiment-onboarding') {
     return readWorkflowSkillPolicy(slug)
   }
   return readFile(

@@ -1,69 +1,57 @@
-# Reduce task-specific skill context while preserving assistant behavior
+# Load experiment support policy only when needed
 
 Status: active
 Created: 2026-09-04
 Updated: 2026-09-04
 
-## Goal
+## Goal and scope
 
-Reduce irrelevant lazy-loaded policy during behavior support and experiment turns while preserving every existing domain rule and canonical effect.
+Reduce policy loaded for routine experiment logging while preserving existing safety, setup, support consent, and canonical effects. Move only experiment first-session/support mechanics to a bundled reference. Behavior-followthrough remains unchanged; protocol resolution, run creation, and active logging remain in the experiment entrypoint.
 
 ## Success criteria
 
-- Original policy retained verbatim across entrypoints and references.
-- Shared safety, grounding, privacy, consent, ordinary setup, active-session logging, and stop gates remain in entrypoints before dependent actions.
-- Focused policy assertions, reference packaging, typecheck, and production-derived real journeys pass.
-- Ordinary behavior setup and active-experiment entrypoints load less policy; support and full setup still read all applicable rules.
-
-## Scope
-
-- In scope: behavior-followthrough and experiment-onboarding workflow references, test fixtures, discovery and behavior proof.
-- Out of scope: model changes, tool authority/availability, billing/runtime state, provider transport, and sibling PRs.
-
-## Constraints
-
-- Move source policy instead of rewriting domain rules for brevity.
-- Reuse recursive skill packaging and filesystem reads; no runtime loader or eager injection.
-- Preserve registry metadata, tool definitions, and first-request assembly.
+- Every original experiment policy line retained verbatim across entrypoint and reference.
+- Safety, run setup, group privacy, occurrence identity, no-double-write rules, and stop gates remain inline.
+- Support reference loads before support questions or effects; missing policy blocks dependent effects.
+- Deterministic asset/policy tests, typecheck, and pinned real support/logging journeys pass.
 
 ## Product UX
 
 - Effort: Patch.
-- Outcome: Same grounded setup, exact support reconciliation, and canonical session logging with less irrelevant policy context.
-- Reaches: Private behavior launch/reuse, support-only repair, and repeated-set completion; clinical, consent, and group privacy gates remain in policy.
-- Proof: Preserve all prior owner assertions and run those three production-derived real-Codex journeys; verify ambiguity and private/group non-write boundaries deterministically and with existing focused journeys as needed.
+- Outcome: Same exact reminder reconciliation and canonical repeated-set logging with less unrelated support policy during routine logging.
+- Reaches: Private experiment support and logging; setup, clinical, consent, group privacy, and ambiguity gates are preserved.
+- Proof: Exact support inventory/reconciliation, one event per confirmed occurrence, canonical totals readback, no private writes in group context, preserved whole-owner semantic assertions.
 
-## Risks and mitigations
+## Decisions and boundaries
 
-1. Missed policy before a write: explicit action routing, common gates, complete live-fixture materialization, and exact effect assertions.
-2. Lost policy or packaging: line conservation, local-link checks, and existing semantic assertions against the complete owner policy.
-3. Increased read overhead: measure entrypoints and workflow reads; no mandatory recursive loading.
+- Keep the existing recursive asset packager and filesystem reads. No registry, eager input, schema, model, provider, state, or permission change.
+- Narrowed the initial broader split after the grounded behavior setup journey missed the expected support offer. Restore all behavior guidance and experiment run-setup policy; do not weaken that journey's business assertions to claim success.
+- The remaining support-reference path passed real-model proof before this final conservative layout. Rerun support and logging against the final entrypoint.
+- Source-CLI fixture yielding exposed an existing loss of native running-command handles. Reuse the existing fixture friction report. Keep the test-only streamed-output reconstruction regression so initial surfaced policy is not lost from completed-event evidence.
+- Private repeated-set fixtures use production CLI guidance; group fixtures retain their private-state boundary.
 
-## Tasks
+## Measurements
 
-1. Inventory source and callers, move workflow detail verbatim.
-2. Preserve semantic assertions, fix fixture materialization, and add routing proof.
-3. Run deterministic tests/typecheck, then focused real journeys and review replies/effects.
-4. Review full diff/privacy and measurements, close plan, commit, open PR.
-5. Parent review, readiness, required CI, and routed final review.
-
-## Decisions
-
-- Limit to the two largest multi-workflow entrypoints; keep eager-tool discovery unchanged.
-- Retain ordinary behavior Setup workflow and Active experiment support in the entrypoint. Initial live exploration did not reliably demonstrate loading every separated policy reference; smaller entrypoint savings are preferable to moving these common safeguards.
-- Repair references remain mandatory before support effects; one real support reconciliation has demonstrated entrypoint then complete reference then inventory then exact reconcile, with truthful timing uncertainty.
-- Existing repeated-set fixtures omitted production CLI bootstrap guidance and allowed shell-source inspection. Restore the production manifest contract for direct fixtures before treating them as policy evidence; group private-state exclusions remain unchanged.
-- Final live proof uses the repository-pinned Codex 0.151.0 binary, matching shipped runtime.
-- No new persistence or authority owner; unavailable policy blocks only dependent actions.
+- Experiment entrypoint: 58,162 to 36,296 bytes, a 37.6 percent reduction.
+- Every original nonempty experiment policy line retained across the two files.
+- Full support still reads both files and may incur routing/read overhead; this is not a claim of overall token or allowance savings.
+- Initial provider-visible inputs for individual and group chats are structurally unchanged: registry metadata, prompt assembly, eager/deferred tools, generated guidance, and history assembly are untouched. No measured-zero claim.
 
 ## Verification
 
-- Initial focused policy/asset tests: 61 passed, 7 existing skipped; assistant-engine typecheck, complexity, docs drift, and gardening passed.
-- Final layout retains every original nonempty policy line verbatim across owner files. Entrypoints: behavior 50,734 to 25,515 bytes; experiment 58,162 to 27,125 bytes. These are lazy policy bytes, not complete request tokens or measured allowance savings.
-- Registry/frontmatter, eager schemas, runtime tools, first-request assembly, and persisted state are unchanged.
-- Skill Creator standalone validator could not import PyYAML in this environment; repository frontmatter, asset-link, and semantic assertions provide next-best validation.
-- Final layout policy/asset tests passed: 61 passed, 7 existing skipped. Final assistant-engine typecheck and complexity guard pass.
-- Pinned real support reconciliation passes: entrypoint then complete support policy, one compact exact-series inventory, one exact reconcile; existing reminder retained and stale review archived, with no invented delivery time.
-- Pinned repeated-set logging passes with production CLI guidance: all confirmed occurrences saved under the canonical alternating target, exact totals reread, no setup/support reference loaded unnecessarily.
-- Setup proof remains pending. Recovered synthetic native evidence proves the full behavior policy was surfaced, while completed command events lost the initial output chunk and the model discarded yielded command handles. Reuse the existing source-CLI fixture friction report; preserve full native results and reconstruct matching streamed command output in test evidence without changing business policy or relaxing effects.
-- Stream reconstruction regression passes, preserving earlier surfaced policy without duplicating final output or mixing command identities. Identifier scan is clean. Final setup journey and final typecheck rerun are in progress; PR and exact-head CI remain pending. Early live failures remain diagnostic evidence only.
+- Earlier larger-layout policy/asset suite: 61 passed, 7 existing skipped. Earlier typechecks and complexity guard passed.
+- Pinned Codex 0.151.0, GPT-5.6 Terra, local subscription: support reconciliation and repeated-set logging passed before final narrowing; grounded behavior setup remained Hold and its runtime changes were removed.
+- Stream reconstruction regression passes: preserves initial policy, matches exact command identity and final tail, avoids duplication.
+- Final conservative-layout policy/asset suite: 58 passed, 7 existing skipped. Stream-output regression, assistant-engine typecheck, complexity guard, line conservation, and changed-file privacy scan passed.
+- Final conservative-layout support repair passed: entrypoint then full support reference, one exact compact inventory and one reconciliation; current reminder retained and stale review retired.
+- Final logging sample held: it asked an unnecessary target clarification despite the canonical rotation. The unchanged-policy control passed with the identical production CLI fixture and unchanged business assertions; the final candidate is being rerun. Both samples combined large skill reads and received truncated outer tool output, so the current evidence does not isolate a causal regression. No logging assertion was weakened.
+- Parent inspected policy routing, whole-owner preservation, and test-only evidence handling. Final ReviewGPT is exempt under completion-workflow Final ReviewGPT Eligibility: prompt-primary relocation with no production code, authority, persistence, provider, protocol, or safety-policy change; direct journey proof remains required.
+- Privacy scan clean on all ten files in the narrowed candidate; repeat on final plan/PR closeout.
+- Skill Creator standalone validator lacked PyYAML; repository frontmatter, packaging/link, and semantic tests provide next-best validation.
+- Draft PR #2866 exists. Remain draft until final proof, parent review, and required CI complete. No merge or deployment is authorized by this task.
+
+## Remaining work
+
+1. Verify final conservative layout and inspect replies/effects.
+2. Review final diff/privacy, close plan via the repository wrapper, and push the narrowed candidate.
+3. Update PR description around the final implementation, mark Ready after proof, and complete required CI.

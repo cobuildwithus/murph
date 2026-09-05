@@ -3,12 +3,7 @@ import path from 'node:path'
 import { resolveAssistantSkillsRoot } from '../../src/assistant-skill-assets.js'
 
 export const WORKFLOW_SKILL_REFERENCES = {
-  'behavior-followthrough': [
-    'references/support-lifecycle.md',
-    'references/examples.md',
-  ],
   'experiment-onboarding': [
-    'references/setup-and-run.md',
     'references/session-support.md',
   ],
 } as const

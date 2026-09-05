@@ -232,12 +232,11 @@ member input. That binding proves current authority, not the meaning of the
 message. The result exposes a Stripe-hosted URL only when payment is required,
 and the tool never exposes a general billing or Stripe client.
 
-## Task-specific skill policy
+## Experiment support policy
 
-The behavior-followthrough and experiment-onboarding skill entrypoints keep
-shared constraints, ordinary behavior setup, and active-experiment logging rules
-directly available. They route to co-packaged `references/` files before
-specialized setup or support effects instead of loading the whole directory. The normal
-skill filesystem remains the only loader; references are neither eager prompt
-content nor a separate skill registry. Keep the entrypoint routing, reference
-assets, and focused real-Codex fixtures together when changing these policies.
+The experiment-onboarding entrypoint retains safety, protocol resolution, run
+creation, and active-session logging rules. First-session guidance and support
+mechanics live in the co-packaged `references/session-support.md`, which must be
+read before support questions or effects. Normal recursive skill packaging and
+filesystem reads remain the owners. Keep that reference in focused real-Codex
+fixtures when changing support policy.
