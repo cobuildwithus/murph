@@ -1,6 +1,6 @@
 # Diagnose post-checkpoint lease version drift
 
-Status: active
+Status: completed
 Created: 2026-09-05
 Updated: 2026-09-05
 
@@ -25,11 +25,11 @@ The runtime checkpoint bridge owns lease validation. The existing foreground mai
 ## Tasks
 
 1. Completed: obtained and inspected ReviewGPT's implementation patch; production source matches that patch.
-2. Verify both diagnostic outcomes, absent diagnostics on unrelated failures, sensitive-value exclusion, and unchanged checkpoint outcomes through focused tests and typecheck.
-3. Review the complete candidate, run complexity and documentation checks, and create a scoped candidate commit and PR.
-4. Run final ReviewGPT on the pushed candidate concurrently with required CI. Resolve findings under the current disposition policy.
-5. Merge and deploy only if the final patch remains telemetry-only and every canonical gate is satisfied. Otherwise preserve the concrete blocker.
-6. Verify the deployed revision and use a bounded aggregate query on natural failures. Absence of a recurrence does not prove the underlying bug resolved.
+2. Completed: verified both diagnostic outcomes, absent diagnostics on unrelated failures, sensitive-value exclusion, and unchanged checkpoint outcomes through focused tests and typecheck.
+3. Completed: parent reviewed the complete candidate; complexity and documentation checks passed; candidate committed and published as PR #2932.
+4. Final ReviewGPT round 1 passed on commit 63b54a07a0abac620e6d44a92dc42c02062b9eb1 with no qualifying finding; required CI continues separately.
+5. Operational follow-up: merge and deploy only after final-head CI and every canonical gate pass. The automation retains this condition and the exact natural-traffic query; no rollout is claimed here.
+6. Operational follow-up: verify the deployed revision and aggregate natural failures by the two boolean fields. Absence of recurrence means unexercised telemetry, not a resolved underlying issue.
 
 ## Verification
 
@@ -39,10 +39,13 @@ The runtime checkpoint bridge owns lease validation. The existing foreground mai
 - Complexity passed: checkpoint bridge maximum 6 to 8, zero debt; workspace runner maximum 71 and debt 59 unchanged. Its three existing hotspots are unchanged orchestration functions; this observation does not justify refactoring them.
 - Log privacy guard, documentation drift, and diff whitespace checks passed. Documentation gardening passed with zero issues. Full affected suites passed 209/210; the sole failure is the same pre-existing 250 ms queued-log assertion proved on the unchanged base. All 30 new cases pass in both the focused and full runs.
 - Before implementation, the bridge suite passed 53/54, and the existing 250 ms queued-log independence assertion failed both in the full file and alone. The public-safe Frog entry records that reproducible baseline gap without claiming its cause or applying a workaround.
-- Required CI, pushed-candidate final ReviewGPT, merge, and canonical protected rollout remain pending. No live replay or production mutation beyond the explicitly authorized telemetry rollout is permitted.
+- Final ReviewGPT round 1: PASS on the pushed candidate above, with verified gpt-6-pro model identity. Independent review exercised 76 base/head bridge scenarios and the projection/privacy cases; it did not claim full Vitest reruns. No finding was accepted or left unresolved.
+- Parent final review confirms production source remains telemetry-only. The parser and structured sanitizer match the previously observed ready Web revision, supporting old-reader compatibility without a coordinated release.
+- This implementation plan closes with the reviewed code and proof recorded. Final-head CI, merge, canonical protected rollout, and read-only observation remain operational follow-ups owned by the same automation. No merge or deployment is claimed, and no runtime behavior or test assertion was changed to bypass the baseline gap.
 
 ## Decisions
 
 - One telemetry improvement selected for this sweep.
 - Internal-only observation; no member-visible changelog or product-flow change.
 - Diagnostic overhead must be constant and restricted to an existing failure path.
+Completed: 2026-09-05
