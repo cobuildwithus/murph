@@ -21,4 +21,4 @@ Record the provider-request baseline before the synthetic inbound message and se
 
 ## Context
 
-This mismatch blocked the hosted Linq first-contact predeploy proof. The correction changes test attribution only; direct reply tool availability remains required.
+Selecting the exact inbound request improves proof attribution; it does not establish the cause of the historical predeploy failure. That failure came from expecting deferred card tools in the resident code-mode inventory and is corrected by the shared E2E helper. Direct reply tool availability remains required through its existing discovery contract.
