@@ -19,7 +19,9 @@ The same local lane runs `hosted-group-start-recovery-postgres.test.ts` through
 the real recovery endpoint, identity writer, routing owner, and activation
 promotion: foreign-owner rejection, exactly one concurrent recovery claimant,
 route-failure rollback, and retained identity/source without verified-email
-authorization. Its external session/token and crypto boundaries are synthetic;
+authorization, plus a recovered member's separate verified-email inbound and
+duplicate replay through the real planner and mailbox without identity writes.
+Its external session/token and crypto boundaries are synthetic;
 the separate crypto suite owns authenticated-encryption proof. Recovery route
 and Linq thread-route regressions cover ordered mutation and direct-only group
 admission alongside existing verified and recovered group behavior.

@@ -41,7 +41,6 @@ import {
   ensureHostedMemberForPhoneResolutionTx,
 } from "./member-identity-service";
 import {
-  bindHostedMemberLinqEmailHandleTx,
   hostedMemberIdentityRecordsEqual,
   lockHostedMemberIdentityStateTx,
   lookupHostedMemberIdentityByLinqEmailHandle,
@@ -1691,12 +1690,6 @@ export async function planHostedOnboardingLinqWebhook(
     } else {
       await lockHostedMemberRow(input.prisma, existingMember.id);
     }
-    await bindHostedLinqEmailHandleIdentityIfMatchedTx({
-      existingMemberLookup,
-      memberId: existingMember.id,
-      participantContact,
-      prisma: input.prisma,
-    });
     const exactMemberAccess = await readHostedRuntimeAiAccessDecision({
       memberId: existingMember.id,
       noticeSeed: input.event.event_id,
@@ -4509,26 +4502,6 @@ function resolveHostedLinqExistingMemberMatch(input: {
   }
 
   return "none";
-}
-
-async function bindHostedLinqEmailHandleIdentityIfMatchedTx(input: {
-  existingMemberLookup: HostedLinqIdentityCoreCandidate | null;
-  memberId: string;
-  participantContact: HostedLinqParticipantContact;
-  prisma: Prisma.TransactionClient;
-}): Promise<void> {
-  if (
-    input.participantContact.kind !== "email"
-    || !input.existingMemberLookup
-  ) {
-    return;
-  }
-  await bindHostedMemberLinqEmailHandleTx({
-    emailAddress: input.participantContact.value,
-    lookupKey: input.participantContact.lookupKey,
-    memberId: input.memberId,
-    prisma: input.prisma,
-  });
 }
 
 function resolveHostedLinqHomeLineRouteBindingAuthority(input: {

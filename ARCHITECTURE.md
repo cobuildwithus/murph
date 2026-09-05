@@ -3520,6 +3520,11 @@ foreign handle, binds the authenticated member's handle and encrypted source,
 and writes the exact temporary route atomically. Crypto preparation and current
 routing opens precede the transaction, which permits cached crypto only. Thus
 recovered direct routing and later promotion cannot lose the identity source.
+Direct inbound resolution uses the existing handle or verified-email authority
+without rewriting either. A member's retained iMessage handle and separate
+verified email can both resolve to that member; verified email is not copied
+into the single retained-handle slot. Handle writes belong to new identity
+creation, explicit recovery, and owner-controlled source re-derivation.
 Canonical verified-email writes and email unlink take the participant contact
 lock before the member lock. A foreign handle blocks a primary email write;
 optional secondary enrichment skips that email while preserving phone or

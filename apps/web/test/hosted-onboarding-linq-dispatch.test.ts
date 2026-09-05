@@ -13401,25 +13401,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       reason: "sent-signup-link",
     });
     expect(hostedMemberRouting.upsert).toHaveBeenCalled();
-    expect(prisma.hostedMemberIdentity?.updateMany).toHaveBeenCalledWith({
-      data: {
-        linqEmailHandleEncrypted: expect.any(String),
-        linqEmailHandleLookupKey: expect.stringMatching(/^hbidx:email:v1:/u),
-      },
-      where: {
-        memberId: "member_email",
-        OR: [
-          { linqEmailHandleLookupKey: null },
-          {
-            linqEmailHandleLookupKey: {
-              in: expect.arrayContaining([
-                expect.stringMatching(/^hbidx:email:v1:/u),
-              ]),
-            },
-          },
-        ],
-      },
-    });
+    expect(prisma.hostedMemberIdentity?.updateMany).not.toHaveBeenCalled();
     expect(prismaMocks.hostedInvite.create).toHaveBeenCalledOnce();
     expect(mocks.createHostedLinqChat).toHaveBeenCalledWith(expect.objectContaining({
       from: fallbackLinePhone,
