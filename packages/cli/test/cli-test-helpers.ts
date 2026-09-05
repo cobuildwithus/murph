@@ -100,7 +100,7 @@ const assistantCommandDeclarationPath = path.join(
   repoRoot,
   'packages/assistant-cli/dist/commands/assistant.d.ts',
 )
-export const requiredRuntimeArtifactPaths = [
+const requiredRuntimeArtifactPaths = [
   path.join(repoRoot, 'packages/contracts/dist/index.js'),
   path.join(repoRoot, 'packages/contracts/dist/index.d.ts'),
   path.join(repoRoot, 'packages/hosted-execution/dist/index.js'),
@@ -143,12 +143,6 @@ export const requiredRuntimeArtifactPaths = [
   cliIndexPath,
   path.join(repoRoot, 'packages/cli/dist/cli-entry.js'),
 ]
-export const runtimeArtifactFreshnessPairs = [
-  {
-    artifactPath: assistantCommandJavaScriptPath,
-    sourcePath: assistantCommandSourcePath,
-  },
-] as const
 const importSmokeArtifactPaths = [
   ...requiredRuntimeArtifactPaths.filter((artifactPath) => artifactPath.endsWith('.js') && artifactPath !== binPath),
   path.join(repoRoot, 'packages/setup-cli/dist/setup-cli.js'),
@@ -484,7 +478,8 @@ export async function ensureCliRuntimeArtifactsWithOptions(options?: {
   if (
     options?.forceReverify !== true &&
     cliRuntimeArtifactsVerified &&
-    requiredRuntimeArtifactPaths.every((artifactPath) => existsSync(artifactPath))
+    requiredRuntimeArtifactPaths.every((artifactPath) => existsSync(artifactPath)) &&
+    await verifyAssistantCommandFreshness()
   ) {
     return
   }
@@ -494,7 +489,7 @@ export async function ensureCliRuntimeArtifactsWithOptions(options?: {
   }
 
   await withCliRuntimeArtifactRepairLock(async () => {
-    if (await verifyCliRuntimeArtifacts({ trustPreparedBuild: true })) {
+    if (await verifyCliRuntimeArtifacts()) {
       return
     }
 
@@ -903,15 +898,13 @@ function formatHarnessStderr(stderrOutput: string): string {
   return stderrOutput.trim().length > 0 ? `\n${stderrOutput.trim()}` : ''
 }
 
-async function verifyCliRuntimeArtifacts(options?: {
-  trustPreparedBuild?: boolean
-}): Promise<boolean> {
+async function verifyCliRuntimeArtifacts(): Promise<boolean> {
   if (!requiredRuntimeArtifactPaths.every((artifactPath) => existsSync(artifactPath))) {
     cliRuntimeArtifactsVerified = false
     return false
   }
 
-  if (options?.trustPreparedBuild !== true && !(await verifyRuntimeArtifactFreshness())) {
+  if (!(await verifyAssistantCommandFreshness())) {
     cliRuntimeArtifactsVerified = false
     return false
   }
@@ -922,18 +915,13 @@ async function verifyCliRuntimeArtifacts(options?: {
   return cliRuntimeArtifactsVerified
 }
 
-async function verifyRuntimeArtifactFreshness(): Promise<boolean> {
+async function verifyAssistantCommandFreshness(): Promise<boolean> {
   try {
-    const results = await Promise.all(
-      runtimeArtifactFreshnessPairs.map(async ({ artifactPath, sourcePath }) => {
-        const [artifactStats, sourceStats] = await Promise.all([
-          stat(artifactPath),
-          stat(sourcePath),
-        ])
-        return artifactStats.mtimeMs >= sourceStats.mtimeMs
-      }),
-    )
-    return results.every(Boolean)
+    const [artifact, source] = await Promise.all([
+      stat(assistantCommandJavaScriptPath),
+      stat(assistantCommandSourcePath),
+    ])
+    return artifact.mtimeMs >= source.mtimeMs
   } catch {
     return false
   }

@@ -6,11 +6,8 @@ import path from 'node:path'
 import { test } from 'vitest'
 
 import {
-  requiredRuntimeArtifactPaths,
   resolveCliProcessExecutionMode,
-  runtimeArtifactFreshnessPairs,
   retryableCliRuntimeArtifactOutputFromError,
-  repoRoot,
   runCli,
   runRawCli,
 } from './cli-test-helpers.js'
@@ -86,30 +83,6 @@ test('cli test helpers treat harness error messages as retryable artifact failur
     retryableCliRuntimeArtifactOutputFromError(error),
     error.message,
   )
-})
-
-test('cli test helpers require the built assistant command and reject its stale projection', () => {
-  const assistantCommandSourcePath = path.join(
-    repoRoot,
-    'packages/assistant-cli/src/commands/assistant.ts',
-  )
-  const assistantCommandJavaScriptPath = path.join(
-    repoRoot,
-    'packages/assistant-cli/dist/commands/assistant.js',
-  )
-  const assistantCommandDeclarationPath = path.join(
-    repoRoot,
-    'packages/assistant-cli/dist/commands/assistant.d.ts',
-  )
-
-  assert.equal(requiredRuntimeArtifactPaths.includes(assistantCommandJavaScriptPath), true)
-  assert.equal(requiredRuntimeArtifactPaths.includes(assistantCommandDeclarationPath), true)
-  assert.deepEqual(runtimeArtifactFreshnessPairs, [
-    {
-      artifactPath: assistantCommandJavaScriptPath,
-      sourcePath: assistantCommandSourcePath,
-    },
-  ])
 })
 
 test('local parallel CLI test helper keeps suite concurrency opt-in by default', () => {
