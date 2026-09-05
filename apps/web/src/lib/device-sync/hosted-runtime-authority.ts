@@ -747,31 +747,21 @@ function resolveHostedRuntimeSourceDeliveryStallNoticeCandidates(input: {
   const updatesByKey = new Map(
     input.sourceUpdates.map((source) => [source.sourceInstanceKey, source]),
   );
-  const sourceKeys = new Set([
-    ...input.currentSources.map((source) => source.sourceInstanceKey),
-    ...input.sourceUpdates.map((source) => source.sourceInstanceKey),
-  ]);
-  const currentByKey = new Map(
-    input.currentSources.map((source) => [source.sourceInstanceKey, source]),
-  );
   const candidates: HostedSourceDeliveryStallNoticeCandidate[] = [];
-  for (const sourceInstanceKey of sourceKeys) {
-    const current = currentByKey.get(sourceInstanceKey);
-    const update = updatesByKey.get(sourceInstanceKey);
-    if (!current && !update) {
-      continue;
-    }
+  // A notice needs the canonical row id. Newly reported sources without a
+  // stored row cannot be candidates until the next pass.
+  for (const current of input.currentSources) {
+    const source = { ...current, ...updatesByKey.get(current.sourceInstanceKey) };
     const candidate = resolveHostedSourceDeliveryStallNoticeCandidate({
       connectionId: input.connectionId,
-      lastDataAt: update && Object.prototype.hasOwnProperty.call(update, "lastDataAt")
-        ? update.lastDataAt ?? null
-        : current?.lastDataAt ?? null,
-      lifecycleEpoch: update?.lifecycleEpoch ?? current?.lifecycleEpoch ?? null,
+      lastErrorCode: source.lastErrorCode ?? null,
+      lastDataAt: source.lastDataAt ?? null,
+      lifecycleEpoch: source.lifecycleEpoch ?? current.lifecycleEpoch ?? null,
       now: input.now,
-      sourceId: current?.id ?? "",
-      sourceInstanceKey,
-      sourceProviderSlug: update?.sourceProviderSlug ?? current?.sourceProviderSlug ?? "",
-      status: update?.status ?? current?.status ?? "disconnected",
+      sourceId: current.id,
+      sourceInstanceKey: current.sourceInstanceKey,
+      sourceProviderSlug: source.sourceProviderSlug,
+      status: source.status,
     });
     if (candidate) {
       candidates.push(candidate);

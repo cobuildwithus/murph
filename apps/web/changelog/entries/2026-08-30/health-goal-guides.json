@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-08-30",
+  "order": 200,
+  "item": {
+    "id": "health-goal-guides",
+    "kind": "feature",
+    "priority": 4,
+    "title": "252 health goals you can act on",
+    "summary": "Browse practical, research-backed guides for outcomes like sleeping better, lowering resting heart rate, building strength, and training for an event.",
+    "details": "Every guide works on its own. All seven goal categories are grouped under clear section labels with no more than 12 goals at a time, and every goal now has a simple visual cue that carries into its guide. Search understands common phrasing such as iron man; when there is no exact guide, Start with Murph opens Messages with your goal already filled in.",
+    "relevanceTags": ["goals", "health", "assistant"],
+    "sourcePullRequests": [2616],
+    "tryIt": {
+      "label": "Browse health goals",
+      "href": "/goals"
+    }
+  }
+}

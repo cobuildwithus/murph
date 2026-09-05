@@ -3573,6 +3573,8 @@ function createHostedMemberIdentityServiceTransaction(): HostedCryptoTestTransac
           input.data.assistantPersonaCausalSeq === null
             ? null
             : BigInt(input.data.assistantPersonaCausalSeq),
+        groupJournalCaptureConsentRequestedAt: null,
+        groupJournalCaptureEnabled: null,
         assistantDetail: null,
         assistantDetailCausalSeq:
           input.data.assistantDetailCausalSeq === undefined ||
@@ -3650,6 +3652,8 @@ function buildHostedMemberIdentityRecord(
   const now = new Date("2026-05-02T00:00:00.000Z");
   return {
     createdAt: now,
+    linqEmailHandleLookupKey: nullableString(input.linqEmailHandleLookupKey),
+    linqEmailHandleEncrypted: null,
     maskedPhoneNumberHint: nullableString(input.maskedPhoneNumberHint),
     memberId: input.memberId,
     phoneLookupKey: nullableString(input.phoneLookupKey),

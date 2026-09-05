@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import {
   buildCalendarEventUrl,
@@ -14,10 +14,23 @@ import {
 const ROUTES = [
   "/",
   "/clubs",
+  "/food",
   "/search",
+  "/goals",
+  "/goals/sleep",
+  "/goals/nutrition",
+  "/goals/cardio",
+  "/goals/strength",
+  "/goals/biomarkers",
+  "/goals/life-stages",
+  "/goals/lower-resting-heart-rate",
   "/security",
   "/pitch",
   "/changelog",
+  "/compare",
+  "/compare/murph-vs-bodybuddy",
+  "/compare/murph-vs-commonhealth",
+  "/compare/murph-vs-whoop",
   "/growth",
   "/subprocessors",
   "/consumer-health-data-privacy-policy",
@@ -51,6 +64,38 @@ function isLoopbackUrl(rawUrl: string): boolean {
     return false;
   }
 }
+
+test("comparison evidence links keep 24px targets at narrow widths", async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  await page.route("**/*", (route) => {
+    if (isLoopbackUrl(route.request().url())) {
+      route.continue();
+    } else {
+      route.abort();
+    }
+  });
+
+  for (const width of [320, 390] as const) {
+    await page.setViewportSize({ width, height: 900 });
+    const response = await page.goto("/compare/murph-vs-whoop", {
+      waitUntil: "load",
+    });
+    expect(response?.status(), "WHOOP comparison should respond 200").toBe(200);
+    await page.locator("[data-detailed-comparison] summary").click();
+    const sourceLinks = page.getByRole("link", {
+      name: /^Open source \d+ for WHOOP/u,
+    });
+    expect(await sourceLinks.count()).toBeGreaterThan(1);
+
+    for (const sourceLink of await sourceLinks.all()) {
+      const bounds = await sourceLink.boundingBox();
+      expect(bounds?.height ?? 0).toBeGreaterThanOrEqual(24);
+      expect(bounds?.width ?? 0).toBeGreaterThanOrEqual(24);
+    }
+  }
+});
 
 test("challenge-card studies retain every semantic edge at mobile widths", async ({
   page,
@@ -186,6 +231,86 @@ function measureHorizontalOverflow(tolerancePx: number) {
   return { viewportWidth, scrollWidth, overflowPx, culprits };
 }
 
+async function openGoalCategory(
+  page: Page,
+  route: string,
+  width: number,
+) {
+  await page.setViewportSize({ width, height: 900 });
+  const response = await page.goto(route, { waitUntil: "load" });
+  expect(response?.status(), `${route} should respond 200 at ${width}px`).toBe(200);
+
+  const catalog = page.locator("[data-goal-catalog]");
+  await expect(catalog).toBeVisible();
+  await page.evaluate(async () => {
+    await document.fonts?.ready;
+    await new Promise((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve)),
+    );
+  });
+
+  return catalog;
+}
+
+function allowOnlyLoopbackRequests(page: Page) {
+  return page.route("**/*", (route) => {
+    if (isLoopbackUrl(route.request().url())) {
+      return route.continue();
+    }
+    return route.abort();
+  });
+}
+
+function countRenderedGridTracks(gridTemplateColumns: string): number {
+  return gridTemplateColumns.trim().split(/\s+/).filter(Boolean).length;
+}
+
+async function measureStandaloneGoalDirectory(directory: Locator) {
+  return directory.evaluate((element, tolerancePx) => {
+    const directoryRect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    const items = Array.from(
+      element.querySelectorAll<HTMLElement>(
+        ':scope > [data-goal-root="standalone"]',
+      ),
+    );
+    const itemRects = items.map((item) => item.getBoundingClientRect());
+    const columns = new Map<number, DOMRect[]>();
+    for (const rect of itemRects) {
+      const columnStart = Math.round((rect.left - directoryRect.left) * 10) / 10;
+      const column = columns.get(columnStart) ?? [];
+      column.push(rect);
+      columns.set(columnStart, column);
+    }
+
+    let maxInternalGap = 0;
+    for (const column of columns.values()) {
+      column.sort((left, right) => left.top - right.top);
+      for (let index = 1; index < column.length; index += 1) {
+        maxInternalGap = Math.max(
+          maxInternalGap,
+          column[index].top - column[index - 1].bottom,
+        );
+      }
+    }
+
+    return {
+      allItemsContained: itemRects.every(
+        (rect) =>
+          rect.left >= directoryRect.left - tolerancePx
+          && rect.right <= directoryRect.right + tolerancePx,
+      ),
+      columnCount: style.gridTemplateColumns.trim().split(/\s+/).filter(Boolean)
+        .length,
+      itemCount: items.length,
+      maxInternalGap,
+      scrollWidth: element.scrollWidth,
+      usedColumnCount: columns.size,
+      visibleWidth: element.clientWidth,
+    };
+  }, OVERFLOW_TOLERANCE_PX);
+}
+
 test("calendar links wrap maximum unbroken event text", async ({ page }) => {
   test.setTimeout(240_000);
   const event = {
@@ -243,6 +368,11 @@ test("calendar links wrap maximum unbroken event text", async ({ page }) => {
 for (const route of ROUTES) {
   for (const width of WIDTHS) {
     test(`no horizontal overflow: ${route} @ ${width}px`, async ({ page }) => {
+      if (route.startsWith("/goals")) {
+        test.slow();
+      } else if (route.startsWith("/compare")) {
+        test.setTimeout(300_000);
+      }
       await page.setViewportSize({ width, height: 900 });
 
       // Measure the real, production-relevant page: drop every non-loopback
@@ -257,16 +387,15 @@ for (const route of ROUTES) {
         }
       });
 
-      // Freeze animation/transition so layout settles to a stable measurement.
-      await page.addInitScript(() => {
-        const style = document.createElement("style");
-        style.textContent =
-          "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}";
-        (document.head ?? document.documentElement).appendChild(style);
-      });
-
       const response = await page.goto(route, { waitUntil: "load" });
       expect(response?.status(), `${route} should respond 200`).toBe(200);
+
+      // Freeze animation/transition after the document exists, then allow two
+      // frames for the resulting layout to settle before measurement.
+      await page.addStyleTag({
+        content:
+          "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}",
+      });
 
       // Web fonts change text width (and therefore min-content), so wait for
       // them and a couple of frames before measuring or the result drifts.
@@ -288,6 +417,255 @@ for (const route of ROUTES) {
     });
   }
 }
+
+test("category directories group every goal into sectioned grids", async ({
+  page,
+}) => {
+  test.slow();
+  await allowOnlyLoopbackRequests(page);
+
+  for (const [width, expectedColumns] of [
+    [320, 1],
+    [390, 1],
+    [640, 2],
+    [1024, 3],
+    [1280, 3],
+  ] as const) {
+    const catalog = await openGoalCategory(page, "/goals/cardio", width);
+    await expect(catalog.locator("[data-goal-sectioned-directory]")).toHaveCount(1);
+    await expect(page.locator("details")).toHaveCount(0);
+    await expect(page.locator("[data-goal-family]")).toHaveCount(0);
+
+    const directories = catalog.locator('[data-goal-directory="section"]');
+    const directoryCount = await directories.count();
+    expect(directoryCount).toBeGreaterThan(1);
+
+    const routeIds = await directories.locator(":scope > li > a")
+      .evaluateAll((links) => links.map((link) =>
+        link.getAttribute("href")?.replace("/goals/", "")
+      ));
+    expect(routeIds.length).toBeGreaterThan(8);
+    expect(new Set(routeIds).size).toBe(routeIds.length);
+
+    for (let index = 0; index < directoryCount; index += 1) {
+      const layout = await measureStandaloneGoalDirectory(directories.nth(index));
+      expect(layout.itemCount).toBeGreaterThan(0);
+      expect(layout.columnCount).toBe(expectedColumns);
+      expect(layout.usedColumnCount).toBe(
+        Math.min(expectedColumns, layout.itemCount),
+      );
+      expect(layout.allItemsContained).toBe(true);
+      expect(layout.maxInternalGap).toBeLessThanOrEqual(16);
+      expect(layout.scrollWidth - layout.visibleWidth).toBeLessThanOrEqual(
+        OVERFLOW_TOLERANCE_PX,
+      );
+    }
+
+    const overflow = await page.evaluate(
+      measureHorizontalOverflow,
+      OVERFLOW_TOLERANCE_PX,
+    );
+    expect(
+      overflow.overflowPx,
+      `/goals/cardio overflows by ${overflow.overflowPx}px at ${width}px.\n${overflow.culprits.join("\n")}`,
+    ).toBeLessThanOrEqual(OVERFLOW_TOLERANCE_PX);
+  }
+});
+
+test("category sections keep their heading above a full-width grid without disclosures", async ({
+  page,
+}) => {
+  test.slow();
+  await allowOnlyLoopbackRequests(page);
+
+  for (const width of [390, 1280] as const) {
+    const catalog = await openGoalCategory(page, "/goals/nutrition", width);
+    await expect(page.locator("details")).toHaveCount(0);
+
+    const sections = catalog.locator("[data-goal-directory-section]");
+    expect(await sections.count()).toBeGreaterThan(1);
+    const layouts = await sections.evaluateAll((elements) =>
+      elements.map((section) => {
+        const heading = section.querySelector<HTMLElement>("h2");
+        const grid = section.querySelector<HTMLElement>(
+          '[data-goal-directory="section"]',
+        );
+        if (!heading || !grid) {
+          throw new Error("Goal directory section markup is incomplete.");
+        }
+        const headingRect = heading.getBoundingClientRect();
+        const gridRect = grid.getBoundingClientRect();
+        const sectionRect = section.getBoundingClientRect();
+        return {
+          gridWidth: gridRect.width,
+          headingAboveGrid: headingRect.bottom <= gridRect.top + 1,
+          itemCount: grid.children.length,
+          sectionTop: sectionRect.top,
+          sectionWidth: sectionRect.width,
+        };
+      })
+    );
+
+    for (const layout of layouts) {
+      expect(layout.headingAboveGrid).toBe(true);
+      expect(layout.itemCount).toBeGreaterThan(0);
+      expect(Math.abs(layout.gridWidth - layout.sectionWidth)).toBeLessThanOrEqual(
+        OVERFLOW_TOLERANCE_PX,
+      );
+    }
+    for (let index = 1; index < layouts.length; index += 1) {
+      expect(layouts[index].sectionTop).toBeGreaterThan(layouts[index - 1].sectionTop);
+    }
+
+    const overflow = await page.evaluate(
+      measureHorizontalOverflow,
+      OVERFLOW_TOLERANCE_PX,
+    );
+    expect(overflow.overflowPx).toBeLessThanOrEqual(OVERFLOW_TOLERANCE_PX);
+  }
+});
+
+test("goal landing and search previews stay compact and title-first", async ({
+  page,
+}) => {
+  test.slow();
+  await allowOnlyLoopbackRequests(page);
+
+  for (const [width, expectedColumns] of [
+    [320, 2],
+    [1280, 4],
+  ] as const) {
+    await page.setViewportSize({ width, height: 900 });
+    const response = await page.goto("/goals", { waitUntil: "load" });
+    expect(response?.status()).toBe(200);
+
+    const previews = page.locator("[data-goal-preview]");
+    await expect(previews).toHaveCount(7);
+    const previewLayouts = await previews.evaluateAll((directories) =>
+      directories.map((directory) => {
+        const links = Array.from(
+          directory.querySelectorAll<HTMLElement>(":scope > li > a"),
+        );
+        return {
+          cardCount: links.length,
+          gridTemplateColumns: getComputedStyle(directory).gridTemplateColumns,
+          maxCardHeight: Math.max(
+            ...links.map((link) => link.getBoundingClientRect().height),
+          ),
+          paragraphCount: links.reduce(
+            (count, link) => count + link.querySelectorAll("p").length,
+            0,
+          ),
+        };
+      })
+    );
+
+    for (const preview of previewLayouts) {
+      expect(preview.cardCount).toBe(4);
+      expect(countRenderedGridTracks(preview.gridTemplateColumns)).toBe(
+        expectedColumns,
+      );
+      expect(preview.maxCardHeight).toBeLessThan(150);
+      expect(preview.paragraphCount).toBe(0);
+    }
+    await expect(previews.locator("[data-goal-outcome-visual]")).toHaveCount(0);
+  }
+
+  await page.setViewportSize({ width: 390, height: 900 });
+  const searchInput = page.getByRole("searchbox", { name: "Your goal" });
+  await searchInput.fill("sleep");
+  const searchResults = page.locator('[data-goal-search-results="visible"]');
+  await expect(searchResults).toBeVisible();
+  const searchLayout = await searchResults.evaluate((directory) => {
+    const links = Array.from(
+      directory.querySelectorAll<HTMLElement>(":scope > li > a"),
+    );
+    return {
+      cardCount: links.length,
+      gridTemplateColumns: getComputedStyle(directory).gridTemplateColumns,
+      maxCardHeight: Math.max(
+        ...links.map((link) => link.getBoundingClientRect().height),
+      ),
+      paragraphCount: links.reduce(
+        (count, link) => count + link.querySelectorAll("p").length,
+        0,
+      ),
+    };
+  });
+
+  expect(searchLayout.cardCount).toBeGreaterThan(0);
+  expect(searchLayout.cardCount).toBeLessThanOrEqual(16);
+  expect(countRenderedGridTracks(searchLayout.gridTemplateColumns)).toBe(2);
+  expect(searchLayout.maxCardHeight).toBeLessThan(150);
+  expect(searchLayout.paragraphCount).toBe(0);
+  await expect(searchResults.locator("svg")).toHaveCount(0);
+  await expect(searchResults.locator("[data-goal-outcome-visual]")).toHaveCount(0);
+  const showMore = page.locator("[data-goal-search-more]");
+  await expect(showMore).toBeVisible();
+  await showMore.click();
+  const expandedSearchCount = await searchResults.locator(":scope > li").count();
+  expect(expandedSearchCount).toBeGreaterThan(searchLayout.cardCount);
+  expect(expandedSearchCount - searchLayout.cardCount).toBeLessThanOrEqual(16);
+  const overflow = await page.evaluate(
+    measureHorizontalOverflow,
+    OVERFLOW_TOLERANCE_PX,
+  );
+  expect(overflow.overflowPx).toBeLessThanOrEqual(OVERFLOW_TOLERANCE_PX);
+});
+
+test("Goal library search fills its content column", async ({ page }) => {
+  test.slow();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.route("**/*", (route) => {
+    if (isLoopbackUrl(route.request().url())) {
+      route.continue();
+    } else {
+      route.abort();
+    }
+  });
+
+  const response = await page.goto("/goals", { waitUntil: "load" });
+  expect(response?.status()).toBe(200);
+  const widths = await page.locator('[data-goal-search="full-width"]').evaluate(
+    (form) => ({
+      form: form.getBoundingClientRect().width,
+      parent: form.parentElement?.getBoundingClientRect().width ?? 0,
+    }),
+  );
+
+  expect(Math.abs(widths.form - widths.parent)).toBeLessThanOrEqual(
+    OVERFLOW_TOLERANCE_PX,
+  );
+});
+
+test("Goal guide source hover changes only the hovered source", async ({ page }) => {
+  test.slow();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.route("**/*", (route) => {
+    if (isLoopbackUrl(route.request().url())) {
+      route.continue();
+    } else {
+      route.abort();
+    }
+  });
+
+  const response = await page.goto("/goals/lower-resting-heart-rate", {
+    waitUntil: "load",
+  });
+  expect(response?.status()).toBe(200);
+  const sources = page.locator("article a[href^='http']:not([aria-label])");
+  expect(await sources.count()).toBeGreaterThan(1);
+  const before = await sources.evaluateAll((links) =>
+    links.slice(0, 2).map((link) => getComputedStyle(link).textDecorationColor),
+  );
+  await sources.first().hover();
+  const after = await sources.evaluateAll((links) =>
+    links.slice(0, 2).map((link) => getComputedStyle(link).textDecorationColor),
+  );
+
+  expect(after[0]).not.toBe(before[0]);
+  expect(after[1]).toBe(before[1]);
+});
 
 test("homepage footer link columns stay separate at the sm breakpoint", async ({
   page,

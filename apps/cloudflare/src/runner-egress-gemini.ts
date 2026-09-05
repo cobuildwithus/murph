@@ -5,15 +5,20 @@ import {
   HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_RESPONSE_BODY_BYTES as SHARED_GEMINI_VIDEO_ANALYSIS_MAX_RESPONSE_BODY_BYTES,
   HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_VIDEO_BYTES,
   HOSTED_GEMINI_VIDEO_ANALYSIS_MODEL,
+  HOSTED_GEMINI_VIDEO_ANALYSIS_PREVIOUS_MODEL,
+  HOSTED_GEMINI_VIDEO_ANALYSIS_ROLLOUT_MODELS,
   HOSTED_GEMINI_VIDEO_ANALYSIS_SUPPORTED_MIME_TYPES,
   HOSTED_GEMINI_VIDEO_ANALYSIS_SYSTEM_INSTRUCTION,
   HOSTED_GEMINI_VIDEO_ANALYSIS_THINKING_LEVEL,
+  type HostedGeminiVideoAnalysisRolloutModel,
 } from "@murphai/hosted-execution/assistant-capabilities";
 
 export const DEFAULT_GEMINI_API_BASE_URL =
   HOSTED_GEMINI_VIDEO_ANALYSIS_API_BASE_URL;
 export const HOSTED_GEMINI_VIDEO_ANALYSIS_PATH =
   `/v1beta/models/${HOSTED_GEMINI_VIDEO_ANALYSIS_MODEL}:generateContent`;
+export const HOSTED_GEMINI_VIDEO_ANALYSIS_PREVIOUS_MODEL_PATH =
+  `/v1beta/models/${HOSTED_GEMINI_VIDEO_ANALYSIS_PREVIOUS_MODEL}:generateContent`;
 export const HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_BODY_BYTES =
   HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_REQUEST_BODY_BYTES;
 export const HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_RESPONSE_BODY_BYTES =
@@ -33,6 +38,12 @@ const supportedMimeTypes = new Set<string>(
 );
 const supportedFps = new Set<number>(
   Object.values(HOSTED_GEMINI_VIDEO_ANALYSIS_FPS_BY_SAMPLING_MODE),
+);
+const modelByPath = new Map<string, HostedGeminiVideoAnalysisRolloutModel>(
+  HOSTED_GEMINI_VIDEO_ANALYSIS_ROLLOUT_MODELS.map((model) => [
+    `/v1beta/models/${model}:generateContent`,
+    model,
+  ]),
 );
 
 type HostedGeminiVideoAnalysisGenerationConfig =
@@ -69,11 +80,20 @@ export function isAllowedHostedGeminiVideoAnalysisRequest(
   method: string,
   pathname: string,
 ): boolean {
-  return method === "POST" && pathname === HOSTED_GEMINI_VIDEO_ANALYSIS_PATH;
+  return readHostedGeminiVideoAnalysisRequestModel(method, pathname) !== null;
+}
+
+export function readHostedGeminiVideoAnalysisRequestModel(
+  method: string,
+  pathname: string,
+): HostedGeminiVideoAnalysisRolloutModel | null {
+  return method === "POST" ? modelByPath.get(pathname) ?? null : null;
 }
 
 export function parseHostedGeminiVideoAnalysisRequestBody(
   value: unknown,
+  model: HostedGeminiVideoAnalysisRolloutModel =
+    HOSTED_GEMINI_VIDEO_ANALYSIS_MODEL,
 ): HostedGeminiVideoAnalysisRequestBody {
   const body = exactRecord(value, "Gemini video-analysis request", [
     "contents",
@@ -174,7 +194,8 @@ export function parseHostedGeminiVideoAnalysisRequestBody(
   );
   if (legacyProfile) {
     if (
-      fps !== LEGACY_GEMINI_VIDEO_ANALYSIS_FPS
+      model !== HOSTED_GEMINI_VIDEO_ANALYSIS_PREVIOUS_MODEL
+      || fps !== LEGACY_GEMINI_VIDEO_ANALYSIS_FPS
       || generationConfig.maxOutputTokens
         !== LEGACY_GEMINI_VIDEO_ANALYSIS_MAX_OUTPUT_TOKENS
       || thinkingConfig.thinkingLevel

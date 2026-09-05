@@ -5,10 +5,12 @@ import { type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 
 import { afterEach, test } from "vitest";
 
 import {
+  compactWarmCodexThread,
   executeCodexAppServerTurn as executeCodexAppServerTurnUnchecked,
   resolveMurphDynamicTools,
   stopWarmCodexAppServer,
@@ -22,6 +24,7 @@ import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
   MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+  MURPH_OPERATOR_DIAGNOSTIC_READ_PERMISSION_PROFILE,
 } from "@murphai/hosted-execution/assistant-permissions";
 import {
   HostedAssistantConfigurationError,
@@ -57,12 +60,22 @@ import {
   HOSTED_CODEX_OPERATOR_MEMORY_DIAGNOSTICS,
   HOSTED_CODEX_PROVIDER_TRANSPORT_DIAGNOSTICS,
   prepareHostedCodexRuntimeEnvironment,
+  resolveHostedCodexModelCatalogPath,
 } from "../src/hosted-runtime/codex-config.ts";
 import {
   HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY,
 } from "../src/hosted-runtime/codex-shell-env-policy.ts";
 
 const temporaryPaths: string[] = [];
+
+test("selects the expanded catalog only with explicit workspace Astra authority", () => {
+  const imageCatalogPath = "/opt/murph/models.json";
+  for (const astraAllowed of [false, undefined]) {
+    assert.equal(resolveHostedCodexModelCatalogPath({ imageCatalogPath, astraAllowed }), imageCatalogPath);
+  }
+  assert.equal(resolveHostedCodexModelCatalogPath({ imageCatalogPath, astraAllowed: true }), `${imageCatalogPath}.astra`);
+  assert.equal(resolveHostedCodexModelCatalogPath({ imageCatalogPath: undefined, astraAllowed: true }), undefined);
+});
 const RUN_HOSTED_CODEX_AUTH_E2E = process.env.MURPH_RUN_HOSTED_CODEX_AUTH_E2E === "1";
 const RUN_HOSTED_CODEX_AUTOCOMPACTION_E2E =
   process.env.MURPH_RUN_HOSTED_CODEX_AUTOCOMPACTION_E2E === "1";
@@ -317,6 +330,27 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
     config,
     new RegExp(
       String.raw`\[permissions\.${MURPH_GROUP_READ_PERMISSION_PROFILE}\.network\]\nenabled = false`,
+      "u",
+    ),
+  );
+  assert.match(
+    config,
+    new RegExp(
+      String.raw`\[permissions\.${MURPH_OPERATOR_DIAGNOSTIC_READ_PERMISSION_PROFILE}\.filesystem\]\n":minimal" = "read"\nglob_scan_max_depth = 64`,
+      "u",
+    ),
+  );
+  assert.match(
+    config,
+    new RegExp(
+      String.raw`\[permissions\.${MURPH_OPERATOR_DIAGNOSTIC_READ_PERMISSION_PROFILE}\.filesystem\.":workspace_roots"\]\n"\." = "read"\n"\.runtime/operations/assistant/secrets" = "deny"\n"\.codex" = "deny"\n"\.git" = "deny"\n"\*\*/\.env" = "deny"\n"\*\*/\.env\.\*" = "deny"\n"\*\*/\.mcp\.json" = "deny"\n"\*\*/auth\.json" = "deny"\n"\*\*/config\.toml" = "deny"\n"\*\*/credential\*" = "deny"\n"\*\*/\*\.key" = "deny"\n"\*\*/\*\.pem" = "deny"`,
+      "u",
+    ),
+  );
+  assert.match(
+    config,
+    new RegExp(
+      String.raw`\[permissions\.${MURPH_OPERATOR_DIAGNOSTIC_READ_PERMISSION_PROFILE}\.network\]\nenabled = false`,
       "u",
     ),
   );
@@ -1365,6 +1399,7 @@ async function runHostedCodexAutocompactionE2e(
   const requests: string[] = [];
   const requestUrls: string[] = [];
   const compactionRequestIndexes = new Set<number>();
+  let expectingManualCompaction = false;
   const server = await startResponsesStubServer({
     compactionOutputKind: providerKind === "managed" ? "compaction" : "message",
     compactionRequestIndexes,
@@ -1376,12 +1411,12 @@ async function runHostedCodexAutocompactionE2e(
       }
 
       if (
-        compactionRequestIndexes.size === 0
-        && (
+        expectingManualCompaction || (compactionRequestIndexes.size === 0 && (
           requestUrl === "/v1/responses/compact"
           || isResponsesAutocompactionRequest(body)
         )
-      ) {
+      )) {
+        expectingManualCompaction = false;
         compactionRequestIndexes.add(requestIndex);
         return [
           HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL,
@@ -1399,11 +1434,11 @@ async function runHostedCodexAutocompactionE2e(
     usageForRequest: (_body, requestIndex) => {
       if (compactionRequestIndexes.has(requestIndex)) {
         return {
-          input_tokens: 300,
-          input_tokens_details: null,
-          output_tokens: 80,
-          output_tokens_details: null,
-          total_tokens: 380,
+          input_tokens: 1700,
+          input_tokens_details: { cached_tokens: 700, cache_write_tokens: 50 },
+          output_tokens: 987,
+          output_tokens_details: { reasoning_tokens: 123 },
+          total_tokens: 2687,
         };
       }
       if (requestIndex === 1) {
@@ -1478,6 +1513,8 @@ async function runHostedCodexAutocompactionE2e(
     const firstResult = await executeCodexAppServerTurn({
       abortSignal: AbortSignal.timeout(60_000),
       approvalPolicy: "never",
+      codexCommand: fileURLToPath(new URL("../../assistant-engine/node_modules/.bin/codex", import.meta.url)),
+      processLifetime: "warm",
       codexHome: prepared.runtimeEnv.CODEX_HOME,
       env: codexEnv,
       prompt: [
@@ -1497,6 +1534,8 @@ async function runHostedCodexAutocompactionE2e(
     const secondResult = await executeCodexAppServerTurn({
       abortSignal: AbortSignal.timeout(60_000),
       approvalPolicy: "never",
+      codexCommand: fileURLToPath(new URL("../../assistant-engine/node_modules/.bin/codex", import.meta.url)),
+      processLifetime: "warm",
       codexHome: prepared.runtimeEnv.CODEX_HOME,
       env: codexEnv,
       prompt: "Finish the task using the compacted goal, constraint, and completed tool result.",
@@ -1512,6 +1551,10 @@ async function runHostedCodexAutocompactionE2e(
       true,
       "Expected real Codex app-server to issue a compaction Responses API request.",
     );
+    assert.equal(firstResult.stdout.includes('"method":"rawResponse'), false);
+    assert.equal(secondResult.stdout.includes('"method":"rawResponse'), false);
+    assert.equal(secondResult.jsonEvents.some((event) =>
+      String(parseJsonObject(JSON.stringify(event))?.method).startsWith("rawResponse")), false);
     const firstCompactionRequestIndex = Math.min(...compactionRequestIndexes);
     const modelRequestIndexes = requestUrls
       .map((requestUrl, index) => ({ index: index + 1, requestUrl }))
@@ -1567,7 +1610,57 @@ async function runHostedCodexAutocompactionE2e(
       true,
       "Expected the resumed turn to issue new provider requests.",
     );
+    if (providerKind === "managed") {
+      expectingManualCompaction = true;
+      const manual = await compactWarmCodexThread({ minThreadTokens: 1, timeoutMs: 30_000 });
+      assert.equal(manual.kind, "compacted");
+      if (manual.kind !== "compacted") throw new Error("Expected native manual compaction.");
+      assert.equal(manual.usage.source, "measured");
+      assert.equal(manual.usage.responses?.length, 1);
+      assert.deepEqual(manual.usage.responses?.map(({ responseId: _id, ...usage }) => usage), [{
+        inputTokens: 1700, cachedInputTokens: 700, cacheWriteInputTokens: 50,
+        outputTokens: 987, reasoningOutputTokens: 123, totalTokens: 2687,
+      }]);
+      const afterIdle = await executeCodexAppServerTurn({
+        abortSignal: AbortSignal.timeout(60_000), approvalPolicy: "never",
+        codexCommand: fileURLToPath(new URL("../../assistant-engine/node_modules/.bin/codex", import.meta.url)),
+        processLifetime: "warm", codexHome: prepared.runtimeEnv.CODEX_HOME, env: codexEnv,
+        prompt: "Continue the preserved task.", resumeSessionId: firstResult.threadId,
+        sandbox: "danger-full-access", workingDirectory: vaultRoot,
+      });
+      // The billing extractor consumes only the current turn's native usage
+      // events. Neither the measured idle response nor its buckets may leak
+      // into this next foreground turn.
+      const afterIdleUsage = afterIdle.jsonEvents.flatMap((event) => {
+        const notification = parseJsonObject(JSON.stringify(event));
+        if (notification?.method !== "thread/tokenUsage/updated") return [];
+        const params = notification.params as Record<string, unknown>;
+        assert.equal(params.turnId, afterIdle.turnId);
+        return [(params.tokenUsage as Record<string, unknown>).last];
+      });
+      assert.deepEqual(afterIdleUsage, [{
+        inputTokens: 300, cachedInputTokens: 0, cacheWriteInputTokens: 0,
+        outputTokens: 80, reasoningOutputTokens: 0, totalTokens: 380,
+      }]);
+      assert.equal(afterIdle.stdout.includes('"method":"rawResponse'), false);
+      // Cold resume has no raw-event opt-in in pinned Codex. Preserve the
+      // explicitly estimated path instead of treating missing evidence as zero.
+      await stopWarmCodexAppServer("native-compaction-cold-resume");
+      await executeCodexAppServerTurn({
+        abortSignal: AbortSignal.timeout(60_000), approvalPolicy: "never",
+        codexCommand: fileURLToPath(new URL("../../assistant-engine/node_modules/.bin/codex", import.meta.url)),
+        processLifetime: "warm", codexHome: prepared.runtimeEnv.CODEX_HOME, env: codexEnv,
+        prompt: "Continue the preserved task.", resumeSessionId: firstResult.threadId,
+        sandbox: "danger-full-access", workingDirectory: vaultRoot,
+      });
+      expectingManualCompaction = true;
+      const cold = await compactWarmCodexThread({ minThreadTokens: 1, timeoutMs: 30_000 });
+      assert.equal(cold.kind, "compacted");
+      if (cold.kind !== "compacted") throw new Error("Expected cold resumed manual compaction.");
+      assert.equal(cold.usage.source, "estimated");
+    }
   } finally {
+    await stopWarmCodexAppServer();
     await closeHttpServer(server);
   }
 }
@@ -1922,6 +2015,28 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       '"**/.env.*" = "deny"',
       "",
       `[permissions.${MURPH_GROUP_READ_PERMISSION_PROFILE}.network]`,
+      "enabled = false",
+      "",
+      "# Authenticated operator diagnostics inspect only exact host-bound read roots.",
+      `[permissions.${MURPH_OPERATOR_DIAGNOSTIC_READ_PERMISSION_PROFILE}.filesystem]`,
+      '":minimal" = "read"',
+      "glob_scan_max_depth = 64",
+      "",
+      `[permissions.${MURPH_OPERATOR_DIAGNOSTIC_READ_PERMISSION_PROFILE}.filesystem.":workspace_roots"]`,
+      '"." = "read"',
+      '".runtime/operations/assistant/secrets" = "deny"',
+      '".codex" = "deny"',
+      '".git" = "deny"',
+      '"**/.env" = "deny"',
+      '"**/.env.*" = "deny"',
+      '"**/.mcp.json" = "deny"',
+      '"**/auth.json" = "deny"',
+      '"**/config.toml" = "deny"',
+      '"**/credential*" = "deny"',
+      '"**/*.key" = "deny"',
+      '"**/*.pem" = "deny"',
+      "",
+      `[permissions.${MURPH_OPERATOR_DIAGNOSTIC_READ_PERMISSION_PROFILE}.network]`,
       "enabled = false",
       "",
       "# Silent group room-model consolidation uses only its host-owned dynamic tool.",
@@ -2411,9 +2526,9 @@ async function startResponsesStubServer(input: {
 
 type ResponsesStubUsage = {
   input_tokens: number;
-  input_tokens_details: null;
+  input_tokens_details: { cached_tokens: number; cache_write_tokens: number } | null;
   output_tokens: number;
-  output_tokens_details: null;
+  output_tokens_details: { reasoning_tokens: number } | null;
   total_tokens: number;
 };
 

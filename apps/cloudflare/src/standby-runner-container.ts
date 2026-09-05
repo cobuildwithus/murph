@@ -9,6 +9,7 @@ import {
   type RunnerContainerEnsureReadyForProcessingInput,
   type RunnerContainerEnsureReadyForProcessingResult,
   type RunnerContainerPrewarmShellResult,
+  type RunnerContainerRuntimeCompletionRecordedInput,
   type RunnerRuntimeWakeInput,
   type RunnerRuntimeWakeResult,
   type RunnerWorkspaceInvocationAbortStatus,
@@ -20,6 +21,7 @@ import {
   isHostedStandbyClaimId,
   isHostedStandbySlotName,
   readHostedStandbyReleaseId,
+  readHostedStandbySlotReleaseId,
   type HostedStandbySlotCoordinatorState,
   type HostedStandbySlotBinding,
 } from "./standby-runner-contract.js";
@@ -151,6 +153,46 @@ export class StandbyRunnerContainer extends RunnerContainer {
     };
   }
 
+  async resolveRetainedStandbySlot(input: {
+    currentReleaseId: string;
+    region: typeof HOSTED_STANDBY_REGION;
+    slotName: string;
+    userId: string;
+  }): Promise<HostedStandbySlotBinding> {
+    const binding = this.standbyStore.read();
+    const request = requireRetainedStandbyRequest(
+      this.environment,
+      binding,
+      input,
+    );
+
+    if (
+      binding.state === "bound"
+      && binding.releaseId === request.currentReleaseId
+    ) {
+      const liveness = await this.retainNativeContainerIfWarm(
+        "standby-retained-handoff",
+      );
+      if (liveness === "unsettled") {
+        throw new Error("Hosted standby retained-slot native liveness is unsettled.");
+      }
+      if (liveness === "warm") {
+        const retained = this.standbyStore.read();
+        assertRetainedStandbyBinding(retained, binding, request);
+        return retained;
+      }
+    }
+
+    if (binding.state !== "retired") {
+      await this.retireStandbySlot(
+        binding.claimId === null ? {} : { claimId: binding.claimId },
+      );
+    }
+    const retired = this.standbyStore.read();
+    assertRetiredStandbyBinding(retired, request);
+    return retired;
+  }
+
   async retireStandbySlot(input: {
     claimId?: string;
   }): Promise<{ retired: true }> {
@@ -168,6 +210,13 @@ export class StandbyRunnerContainer extends RunnerContainer {
   ): Promise<HostedExecutionRunnerJobResult> {
     this.authorizeBoundUser(payload.userId);
     return await super.invoke(payload);
+  }
+
+  override async onRuntimeCompletionRecorded(
+    input: RunnerContainerRuntimeCompletionRecordedInput,
+  ): Promise<void> {
+    this.authorizeBoundUser(input.userId);
+    await super.onRuntimeCompletionRecorded(input);
   }
 
   override async ensureReadyForProcessing(
@@ -260,21 +309,50 @@ export class StandbyRunnerContainer extends RunnerContainer {
       "HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT",
     );
     const runnerBundle = isRecord(payload.runnerBundle) ? payload.runnerBundle : null;
-    if (
-      payload.activeJobCount !== 0
-      || payload.codexShellPreflightStatus !== "ready"
-      || typeof payload.codexShellPreflightCompletedAtEpochMs !== "number"
-      || payload.cloudflareRegion !== input.region
-      || payload.heavyRuntimeHydrationStatus !== "ready"
-      || payload.hostedRuntimeArchitectureVersion !== HOSTED_RUNTIME_ARCHITECTURE_VERSION
-      || payload.hostedWorkerReleaseId !== input.releaseId
-      || payload.poisoned !== false
-      || payload.workspaceInvocationAcceptedCount !== 0
-      || runnerBundle?.bundleFingerprint !== expectedBundleFingerprint
-      || runnerBundle.sourceFingerprint !== expectedSourceFingerprint
-    ) {
-      throw new Error("Hosted standby slot failed pristine readiness proof.");
+    const expectedHealthRegion = this.resolveExpectedStandbyHealthRegion(
+      input.region,
+    );
+    const failedChecks: string[] = [];
+    if (payload.activeJobCount !== 0) failedChecks.push("active_job_count");
+    if (payload.codexShellPreflightStatus !== "ready") {
+      failedChecks.push("codex_shell_preflight_status");
     }
+    if (typeof payload.codexShellPreflightCompletedAtEpochMs !== "number") {
+      failedChecks.push("codex_shell_preflight_completed_at");
+    }
+    if (payload.cloudflareRegion !== expectedHealthRegion) {
+      failedChecks.push("cloudflare_region");
+    }
+    if (payload.heavyRuntimeHydrationStatus !== "ready") {
+      failedChecks.push("heavy_runtime_hydration_status");
+    }
+    if (payload.hostedRuntimeArchitectureVersion !== HOSTED_RUNTIME_ARCHITECTURE_VERSION) {
+      failedChecks.push("hosted_runtime_architecture_version");
+    }
+    if (payload.hostedWorkerReleaseId !== input.releaseId) {
+      failedChecks.push("hosted_worker_release_id");
+    }
+    if (payload.poisoned !== false) failedChecks.push("poisoned");
+    if (payload.workspaceInvocationAcceptedCount !== 0) {
+      failedChecks.push("workspace_invocation_accepted_count");
+    }
+    if (runnerBundle?.bundleFingerprint !== expectedBundleFingerprint) {
+      failedChecks.push("runner_bundle_fingerprint");
+    }
+    if (runnerBundle?.sourceFingerprint !== expectedSourceFingerprint) {
+      failedChecks.push("runner_source_fingerprint");
+    }
+    if (failedChecks.length > 0) {
+      throw new Error(
+        `Hosted standby slot failed pristine readiness proof: ${failedChecks.join(", ")}.`,
+      );
+    }
+  }
+
+  protected resolveExpectedStandbyHealthRegion(
+    region: typeof HOSTED_STANDBY_REGION,
+  ): string {
+    return region;
   }
 }
 
@@ -489,6 +567,88 @@ function projectBinding(row: StandbySlotRow): HostedStandbySlotBinding {
     };
   }
   throw new Error("Hosted standby slot state is invalid.");
+}
+
+interface RetainedStandbyRequest {
+  currentReleaseId: string;
+  region: typeof HOSTED_STANDBY_REGION;
+  slotName: string;
+  targetReleaseId: string;
+  userId: string;
+}
+
+function requireRetainedStandbyRequest(
+  environment: Readonly<Record<string, unknown>>,
+  binding: HostedStandbySlotBinding,
+  input: {
+    currentReleaseId: string;
+    region: typeof HOSTED_STANDBY_REGION;
+    slotName: string;
+    userId: string;
+  },
+): RetainedStandbyRequest {
+  const currentReleaseId = readHostedStandbyReleaseId(environment);
+  if (!currentReleaseId || input.currentReleaseId !== currentReleaseId) {
+    throw new Error("Hosted standby retained-slot release authority is stale.");
+  }
+  const targetReleaseId = readHostedStandbySlotReleaseId(input.slotName);
+  if (
+    !targetReleaseId
+    || input.region !== HOSTED_STANDBY_REGION
+    || binding.slotName !== input.slotName
+    || binding.releaseId !== targetReleaseId
+    || binding.region !== input.region
+  ) {
+    throw new Error("Hosted standby retained-slot identity did not match exactly.");
+  }
+  const userId = requireUserId(input.userId);
+  if (
+    (binding.state === "bound" || binding.state === "retiring")
+    && binding.userId !== null
+    && binding.userId !== userId
+  ) {
+    throw new Error("Hosted standby retained slot belongs to another member.");
+  }
+  return {
+    currentReleaseId,
+    region: input.region,
+    slotName: input.slotName,
+    targetReleaseId,
+    userId,
+  };
+}
+
+function assertRetainedStandbyBinding(
+  retained: HostedStandbySlotBinding,
+  before: Extract<HostedStandbySlotBinding, { state: "bound" }>,
+  request: RetainedStandbyRequest,
+): void {
+  if (
+    retained.state !== "bound"
+    || retained.claimId !== before.claimId
+    || retained.releaseId !== request.currentReleaseId
+    || retained.region !== request.region
+    || retained.slotName !== request.slotName
+    || retained.userId !== request.userId
+  ) {
+    throw new Error(
+      "Hosted standby retained-slot binding changed during native liveness proof.",
+    );
+  }
+}
+
+function assertRetiredStandbyBinding(
+  retired: HostedStandbySlotBinding,
+  request: RetainedStandbyRequest,
+): asserts retired is Extract<HostedStandbySlotBinding, { state: "retired" }> {
+  if (
+    retired.state !== "retired"
+    || retired.releaseId !== request.targetReleaseId
+    || retired.region !== request.region
+    || retired.slotName !== request.slotName
+  ) {
+    throw new Error("Hosted standby retained-slot retirement did not settle exactly.");
+  }
 }
 
 function assertSameSlot(

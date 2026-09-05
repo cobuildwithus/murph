@@ -11,40 +11,45 @@ const defaultRepoRoot = path.resolve(scriptDir, "..");
 export const PACKAGE_COVERAGE_EXCLUSIONS = Object.freeze({});
 
 export const PACKAGE_COVERAGE_PLAN = Object.freeze([
-  // Release shards keep CLI and contracts on separate checkouts because contracts coverage
-  // rewrites dist files imported by CLI built-runtime tests.
-  { dir: "packages/cli", shard: "cli-runtime" },
+  // Keep the measured CLI and Assistant Engine floors on isolated runners.
+  // Contracts stays off the CLI checkout because its coverage rewrites dist
+  // files imported by CLI built-runtime tests.
+  { dir: "packages/cli", shard: "cli" },
   { dir: "packages/assistant-engine", shard: "assistant-engine" },
-  { dir: "packages/assistant-runtime", shard: "cli-runtime" },
-  // The two owner shards use the corrected v1.3.1 timings and are balanced
-  // at roughly 317 seconds each before per-job setup.
-  { dir: "packages/core", shard: "owners-a" },
-  { dir: "packages/setup-cli", shard: "owners-a" },
-  { dir: "packages/assistant-cli", shard: "owners-a" },
-  { dir: "packages/assistantd", shard: "owners-b" },
-  { dir: "packages/cloudflare-hosted-control", shard: "owners-b" },
-  { dir: "packages/contracts", shard: "owners-a" },
-  { dir: "packages/clinical-records", shard: "owners-a" },
-  { dir: "packages/device-syncd", shard: "owners-b" },
-  { dir: "packages/exercise-library", shard: "owners-b" },
-  { dir: "packages/gateway-core", shard: "owners-b" },
-  // These suites were absent from the old gate. Give each a dedicated shard
-  // until release telemetry supplies a truthful cost for later rebalancing.
+
+  // Recent hosted timings are dominated by Assistant Runtime on one side and
+  // Core, Device Sync, Query, and Vault on the other. Keep exactly two bounded
+  // platform runners and place the smaller owners around those measured floors.
+  { dir: "packages/assistant-runtime", shard: "platform-a" },
+  { dir: "packages/core", shard: "platform-b" },
+  { dir: "packages/setup-cli", shard: "platform-b" },
+  { dir: "packages/assistant-cli", shard: "platform-b" },
+  { dir: "packages/assistantd", shard: "platform-a" },
+  { dir: "packages/cloudflare-hosted-control", shard: "platform-a" },
+  { dir: "packages/contracts", shard: "platform-b" },
+  { dir: "packages/clinical-records", shard: "platform-b" },
+  { dir: "packages/device-syncd", shard: "platform-b" },
+  { dir: "packages/exercise-library", shard: "platform-a" },
+  { dir: "packages/gateway-core", shard: "platform-a" },
+
+  // Health Commons has no representative release telemetry. Keep it isolated
+  // rather than guessing at overlap that could crowd a two-core hosted runner.
   { dir: "packages/health-commons", shard: "health-commons" },
-  { dir: "packages/health-metrics", shard: "owners-b" },
-  { dir: "packages/hosted-execution", shard: "owners-b" },
-  { dir: "packages/importers", shard: "owners-b" },
-  { dir: "packages/inbox-services", shard: "owners-b" },
-  { dir: "packages/inboxd", shard: "owners-a" },
-  { dir: "packages/messaging-ingress", shard: "owners-a" },
-  { dir: "packages/openclaw-plugin", shard: "owners-b" },
-  { dir: "packages/operator-config", shard: "owners-b" },
-  { dir: "packages/parsers", shard: "owners-a" },
-  { dir: "packages/query", shard: "owners-a" },
-  { dir: "packages/runtime-state", shard: "owners-a" },
-  { dir: "packages/vault-usecases", shard: "owners-b" },
-  // Keep the other child-runtime-heavy owner last so unrelated package refill
-  // completes before its pairwise Assistant Engine exclusion can hold the head.
+  { dir: "packages/health-metrics", shard: "platform-a" },
+  { dir: "packages/hosted-execution", shard: "platform-a" },
+  { dir: "packages/importers", shard: "platform-a" },
+  { dir: "packages/inbox-services", shard: "platform-a" },
+  { dir: "packages/inboxd", shard: "platform-b" },
+  { dir: "packages/messaging-ingress", shard: "platform-b" },
+  { dir: "packages/openclaw-plugin", shard: "platform-a" },
+  { dir: "packages/operator-config", shard: "platform-a" },
+  { dir: "packages/parsers", shard: "platform-b" },
+  { dir: "packages/query", shard: "platform-b" },
+  { dir: "packages/runtime-state", shard: "platform-b" },
+  { dir: "packages/vault-usecases", shard: "platform-b" },
+  // Keep the other child-runtime-heavy owner last so local composed coverage
+  // can refill unrelated work before its Assistant Engine exclusion holds the
+  // shared-host head. Hosted CI gives it a singleton runner.
   { dir: "packages/hosted-local-harness", shard: "hosted-local-harness" },
 ]);
 

@@ -102,7 +102,13 @@ const mocks = vi.hoisted(() => {
     signalHostedDeviceSyncMailboxRuntime: vi.fn(),
     appendHostedMailboxEnvelopeTx: vi.fn(async (input: {
       envelope: { eventId: string; userId: string };
-    }) => {
+    }): Promise<{
+      dedupeConflict: boolean;
+      duplicate: boolean;
+      inserted: boolean;
+      item: { id: string; userId: string };
+      runtimeOwnedRetiredDuplicate?: boolean;
+    }> => {
       await state.appendHostedMailboxEnvelope(input);
       return {
         dedupeConflict: false,
@@ -194,6 +200,8 @@ vi.mock("@/src/lib/prisma", () => ({
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
   appendHostedMailboxEnvelopeWithPreparedCryptoTx: mocks.appendHostedMailboxEnvelopeTx,
+  appendHostedScheduledDeviceSyncWakeEnvelopeTx:
+    mocks.appendHostedMailboxEnvelopeTx,
   prepareHostedMailboxItemAppendCrypto: mocks.prepareHostedMailboxItemAppendCrypto,
 }));
 
@@ -1849,7 +1857,7 @@ describe("hosted device-sync wakes", () => {
     }
   });
 
-  it("leaves an unchanged imported due tuple with its runtime retry owner", async () => {
+  it("keeps live duplicate due tuples on the existing recovery cadence", async () => {
     mocks.appendHostedMailboxEnvelopeTx
       .mockResolvedValueOnce({
         dedupeConflict: false,
@@ -1919,6 +1927,52 @@ describe("hosted device-sync wakes", () => {
         nextReconcileAt: canonicalWake.nextReconcileAt,
       },
     ]);
+  });
+
+  it("accepts imported retired due tuples without recreating either signal", async () => {
+    mocks.appendHostedMailboxEnvelopeTx
+      .mockResolvedValueOnce({
+        dedupeConflict: false,
+        duplicate: true,
+        inserted: false,
+        item: {
+          id: "mailbox_existing",
+          userId: "user-123",
+        },
+        runtimeOwnedRetiredDuplicate: true,
+      })
+      .mockResolvedValueOnce({
+        dedupeConflict: false,
+        duplicate: true,
+        inserted: false,
+        item: {
+          id: "mailbox_existing",
+          userId: "user-123",
+        },
+        runtimeOwnedRetiredDuplicate: true,
+      });
+
+    for (const connectionId of ["dsc_123", "dsc_456"]) {
+      await expect(appendHostedDeviceSyncScheduledReconcileWake({
+        connectionId,
+        createdAt: "2026-03-26T12:05:00.000Z",
+        eventId:
+          `device-sync:scheduled-reconcile:v3:${connectionId}:2026-03-26T12:00:00.000Z:2026-03-26T12:30:00.000Z`,
+        expectedConnectedAt: "2026-03-26T12:00:00.000Z",
+        nextReconcileAt: "2026-03-26T12:30:00.000Z",
+        provider: "oura",
+        userId: "user-123",
+      })).resolves.toEqual({
+        wakeAccepted: true,
+        wakeAppended: false,
+        wakeDuplicate: true,
+        wakeInserted: false,
+      });
+    }
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
   });
 
   it("surfaces duplicate due-reconcile dedupe conflicts without writing signals or Temporal signals", async () => {
@@ -5107,6 +5161,52 @@ describe("hosted device-sync wakes", () => {
       sourceLifecycleProof: null,
       sourceProviderSlug: "fitbit",
     }));
+  });
+
+  it("starts a fresh Junction link when the stored connection already requires reauthorization", async () => {
+    const failedConnection = buildHostedConnection({
+      lastErrorCode: "CONNECTION_SETUP_FAILED",
+      provider: "junction",
+      setupPhase: "failed",
+      status: "reauthorization_required",
+    });
+    mocks.listConnectionsForUser.mockResolvedValue([failedConnection]);
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request(
+        "https://control.example.test/api/connect-sources/oura/start",
+        {
+          method: "POST",
+        },
+      ),
+    );
+
+    await expect(
+      controlPlane.prepareConnectionStart("user-123", {
+        connectSourceId: "oura",
+        connectTarget: "oura",
+        label: "Oura",
+        provider: "junction",
+        sourceProviderSlug: "oura",
+      }),
+    ).resolves.toBeUndefined();
+    await controlPlane.startConnection("user-123", "junction", null, {
+      connectSourceId: "oura",
+      connectTarget: "oura",
+      sourceProviderSlug: "oura",
+    });
+
+    expect(mocks.registryGet).not.toHaveBeenCalled();
+    expect(mocks.upsertConnectionSource).not.toHaveBeenCalled();
+    const ingress = mocks.createDeviceSyncPublicIngress.mock.results.at(-1)
+      ?.value as {
+      startConnection: ReturnType<typeof vi.fn>;
+    };
+    expect(ingress.startConnection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceLifecycleProof: null,
+        sourceProviderSlug: "oura",
+      }),
+    );
   });
 
   it("keeps history coverage scheduler-owned while provider cleanup prepares reconnect", async () => {

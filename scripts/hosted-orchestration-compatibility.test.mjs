@@ -7,23 +7,32 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  HOSTED_RELEASE_ADMISSION_MODE,
+  HOSTED_RELEASE_SCOPE_FOREGROUND,
+  HOSTED_RELEASE_SCOPE_NONE,
+  TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH,
   TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY,
   TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
   TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
+  TEMPORAL_COMPATIBILITY_RUN_TIMEOUT_MS,
+  TEMPORAL_COMPATIBILITY_SETTLEMENT_RESERVE_MS,
+  TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS,
   buildAttestationJobName,
   buildDispatchInputs,
+  buildHostedReleaseAttestationJobName,
   buildReaderJobName,
   cancelAcceptedRun,
   compatibilityProofDigest,
+  hostedReleaseProofDigest,
   inspectAttestationJobs,
   inspectChangedFilePage,
-  inspectControllerPolicy,
   inspectDispatchReceipt,
   inspectExactPublicHead,
   inspectJobPage,
+  inspectPrivateMainRef,
   inspectPrivateRun,
-  inspectPrivateTag,
   inspectPrivateWorkflow,
+  inspectPublicBranchRef,
   inspectPullRequest,
   inspectProducerFixtures,
   isTemporalCompatibilityRelevantPath,
@@ -34,8 +43,11 @@ import {
 
 const PUBLIC_SHA = "a".repeat(40);
 const PRIVATE_SHA = "b".repeat(40);
-const OTHER_READER_SHA = "c".repeat(40);
-const PRIVATE_REF = `temporal-compatibility-v1-${PRIVATE_SHA}`;
+const CURRENT_READER_SHA = "c".repeat(40);
+const RAMPING_READER_SHA = "d".repeat(40);
+const MOVED_PRIVATE_SHA = "e".repeat(40);
+const TEMPORAL_TARGET_DIGEST = "e".repeat(64);
+const OTHER_TEMPORAL_TARGET_DIGEST = "f".repeat(64);
 const REQUEST_ID = `temporal-${PUBLIC_SHA}-123-1`;
 const PRODUCER_FIXTURES = JSON.stringify([{
   blocked: null,
@@ -65,16 +77,32 @@ function pullRequest(overrides = {}) {
   };
 }
 
+function privateMainRef(sha = PRIVATE_SHA, overrides = {}) {
+  return {
+    object: { sha, type: "commit" },
+    ref: `refs/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`,
+    ...overrides,
+  };
+}
+
+function publicMainRef(sha = PUBLIC_SHA, overrides = {}) {
+  return {
+    object: { sha, type: "commit" },
+    ref: "refs/heads/main",
+    ...overrides,
+  };
+}
+
 function privateRun(overrides = {}) {
   return {
     conclusion: "success",
     event: "workflow_dispatch",
     head_repository: { full_name: TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY },
-    head_branch: PRIVATE_REF,
+    head_branch: TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH,
     head_sha: PRIVATE_SHA,
     id: RUN_ID,
     name: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
-    path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
+    path: `${TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH}@${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`,
     repository: { full_name: TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY },
     run_attempt: 1,
     status: "completed",
@@ -83,18 +111,26 @@ function privateRun(overrides = {}) {
   };
 }
 
-function proofJobs({ proofDigest = compatibilityProofDigest({
-  producerDigest: PRODUCER_DIGEST,
-  publicSha: PUBLIC_SHA,
-  readersDigest: supportedReaderDigest([PRIVATE_SHA, OTHER_READER_SHA]),
-  requestId: REQUEST_ID,
-}) } = {}) {
-  return [
+function proofJobs({
+  expectedTemporalTargetDigest = TEMPORAL_TARGET_DIGEST,
+  releaseScope = HOSTED_RELEASE_SCOPE_NONE,
+  proofDigest = compatibilityProofDigest({
+    producerDigest: PRODUCER_DIGEST,
+    publicSha: PUBLIC_SHA,
+    readersDigest: supportedReaderDigest([
+      PRIVATE_SHA,
+      CURRENT_READER_SHA,
+      RAMPING_READER_SHA,
+    ]),
+    requestId: REQUEST_ID,
+  }),
+} = {}) {
+  const jobs = [
     {
       conclusion: "success",
       head_sha: PRIVATE_SHA,
       id: 1,
-      name: buildReaderJobName(PRIVATE_SHA),
+      name: buildReaderJobName(CURRENT_READER_SHA),
       run_id: RUN_ID,
       status: "completed",
     },
@@ -102,7 +138,7 @@ function proofJobs({ proofDigest = compatibilityProofDigest({
       conclusion: "success",
       head_sha: PRIVATE_SHA,
       id: 2,
-      name: buildReaderJobName(OTHER_READER_SHA),
+      name: buildReaderJobName(RAMPING_READER_SHA),
       run_id: RUN_ID,
       status: "completed",
     },
@@ -110,18 +146,42 @@ function proofJobs({ proofDigest = compatibilityProofDigest({
       conclusion: "success",
       head_sha: PRIVATE_SHA,
       id: 3,
+      name: buildReaderJobName(PRIVATE_SHA),
+      run_id: RUN_ID,
+      status: "completed",
+    },
+    {
+      conclusion: "success",
+      head_sha: PRIVATE_SHA,
+      id: 4,
       name: buildAttestationJobName({ proofDigest }),
       run_id: RUN_ID,
       status: "completed",
     },
   ];
+  if (releaseScope !== HOSTED_RELEASE_SCOPE_NONE) {
+    jobs.push({
+      conclusion: "success",
+      head_sha: PRIVATE_SHA,
+      id: 5,
+      name: buildHostedReleaseAttestationJobName({
+        proofDigest: hostedReleaseProofDigest({
+          expectedTemporalTargetDigest,
+          releaseScope,
+          privateSha: PRIVATE_SHA,
+          publicSha: PUBLIC_SHA,
+        }),
+      }),
+      run_id: RUN_ID,
+      status: "completed",
+    });
+  }
+  return jobs;
 }
 
 function compatibilityArgs(overrides = {}) {
   return {
     expectedBaseRef: "main",
-    expectedPrivateSha: PRIVATE_SHA,
-    privateRef: PRIVATE_REF,
     privateToken: "private-token",
     producerDigest: PRODUCER_DIGEST,
     producerFixtures: PRODUCER_FIXTURES,
@@ -159,7 +219,6 @@ test("classifier selects Temporal contracts, harnesses, and CI owners", () => {
     "scripts/check-hosted-temporal-orchestration-guards.ts",
     "scripts/setup-temporal-cli.sh",
     "scripts/temporal-compatibility-producer-fixtures.ts",
-    ".github/temporal-compatibility-controller.json",
     ".github/workflows/temporal-compatibility.yml",
     "pnpm-lock.yaml",
   ]) {
@@ -170,6 +229,14 @@ test("classifier selects Temporal contracts, harnesses, and CI owners", () => {
 test("classifier leaves unrelated documentation neutral", () => {
   assert.equal(isTemporalCompatibilityRelevantPath("docs/README.md"), false);
   assert.equal(isTemporalCompatibilityRelevantPath("apps/desktop/README.md"), false);
+});
+
+test("public deployment ref inspection binds the exact configured branch", () => {
+  assert.equal(inspectPublicBranchRef(publicMainRef(), "main"), PUBLIC_SHA);
+  assert.throws(
+    () => inspectPublicBranchRef(publicMainRef(PUBLIC_SHA, { ref: "refs/heads/other" }), "main"),
+    /identity is invalid/u,
+  );
 });
 
 test("pull-request inspection binds the open exact head and trust source", () => {
@@ -319,12 +386,47 @@ test("dispatch contract is closed, versioned, and exact-SHA only", () => {
     requestId: REQUEST_ID,
   }), {
     contract_version: "1",
+    release_scope: "none",
     mode: "temporal_compatibility",
     murph_sha: PUBLIC_SHA,
     producer_digest: PRODUCER_DIGEST,
     producer_fixtures: PRODUCER_FIXTURES,
     request_id: REQUEST_ID,
+    temporal_target_digest: "",
   });
+  assert.deepEqual(buildDispatchInputs({
+    expectedTemporalTargetDigest: TEMPORAL_TARGET_DIGEST,
+    releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
+    mode: HOSTED_RELEASE_ADMISSION_MODE,
+    producerDigest: PRODUCER_DIGEST,
+    producerFixtures: PRODUCER_FIXTURES,
+    publicSha: PUBLIC_SHA,
+    requestId: REQUEST_ID,
+  }), {
+    contract_version: "1",
+    release_scope: "foreground_priority",
+    mode: "release_admission",
+    murph_sha: PUBLIC_SHA,
+    producer_digest: PRODUCER_DIGEST,
+    producer_fixtures: PRODUCER_FIXTURES,
+    request_id: REQUEST_ID,
+    temporal_target_digest: TEMPORAL_TARGET_DIGEST,
+  });
+  assert.throws(() => buildDispatchInputs({
+    releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
+    mode: HOSTED_RELEASE_ADMISSION_MODE,
+    producerDigest: PRODUCER_DIGEST,
+    producerFixtures: PRODUCER_FIXTURES,
+    publicSha: PUBLIC_SHA,
+    requestId: REQUEST_ID,
+  }), /expected Temporal target digest/u);
+  assert.throws(() => buildDispatchInputs({
+    releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
+    producerDigest: PRODUCER_DIGEST,
+    producerFixtures: PRODUCER_FIXTURES,
+    publicSha: PUBLIC_SHA,
+    requestId: REQUEST_ID,
+  }), /mode and hosted release scope do not match/u);
   assert.throws(
     () => buildDispatchInputs({
       producerDigest: PRODUCER_DIGEST,
@@ -336,34 +438,21 @@ test("dispatch contract is closed, versioned, and exact-SHA only", () => {
   );
 });
 
-test("producer artifact and controller policy are bounded exact-SHA data", () => {
+test("producer artifact is bounded and private main resolves to an exact commit", () => {
   assert.deepEqual(inspectProducerFixtures(`  ${PRODUCER_FIXTURES}\n`), {
     digest: PRODUCER_DIGEST,
     serialized: PRODUCER_FIXTURES,
   });
   assert.throws(() => inspectProducerFixtures(JSON.stringify([])), /artifact is invalid/u);
   assert.throws(() => inspectProducerFixtures(`[{"value":"${"x".repeat(33_000)}"}]`), /too large/u);
-  assert.deepEqual(inspectControllerPolicy({
-    contractVersion: 1,
-    privateRef: PRIVATE_REF,
-    privateSha: PRIVATE_SHA,
-  }), { privateRef: PRIVATE_REF, privateSha: PRIVATE_SHA });
-  assert.throws(() => inspectControllerPolicy({
-    contractVersion: 1,
-    privateRef: "temporal-compatibility-v1-stale",
-    privateSha: PRIVATE_SHA,
-  }), /bind its exact SHA/u);
-});
-
-test("private tag proof accepts only the reviewed lightweight tag", () => {
-  assert.equal(inspectPrivateTag({
-    object: { sha: PRIVATE_SHA, type: "commit" },
-    ref: `refs/tags/${PRIVATE_REF}`,
-  }, { expectedSha: PRIVATE_SHA, ref: PRIVATE_REF }), PRIVATE_SHA);
-  assert.throws(() => inspectPrivateTag({
-    object: { sha: PRIVATE_SHA, type: "tag" },
-    ref: `refs/tags/${PRIVATE_REF}`,
-  }, { expectedSha: PRIVATE_SHA, ref: PRIVATE_REF }), /lightweight tag/u);
+  assert.equal(inspectPrivateMainRef(privateMainRef()), PRIVATE_SHA);
+  for (const invalid of [
+    privateMainRef(PRIVATE_SHA, { ref: "refs/heads/release" }),
+    privateMainRef(PRIVATE_SHA, { object: { sha: PRIVATE_SHA, type: "tag" } }),
+    privateMainRef("not-a-sha"),
+  ]) {
+    assert.throws(() => inspectPrivateMainRef(invalid), /[Pp]rivate main|exact lowercase Git SHA/u);
+  }
 });
 
 test("private workflow proof binds exact name, path, state, and id", () => {
@@ -386,23 +475,36 @@ test("dispatch receipt accepts only the returned positive run id", () => {
   assert.throws(() => inspectDispatchReceipt({}), /did not return workflow_run_id/u);
 });
 
-test("private run proof binds repository, workflow, tag SHA, event, and first attempt", () => {
+test("private run proof binds repository, workflow, main SHA, event, and first attempt", () => {
   assert.deepEqual(inspectPrivateRun(privateRun(), {
-    privateRef: PRIVATE_REF,
+    privateSha: PRIVATE_SHA,
+    runId: RUN_ID,
+    workflowId: WORKFLOW_ID,
+  }), { complete: true, conclusion: "success" });
+  assert.deepEqual(inspectPrivateRun(privateRun({
+    name: `${TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME} / temporal_compatibility / ${PUBLIC_SHA} / none`,
+  }), {
+    privateSha: PRIVATE_SHA,
+    runId: RUN_ID,
+    workflowId: WORKFLOW_ID,
+  }), { complete: true, conclusion: "success" });
+  assert.deepEqual(inspectPrivateRun(privateRun({
+    path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
+  }), {
     privateSha: PRIVATE_SHA,
     runId: RUN_ID,
     workflowId: WORKFLOW_ID,
   }), { complete: true, conclusion: "success" });
   for (const overrides of [
+    { name: `${TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME}-spoofed` },
     { event: "push" },
-    { head_branch: "main" },
+    { head_branch: "release" },
     { head_sha: PUBLIC_SHA },
-    { path: `${TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH}@${PRIVATE_REF}` },
+    { path: `${TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH}@refs/heads/main` },
     { run_attempt: 2 },
     { repository: { full_name: "other/private" } },
   ]) {
     assert.throws(() => inspectPrivateRun(privateRun(overrides), {
-      privateRef: PRIVATE_REF,
       privateSha: PRIVATE_SHA,
       runId: RUN_ID,
       workflowId: WORKFLOW_ID,
@@ -410,43 +512,120 @@ test("private run proof binds repository, workflow, tag SHA, event, and first at
   }
 });
 
-test("supported-reader digest is deterministic and rejects duplicates", () => {
+test("supported-reader digest matches the SHA-only wire vector and rejects duplicates", () => {
   assert.equal(
-    supportedReaderDigest([PRIVATE_SHA, OTHER_READER_SHA]),
-    supportedReaderDigest([OTHER_READER_SHA, PRIVATE_SHA]),
+    supportedReaderDigest([CURRENT_READER_SHA, RAMPING_READER_SHA]),
+    "76c0b5059fc6aef721085df3183c4184f236d4c6f7cac2d006d74ee0b8189b4b",
+  );
+  assert.equal(
+    supportedReaderDigest([CURRENT_READER_SHA, RAMPING_READER_SHA]),
+    supportedReaderDigest([RAMPING_READER_SHA, CURRENT_READER_SHA]),
   );
   assert.throws(
-    () => supportedReaderDigest([PRIVATE_SHA, PRIVATE_SHA]),
+    () => supportedReaderDigest([CURRENT_READER_SHA, CURRENT_READER_SHA]),
     /duplicate SHA/u,
   );
 });
 
-test("attestation accepts every unique successful reader and its exact digest", () => {
+test("attestation accepts the exact SHA-only private reader proof", () => {
+  const readersDigest = supportedReaderDigest([
+    PRIVATE_SHA,
+    CURRENT_READER_SHA,
+    RAMPING_READER_SHA,
+  ]);
   assert.deepEqual(inspectAttestationJobs(proofJobs(), {
     ...proofInspectionArgs(),
   }), {
-    digest: supportedReaderDigest([PRIVATE_SHA, OTHER_READER_SHA]),
+    digest: readersDigest,
     proofDigest: compatibilityProofDigest({
       producerDigest: PRODUCER_DIGEST,
       publicSha: PUBLIC_SHA,
-      readersDigest: supportedReaderDigest([PRIVATE_SHA, OTHER_READER_SHA]),
+      readersDigest,
       requestId: REQUEST_ID,
     }),
-    readerCount: 2,
+    releaseScope: HOSTED_RELEASE_SCOPE_NONE,
+    readerCount: 3,
   });
 });
 
-test("attestation rejects an omitted pinned controller reader", () => {
-  const jobs = proofJobs().filter((job) => job.name !== buildReaderJobName(PRIVATE_SHA));
-  assert.throws(() => inspectAttestationJobs(jobs, {
+test("hosted release attestation binds scope, exact revisions, and the expected Temporal target", () => {
+  assert.equal(hostedReleaseProofDigest({
+    expectedTemporalTargetDigest: TEMPORAL_TARGET_DIGEST,
+    privateSha: PRIVATE_SHA,
+    publicSha: PUBLIC_SHA,
+    releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
+  }), "f5f38e52bff74f3d20cc60c9bc53bcef4341ca6260c84c18aa8bce929207fd0d");
+  assert.equal(inspectAttestationJobs(
+    proofJobs({ releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND }),
+    {
+      expectedTemporalTargetDigest: TEMPORAL_TARGET_DIGEST,
+      ...proofInspectionArgs(),
+      releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
+    },
+  ).releaseScope, HOSTED_RELEASE_SCOPE_FOREGROUND);
+  assert.throws(() => inspectAttestationJobs(
+    proofJobs({ releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND }),
+    {
+      expectedTemporalTargetDigest: TEMPORAL_TARGET_DIGEST,
+      ...proofInspectionArgs({ privateSha: MOVED_PRIVATE_SHA }),
+      releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
+    },
+  ), /not bound to the accepted run|does not bind/u);
+  assert.throws(() => inspectAttestationJobs(proofJobs(), {
+    expectedTemporalTargetDigest: TEMPORAL_TARGET_DIGEST,
     ...proofInspectionArgs(),
-  }), /omitted the pinned private controller/u);
+    releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
+  }), /exactly one hosted release attestation/u);
+  assert.throws(() => inspectAttestationJobs(
+    proofJobs({ releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND }),
+    {
+      expectedTemporalTargetDigest: OTHER_TEMPORAL_TARGET_DIGEST,
+      ...proofInspectionArgs(),
+      releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
+    },
+  ), /does not bind the requested proof/u);
+});
+
+test("attestation ignores completed skipped jobs from inactive proof lanes", () => {
+  const skippedJobs = [
+    {
+      conclusion: "skipped",
+      head_sha: PRIVATE_SHA,
+      id: 5,
+      name: "Hosted release attestation [proof=${{ needs.hosted-integration-plan.outputs.proof_digest }}]",
+      run_id: RUN_ID,
+      status: "completed",
+    },
+    {
+      conclusion: "skipped",
+      head_sha: PRIVATE_SHA,
+      id: 6,
+      name: "Temporal compatibility attestation [proof=${{ needs.temporal-compatibility-setup.outputs.proof_digest }}]",
+      run_id: RUN_ID,
+      status: "completed",
+    },
+  ];
+  const expected = inspectAttestationJobs(proofJobs(), {
+    ...proofInspectionArgs(),
+  });
+  for (const skippedJob of skippedJobs) {
+    assert.deepEqual(inspectAttestationJobs([...proofJobs(), skippedJob], {
+      ...proofInspectionArgs(),
+    }), expected);
+  }
+});
+
+test("attestation rejects omission of the dispatched private candidate", () => {
+  assert.throws(() => inspectAttestationJobs(
+    proofJobs().filter((job) => job.name !== buildReaderJobName(PRIVATE_SHA)),
+    { ...proofInspectionArgs() },
+  ), /omitted the dispatched private candidate/u);
 });
 
 test("attestation rejects duplicate readers and duplicate job ids", () => {
   const duplicateReader = {
     ...proofJobs()[0],
-    id: 4,
+    id: 5,
   };
   assert.throws(() => inspectAttestationJobs([...proofJobs(), duplicateReader], {
     ...proofInspectionArgs(),
@@ -459,10 +638,10 @@ test("attestation rejects duplicate readers and duplicate job ids", () => {
   }), /duplicate id/u);
 });
 
-test("attestation rejects malformed, skipped, failed, and mismatched proof jobs", () => {
+test("attestation rejects malformed, required-skipped, failed, and mismatched proof jobs", () => {
   const scenarios = [
     [{ ...proofJobs()[0], name: "Temporal compatibility reader main" }, /malformed proof job/u],
-    [{ ...proofJobs()[0], conclusion: "skipped" }, /did not complete successfully/u],
+    [{ ...proofJobs()[0], conclusion: "skipped" }, /does not bind the requested proof/u],
     [{ ...proofJobs()[0], conclusion: "failure" }, /did not complete successfully/u],
     [{ ...proofJobs()[0], head_sha: PUBLIC_SHA }, /not bound to the accepted run/u],
   ];
@@ -474,6 +653,28 @@ test("attestation rejects malformed, skipped, failed, and mismatched proof jobs"
       ...proofInspectionArgs(),
     }), expected);
   }
+});
+
+test("temporal-only attestation ignores the skipped hosted-release job placeholder", () => {
+  const skippedHostedReleaseJob = {
+    conclusion: "skipped",
+    head_sha: PRIVATE_SHA,
+    id: 5,
+    name: "Hosted release attestation [proof=${{ needs.hosted-integration-plan.outputs.proof_digest }}]",
+    run_id: RUN_ID,
+    status: "completed",
+  };
+  assert.deepEqual(
+    inspectAttestationJobs([...proofJobs(), skippedHostedReleaseJob], proofInspectionArgs()),
+    inspectAttestationJobs(proofJobs(), proofInspectionArgs()),
+  );
+  assert.throws(() => inspectAttestationJobs(
+    [...proofJobs(), skippedHostedReleaseJob],
+    proofInspectionArgs({
+      expectedTemporalTargetDigest: TEMPORAL_TARGET_DIGEST,
+      releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
+    }),
+  ), /exactly one hosted release attestation/u);
 });
 
 test("attestation rejects a producer digest, public SHA, or request-id mismatch", () => {
@@ -491,30 +692,29 @@ test("attestation rejects a producer digest, public SHA, or request-id mismatch"
   }), /does not bind the requested proof/u);
 });
 
-test("job pagination fails closed on incomplete or changing totals", () => {
-  assert.deepEqual(inspectJobPage({ jobs: proofJobs(), total_count: 3 }, {
-    expectedTotal: null,
-    page: 1,
-  }), { jobs: proofJobs(), total: 3 });
-  assert.throws(() => inspectJobPage({ jobs: [], total_count: 3 }, {
-    expectedTotal: null,
-    page: 1,
-  }), /pagination is incomplete/u);
-  assert.throws(() => inspectJobPage({ jobs: [], total_count: 4 }, {
-    expectedTotal: 3,
-    page: 2,
-  }), /count changed/u);
+test("job proof is one bounded page and fails closed on incomplete totals", () => {
+  assert.deepEqual(inspectJobPage({ jobs: proofJobs(), total_count: 4 }), proofJobs());
+  assert.throws(
+    () => inspectJobPage({ jobs: [], total_count: 4 }),
+    /pagination is incomplete/u,
+  );
+  assert.throws(
+    () => inspectJobPage({ jobs: [], total_count: 101 }),
+    /malformed/u,
+  );
 });
 
-test("controller dispatches only after tag, workflow, and current-head proof", async () => {
+test("controller dispatches main only after exact private-head, workflow, and public-head proof", async () => {
   const calls = [];
   await withCompatibilityEnv(async () => withFetch(async (url, init = {}) => {
-    if (url.includes("/git/ref/tags/")) {
-      calls.push("tag");
-      return jsonResponse({ object: { sha: PRIVATE_SHA, type: "commit" }, ref: `refs/tags/${PRIVATE_REF}` });
+    if (url.endsWith(`/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`)) {
+      calls.push("main");
+      assert.equal(init.headers.authorization, "Bearer private-token");
+      return jsonResponse(privateMainRef());
     }
     if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
       calls.push("workflow");
+      assert.equal(init.headers.authorization, "Bearer private-token");
       return jsonResponse({
         id: WORKFLOW_ID,
         name: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
@@ -524,11 +724,13 @@ test("controller dispatches only after tag, workflow, and current-head proof", a
     }
     if (url.endsWith("/pulls/42")) {
       calls.push("head");
+      assert.equal(init.headers.authorization, "Bearer public-token");
       return jsonResponse(pullRequest());
     }
     if (url.endsWith("/dispatches")) {
       calls.push("dispatch");
       assert.equal(init.method, "POST");
+      assert.equal(init.headers.authorization, "Bearer private-token");
       assert.deepEqual(JSON.parse(init.body), {
         inputs: buildDispatchInputs({
           producerDigest: PRODUCER_DIGEST,
@@ -536,7 +738,7 @@ test("controller dispatches only after tag, workflow, and current-head proof", a
           publicSha: PUBLIC_SHA,
           requestId: REQUEST_ID,
         }),
-        ref: PRIVATE_REF,
+        ref: TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH,
         return_run_details: true,
       });
       return jsonResponse({ workflow_run_id: RUN_ID });
@@ -547,15 +749,213 @@ test("controller dispatches only after tag, workflow, and current-head proof", a
     }
     if (url.includes(`/actions/runs/${RUN_ID}/jobs`)) {
       calls.push("jobs");
-      return jsonResponse({ jobs: proofJobs(), total_count: 3 });
+      return jsonResponse({ jobs: proofJobs(), total_count: 4 });
     }
     throw new Error(`unexpected URL ${url}`);
   }, async () => {
     const proof = await runTemporalCompatibility(compatibilityArgs({
       sleepFn: async () => undefined,
     }));
-    assert.equal(proof.readerCount, 2);
-    assert.deepEqual(calls, ["tag", "workflow", "head", "dispatch", "run", "jobs"]);
+    assert.equal(proof.readerCount, 3);
+    assert.deepEqual(calls, [
+      "main",
+      "workflow",
+      "head",
+      "dispatch",
+      "run",
+      "jobs",
+      "head",
+      "main",
+    ]);
+  }));
+});
+
+test("controller finalizes a last-admitted success before the private token safety boundary", async () => {
+  let nowMs = 0;
+  let dispatchFinishedAt = null;
+  let privateMainReads = 0;
+  await withCompatibilityEnv(async () => withFetch(async (url) => {
+    nowMs += 30_000;
+    if (url.endsWith(`/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`)) {
+      privateMainReads += 1;
+      return jsonResponse(privateMainRef());
+    }
+    if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
+      return jsonResponse({
+        id: WORKFLOW_ID,
+        name: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
+        path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
+        state: "active",
+      });
+    }
+    if (url.endsWith("/pulls/42")) return jsonResponse(pullRequest());
+    if (url.endsWith("/dispatches")) {
+      dispatchFinishedAt = nowMs;
+      return jsonResponse({ workflow_run_id: RUN_ID });
+    }
+    if (url.endsWith(`/actions/runs/${RUN_ID}`)) {
+      assert.notEqual(dispatchFinishedAt, null);
+      nowMs = dispatchFinishedAt + TEMPORAL_COMPATIBILITY_RUN_TIMEOUT_MS;
+      return jsonResponse(privateRun());
+    }
+    if (url.includes(`/actions/runs/${RUN_ID}/jobs`)) {
+      return jsonResponse({ jobs: proofJobs(), total_count: 4 });
+    }
+    throw new Error(`unexpected URL ${url}`);
+  }, async () => {
+    const proof = await runTemporalCompatibility(compatibilityArgs({
+      now: () => nowMs,
+      sleepFn: async (duration) => {
+        nowMs += duration;
+      },
+    }));
+    assert.equal(proof.readerCount, 3);
+  }));
+  assert.equal(privateMainReads, 2);
+  assert.ok(nowMs < TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS);
+  assert.ok(
+    TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS - nowMs
+      > TEMPORAL_COMPATIBILITY_SETTLEMENT_RESERVE_MS,
+  );
+});
+
+test("deployment controller dispatches the hosted release lane and binds both rereads to exact public main", async () => {
+  let privateMainReads = 0;
+  let publicMainReads = 0;
+  await withCompatibilityEnv(async () => withFetch(async (url, init = {}) => {
+    if (
+      url.includes(`/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/`)
+      && url.endsWith(`/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`)
+    ) {
+      privateMainReads += 1;
+      return jsonResponse(privateMainRef());
+    }
+    if (url.endsWith("/repos/cobuildwithus/murph/git/ref/heads/main")) {
+      publicMainReads += 1;
+      return jsonResponse(publicMainRef());
+    }
+    if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
+      return jsonResponse({
+        id: WORKFLOW_ID,
+        name: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
+        path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
+        state: "active",
+      });
+    }
+    if (url.endsWith("/dispatches")) {
+      assert.deepEqual(JSON.parse(init.body), {
+        inputs: buildDispatchInputs({
+          expectedTemporalTargetDigest: TEMPORAL_TARGET_DIGEST,
+          releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
+          mode: HOSTED_RELEASE_ADMISSION_MODE,
+          producerDigest: PRODUCER_DIGEST,
+          producerFixtures: PRODUCER_FIXTURES,
+          publicSha: PUBLIC_SHA,
+          requestId: REQUEST_ID,
+        }),
+        ref: TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH,
+        return_run_details: true,
+      });
+      return jsonResponse({ workflow_run_id: RUN_ID });
+    }
+    if (url.endsWith(`/actions/runs/${RUN_ID}`)) return jsonResponse(privateRun());
+    if (url.includes(`/actions/runs/${RUN_ID}/jobs`)) {
+      return jsonResponse({
+        jobs: proofJobs({ releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND }),
+        total_count: 5,
+      });
+    }
+    throw new Error(`unexpected URL ${url}`);
+  }, async () => {
+    const proof = await runTemporalCompatibility(compatibilityArgs({
+      dispatchMode: HOSTED_RELEASE_ADMISSION_MODE,
+      expectedTemporalTargetDigest: TEMPORAL_TARGET_DIGEST,
+      releaseScope: HOSTED_RELEASE_SCOPE_FOREGROUND,
+      prNumber: null,
+      sleepFn: async () => undefined,
+    }));
+    assert.equal(proof.readerCount, 3);
+    assert.equal(publicMainReads, 2);
+    assert.equal(privateMainReads, 2);
+  }));
+});
+
+test("controller rejects a dispatch race that runs a different private main head", async () => {
+  const controls = [];
+  let mainReads = 0;
+  await withCompatibilityEnv(async () => withFetch(async (url) => {
+    if (url.endsWith(`/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`)) {
+      mainReads += 1;
+      return jsonResponse(privateMainRef());
+    }
+    if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
+      return jsonResponse({
+        id: WORKFLOW_ID,
+        name: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
+        path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
+        state: "active",
+      });
+    }
+    if (url.endsWith("/pulls/42")) return jsonResponse(pullRequest());
+    if (url.endsWith("/dispatches")) return jsonResponse({ workflow_run_id: RUN_ID });
+    if (url.endsWith(`/actions/runs/${RUN_ID}/cancel`)) {
+      controls.push(url);
+      return new Response(null, { status: 202 });
+    }
+    if (url.endsWith(`/actions/runs/${RUN_ID}`)) {
+      return jsonResponse(privateRun({
+        conclusion: null,
+        head_sha: MOVED_PRIVATE_SHA,
+        status: "in_progress",
+      }));
+    }
+    throw new Error(`unexpected URL ${url}`);
+  }, async () => {
+    await assert.rejects(
+      () => runTemporalCompatibility(compatibilityArgs({ sleepFn: async () => undefined })),
+      (error) => {
+        assert.ok(error instanceof AggregateError);
+        assert.match(error.message, /could not be proven terminal/u);
+        assert.ok(error.errors.some((cause) =>
+          cause instanceof Error && /run identity is invalid/u.test(cause.message)));
+        return true;
+      },
+    );
+    assert.equal(mainReads, 1);
+    assert.deepEqual(controls, [
+      `https://api.github.com/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/actions/runs/${RUN_ID}/cancel`,
+    ]);
+  }));
+});
+
+test("controller fails closed when private main moves before success is accepted", async () => {
+  let mainReads = 0;
+  await withCompatibilityEnv(async () => withFetch(async (url) => {
+    if (url.endsWith(`/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`)) {
+      mainReads += 1;
+      return jsonResponse(privateMainRef(mainReads === 1 ? PRIVATE_SHA : MOVED_PRIVATE_SHA));
+    }
+    if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
+      return jsonResponse({
+        id: WORKFLOW_ID,
+        name: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
+        path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
+        state: "active",
+      });
+    }
+    if (url.endsWith("/pulls/42")) return jsonResponse(pullRequest());
+    if (url.endsWith("/dispatches")) return jsonResponse({ workflow_run_id: RUN_ID });
+    if (url.endsWith(`/actions/runs/${RUN_ID}`)) return jsonResponse(privateRun());
+    if (url.includes(`/actions/runs/${RUN_ID}/jobs`)) {
+      return jsonResponse({ jobs: proofJobs(), total_count: 4 });
+    }
+    throw new Error(`unexpected URL ${url}`);
+  }, async () => {
+    await assert.rejects(
+      () => runTemporalCompatibility(compatibilityArgs({ sleepFn: async () => undefined })),
+      /Private main changed during Temporal compatibility proof/u,
+    );
+    assert.equal(mainReads, 2);
   }));
 });
 
@@ -563,8 +963,8 @@ test("controller waits for its accepted exact run to become visible", async () =
   let runReads = 0;
   const sleepDurations = [];
   await withCompatibilityEnv(async () => withFetch(async (url) => {
-    if (url.includes("/git/ref/tags/")) {
-      return jsonResponse({ object: { sha: PRIVATE_SHA, type: "commit" }, ref: `refs/tags/${PRIVATE_REF}` });
+    if (url.endsWith(`/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`)) {
+      return jsonResponse(privateMainRef());
     }
     if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
       return jsonResponse({
@@ -583,7 +983,7 @@ test("controller waits for its accepted exact run to become visible", async () =
         : jsonResponse(privateRun());
     }
     if (url.includes(`/actions/runs/${RUN_ID}/jobs`)) {
-      return jsonResponse({ jobs: proofJobs(), total_count: 3 });
+      return jsonResponse({ jobs: proofJobs(), total_count: 4 });
     }
     throw new Error(`unexpected URL ${url}`);
   }, async () => {
@@ -592,7 +992,7 @@ test("controller waits for its accepted exact run to become visible", async () =
         sleepDurations.push(duration);
       },
     }));
-    assert.equal(proof.readerCount, 2);
+    assert.equal(proof.readerCount, 3);
     assert.equal(runReads, 2);
     assert.deepEqual(sleepDurations, [15_000]);
   }));
@@ -603,8 +1003,8 @@ test("controller does not reopen visibility recovery after the run is visible", 
   let runReads = 0;
   const sleepDurations = [];
   await withCompatibilityEnv(async () => withFetch(async (url) => {
-    if (url.includes("/git/ref/tags/")) {
-      return jsonResponse({ object: { sha: PRIVATE_SHA, type: "commit" }, ref: `refs/tags/${PRIVATE_REF}` });
+    if (url.endsWith(`/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`)) {
+      return jsonResponse(privateMainRef());
     }
     if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
       return jsonResponse({
@@ -648,8 +1048,8 @@ test("controller bounds exact-run visibility recovery before cancellation", asyn
   let runReads = 0;
   const sleepDurations = [];
   await withCompatibilityEnv(async () => withFetch(async (url) => {
-    if (url.includes("/git/ref/tags/")) {
-      return jsonResponse({ object: { sha: PRIVATE_SHA, type: "commit" }, ref: `refs/tags/${PRIVATE_REF}` });
+    if (url.endsWith(`/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`)) {
+      return jsonResponse(privateMainRef());
     }
     if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
       return jsonResponse({
@@ -690,8 +1090,8 @@ test("controller cancels only its accepted run when status polling becomes uncer
   const controlUrls = [];
   let runReads = 0;
   await withCompatibilityEnv(async () => withFetch(async (url) => {
-    if (url.includes("/git/ref/tags/")) {
-      return jsonResponse({ object: { sha: PRIVATE_SHA, type: "commit" }, ref: `refs/tags/${PRIVATE_REF}` });
+    if (url.endsWith(`/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`)) {
+      return jsonResponse(privateMainRef());
     }
     if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
       return jsonResponse({
@@ -725,14 +1125,13 @@ test("controller cancels only its accepted run when status polling becomes uncer
 
 test("controller times out and cancels only its accepted run", async () => {
   const controlUrls = [];
-  const originalNow = Date.now;
-  let deadlineReached = false;
+  let nowMs = 0;
+  let forceCancelFinishedAt = null;
   let runReads = 0;
-  try {
-    Date.now = () => deadlineReached ? 1_000_000_000_000 : 0;
-    await withCompatibilityEnv(async () => withFetch(async (url) => {
-      if (url.includes("/git/ref/tags/")) {
-        return jsonResponse({ object: { sha: PRIVATE_SHA, type: "commit" }, ref: `refs/tags/${PRIVATE_REF}` });
+  await withCompatibilityEnv(async () => withFetch(async (url) => {
+      nowMs += 30_000;
+      if (url.endsWith(`/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`)) {
+        return jsonResponse(privateMainRef());
       }
       if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
         return jsonResponse({
@@ -748,34 +1147,41 @@ test("controller times out and cancels only its accepted run", async () => {
         controlUrls.push(url);
         return new Response(null, { status: 202 });
       }
+      if (url.endsWith(`/actions/runs/${RUN_ID}/force-cancel`)) {
+        controlUrls.push(url);
+        forceCancelFinishedAt = nowMs;
+        return new Response(null, { status: 202 });
+      }
       if (url.endsWith(`/actions/runs/${RUN_ID}`)) {
         runReads += 1;
-        return jsonResponse(privateRun(runReads === 1
-          ? { conclusion: null, status: "in_progress" }
-          : { conclusion: "cancelled", status: "completed" }));
+        const forceCancellationSettled = forceCancelFinishedAt !== null
+          && nowMs - forceCancelFinishedAt >= 2 * 60_000;
+        return jsonResponse(privateRun(forceCancellationSettled
+          ? { conclusion: "cancelled", status: "completed" }
+          : { conclusion: null, status: "in_progress" }));
       }
       throw new Error(`unexpected URL ${url}`);
     }, async () => {
       await assert.rejects(() => runTemporalCompatibility(compatibilityArgs({
-        sleepFn: async () => {
-          deadlineReached = true;
+        now: () => nowMs,
+        sleepFn: async (duration) => {
+          nowMs += duration;
         },
       })), /run timed out/u);
     }));
-  } finally {
-    Date.now = originalNow;
-  }
   assert.deepEqual(controlUrls, [
     `https://api.github.com/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/actions/runs/${RUN_ID}/cancel`,
+    `https://api.github.com/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/actions/runs/${RUN_ID}/force-cancel`,
   ]);
-  assert.equal(runReads, 2);
+  assert.ok(runReads > 2);
+  assert.ok(nowMs < TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS);
 });
 
 test("missing dispatch identity never issues a broad or guessed cancellation", async () => {
   const controls = [];
   await withCompatibilityEnv(async () => withFetch(async (url) => {
-    if (url.includes("/git/ref/tags/")) {
-      return jsonResponse({ object: { sha: PRIVATE_SHA, type: "commit" }, ref: `refs/tags/${PRIVATE_REF}` });
+    if (url.endsWith(`/git/ref/heads/${TEMPORAL_COMPATIBILITY_PRIVATE_BRANCH}`)) {
+      return jsonResponse(privateMainRef());
     }
     if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
       return jsonResponse({
@@ -800,33 +1206,41 @@ test("missing dispatch identity never issues a broad or guessed cancellation", a
 
 test("accepted-run cancellation force-cancels only after ordinary cancellation stays nonterminal", async () => {
   const controls = [];
-  let runReads = 0;
+  let nowMs = 0;
+  let forceCancelFinishedAt = null;
   await withFetch(async (url) => {
+    nowMs += 30_000;
     if (url.endsWith(`/actions/runs/${RUN_ID}/cancel`)) {
       controls.push("cancel");
       return new Response(null, { status: 202 });
     }
     if (url.endsWith(`/actions/runs/${RUN_ID}/force-cancel`)) {
       controls.push("force-cancel");
+      forceCancelFinishedAt = nowMs;
       return new Response(null, { status: 202 });
     }
     if (url.endsWith(`/actions/runs/${RUN_ID}`)) {
-      runReads += 1;
-      return jsonResponse(privateRun(runReads <= 8
-        ? { conclusion: null, status: "in_progress" }
-        : { conclusion: "cancelled", status: "completed" }));
+      const forceCancellationSettled = forceCancelFinishedAt !== null
+        && nowMs - forceCancelFinishedAt >= 2 * 60_000;
+      return jsonResponse(privateRun(forceCancellationSettled
+        ? { conclusion: "cancelled", status: "completed" }
+        : { conclusion: null, status: "in_progress" }));
     }
     throw new Error(`unexpected URL ${url}`);
   }, async () => {
     await cancelAcceptedRun({
-      privateRef: PRIVATE_REF,
       privateSha: PRIVATE_SHA,
+      now: () => nowMs,
       runId: RUN_ID,
-      sleepFn: async () => undefined,
+      sleepFn: async (duration) => {
+        nowMs += duration;
+      },
       token: "private-token",
       workflowId: WORKFLOW_ID,
     });
     assert.deepEqual(controls, ["cancel", "force-cancel"]);
+    assert.equal(forceCancelFinishedAt, 3 * 60_000);
+    assert.equal(nowMs, 5 * 60_000);
   });
 });
 
@@ -934,6 +1348,61 @@ printf '%s\n' "$@" > "$GH_CAPTURE"
   } finally {
     await rm(tempDir, { force: true, recursive: true });
   }
+});
+
+test("Web production admission runs only for exact public main", async () => {
+  const workflow = await readFile(
+    path.join(
+      REPO_ROOT,
+      ".github",
+      "workflows",
+      "temporal-web-deployment-admission.yml",
+    ),
+    "utf8",
+  );
+  const admissionJob = workflow.slice(workflow.indexOf("jobs:\n  admission:"));
+  const checkoutIndex = admissionJob.indexOf("name: Check out exact public main revision");
+  const setupIndex = admissionJob.indexOf("name: Setup Node");
+  const fixtureIndex = admissionJob.indexOf("name: Execute exact production wire projection");
+  const tokenIndex = admissionJob.indexOf("name: Mint private compatibility token");
+  const proofIndex = admissionJob.indexOf(
+    "name: Prove exact public main against private Temporal and hosted runtime",
+  );
+
+  assert.match(workflow, /on:\n  push:\n    branches:\n      - main/u);
+  assert.match(workflow, /name: Temporal Web production admission/u);
+  assert.match(workflow, /environment: temporal-compatibility/u);
+  assert.match(workflow, /ref: \$\{\{ github\.sha \}\}/u);
+  assert.match(workflow, /hosted-orchestration-compatibility\.mjs run-main/u);
+  assert.match(
+    workflow,
+    /TEMPORAL_PRODUCTION_TARGET_DIGEST: \$\{\{ vars\.TEMPORAL_PRODUCTION_TARGET_DIGEST \}\}/u,
+  );
+  assert.match(workflow, /--sha "\$\{GITHUB_SHA\}"/u);
+  assert.match(workflow, /permission-actions: write/u);
+  assert.match(workflow, /repositories: murph-cloud/u);
+  const timeoutMinutes = Number(/timeout-minutes: (\d+)/u.exec(admissionJob)?.[1]);
+  assert.ok(Number.isSafeInteger(timeoutMinutes));
+  assert.ok(
+    timeoutMinutes * 60_000
+      > 15 * 60_000 + TEMPORAL_COMPATIBILITY_TOKEN_BUDGET_MS,
+  );
+  assert.doesNotMatch(workflow, /pull_request:/u);
+  assert.doesNotMatch(admissionJob, /\n    needs:/u);
+  assert.doesNotMatch(workflow, /\n  producer:|upload-artifact|download-artifact/u);
+  assert.ok(checkoutIndex >= 0);
+  assert.ok(setupIndex > checkoutIndex);
+  assert.ok(fixtureIndex > setupIndex);
+  assert.ok(tokenIndex > fixtureIndex);
+  assert.ok(proofIndex > tokenIndex);
+  assert.match(
+    admissionJob,
+    /--output "\$\{RUNNER_TEMP\}\/temporal-compatibility-producer-fixtures\.json"/u,
+  );
+  assert.match(
+    admissionJob,
+    /--fixtures "\$\{RUNNER_TEMP\}\/temporal-compatibility-producer-fixtures\.json"/u,
+  );
 });
 
 test("Repo Hygiene owns the focused controller contract test", async () => {

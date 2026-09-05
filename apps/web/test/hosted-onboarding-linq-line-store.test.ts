@@ -19,6 +19,7 @@ import {
   readHostedLinqReceiptCorrelatedRecoveryLineTx,
   syncHostedLinqConfiguredLinesTx,
   upsertHostedLinqLineForPhoneTx,
+  HOSTED_LINQ_INVENTORY_FRESHNESS_MAX_AGE_MS,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
 import {
   readHostedLinqLinePhoneNumberByLookupKey,
@@ -189,6 +190,8 @@ describe("readHostedLinqLinePhoneNumberByLookupKey", () => {
     }
     const findUnique = vi.fn().mockResolvedValue({
       phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(phoneNumber),
+      providerInventoryConfirmedAt: new Date(),
+      providerPhoneNumberId: "provider-line-1",
     });
 
     await expect(readHostedLinqLinePhoneNumberByLookupKey({
@@ -199,9 +202,54 @@ describe("readHostedLinqLinePhoneNumberByLookupKey", () => {
     })).resolves.toBe(phoneNumber);
 
     expect(findUnique).toHaveBeenCalledWith({
-      select: { phoneNumberEncrypted: true },
+      select: {
+        phoneNumberEncrypted: true,
+        providerInventoryConfirmedAt: true,
+        providerPhoneNumberId: true,
+      },
       where: { phoneNumberLookupKey },
     });
+  });
+
+  it("fails closed when provider inventory no longer confirms ownership", async () => {
+    restoreContactPrivacyKeyring = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v1",
+      entries: { v1: TEST_KEYRING_ENTRIES.v1 },
+    });
+    const phoneNumber = "+15550100001";
+    const phoneNumberLookupKey = createHostedPhoneLookupKey(phoneNumber);
+    if (!phoneNumberLookupKey) {
+      throw new Error("Expected a hosted phone lookup key for the test line.");
+    }
+    const phoneNumberEncrypted = encryptHostedLinqLinePhoneNumber(phoneNumber);
+    const findUnique = vi.fn()
+      .mockResolvedValueOnce({
+        phoneNumberEncrypted,
+        providerInventoryConfirmedAt: new Date(),
+        providerPhoneNumberId: null,
+      })
+      .mockResolvedValueOnce({
+        phoneNumberEncrypted,
+        providerInventoryConfirmedAt: null,
+        providerPhoneNumberId: "provider-line-1",
+      })
+      .mockResolvedValueOnce({
+        phoneNumberEncrypted,
+        providerInventoryConfirmedAt: new Date(
+          Date.now() - HOSTED_LINQ_INVENTORY_FRESHNESS_MAX_AGE_MS - 60_000,
+        ),
+        providerPhoneNumberId: "provider-line-1",
+      });
+    const prisma = {
+      hostedLinqLine: { findUnique },
+    } as never;
+
+    for (let index = 0; index < 3; index += 1) {
+      await expect(readHostedLinqLinePhoneNumberByLookupKey({
+        phoneNumberLookupKey,
+        prisma,
+      })).resolves.toBeNull();
+    }
   });
 
   it("fails closed for absent keys, missing rows, and mismatched lines", async () => {
@@ -213,6 +261,8 @@ describe("readHostedLinqLinePhoneNumberByLookupKey", () => {
       .mockResolvedValueOnce(null)
       .mockResolvedValue({
         phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber("+15550100001"),
+        providerInventoryConfirmedAt: new Date(),
+        providerPhoneNumberId: "provider-line-1",
       });
     const prisma = {
       hostedLinqLine: { findUnique },
@@ -247,6 +297,8 @@ describe("readHostedLinqLinePhoneNumberByLookupKey", () => {
         hostedLinqLine: {
           findUnique: vi.fn().mockResolvedValue({
             phoneNumberEncrypted: "malformed-envelope",
+            providerInventoryConfirmedAt: new Date(),
+            providerPhoneNumberId: "provider-line-1",
           }),
         },
       } as never,

@@ -2269,6 +2269,7 @@ function createPrismaStub() {
       }),
     },
     hostedMemberIdentity: {
+      findMany: vi.fn().mockResolvedValue([]),
       findUnique: vi.fn().mockResolvedValue(null),
     },
     hostedMemberRouting: {

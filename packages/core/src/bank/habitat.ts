@@ -11,7 +11,7 @@ import {
 
 import { ID_PREFIXES, VAULT_LAYOUT } from "../constants.ts";
 import { parseFrontmatterDocument } from "../frontmatter.ts";
-import { generateRecordId } from "../ids.ts";
+import { deterministicContractId, generateRecordId } from "../ids.ts";
 import {
   compactObject,
   ensureMarkdownHeading,
@@ -30,6 +30,7 @@ import {
   withCanonicalWriteLockScope,
 } from "../operations/canonical-write-lock.ts";
 import { loadVault } from "../vault.ts";
+import { readEvent, upsertEvent } from "../domains/events/ledger.ts";
 
 import type { FrontmatterObject } from "../types.ts";
 
@@ -68,6 +69,15 @@ export interface UpsertHabitatAspectResult {
   relativePath: string;
   created: boolean;
   indicators: Record<string, HabitatIndicatorValue>;
+  journalEventId?: string;
+}
+
+interface HabitatJournalChange {
+  eventId: string;
+  note: string;
+  occurredAt: string;
+  tags: string[];
+  title: string;
 }
 
 function validateHabitatFrontmatter(
@@ -271,7 +281,7 @@ export async function upsertHabitatAspect(
   input: UpsertHabitatAspectInput,
 ): Promise<UpsertHabitatAspectResult> {
   await loadVault({ vaultRoot: input.vaultRoot });
-  return await withCanonicalWriteLockScope(input.vaultRoot, async () => {
+  const saved = await withCanonicalWriteLockScope(input.vaultRoot, async () => {
     const lock = await acquireCanonicalWriteLock(input.vaultRoot);
 
     try {
@@ -280,11 +290,23 @@ export async function upsertHabitatAspect(
       await lock.release();
     }
   });
+  if (saved.journalChange) {
+    await ensureHabitatJournalChange(input.vaultRoot, saved.journalChange);
+  }
+  return {
+    ...saved.result,
+    ...(saved.journalChange
+      ? { journalEventId: saved.journalChange.eventId }
+      : {}),
+  };
 }
 
 async function upsertHabitatAspectLocked(
   input: UpsertHabitatAspectInput,
-): Promise<UpsertHabitatAspectResult> {
+): Promise<{
+  journalChange: HabitatJournalChange | null;
+  result: UpsertHabitatAspectResult;
+}> {
   const aspectDefinition = requireHabitatAspectDefinition(input.aspect);
   const recordedAt = normalizeOptionalText(input.recordedAt) ?? undefined;
   const existingRecords = await loadHabitatRecords(input.vaultRoot);
@@ -293,6 +315,13 @@ async function upsertHabitatAspectLocked(
   assertRecordedAtForStoredIndicatorUpdates(input.indicators, recordedAt);
   const existingRecord =
     existingRecords.find((record) => record.aspect === aspectDefinition.id) ?? null;
+  const journalChange = buildHabitatJournalChange({
+    aspectId: aspectDefinition.id,
+    aspectTitle: aspectDefinition.title,
+    existingRecord,
+    indicators: input.indicators,
+    recordedAt,
+  });
   const target = resolveMarkdownRegistryUpsertTarget({
     existingRecord,
     recordId: existingRecord?.habitatId,
@@ -357,12 +386,92 @@ async function upsertHabitatAspectLocked(
   });
 
   return {
-    habitatId: record.habitatId,
-    aspect: record.aspect,
-    relativePath: record.relativePath,
-    created: target.created,
-    indicators: record.indicators,
+    journalChange,
+    result: {
+      habitatId: record.habitatId,
+      aspect: record.aspect,
+      relativePath: record.relativePath,
+      created: target.created,
+      indicators: record.indicators,
+    },
   };
+}
+
+function buildHabitatJournalChange(input: {
+  aspectId: string;
+  aspectTitle: string;
+  existingRecord: HabitatRecord | null;
+  indicators: Record<string, HabitatIndicatorValue> | undefined;
+  recordedAt: string | undefined;
+}): HabitatJournalChange | null {
+  if (!input.recordedAt) {
+    return null;
+  }
+  const changed = Object.entries(input.indicators ?? {})
+    .filter(
+      ([indicatorId, value]) =>
+        input.existingRecord?.indicators[indicatorId] !== value ||
+        // A failed event write leaves the Habitat value saved. The same
+        // recordedAt lets a caller retry and repair that missing event.
+        input.existingRecord?.indicatorRecordedAt?.[indicatorId] ===
+          input.recordedAt,
+    )
+    .sort(([left], [right]) => left.localeCompare(right));
+  if (changed.length === 0) {
+    return null;
+  }
+  const details = changed.map(([indicatorId, value]) => {
+    const label = getHabitatIndicatorDefinition(
+      input.aspectId,
+      indicatorId,
+    )?.label ?? indicatorId.replaceAll("_", " ");
+    return `${label}: ${formatHabitatJournalValue(value)}`;
+  });
+  const seed = JSON.stringify({
+    aspect: input.aspectId,
+    changes: changed,
+    recordedAt: input.recordedAt,
+  });
+  return {
+    eventId: deterministicContractId(ID_PREFIXES.event, `habitat:${seed}`),
+    note: details.join("; "),
+    occurredAt: input.recordedAt,
+    tags: ["environment", "key-environment"],
+    title: input.aspectTitle,
+  };
+}
+
+function formatHabitatJournalValue(value: HabitatIndicatorValue): string {
+  if (value === null) return "cleared";
+  if (typeof value === "boolean") return value ? "yes" : "no";
+  return String(value);
+}
+
+async function ensureHabitatJournalChange(
+  vaultRoot: string,
+  change: HabitatJournalChange,
+): Promise<void> {
+  try {
+    await readEvent({ eventId: change.eventId, vaultRoot });
+    return;
+  } catch (error) {
+    if (!(error instanceof VaultError) || error.code !== "EVENT_MISSING") {
+      throw error;
+    }
+  }
+  await upsertEvent({
+    vaultRoot,
+    payload: {
+      id: change.eventId,
+      kind: "note",
+      note: change.note,
+      noteType: "journal-context",
+      occurredAt: change.occurredAt,
+      source: "manual",
+      tags: change.tags,
+      title: change.title,
+    },
+  });
 }
 
 export async function listHabitatAspects(vaultRoot: string): Promise<HabitatRecord[]> {

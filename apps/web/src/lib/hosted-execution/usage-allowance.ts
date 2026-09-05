@@ -17,7 +17,8 @@ import {
 import {
   HOSTED_GEMINI_VIDEO_ANALYSIS_API_BASE_URL,
   HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV,
-  HOSTED_GEMINI_VIDEO_ANALYSIS_MODEL,
+  HOSTED_GEMINI_VIDEO_ANALYSIS_ROLLOUT_MODELS,
+  type HostedGeminiVideoAnalysisRolloutModel,
 } from "@murphai/hosted-execution/assistant-capabilities";
 import {
   isHostedAiUsageOpenAiTokenPricingProviderName,
@@ -545,16 +546,13 @@ const HOSTED_AI_USAGE_ALLOWANCE_XAI_SEARCH_RAW_USAGE_KEYS: ReadonlySet<string> =
   ]);
 const HOSTED_AI_USAGE_ALLOWANCE_XAI_USD_TICKS_PER_USD_MICRO = 10_000n;
 
-// Gemini 3.7 Flash video analysis is token-priced independently from Murph's
-// primary assistant-model catalog. Google publishes one introductory rate
-// through 2026-12-31 and a higher rate beginning 2027-01-01. Output pricing
-// includes thinking tokens, so candidates and thoughts share one output bucket.
+// Gemini 3.8 Flash video analysis and its deployed 3.7 rollout reader are
+// token-priced independently from Murph's primary assistant-model catalog.
+// Google publishes the same introductory and standard rates for both models.
+// Output pricing includes thinking tokens, so candidates and thoughts share
+// one output bucket.
 const HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_PRICING_SOURCE =
   "https://ai.google.dev/gemini-api/docs/pricing";
-const HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2026_PRICING_VERSION =
-  "gemini-3.7-flash-video-pricing-through-2026-12-31";
-const HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2027_PRICING_VERSION =
-  "gemini-3.7-flash-video-pricing-from-2027-01-01";
 const HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2027_START_MS =
   Date.parse("2027-01-01T00:00:00.000Z");
 const HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2026_INPUT_USD_MICROS_PER_MILLION_TOKENS =
@@ -577,6 +575,9 @@ const HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_RAW_USAGE_KEYS: ReadonlySet<string>
     "thoughtsTokenCount",
     "totalTokenCount",
   ]);
+const hostedGeminiVideoAnalysisRolloutModels = new Set<string>(
+  HOSTED_GEMINI_VIDEO_ANALYSIS_ROLLOUT_MODELS,
+);
 
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_SOL_MODEL_PRICE = {
   cachedInputUsdMicrosPerMillionTokens: 400_000n,
@@ -603,15 +604,21 @@ const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_MODEL_PRICES: Record<
   HostedAiUsageAllowancePricedModel,
   HostedAiUsageAllowanceModelPrice
 > = {
+  "gpt-6-astra": {
+    cachedInputUsdMicrosPerMillionTokens: 1_000_000n,
+    cacheWriteUsdMicrosPerMillionTokens: 12_500_000n,
+    inputUsdMicrosPerMillionTokens: 10_000_000n,
+    outputUsdMicrosPerMillionTokens: 50_000_000n,
+  },
   "gpt-5.6-sol": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_SOL_MODEL_PRICE,
   "gpt-5.6-terra": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TERRA_MODEL_PRICE,
   "gpt-5.6-luna": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_LUNA_MODEL_PRICE,
 };
 
-const HOSTED_AI_USAGE_ALLOWANCE_VENICE_MODEL_PRICES: Record<
+const HOSTED_AI_USAGE_ALLOWANCE_VENICE_MODEL_PRICES: Partial<Record<
   HostedAiUsageAllowancePricedModel,
   HostedAiUsageAllowanceModelPrice
-> = {
+>> = {
   "gpt-5.6-sol": {
     cachedInputUsdMicrosPerMillionTokens: 630_000n,
     cacheWriteUsdMicrosPerMillionTokens: 7_810_000n,
@@ -659,6 +666,18 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES = {
 } as const;
 
 const HOSTED_AI_USAGE_ALLOWANCE_MODEL_TOKEN_PRICING_BASES = {
+  "gpt-6-astra": {
+    "openai-flex": {
+      ...HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES["openai-flex"],
+      pricingSource: "https://developers.openai.com/api/docs/models/gpt-6-astra",
+      pricingVersion: "openai-api-pricing-2026-09-04-gpt-6-astra-openai-flex",
+    },
+    standard: {
+      ...HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES.standard,
+      pricingSource: "https://developers.openai.com/api/docs/models/gpt-6-astra",
+      pricingVersion: "openai-api-pricing-2026-09-04-gpt-6-astra-standard",
+    },
+  },
   "gpt-5.6-sol": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES,
   "gpt-5.6-terra": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES,
   "gpt-5.6-luna": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES,
@@ -3029,6 +3048,7 @@ function divideXaiUsdTicksToMicrosCeil(costInUsdTicks: bigint): bigint {
 interface HostedAiUsageAllowanceGeminiVideoMatch {
   cachedInputTokens: bigint;
   inputTokens: bigint;
+  model: HostedGeminiVideoAnalysisRolloutModel;
   outputTokens: bigint;
   reasoningTokens: bigint;
   totalTokens: bigint;
@@ -3054,7 +3074,7 @@ function matchHostedAiUsageGeminiVideoAnalysisRecord(
       !== HOSTED_GEMINI_VIDEO_ANALYSIS_USAGE_EXTRACTION_SOURCE_PATH
     || record.usageExtractionVersion
       !== HOSTED_GEMINI_VIDEO_ANALYSIS_USAGE_EXTRACTION_VERSION
-    || record.requestedModel !== HOSTED_GEMINI_VIDEO_ANALYSIS_MODEL
+    || !isHostedGeminiVideoAnalysisRolloutModel(record.requestedModel)
     || record.servedModel !== null
     || record.cacheWriteTokens !== null
     || rawUsageJson === null
@@ -3105,10 +3125,17 @@ function matchHostedAiUsageGeminiVideoAnalysisRecord(
   return {
     cachedInputTokens: cachedInput.value,
     inputTokens,
+    model: record.requestedModel,
     outputTokens: output.value,
     reasoningTokens: reasoning.value,
     totalTokens,
   };
+}
+
+function isHostedGeminiVideoAnalysisRolloutModel(
+  value: string | null,
+): value is HostedGeminiVideoAnalysisRolloutModel {
+  return value !== null && hostedGeminiVideoAnalysisRolloutModels.has(value);
 }
 
 function readHostedAiUsageOptionalNonNegativeInteger(
@@ -3138,7 +3165,10 @@ function priceHostedAiUsageGeminiVideoForAllowance(input: {
   match: HostedAiUsageAllowanceGeminiVideoMatch;
   record: AssistantUsageRecord;
 }): HostedAiUsageAllowancePricingResult {
-  const pricing = resolveHostedAiUsageGeminiVideoPricing(input.record.occurredAt);
+  const pricing = resolveHostedAiUsageGeminiVideoPricing(
+    input.record.occurredAt,
+    input.match.model,
+  );
   const billableNonCachedInputTokens =
     input.match.inputTokens - input.match.cachedInputTokens;
   const billableOutputTokens =
@@ -3162,7 +3192,7 @@ function priceHostedAiUsageGeminiVideoForAllowance(input: {
     counted: input.counted,
     pricingSnapshot: {
       credentialSource: input.credentialSource,
-      model: HOSTED_GEMINI_VIDEO_ANALYSIS_MODEL,
+      model: input.match.model,
       modelSource: "requested",
       pricingSource: HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_PRICING_SOURCE,
       pricingWindow: {
@@ -3196,6 +3226,7 @@ function priceHostedAiUsageGeminiVideoForAllowance(input: {
 
 function resolveHostedAiUsageGeminiVideoPricing(
   occurredAt: Date | string,
+  model: HostedGeminiVideoAnalysisRolloutModel,
 ): {
   cachedInputUsdMicrosPerMillionTokens: bigint;
   effectiveFrom: string | null;
@@ -3215,8 +3246,7 @@ function resolveHostedAiUsageGeminiVideoPricing(
         HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2027_INPUT_USD_MICROS_PER_MILLION_TOKENS,
       outputUsdMicrosPerMillionTokens:
         HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2027_OUTPUT_USD_MICROS_PER_MILLION_TOKENS,
-      pricingVersion:
-        HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2027_PRICING_VERSION,
+      pricingVersion: `${model}-video-pricing-from-2027-01-01`,
     };
   }
 
@@ -3229,8 +3259,7 @@ function resolveHostedAiUsageGeminiVideoPricing(
       HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2026_INPUT_USD_MICROS_PER_MILLION_TOKENS,
     outputUsdMicrosPerMillionTokens:
       HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2026_OUTPUT_USD_MICROS_PER_MILLION_TOKENS,
-    pricingVersion:
-      HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2026_PRICING_VERSION,
+    pricingVersion: `${model}-video-pricing-through-2026-12-31`,
   };
 }
 
@@ -3635,7 +3664,7 @@ function buildHostedAiUsageAllowanceModelSnapshot(
         && isHostedAiUsageVeniceTokenPricingProviderName(record.providerName)
       ? {
         providerModel:
-          HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS[resolution.model],
+          HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS[resolution.model] ?? null,
       }
       : {}),
     requestedModel: resolution.requestedModel,
@@ -3647,9 +3676,27 @@ function resolveHostedAiUsageAllowanceModelPrices(input: {
   model: HostedAiUsageAllowancePricedModel;
   record: AssistantUsageRecord;
 }): HostedAiUsageAllowanceModelPrice {
-  return isHostedAiUsageVeniceTokenPricingProviderName(input.record.providerName)
+  const prices = isHostedAiUsageVeniceTokenPricingProviderName(input.record.providerName)
     ? HOSTED_AI_USAGE_ALLOWANCE_VENICE_MODEL_PRICES[input.model]
     : HOSTED_AI_USAGE_ALLOWANCE_OPENAI_MODEL_PRICES[input.model];
+  if (!prices) {
+    throw new TypeError("Hosted AI usage allowance pricing is missing for the provider model.");
+  }
+  // Hosted Codex caps Astra context at 272K (validated in the runner catalog).
+  // Its turn deltas sum multiple requests; cumulative input is not context size.
+  const cumulativeCodexUsage = input.record.usageExtractionSourcePath
+    ?.endsWith("tokenUsage.total.delta") === true;
+  // Exact individual requests above 272K pay long-context rates in every bucket.
+  if (input.model === "gpt-6-astra" && !cumulativeCodexUsage
+      && normalizeTokenCount(input.record.inputTokens) > 272_000n) {
+    return {
+      cachedInputUsdMicrosPerMillionTokens: prices.cachedInputUsdMicrosPerMillionTokens * 2n,
+      cacheWriteUsdMicrosPerMillionTokens: (prices.cacheWriteUsdMicrosPerMillionTokens ?? 0n) * 2n,
+      inputUsdMicrosPerMillionTokens: prices.inputUsdMicrosPerMillionTokens * 2n,
+      outputUsdMicrosPerMillionTokens: prices.outputUsdMicrosPerMillionTokens * 3n / 2n,
+    };
+  }
+  return prices;
 }
 
 function isHostedAiUsageVeniceTokenPricingProviderName(

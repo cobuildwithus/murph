@@ -1567,9 +1567,10 @@ test("browser-vault provider exposes pending device imports without showing a gl
   await rendered.cleanup();
 });
 
-test("browser-vault provider polls pending refreshes without a global sync indicator", async () => {
+test("browser-vault provider does not poll an empty vault while a device import is pending", async () => {
   vi.useFakeTimers();
   const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+    deviceSyncImportPending: true,
     encryptedReplica: null,
     freshness: "stale",
     memberId: "member_123",
@@ -1597,24 +1598,7 @@ test("browser-vault provider polls pending refreshes without a global sync indic
     await vi.advanceTimersByTimeAsync(2_000);
   });
 
-  assert.equal(fetchMock.mock.calls.length > 1, true);
-  const firstPollBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
-  assert.equal(firstPollBody.refreshObservationOnly, true);
-  assert.equal(rendered.container.textContent?.includes("Preparing dashboard..."), false);
-  assert.equal(rendered.container.textContent?.includes("Syncing latest changes..."), false);
-
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(25_000);
-  });
-  const fetchCountAfterBoundedPolling = fetchMock.mock.calls.length;
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(30_000);
-  });
-  assert.equal(fetchMock.mock.calls.length, fetchCountAfterBoundedPolling);
-  assert.equal(
-    rendered.container.textContent,
-    "error:Your dashboard data is not available right now.",
-  );
+  assert.equal(fetchMock.mock.calls.length, 1);
   assert.equal(rendered.container.textContent?.includes("Preparing dashboard..."), false);
   assert.equal(rendered.container.textContent?.includes("Syncing latest changes..."), false);
 

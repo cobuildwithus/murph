@@ -12,6 +12,10 @@ import {
 } from '@murphai/contracts'
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
+  HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+  HOSTED_EXECUTION_GROUP_JOURNAL_FACT_MAX_NOTE_LENGTH,
+  HOSTED_EXECUTION_GROUP_JOURNAL_FACT_MAX_TITLE_LENGTH,
+  HOSTED_EXECUTION_GROUP_JOURNAL_FACT_NOTE_TYPES,
 } from '@murphai/hosted-execution/contracts'
 import {
   HOSTED_RUNTIME_PENDING_GROUP_SETUP_ROOM_CONTEXT_MAX_CODE_POINTS,
@@ -280,6 +284,7 @@ export const MURPH_ATTACH_RESPONSE_MEDIA_TOOL = {
 } as const
 
 export const MURPH_ATTACH_RESPONSE_CARD_TOOL = {
+  deferLoading: true,
   namespace: 'murph',
   name: 'attach_response_card',
   description:
@@ -302,10 +307,11 @@ export const MURPH_ATTACH_RESPONSE_CARD_TOOL = {
 } as const
 
 export const MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL = {
+  deferLoading: true,
   namespace: 'murph',
   name: 'attach_exercise_routine_card',
   description:
-    'Attach one complete Telegram exercise routine Rich Message when this tool is available and its exercise layout, optional catalog images, or both make the answer clearer. Use it for current movement instruction, an exact scheduled occurrence that teaches the saved routine now, or a request to repeat or improve an earlier routine. This card is one useful presentation option, not the only valid rich layout. Use attach_telegram_rich_content when a custom or mixed layout is clearer. The card must completely answer the request and replaces final text. Represent every named movement as its own card.exercises item, even when the routine groups movements under phases. A phase is not an exercise. Example: Mobility (ankle circles, trunk rotations) plus Balance (tandem stance, weight shifts) becomes four exercise items in one card, not two. An exercise list result is not enough: run vault-cli exercise show for every named movement before attaching the card. Include useful returned catalog images when they are available and help explain the movement; images are recommended, not required. In a multi-movement routine, put each useful returned image on its matching movement item. Keep the card at eight images or fewer. Copy each selected image URL, alt, and step exactly. Construct its source as exercise_catalog:<returned-item-id>:<1-based-position-in-returned-images>; never invent media or reorder images before assigning the position. Keep each instruction concrete and short. Safety is required: write one scenario-specific stop condition in at most 160 characters. Omit subtitle or footer when it adds nothing; the runtime records null. Never promise images for an exercise that has none. Estimate each exercise, transition, and total honestly. Before attaching, compare the stated total with the routine and do not claim a longer session than the content supports. If validation rejects the card, correct the reported fields and retry this tool once. On that retry, preserve every valid movement, instruction, and image; change only the reported invalid fields. Do not switch to separate response media on Telegram. If the corrected retry is also rejected, use one complete attach_telegram_rich_content card without images and keep every named movement separate. After either card tool succeeds, stop and send no final text. The successful fallback is the answer; do not apologize, report the rejected card, or add a second safety recap. Do not combine this card with response media.',
+    'Attach one complete Telegram exercise routine Rich Message when this tool is available and its exercise layout, optional catalog images, or both make the answer clearer. Use it for current movement instruction, an exact scheduled occurrence that teaches the saved routine now, or a request to repeat or improve an earlier routine. This card is one useful presentation option, not the only valid rich layout. Use attach_telegram_rich_content when a custom or mixed layout is clearer. The card must completely answer the request and replaces final text. Represent every named movement as its own card.exercises item, even when the routine groups movements under phases. A phase is not an exercise. Example: Mobility (ankle circles, trunk rotations) plus Balance (tandem stance, weight shifts) becomes four exercise items in one card, not two. An exercise list result is not enough: run vault-cli exercise show for every named movement before attaching the card. Include useful returned catalog images when they are available and help explain the movement; images are recommended, not required. In a multi-movement routine, put each useful returned image on its matching movement item. Keep the card at eight images or fewer. Copy each selected image URL, alt, and step exactly. Construct its source as exercise_catalog:<returned-item-id>:<1-based-position-in-returned-images>; never invent media or reorder images before assigning the position. Use at most three concrete, short instructions per movement. Safety is required: write one scenario-specific stop condition in at most 160 characters. Omit subtitle or footer when it adds nothing; the runtime records null. Never promise images for an exercise that has none. Estimate each exercise, transition, and total honestly. Before attaching, compare the stated total with the routine and do not claim a longer session than the content supports. If validation rejects the card, correct the reported fields and retry this tool once. On that retry, preserve every valid movement, instruction, and image; change only the reported invalid fields. Do not switch to separate response media on Telegram. If the corrected retry is also rejected, use one complete attach_telegram_rich_content card without images and keep every named movement separate. After either card tool succeeds, stop and send no final text. The successful fallback is the answer; do not apologize, report the rejected card, or add a second safety recap. Do not combine this card with response media.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -317,6 +323,7 @@ export const MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL = {
 } as const
 
 export const MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL = {
+  deferLoading: true,
   namespace: 'murph',
   name: 'attach_telegram_rich_content',
   description:
@@ -332,6 +339,7 @@ export const MURPH_ATTACH_TELEGRAM_RICH_CONTENT_TOOL = {
 } as const
 
 export const MURPH_GROUP_CHALLENGE_RESPONSE_CARD_TOOL = {
+  deferLoading: true,
   namespace: 'murph',
   name: 'attach_response_card',
   description:
@@ -656,7 +664,7 @@ export const MURPH_ASSISTANT_CONFIGURATION_TOOL = {
   namespace: 'murph',
   name: 'assistant_configuration',
   description:
-    'Read the current hosted turn model, provider, and reasoning effort plus the choices available for the next turn, or directly save an explicit user-requested change. OpenAI and Venice are the supported core-reply providers when listed as available; specialized tools may still use their own managed providers. Internally, Luna is the most usage-efficient model, Terra is the default, and Sol requires an active paid Edge plan. Do not assume the member knows model names or introduce them unless the member asks; otherwise describe the usage-saving option as “a less capable model that uses less AI usage.” The lowest supported reasoning effort is low; these hosted models do not support none. Use action="read" whenever configuration facts are needed. Use action="update" only when the current user-sourced turn explicitly asks for the exact change. Never switch models, providers, or reasoning automatically because usage is low. Do not claim a change is saved unless the result says updated or unchanged. A saved update does not change the running turn and takes effect on the next turn.',
+    'Read the current hosted turn model, provider, and reasoning effort plus the choices available for the next turn, or directly save an explicit user-requested change. OpenAI and Venice are the supported core-reply providers when listed as available; specialized tools may still use their own managed providers. Internally, Luna is the most usage-efficient model, Terra is the default, Sol and Astra require an active paid Edge or Max plan, and Astra requires OpenAI. Do not assume the member knows model names or introduce them unless the member asks; otherwise describe the usage-saving option as “a less capable model that uses less AI usage.” The lowest supported reasoning effort is low; these hosted models do not support none. Use action="read" whenever configuration facts are needed. Use action="update" only when the current user-sourced turn explicitly asks for the exact change. Never switch models, providers, or reasoning automatically because usage is low. Do not claim a change is saved unless the result says updated or unchanged. A saved update does not change the running turn and takes effect on the next turn.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -713,7 +721,7 @@ export const MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL = {
           },
           model: {
             type: 'string',
-            enum: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
+            enum: HOSTED_ASSISTANT_PRODUCT_MODELS.filter((model) => model !== 'gpt-6-astra'),
             description: 'Required next-turn group room model.',
           },
         },
@@ -883,7 +891,7 @@ const ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA = {
   type: 'string',
   pattern: ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN,
   description:
-    'Opaque Message ref shown beside an accepted inbound message in the current prompt. Required for current-sender actions, record_current_sender_daily_metric, and revoke_own_email_share. For offer_access, include it only when the group explicitly asks to repost the native access message; the trusted host binds the replacement to that exact request. It is otherwise optional only for create_signup_referral_link and read_usage_referral. Use the exact ref beside the relevant request or clarification answer; this is not a provider message id.',
+    'Opaque Message ref shown beside an accepted inbound message in the current prompt. Required for current-sender actions, record_current_sender_daily_metric, record_current_sender_journal_fact, set_current_sender_journal_capture, and revoke_own_email_share. For offer_access, include it only when the group explicitly asks to repost the native access message; the trusted host binds the replacement to that exact request. It is otherwise optional only for create_signup_referral_link and read_usage_referral. Use the exact ref beside the relevant request or clarification answer; this is not a provider message id.',
 } as const
 
 export const GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING =
@@ -904,6 +912,7 @@ export const MURPH_GROUP_TOOL_FAMILY_ACTIONS = {
   ],
   group_data: [
     'record_current_sender_daily_metric',
+    'record_current_sender_journal_fact',
     'post_disclosure_request',
     'revoke_disclosure_grant',
     'read_shared',
@@ -911,6 +920,8 @@ export const MURPH_GROUP_TOOL_FAMILY_ACTIONS = {
     'revoke_own_email_share',
   ],
   group_membership: [
+    'set_journal_capture',
+    'set_current_sender_journal_capture',
     'read_current',
     'prepare_next_group',
     'read_next_group',
@@ -1181,11 +1192,62 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
           'For action="offer_access" only. Set true only when the room explicitly asks for a standalone link; otherwise omit it and let the trusted host choose the best presentation for this channel.',
       },
       message_ref: ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA,
+      confidence: {
+        type: 'string',
+        enum: ['high', 'medium'],
+        description:
+          'For Journal facts: high is clear; medium needs one private question. Do not call for low confidence.',
+      },
       date: {
         type: 'string',
         pattern: '^\\d{4}-\\d{2}-\\d{2}$',
         description:
-          'Required only for record_current_sender_daily_metric. Exact member-reported civil date in YYYY-MM-DD form. Do not infer a date when the sender did not provide enough context.',
+          'Required for record_current_sender_daily_metric and record_current_sender_journal_fact. Exact member-reported civil date in YYYY-MM-DD form. Do not infer a date when the sender did not provide enough context.',
+      },
+      factIndex: {
+        type: 'integer',
+        minimum: 1,
+        maximum: 8,
+        description:
+          'Journal fact order in the selected message, starting at 1.',
+      },
+      title: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_EXECUTION_GROUP_JOURNAL_FACT_MAX_TITLE_LENGTH,
+        description:
+          'Short private Journal title in the sender language.',
+      },
+      note: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_EXECUTION_GROUP_JOURNAL_FACT_MAX_NOTE_LENGTH,
+        description:
+          'Current-sender fact only. Exclude group commentary, quotes, jokes, and third-party claims.',
+      },
+      noteType: {
+        type: 'string',
+        enum: HOSTED_EXECUTION_GROUP_JOURNAL_FACT_NOTE_TYPES,
+        description:
+          'Canonical Journal note type for this fact.',
+      },
+      privateQuestion: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
+        description:
+          'High: use the same consent question for every fact and name all clear facts. The host asks the first. Medium: ask only to clarify.',
+      },
+      enabled: {
+        type: 'boolean',
+        description:
+          'set_journal_capture: true accepts capture, false disables all. After true, save all named facts. set_current_sender_journal_capture uses scope.',
+      },
+      scope: {
+        type: 'string',
+        enum: ['global', 'group'],
+        description:
+          'Use group for this group, or global only when the sender says all groups.',
       },
       metric: {
         type: 'string',
@@ -1215,11 +1277,14 @@ const MURPH_GROUP_TOOL_FAMILY_PROPERTIES = {
     'context', 'grantId', 'membershipId', 'message_ref', 'question',
   ],
   group_data: [
-    'audience', 'date', 'displayName', 'grantId', 'message_ref', 'metric',
-    'permissionText', 'projectionScopes', 'standaloneLink', 'unit', 'value',
+    'audience', 'confidence', 'date', 'displayName', 'factIndex', 'grantId',
+    'message_ref', 'metric', 'note', 'noteType', 'permissionText',
+    'privateQuestion', 'projectionScopes', 'standaloneLink', 'title', 'unit',
+    'value',
   ],
   group_membership: [
-    'cursor', 'disclosureGrantCursor', 'membershipId', 'setup',
+    'cursor', 'disclosureGrantCursor', 'enabled', 'membershipId', 'message_ref',
+    'scope', 'setup',
   ],
   group_usage: ['message_ref', 'policyCode', 'policyCodes'],
   group_chat: [
@@ -1353,7 +1418,7 @@ export const MURPH_GROUP_DATA_TOOL = buildMurphGroupFamilyTool({
 export const MURPH_GROUP_MEMBERSHIP_TOOL = buildMurphGroupFamilyTool({
   name: 'group_membership',
   description:
-    'Read/change membership or next-group setup.',
+    'Read/change membership or next-group setup. On a direct answer to private group Journal consent, call set_journal_capture before saving every named fact.',
 })
 
 export const MURPH_GROUP_USAGE_TOOL = buildMurphGroupFamilyTool({
@@ -1404,7 +1469,7 @@ export const MURPH_SEND_VAULT_FILE_TOOL = {
   namespace: 'murph',
   name: 'send_vault_file',
   description:
-    `Securely prepare one file for the current iMessage conversation. Use a normalized vault-relative file path. Only after this turn establishes an obligation to send a newly generated file now, write its final bytes directly to ${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename> and use that ref. Do not stage files for possible later delivery, and never move or copy existing, user-owned, canonical, or durable files there. When a generated ZIP contains derived exports/packs/<packId> directories, pass those exact included ids in retire_export_pack_ids; never include a pack that is absent from the ZIP. The runtime retires only unchanged claimed packs after confirmed delivery. When approval is pending, explain that approval is required; the runtime adds the exact link outside model context. When approval is approved, the runtime owns delivery of the existing attachment intent; call finish_without_reply and do not attach the file or send a companion acknowledgment. Do not claim final iMessage delivery unless later delivery evidence confirms it. It does not reveal file bytes to the model and does not support arbitrary recipients.`,
+    `Securely prepare one file for the current conversation. For an existing saved file, pass its current vault-relative ref directly. Newly generated files are supported too. Only after this turn establishes an obligation to send a newly generated file now, write its final bytes directly to ${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename> and use that ref. Do not stage files for possible later delivery, and never move or copy existing, user-owned, canonical, or durable files there. Creating a new ZIP from requested vault files is allowed; read the originals in place and stage only the new archive. When a generated ZIP contains derived exports/packs/<packId> directories, pass those exact included ids in retire_export_pack_ids; never include a pack that is absent from the ZIP. The runtime retires only unchanged claimed packs after confirmed delivery. When approval is pending, explain that approval is required; the runtime adds the exact link outside model context. When approval is approved, the runtime owns delivery of the existing attachment intent; call finish_without_reply and do not attach the file or send a companion acknowledgment. Do not claim final delivery unless later delivery evidence confirms it. It does not reveal file bytes to the model and does not support arbitrary recipients.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,

@@ -314,6 +314,28 @@ test("workout features use public query normalization for underscore provider so
   );
 });
 
+test("Junction workout sport remains available to query surfaces", () => {
+  const vault = makeVaultFromJunctionSnapshot({
+    importedAt: "2026-04-22T13:00:00.000Z",
+    summaries: {
+      workouts: [{
+        durationMinutes: 42,
+        endAt: "2026-04-22T12:42:00.000Z",
+        observedAt: "2026-04-22T12:42:00.000Z",
+        sourceProviderSlug: "oura",
+        sport: { name: "Trail Run", type: "workout" },
+        startAt: "2026-04-22T12:00:00.000Z",
+        type: "workout",
+      }],
+    },
+  });
+
+  const workout = listEntities(vault).find(
+    (entity) => entity.kind === "activity_session",
+  );
+  assert.equal(workout?.attributes.activityType, "trail-run");
+});
+
 test("Junction activity heart-rate and intensity metrics stay out of sleep and support latest/trend queries", () => {
   const activityOnly = makeVaultFromJunctionSnapshot({
     importedAt: "2026-08-11T12:00:00.000Z",

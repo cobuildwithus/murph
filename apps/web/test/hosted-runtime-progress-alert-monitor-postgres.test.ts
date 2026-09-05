@@ -494,7 +494,7 @@ describe.skipIf(!runPostgresProof)(
       }
     }, 60_000);
 
-    it("ages typed device retries from their canonical scheduled wake", async () => {
+    it("does not defer unhandled device items for unrelated workspace wakes", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
       const rollback = new Error("Rollback scheduled device retry progress proof.");
       const prefix = `progress-device-retry-proof-${randomUUID()}`;
@@ -578,10 +578,10 @@ describe.skipIf(!runPostgresProof)(
           })).resolves.toMatchObject({
             anomalous: true,
             oldestStalledAgeMs: 60 * 60_000,
-            pendingItemCount: 2,
-            stalledLaneCount: 2,
-            stalledRuntimeCount: 2,
-            stalledSystemLaneCount: 2,
+            pendingItemCount: 4,
+            stalledLaneCount: 4,
+            stalledRuntimeCount: 4,
+            stalledSystemLaneCount: 4,
           });
 
           proofCompleted = true;
@@ -600,7 +600,7 @@ describe.skipIf(!runPostgresProof)(
       }
     }, 60_000);
 
-    it("starts an overdue device retry stall at its scheduled wake", async () => {
+    it("keeps accepted-work age across checkpoint and scheduling changes", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
       const rollback = new Error("Rollback overdue device retry progress proof.");
       const userId = `progress-overdue-device-proof-${randomUUID()}`;
@@ -635,12 +635,31 @@ describe.skipIf(!runPostgresProof)(
             prisma: tx,
           })).resolves.toMatchObject({
             anomalous: true,
-            oldestStalledAgeMs: 20 * 60_000,
+            oldestStalledAgeMs: 60 * 60_000,
             pendingItemCount: 1,
             stalledLaneCount: 1,
             stalledRuntimeCount: 1,
             stalledSystemLaneCount: 1,
           });
+
+          await tx.hostedWorkspace.update({
+            where: { userId },
+            data: {
+              checkpointedAt: now,
+              version: 9n,
+              systemMailboxProgressGeneration: 8n,
+              nextWakeAt: new Date(now.getTime() + 6 * 60 * 60_000),
+              nextWakeReason: "assistant",
+              nextDefaultProcessingWakeAt: new Date(now.getTime() + 60_000),
+              nextDefaultProcessingWakeReason: "assistant",
+            },
+          });
+          await expect(readHostedRuntimeProgressHealth({ now, prisma: tx }))
+            .resolves.toMatchObject({
+              oldestStalledAgeMs: 60 * 60_000,
+              pendingItemCount: 1,
+              stalledRuntimeCount: 1,
+            });
 
           proofCompleted = true;
           throw rollback;
@@ -765,11 +784,12 @@ describe.skipIf(!runPostgresProof)(
             now,
             prisma: tx,
           })).resolves.toMatchObject({
-            anomalous: false,
-            pendingItemCount: 0,
-            stalledLaneCount: 0,
-            stalledRuntimeCount: 0,
-            stalledSystemLaneCount: 0,
+            anomalous: true,
+            oldestStalledAgeMs: 60 * 60_000,
+            pendingItemCount: 3,
+            stalledLaneCount: 2,
+            stalledRuntimeCount: 2,
+            stalledSystemLaneCount: 2,
           });
 
           await tx.hostedWorkspace.update({
@@ -787,11 +807,32 @@ describe.skipIf(!runPostgresProof)(
           })).resolves.toMatchObject({
             anomalous: true,
             oldestStalledAgeMs: 60 * 60_000,
-            pendingItemCount: 2,
-            stalledLaneCount: 1,
-            stalledRuntimeCount: 1,
-            stalledSystemLaneCount: 1,
+            pendingItemCount: 3,
+            stalledLaneCount: 2,
+            stalledRuntimeCount: 2,
+            stalledSystemLaneCount: 2,
           });
+
+          // Receipt alone did not retire either obligation. Advance the
+          // canonical handling floor and expose the successor's own clock.
+          await tx.hostedMailboxLaneCounter.updateMany({
+            where: { userId: { in: [unimportedHead, unimportedSuffix] }, lane: "system" },
+            data: { consumedSeq: 1n },
+          });
+          await expect(readHostedRuntimeProgressHealth({ now, prisma: tx }))
+            .resolves.toMatchObject({
+              oldestStalledAgeMs: 30 * 60_000,
+              pendingItemCount: 1,
+              stalledSystemLaneCount: 1,
+            });
+          await tx.hostedMailboxLaneCounter.update({
+            where: { userId_lane: { userId: unimportedSuffix, lane: "system" } },
+            data: { consumedSeq: 2n },
+          });
+          // A retained device deadline may remain after mailbox handling. This
+          // observation establishes mailbox health, not device-job completion.
+          await expect(readHostedRuntimeProgressHealth({ now, prisma: tx }))
+            .resolves.toMatchObject({ anomalous: false, pendingItemCount: 0 });
 
           proofCompleted = true;
           throw rollback;
@@ -809,7 +850,7 @@ describe.skipIf(!runPostgresProof)(
       }
     }, 60_000);
 
-    it("uses exact creation clocks and fails closed impossible imported frontiers", async () => {
+    it("keeps handling age independent of imported frontiers and fresh suffixes", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
       const rollback = new Error("Rollback device retry clock boundary proof.");
       const prefix = `progress-device-clock-proof-${randomUUID()}`;
@@ -886,10 +927,10 @@ describe.skipIf(!runPostgresProof)(
           })).resolves.toMatchObject({
             anomalous: true,
             oldestStalledAgeMs: 60 * 60_000,
-            pendingItemCount: 1,
-            stalledLaneCount: 1,
-            stalledRuntimeCount: 1,
-            stalledSystemLaneCount: 1,
+            pendingItemCount: 3,
+            stalledLaneCount: 2,
+            stalledRuntimeCount: 2,
+            stalledSystemLaneCount: 2,
           });
 
           await tx.hostedWorkspace.update({
@@ -904,11 +945,12 @@ describe.skipIf(!runPostgresProof)(
             now,
             prisma: tx,
           })).resolves.toMatchObject({
-            anomalous: false,
-            pendingItemCount: 0,
-            stalledLaneCount: 0,
-            stalledRuntimeCount: 0,
-            stalledSystemLaneCount: 0,
+            anomalous: true,
+            oldestStalledAgeMs: 60 * 60_000,
+            pendingItemCount: 3,
+            stalledLaneCount: 2,
+            stalledRuntimeCount: 2,
+            stalledSystemLaneCount: 2,
           });
 
           await expect(readHostedRuntimeProgressHealth({
@@ -916,11 +958,11 @@ describe.skipIf(!runPostgresProof)(
             prisma: tx,
           })).resolves.toMatchObject({
             anomalous: true,
-            oldestStalledAgeMs: 15 * 60_000,
-            pendingItemCount: 2,
-            stalledLaneCount: 1,
-            stalledRuntimeCount: 1,
-            stalledSystemLaneCount: 1,
+            oldestStalledAgeMs: 70 * 60_000,
+            pendingItemCount: 3,
+            stalledLaneCount: 2,
+            stalledRuntimeCount: 2,
+            stalledSystemLaneCount: 2,
           });
 
           proofCompleted = true;

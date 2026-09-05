@@ -656,6 +656,11 @@ direct-Starter gate is fully exhausted again.
 
 - Cross-plane changes state safe deploy order, warm-old-bundle behavior,
   rollback floor, and whether coordinated deployment is required.
+- A protocol change between independently deployed components is
+  consumer-first. Deploy a consumer that accepts both the current and next
+  shape before any producer emits the next shape. A strict consumer must not
+  receive a new field, value, or message kind until that compatible consumer is
+  live. Remove legacy acceptance only after every old producer has drained.
 - A producer that persists new fail-closed authority becomes a hard rollback
   floor before its first such write when an older producer would ignore that
   authority. A below-floor emergency rollback first disables and drains every
@@ -664,6 +669,9 @@ direct-Starter gate is fully exhausted again.
 - Schema and protocol evolution is additive-first. Compatibility stays
   legacy-facing, includes a removal condition, and is deleted after verified
   production drain.
+- Compatibility proof covers every mixed-version pair that the deployment can
+  create. A current-producer/current-consumer test alone does not prove a safe
+  rolling deployment.
 
 ## Observability And Bounded Growth
 

@@ -53,6 +53,20 @@ export async function acquireHostedLinqParticipantContactLockTx(input: {
   `;
 }
 
+export async function acquireHostedLinqParticipantEmailLockTx(input: {
+  emailAddress: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const contact = createHostedLinqParticipantContact({
+    kind: "email",
+    value: input.emailAddress,
+  });
+  if (!contact) {
+    throw new TypeError("Hosted Linq participant email lock requires a valid email address.");
+  }
+  await acquireHostedLinqParticipantContactLockTx({ contact, tx: input.tx });
+}
+
 export async function acquireHostedLinqParticipantPhoneLockTx(input: {
   lockTimeoutMs?: number;
   phoneNumber: string;

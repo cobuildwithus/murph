@@ -40,6 +40,7 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
+  findHostedExecutionDeviceSyncRuntimeApplyEntry,
   mergeHostedDeviceSyncConnectionMetadata,
   mergeHostedDeviceSyncEventToProviderSendBuckets,
   normalizeHostedDeviceSyncJobHints,
@@ -164,7 +165,7 @@ type HostedTerminalDeviceSyncStatus = "disconnected" | "reauthorization_required
 
 const HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON = "retained_completion_fence";
 const HOSTED_DEVICE_SYNC_DIRTY_REMAINDER_HINT_REASON = "retained_dirty_remainder";
-const HOSTED_DEVICE_SYNC_COMPLETION_FENCE_DELAY_MS = 30_000;
+const HOSTED_DEVICE_SYNC_DIRTY_REMAINDER_DELAY_MS = 30_000;
 
 export async function syncHostedDeviceSyncControlPlaneState(input: {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
@@ -183,9 +184,56 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
     );
   }
 
+  const state = await hydrateHostedDeviceSyncControlPlaneState({
+    deviceSyncPort: client,
+    secret: input.secret,
+    service: input.service,
+    signal: input.signal ?? null,
+    snapshot: input.snapshot,
+    wake: input.wake,
+  });
+  if (state.wakeSuperseded === true) {
+    return state;
+  }
+
+  if (input.wake.kind === "device-sync.wake") {
+    await applyHostedDeviceSyncWakeHint({
+      wake: input.wake,
+      hostedToLocalAccountIds: state.hostedToLocalAccountIds,
+      service: input.service,
+    });
+  }
+  if (
+    input.skipDirtyPendingFetch !== true
+    && resolveHostedDeviceSyncWakeLocalAccountId({ state, wake: input.wake })
+  ) {
+    const dirtyState = await applyHostedPendingDirtyDeviceSyncState({
+      deviceSyncPort: client,
+      hostedToLocalAccountIds: state.hostedToLocalAccountIds,
+      signal: input.signal ?? null,
+      service: input.service,
+      stagedDirtyAcks: input.stagedDirtyAcks ?? null,
+      wake: input.wake,
+    });
+    state.pendingDirtyAcks = dirtyState.acks;
+    state.pendingDirtyPayloadJobs = dirtyState.pendingDirtyPayloadJobs;
+    state.dirtyWorkRemaining = dirtyState.hasMoreForWake;
+  }
+
+  return state;
+}
+
+export async function hydrateHostedDeviceSyncControlPlaneState(input: {
+  deviceSyncPort: HostedRuntimeDeviceSyncPort;
+  secret: string;
+  service: DeviceSyncService;
+  snapshot?: HostedDeviceSyncRuntimeSnapshotResponse | null;
+  signal?: AbortSignal | null;
+  wake: HostedRuntimeEvent;
+}): Promise<HostedDeviceSyncRuntimeSyncState> {
   const snapshot = input.snapshot === undefined
     ? await fetchCompleteHostedDeviceSyncRuntimeSnapshot({
-        deviceSyncPort: client,
+        deviceSyncPort: input.deviceSyncPort,
         includeCredentialMaterial: true,
         signal: input.signal ?? null,
       })
@@ -401,35 +449,103 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
     );
   }
 
-  if (input.wake.kind === "device-sync.wake") {
-    const superseded = await applyHostedDeviceSyncWakeHint({
-      wake: input.wake,
-      hostedToLocalAccountIds: state.hostedToLocalAccountIds,
-      service: input.service,
-    });
-    if (superseded) {
-      state.wakeSuperseded = true;
-      return state;
-    }
+  if (isHostedDeviceSyncWakeSuperseded({
+    service: input.service,
+    state,
+    wake: input.wake,
+  })) {
+    state.wakeSuperseded = true;
   }
+  return state;
+}
+
+export function isHostedDeviceSyncCompletionFenceWake(
+  wake: HostedRuntimeEvent,
+): wake is HostedExecutionDeviceSyncWake {
+  if (wake.kind !== "device-sync.wake") {
+    return false;
+  }
+  const wakeContext = resolveHostedDeviceSyncWakeContext(wake);
+  return wakeContext.hint?.reason === HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON
+    && normalizeHostedDeviceSyncJobHints(wakeContext.hint).length === 0;
+}
+
+export async function publishHostedDeviceSyncCompletionFence(input: {
+  deviceSyncPort: HostedRuntimeDeviceSyncPort;
+  signal?: AbortSignal | null;
+  wake: HostedExecutionDeviceSyncWake;
+}): Promise<string | null> {
+  const wakeContext = resolveHostedDeviceSyncWakeContext(input.wake);
   if (
-    input.skipDirtyPendingFetch !== true
-    && resolveHostedDeviceSyncWakeLocalAccountId({ state, wake: input.wake })
+    wakeContext.hint?.reason !== HOSTED_DEVICE_SYNC_COMPLETION_FENCE_HINT_REASON
+    || !Object.hasOwn(wakeContext.hint, "nextReconcileAt")
+    || normalizeHostedDeviceSyncJobHints(wakeContext.hint).length > 0
   ) {
-    const dirtyState = await applyHostedPendingDirtyDeviceSyncState({
-      deviceSyncPort: client,
-      hostedToLocalAccountIds: state.hostedToLocalAccountIds,
-      signal: input.signal ?? null,
-      service: input.service,
-      stagedDirtyAcks: input.stagedDirtyAcks ?? null,
-      wake: input.wake,
-    });
-    state.pendingDirtyAcks = dirtyState.acks;
-    state.pendingDirtyPayloadJobs = dirtyState.pendingDirtyPayloadJobs;
-    state.dirtyWorkRemaining = dirtyState.hasMoreForWake;
+    throw new TypeError(
+      "Hosted device-sync completion fence requires its canonical cadence and no retained jobs.",
+    );
+  }
+  const connectionId = wakeContext.connectionId;
+  if (!connectionId) {
+    return null;
   }
 
-  return state;
+  const snapshot = await input.deviceSyncPort.fetchSnapshot({
+    connectionId,
+    includeCredentialMaterial: false,
+    limit: 1,
+    ...(input.signal ? { signal: input.signal } : {}),
+  });
+  const baseline = snapshot.connections.find((entry) =>
+    entry.connection.id === connectionId
+  ) ?? null;
+  if (
+    wakeContext.expectedConnectedAt === null
+    || !baseline
+    || baseline.connection.connectedAt !== wakeContext.expectedConnectedAt
+    || baseline.connection.status !== "active"
+  ) {
+    return null;
+  }
+
+  const nextReconcileAt = resolveHostedWakeNextReconcileAt(
+    baseline.localState.nextReconcileAt,
+    wakeContext.hint.nextReconcileAt,
+  );
+  if (!nextReconcileAt) {
+    return baseline.localState.nextReconcileAt;
+  }
+
+  const response = await input.deviceSyncPort.applyUpdates({
+    occurredAt: input.wake.occurredAt,
+    ...(input.signal ? { signal: input.signal } : {}),
+    updates: [{
+      connectionId,
+      localState: { nextReconcileAt },
+      observedConnectedAt: baseline.connection.connectedAt,
+      observedUpdatedAt: baseline.connection.updatedAt ?? null,
+    }],
+  });
+  const applied = findHostedExecutionDeviceSyncRuntimeApplyEntry(
+    response,
+    connectionId,
+  );
+  if (!applied) {
+    throw new Error(
+      "Hosted device-sync completion fence apply response omitted its connection.",
+    );
+  }
+  switch (applied.writeUpdate) {
+    case "applied":
+    case "unchanged":
+      return nextReconcileAt;
+    case "missing":
+      return null;
+    case "skipped_version_mismatch":
+      throw new Error(
+        "Hosted device-sync completion fence lost its connection version fence.",
+      );
+  }
 }
 
 export async function applyHostedPendingDirtyDeviceSyncStateForWake(input: {
@@ -638,9 +754,9 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
   service: DeviceSyncService;
   state: HostedDeviceSyncRuntimeSyncState;
   wake: HostedRuntimeEvent;
-}): Promise<void> {
+}): Promise<boolean> {
   if (!input.state.snapshot) {
-    return;
+    return true;
   }
 
   const client = resolveHostedDeviceSyncRuntimeClientForUser(input.deviceSyncPort);
@@ -685,17 +801,36 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
   }
 
   let offset = 0;
+  let accepted = true;
   do {
-    await client.applyUpdates({
+    const updatesBatch = updates.slice(
+      offset,
+      offset + HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
+    );
+    const response = await client.applyUpdates({
       occurredAt: input.wake.occurredAt,
       ...(input.signal ? { signal: input.signal } : {}),
-      updates: updates.slice(
-        offset,
-        offset + HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
-      ),
+      updates: updatesBatch,
     });
+    for (const update of updatesBatch) {
+      const applied = findHostedExecutionDeviceSyncRuntimeApplyEntry(
+        response,
+        update.connectionId,
+      );
+      if (!applied) {
+        accepted = false;
+        continue;
+      }
+      if (
+        applied.writeUpdate === "skipped_version_mismatch"
+        || applied.tokenUpdate === "skipped_version_mismatch"
+      ) {
+        accepted = false;
+      }
+    }
     offset += HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT;
   } while (offset < updates.length);
+  return accepted;
 }
 
 function createEmptyHostedDeviceSyncRuntimeSyncState(
@@ -752,13 +887,37 @@ function markHostedTerminalDeviceSyncJobsDead(input: {
   );
 }
 
+function isHostedDeviceSyncWakeSuperseded(input: {
+  service: DeviceSyncService;
+  state: HostedDeviceSyncRuntimeSyncState;
+  wake: HostedRuntimeEvent;
+}): boolean {
+  if (input.wake.kind !== "device-sync.wake") {
+    return false;
+  }
+  const wake = resolveHostedDeviceSyncWakeContext(input.wake);
+  const localAccountId = wake.connectionId
+    ? input.state.hostedToLocalAccountIds.get(wake.connectionId) ?? null
+    : null;
+  const account = localAccountId
+    ? requireHostedRuntimeDeviceSyncStore(input.service).getAccountById(localAccountId)
+    : null;
+  return Boolean(
+    account
+    && (
+      wake.expectedConnectedAt === null
+      || wake.expectedConnectedAt !== account.connectedAt
+    ),
+  );
+}
+
 async function applyHostedDeviceSyncWakeHint(input: {
   wake: HostedRuntimeEvent;
   hostedToLocalAccountIds: Map<string, string>;
   service: DeviceSyncService;
-}): Promise<boolean> {
+}): Promise<void> {
   if (input.wake.kind !== "device-sync.wake") {
-    return false;
+    return;
   }
 
   const wake = resolveHostedDeviceSyncWakeContext(input.wake);
@@ -766,21 +925,13 @@ async function applyHostedDeviceSyncWakeHint(input: {
   const store = requireHostedRuntimeDeviceSyncStore(input.service);
 
   if (!localAccountId) {
-    return false;
+    return;
   }
 
   const account = store.getAccountById(localAccountId);
 
   if (!account) {
-    return false;
-  }
-
-  // Missing epochs remain readable during deploy skew, but have no authority.
-  if (
-    wake.expectedConnectedAt === null
-    || wake.expectedConnectedAt !== account.connectedAt
-  ) {
-    return true;
+    return;
   }
 
   const terminalStatus = readHostedTerminalDeviceSyncStatus(account);
@@ -791,7 +942,7 @@ async function applyHostedDeviceSyncWakeHint(input: {
       status: terminalStatus,
       store,
     });
-    return false;
+    return;
   }
 
   if (input.wake.reason === "disconnected") {
@@ -802,7 +953,7 @@ async function applyHostedDeviceSyncWakeHint(input: {
       "HOSTED_DEVICE_SYNC_DISCONNECTED",
       "Hosted device-sync wake marked the connection as disconnected.",
     );
-    return false;
+    return;
   }
 
   if (input.wake.reason === "reauthorization_required") {
@@ -816,7 +967,7 @@ async function applyHostedDeviceSyncWakeHint(input: {
       "HOSTED_DEVICE_SYNC_REAUTHORIZATION_REQUIRED",
       "Hosted device-sync wake marked the connection as requiring reconnection.",
     );
-    return false;
+    return;
   }
 
   const jobHints = normalizeHostedDeviceSyncJobHints(wake.hint);
@@ -829,7 +980,7 @@ async function applyHostedDeviceSyncWakeHint(input: {
     && jobHints.length === 0
   ) {
     input.service.queueManualReconcile(localAccountId);
-    return false;
+    return;
   }
 
   for (const [index, hint] of jobHints.entries()) {
@@ -860,8 +1011,6 @@ async function applyHostedDeviceSyncWakeHint(input: {
   if (wakePatch) {
     store.patchAccount(localAccountId, wakePatch);
   }
-
-  return false;
 }
 
 export function resolveHostedDeviceSyncWakeLocalAccountId(input: {
@@ -974,7 +1123,7 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
   if (input.state.dirtyWorkRemaining) {
     return {
       retryAt: new Date(
-        Date.now() + HOSTED_DEVICE_SYNC_COMPLETION_FENCE_DELAY_MS,
+        Date.now() + HOSTED_DEVICE_SYNC_DIRTY_REMAINDER_DELAY_MS,
       ).toISOString(),
       wake: {
         ...input.wake,
@@ -1003,9 +1152,7 @@ export function resolveHostedDeviceSyncWakeRecovery(input: {
   }
 
   return {
-    retryAt: new Date(
-      Date.now() + HOSTED_DEVICE_SYNC_COMPLETION_FENCE_DELAY_MS,
-    ).toISOString(),
+    retryAt: new Date(Date.now()).toISOString(),
     wake: {
       ...input.wake,
       hint: {

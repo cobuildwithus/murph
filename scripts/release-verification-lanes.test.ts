@@ -161,7 +161,14 @@ describe("release verification executable lanes", () => {
         outputEntries.hosted_web_test_matrix ?? "",
       );
       const packageShards = readMatrixShardNames(packageMatrix);
-      expect(packageShards).toHaveLength(6);
+      expect(packageShards).toEqual([
+        "cli",
+        "assistant-engine",
+        "platform-a",
+        "platform-b",
+        "health-commons",
+        "hosted-local-harness",
+      ]);
       expect(new Set(packageShards).size).toBe(packageShards.length);
       expect(readMatrixShardNames(hostedWebMatrix)).toEqual([
         "1/4",
@@ -170,15 +177,50 @@ describe("release verification executable lanes", () => {
         "4/4",
       ]);
 
-      const packageDirs = packageShards.flatMap((shard) => {
+      const packageDirsByShard = Object.fromEntries(packageShards.map((shard) => {
         const result = spawnSync(
           process.execPath,
           [releasePlanPath, "--package-dirs", shard],
           { cwd: repoRoot, encoding: "utf8" },
         );
         expect(result.status, result.stderr).toBe(0);
-        return result.stdout.trim().split("\n").filter(Boolean);
+        return [shard, result.stdout.trim().split("\n").filter(Boolean)];
+      }));
+      expect(packageDirsByShard).toEqual({
+        cli: ["packages/cli"],
+        "assistant-engine": ["packages/assistant-engine"],
+        "platform-a": [
+          "packages/assistant-runtime",
+          "packages/assistantd",
+          "packages/cloudflare-hosted-control",
+          "packages/exercise-library",
+          "packages/gateway-core",
+          "packages/health-metrics",
+          "packages/hosted-execution",
+          "packages/importers",
+          "packages/inbox-services",
+          "packages/openclaw-plugin",
+          "packages/operator-config",
+        ],
+        "platform-b": [
+          "packages/core",
+          "packages/setup-cli",
+          "packages/assistant-cli",
+          "packages/contracts",
+          "packages/clinical-records",
+          "packages/device-syncd",
+          "packages/inboxd",
+          "packages/messaging-ingress",
+          "packages/parsers",
+          "packages/query",
+          "packages/runtime-state",
+          "packages/vault-usecases",
+        ],
+        "health-commons": ["packages/health-commons"],
+        "hosted-local-harness": ["packages/hosted-local-harness"],
       });
+
+      const packageDirs = Object.values(packageDirsByShard).flat();
       expect(new Set(packageDirs).size).toBe(packageDirs.length);
       expect([...packageDirs].sort()).toEqual(discoverCoveragePackageDirs());
     } finally {
@@ -238,7 +280,6 @@ describe("release verification executable lanes", () => {
         MURPH_HOSTED_WEB_VERIFY_SKIP_TYPECHECK: "1",
         MURPH_VERIFY_SHARED_HOST: "0",
         MURPH_VERIFY_STEP_PARALLEL: "0",
-        MURPH_WORKSPACE_ARTIFACT_LOCK_HELD: "1",
       };
       const testShard = spawnSync("/bin/bash", [hostedWebVerifyPath], {
         cwd: repoRoot,

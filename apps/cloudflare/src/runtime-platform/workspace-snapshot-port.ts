@@ -9,7 +9,7 @@ import type {
   HostedRuntimeWorkspaceSnapshotSessionCompleteResult,
   HostedRuntimeWorkspaceSnapshotSessionStart,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
-import { readHostedRuntimeSafeErrorText } from "@murphai/hosted-execution";
+import { emitHostedExecutionStructuredLog, readHostedRuntimeSafeErrorText } from "@murphai/hosted-execution";
 import { parseHostedWorkspaceCheckpointResponse, parseHostedWorkspaceSnapshotV2Ref } from "@murphai/hosted-execution/parsers";
 import type { HostedWorkspaceCheckpointResponse } from "@murphai/hosted-execution/runtime-control";
 import {
@@ -61,6 +61,7 @@ import {
   readRequiredHostedRuntimeString,
 } from "./hosted-http.ts";
 
+const WORKSPACE_SNAPSHOT_READ_IDLE_TIMEOUT_MS = 15_000;
 const WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_INTERVAL_MS = 2_000;
 const WORKSPACE_SNAPSHOT_PRESIGN_PUT_MAX_ATTEMPTS = 2;
 const WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_TIMEOUT_MS = 2_000;
@@ -649,6 +650,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
       const objectFetchStartedAt = Date.now();
       const archiveTimings = await runHostedWorkspaceSnapshotRestoreReplaySafeReadStep({
         details: restoreLogDetails,
+        signal: request.signal,
         onAttempt: noteReplaySafeReadAttempt,
         run: async () => {
           const objectFetchAttemptTiming = {
@@ -1436,22 +1438,46 @@ async function* readHostedWorkspaceSnapshotEncryptedObjectStream(input: {
   }
   const bodyReadStartedAt = Date.now();
   let byteCount = 0;
-  for await (const next of readHostedRuntimeResponseBodyChunks({
-    body: response.body,
-    description: "Hosted workspace snapshot fetch",
-    signal: input.signal ?? null,
-    timeoutMs: Math.max(1, input.deadlineMs - Date.now()),
-  })) {
-    byteCount += next.byteLength;
-    if (byteCount > input.expectedEncryptedByteSize) {
-      throw new Error("Hosted workspace snapshot fetch exceeded its ref byte count.");
+  const readTiming = { readWaitMs: 0, maxReadWaitMs: 0 };
+  let complete = false;
+  try {
+    for await (const next of readHostedRuntimeResponseBodyChunks({
+      body: response.body,
+      description: "Hosted workspace snapshot fetch",
+      signal: input.signal ?? null,
+      timeoutMs: Math.max(1, input.deadlineMs - Date.now()),
+      readTimeoutMs: WORKSPACE_SNAPSHOT_READ_IDLE_TIMEOUT_MS,
+      timing: readTiming,
+    })) {
+      byteCount += next.byteLength;
+      if (byteCount > input.expectedEncryptedByteSize) {
+        throw new Error("Hosted workspace snapshot fetch exceeded its ref byte count.");
+      }
+      yield next;
     }
-    yield next;
+    if (byteCount !== input.expectedEncryptedByteSize) {
+      throw new Error("Hosted workspace snapshot fetch byte count does not match its ref.");
+    }
+    complete = true;
+    input.timing.objectFetchBodyReadMs = readHostedRuntimeStepElapsedMs(bodyReadStartedAt);
+  } finally {
+    const durationMs = readHostedRuntimeStepElapsedMs(bodyReadStartedAt);
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runtime.workspace-snapshot",
+      details: {
+        bytesRead: byteCount,
+        complete,
+        durationMs,
+        readWaitMs: readTiming.readWaitMs,
+        maxReadWaitMs: readTiming.maxReadWaitMs,
+        consumerElapsedMs: Math.max(0, durationMs - readTiming.readWaitMs),
+        readIdleTimeoutMs: WORKSPACE_SNAPSHOT_READ_IDLE_TIMEOUT_MS,
+      },
+      message: "Hosted workspace snapshot body read settled.",
+      phase: "runtime.starting",
+      userId: null,
+    });
   }
-  if (byteCount !== input.expectedEncryptedByteSize) {
-    throw new Error("Hosted workspace snapshot fetch byte count does not match its ref.");
-  }
-  input.timing.objectFetchBodyReadMs = readHostedRuntimeStepElapsedMs(bodyReadStartedAt);
 }
 
 async function cancelHostedWorkspaceSnapshotResponseBody(

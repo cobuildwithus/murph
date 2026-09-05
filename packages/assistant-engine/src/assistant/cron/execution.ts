@@ -70,6 +70,7 @@ import {
 import {
   runOnboardingGoalCheckinAuthorityPrecondition,
 } from '../onboarding-goal-checkin-automation.js'
+import { canSkipManagedJournalConnectedContext } from '../journal-connected-context-eligibility.js'
 import {
   buildAssistantLinqDeliveryPosturePrompt,
 } from '../linq-delivery-posture.js'
@@ -501,6 +502,7 @@ interface ExecuteClaimedAssistantCronJobInput {
 }
 
 interface AssistantCronRunExecutionResult {
+  automationSlug: string | null
   job: AssistantCronJob
   removedAfterRun: boolean
   run: AssistantCronRunRecord
@@ -724,28 +726,14 @@ export async function executeClaimedAssistantCronJob(
             ASSISTANT_CRON_ONBOARDING_FOLLOWUP_COMPLETED_ERROR
         }
       }
-      // Route on the immutable automationId so a user-edited slug cannot
-      // silently bypass the precondition.
-      const onboardingAuthority =
-        await runOnboardingGoalCheckinAuthorityPrecondition({
-          automationId: input.job.source.automationId,
-          occurrenceAt,
-          vault: input.vault,
-        })
-      if (onboardingAuthority.kind === 'skip') {
-        lifecycleSkipReason = onboardingAuthority.reason
-      }
-      const lifecycleResult =
-        lifecycleSkipReason === null
-          ? await runExperimentLifecycleOutcomePrecondition({
-              automationId: input.job.source.automationId,
-              tags: input.job.source.tags,
-              vault: input.vault,
-            })
-          : null
-      if (lifecycleResult?.kind === 'skip') {
-        lifecycleSkipReason = lifecycleResult.reason
-      }
+      lifecycleSkipReason = await runAssistantCronAutomationPreconditions({
+        source: input.job.source,
+        occurrenceAt,
+        vault: input.vault,
+        executionContext: input.executionContext ?? null,
+        signal: yieldCancellation.signal,
+        skipReason: lifecycleSkipReason,
+      })
     }
 
     const staleError =
@@ -784,6 +772,7 @@ export async function executeClaimedAssistantCronJob(
         job: input.job,
         latenessMinutes: staleError.latenessMinutes,
         onEvent: input.onEvent,
+        occurrenceAt,
       })
     } else {
       const onboardingSkipError =
@@ -1430,6 +1419,7 @@ export async function executeClaimedAssistantCronJob(
   })
 
   return {
+    automationSlug: resolveAssistantCronAutomationSlug(input.job),
     job: finalized.job,
     removedAfterRun: finalized.removedAfterRun,
     run,
@@ -1751,14 +1741,15 @@ function resolveAssistantCronOutboxAutomationAuthority(
 function resolveAssistantCronOutboxAutomationContextReferences(
   job: ResolvedAssistantCronJob,
   deviceActivityAuthority: DeviceActivityParentAuthority,
-): AssistantOutboxIntent['automationContextReferences'] | undefined {
-  if (job.kind === 'canonical' && job.source.kind === 'automation') {
-    return [...job.source.contextReferences]
-  }
+): AssistantOutboxIntent['automationContextReferences'] {
+  const contextReferences =
+    job.kind === 'canonical' && job.source.kind === 'automation'
+      ? job.source.contextReferences
+      : deviceActivityAuthority.automationId === null
+        ? []
+        : deviceActivityAuthority.contextReferences
 
-  return deviceActivityAuthority.automationId === null
-    ? undefined
-    : [...deviceActivityAuthority.contextReferences]
+  return contextReferences.length === 0 ? null : [...contextReferences]
 }
 
 function resolveAssistantCronOutboxPlannedOccurrenceAt(input: {
@@ -1992,6 +1983,51 @@ function assistantCronTimestampIsLater(
   const candidateMs = Date.parse(candidate)
   const referenceMs = reference ? Date.parse(reference) : Number.NEGATIVE_INFINITY
   return Number.isFinite(candidateMs) && candidateMs > referenceMs
+}
+
+async function runAssistantCronAutomationPreconditions(input: {
+  source: CanonicalAutomationAssistantCronJobRecord
+  occurrenceAt: string
+  vault: string
+  executionContext: AssistantExecutionContext | null
+  signal: AbortSignal
+  skipReason: string | null
+}): Promise<string | null> {
+  let lifecycleSkipReason = input.skipReason
+  // Route on the immutable automationId so a user-edited slug cannot
+  // silently bypass the precondition.
+  const onboardingAuthority =
+    await runOnboardingGoalCheckinAuthorityPrecondition({
+      automationId: input.source.automationId,
+      occurrenceAt: input.occurrenceAt,
+      vault: input.vault,
+    })
+  if (onboardingAuthority.kind === 'skip') {
+    lifecycleSkipReason = onboardingAuthority.reason
+  }
+  const lifecycleResult =
+    lifecycleSkipReason === null
+      ? await runExperimentLifecycleOutcomePrecondition({
+          automationId: input.source.automationId,
+          tags: input.source.tags,
+          vault: input.vault,
+        })
+      : null
+  if (lifecycleResult?.kind === 'skip') {
+    lifecycleSkipReason = lifecycleResult.reason
+  }
+  if (
+    lifecycleSkipReason === null &&
+    await canSkipManagedJournalConnectedContext({
+      automationId: input.source.automationId,
+      connectedApps: input.executionContext?.hosted?.connectedApps ?? null,
+      signal: input.signal,
+      vaultRoot: input.vault,
+    })
+  ) {
+    lifecycleSkipReason = 'Journal connected context has no connected accounts or existing ledger.'
+  }
+  return lifecycleSkipReason
 }
 
 function resolveAssistantCronTurnServiceTier(input: {
@@ -2678,6 +2714,7 @@ function emitAssistantCronOccurrenceExpiredEvent(input: {
   job: ResolvedAssistantCronJob
   latenessMinutes: number
   onEvent?: (event: AssistantRunEvent) => void
+  occurrenceAt: string
 }): void {
   const automationSlug = resolveAssistantCronAutomationSlug(input.job)
   if (!automationSlug) {
@@ -2691,6 +2728,7 @@ function emitAssistantCronOccurrenceExpiredEvent(input: {
     failureContext: {
       automationSlug,
       latenessMinutes: input.latenessMinutes,
+      occurrenceAt: input.occurrenceAt,
     },
     providerKind: 'status',
     providerState: 'completed',

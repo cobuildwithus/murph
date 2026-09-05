@@ -86,23 +86,23 @@ describe("assistant model settings route", () => {
     delete process.env.HOSTED_VENICE_ENABLED;
   });
 
-  it("persists a validated model choice without a mailbox wake", async () => {
+  it.each(["gpt-5.6-sol", "gpt-6-astra"])("persists validated %s without a mailbox wake", async (model) => {
     mocks.updateHostedMemberAssistantConfigurationTx.mockResolvedValueOnce({
       dormantSolPreference: false,
-      hostedAssistantModelOverride: "gpt-5.6-sol",
-      model: "gpt-5.6-sol",
+      hostedAssistantModelOverride: model,
+      model: model,
       provider: "openai",
       solAvailable: true,
       updated: true,
     });
     const response = await route.POST(jsonRequest({
-      model: "gpt-5.6-sol",
+      model: model,
     }));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       dormantSolPreference: false,
-      model: "gpt-5.6-sol",
+      model: model,
       ok: true,
       provider: "openai",
       solAvailable: true,
@@ -116,7 +116,7 @@ describe("assistant model settings route", () => {
     );
     expect(mocks.updateHostedMemberAssistantConfigurationTx).toHaveBeenCalledWith({
       memberId: "member_edge",
-      model: "gpt-5.6-sol",
+      model: model,
       prisma: { tx: true },
     });
     expect(mocks.signalHostedRuntimeWakeRuntime).not.toHaveBeenCalled();

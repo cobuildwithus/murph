@@ -361,7 +361,7 @@ test("hosted web dev filesystem cache defaults off and allows explicit opt-in", 
 
 test("next.config keeps both bundlers focused without custom workspace rewrite rules", () => {
   assert.equal(productionNextConfig.turbopack?.root, process.cwd());
-  assert.equal(productionNextConfig.webpack, configureHostedWebWebpack);
+  assert.equal(typeof productionNextConfig.webpack, "function");
   assert.deepEqual(productionNextConfig.typescript, {
     ignoreBuildErrors: false,
     tsconfigPath: HOSTED_WEB_NEXT_TSCONFIG_PATH,
@@ -455,6 +455,78 @@ test("next.config uses Workflow lazy discovery to avoid eager dev rebuild loops"
 });
 
 test("next.config traces generated Health Commons route files without the monolithic catalog", () => {
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingIncludes?.["/goals"],
+    [
+      "../../packages/health-commons/generated/web/browse/goals.json",
+    ],
+  );
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingIncludes?.["/goals/[goalId]"],
+    [
+      "../../packages/health-commons/generated/web/browse/goals.json",
+      "../../packages/health-commons/generated/web/routes/index.json",
+      "../../packages/health-commons/generated/web/pages/goals/**/*.json",
+    ],
+  );
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingIncludes?.["/api/goals/contact"],
+    [
+      "../../packages/health-commons/generated/web/browse/goals.json",
+    ],
+  );
+  for (const route of [
+    "/api/hosted-onboarding/linq/webhook",
+    "/api/hosted-onboarding/telegram/webhook",
+  ]) {
+    assert.deepEqual(
+      productionNextConfig.outputFileTracingIncludes?.[route],
+      ["../../packages/health-commons/generated/web/browse/goals.json"],
+    );
+  }
+  const expectedGoalTraceExcludes = [
+    "../../packages/health-commons/generated/web/browse/biomarkers.json",
+    "../../packages/health-commons/generated/web/browse/experiments.json",
+    "../../packages/health-commons/generated/web/bundles/**/*.json",
+    "../../packages/health-commons/generated/web/pages/biomarkers/**/*.json",
+    "../../packages/health-commons/generated/web/shell/**/*.json",
+    "../../packages/health-commons/generated/web/tabs/**/*.json",
+  ];
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingExcludes?.["/goals"],
+    expectedGoalTraceExcludes,
+  );
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingExcludes?.["/goals/[goalId]"],
+    expectedGoalTraceExcludes,
+  );
+  const expectedGoalIndexOnlyTraceExcludes = [
+    "../../packages/health-commons/generated/web/pages/goals/**/*.json",
+    "../../packages/health-commons/generated/web/routes/index.json",
+  ];
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingExcludes?.["/goals!(/**)"],
+    expectedGoalIndexOnlyTraceExcludes,
+  );
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingExcludes?.["/api/goals/contact"],
+    [
+      ...expectedGoalTraceExcludes,
+      ...expectedGoalIndexOnlyTraceExcludes,
+    ],
+  );
+  for (const route of [
+    "/api/hosted-onboarding/linq/webhook",
+    "/api/hosted-onboarding/telegram/webhook",
+  ]) {
+    assert.deepEqual(
+      productionNextConfig.outputFileTracingExcludes?.[route],
+      [
+        ...expectedGoalTraceExcludes,
+        ...expectedGoalIndexOnlyTraceExcludes,
+      ],
+    );
+  }
   assert.deepEqual(
     productionNextConfig.outputFileTracingIncludes?.["/measurement-methods/[measurementMethodId]"],
     [
@@ -578,8 +650,30 @@ test("configureHostedWebWebpack disables the production cache and aliases Privy'
   }
 });
 
+test("the Webpack callback retains Next compiler caching only for explicit CI opt-in", () => {
+  const cache = {
+    type: "filesystem",
+    version: "next-owned",
+    maxMemoryGenerations: Infinity,
+    buildDependencies: { config: ["next.config.ts"] },
+  };
+  for (const value of [undefined, "0", "true", "1"]) {
+    const config = { cache, resolve: {} };
+    const environment = createProcessEnv(
+      value === undefined ? {} : { MURPH_HOSTED_WEB_WEBPACK_CACHE: value },
+    );
+    const { webpack } = buildHostedWebNextConfig(PHASE_PRODUCTION_BUILD, environment);
+    assert(webpack);
+    webpack(config, { dev: false } as Parameters<typeof webpack>[1]);
+    assert.equal(config.cache, value === "1" ? cache : false);
+    assert.equal(cache.maxMemoryGenerations, value === "1" ? 0 : Infinity);
+    assert.equal(cache.version, "next-owned");
+    assert.deepEqual(cache.buildDependencies, { config: ["next.config.ts"] });
+  }
+});
+
 test("configureHostedWebWebpack preserves development caching", () => {
-  const cache = { type: "filesystem" };
+  const cache = { type: "filesystem", maxMemoryGenerations: Infinity };
   const webpackConfig = {
     cache,
     resolve: {},
@@ -588,6 +682,7 @@ test("configureHostedWebWebpack preserves development caching", () => {
   configureHostedWebWebpack(webpackConfig, { dev: true });
 
   assert.equal(webpackConfig.cache, cache);
+  assert.equal(cache.maxMemoryGenerations, Infinity);
 });
 
 test("resolvePrivyBaseDomainOrigin normalizes base-domain inputs into a Privy origin", () => {
@@ -737,6 +832,7 @@ test("buildHostedWebContentSecurityPolicy includes Privy, WalletConnect, and hos
   assert.match(csp, /script-src [^;]*https:\/\/challenges\.cloudflare\.com/);
   assert.match(csp, /script-src-attr 'none'/);
   assert.match(csp, /style-src 'self' 'unsafe-inline'/);
+  assert.match(csp, /img-src [^;]*https:\/\/cdn\.brandfetch\.io/);
   assert.match(csp, /manifest-src 'self'/);
   assert.match(csp, /media-src 'self' blob:/);
   assert.match(csp, /object-src 'none'/);
@@ -757,8 +853,20 @@ test("buildHostedWebContentSecurityPolicy includes Privy, WalletConnect, and hos
   assert.match(csp, /connect-src [^;]*https:\/\/\*\.rpc\.privy\.systems/);
   assert.match(csp, /connect-src [^;]*https:\/\/explorer-api\.walletconnect\.com/);
   assert.match(csp, /connect-src [^;]*https:\/\/status\.withmurph\.ai/);
+  assert.match(csp, /connect-src [^;]*https:\/\/api\.brandfetch\.io/);
+  assert.match(csp, /img-src [^;]*https:\/\/cdn\.brandfetch\.io/);
   assert.match(csp, /upgrade-insecure-requests/);
   assert.doesNotMatch(csp, /'unsafe-eval'/);
+});
+
+test("next.config permits only the Brandfetch CDN for remote brand images", () => {
+  assert.deepEqual(productionNextConfig.images?.remotePatterns, [
+    {
+      protocol: "https",
+      hostname: "cdn.brandfetch.io",
+      pathname: "/**",
+    },
+  ]);
 });
 
 test("buildHostedWebContentSecurityPolicy keeps production script origins on a tight allowlist", () => {

@@ -122,6 +122,9 @@ import {
   readHostedRuntimeSafeErrorText,
 } from "@murphai/hosted-execution";
 import {
+  parseHostedRuntimeLogRequest,
+} from "@murphai/hosted-execution/parsers";
+import {
   buildHostedExecutionRuntimePlatform,
   createCloudflareHostedProviderFetch,
   createHostedBrowserVaultReplicaWriteHeaders,
@@ -136,6 +139,9 @@ import {
   HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   HostedWebControlPlaneResponseError,
 } from "../src/runtime-platform/web-control-transport.ts";
+import {
+  createHostedWebControlLoggingTransport,
+} from "../src/runtime-platform/log-port.ts";
 import {
   fetchHostedExecutionWebControlPlaneResponse,
 } from "../src/web-control-plane.ts";
@@ -4010,7 +4016,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
-  it("retries v2 workspace snapshot object fetch transport failures once", async () => {
+  it.each(["network", "idle"] as const)("retries v2 workspace snapshot %s failures once", async (failureKind) => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-retry-"));
     const sourceRoot = path.join(tempRoot, "source");
     const durableRoot = path.join(tempRoot, "durable");
@@ -4045,10 +4051,13 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         outputDir: scratchRoot,
       });
       const encryptedBytes = await readFile(encrypted.encryptedFilePath);
-      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.useFakeTimers({ toFake: failureKind === "idle" ? ["Date", "setTimeout", "clearTimeout"] : ["Date"] });
       vi.setSystemTime(new Date("2026-05-20T00:00:00.000Z"));
       const getUrl = `https://r2.example.test/bundles/${objectKey}?X-Amz-Signature=fixture-get`;
       let objectFetchCount = 0;
+      const bodyCanceled = vi.fn();
+      let idleReadStarted!: () => void;
+      const idleRead = new Promise<void>((resolve) => { idleReadStarted = resolve; });
       const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
         const request = requireFetchRequest(args, "workspace snapshot restore retry fetch");
         if (request.url.includes(`/workspace-snapshots/${snapshotId}/data-key/unwrap`)) {
@@ -4076,11 +4085,16 @@ describe("buildHostedExecutionRuntimePlatform", () => {
             vi.setSystemTime(new Date(Date.now() + 80));
             let prefixSent = false;
             return new Response(new ReadableStream<Uint8Array>({
+              cancel: bodyCanceled,
               pull(controller) {
                 if (!prefixSent) {
                   prefixSent = true;
                   vi.setSystemTime(new Date(Date.now() + 70));
                   controller.enqueue(encryptedBytes.subarray(0, 32));
+                  return;
+                }
+                if (failureKind === "idle") {
+                  idleReadStarted();
                   return;
                 }
                 controller.error(new TypeError("connection reset"));
@@ -4120,7 +4134,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         fetchImpl: fetchMock as typeof fetch,
       });
 
-      const restoreTimings = await platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
+      const restorePromise = platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
         durableRoot,
         ref: {
           archive: {
@@ -4148,9 +4162,34 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         },
       });
 
+      if (failureKind === "idle") {
+        await idleRead;
+        await vi.advanceTimersByTimeAsync(15_000);
+        await vi.waitFor(() => expect(readWorkspaceSnapshotDiagnosticLogs().some((log) =>
+          log.message === "Hosted workspace snapshot restore read step failed; retrying."
+        )).toBe(true));
+        await vi.advanceTimersByTimeAsync(100);
+      }
+      const restoreTimings = await restorePromise;
       expect(objectFetchCount).toBe(2);
+      if (failureKind === "idle") expect(bodyCanceled).toHaveBeenCalledOnce();
       expect(restoreTimings?.objectFetchResponseHeadersMs).toBe(7);
       expect(restoreTimings?.objectFetchBodyReadMs).toBe(11);
+      const bodyLogs = readWorkspaceSnapshotDiagnosticLogs().filter((log) =>
+        log.message === "Hosted workspace snapshot body read settled."
+      );
+      expect(bodyLogs).toHaveLength(2);
+      expect(bodyLogs[1]?.details).toMatchObject({
+        complete: true,
+        bytesRead: encrypted.encryptedByteSize,
+        readIdleTimeoutMs: 15_000,
+      });
+      if (failureKind === "idle") {
+        expect(bodyLogs[0]?.details).toMatchObject({
+          complete: false,
+          maxReadWaitMs: 15_000,
+        });
+      }
       await expect(access(path.join(durableRoot, "note.md"))).resolves.toBeUndefined();
       await expect(
         readdir(tempRoot).then((entries) =>
@@ -4163,7 +4202,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         );
       expect(retryLogs).toHaveLength(1);
       expect(retryLogs[0]?.details).toEqual(expect.objectContaining({
-        fetchCauseKind: "network",
+        fetchCauseKind: failureKind === "idle" ? "timeout" : "network",
         retrying: true,
         workspaceSnapshotRestoreAttempt: 1,
         workspaceSnapshotRestoreStep: "object_fetch",
@@ -4192,7 +4231,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(serializedLogs).not.toContain(objectKey);
       expect(serializedLogs).not.toContain(snapshotId);
       expect(serializedLogs).not.toContain(getUrl);
-      expect(serializedLogs).toContain("connection reset");
+      if (failureKind === "network") expect(serializedLogs).toContain("connection reset");
       expect(serializedLogs).not.toContain(dataKeyBase64);
       expect(serializedLogs).not.toContain(tempRoot);
     } finally {
@@ -4205,7 +4244,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
-  it("aborts and cancels stalled v2 workspace snapshot object body reads", async () => {
+  it.each(["caller", "idle"] as const)("preserves the workspace after %s cancellation of stalled snapshot reads", async (interruption) => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-body-abort-"));
     const durableRoot = path.join(tempRoot, "durable");
     const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
@@ -4223,6 +4262,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     try {
+      await mkdir(durableRoot, { recursive: true });
+      await writeFile(path.join(durableRoot, "existing.md"), "keep the prior workspace");
+      if (interruption === "idle") {
+        vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+      }
       const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
         const request = requireFetchRequest(args, "workspace snapshot stalled body fetch");
         if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/data-key/unwrap`)) {
@@ -4273,18 +4317,32 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         durableRoot,
         ref,
         signal: abortController.signal,
-      });
+      }).catch((error: unknown) => error);
       await objectBodyOpened;
-      abortController.abort(new Error("restore aborted while reading snapshot body"));
-
-      await expect(restore).rejects.toThrow("restore aborted while reading snapshot body");
-      expect(objectFetchCount).toBe(1);
-      expect(objectBodyCancelCount).toBe(1);
-      await expect(access(durableRoot)).rejects.toThrow();
+      if (interruption === "caller") {
+        abortController.abort(new Error("restore aborted while reading snapshot body"));
+        expect(await restore).toMatchObject({ message: "restore aborted while reading snapshot body" });
+      } else {
+        await vi.advanceTimersByTimeAsync(15_000);
+        await vi.waitFor(() => expect(readWorkspaceSnapshotDiagnosticLogs().some((log) =>
+          log.message === "Hosted workspace snapshot restore read step failed; retrying."
+        )).toBe(true));
+        await vi.advanceTimersByTimeAsync(100);
+        await vi.waitFor(() => expect(objectFetchCount).toBe(2));
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(await restore).toMatchObject({ code: "timeout" });
+      }
+      const expectedAttempts = interruption === "idle" ? 2 : 1;
+      expect(objectFetchCount).toBe(expectedAttempts);
+      expect(objectBodyCancelCount).toBe(expectedAttempts);
+      await expect(readFile(path.join(durableRoot, "existing.md"), "utf8"))
+        .resolves.toBe("keep the prior workspace");
       expect(readWorkspaceSnapshotDiagnosticLogs().filter((log) =>
         log.message === "Hosted workspace snapshot restore read step failed; retrying."
-      )).toHaveLength(0);
+      )).toHaveLength(expectedAttempts - 1);
+
     } finally {
+      vi.useRealTimers();
       dataKey.fill(0);
       await rm(tempRoot, {
         force: true,
@@ -5235,6 +5293,115 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     );
   });
 
+  it("persists registered-route contract rejections without target egress", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      loggedCount: 1,
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const privateMemberMaterial = "private-member-material";
+    const { transport } = createHostedWebControlLoggingTransport({
+      boundUserId: privateMemberMaterial,
+      fetchImpl: fetchMock as typeof fetch,
+      timeoutMs: 1_000,
+      transport: { mode: "proxy" },
+    });
+    if (!transport) {
+      throw new Error("Expected a reporting web-control transport.");
+    }
+    const blockedRoute = {
+      ...HOSTED_RUNNER_WEB_CONTROL_ROUTES.runtimeLogWrite,
+      path: "/api/internal/hosted-execution/synthetic-blocked-control",
+    };
+
+    await expect(fetchHostedWebControlPlaneJson({
+      boundUserId: privateMemberMaterial,
+      description: "Hosted synthetic blocked control",
+      fetchImpl: fetchMock as typeof fetch,
+      route: blockedRoute,
+      timeoutMs: 1_000,
+      transport,
+    })).rejects.toMatchObject({
+      code: "HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED",
+      message:
+        "Hosted runtime web-control route is not allowlisted for proxy transport: POST /api/internal/hosted-execution/synthetic-blocked-control",
+      name: "HostedWebControlRouteNotAllowlistedError",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const logRequest = requireFetchRequest(
+      fetchMock.mock.calls[0],
+      "web-control preflight rejection log",
+    );
+    expect(logRequest.url).toBe(
+      "http://web-control.worker/api/internal/hosted-runtime/log",
+    );
+    expect(logRequest.method).toBe("POST");
+    const serializedLog = await logRequest.text();
+    expect(parseHostedRuntimeLogRequest(JSON.parse(serializedLog))).toEqual({
+      entries: [{
+        at: expect.any(String),
+        component: "runner",
+        errorCode: "HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED",
+        eventCode: "runner.web_control_preflight_rejected",
+        level: "warn",
+        phase: "invoke",
+        redactedJson: {
+          method: "POST",
+          operation: "web_control_blocked",
+          reason: "not_allowlisted",
+          transport: "proxy",
+        },
+      }],
+    });
+    expect(serializedLog).not.toContain(privateMemberMaterial);
+    expect(serializedLog).not.toContain("synthetic-blocked-control");
+    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          eventCode: "runner.web_control_preflight_rejected",
+        }),
+      }),
+    );
+  });
+
+  it("preserves the policy error when the preflight log write fails", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const reportPreflightRejection = vi.fn(async () => {
+      throw new Error("Synthetic runtime-log transport failure.");
+    });
+    const blockedRoute = {
+      ...HOSTED_RUNNER_WEB_CONTROL_ROUTES.runtimeLogWrite,
+      path: "/api/internal/hosted-execution/synthetic-blocked-control",
+    };
+
+    await expect(fetchHostedWebControlPlaneJson({
+      boundUserId: "member_123",
+      description: "Hosted synthetic blocked control",
+      fetchImpl: fetchMock as typeof fetch,
+      route: blockedRoute,
+      timeoutMs: 1_000,
+      transport: {
+        mode: "proxy",
+        reportPreflightRejection,
+      },
+    })).rejects.toMatchObject({
+      code: "HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED",
+      name: "HostedWebControlRouteNotAllowlistedError",
+    });
+
+    expect(reportPreflightRejection).toHaveBeenCalledOnce();
+    expect(reportPreflightRejection).toHaveBeenCalledWith({
+      method: "POST",
+      operation: "web_control_blocked",
+      transport: "proxy",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("preserves structured non-retryable web-control errors without raw JSON in the message", async () => {
     const requestId = `aask_req_${"a".repeat(64)}`;
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
@@ -5993,7 +6160,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     );
 
     const response = await hostedFetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent",
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
       { body: "{}", method: "POST" },
     );
 

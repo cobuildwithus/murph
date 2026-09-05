@@ -10,6 +10,7 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
 import { SqliteDeviceSyncStore } from "@murphai/device-syncd/service";
+import { sanitizeHostedExecutionStructuredLogDetails } from "@murphai/hosted-execution";
 import {
   restoreHostedExecutionContext,
   snapshotHostedExecutionContext,
@@ -27,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   detectWearableStorageMigrationCandidates: vi.fn(),
   emitHostedExecutionStructuredLog: vi.fn(),
   fetchCompleteHostedDeviceSyncRuntimeSnapshot: vi.fn(),
+  hydrateHostedDeviceSyncControlPlaneState: vi.fn(),
   applyHostedPendingDirtyDeviceSyncStateForWake: vi.fn(),
   initInboxRuntime: vi.fn(),
   persistHostedRuntimeStateAtCanonicalBoundary: vi.fn(),
@@ -102,6 +104,14 @@ vi.mock("../src/hosted-device-sync-runtime.ts", () => ({
     mocks.applyHostedPendingDirtyDeviceSyncStateForWake,
   fetchCompleteHostedDeviceSyncRuntimeSnapshot:
     mocks.fetchCompleteHostedDeviceSyncRuntimeSnapshot,
+  hydrateHostedDeviceSyncControlPlaneState:
+    mocks.hydrateHostedDeviceSyncControlPlaneState,
+  isHostedDeviceSyncCompletionFenceWake: (wake: {
+    hint?: { jobs?: unknown[]; reason?: string | null };
+    kind: string;
+  }) => wake.kind === "device-sync.wake"
+    && wake.hint?.reason === "retained_completion_fence"
+    && (wake.hint.jobs?.length ?? 0) === 0,
   promoteHostedCompletedDirtyPayloadAcks:
     mocks.promoteHostedCompletedDirtyPayloadAcks,
   reconcileHostedDeviceSyncControlPlaneState:
@@ -391,7 +401,7 @@ beforeEach(async () => {
     pendingDirtyPayloadJobs: [],
     snapshot: null,
   });
-  mocks.reconcileHostedDeviceSyncControlPlaneState.mockResolvedValue(undefined);
+  mocks.reconcileHostedDeviceSyncControlPlaneState.mockResolvedValue(true);
 });
 
 describe("runHostedAssistantAutomation", () => {
@@ -593,8 +603,11 @@ describe("runHostedAssistantAutomation", () => {
     mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
       input.onEvent?.({
         failureContext: {
+          automationSlug: "personal-patterns-update",
           errorCode: "ASSISTANT_CODEX_USAGE_LIMIT",
           errorPresent: true,
+          occurrenceAt: "2026-04-08T13:00:00.000Z",
+          retryScheduled: true,
           routeConfigured: true,
           runStatus: "failed",
           scheduleKind: "at",
@@ -635,6 +648,9 @@ describe("runHostedAssistantAutomation", () => {
           redacted: expect.objectContaining({
             failureErrorCode: "ASSISTANT_CODEX_USAGE_LIMIT",
             failureErrorPresent: true,
+            failureAutomationSlug: "personal-patterns-update",
+            failureOccurrenceAt: "2026-04-08T13:00:00.000Z",
+            failureRetryScheduled: true,
             failureRunStatus: "failed",
             failureScheduleKind: "at",
             safeDetails: "cron_job_enqueue_failed",
@@ -643,6 +659,64 @@ describe("runHostedAssistantAutomation", () => {
             safeErrorMessage:
               "Codex app-server failed before producing a reply.",
             safeErrorPresent: true,
+            type: "cron.job.completed",
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it("persists Personal Patterns failures after the ordinary event cap", async () => {
+    mocks.runAssistantAutomationPass.mockImplementationOnce(async (input) => {
+      for (let index = 0; index < 13; index += 1) {
+        input.onEvent?.({
+          safeDetails: "scan_started",
+          type: "scan.started",
+        });
+      }
+      input.onEvent?.({
+        failureContext: {
+          automationSlug: "personal-patterns-update",
+          errorCode: "ASSISTANT_CODEX_USAGE_LIMIT",
+          errorPresent: true,
+          occurrenceAt: "2026-04-08T13:00:00.000Z",
+          runOutcome: "failed",
+          scheduleKind: "cron",
+          sourceKind: "automation",
+        },
+        safeDetails: "cron_job_enqueue_failed",
+        type: "cron.job.completed",
+      });
+      return {
+        nextWakeAt: null,
+        progressed: true,
+      };
+    });
+
+    const result = await runHostedAssistantAutomation(
+      "/tmp/vault-root",
+      "req_patterns_failure_cap",
+      {
+        hosted: {
+          memberId: "member_123",
+          userEnvKeys: [],
+        },
+      },
+      {
+        eventId: "evt_patterns_failure_cap",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+    );
+
+    expect(result.redactedLogEntries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          redacted: expect.objectContaining({
+            failureAutomationSlug: "personal-patterns-update",
+            failureRunOutcome: "failed",
             type: "cron.job.completed",
           }),
         }),
@@ -1812,6 +1886,178 @@ describe("runHostedDeviceSyncPass", () => {
         ],
       }),
     );
+  });
+
+  it("rehydrates without readmitting work and carries current-pass cadence before retrying reconciliation", async () => {
+    const service = {
+      close: vi.fn(),
+      drainWorker: vi.fn(async () => 0),
+      getNextJobWakeAt: () => null,
+      getNextWakeAt: () => null,
+      listAccounts: vi.fn(() => []),
+      listJobFailureDiagnostics: vi.fn(() => []),
+      runSchedulerOnce: vi.fn(async () => undefined),
+    };
+    const completionWake = {
+      connectionId: "hosted_connection_version_retry",
+      eventId: "device-sync.wake:version-retry",
+      expectedConnectedAt: "2026-04-08T00:00:00.000Z",
+      hint: {
+        jobs: [],
+        nextReconcileAt: "2026-04-08T06:00:00.000Z",
+        reason: "retained_completion_fence",
+      },
+      kind: "device-sync.wake" as const,
+      occurredAt: "2026-04-08T00:01:00.000Z",
+      provider: "oura",
+      reason: "reconcile_due" as const,
+      userId: "member_123",
+    };
+    const pendingDirtyAcks = [{
+      completedImports: [{
+        dirtyPayloadId: "dirty_payload_completed",
+        importCompletedAt: "2026-04-08T00:00:30.000Z",
+        resource: "sleep",
+        sourceProviderSlug: "oura",
+      }],
+      connectionId: completionWake.connectionId,
+      nextWakeAt: null,
+      processedDirtyPayloadIds: ["dirty_payload_completed"],
+      processedRevision: "7",
+    }];
+    const initialState = {
+      dirtyWorkRemaining: false,
+      hostedToLocalAccountIds: new Map([[completionWake.connectionId, "local_account"]]),
+      localToHostedAccountIds: new Map([["local_account", completionWake.connectionId]]),
+      observedTokenVersions: new Map([[completionWake.connectionId, 3]]),
+      pendingDirtyAcks,
+      pendingDirtyPayloadJobs: [],
+      snapshot: { connections: [] },
+    };
+    const refreshedState = {
+      dirtyWorkRemaining: false,
+      hostedToLocalAccountIds: initialState.hostedToLocalAccountIds,
+      localToHostedAccountIds: initialState.localToHostedAccountIds,
+      observedTokenVersions: new Map([[completionWake.connectionId, 4]]),
+      pendingDirtyAcks: [],
+      pendingDirtyPayloadJobs: [],
+      snapshot: { connections: [] },
+    };
+    const currentPassNextReconcileAt = "2026-04-08T06:00:00.000Z";
+    const canonicalNextReconcileAt = "2026-04-08T00:00:00.000Z";
+    const localAccount = {
+      connectedAt: completionWake.expectedConnectedAt,
+      id: "local_account",
+      nextReconcileAt: currentPassNextReconcileAt,
+      status: "active",
+    };
+    const patchAccount = vi.fn((accountId: string, patch: {
+      nextReconcileAt: string | null;
+    }) => {
+      expect(accountId).toBe(localAccount.id);
+      localAccount.nextReconcileAt = patch.nextReconcileAt ?? canonicalNextReconcileAt;
+      return localAccount;
+    });
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
+    mocks.requireHostedRuntimeDeviceSyncStore.mockReturnValue({
+      getAccountById: vi.fn(() => localAccount),
+      patchAccount,
+    });
+    mocks.resolveHostedDeviceSyncWakeLocalAccountId.mockReturnValue(localAccount.id);
+    mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValueOnce(initialState);
+    mocks.hydrateHostedDeviceSyncControlPlaneState.mockImplementationOnce(async () => {
+      localAccount.nextReconcileAt = canonicalNextReconcileAt;
+      return refreshedState;
+    });
+    mocks.resolveHostedDeviceSyncWakeRecovery.mockReturnValue({
+      retryAt: "2026-04-08T00:01:30.000Z",
+      wake: completionWake,
+    });
+    mocks.reconcileHostedDeviceSyncControlPlaneState
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+
+    const result = await runHostedDeviceSyncPass(
+      completionWake,
+      FIXED_MAINTENANCE_VAULT_ROOT,
+      DEVICE_SYNC_CONFIG,
+      createMaintenanceDeviceSyncPortStub(),
+      45_000,
+    );
+
+    expect(mocks.syncHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(1);
+    expect(mocks.hydrateHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(1);
+    expect(mocks.reconcileHostedDeviceSyncControlPlaneState).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.reconcileHostedDeviceSyncControlPlaneState.mock.calls[1]?.[0].state,
+    ).toBe(refreshedState);
+    expect(refreshedState.pendingDirtyAcks).toBe(pendingDirtyAcks);
+    expect(patchAccount).toHaveBeenCalledWith(localAccount.id, {
+      nextReconcileAt: currentPassNextReconcileAt,
+    });
+    expect(localAccount.nextReconcileAt).toBe(currentPassNextReconcileAt);
+    expect(result.postCheckpointRecord).toEqual(expect.objectContaining({
+      kind: "device-sync.dirty-processed-batch",
+      retainedWake: completionWake,
+    }));
+  });
+
+  it("keeps a yielded completion wake outside same-admission completion", async () => {
+    let yielded = false;
+    const service = {
+      close: vi.fn(),
+      drainWorker: vi.fn(async () => {
+        yielded = true;
+        return 0;
+      }),
+      getNextJobWakeAt: () => null,
+      getNextWakeAt: () => "2026-04-08T06:00:00.000Z",
+      listAccounts: vi.fn(() => []),
+      listJobFailureDiagnostics: vi.fn(() => []),
+      runSchedulerOnce: vi.fn(async () => undefined),
+    };
+    const completionWake = {
+      connectionId: "hosted_connection_yielded_completion",
+      eventId: "device-sync.wake:yielded-completion",
+      expectedConnectedAt: "2026-04-08T00:00:00.000Z",
+      hint: {
+        jobs: [],
+        nextReconcileAt: "2026-04-08T06:00:00.000Z",
+        reason: "retained_completion_fence",
+      },
+      kind: "device-sync.wake" as const,
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      provider: "oura",
+      reason: "reconcile_due" as const,
+      userId: "member_123",
+    };
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
+    mocks.resolveHostedDeviceSyncSchedulerAccountId.mockReturnValue(null);
+    mocks.resolveHostedDeviceSyncWakeRecovery.mockReturnValue({
+      retryAt: "2026-04-08T00:00:30.000Z",
+      wake: completionWake,
+    });
+
+    const result = await withHostedMaintenanceNow(
+      "2026-04-08T00:00:00.000Z",
+      () => runHostedDeviceSyncPass(
+        completionWake,
+        FIXED_MAINTENANCE_VAULT_ROOT,
+        DEVICE_SYNC_CONFIG,
+        createMaintenanceDeviceSyncPortStub(),
+        45_000,
+        { shouldYield: () => yielded },
+      ),
+    );
+
+    expect(result.postCheckpointRecord).toEqual(expect.objectContaining({
+      retainedWake: expect.objectContaining({
+        hint: expect.objectContaining({
+          reason: "yielded_before_reconciliation",
+        }),
+      }),
+    }));
+    expect(mocks.reconcileHostedDeviceSyncControlPlaneState).not.toHaveBeenCalled();
   });
 
   it("completes a ready active Fitbit cutover only after scheduled imports are drained and published", async () => {
@@ -3353,7 +3599,7 @@ describe("runHostedDeviceSyncPass", () => {
       pendingDirtyPayloadJobs: [],
       snapshot: null,
     });
-    mocks.resolveHostedDeviceSyncWakeRecovery.mockReturnValueOnce({
+    mocks.resolveHostedDeviceSyncWakeRecovery.mockReturnValue({
       retryAt,
       wake: {
         connectionId: "hosted_retry_connection",
@@ -3847,7 +4093,44 @@ describe("runHostedDeviceSyncPass", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it("emits exactly one sanitized job-failed event for a failed device-sync attempt", async () => {
+  it.each<{
+    code: string;
+    expectedReason?: string;
+    exhausted?: boolean;
+    label: string;
+    reason?: unknown;
+  }>([
+    { label: "ordinary failure", code: "SYNC_JOB_FAILED" },
+    ...[
+      { label: "valid queued reason", reason: "sample_count_mismatch", expectedReason: "sample_count_mismatch" },
+      { label: "valid exhausted reason", reason: "summary_identity_incomplete", expectedReason: "summary_identity_incomplete", exhausted: true },
+      { label: "missing reason" },
+      { label: "unknown token", reason: "unknown_binding_reason" },
+      { label: "freeform reason", reason: "synthetic-private-ecg detail" },
+      { label: "padded reason", reason: " sample_count_mismatch " },
+      { label: "null reason", reason: null },
+      { label: "numeric reason", reason: 123 },
+      { label: "array reason", reason: ["sample_count_mismatch"] },
+      { label: "object reason", reason: { reason: "sample_count_mismatch" } },
+    ].map((entry) => ({ ...entry, code: "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE" })),
+    { label: "reason on another failure", code: "SYNC_JOB_FAILED", reason: "sample_count_mismatch" },
+  ])("emits exactly one sanitized job-failed event: $label", async ({ code, expectedReason, exhausted = false, reason }) => {
+    const ecgFailure = code === "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE";
+    const provider = ecgFailure ? "junction" : "whoop";
+    const sensitiveEcgDetails = {
+      junctionEcgActualRecordingCount: 987_001,
+      junctionEcgActualSampleCount: 987_002,
+      junctionEcgExpectedRecordingCount: 987_003,
+      junctionEcgExpectedSampleCount: 987_004,
+      junctionEcgMaxRecordingCount: 987_005,
+      junctionEcgMaxSampleCount: 987_006,
+      recordingId: "synthetic-private-ecg-recording",
+      sampleId: "synthetic-private-ecg-sample",
+      rawError: "synthetic-private-ecg-error",
+      url: "https://example.test/synthetic-private-ecg",
+      path: "/tmp/synthetic-private-ecg",
+      payload: { voltage: "synthetic-private-ecg-payload" },
+    };
     const close = vi.fn();
     const drainWorker = vi.fn(async () => 1);
     const runSchedulerOnce = vi.fn(async () => undefined);
@@ -3862,9 +4145,11 @@ describe("runHostedDeviceSyncPass", () => {
         {
           accountId: "local_account_sensitive",
           accountStatus: null,
-          attempts: 1,
-          code: "SYNC_JOB_FAILED",
+          attempts: exhausted ? 5 : 1,
+          code,
           details: {
+            ...sensitiveEcgDetails,
+            ...(reason === undefined ? {} : { junctionEcgBindingReason: reason }),
             failureCauseCode: "UND_ERR_CONNECT_TIMEOUT",
             failureErrorCause: "Connect Timeout Error",
             failureErrorName: "TypeError",
@@ -3899,24 +4184,24 @@ describe("runHostedDeviceSyncPass", () => {
             providerOAuthResponseErrorFieldPresent: true,
             providerOAuthResponseShapeKind: "json_object",
           },
-          jobDisposition: "queued",
+          jobDisposition: exhausted ? "dead" : "queued",
           jobKind: "reconcile",
           maxAttempts: 5,
-          remainingAttempts: 4,
+          remainingAttempts: exhausted ? 0 : 4,
           retryable: true,
         },
       ]),
       listAccounts: vi.fn(() => [
         {
           id: "local_account_sensitive",
-          lastErrorCode: "SYNC_JOB_FAILED",
+          lastErrorCode: code,
           lastErrorMessage:
             "Importer failed reading file://<fixture-path> for owner@example.test with access_token=<fixture-secret>.",
           lastSyncCompletedAt: null,
           lastSyncErrorAt: "2026-04-08T00:00:03.000Z",
           lastSyncStartedAt: "2026-04-08T00:00:01.000Z",
           nextReconcileAt: "2026-04-08T02:00:00.000Z",
-          provider: "whoop",
+          provider,
           setupPhase: null,
           status: "active",
         },
@@ -3968,7 +4253,7 @@ describe("runHostedDeviceSyncPass", () => {
         runtimeLogPlatform: {
           logPort: {
             async write(request) {
-              logRequests.push(request);
+              logRequests.push(parseHostedRuntimeLogRequest(request));
               return {
                 loggedCount: request.entries.length,
               };
@@ -3991,18 +4276,18 @@ describe("runHostedDeviceSyncPass", () => {
     const entry = jobFailureEntries[0];
     assert.ok(entry);
     assert.equal(entry.component, "device-sync");
-    assert.equal(entry.errorCode, "SYNC_JOB_FAILED");
+    assert.equal(entry.errorCode, code);
     assert.equal(entry.eventCode, "device-sync.job_failed");
     assert.equal(entry.level, "warn");
     assert.equal(entry.phase, "invoke");
     assert.deepEqual(entry.redactedJson, {
-      failureCode: "SYNC_JOB_FAILED",
-      failureDisposition: "queued",
+      failureCode: code,
+      failureDisposition: exhausted ? "dead" : "queued",
       failureEventOrigin: "worker_attempt",
-      failureJobAttempts: 1,
+      failureJobAttempts: exhausted ? 5 : 1,
       failureJobKind: "reconcile",
       failureJobMaxAttempts: 5,
-      failureJobRemainingAttempts: 4,
+      failureJobRemainingAttempts: exhausted ? 0 : 4,
       failureSummary:
         "Importer failed reading <redacted-path> for <redacted-email> with",
       failureCauseCode: "UND_ERR_CONNECT_TIMEOUT",
@@ -4017,6 +4302,7 @@ describe("runHostedDeviceSyncPass", () => {
       normalizationTimestampKind: "invalid",
       normalizationTimestampSemantics: "unknown",
       failureRetryable: true,
+      ...(expectedReason ? { junctionEcgBindingReason: expectedReason } : {}),
       hadPriorFailure: false,
       hadPriorSuccess: false,
       hostedConnectionKnown: true,
@@ -4044,7 +4330,7 @@ describe("runHostedDeviceSyncPass", () => {
       providerOAuthResponseErrorDescriptionFieldPresent: true,
       providerOAuthResponseErrorFieldPresent: true,
       providerOAuthResponseShapeKind: "json_object",
-      provider: "whoop",
+      provider,
       setupPhase: null,
       status: "active",
       syncCompletedAt: null,
@@ -4053,7 +4339,17 @@ describe("runHostedDeviceSyncPass", () => {
       wakeKind: "device-sync.wake",
       wakeReason: "webhook_hint",
     });
+    assert.ok(entry.redactedJson);
+    // Exercise the shared 32-key sanitizer with the fully populated diagnostic.
+    expect(Object.keys(entry.redactedJson).length).toBeGreaterThan(32);
+    const sharedDetails = sanitizeHostedExecutionStructuredLogDetails(entry.redactedJson);
+    expect(sharedDetails?.junctionEcgBindingReason).toBe(expectedReason);
+    for (const field of Object.keys(sensitiveEcgDetails)) {
+      expect(entry.redactedJson).not.toHaveProperty(field);
+      expect(sharedDetails).not.toHaveProperty(field);
+    }
     const serialized = JSON.stringify(logRequests);
+    expect(serialized).not.toContain("synthetic-private-ecg");
     expect(serialized).not.toContain("local_account_sensitive");
     expect(serialized).not.toContain("hosted_connection_sensitive");
     expect(serialized).not.toContain("file://");
@@ -4302,6 +4598,7 @@ describe("runHostedDeviceSyncPass", () => {
     });
     mocks.reconcileHostedDeviceSyncControlPlaneState.mockImplementationOnce(async () => {
       operationOrder.push("reconcile");
+      return true;
     });
 
     const result = await runHostedDeviceSyncPass(

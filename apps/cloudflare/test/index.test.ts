@@ -51,6 +51,12 @@ import type {
   HostedExecutionContainerNamespaceLike,
   HostedExecutionContainerStubLike,
 } from "../src/runner-container.ts";
+import {
+  HOSTED_STANDBY_LOCATION_HINT,
+  HOSTED_STANDBY_REGION,
+  createHostedStandbySlotName,
+  type HostedStandbyRunnerContainerStubLike,
+} from "../src/standby-runner-contract.ts";
 import type {
   DurableObjectStateLike,
   DurableObjectStorageLike,
@@ -377,6 +383,7 @@ describe("cloudflare worker routes", () => {
       "test-read-active-runtime-fence",
       "test-age-active-runtime-fence",
       "test-start-stuck-invocation",
+      "test-ensure-standby-ready",
       "test-temporal-mailbox-signal-fault-arm",
       "test-temporal-mailbox-signal-fault-clear",
       "test-temporal-mailbox-signal-fault-consume",
@@ -2023,6 +2030,100 @@ describe("cloudflare worker routes", () => {
     expect(invalidResponse.status).toBe(400);
   });
 
+  it("stops the standby container that owns the active runtime fence", async () => {
+    const standbyContainerName = createHostedStandbySlotName("release_1");
+    const beginExactShutdown = vi.fn(async () => ({ ok: true as const }));
+    const beginStandbyShutdown = vi.fn(async () => ({ ok: true as const }));
+    const baseRunnerContainerNamespace = createRunnerContainerNamespace();
+    const exactStub = {
+      ...baseRunnerContainerNamespace.getByName("member_123"),
+      beginShutdownCheckpointGracefulStopForTest: beginExactShutdown,
+    };
+    const standbyStub = {
+      ...baseRunnerContainerNamespace.getByName(standbyContainerName),
+      bindStandbySlot: vi.fn(async (input) => ({
+        ...input,
+        bound: true as const,
+      })),
+      beginShutdownCheckpointGracefulStopForTest: beginStandbyShutdown,
+      prepareStandbySlot: vi.fn(async (input) => ({
+        ...input,
+        prepared: true as const,
+      })),
+      readStandbySlotBinding: vi.fn(async () => ({
+        claimId: "standby-claim-00000000-0000-4000-8000-000000000000",
+        releaseId: "release_1",
+        region: HOSTED_STANDBY_REGION,
+        slotName: standbyContainerName,
+        state: "bound" as const,
+        userId: "member_123",
+      })),
+      readStandbySlotCoordinatorState: vi.fn(async () => ({
+        coordinatorOwned: false,
+        releaseId: "release_1",
+        slotName: standbyContainerName,
+        state: "bound" as const,
+      })),
+      resolveRetainedStandbySlot: vi.fn(async () => ({
+        claimId: "standby-claim-00000000-0000-4000-8000-000000000000",
+        releaseId: "release_1",
+        region: HOSTED_STANDBY_REGION,
+        slotName: standbyContainerName,
+        state: "bound" as const,
+        userId: "member_123",
+      })),
+      retireStandbySlot: vi.fn(async () => ({ retired: true as const })),
+    } satisfies HostedStandbyRunnerContainerStubLike & {
+      beginShutdownCheckpointGracefulStopForTest(
+        input: { userId: string },
+      ): Promise<{ ok: true }>;
+    };
+    const exactGetByName = vi.fn(() => exactStub);
+    const standbyGetByName = vi.fn(() => standbyStub);
+    const readActiveRuntimeFenceForTest = vi.fn(async () => ({
+      attemptId: "runtime-attempt-standby",
+      processingMode: "default" as const,
+      runnerContainerName: standbyContainerName,
+    }));
+    const env = createWorkerEnv(createUserRunnerStub({
+      readActiveRuntimeFenceForTest,
+    }), {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+      RUNNER_CONTAINER: {
+        getByName: exactGetByName,
+      },
+      STANDBY_RUNNER_CONTAINER: {
+        getByName: standbyGetByName,
+      },
+    });
+
+    const response = await hostedLocalTestWorker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/users/member_123"
+          + "/shutdown-checkpoint-publication-barrier?action=shutdown",
+        { method: "POST" },
+      ), {
+        boundUserId: "member_123",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+    expect(readActiveRuntimeFenceForTest).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    expect(standbyGetByName).toHaveBeenCalledWith(standbyContainerName, {
+      locationHint: HOSTED_STANDBY_LOCATION_HINT,
+    });
+    expect(beginStandbyShutdown).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    expect(exactGetByName).not.toHaveBeenCalled();
+    expect(beginExactShutdown).not.toHaveBeenCalled();
+  });
+
   it("maps the user-scoped foreground-priority ordering controls", async () => {
     const baseRunnerContainerNamespace = createRunnerContainerNamespace();
     const foregroundPriorityOrderingControlForTest = vi.fn(
@@ -3076,7 +3177,10 @@ describe("cloudflare worker routes", () => {
   });
 
   describe("hosted runtime control", () => {
-    it("maps runtime ensure-processing route calls to the Durable Object adapter", async () => {
+    it.each([
+      { assistantExecutionBlocked: true, processingMode: "system_mailbox" },
+      { conversationWorkPending: true, processingMode: "default" },
+    ] as const)("maps signed runtime ensure-processing $processingMode calls to the Durable Object adapter", async (processingRequest) => {
       const stub = createUserRunnerStub({
         ensureRuntimeProcessingForUser: vi.fn(async () => ({
           action: "started" as const,
@@ -3091,9 +3195,8 @@ describe("cloudflare worker routes", () => {
         await signWebCallbackControlRequest(
           new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
             body: JSON.stringify({
-              assistantExecutionBlocked: true,
+              ...processingRequest,
               orchestrationAttemptId: "orchestration-attempt-test",
-              processingMode: "system_mailbox",
             }),
             headers: {
               "content-type": "application/json; charset=utf-8",
@@ -3118,7 +3221,7 @@ describe("cloudflare worker routes", () => {
         runtimeAttemptId: "runtime-attempt-test",
       });
       expect(stub.ensureRuntimeProcessingForUser).toHaveBeenCalledWith({
-        assistantExecutionBlocked: true,
+        ...processingRequest,
         orchestrationAttemptId: "orchestration-attempt-test",
         commandStartedAtEpochMs: expect.any(Number),
         commandTimeoutMs: 10_000,
@@ -3129,9 +3232,28 @@ describe("cloudflare worker routes", () => {
           runtimeControlAuthStartedAtEpochMs: expect.any(Number),
           cloudflareRouteReceivedAtEpochMs: expect.any(Number),
         },
-        processingMode: "system_mailbox",
         userId: "test-user",
       });
+    });
+
+    it("rejects a conversation work marker added after runtime request signing", async () => {
+      const stub = createUserRunnerStub();
+      const env = createWorkerEnv(stub);
+      const requestBody = { orchestrationAttemptId: "orchestration-attempt-test" };
+      const signedRequest = await signWebCallbackControlRequest(
+        new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
+          body: JSON.stringify(requestBody),
+          headers: { "content-type": "application/json; charset=utf-8" },
+          method: "POST",
+        }),
+        env,
+      );
+      const response = await worker.fetch(new Request(signedRequest, {
+        body: JSON.stringify({ ...requestBody, conversationWorkPending: true }),
+      }), env);
+
+      expect(response.status).toBe(401);
+      expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
     });
 
     it("runs runtime health-data consent reconciliation synchronously for Web OIDC", async () => {
@@ -4639,6 +4761,7 @@ function createCodexShellSmokeResult() {
     cliSurfaceContractBytes: 37282,
     cliSurfaceHotPathProofCount: 5,
     client: "codex-app-server",
+    healthCommonsCliGoalProofCount: 6,
     murphPathBytes: 28,
     noteAddBytes: 128,
     stderrBytes: 0,

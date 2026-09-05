@@ -622,6 +622,8 @@ model HostedMember {
   signupNotificationEmailAttemptedAt DateTime?                   @map("signup_notification_email_attempted_at")
   signupWelcomeEmailAttemptedAt  DateTime?                       @map("signup_welcome_email_attempted_at")
   groupPrivateConversionTrackedAt DateTime?                      @map("group_private_conversion_tracked_at")
+  groupJournalCaptureEnabled      Boolean?                       @map("group_journal_capture_enabled")
+  groupJournalCaptureConsentRequestedAt DateTime?                @map("group_journal_capture_consent_requested_at")
   suspendedAt                    DateTime?                       @map("suspended_at")
   createdAt                      DateTime                        @default(now()) @map("created_at")
   updatedAt                      DateTime                        @updatedAt @map("updated_at")
@@ -1006,6 +1008,9 @@ model HostedPhysicalNoteRecovery {
 
 model HostedMemberIdentity {
   memberId                            String       @unique @map("member_id")
+  /// Blinded provider-observed iMessage email handle. This is routing identity, not verified email authorization.
+  linqEmailHandleLookupKey            String?      @unique @map("linq_email_handle_lookup_key")
+  linqEmailHandleEncrypted            String?      @map("linq_email_handle_encrypted")
   maskedPhoneNumberHint               String?      @map("masked_phone_number_hint")
   phoneLookupKey                      String?      @unique @map("phone_lookup_key")
   phoneNumberEncrypted                String?      @map("phone_number_encrypted")
@@ -1939,6 +1944,7 @@ model HostedGroupMember {
   joinedAt  DateTime?    @map("joined_at")
   joinConfirmationEligibleAt DateTime? @map("join_confirmation_eligible_at")
   joinConfirmationOrigin String?       @map("join_confirmation_origin")
+  journalCaptureDisabledAt DateTime?   @map("journal_capture_disabled_at")
   createdAt DateTime     @default(now()) @map("created_at")
   updatedAt DateTime     @updatedAt @map("updated_at")
   group     HostedGroup  @relation(fields: [groupId], references: [id], onDelete: Cascade)
@@ -2287,6 +2293,8 @@ model HostedLinqDeliveryMessage {
   deliveryId          String   @map("delivery_id")
   ordinal             Int
   messageLookupKey    String   @unique @map("message_lookup_key")
+  terminalRetryAttemptedAt DateTime? @map("terminal_retry_attempted_at")
+  terminalRetryOriginalMessageLookupKey String? @unique(map: "hosted_linq_delivery_message_terminal_retry_key") @map("terminal_retry_original_message_lookup_key")
   messageIdSuffix     String?  @map("message_id_suffix")
   status              String   @default("accepted")
   acceptedAt          DateTime @map("accepted_at")

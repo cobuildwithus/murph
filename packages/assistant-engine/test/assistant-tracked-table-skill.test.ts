@@ -79,6 +79,20 @@ const AD_HOC_COMPLETED_TARGETLESS_WORKOUT_CARD = {
 } satisfies AssistantResponseCard
 
 describe('assistant tracked workout table skill', () => {
+  it('recovers a reference-free reminder without inventing prior completed sets', async () => {
+    const skill = await readFile(
+      path.join(resolveAssistantSkillsRoot(), 'tracked-table', 'SKILL.md'),
+      'utf8',
+    )
+    expect(skill).toContain('recover the saved reminder definition before asking')
+    expect(skill).toContain('`action: inspect` and that exact id as `lookup`')
+    expect(skill).toContain('returned `title` and `instructions`')
+    expect(skill).toContain('Do not patch the reminder during recovery')
+    expect(skill).toContain('leave every unreported set pending')
+    expect(skill).toContain('Missing definition fields, an ambiguous exercise or owner')
+    expect(skill).toContain('an explicit cleared or mismatched event reference never enters')
+  })
+
   it('registers direct table and live-workout language with the skill router', () => {
     const matches = ASSISTANT_SKILLS.filter(
       ({ slug }) => slug === 'tracked-table',
@@ -113,7 +127,7 @@ describe('assistant tracked workout table skill', () => {
       'Once an exact live workout owns the exchange, use only this execution owner',
     )
     expect(strengthSkill).toContain(
-      'Only an exact standalone `workout_format` reminder context',
+      'An exact standalone `workout_format` reminder context',
     )
     expect(strengthSkill).toContain('instead of Markdown table syntax')
   })
@@ -292,13 +306,13 @@ describe('assistant tracked workout table skill', () => {
     expect(skill).toContain('Keep the last exact coordinate the member identified.')
     expect(skill).toContain('Never advance to another set from an acknowledgement.')
     expect(skill).toContain(
-      'When the exact workout id or set coordinate is genuinely unavailable, ask which workout, exercise, or set the member means without switching record types.',
+      'If that recovery cannot resolve the intended workout and coordinate, ask which workout, exercise, or set the member means without switching record types.',
     )
     expect(skill).toContain(
       'Do not block unrelated new work, demand closure metadata for another workout, or create a workout merely to make an earlier assistant claim appear true.',
     )
     expect(skill).toContain(
-      'An isolated completion with no exact causal workout identity does not authorize choosing an unfinished workout or inventing one.',
+      'An isolated completion with neither exact causal workout identity nor a recovered standalone reminder definition does not authorize choosing an unfinished workout or inventing one.',
     )
     expect(skill).not.toContain('bounded recovery offer')
     expect(skill).not.toContain('No active live workout was found')
@@ -431,7 +445,10 @@ describe('assistant tracked workout table skill', () => {
       'A visible transcript marker, conversational recency, and the previously logged set never identify the owner.',
     )
     expect(skill).toContain(
-      'An unrelated assistant delivery, a missing reference, multiple session references, or a conflicting result ends implicit continuation',
+      'A later unrelated assistant delivery that makes no workout-context decision is transparent',
+    )
+    expect(skill).toContain(
+      'An explicit clear, missing or multiple session identities, a mismatched result, or a conflict ends implicit continuation',
     )
   })
 

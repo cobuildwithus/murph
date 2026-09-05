@@ -303,11 +303,13 @@ describe("murph.group dynamic tool", () => {
         "question",
       ],
       group_data: [
-        "action", "audience", "date", "displayName", "grantId", "message_ref",
-        "metric", "permissionText", "projectionScopes", "standaloneLink", "unit", "value",
+        "action", "audience", "confidence", "date", "displayName", "factIndex",
+        "grantId", "message_ref", "metric", "note", "noteType", "permissionText",
+        "privateQuestion", "projectionScopes", "standaloneLink", "title", "unit", "value",
       ],
       group_membership: [
-        "action", "cursor", "disclosureGrantCursor", "membershipId", "setup",
+        "action", "cursor", "disclosureGrantCursor", "enabled", "membershipId",
+        "message_ref", "scope", "setup",
       ],
       group_usage: ["action", "message_ref", "policyCode", "policyCodes"],
       group_chat: [
@@ -2592,48 +2594,67 @@ describe("murph.group dynamic tool", () => {
     });
   });
 
-  it.each([
-    ["missing", () => null],
-    [
-      "group",
-      () => ({
-        acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
-        conversationId: "conversation_group",
-        conversationScope: "group" as const,
-        inboundMailboxItemIds: ["mailbox_group"],
-        originSessionId: "session_group",
-        recipientKey: "recipient_group",
-      }),
-    ],
-  ])("does not admit a context handoff with %s private-user authority", async (
-    _case,
-    currentUserActionScope,
-  ) => {
-    const request = readMurphDynamicToolRequest(groupToolCall({
-      action: "handoff",
-      context: "A bounded fact.",
-      membershipId: "membership_lifting_club",
-    }));
-    if (!request || request.kind !== "group") {
-      throw new Error("Expected group request.");
-    }
-    const groupRequest = vi.fn<GroupToolRequest>();
+  describe.each(["ask", "handoff"] as const)("%s direct authority", (action) => {
+    it.each([
+      ["missing", () => null],
+      ["empty direct", () => ({
+        acceptedInputIds: [],
+        conversationId: "conversation_private",
+        conversationScope: "direct" as const,
+        inboundMailboxItemIds: [],
+        originSessionId: "session_private",
+        recipientKey: "recipient_private",
+      })],
+      [
+        "group",
+        () => ({
+          acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+          conversationId: "conversation_group",
+          conversationScope: "group" as const,
+          inboundMailboxItemIds: ["mailbox_group"],
+          originSessionId: "session_group",
+          recipientKey: "recipient_group",
+        }),
+      ],
+    ])("rejects %s authority before the hosted request", async (
+      _case,
+      currentUserActionScope,
+    ) => {
+      const request = readMurphDynamicToolRequest(groupToolCall({
+        action,
+        ...(action === "handoff"
+          ? { context: "A bounded fact." }
+          : { question: "Which day is planned?" }),
+        membershipId: "membership_lifting_club",
+      }));
+      if (!request || request.kind !== "group") {
+        throw new Error("Expected group request.");
+      }
+      const groupRequest = vi.fn<GroupToolRequest>();
 
-    const result = await executeMurphDynamicToolRequest({
-      env: {},
-      fetchImpl: fetch,
-      hostedToolContext: createGroupHostedToolContext({
-        currentUserActionScope,
-        groupRequest,
-      }),
-      nextUsageOrdinal: () => 1,
-      progressDelivery: null,
-      request,
-      vaultRoot: null,
+      const result = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext: createGroupHostedToolContext({
+          currentUserActionScope,
+          groupRequest,
+        }),
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request,
+        vaultRoot: null,
+      });
+
+      expect(result.rpcResult.success).toBe(false);
+      expect(groupRequest).not.toHaveBeenCalled();
+      expect(result.rpcResult.contentItems).toEqual([{
+        type: "inputText",
+        text: _case === "empty direct"
+          ? `group ${action} requires fresh user-sourced input for this turn`
+          : `group ${action} requires a fresh user request in a personal direct conversation`,
+      }]);
     });
 
-    expect(result.rpcResult.success).toBe(false);
-    expect(groupRequest).not.toHaveBeenCalled();
   });
 
   it("enforces group ask bounds in Unicode code points", () => {

@@ -73,6 +73,8 @@ const TELEGRAM_REQUIRED_FRAME_SOURCES = [
   "https://oauth.telegram.org",
 ] as const;
 const TURNSTILE_SOURCES = ["https://challenges.cloudflare.com"] as const;
+const BRANDFETCH_API_SOURCES = ["https://api.brandfetch.io"] as const;
+const BRANDFETCH_IMAGE_SOURCES = ["https://cdn.brandfetch.io"] as const;
 // Brand assets that OG and share-card route handlers read from disk at render
 // time through app/font-files.ts. They must be traced into each of those
 // serverless functions or every non-prerendered render 500s with ENOENT.
@@ -85,6 +87,24 @@ const OG_SHARE_ASSET_TRACE_INCLUDES = [
 const MURPH_CONTACT_CARD_AVATAR_TRACE_INCLUDES = [
   "public/brand-logos/murph-logo-avatar-*.png",
   "public/murph-headshots/*-sm.png",
+];
+// The package root resolver supports several install layouts. Node file trace
+// conservatively expands that fallback search to every generated Web artifact,
+// so Goal functions must explicitly discard projection families they never read.
+const HEALTH_COMMONS_GOAL_TRACE_EXCLUDES = [
+  "../../packages/health-commons/generated/web/browse/biomarkers.json",
+  "../../packages/health-commons/generated/web/browse/experiments.json",
+  "../../packages/health-commons/generated/web/bundles/**/*.json",
+  "../../packages/health-commons/generated/web/pages/biomarkers/**/*.json",
+  "../../packages/health-commons/generated/web/shell/**/*.json",
+  "../../packages/health-commons/generated/web/tabs/**/*.json",
+];
+const HEALTH_COMMONS_GOAL_INDEX_ONLY_TRACE_EXCLUDES = [
+  "../../packages/health-commons/generated/web/pages/goals/**/*.json",
+  "../../packages/health-commons/generated/web/routes/index.json",
+];
+const HEALTH_COMMONS_GOAL_INDEX_TRACE_INCLUDES = [
+  "../../packages/health-commons/generated/web/browse/goals.json",
 ];
 // The footer availability indicator reads the incident.io status-page summary
 // from the browser, so the status-page origin must be reachable client-side.
@@ -178,6 +198,7 @@ export function buildHostedWebContentSecurityPolicy(
     ...privyOrigins,
     ...KERNEL_COMPUTER_LIVE_VIEW_CONNECT_SOURCES,
     ...STATUS_PAGE_CONNECT_SOURCES,
+    ...BRANDFETCH_API_SOURCES,
     ...(isDevelopment ? ["ws:", "wss:"] : []),
   ]);
   const scriptSources = uniqueSources([
@@ -194,7 +215,7 @@ export function buildHostedWebContentSecurityPolicy(
     `script-src ${scriptSources.join(" ")}`,
     "script-src-attr 'none'",
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
+    `img-src 'self' data: blob: ${BRANDFETCH_IMAGE_SOURCES.join(" ")}`,
     "font-src 'self'",
     "manifest-src 'self'",
     "media-src 'self' blob:",
@@ -285,12 +306,21 @@ export function buildHostedWebTurbopackConfig(): NextConfig["turbopack"] {
 export function configureHostedWebWebpack(
   config: HostedWebWebpackConfig,
   context: HostedWebWebpackContext,
+  environment: NodeJS.ProcessEnv = process.env,
 ): HostedWebWebpackConfig {
-  if (!context.dev) {
-    // The production runner deliberately starts every Webpack compile cold, so
-    // a generated filesystem cache can never produce a later hit. Do not spend
-    // several gigabytes of memory and page cache writing that dead artifact.
+  if (!context.dev && environment.MURPH_HOSTED_WEB_WEBPACK_CACHE !== "1") {
+    // Vercel keeps cold compilation. CI jobs that persist the compiler cache
+    // explicitly opt in and let Webpack validate its source dependencies.
     config.cache = false;
+  } else if (
+    !context.dev
+    && config.cache
+    && typeof config.cache === "object"
+    && "type" in config.cache
+    && config.cache.type === "filesystem"
+  ) {
+    // Disk reuse must fit the same bounded compiler heap as cold compilation.
+    Object.assign(config.cache, { maxMemoryGenerations: 0 });
   }
 
   if (!hasOptionalModule("@farcaster/mini-app-solana")) {
@@ -361,6 +391,15 @@ export function buildHostedWebNextConfig(
       webpackBuildWorker: true,
       webpackMemoryOptimizations: true,
     },
+    images: {
+      remotePatterns: [
+        {
+          protocol: "https",
+          hostname: "cdn.brandfetch.io",
+          pathname: "/**",
+        },
+      ],
+    },
     outputFileTracingIncludes: {
       "/experiments": [
         "../../packages/health-commons/generated/web/browse/experiments.json",
@@ -379,6 +418,23 @@ export function buildHostedWebNextConfig(
         "../../packages/health-commons/generated/web/routes/index.json",
         "../../packages/health-commons/generated/web/shell/experiments/**/*.json",
         "../../packages/health-commons/generated/web/tabs/experiments/**/*.json",
+      ],
+      "/goals": [
+        ...HEALTH_COMMONS_GOAL_INDEX_TRACE_INCLUDES,
+      ],
+      "/goals/[goalId]": [
+        "../../packages/health-commons/generated/web/browse/goals.json",
+        "../../packages/health-commons/generated/web/routes/index.json",
+        "../../packages/health-commons/generated/web/pages/goals/**/*.json",
+      ],
+      "/api/goals/contact": [
+        ...HEALTH_COMMONS_GOAL_INDEX_TRACE_INCLUDES,
+      ],
+      "/api/hosted-onboarding/linq/webhook": [
+        ...HEALTH_COMMONS_GOAL_INDEX_TRACE_INCLUDES,
+      ],
+      "/api/hosted-onboarding/telegram/webhook": [
+        ...HEALTH_COMMONS_GOAL_INDEX_TRACE_INCLUDES,
       ],
       "/biomarkers": [
         "../../packages/health-commons/generated/web/browse/biomarkers.json",
@@ -402,6 +458,25 @@ export function buildHostedWebNextConfig(
       "/api/murph-contact-card": MURPH_CONTACT_CARD_AVATAR_TRACE_INCLUDES,
       "/imessage/card/v1/[payload]": OG_SHARE_ASSET_TRACE_INCLUDES,
     },
+    outputFileTracingExcludes: {
+      "/goals": HEALTH_COMMONS_GOAL_TRACE_EXCLUDES,
+      "/goals/[goalId]": HEALTH_COMMONS_GOAL_TRACE_EXCLUDES,
+      // Next matches trace keys with picomatch `contains: true`. This extglob
+      // matches only the directory landing route, not /goals/[goalId].
+      "/goals!(/**)": HEALTH_COMMONS_GOAL_INDEX_ONLY_TRACE_EXCLUDES,
+      "/api/goals/contact": [
+        ...HEALTH_COMMONS_GOAL_TRACE_EXCLUDES,
+        ...HEALTH_COMMONS_GOAL_INDEX_ONLY_TRACE_EXCLUDES,
+      ],
+      "/api/hosted-onboarding/linq/webhook": [
+        ...HEALTH_COMMONS_GOAL_TRACE_EXCLUDES,
+        ...HEALTH_COMMONS_GOAL_INDEX_ONLY_TRACE_EXCLUDES,
+      ],
+      "/api/hosted-onboarding/telegram/webhook": [
+        ...HEALTH_COMMONS_GOAL_TRACE_EXCLUDES,
+        ...HEALTH_COMMONS_GOAL_INDEX_ONLY_TRACE_EXCLUDES,
+      ],
+    },
     outputFileTracingRoot: path.resolve(appDir, "../.."),
     // Temporal clients use process-bound transport state. Keep one physical
     // package instance across request handlers in every server artifact.
@@ -414,7 +489,7 @@ export function buildHostedWebNextConfig(
           === HOSTED_WEB_PREPARED_TYPECHECK_COMPLETE,
       tsconfigPath: HOSTED_WEB_NEXT_TSCONFIG_PATH,
     },
-    webpack: configureHostedWebWebpack,
+    webpack: (config, context) => configureHostedWebWebpack(config, context, environment),
     headers: async () => [
       {
         source: HOSTED_WEB_HEADER_SOURCE,

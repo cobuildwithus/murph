@@ -64,6 +64,8 @@ declare module 'incur' {
       'clinical-note import-json': { args: {}; options: { requestId?: string; input: string } }
       'clinical-note payload-schema': { args: {}; options: {} }
       'clinical-note scaffold': { args: {}; options: { requestId?: string } }
+      'commons goal list': { args: {}; options: { query?: string; category?: ("sleep" | "nutrition" | "cardio" | "strength" | "mind" | "biomarkers" | "life-stages")[]; limit: number } }
+      'commons goal show': { args: { key: string }; options: {} }
       'commons knowledge search': { args: { query: string }; options: { limit: number } }
       'commons protocol explore': { args: { lookup: string }; options: { limit: number } }
       'commons protocol list': { args: {}; options: { query?: string; status?: "draft" | "field-testing" | "reviewed" | "deprecated" | "community" | "*"; category?: string[]; limit: number } }
@@ -108,7 +110,7 @@ declare module 'incur' {
       'event import-jsonl': { args: {}; options: { requestId?: string; input: string; apply: boolean; sourceRawRefOnce?: string } }
       'event list': { args: {}; options: { requestId?: string; kind?: "adverse_effect" | "body_measurement" | "clinical_assertion" | "document" | "encounter" | "exposure" | "meal" | "measurement" | "symptom" | "note" | "observation" | "experiment_event" | "experiment_context" | "immunization" | "medication_intake" | "procedure" | "supplement_intake" | "test" | "activity_session" | "sleep_session" | "intervention_session"; from?: string; to?: string; tag?: string[]; experiment?: string; limit: number } }
       'event medication-intake add': { args: {}; options: { requestId?: string; medicationName: string; dose: number; unit: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
-      'event note add': { args: {}; options: { requestId?: string; note: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; tag?: string[] } }
+      'event note add': { args: {}; options: { requestId?: string; note: string; noteType?: string; relatedId?: string[]; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; tag?: string[] } }
       'event observation add': { args: {}; options: { requestId?: string; metric: string; value: number; unit: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
       'event payload-schema': { args: {}; options: { for: "import-jsonl"; kind: "symptom" | "note" | "observation" | "clinical_assertion" | "exposure" | "measurement" | "test" | "medication_intake" | "supplement_intake" | "activity_session" | "body_measurement" | "sleep_session" | "intervention_session" | "experiment_context" } }
       'event procedure add': { args: {}; options: { requestId?: string; procedure: string; status?: "ordered" | "planned" | "completed" | "cancelled"; occurredAt: string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; tag?: string[] } }
@@ -163,7 +165,7 @@ declare module 'incur' {
       'genetics show': { args: { id: string }; options: { requestId?: string } }
       'goal import-json': { args: {}; options: { requestId?: string; input: string } }
       'goal list': { args: {}; options: { requestId?: string; status?: string; limit: number } }
-      'goal save': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "completed" | "abandoned"; horizon?: "short_term" | "medium_term" | "long_term" | "ongoing"; priority?: number; startAt?: string; targetAt?: string; parentGoalId?: string; relatedGoalId?: string[]; relatedExperimentId?: string[]; domain?: string[] } }
+      'goal save': { args: { title?: string }; options: { requestId?: string; id?: string; slug?: string; status?: "active" | "paused" | "completed" | "abandoned"; horizon?: "short_term" | "medium_term" | "long_term" | "ongoing"; priority?: number; startAt?: string; targetAt?: string; parentGoalId?: string; relatedGoalId?: string[]; relatedExperimentId?: string[]; commonsGoalKey?: string; commonsPageRevisionId?: string; commonsWorkflowRevisionId?: string; domain?: string[] } }
       'goal scaffold': { args: {}; options: { requestId?: string } }
       'goal show': { args: { id: string }; options: { requestId?: string } }
       'habitat catalog': { args: { aspect?: string }; options: {} }

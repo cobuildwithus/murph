@@ -1,6 +1,8 @@
 import Image from "next/image";
 import { RefreshCcw } from "lucide-react";
 
+import { TryItNowButton } from "./try-it-now-button";
+
 const MACROS = [
   { name: "Protein", amount: "138 g", width: "84%" },
   { name: "Carbs", amount: "214 g", width: "62%" },
@@ -90,13 +92,7 @@ const OTHER_ROLL_PHOTOS = [
 function BackgroundLogArtifact() {
   return (
     <div className="w-full max-w-[320px] rounded-2xl bg-[#fffcf6] p-3.5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)]">
-      <div className="flex items-center justify-between px-1">
-        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.15em] text-[#8a6428]">
-          Your camera roll
-        </span>
-      </div>
-
-      <div className="mt-3 grid grid-cols-[1.9fr_1fr] gap-2">
+      <div className="grid grid-cols-[1.9fr_1fr] gap-2">
         <div className="relative overflow-hidden rounded-xl ring-2 ring-[#2c7a3f]">
           <div className="relative aspect-square">
             <Image
@@ -107,9 +103,6 @@ function BackgroundLogArtifact() {
               src="/meal-snap-2.jpg"
             />
           </div>
-          <span className="absolute top-2 left-2 rounded-full bg-black/55 px-2 py-0.5 font-mono text-[8px] uppercase tracking-[0.12em] text-white backdrop-blur-sm">
-            New
-          </span>
           <span className="absolute right-2 bottom-2 rounded-full bg-[#2c7a3f] px-2.5 py-1 font-mono text-[9px] font-medium tracking-[0.1em] text-white shadow-[0_4px_12px_rgba(0,0,0,0.25)]">
             ✓ Logged
           </span>
@@ -156,15 +149,7 @@ function DailyTallyArtifact() {
         your protein target.
       </div>
       <div className="mt-3 rounded-2xl bg-[#fffcf6] p-5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)]">
-        <div className="flex items-baseline justify-between">
-          <span className="font-mono text-[10px] font-medium uppercase tracking-[0.15em] text-[#8a6428]">
-            Daily tally
-          </span>
-          <span className="font-mono text-[10px] tabular-nums text-[#736a58]">
-            3 meals
-          </span>
-        </div>
-        <p className="mt-3 font-serif text-[2rem] font-semibold leading-none tracking-[-0.02em] text-[#2d3436]">
+        <p className="font-serif text-[2rem] font-semibold leading-none tracking-[-0.02em] text-[#2d3436]">
           2,140 cal
         </p>
         <div className="mt-4 space-y-3">
@@ -211,15 +196,16 @@ const STEPS = [
   },
 ] as const;
 
-export function MealPhotosSection() {
+export function MealPhotosSection({
+  authenticated,
+}: {
+  authenticated: boolean;
+}) {
   return (
     <section className="bg-[linear-gradient(170deg,#f8f0dd_0%,#efe1c2_100%)] px-4 py-20 sm:px-8 lg:px-16 lg:py-28">
       <div className="mx-auto max-w-[1200px]">
         <div className="max-w-[720px]">
-          <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#8a6428]">
-            Calorie counting
-          </p>
-          <h2 className="mt-4 font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.08] tracking-[-0.03em] text-[#2d3436]">
+          <h2 className="font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.08] tracking-[-0.03em] text-[#2d3436]">
             The calorie tracker you never open.
           </h2>
           <p className="mt-5 max-w-[62ch] text-[1rem] leading-[1.7] text-[#3a322a]">
@@ -231,10 +217,7 @@ export function MealPhotosSection() {
         <div className="mt-14 grid gap-14 sm:grid-cols-2 sm:gap-10 lg:grid-cols-3">
           {STEPS.map((step) => (
             <div key={step.number} className="flex flex-col">
-              <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-[#8a6428]">
-                {step.number}
-              </p>
-              <h3 className="mt-3 font-serif text-[1.375rem] font-semibold leading-[1.1] tracking-[-0.02em] text-[#2d3436]">
+              <h3 className="font-serif text-[1.375rem] font-semibold leading-[1.1] tracking-[-0.02em] text-[#2d3436]">
                 {step.heading}
               </h3>
               <p className="mt-2 max-w-[36ch] text-[0.875rem] leading-[1.6] text-[#635a48]">
@@ -243,6 +226,10 @@ export function MealPhotosSection() {
               <div className="mt-7">{step.artifact}</div>
             </div>
           ))}
+        </div>
+
+        <div className="mt-14 flex justify-center">
+          <TryItNowButton authenticated={authenticated} />
         </div>
       </div>
     </section>
