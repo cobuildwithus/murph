@@ -1,6 +1,6 @@
 ---
-title: "Real-Codex harness login shell discards injected fixture PATH"
-severity: "minor"
+title: 'Real-Codex harness login shell discards injected fixture PATH'
+severity: 'minor'
 ---
 
 ## Expected Behavior

@@ -125,6 +125,7 @@ import {
   MURPH_PERSONALIZATION_TOOL,
   MURPH_PLAN_USAGE_TOOL,
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
+  MURPH_SEND_VAULT_FILE_TOOL,
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
   MURPH_SUBSCRIPTION_TOOL,
   readMurphDynamicToolRequest,
@@ -268,6 +269,7 @@ import {
   writeHostedOpenAiMixedModeModelCatalogJson,
 } from './support/codex-model-catalog.ts'
 import { createDeferred } from './test-helpers.ts'
+import { isAssistantGeneratedDeliveryRef } from '../src/assistant/generated-delivery-files.ts'
 
 const RUN_REAL_CODEX_E2E = process.env.MURPH_RUN_REAL_CODEX_E2E === '1'
 const execFileAsync = promisify(execFile)
@@ -2589,6 +2591,103 @@ describe('real Codex live fixture contracts', () => {
       await removeRealCodexTemporaryPath(workingDirectory)
     }
   })
+})
+
+describeRealCodex('real Codex personal archive e2e', () => {
+  it('prepares an original-file workspace ZIP without relocating source files', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-personal-archive-e2e-'))
+    const originals = {
+      'notes/reading-list.md': '# Reading list\nA field guide to trees.\n',
+      'documents/supply-list.csv': 'item,count\nnotebook,2\n',
+      'raw/captures/sketch.txt': 'A synthetic pencil sketch description.\n',
+    }
+    const requestedRefs: string[] = []
+    let approvalRequests = 0
+    try {
+      for (const [ref, contents] of Object.entries(originals)) {
+        await mkdir(path.dirname(path.join(workingDirectory, ref)), { recursive: true })
+        await writeFile(path.join(workingDirectory, ref), contents)
+      }
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildDirectConversationDeveloperInstructions(),
+        dynamicTools: [MURPH_SEND_VAULT_FILE_TOOL, MURPH_FINISH_WITHOUT_REPLY_TOOL],
+        env: config.env,
+        excludeResumeTurns: true,
+        hostedToolContext: {
+          ...createRealCodexSupportHostedToolContext('direct'),
+          vaultFileSendAvailable: true,
+          sendVaultFile: async (ref, toolCallId, retireExportPackIds) => {
+            requestedRefs.push(ref)
+            return requestAssistantVaultFileSend({
+              actionApprovalPort: {
+                read: async () => { throw new Error('No prior approval exists in this fixture') },
+                request: async () => {
+                  approvalRequests += 1
+                  return {
+                    approvalId: `haa_${'b'.repeat(32)}`,
+                    approvalUrl: 'https://murph.test/approve/personal-archive',
+                    expiresAt: '2099-01-01T00:00:00.000Z',
+                    status: 'pending',
+                  }
+                },
+              },
+              bindingDelivery: { kind: 'thread', target: 'chat_archive_fixture' },
+              channel: 'linq',
+              ref,
+              retireExportPackIds,
+              sessionId: 'session_archive_fixture',
+              threadId: 'chat_archive_fixture',
+              threadIsDirect: true,
+              toolCallId,
+              turnId: 'turn_archive_fixture',
+              vault: workingDirectory,
+            })
+          },
+        },
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: 'Back up my reading list and supply list along with the other personal files in this Murph runtime workspace. Make one ZIP attachment with their folders intact.',
+        reasoningEffort: 'low',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+      process.stdout.write(`[personal-archive-e2e] ${JSON.stringify({
+        finalMessage: result.finalMessage.replaceAll(workingDirectory, '<VAULT>'),
+        sendCalls: requestedRefs.length,
+        approvalRequests,
+      })}\n`)
+      expect(requestedRefs).toHaveLength(1)
+      expect(isAssistantGeneratedDeliveryRef(requestedRefs[0] ?? '')).toBe(true)
+      expect(approvalRequests).toBe(1)
+      const intents = await listAssistantOutboxIntents(workingDirectory)
+      expect(intents).toHaveLength(1)
+      const attachment = intents[0]?.media?.[0]
+      expect(attachment).toMatchObject({ kind: 'vault_file', contentType: 'application/zip' })
+      if (attachment?.kind !== 'vault_file') throw new Error('Expected one ZIP attachment')
+      const inspected = await execFileAsync('python3', ['-c', [
+        'import json, sys, zipfile',
+        'with zipfile.ZipFile(sys.argv[1]) as archive:',
+        ' print(json.dumps({name: archive.read(name).decode() for name in archive.namelist() if not name.endswith("/")}))',
+      ].join('\n'), path.join(workingDirectory, attachment.ref)])
+      expect(JSON.parse(inspected.stdout)).toEqual(originals)
+      for (const [ref, contents] of Object.entries(originals)) {
+        expect(await readFile(path.join(workingDirectory, ref), 'utf8')).toBe(contents)
+      }
+      expect(result.finalMessage).toMatch(/approv/iu)
+      expect(result.finalMessage).not.toMatch(/(?:I (?:can|could) help|would you like|shall I)|(?:sent|delivered|attached) (?:it|the (?:zip|file|archive))/iu)
+      expect(result.responseMedia).toEqual([])
+      expect(readCapabilityRoutingActions(result.jsonEvents).filter((action) =>
+        action.kind === 'dynamic' && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name
+      )).toHaveLength(0)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 5 * 60_000)
 })
 
 describeRealCodex('real Codex missing knowledge recovery e2e', () => {
