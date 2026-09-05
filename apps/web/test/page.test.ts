@@ -22,7 +22,6 @@ const mocks = vi.hoisted(() => ({
       signupLabel?: string;
       leadingIcon?: React.ReactNode;
       splitUnauthenticated?: boolean;
-      preloadAuthPanel?: boolean;
     }) =>
       createElement(
         "div",
@@ -154,7 +153,6 @@ test("HomePage renders the canonical landing page at the root route", async () =
       authenticated: false,
       context: "nav",
       authLabel: "Dashboard",
-      preloadAuthPanel: true,
       splitUnauthenticated: true,
     },
     undefined
@@ -166,7 +164,6 @@ test("HomePage renders the canonical landing page at the root route", async () =
       context: "hero",
       authLabel: "Meet Murph",
       leadingIcon: expect.anything(),
-      preloadAuthPanel: true,
     }),
     undefined
   );
@@ -186,7 +183,6 @@ test("HomePage renders the canonical landing page at the root route", async () =
       authenticated: false,
       context: "footer",
       authLabel: "Get started",
-      preloadAuthPanel: true,
       signupLabel: "Get started",
     },
     undefined
@@ -197,7 +193,6 @@ test("HomePage renders the canonical landing page at the root route", async () =
       authenticated: false,
       context: "footer",
       authLabel: "Get started",
-      preloadAuthPanel: true,
       signupLabel: "Get started",
     },
     undefined
@@ -483,7 +478,6 @@ test("HomePage keeps the final CTA consistent for authenticated sessions", async
       authenticated: true,
       context: "footer",
       authLabel: "Go to dashboard",
-      preloadAuthPanel: true,
       signupLabel: "Go to dashboard",
     },
     undefined
