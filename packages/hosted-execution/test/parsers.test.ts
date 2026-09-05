@@ -1643,6 +1643,54 @@ describe("parseHostedRuntimeGroupTool", () => {
     })).toThrow(/at most 25 entries/u);
   });
 
+  describe.each([
+    "read_current",
+    "create_join_link",
+    "update_display_name",
+    "post_join_offer",
+  ])("%s group-summary response boundary", (action) => {
+    it.each([undefined, null, false, 0, "ignored", {}, []])(
+      "normalizes unavailable group payload %j without widening result keys",
+      (group) => {
+        expect(parseHostedRuntimeGroupToolResponse({
+          action,
+          result: { group, status: "unavailable", unavailableReason: "offline" },
+        })).toEqual({
+          action,
+          result: { group: null, status: "unavailable", unavailableReason: "offline" },
+        });
+      },
+    );
+
+    it("preserves unavailable key and reason validation order", () => {
+      expect(() => parseHostedRuntimeGroupToolResponse({
+        action,
+        result: { status: "unavailable", unavailableReason: null, extra: true },
+      })).toThrow(`Hosted runtime group tool ${action} unavailable response result.extra is not allowed.`);
+      expect(() => parseHostedRuntimeGroupToolResponse({
+        action,
+        result: { status: "unavailable", unavailableReason: null },
+      })).toThrow("Hosted runtime group unavailableReason must be a non-empty string.");
+      expect(() => parseHostedRuntimeGroupToolResponse({ action, result: null }))
+        .toThrow(`Hosted runtime group tool ${action} response result must be an object.`);
+      expect(() => parseHostedRuntimeGroupToolResponse({ action, result: {} }))
+        .toThrow(`Hosted runtime group tool ${action} response status must be a non-empty string.`);
+    });
+
+    const acceptedStatuses = action === "read_current"
+      ? ["ok", "none"]
+      : [action === "post_join_offer" ? "sent" : "ok"];
+    it.each(["none", "sent", "ok", "unknown"].filter((status) => !acceptedStatuses.includes(status)))(
+      "keeps status %s specific to its action",
+      (status) => {
+        expect(() => parseHostedRuntimeGroupToolResponse({
+          action,
+          result: { group: null, status },
+        })).toThrow("Hosted runtime group tool response action/status is not supported.");
+      },
+    );
+  });
+
   it("parses create_join_link responses", () => {
     expect(parseHostedRuntimeGroupToolResponse({
       action: "create_join_link",
