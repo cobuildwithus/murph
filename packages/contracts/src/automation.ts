@@ -184,6 +184,7 @@ export function parseAutomationSupportSeriesTag(
 function validateAutomationLifecycleFields(
   value: {
     activeUntil?: string | null;
+    followUpSourceIntentId?: string;
     schedule: AutomationSchedule;
     tags?: string[];
   },
@@ -198,6 +199,14 @@ function validateAutomationLifecycleFields(
       code: z.ZodIssueCode.custom,
       message: "activeUntil must be after schedule.at for a one-shot automation.",
       path: ["activeUntil"],
+    });
+  }
+
+  if (value.followUpSourceIntentId && (!value.activeUntil || value.schedule.kind !== "at")) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "A follow-up must be a finite one-shot automation.",
+      path: ["followUpSourceIntentId"],
     });
   }
 
@@ -407,6 +416,15 @@ export const automationAssistantTargetOverrideSchema = z
   })
   .strict();
 
+export const automationFollowUpRequestSchema = z.object({
+  afterMinutes: z.number().int().min(1).max(7 * 24 * 60),
+  instructions: z.string().trim().min(1).max(4000),
+}).strict();
+
+export type AutomationFollowUpRequest = z.infer<typeof automationFollowUpRequestSchema>;
+
+export const automationFollowUpSourceIntentIdSchema = z.string().trim().min(1).max(240);
+
 export const automationFrontmatterSchema = withContractMetadata(
   z
     .object({
@@ -418,6 +436,8 @@ export const automationFrontmatterSchema = withContractMetadata(
       status: z.enum(automationStatusValues),
       summary: z.string().min(1).max(4000).optional(),
       activeUntil: automationActiveUntilSchema.optional(),
+      followUpSourceIntentId: automationFollowUpSourceIntentIdSchema.optional(),
+      followUpParentAutomationId: z.string().min(1).optional(),
       schedule: automationScheduleSchema,
       route: automationRouteSchema,
       assistantTargetOverride: automationAssistantTargetOverrideSchema.optional(),

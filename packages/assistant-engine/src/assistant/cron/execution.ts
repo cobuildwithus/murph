@@ -83,6 +83,7 @@ import {
 import {
   assistantDeliveryErrorPreventsFreshIntentRetry,
   isAssistantOutboxRetryableError,
+  normalizeAssistantDeliveryError,
   markAssistantOutboxIntentMirrorTerminalById,
   type AssistantOutboxDispatchMode,
 } from '../outbox.js'
@@ -1382,7 +1383,7 @@ export async function executeClaimedAssistantCronJob(
     ) {
       if (input.job.source.kind === 'automation') {
         await upsertAutomation(
-          buildCanonicalAutomationUpsertInput({
+          { ...buildCanonicalAutomationUpsertInput({
             vault: input.vault,
             automationId: input.job.source.automationId,
             automation: input.job.source,
@@ -1391,7 +1392,7 @@ export async function executeClaimedAssistantCronJob(
             schedule: input.job.source.schedule,
             route: input.job.source.route,
             instructions: input.job.source.instructions,
-          }),
+          }), completedOccurrence: true },
         )
       } else if (input.job.source.kind === 'scheduledLog') {
         await setScheduledLogStatus({
@@ -2329,6 +2330,10 @@ function assistantCronDeliveryFailureConsumesOccurrence(
   if (!assistantCronErrorHasNotificationDeliveryStage(error)) {
     return false
   }
+  if (normalizeAssistantDeliveryError(error).code === 'ASSISTANT_FOLLOW_UP_CONTEXT_CHANGED'
+    && job.kind === 'canonical' && job.source.kind === 'automation'
+    && job.source.followUpSourceIntentId && job.source.activeUntil
+    && Date.now() < Date.parse(job.source.activeUntil)) return false
   if (assistantDeliveryErrorPreventsFreshIntentRetry(error)) {
     return true
   }

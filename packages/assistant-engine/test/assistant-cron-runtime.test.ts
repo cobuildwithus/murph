@@ -43,6 +43,7 @@ import {
 } from './onboarding-followup-predecessor-fixtures.ts'
 
 type MockAutomationRecord = {
+  followUpSourceIntentId?: string
   activeUntil?: string | null
   automationId: string
   assistantTargetOverride?: {
@@ -8129,6 +8130,36 @@ describe('assistant cron runtime orchestration', () => {
       'Hosted Linq egress engagement failed with HTTP 500. Internal error.',
     )
     expect(runtimeRecord?.state.consecutiveFailures).toBe(1)
+  })
+
+  it('re-evaluates a finite follow-up after input changes before delivery', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-follow-up-retry-')
+    const canonicalJob = await createCanonicalJob(vaultRoot, 'Optional arrival choice check')
+    const source = getVaultAutomationStore(vaultRoot)[0]!
+    source.followUpSourceIntentId = 'source-delivered-message'
+    source.schedule = { kind: 'at', at: '2026-04-08T10:00:00.000Z' }
+    source.activeUntil = '2026-04-08T11:00:00.000Z'
+    cronMocks.sendAssistantMessageLocal.mockRejectedValueOnce(Object.assign(new Error('New input requires reconsideration.'), {
+      code: 'ASSISTANT_FOLLOW_UP_CONTEXT_CHANGED',
+      details: { assistantNotificationStage: 'delivery' },
+    })).mockResolvedValueOnce({
+      decision: { kind: 'skip', privateSummary: 'The choice was answered.' },
+      response: null, session: { sessionId: 'session-follow-up-retry' },
+    })
+    expect(await processDueAssistantCronJobsLocal({ limit: 1, vault: vaultRoot })).toEqual({ failed: 1, processed: 1, succeeded: 0 })
+    expect(source.status).toBe('active')
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const pending = (await readAssistantCronCanonicalRuntimeStore(paths)).jobs.find((record) => record.jobId === canonicalJob.jobId)!
+    expect(pending.state.pendingOccurrenceAt).toBe('2026-04-08T10:00:00.000Z')
+    expect(pending.state.retryAfterAt).toBe('2026-04-08T10:00:30.000Z')
+    vi.setSystemTime(new Date(pending.state.retryAfterAt!))
+    expect(await processDueAssistantCronJobsLocal({ limit: 1, vault: vaultRoot })).toEqual({ failed: 0, processed: 1, succeeded: 1 })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(2)
+    expect(getVaultAutomationStore(vaultRoot)[0]?.status).toBe('archived')
+    const [first, second] = cronMocks.sendAssistantMessageLocal.mock.calls
+    expect(first![0].deliveryDedupeToken).toBe(second![0].deliveryDedupeToken)
   })
 
   it('retries the same scheduled occurrence and session after a provider-stage failure', async () => {

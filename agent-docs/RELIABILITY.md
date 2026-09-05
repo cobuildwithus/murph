@@ -2752,6 +2752,17 @@ Last verified: 2026-09-04
 
 ## Scheduled tool parity and replay
 
+Optional private follow-ups register under required outbox terminal confirmation.
+A failed canonical write retries confirmation without repeating the source send;
+source-key lookup under the registry lock prevents duplicate or resurrected work.
+Live finite children protect source dispatch evidence from terminal retention.
+Before the first transport attempt, a changed accepted-input cursor fails the
+unsent child intent and leaves its occurrence retryable. Existing failed-intent
+deduplication rules admit reconsidered output under the same occurrence token;
+provider-entered ambiguity still belongs to the original intent. Parent edits
+retire children before changing parent authority, while ordinary one-shot
+consumption explicitly preserves the delivered occurrence’s child.
+
 Canonical scheduled turns receive composable tools through one exact-occurrence
 resolver rather than per-tool cron exceptions. Each owner derives a deterministic
 retry key from the exact occurrence and operation without fabricating an assistant

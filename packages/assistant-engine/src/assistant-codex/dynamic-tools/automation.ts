@@ -4,6 +4,8 @@ import * as z from '@murphai/contracts/zod-runtime'
 
 import {
   automationActiveUntilSchema,
+  automationFollowUpRequestSchema,
+  type AutomationFollowUpRequest,
   automationContextReferencesSchema,
   automationContinuityPolicyValues,
   automationPlannedOccurrenceOffsetMsSchema,
@@ -392,7 +394,12 @@ const reconcileAutomationArgumentsSchema = z.object({
   supportSeriesId: automationSupportSeriesIdSchema,
 }).strict()
 
+const attachFollowUpArgumentsSchema = automationFollowUpRequestSchema.extend({
+  action: z.literal('attach_follow_up'),
+})
+
 const automationArgumentsSchema = z.discriminatedUnion('action', [
+  attachFollowUpArgumentsSchema,
   dismissAutomationLocalAtRecoveryArgumentsSchema,
   inspectAutomationArgumentsSchema,
   saveAutomationArgumentsSchema,
@@ -403,6 +410,7 @@ const automationArgumentsSchema = z.discriminatedUnion('action', [
 
 const AUTOMATION_ARGUMENT_ROOT_KEYS = [
   'action',
+  'afterMinutes',
   'activeUntil',
   'assistantTargetOverride',
   'continuityPolicy',
@@ -430,11 +438,14 @@ export const MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA = z.toJSONSchema(
   { io: 'input' },
 )
 
+export const MURPH_FOLLOW_UP_ATTACHMENT_DESCRIPTION = 'Attach one optional follow-up to this final private message with action=attach_follow_up, afterMinutes, and self-contained instructions describing the unresolved matter and when to skip. It starts only after delivery. Use sparingly for useful action reminders or important unanswered questions. Never attach to a follow-up, repeat an ignored check-in, or create a chain. The future turn reconsiders current context and can stay silent.'
+
 export const MURPH_AUTOMATION_TOOL = {
   namespace: 'murph',
   name: 'automation',
   deferLoading: true,
   description: [
+    MURPH_FOLLOW_UP_ATTACHMENT_DESCRIPTION,
     'Pass contextReferences as an array shaped exactly [{"entityKind":"<canonical-kind>","entityId":"<exact-id>"}]; both camel-case keys are required on every entry. Never pass bare ids or { kind, id }. Copy both fields only from successful current canonical reads or create results that identify exactly one record. The host preserves them but does not validate their existence or semantics. For assistantTargetOverride, omit it to inherit or pass an object such as {"model":"gpt-5.6-luna"}; model must be exactly gpt-5.6-luna, gpt-5.6-terra, or gpt-5.6-sol. Never pass a bare string or Luna, Terra, or Sol.',
     'Create, inspect, patch, or reconcile durable Murph automations for the current authenticated conversation. When a reminder concerns canonical records, pass their exact ids in contextReferences; they are visible routing and interpretation context, not write permission, so inspect them and use ordinary domain tools for every mutation. An ordinary save is create-only: omit slug and receive a new host-generated automationId, even when another automation has the same title. Only when the current loaded skill defines an exact stable recipe key may save include that exact value in slug; never derive a slug from a title or invent one. For inspect, lookup is one scalar string containing either an exact automationId or an exact stable recipe key supplied by the currently loaded skill; for patch, lookup is only the concrete automationId returned by the immediately preceding inspect; lookup is never a title, natural-language phrase, object, or record, and when the turn has only a title or natural-language phrase, resolve exactly one automationId from current read-only automation inventory before inspect and ask if zero or multiple matches remain; patch never changes the recipe key. Inspect is read-only and returns the authoritative stored version plus scheduler timing projection. For every model-authored one-shot, pass schedule.kind=at with schedule.localAt.time, schedule.localAt.timeZone, and exactly one of schedule.localAt.date or schedule.localAt.relativeDay; raw exact ISO schedule.at is not accepted on generic save or patch. When the request says today, tonight, or tomorrow, preserve that wording as relativeDay (today for tonight) so the host resolves it against the named timezone; never calculate a calendar date from a relative word in the model. Use date only for an explicit calendar date from the request or established context. If localAt is nonexistent because of a daylight-saving gap, state the explicit host-resolved date returned by the tool while asking for another time, then retry with that date instead of relativeDay and echo the exact returned localAtRecoveryKey. If it is ambiguous because of a daylight-saving fold, state the explicit host-resolved date returned by the tool while asking whether the earlier or later occurrence is intended, then retry with that date, schedule.localAt.fold, and the exact returned localAtRecoveryKey instead of relativeDay. The recovery key is root-turn-only correlation: include it only on the explicit-date retry that answers that failure; unknown or wrong-date keys are rejected before mutation. If the participant withdraws that reminder or replaces its trusted date, first call action=dismiss_local_at_recovery with the exact returned localAtRecoveryKey and resolvedLocalDate; after successful dismissal, make any replacement save or versioned patch as an ordinary request without that key. Never dismiss an unresolved recovery unless the participant clearly withdraws or supersedes it; omitting it leaves that clarification pending and treats the call as an independent reminder. Recurring cron and dailyLocal values are wall-clock fields: when the user names a timezone, preserve the requested clock time and pass its IANA name in schedule.timeZone; never convert that clock time to UTC inside the cron or localTime field. On save, omit schedule.timeZone only when the recurrence should follow the vault timezone. On patch, inspect the current stored automation first and pass expectedUpdatedAt from that readback; if the automation changed, inspect it again and decide from the new stored state; a replacement recurring wall-clock schedule that omits schedule.timeZone preserves the stored explicit timezone, so do not ask the user to repeat it or guess it from current conversation context. After save or patch, inspect the stored schedule, status, updatedAt, effectiveTimeZone, and occurrenceProjection from this result. For an active deviceActivity schedule, confirm the persisted event trigger directly: occurrenceProjection.status=resolved with a null nextOccurrenceAt means no clock occurrence is knowable until a matching activity arrives, not that future delivery is exhausted; do not invent a time or offer timing recovery. For time-based schedules, confirm an exact next occurrence only when occurrenceProjection.status=resolved, using the stored schedule, effectiveTimeZone, and occurrenceProjection.nextOccurrenceAt; a resolved null nextOccurrenceAt means no later deliverable occurrence, not a retry or cutoff wake. For an active one-shot with that resolved null result, say its requested time is no longer deliverable and offer to reschedule it. For an ordinary reminder, set assistantTargetOverride.model explicitly. Use Luna only when the complete future turn is a fixed, fully self-contained cue whose stored instructions already contain everything it needs to say. Use Terra for all reminders that do not meet that Luna exception; when unsure, use Terra. A Luna reminder must need no reads, tools, conversation-history interpretation, ambiguity resolution, personalization beyond the stored instructions, multi-step work, judgment, or safety reasoning; do not inherit the conversation-selected model for a reminder. For a non-reminder automation, use Luna for similarly self-contained work with no reads or tools, Terra for bounded contextual judgment or a few targeted reads, and inherit the conversation-selected model for broad conversation history, research, complex or sensitive reasoning, or whenever that model materially matters. On a reminder save, always send the selected Luna or Terra override; on a non-reminder save, omit assistantTargetOverride to inherit when the preceding rule selects inheritance. On a reminder patch, send the complete Luna or Terra replacement when its instructions or context requirements materially change or the member explicitly asks to change its model or reasoning; omit assistantTargetOverride for timing-only or status-only edits to preserve the stored override. On a non-reminder patch, assistantTargetOverride replaces the whole stored override: use null to return that automation to conversation inheritance or send the complete replacement. Explicit model selections use high reasoning for Luna and low for Terra or Sol at execution unless reasoningEffort is supplied. The override applies only to the automation turn; a later reply returns to the saved conversation model with the automation message retained through compatible provider-thread continuity or committed history replay. save_onboarding_first_personal_read creates the fixed code-owned private first-read one-shot for the answered-onboarding completion turn; it accepts no prompt, timing, model, route, or other fields. Generic save cannot replace its fixed identity, and generic patch may only archive the existing record when the member cancels. save binds an ordinary automation to this conversation and accepts no route fields. patch preserves the stored route unless retargetToCurrentConversation=true is explicit. reconcile archives members of one supportSeriesId that are absent from desiredAutomationIds. Use patch status to pause, reactivate, or archive. Never pass credentials, delivery targets, filesystem paths, reserved system tags, model-provider ids, or generic commands.',
       'A save or patch result already includes one host-owned occurrence projection. When occurrenceProjection.status=pending, confirm that the write succeeded and report the returned stored schedule and status. For an active recurring every, cron, or dailyLocal schedule, say it remains active, explain briefly that the scheduler is finishing current work and will project the next occurrence automatically, and make clear that no member action is needed. For an active one-shot at schedule, say the saved edit may not affect the occurrence already in progress; do not promise that occurrence will deliver or that another occurrence will be scheduled automatically, and offer to reschedule if its requested time passes without delivery. For any other pending result, make no timing or delivery promise. Do not call pending timing unconfirmed or imply that the repair failed. When occurrenceProjection.status=unavailable, confirm that the write succeeded and report the returned stored schedule and status, briefly state that the next occurrence could not be confirmed, and make no next-occurrence claim. When an unavailable occurrenceProjection issue includes record_readback_mismatch, say the record changed during verification and treat the returned schedule and status as current instead of claiming the requested mutation still holds. Do not inspect again, retry the write, create a fallback automation, ask the member to authorize another inspection, or offer another inspection. Interpret projection_unavailable as scheduler timing unavailable, record_readback_mismatch as the stored schedule and scheduler projection not yet aligned, and default_timezone_unverified as the schedule timezone not yet confirmed. Do not expose these internal code names.',
@@ -449,7 +460,16 @@ export const MURPH_AUTOMATION_TOOL = {
 const AUTOMATION_VALIDATION_PATHS =
   collectSafeJsonSchemaValidationPaths(MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA)
 
+export const MURPH_ATTACH_FOLLOW_UP_TOOL = {
+  namespace: 'murph',
+  name: 'automation',
+  deferLoading: true,
+  description: MURPH_FOLLOW_UP_ATTACHMENT_DESCRIPTION,
+  inputSchema: z.toJSONSchema(attachFollowUpArgumentsSchema, { io: 'input' }),
+} as const
+
 export type AutomationDynamicToolRequest =
+  | { kind: 'attach-follow-up'; request: AutomationFollowUpRequest }
   | {
       kind: 'automation-local-at-recovery-dismissal'
       recoveryKey: string
@@ -501,6 +521,15 @@ export function readAutomationDynamicToolRequest(input: {
     }
   }
 
+  if (parsed.args.action === 'attach_follow_up') {
+    return {
+      kind: 'attach-follow-up',
+      request: {
+        afterMinutes: parsed.args.afterMinutes,
+        instructions: parsed.args.instructions,
+      },
+    }
+  }
   if (parsed.args.action === 'dismiss_local_at_recovery') {
     return {
       kind: 'automation-local-at-recovery-dismissal',
@@ -623,7 +652,7 @@ function resolveAutomationDynamicToolRequest(
   args: z.infer<typeof automationArgumentsSchema>,
   relativeDateReferenceWindow: AssistantAcceptedTurnInputReferenceWindow | null,
 ): AssistantHostedAutomationToolRequest {
-  if (args.action === 'dismiss_local_at_recovery') {
+  if (args.action === 'dismiss_local_at_recovery' || args.action === 'attach_follow_up') {
     throw new TypeError(
       'Local-time recovery dismissal must be handled by the active root turn.',
     )
@@ -860,9 +889,22 @@ function parseLocalAtTime(value: string): { hour: number; minute: number } {
   }
 }
 
+export function executeFollowUpAttachmentDynamicTool(input: {
+  allowed?: boolean | null
+  request: AutomationFollowUpRequest
+}) {
+  if (input.allowed !== true) {
+    return automationTextResult(false, 'follow-up attachment is unavailable for this turn')
+  }
+  return {
+    ...automationTextResult(true, 'One optional follow-up is attached to this final message, subject to delivery and conversation limits. Do not promise it will send.'),
+    followUpRequestPatch: input.request,
+  }
+}
+
 export async function executeAutomationDynamicTool(input: {
   abortSignal?: AbortSignal | null
-  automationTool: AssistantHostedAutomationTool
+  automationTool: AssistantHostedAutomationTool | null
   onboardingFirstReadCompletionTransitionAvailable?: boolean | null
   request: Extract<AutomationDynamicToolRequest, { kind: 'automation' }>
 }): Promise<{
@@ -871,6 +913,9 @@ export async function executeAutomationDynamicTool(input: {
     success: boolean
   }
 }> {
+  if (!input.automationTool) {
+    return automationTextResult(false, 'automation management is unavailable for this turn')
+  }
   if (
     input.request.onboardingFirstReadCompletionRequested === true
     && input.onboardingFirstReadCompletionTransitionAvailable !== true

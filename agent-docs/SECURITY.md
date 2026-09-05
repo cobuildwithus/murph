@@ -1610,6 +1610,13 @@ locally readable.
 
 ## Scheduled assistant action authority
 
+An optional private follow-up attachment is a staged message effect, not general
+automation-write authority. The host permits it only on eligible original turns,
+binds it to actual outbox dispatch, and rejects recursive attachments. Due child
+turns reuse the existing read-only scheduled configuration, with fresh committed
+history and no mutation tools or hosted write ports. The source and parent IDs
+are host-owned canonical fields, not model-selectable attachment arguments.
+
 A scheduled tool action is authorized only by the trusted runtime's exact
 `automationId + occurrenceAt` pair when the turn trigger is `automation-cron` and
 the occurrence equals `scheduledOccurrenceAt`. Assistant Engine derives the opaque

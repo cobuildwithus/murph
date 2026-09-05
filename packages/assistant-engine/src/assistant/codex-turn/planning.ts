@@ -1,3 +1,4 @@
+import { resolveAssistantFollowUpTurnContext } from '../follow-ups.js'
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 import { resolveXaiApiKey } from '@murphai/operator-config/xai-runtime'
 import { isMurphAndroidAppEnabled } from '@murphai/hosted-execution/env'
@@ -147,6 +148,8 @@ import {
 const ASSISTANT_CONTEXT_SNAPSHOT_FOREGROUND_REFRESH_MAX_STEPS = 64
 
 export interface AssistantRouteTurnPlan {
+  followUpAttachmentAllowed?: boolean
+  followUpInvocation?: boolean
   assistantContractFingerprint: string
   assistantCliContract: string | null
   cliEnv: NodeJS.ProcessEnv
@@ -538,6 +541,15 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.profile.toolProfile === 'provider-turn'
   const privateInteractiveProviderTurn =
     privateInteractiveAudience && conversationProviderTurn
+  const followUp = await resolveAssistantFollowUpTurnContext({
+    message: input.input, session: input.session, privateConversation: privateInteractiveAudience,
+    interactiveConversation: conversationProviderTurn, systemNotification: systemNotificationTurn,
+    outputOnly: outputOnlyTurn, providerTools: input.profile.toolProfile === 'provider-turn',
+    onboardingGoalCheckin: onboardingGoalCheckinTurn,
+    supportsNativeResume: routeProviderCapabilities.supportsNativeResume,
+  })
+  const followUpInvocation = followUp.invocation
+  const followUpAttachmentAllowed = followUp.attachmentAllowed
   const authenticatedGroupProviderTurn =
     authenticatedGroupChatRuntime && conversationProviderTurn
   const ordinaryInboundTurn =
@@ -587,10 +599,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
     contextHandoffNotificationTurn ||
     input.profile.promptProfile === 'creative-notification' ||
     operatorMessageNotificationTurn ||
-    onboardingGoalCheckinTurn
+    followUp.requiresExplicitHistory
   const resolveCommittedTranscriptHistoryMessages = async () =>
     shouldUseCommittedTranscriptHistory
       ? await resolveAssistantCommittedTranscriptHistoryMessages({
+          markUnavailableHistory: followUpInvocation,
           currentUserPrompt: input.input.prompt,
           includeTimestamps:
             privateInteractiveAudience
@@ -978,6 +991,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
           authenticatedGroupChatRuntime &&
           userActionAcceptedInputIds.length > 0 &&
           input.hostedToolContext?.assistantConfigurationTool != null,
+        followUpAttachmentAvailable: followUpAttachmentAllowed,
         automationAvailable: input.hostedToolContext?.automationTool != null,
         computerToolsAvailable:
           privateInteractiveAudience &&
@@ -1117,7 +1131,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.profile.threadScope === 'session-thread'
   const resumeCodexThreadId =
     nativeResumeEnabled &&
-    routeProviderCapabilities.supportsNativeResume &&
+    followUp.supportsNativeResume &&
     resumeBinding !== null &&
     assistantContractMatches
       ? resolveAssistantEffectiveCodexResumeThreadId({
@@ -1135,6 +1149,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       normalizeNullableString(
         threadStartPromptResult.layers.dynamicTurnContextPrompt,
       ),
+      followUp.context,
       normalizeNullableString(input.input.turnContext),
     ].filter((section): section is string => section !== null).join('\n\n'),
   )
@@ -1170,6 +1185,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
     resolveRoutePlanningSlowestSpan(routePlanningSpans)
 
   return {
+    followUpInvocation,
+    followUpAttachmentAllowed,
     assistantContractFingerprint,
     assistantCliContract: shouldPrepareBootstrapContext
       ? bootstrapAssistantCliContract
@@ -1241,6 +1258,7 @@ type TranscriptHistoryCandidate = {
 }
 
 async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
+  markUnavailableHistory?: boolean
   currentUserPrompt: string
   includeTimestamps: boolean
   sessionId: string
@@ -1250,7 +1268,12 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
   try {
     entries = await listAssistantTranscriptEntries(input.vault, input.sessionId)
   } catch {
-    return []
+    return input.markUnavailableHistory
+      ? [{ role: 'assistant', content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT }]
+      : []
+  }
+  if (input.markUnavailableHistory && entries.length === 0) {
+    return [{ role: 'assistant', content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT }]
   }
 
   let historyIncomplete =

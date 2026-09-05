@@ -215,6 +215,7 @@ import {
 } from './dynamic-tools/assistant-style.js'
 import {
   executeAutomationDynamicTool,
+  executeFollowUpAttachmentDynamicTool,
   readAutomationDynamicToolRequest,
   type AutomationDynamicToolRequest,
 } from './dynamic-tools/automation.js'
@@ -1177,6 +1178,7 @@ type HostedComputerToolPayloadSanitizer =
   | 'open'
 
 export interface MurphDynamicToolExecutionResult {
+  followUpRequestPatch?: import("@murphai/contracts").AutomationFollowUpRequest
   externallyVisibleOutput?: boolean
   finalActionPatch?: MurphDynamicToolFinalActionPatch
   reactionPatch?: MurphDynamicToolReactionPatch
@@ -2186,6 +2188,7 @@ type ExecuteMurphDynamicToolRequestInput = {
   groupSharedReadTurnState?: MurphGroupSharedReadTurnState | null
   groupChallengeResponseCardAllowed?: boolean | null
   knowledgePageReadTextFile?: KnowledgeServiceDependencies['readTextFile'] | null
+  followUpAttachmentAllowed?: boolean | null
   privateDirectResponseCardAllowed?: boolean | null
   telegramPresentationResponseCardAllowed?: boolean | null
   env: NodeJS.ProcessEnv
@@ -3344,14 +3347,12 @@ export async function executeMurphDynamicToolRequest(
         false,
         'local-time recovery dismissal is unavailable outside the active root turn',
       )
+    case 'attach-follow-up':
+      return executeFollowUpAttachmentDynamicTool({
+        allowed: input.followUpAttachmentAllowed, request: input.request.request,
+      })
     case 'automation': {
       const automationTool = input.hostedToolContext?.automationTool ?? null
-      if (!automationTool) {
-        return toolTextResult(
-          false,
-          'automation management is unavailable for this turn',
-        )
-      }
       return await executeAutomationDynamicTool({
         abortSignal: input.abortSignal ?? null,
         automationTool,

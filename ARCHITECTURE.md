@@ -194,6 +194,27 @@ decrypted contact roster, or compatibility branch. The legacy `read_current`
 wire is unchanged, and assistant-engine still removes the global member id and
 legacy roster handle before any group summary reaches the model.
 
+Optional private follow-ups reuse canonical one-shot automations and the existing
+scheduler/wake path. `murph.automation.attach_follow_up` attaches a finite delay
+and instructions to the current outgoing message; required outbox terminal
+confirmation registers the child only after dispatch. The canonical source
+intent reference makes replay idempotent, including after archival. Registration
+admits at most two unexpired children per private conversation. A parent
+reference lets ordinary parent edits retire children; scheduler-only one-shot
+consumption preserves its delivered occurrence's child.
+
+Foreground turns receive at most two pending records and can resolve or defer
+them through ordinary versioned automation operations. Unrelated messages do
+not cancel a specific matter. Due follow-ups use a fresh read-only contextual
+turn, current committed history, and protected source dispatch evidence to
+send or skip once. They cannot attach another follow-up. An existing input
+cursor captured before evaluation is checked again before the first transport
+attempt; new input retires only the unsent candidate and uses normal cron retry
+to reconsider. Provider-entered attempts retain ordinary ambiguity handling.
+The cursor is vault-wide, so unrelated accepted input can conservatively cause
+reconsideration. Expiry, archival, delivery reconciliation, and retention remain
+with their existing owners; no new scheduler, table, or lifecycle store exists.
+
 Immutable hosted memory consolidation remains an isolated one-shot automation.
 Only its exact built-in id receives `murph.member_memory`; the host executes
 that narrow state tool through canonical core memory operations. The turn uses
