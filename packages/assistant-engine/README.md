@@ -188,6 +188,24 @@ native function, while code-mode-only models receive its schema in `exec`
 guidance without a search step. Murph must not add a second discovery action,
 execution envelope, or compatibility namespace.
 
+Response-card, exercise-routine, Telegram rich-content, and group-challenge
+card tools follow the same deferred contract. Resident messaging guidance
+provides the discovery trigger; the discovered tool remains the sole owner of
+its complete schema, prerequisite reads, eligibility, and fallback rules.
+Ordinary turns avoid those schemas; card-producing turns still pay for native
+discovery and the full selected contract.
+
+Stable route instructions own capability-dependent research guidance and the
+late-child-result policy. Dynamic context carries only the trusted ordinary
+inbound marker and current facts. Research capability changes therefore change
+the native thread fingerprint. Group email omits filesystem skill routing,
+browser procedures, and CLI recipes while retaining resident health guidance
+and the existing sender-authority boundary. Automation instructions keep task
+triggers and essential timing/readback invariants resident; detailed arguments,
+recovery, and projection semantics live in the discovered automation contract.
+Later timing questions require a fresh inspection; successful writes already
+include their own readback and need no redundant verification.
+
 Runtime authority remains independent of advertisement. Hosted transports are
 typed services on `AssistantHostedToolContext`, and each tool checks that service
 again when invoked. Adding a tool therefore requires only:
