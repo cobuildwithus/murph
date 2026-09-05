@@ -222,6 +222,7 @@ export interface HostedExecutionContainerInvokeRequest {
 type HostedExecutionContainerInvokeInput = HostedExecutionContainerInvokeRequest;
 
 export interface RunnerContainerEnsureReadyForProcessingInput {
+  orchestrationAttemptId?: string;
   timeoutMs: number;
   userId: string;
 }
@@ -984,16 +985,20 @@ export class RunnerContainer extends Container {
       if (result.kind === "cleanup_unsettled") {
         emitRunnerContainerStartupFailureObservation({
           cleanupUnsettled: true,
+          orchestrationAttemptId: input.orchestrationAttemptId,
           readinessRequestedAtEpochMs,
           stage: startupFailureObservation.stage,
+          timeoutMs: input.timeoutMs,
         });
       }
       return result;
     } catch (error) {
       emitRunnerContainerStartupFailureObservation({
         cleanupUnsettled: cleanupSettlementTimedOut,
+        orchestrationAttemptId: input.orchestrationAttemptId,
         readinessRequestedAtEpochMs,
         stage: startupFailureObservation.stage,
+        timeoutMs: input.timeoutMs,
       });
       if (cleanupSettlementTimedOut) {
         return { kind: "cleanup_unsettled" };
@@ -4554,8 +4559,10 @@ function hostedRunnerContainerFragmentsOverlap(left: string, right: string): boo
 
 function emitRunnerContainerStartupFailureObservation(input: {
   cleanupUnsettled: boolean;
+  orchestrationAttemptId?: string;
   readinessRequestedAtEpochMs: number;
   stage: RunnerContainerLocalStartupFailureStage;
+  timeoutMs: number;
 }): void {
   try {
     const rawElapsedMs = Date.now() - input.readinessRequestedAtEpochMs;
@@ -4568,6 +4575,10 @@ function emitRunnerContainerStartupFailureObservation(input: {
     emitHostedExecutionStructuredLog({
       component: "container",
       details: {
+        ...(input.orchestrationAttemptId === undefined
+          ? {}
+          : { orchestrationAttemptId: input.orchestrationAttemptId }),
+        runtimeStartupConfirmTimeoutMs: input.timeoutMs,
         runtimeStartupCleanupUnsettled: input.cleanupUnsettled,
         runtimeStartupFailureElapsedMs: elapsedMs,
         runtimeStartupFailureStage: input.stage,
@@ -4749,6 +4760,14 @@ function parseRunnerContainerEnsureReadyForProcessingInput(
   payload: RunnerContainerEnsureReadyForProcessingInput,
 ): RunnerContainerEnsureReadyForProcessingInput {
   return {
+    ...(payload.orchestrationAttemptId === undefined
+      ? {}
+      : {
+          orchestrationAttemptId: requireString(
+            payload.orchestrationAttemptId,
+            "payload.orchestrationAttemptId",
+          ),
+        }),
     timeoutMs: readTimeoutMs(payload.timeoutMs, DEFAULT_RUNNER_READY_TIMEOUT_MS),
     userId: requireString(payload.userId, "payload.userId"),
   };

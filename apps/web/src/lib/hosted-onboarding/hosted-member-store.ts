@@ -259,6 +259,7 @@ export interface HostedMemberMessagingSetupState {
 }
 
 export async function createHostedMember(input: {
+  assistantModelPreference?: HostedMember["assistantModelPreference"];
   billingStatus: HostedMember["billingStatus"];
   memberId: string;
   prisma: Prisma.TransactionClient;
@@ -266,6 +267,9 @@ export async function createHostedMember(input: {
 }): Promise<HostedMemberCoreState> {
   return input.prisma.hostedMember.create({
     data: {
+      ...(input.assistantModelPreference === undefined
+        ? {}
+        : { assistantModelPreference: input.assistantModelPreference }),
       billingStatus: input.billingStatus,
       id: input.memberId,
       // The database default protects legacy writers during a rolling deploy.

@@ -1557,6 +1557,7 @@ function buildAssistantJournalCaptureGuidanceText(
 function buildAssistantVaultFileSendGuidanceText(): string {
   return [
     "Vault file sends:",
+    "- When `send_vault_file` is available, use it for requested attachments in this conversation. For an existing saved file, pass its current vault-relative ref directly; do not copy it into generated-delivery staging.",
     `- Only after this turn establishes an obligation to send a newly generated file now, write its final bytes directly to \`${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename>\` and pass that ref. Do not use runtime staging for "prepare now, maybe send later," and never move or copy existing, user-owned, canonical, or durable files there.`,
     "- On `status: \"pending\"`: say approval is required and the file is not attached; the runtime adds the exact approval link outside model context. Never invent or print a link, or call `finish_without_reply`.",
     "- After a pending send, the runtime owns that exact file. On later approval or confirmation turns, do not list, recreate, rename, delete, overwrite, or call `send_vault_file` again for the same send; let the runtime resume it.",
@@ -1569,8 +1570,8 @@ function buildAssistantSkillRouteHintText(
 ): string {
   const routeLines = [
     "Murph skill router:",
-    "- Specialized skills live at `$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md`. Route by the user's visible outcome and read the primary owner. If routing is ambiguous, inspect at most two candidates; this cap is discovery-only. Then follow explicit handoffs and load every distinct safety or execution owner. Do not preload skills or call a discovery CLI just to route.",
-    "- Setup: murph-onboarding, goal-setup, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough.",
+    "- Skills live at `$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md`. Read the primary owner for the user's visible outcome. If ambiguous, inspect at most two for discovery; then follow handoffs and load each safety/execution owner. Do not preload or use a discovery CLI.",
+    "- Setup: explicit achievable-outcome help (`help me ...`/Goals CTA) -> goal-setup before domain/Commons knowledge; facts -> domain. Also: murph-onboarding, hosted-low-usage, signup-link, experiment-onboarding, behavior-followthrough.",
     "- Automatic meal capture: automatic-meal-capture for the iPhone app, Photos permission, background timing, Meals review, import verification, and photo-only meal enrichment.",
     "- Sleep/readiness: sleep-improvement, circadian-rhythm, sleep-recovery-readiness, hrv-resting-heart-rate, energy-fatigue.",
     "- Sleep safety outranks fatigue/clock routing: snoring/gasping, unrefreshing sleep with enough opportunity, unexplained awakenings, morning headache, sleep attacks, or dangerous daytime sleepiness -> sleep-improvement. If driving/work safety is affected, give immediate safety guidance before coaching.",

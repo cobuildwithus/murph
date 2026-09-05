@@ -1078,7 +1078,10 @@ export class RuntimeProcessingController {
         standbyAllocationReason: "processing_mode_not_default",
       };
     }
-    if (!isTrustedWebDirectRuntimeProcessing(input.input)) {
+    if (
+      !isTrustedWebDirectRuntimeProcessing(input.input)
+      && input.input.conversationWorkPending !== true
+    ) {
       return {
         kind: "ready",
         runnerContainerName: input.exactRunnerContainerName,
@@ -1721,8 +1724,8 @@ export class RuntimeProcessingController {
     }
 
     let readinessRpcDispatched = false;
+    let timeoutMs = RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS;
     try {
-      let timeoutMs = RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS;
       const readinessResult = await runRuntimeProcessingCommandStep({
         budget: input.commandBudget,
         operation: async () => {
@@ -1742,6 +1745,7 @@ export class RuntimeProcessingController {
           );
           readinessRpcDispatched = true;
           return await container.ensureReadyForProcessing!({
+            orchestrationAttemptId: input.input.orchestrationAttemptId,
             timeoutMs,
             userId: input.input.userId,
           });
@@ -1754,6 +1758,7 @@ export class RuntimeProcessingController {
           details: {
             orchestrationAttemptId: input.input.orchestrationAttemptId,
             runtimeProcessingRetryReason: "container_rpc_timeout",
+            runtimeStartupConfirmTimeoutMs: timeoutMs,
             runtimeStartupCleanupUnsettled: true,
             runtimeStartupFailureElapsedMs:
               readBoundedRuntimeStartupFailureElapsedMs(
@@ -1811,6 +1816,7 @@ export class RuntimeProcessingController {
             ...buildHostedRunnerMetadataOnlyErrorDetails(error),
             orchestrationAttemptId: input.input.orchestrationAttemptId,
             runtimeProcessingRetryReason: "container_rpc_timeout",
+            runtimeStartupConfirmTimeoutMs: timeoutMs,
             runtimeStartupFailureElapsedMs:
               readBoundedRuntimeStartupFailureElapsedMs(
                 startupConfirmationStartedAtEpochMs,
@@ -1843,6 +1849,9 @@ export class RuntimeProcessingController {
           ? "command_budget_exhausted"
           : undefined,
         startupConfirmationStartedAtEpochMs,
+        startupConfirmationTimeoutMs: readinessRpcDispatched
+          ? timeoutMs
+          : undefined,
         token: input.token,
       });
     }
@@ -1854,6 +1863,7 @@ export class RuntimeProcessingController {
     input: RuntimeProcessingInput;
     retryReason?: RuntimeProcessingStartFailureRetryReason;
     startupConfirmationStartedAtEpochMs: number;
+    startupConfirmationTimeoutMs?: number;
     token: RunnerWriteFenceToken;
   }): Promise<{
     confirmed: false;
@@ -1869,6 +1879,7 @@ export class RuntimeProcessingController {
           input.startupConfirmationStartedAtEpochMs,
         ),
         stage: input.failureStage,
+        timeoutMs: input.startupConfirmationTimeoutMs,
       },
       token: input.token,
     });
@@ -1882,6 +1893,7 @@ export class RuntimeProcessingController {
     startupFailure?: {
       elapsedMs: number;
       stage: RuntimeStartupCallerFailureStage;
+      timeoutMs?: number;
     };
     token: RunnerWriteFenceToken;
   }): Promise<{
@@ -1902,6 +1914,9 @@ export class RuntimeProcessingController {
         orchestrationAttemptId: input.input.orchestrationAttemptId,
         ...(input.startupFailure === undefined ? {} : {
           runtimeProcessingRetryReason: retryReason,
+          ...(input.startupFailure.timeoutMs === undefined ? {} : {
+            runtimeStartupConfirmTimeoutMs: input.startupFailure.timeoutMs,
+          }),
           runtimeStartupFailureElapsedMs: input.startupFailure.elapsedMs,
           runtimeStartupFailureStage: input.startupFailure.stage,
         }),

@@ -129,7 +129,6 @@ import {
   isJunctionTemporalFeatureResource,
   JUNCTION_TEMPORAL_FEATURE_MAX_OBSERVATIONS_PER_DAY,
   JUNCTION_TEMPORAL_FEATURE_MAX_SAMPLES_PER_DAY,
-  JUNCTION_TEMPORAL_FEATURE_MAX_SAMPLES_PER_IMPORT,
   type JunctionTemporalFeatureObservationQualifiers,
   type JunctionTemporalFeatureResult,
   type JunctionTemporalFeatureSample,
@@ -3410,30 +3409,22 @@ function parseJunctionSparseTimeseriesRecord(
       value,
     });
   }
-  const requiresTimestamp = !intervalBodyResource
-    && resource !== "carbohydrates"
+  const requiresTimestamp = resource !== "carbohydrates"
     && resource !== "heart_rate_alert"
     && resource !== "insulin_injection";
-  const requiresInterval = resource !== "fat";
-  if ((requiresTimestamp && !timestampRaw) || (requiresInterval && (!startRaw || !endRaw))) {
+  if ((requiresTimestamp && !timestampRaw) || !startRaw || !endRaw) {
     return null;
   }
 
   const timestamp = timestampRaw ? normalizeTimestamp(timestampRaw) : undefined;
-  const startAt = startRaw ? normalizeTimestamp(startRaw) : undefined;
-  const endAt = endRaw ? normalizeTimestamp(endRaw) : undefined;
+  const startAt = normalizeTimestamp(startRaw);
+  const endAt = normalizeTimestamp(endRaw);
   if (
-    (!intervalBodyResource && timestampRaw && !timestamp)
-    || (startRaw && !startAt)
-    || (endRaw && !endAt)
-    || (requiresInterval && (!startAt || !endAt))
-    || (startAt && endAt && Date.parse(endAt) < Date.parse(startAt))
+    (timestampRaw && !timestamp)
+    || !startAt
+    || !endAt
+    || Date.parse(endAt) < Date.parse(startAt)
   ) {
-    return null;
-  }
-
-  const observedAtRaw = timestampRaw ?? startRaw;
-  if (!observedAtRaw) {
     return null;
   }
 
@@ -3441,7 +3432,7 @@ function parseJunctionSparseTimeseriesRecord(
     descriptor,
     endAt,
     entry,
-    observedAtRaw,
+    observedAtRaw: timestampRaw ?? startRaw,
     resource,
     startAt,
     value,
@@ -4195,8 +4186,6 @@ function buildJunctionDailyTimeseriesAggregates(input: {
     : undefined;
   const ownsTemporalFeatures = temporalFeatureResource !== undefined
     && input.context.temporalFeatureSourceDay?.resources.includes(input.resource) === true;
-  let temporalFeatureInputCount = 0;
-  let temporalFeatureImportSuppressed = false;
   // A complete-source-day payload is always grouped; its rows are exactly the
   // grouped rows, so an empty grouped envelope or an explicitly empty group
   // data array is a valid authoritative empty rather than a lossy row.
@@ -4281,6 +4270,14 @@ function buildJunctionDailyTimeseriesAggregates(input: {
           resourceContext.sourceProviderSlug,
           JUNCTION_INTERVAL_START_OWNED_TIMESTAMP_PATHS,
         );
+    const resolvedRowDiagnostic = {
+      ...rowDiagnostic,
+      sourceProvider: normalizeKnownJunctionSourceProviderSlug(resourceContext.sourceProviderSlug),
+      timestampKind: classifyJunctionNormalizationTimestampKind(
+        timestamp.observedAtRaw ?? providerTimestamp,
+      ),
+      timestampSemantics: timestamp.timestampSemantics,
+    };
     const sampleAt = resolveJunctionDailyAggregateSampleAt(
       timestamp,
       input.requireExplicitTimestamp,
@@ -4322,16 +4319,7 @@ function buildJunctionDailyTimeseriesAggregates(input: {
         } else {
           reason = "daily.timestamp_or_day_unresolved";
         }
-        throw junctionCalendarRefreshNormalizationError(reason, {
-          ...rowDiagnostic,
-          sourceProvider: normalizeKnownJunctionSourceProviderSlug(
-            resourceContext.sourceProviderSlug,
-          ),
-          timestampKind: classifyJunctionNormalizationTimestampKind(
-            timestamp.observedAtRaw ?? providerTimestamp,
-          ),
-          timestampSemantics: timestamp.timestampSemantics,
-        });
+        throw junctionCalendarRefreshNormalizationError(reason, resolvedRowDiagnostic);
       }
       continue;
     }
@@ -4405,7 +4393,7 @@ function buildJunctionDailyTimeseriesAggregates(input: {
           value,
       })
       : undefined;
-    const legacyDayKeys = new Set<string>();
+    const legacyDayKeys = existing?.legacyDayKeys ?? new Set<string>();
     if (legacyDayKey && legacyDayKey !== dayKey) {
       legacyDayKeys.add(legacyDayKey);
     }
@@ -4445,9 +4433,6 @@ function buildJunctionDailyTimeseriesAggregates(input: {
       }
       existing.sum += value;
       existing.sumSquares += value * value;
-      if (legacyDayKey && legacyDayKey !== dayKey) {
-        existing.legacyDayKeys.add(legacyDayKey);
-      }
       if (sampleAt < existing.firstSampleAt) {
         existing.firstSampleAt = sampleAt;
       }
@@ -4467,127 +4452,100 @@ function buildJunctionDailyTimeseriesAggregates(input: {
       }
     }
 
-    const temporalSourceDay = ownsTemporalFeatures && !temporalFeatureImportSuppressed
+    const temporalSourceDay = ownsTemporalFeatures
       ? input.context.temporalFeatureSourceDay
       : undefined;
     const temporalSampleAt = temporalSourceDay
       ? resolveJunctionTemporalFeatureInstant(
           timestamp,
           temporalSourceDay.timeZone,
-          {
-            ...rowDiagnostic,
-            sourceProvider: normalizeKnownJunctionSourceProviderSlug(
-              resourceContext.sourceProviderSlug,
-            ),
-            timestampKind: classifyJunctionNormalizationTimestampKind(
-              timestamp.observedAtRaw ?? providerTimestamp,
-            ),
-            timestampSemantics: timestamp.timestampSemantics,
-          },
+          resolvedRowDiagnostic,
         )
       : null;
-    if (temporalSourceDay && temporalSampleAt !== null) {
-      temporalFeatureInputCount += 1;
-      if (temporalFeatureInputCount > JUNCTION_TEMPORAL_FEATURE_MAX_SAMPLES_PER_IMPORT) {
-        temporalFeatureImportSuppressed = true;
-        for (const current of temporalAggregates.values()) {
-          delete current.temporalFeatureSamples;
-        }
-      } else {
-        const sourceDay = temporalSourceDay;
-        const vaultDayKey = toLocalDayKey(temporalSampleAt, sourceDay.timeZone);
-        if (vaultDayKey !== sourceDay.dayKey) {
-          // The provider fetched the exact authorized window, so a row that
-          // normalizes outside the target vault day (for example a fallback
-          // timestamp) is a lossy normalization, not out-of-scope data.
-          throw junctionCalendarRefreshNormalizationError(
-            "source_day.outside_authorized_day",
-            {
-              ...rowDiagnostic,
-              sourceProvider: normalizeKnownJunctionSourceProviderSlug(
-                resourceContext.sourceProviderSlug,
-              ),
-              timestampKind: classifyJunctionNormalizationTimestampKind(
-                timestamp.observedAtRaw ?? providerTimestamp,
-              ),
-              timestampSemantics: timestamp.timestampSemantics,
-            },
-          );
-        }
-        const temporalKey = [
-          resourceContext.externalRefResourceType,
-          resourceContext.origin.sourceType ?? "",
-          resourceContext.origin.sourceInstanceId ?? "",
-          sourceDay.dayKey,
-        ].join("\u0000");
-        let temporalAggregate = temporalAggregates.get(temporalKey);
-        if (!temporalAggregate) {
-          const sourceFacet = shortHash([
-            resourceContext.sourceProviderSlug,
-            resourceContext.origin.sourceType ?? "",
-            resourceContext.origin.sourceInstanceId ?? "",
-          ]);
-          temporalAggregate = {
-            authoritativeEmptyCalendarSet: false,
-            dayKey: sourceDay.dayKey,
-            duplicateSampleCount: 0,
-            entry,
-            fidelitySamples: [],
-            firstSampleAt: temporalSampleAt,
-            lastRecordedAt: recordedAt,
-            lastSampleAt: temporalSampleAt,
-            legacyDayKeys: new Set(),
-            maxValue: value,
-            minValue: value,
-            evidencePartRole:
-              `junction-timeseries-temporal-${input.resourceSlug}:${sourceDay.dayKey}:${sourceFacet}`,
-            resourceContext,
-            sampleCount: 0,
-            sum: 0,
-            sumSquares: 0,
-            timestamp,
-            timeZone: sourceDay.timeZone,
-          };
-          temporalAggregates.set(temporalKey, temporalAggregate);
-        }
-        temporalAggregate.sampleCount += 1;
-        temporalAggregate.sum += value;
-        if (temporalSampleAt < temporalAggregate.firstSampleAt) {
-          temporalAggregate.firstSampleAt = temporalSampleAt;
-        }
-        if (temporalSampleAt >= temporalAggregate.lastSampleAt) {
-          temporalAggregate.lastSampleAt = temporalSampleAt;
-          temporalAggregate.lastRecordedAt = recordedAt;
-          temporalAggregate.timestamp = timestamp;
-        }
-        temporalAggregate.minValue = Math.min(temporalAggregate.minValue, value);
-        temporalAggregate.maxValue = Math.max(temporalAggregate.maxValue, value);
-        const temporalFeatureSamples = temporalAggregate.temporalFeatureSamples ?? [];
-        if (temporalFeatureSamples.length >= JUNCTION_TEMPORAL_FEATURE_MAX_SAMPLES_PER_DAY) {
-          temporalAggregate.temporalFeatureInputSuppressed = true;
-          delete temporalAggregate.temporalFeatureSamples;
-        } else {
-          temporalFeatureSamples.push(stripUndefined({
-            recordedAt: temporalSampleAt,
-            value,
-            localMinuteOfDay: resolveJunctionTemporalFeatureVaultLocalMinuteOfDay(
-              temporalSampleAt,
-              sourceDay.timeZone,
-            ),
-          }));
-          temporalAggregate.temporalFeatureSamples = temporalFeatureSamples;
-        }
-      }
+    if (!temporalSourceDay || temporalSampleAt === null) continue;
+
+    const sourceDay = temporalSourceDay;
+    const vaultDayKey = toLocalDayKey(temporalSampleAt, sourceDay.timeZone);
+    if (vaultDayKey !== sourceDay.dayKey) {
+      // The provider fetched the exact authorized window, so a row that
+      // normalizes outside the target vault day (for example a fallback
+      // timestamp) is a lossy normalization, not out-of-scope data.
+      throw junctionCalendarRefreshNormalizationError(
+        "source_day.outside_authorized_day",
+        resolvedRowDiagnostic,
+      );
+    }
+    const temporalKey = [
+      resourceContext.externalRefResourceType,
+      resourceContext.origin.sourceType ?? "",
+      resourceContext.origin.sourceInstanceId ?? "",
+      sourceDay.dayKey,
+    ].join("\u0000");
+    let temporalAggregate = temporalAggregates.get(temporalKey);
+    if (!temporalAggregate) {
+      const sourceFacet = shortHash([
+        resourceContext.sourceProviderSlug,
+        resourceContext.origin.sourceType ?? "",
+        resourceContext.origin.sourceInstanceId ?? "",
+      ]);
+      temporalAggregate = {
+        authoritativeEmptyCalendarSet: false,
+        dayKey: sourceDay.dayKey,
+        duplicateSampleCount: 0,
+        entry,
+        fidelitySamples: [],
+        firstSampleAt: temporalSampleAt,
+        lastRecordedAt: recordedAt,
+        lastSampleAt: temporalSampleAt,
+        legacyDayKeys: new Set(),
+        maxValue: value,
+        minValue: value,
+        evidencePartRole:
+          `junction-timeseries-temporal-${input.resourceSlug}:${sourceDay.dayKey}:${sourceFacet}`,
+        resourceContext,
+        sampleCount: 0,
+        sum: 0,
+        sumSquares: 0,
+        timestamp,
+        timeZone: sourceDay.timeZone,
+      };
+      temporalAggregates.set(temporalKey, temporalAggregate);
+    }
+    temporalAggregate.sampleCount += 1;
+    temporalAggregate.sum += value;
+    if (temporalSampleAt < temporalAggregate.firstSampleAt) {
+      temporalAggregate.firstSampleAt = temporalSampleAt;
+    }
+    if (temporalSampleAt >= temporalAggregate.lastSampleAt) {
+      temporalAggregate.lastSampleAt = temporalSampleAt;
+      temporalAggregate.lastRecordedAt = recordedAt;
+      temporalAggregate.timestamp = timestamp;
+    }
+    temporalAggregate.minValue = Math.min(temporalAggregate.minValue, value);
+    temporalAggregate.maxValue = Math.max(temporalAggregate.maxValue, value);
+    const temporalFeatureSamples = temporalAggregate.temporalFeatureSamples ?? [];
+    if (temporalFeatureSamples.length >= JUNCTION_TEMPORAL_FEATURE_MAX_SAMPLES_PER_DAY) {
+      temporalAggregate.temporalFeatureInputSuppressed = true;
+      delete temporalAggregate.temporalFeatureSamples;
+    } else {
+      temporalFeatureSamples.push(stripUndefined({
+        recordedAt: temporalSampleAt,
+        value,
+        localMinuteOfDay: resolveJunctionTemporalFeatureVaultLocalMinuteOfDay(
+          temporalSampleAt,
+          sourceDay.timeZone,
+        ),
+      }));
+      temporalAggregate.temporalFeatureSamples = temporalFeatureSamples;
     }
   }
 
-  const sortedAggregates = [...aggregates.values()].sort(compareJunctionDailyTimeseriesAggregates);
-  if (temporalFeatureResource && ownsTemporalFeatures) {
+  if (ownsTemporalFeatures) {
     for (const aggregate of [...temporalAggregates.values()].sort(
       compareJunctionDailyTimeseriesAggregates,
     )) {
       const result: JunctionTemporalFeatureResult =
-        temporalFeatureImportSuppressed || aggregate.temporalFeatureInputSuppressed
+        aggregate.temporalFeatureInputSuppressed
           ? { observations: [], status: "suppressed_input_cap" }
           : buildJunctionTemporalFeatures({
             resource: temporalFeatureResource,
@@ -4620,16 +4578,15 @@ function buildJunctionDailyTimeseriesAggregates(input: {
       }
       delete aggregate.temporalFeatureSamples;
     }
-  }
 
-  // A complete-source-day import owns only temporal facets. Its vault-window
-  // samples cover partial provider days, so emitting ordinary observations,
-  // aggregate artifacts, or dense envelopes would supersede the calendar-day
-  // owner's full-day facts with partial revisions.
-  if (ownsTemporalFeatures) {
+    // A complete-source-day import owns only temporal facets. Its vault-window
+    // samples cover partial provider days, so emitting ordinary observations,
+    // aggregate artifacts, or dense envelopes would supersede the calendar-day
+    // owner's full-day facts with partial revisions.
     return [];
   }
 
+  const sortedAggregates = [...aggregates.values()].sort(compareJunctionDailyTimeseriesAggregates);
   if (sortedAggregates.length === 0) {
     pushJunctionEmptyDailyTimeseriesAggregateArtifact(input.context, input.resource, input.resourceSlug);
     return sortedAggregates;

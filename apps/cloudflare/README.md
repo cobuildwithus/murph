@@ -74,11 +74,13 @@ HTTP route. `HOSTED_EXECUTION_STANDBY_MODE` has three strict values:
 - `off` (the default) advertises no slot and retires any still-unclaimed slot.
 - `shadow` keeps one release-scoped ENAM slot ready but never gives it to real
   processing.
-- `allocate` lets only a fence-free, authenticated Web-direct `default` request
+- `allocate` lets fence-free `default` work from authenticated Web-direct
+  ingress or a request carrying authenticated `conversationWorkPending: true`
   claim that one ready slot, immediately starts a replacement in background
   work, and falls back to the ordinary exact-user container when the claim does
-  not finish within 250 ms. Temporal requests and background modes do not claim
-  it. A trusted foreground replacement may claim it after clearing an
+  not finish within 250 ms. Temporal includes that fact only for fresh admitted
+  conversation lag; background-only requests do not claim it. A trusted
+  foreground replacement may claim it after clearing an
   exact-user background fence so it does not reuse a child that is still
   shutting down. In `allocate` mode the standby coordinator is the only
   shell-prewarm owner: the exact-user prewarm hint is skipped so it cannot
@@ -744,3 +746,27 @@ retry or result mutation.
 Deploy smoke pins the 100% Worker version, verifies the response-reported version metadata, and, when enabled by the workflow, runs a signed managed-container smoke that compares the live runner bundle/source fingerprints and public Murph release SHA with `.deploy/runner-bundle/.murph-runner-bundle-manifest.json`. The release SHA identifies the checked-out public base commit even when the protected private workflow composes its private runtime assets into that checkout; the source and bundle fingerprints identify the resulting composed artifact. A missing or malformed public release SHA is rejected. A Cloudflare version id or the private deployment-workflow commit is not release provenance. The same smoke can mint an actual R2 S3 presigned PUT URL, upload a payload larger than 150 MiB from the container, verify the object size through the Worker R2 binding, and delete the smoke object.
 
 See [DEPLOY.md](./DEPLOY.md) for the exact GitHub environment surface, lifecycle rules, and smoke workflow.
+
+### Astra model catalog
+
+The native runner image has a default Luna/Terra/Sol catalog and an expanded
+`.astra` catalog with `gpt-6-astra` and OpenAI Flex support. The runtime chooses
+the latter only from Web's explicit Max/OpenAI workspace authorization. Missing
+authority, Edge, group, and Venice runtimes retain the default catalog and its
+existing delegation choices. The
+pinned Linux Codex 0.151.0 catalog omits Astra, so the image adds a compatibility
+entry using Sol's shared Responses capabilities when Astra is absent. Murph
+supplies its own base instructions for each turn. Existing native Astra metadata
+is preserved; remove the compatibility branch when the Linux catalog includes it.
+The Astra context window remains at most 272,000 tokens, verified while building the
+image. This bound lets allowance accounting price cumulative Codex turn and
+subagent usage without mistaking multiple requests for one long-context request.
+Changing this bound requires request-level long-context metering first. Astra
+selection remains owned by the Web Max-plan eligibility check. Venice mappings
+remain limited to Luna, Terra, and Sol.
+
+## Workspace restore benchmark
+
+See [the restore benchmark](scripts/benchmark-workspace-restore.md) for a
+synthetic 50 MiB encrypted snapshot, real local HTTP transport, production
+restore timings, content verification, and a fixed-resource Linux command.

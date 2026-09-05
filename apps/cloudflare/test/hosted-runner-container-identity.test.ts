@@ -918,7 +918,22 @@ describe("hosted runner container identity", () => {
     expect(invokedContainerNames).toEqual([]);
   });
 
-  it("persists an opaque stop target before binding a claimed standby and opening the write fence", async () => {
+  it.each([
+    {
+      label: "Web direct",
+      request: {
+        orchestration: { triggeredByWebDirect: true },
+        orchestrationAttemptId: "web-ingress-11111111-1111-4111-8111-111111111111",
+      },
+    },
+    {
+      label: "Temporal conversation",
+      request: {
+        conversationWorkPending: true,
+        orchestrationAttemptId: "temporal-conversation-standby",
+      },
+    },
+  ] as const)("persists an opaque stop target before binding a claimed standby and opening the write fence for $label", async ({ request }) => {
     const durable = createRunnerDurableState();
     const stateStore = new RunnerStateStore(durable.state);
     const slotName =
@@ -957,9 +972,7 @@ describe("hosted runner container identity", () => {
     });
 
     const response = await controller.ensureForUser({
-      orchestration: { triggeredByWebDirect: true },
-      orchestrationAttemptId:
-        "web-ingress-11111111-1111-4111-8111-111111111111",
+      ...request,
       userId: TEST_USER_ID,
     });
     expect(response).toMatchObject({
@@ -979,8 +992,7 @@ describe("hosted runner container identity", () => {
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         details: expect.objectContaining({
-          orchestrationAttemptId:
-            "web-ingress-11111111-1111-4111-8111-111111111111",
+          orchestrationAttemptId: request.orchestrationAttemptId,
           standbyAllocationElapsedMs: expect.any(Number),
           standbyAllocationOutcome: "claimed",
           standbyAllocationReason: "bind_completed",
@@ -994,6 +1006,8 @@ describe("hosted runner container identity", () => {
       standbyAllocationOutcome: "claimed",
       standbyAllocationReason: "bind_completed",
     });
+    expect(invocationService.invokedInputs[0]?.orchestration?.triggeredByWebDirect)
+      .toBe("orchestration" in request ? true : false);
   });
 
   it.each([
@@ -1036,6 +1050,24 @@ describe("hosted runner container identity", () => {
         orchestration: { triggeredByWebDirect: true },
         orchestrationAttemptId:
           "web-ingress-44444444-4444-4444-8444-444444444444",
+        processingMode: "inbox_media_retention",
+      },
+      "processing_mode_not_default",
+    ],
+    [
+      "conversation marker on system-mailbox work",
+      {
+        conversationWorkPending: true,
+        orchestrationAttemptId: "temporal-conversation-system-mailbox",
+        processingMode: "system_mailbox",
+      },
+      "processing_mode_not_default",
+    ],
+    [
+      "conversation marker on retention work",
+      {
+        conversationWorkPending: true,
+        orchestrationAttemptId: "temporal-conversation-retention",
         processingMode: "inbox_media_retention",
       },
       "processing_mode_not_default",
@@ -1251,7 +1283,10 @@ describe("hosted runner container identity", () => {
     ).toBeGreaterThanOrEqual(HOSTED_STANDBY_CLAIM_TIMEOUT_MS - 1);
   });
 
-  it("keeps a late standby bind as the exact retry target", async () => {
+  it.each([
+    { processingMode: "system_mailbox" },
+    { conversationWorkPending: true },
+  ] as const)("keeps a late standby bind as the exact retry target for %j", async (retryRequest) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const durable = createRunnerDurableState();
@@ -1321,8 +1356,8 @@ describe("hosted runner container identity", () => {
       claimDelayMs + bindDelayMs - HOSTED_STANDBY_CLAIM_TIMEOUT_MS,
     );
     const retained = controller.ensureForUser({
+      ...retryRequest,
       orchestrationAttemptId: "temporal-standby-bind-retained",
-      processingMode: "system_mailbox",
       userId: TEST_USER_ID,
     });
     await vi.waitFor(() =>

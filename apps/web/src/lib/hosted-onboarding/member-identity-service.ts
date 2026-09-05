@@ -69,6 +69,9 @@ import {
   acquireHostedLinqParticipantPhoneLockTx,
   type HostedLinqParticipantContact,
 } from "./linq-participant-contact";
+import {
+  resolveHostedLinqProductionCanaryAssistantModelPreference,
+} from "./linq-production-canary";
 
 export {
   createHostedPrivyIdentityConflictError,
@@ -198,6 +201,10 @@ export async function ensureHostedMemberForPhoneResolutionTx(input: {
   const memberId = generateHostedMemberId();
 
   const createdMember = await createHostedMember({
+    assistantModelPreference:
+      resolveHostedLinqProductionCanaryAssistantModelPreference(
+        input.phoneNumber,
+      ),
     billingStatus: HostedBillingStatus.not_started,
     memberId,
     prisma: input.prisma,
@@ -292,6 +299,11 @@ export async function ensureHostedMemberForPendingLinqParticipantContactTx(input
   const memberId = generateHostedMemberId();
 
   const createdMember = await createHostedMember({
+    assistantModelPreference: input.contact.kind === "phone"
+      ? resolveHostedLinqProductionCanaryAssistantModelPreference(
+          input.contact.value,
+        )
+      : undefined,
     billingStatus: HostedBillingStatus.not_started,
     memberId,
     prisma: input.prisma,

@@ -42,10 +42,9 @@ const PROTECTED_PRODUCTION_DEPLOYMENT_TYPES = new Set([
   "prod_deployment_urls_and_all_previews",
 ]);
 
-// Keep this workflow helper on direct REST calls: the GitHub deployment_status job
-// needs only Vercel's alias, deployment, and project endpoints, and the response
-// contracts are pinned by focused tests without adding SDK/runtime setup to the
-// deploy gate.
+// Keep these workflow helpers on direct REST calls. They need only Vercel's alias,
+// deployment, domain, and project endpoints, and focused tests pin the response
+// contracts without adding SDK/runtime setup to a production gate.
 function extractVercelAliasDeploymentRef(
   aliasResponse: unknown,
 ): VercelAliasDeploymentRef | undefined {
@@ -174,17 +173,60 @@ export async function verifyVercelProductionDeployment(
     input,
     fetchImpl,
   );
+
+  return verifyVercelProductionDomains(
+    environment,
+    verifiedCandidate,
+    fetchImpl,
+  );
+}
+
+export async function verifyCurrentVercelProductionDeployment(
+  environment: VercelAliasShaEnvironment,
+  expectedGitSha: string,
+  fetchImpl: FetchLike = fetch,
+): Promise<VerifiedVercelProductionDeployment> {
   const token = readRequiredEnvironment(
     environment,
     "HOSTED_WEB_VERCEL_TOKEN",
   );
-  const configuredProjectId = readRequiredEnvironment(
+  const aliasResponse = await fetchVercelJson(
+    buildVercelAliasUrl(environment),
+    token,
+    fetchImpl,
+    "alias",
+  );
+  const deploymentRef = extractVercelAliasDeploymentRef(aliasResponse);
+  if (deploymentRef === undefined) {
+    throw new Error("Vercel alias response did not include a deployment id or url.");
+  }
+  const verifiedCandidate = await verifyVercelProductionDeploymentRef(
+    environment,
+    deploymentRef.value,
+    expectedGitSha,
+    fetchImpl,
+  );
+
+  return verifyVercelProductionDomains(
+    environment,
+    verifiedCandidate,
+    fetchImpl,
+  );
+}
+
+async function verifyVercelProductionDomains(
+  environment: VercelAliasShaEnvironment,
+  verifiedCandidate: { deploymentId: string; gitSha: string },
+  fetchImpl: FetchLike,
+): Promise<VerifiedVercelProductionDeployment> {
+  const token = readRequiredEnvironment(environment, "HOSTED_WEB_VERCEL_TOKEN");
+  const projectId = readRequiredEnvironment(
     environment,
     "HOSTED_WEB_VERCEL_PROJECT_ID",
   );
 
   const productionDomains = await listVercelProductionDomains(
-    configuredProjectId,
+    projectId,
     environment,
     token,
     fetchImpl,
@@ -260,21 +302,30 @@ async function verifyVercelProductionDeploymentCandidate(
   input: VercelProductionDeploymentInput,
   fetchImpl: FetchLike,
 ): Promise<{ deploymentId: string; gitSha: string }> {
-  const token = readRequiredEnvironment(
+  const deploymentHost = resolveExactDeploymentHost(input.deploymentUrl);
+
+  return verifyVercelProductionDeploymentRef(
     environment,
-    "HOSTED_WEB_VERCEL_TOKEN",
+    deploymentHost,
+    input.expectedGitSha,
+    fetchImpl,
   );
+}
+
+async function verifyVercelProductionDeploymentRef(
+  environment: VercelAliasShaEnvironment,
+  deploymentRef: string,
+  expectedGitShaInput: string,
+  fetchImpl: FetchLike,
+): Promise<{ deploymentId: string; gitSha: string }> {
+  const token = readRequiredEnvironment(environment, "HOSTED_WEB_VERCEL_TOKEN");
   const configuredProjectId = readRequiredEnvironment(
     environment,
     "HOSTED_WEB_VERCEL_PROJECT_ID",
   );
-  const deploymentHost = resolveExactDeploymentHost(input.deploymentUrl);
-  const expectedGitSha = resolveExpectedGitSha(input.expectedGitSha);
+  const expectedGitSha = resolveExpectedGitSha(expectedGitShaInput);
   const deploymentResponse = await fetchVercelJson(
-    buildVercelDeploymentUrl(
-      deploymentHost,
-      environment,
-    ),
+    buildVercelDeploymentUrl(deploymentRef, environment),
     token,
     fetchImpl,
     "deployment",

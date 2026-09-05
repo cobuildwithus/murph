@@ -1,8 +1,47 @@
 # Reliability
 
-Last verified: 2026-09-02
+Last verified: 2026-09-04
 
 ## Current Guardrails
+
+- Runtime-owned Linq iMessages with code `4001` and the exact terminal
+  reason `Message send failed` may resend each failed provider message once.
+  The existing delivery-message row owns the permanent attempt timestamp and
+  original lookup key; a parent delivery lock serializes competing claims.
+  Acceptance replaces the existing active message key (and matching parent
+  scalar key), preserving the established receipt-reader contract. Receipt
+  updates recheck that active key after acquiring the parent lock.
+  Duplicate webhooks, callback replay, and a failed or transport-ambiguous
+  replacement never create another attempt. The original failure remains
+  observable, while replacement receipts advance the same logical delivery;
+  receipts for a replaced original cannot regress it. Group multi-message
+  delivery retries only the failed part and preserves no-receipt status.
+  Recovery runs after failure ingestion and after runtime acceptance to cover
+  both receipt/acceptance arrival orders. It is limited to deliveries accepted
+  within 24 hours and current configured sender, route, account access, and
+  line/chat egress policy. Read the exact failed outbound through the official
+  SDK (three-second limit), then claim in a short database-only transaction,
+  then resend once (five-second limit, SDK retries disabled) into that same
+  chat with a stable retry idempotency key. Retrieved content stays in memory.
+  Text, native links, and non-audio attachments preserve their send shape;
+  voice memos, app cards, absent/expired content, and other non-reconstructible
+  formats retain the original failure instead of changing their semantics.
+  Web-owned onboarding sends and manual/provider-only sends retain their
+  existing recovery owners. Other `4001` reasons and `4006` remain excluded
+  because they can still deliver late. Scheduling failure cannot invalidate an
+  accepted runtime handoff. An unavailable provider response or interrupted
+  post-dispatch recording may leave failure evidence unresolved; the consumed
+  claim deliberately prevents a further resend.
+  The post-response acceptance check performs one exact failed-delivery lookup
+  per provider ID (at most ten, sequentially), with no provider work on normal
+  success. Recovery reads at most eleven child rows to reject an oversized
+  delivery, reuses bounded canonical access reads, and opens at most one
+  transaction/connection per invocation at a time. Network calls occur between
+  the claim and acceptance transactions; there is no collection worker,
+  scheduler, or new retry queue.
+  Apply the additive delivery-message migration before deploying the new Web
+  reader/writer. Existing Web readers continue using the active message key;
+  the new nullable fields do not require a Cloudflare runtime deployment.
 
 - Keep behavior deterministic and documented as the first modules are added.
 - Prefer explicit failure paths and actionable errors over silent fallback behavior.
@@ -21,17 +60,21 @@ Last verified: 2026-09-02
   missing verifier before database authority or SQL, and recovery must roll
   forward to the floor or newer rather than re-running an older base-domain-only
   workflow.
-- The Linq production canary runs only after the same exact Vercel production
-  proof succeeds for a protected-main deployment. One fixed Photon identity
-  starts a three-turn private iMessage conversation, and every Murph reply must
-  arrive in under twenty seconds. That workflow remains the canary's latency
-  owner: the Web reply-latency email monitor resolves the same configured
+- The Linq production canary runs from one staggered hourly schedule only after
+  the same exact Vercel production proof succeeds for the scheduled
+  protected-main revision. Manual dispatch remains available for recovery. One
+  fixed Photon identity starts a three-turn private iMessage conversation, and
+  every Murph reply must arrive in under twenty seconds. The canary member's
+  existing assistant-model
+  preference selects GPT-5.6 Luna for its runtime turns without changing the
+  model selected for ordinary members. That workflow remains the canary's
+  latency owner: the Web reply-latency email monitor resolves the same configured
   identity through its canonical blind-index lookup and excludes its current
   member from both the initial health read and the pre-send recheck. The
-  workflow is non-canceling and serialized; an older deployment skips when the
-  production alias has advanced. Before the first send, a dedicated fixed-target
-  Web route clears only that identity's admission rows and fully pre-provider
-  instant-reply claim, then invokes the canonical account-deletion owner.
+  workflow is non-canceling and serialized; a scheduled revision skips when the
+  production alias has not converged. Before the first send, a dedicated
+  fixed-target Web route clears only that identity's admission rows and fully
+  pre-provider instant-reply claim, then invokes the canonical account-deletion owner.
   Completed delivery evidence is preserved, and any provider-entered or
   ambiguous claim blocks the reset. The route has no target input and accepts
   only its dedicated constant-time bearer secret. Provider, reset, target, and
@@ -469,9 +512,12 @@ Last verified: 2026-09-02
 - Cloudflare standby allocation is an optional one-slot optimization, not a
   scheduler. `off` is the source-controlled default, `shadow` maintains and
   re-proves one current-release ENAM slot without allocating it, and `allocate`
-  offers one 250 ms claim/bind deadline only to a fence-free, authenticated
-  Web-direct `default` request. Temporal and background requests keep the
-  ordinary exact-user target. After foreground preemption has cleared an
+  offers one 250 ms claim/bind deadline to fence-free `default` work from
+  authenticated Web-direct ingress or an authenticated request carrying
+  `conversationWorkPending: true`. Temporal derives that positive-only fact
+  from fresh admitted conversation lag on every attempt. System-only work,
+  scheduled default work, and provider/runtime wakes without conversation lag
+  keep the ordinary exact-user target. After foreground preemption has cleared an
   exact-user background fence, the trusted foreground replacement may claim
   the ready standby instead of reusing the child while it shuts down. A miss
   before slot ownership uses the same exact-user fallback; an ambiguous bind
@@ -1356,13 +1402,29 @@ Last verified: 2026-09-02
   acknowledged. Because the device-sync SQLite store is intentionally excluded
   from hosted snapshots, a replacement runner rebuilds from those owners; it
   never projects local retry timing into `nextReconcileAt`. Per-connection
-  mailbox ordering and scheduler scoping
-  prevent a future retry for one connection from blocking or advancing due work
-  for another. A later due webhook for that same connection may admit the older
-  exact retained mailbox item so newly dirty data can enter the local worker
-  without waiting behind a historical retry. That webhook remains available for
-  an exact continuation only when post-checkpoint acknowledgement reports a
-  newer dirty revision and the retained job hints prove the next pass has
+  mailbox ordering and scheduler scoping prevent a future retry for one
+  connection from blocking or advancing due work for another. After
+  post-checkpoint retention transfers an imported device wake to the local
+  continuation owner, the existing runtime mailbox item carries that ownership
+  through pending, sending, recording, retryable recording, and preemption
+  transitions. The marker disappears only when the existing completion owner
+  removes the item. Restore promotes the exact legacy pending retained-job shape
+  to this marker so already-owned work is not stranded during rollout; all later
+  ownership is marker-based rather than status-derived. Runtime checkpoint
+  progress therefore keeps the first
+  ordinary pending sequence as the handled-frontier blocker and separately
+  publishes the sorted exact device-sync continuation sequences. The projection
+  admits at most one owner per connection and is capped by the existing
+  100-connection complete-snapshot hydration authority. A malformed owner,
+  duplicate connection or sequence, impossible imported sequence, or overflow
+  invalidates the whole projection: marked items remain ordinary blockers and
+  Web receives no continuation owner set. A payload-retired duplicate is
+  recoverable when that exact owner set names its sequence, independently of
+  another connection's position in the global frontier. A later due webhook for that same connection may
+  admit the older exact retained mailbox item so newly dirty data can enter the
+  local worker without waiting behind a historical retry. That webhook remains
+  available for an exact continuation only when post-checkpoint
+  acknowledgement reports a newer dirty revision and the retained job hints prove the next pass has
   admission capacity. Every accepted dirty append advances that revision,
   including payload-only work accepted after the pass fetched its input, while
   ingress still coalesces mailbox delivery for an already-dirty connection.
@@ -1384,6 +1446,13 @@ Last verified: 2026-09-02
   `device-sync.maintenance_failed`, and activity scheduling uses
   `assistant.device_activity_automation_failed`; none increments the
   failed-attempt metric.
+  Junction sync-result metadata preserves the existing historical progress and
+  coverage keys before optional diagnostics when the 16-entry envelope fills.
+  The provider owner supplies that priority to the shared sanitized merge for
+  success, failure, and coverage composition. Patch values and explicit null
+  clearing remain authoritative; secret filtering and size limits still apply.
+  This prevents local metadata eviction from manufacturing a canonical apply
+  conflict, without weakening Web's version or historical-progress fences.
   Every hosted device-sync lane also enqueues a best-effort
   `device-sync.pass_started` marker before snapshot/provider work and a paired
   `device-sync.pass_finished` marker before returning or rethrowing. Both use
@@ -1842,17 +1911,12 @@ Last verified: 2026-09-02
   error-code-independent stalls. Conversation rows with a non-null
   `consumed_at` are terminal and are excluded before both head selection and the
   lane's `COUNT(*) OVER()`; system-lane selection remains unchanged. A system
-  `device-sync.wake` head covered by the workspace's canonical
-  `hostedMailboxSystemImportedSeq` ages from the later of its creation and the
-  scheduled wake. The runtime keeps that device deadline in the canonical
-  model-free `nextWakeAt` selection and projects an independent assistant
-  deadline through `nextDefaultProcessingWakeAt`, so orchestration retains both
-  owners without polling unchanged system progress. The first live system item
-  above the imported frontier keeps its own creation-time clock, and an absent,
-  malformed, behind-head, or beyond-high-water imported frontier cannot defer
-  the head. Other system work still ages from creation, and a covered device
-  retry becomes anomalous when it remains pending for 15 minutes after that
-  scheduled runtime opportunity.
+  head ages from its accepted mailbox creation time. Import and unrelated
+  checkpoint or wake changes cannot reset that clock. The independent device
+  and assistant wake projections remain scheduler inputs, not per-item progress
+  evidence. Advancing the canonical handling frontier exposes the next live
+  head's own age. A mailbox can be clear after durable transfer into a retained
+  operation; this monitor does not establish that retained device work completed.
   An active runtime is otherwise
   anomalous when the resulting oldest live item beyond that high-water remains
   pending for at least 15 minutes. Eligibility uses the canonical

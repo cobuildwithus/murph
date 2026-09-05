@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import {
@@ -112,6 +112,65 @@ describe("time helpers", () => {
       "Invalid ISO date-time",
     );
   });
+
+  it("reuses successful explicit timezone resolutions across mixed history", () => {
+    const zones = ["Asia/Kathmandu", "Pacific/Chatham"];
+    const expected = zones.map((timeZone) => new Intl.DateTimeFormat("en-US", {
+      timeZone,
+    }).resolvedOptions().timeZone);
+    const NativeDateTimeFormat = Intl.DateTimeFormat;
+    const formatter = vi.spyOn(Intl, "DateTimeFormat").mockImplementation(
+      function (locales, options) { return new NativeDateTimeFormat(locales, options); },
+    );
+    try {
+      for (let index = 0; index < 100; index += 1) {
+        for (const [zoneIndex, zone] of zones.entries()) {
+          expect(normalizeIanaTimeZone(` ${zone} `)).toBe(expected[zoneIndex]);
+        }
+      }
+      expect(formatter).toHaveBeenCalledTimes(2);
+      expect(normalizeIanaTimeZone("Mars/Olympus")).toBeNull();
+      expect(normalizeIanaTimeZone("")).toBeNull();
+      expect(normalizeIanaTimeZone(undefined)).toBeNull();
+      expect(normalizeIanaTimeZone("Asia/Kathmandu")).toBe(expected[0]);
+      expect(formatter).toHaveBeenCalledTimes(3);
+    } finally {
+      formatter.mockRestore();
+    }
+  });
+
+  it("bounds retained timezone spellings and revalidates evicted inputs", () => {
+    const zones = Intl.supportedValuesOf("timeZone").slice(0, 65);
+    expect(zones).toHaveLength(65);
+    const first = zones[0];
+    const last = zones[64];
+    const expected = new Intl.DateTimeFormat("en-US", { timeZone: first })
+      .resolvedOptions().timeZone;
+    for (const zone of zones) normalizeIanaTimeZone(zone);
+    const NativeDateTimeFormat = Intl.DateTimeFormat;
+    const formatter = vi.spyOn(Intl, "DateTimeFormat").mockImplementation(
+      function (locales, options) { return new NativeDateTimeFormat(locales, options); },
+    );
+    try {
+      expect(normalizeIanaTimeZone(last)).not.toBeNull();
+      expect(formatter).not.toHaveBeenCalled();
+      expect(normalizeIanaTimeZone(first)).toBe(expected);
+      expect(normalizeIanaTimeZone(first)).toBe(expected);
+      expect(formatter).toHaveBeenCalledTimes(1);
+    } finally {
+      formatter.mockRestore();
+    }
+  });
+
+  it.each(["UTC", "utc", "US/Eastern", "America/New_York", "Etc/GMT+5", "Asia/Kolkata"])(
+    "preserves the platform's timezone normalization for %s",
+    (timeZone) => {
+      const expected = new Intl.DateTimeFormat("en-US", { timeZone })
+        .resolvedOptions().timeZone;
+      expect(normalizeIanaTimeZone(timeZone)).toBe(expected);
+      expect(normalizeIanaTimeZone(` ${timeZone} `)).toBe(expected);
+    },
+  );
 
   it("resolves floating timestamps independently across timezone transitions", () => {
     expect(

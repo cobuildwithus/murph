@@ -76,6 +76,7 @@ import {
 import {
   readHostedSystemMailboxState,
   resolveHostedSystemMailboxHandledThroughSeq,
+  resolveHostedSystemMailboxProgress,
   type HostedSystemMailboxPendingItem,
   updateHostedSystemMailboxState,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
@@ -3433,6 +3434,7 @@ describe("hosted system mailbox notification execution context", () => {
     try {
       await enqueueHostedSystemMailboxItem({
         item: createResolvedDeviceSyncItem({
+          dedupeKey: wake.eventId,
           id: "mailbox_item_system_device_sync_exact_retry",
         }),
         vaultRoot: workspace.vaultRoot,
@@ -3483,6 +3485,7 @@ describe("hosted system mailbox notification execution context", () => {
       expect(retainedState.pending).toEqual([
         expect.objectContaining({
           attemptCount: 1,
+          deviceSyncContinuationOwner: true,
           itemId: "mailbox_item_system_device_sync_exact_retry",
           nextAttemptAt: retryAt,
           postCheckpointRecord: null,
@@ -3490,6 +3493,34 @@ describe("hosted system mailbox notification execution context", () => {
           wake: retainedWake,
         }),
       ]);
+
+      const blockingWake = buildHostedExecutionDeviceSyncWake({
+        connectionId: "dsc_exact_retry_blocker",
+        eventId: "device-sync.wake:exact-retry-blocker",
+        expectedConnectedAt: FIXED_NOW,
+        occurredAt: FIXED_NOW,
+        provider: "oura",
+        reason: "reconcile_due",
+        userId: "member_123",
+      });
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedDeviceSyncItem({
+          dedupeKey: blockingWake.eventId,
+          id: "mailbox_item_system_device_sync_exact_retry_blocker",
+          laneSeq: "9",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: blockingWake,
+      });
+      expect(resolveHostedSystemMailboxProgress({
+        importedSeq: "9",
+        now: retryAt,
+        state: await readHostedSystemMailboxState(workspace.vaultRoot),
+      })).toEqual({
+        deviceSyncContinuationSeqs: ["1"],
+        firstPendingSeq: "9",
+        handledThroughSeq: "8",
+      });
 
       const retryPrepared = await prepareHostedSystemMailboxItemForCheckpoint({
         allowedRouteActions: ["run-device-sync-wake"],
@@ -3502,7 +3533,17 @@ describe("hosted system mailbox notification execution context", () => {
       });
       assert.equal(retryPrepared?.status, "processed");
       assert.equal(retryPrepared.item.attemptCount, 2);
+      assert.equal(retryPrepared.item.deviceSyncContinuationOwner, true);
       assert.deepEqual(retryPrepared.item.wake, retainedWake);
+      expect(resolveHostedSystemMailboxProgress({
+        importedSeq: "9",
+        now: retryAt,
+        state: await readHostedSystemMailboxState(workspace.vaultRoot),
+      })).toEqual({
+        deviceSyncContinuationSeqs: ["1"],
+        firstPendingSeq: "9",
+        handledThroughSeq: "8",
+      });
 
       await expect(recordHostedSystemMailboxItemAfterCheckpoint({
         item: retryPrepared.item,
@@ -3510,10 +3551,23 @@ describe("hosted system mailbox notification execution context", () => {
         vaultRoot: workspace.vaultRoot,
       })).resolves.toEqual({
         failed: 0,
-        nextWakeAt: null,
+        nextWakeAt: expect.any(String),
+        nextWakeReason: "device-sync.reconcile",
         recorded: 0,
       });
-      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending).toEqual([]);
+      const completedState = await readHostedSystemMailboxState(workspace.vaultRoot);
+      expect(completedState.pending.map((item) => item.itemId)).toEqual([
+        "mailbox_item_system_device_sync_exact_retry_blocker",
+      ]);
+      expect(resolveHostedSystemMailboxProgress({
+        importedSeq: "9",
+        now: retryAt,
+        state: completedState,
+      })).toEqual({
+        deviceSyncContinuationSeqs: [],
+        firstPendingSeq: "9",
+        handledThroughSeq: "8",
+      });
     } finally {
       await workspace.cleanup();
     }
@@ -6338,12 +6392,13 @@ function createResolvedCodexAuthRuntimeControlItem(
 }
 
 function createResolvedDeviceSyncItem(overrides: Partial<{
+  dedupeKey: string;
   id: string;
   laneSeq: string;
 }> = {}): HostedMailboxResolvedImportItem {
   const item: HostedMailboxItem = {
     createdAt: FIXED_NOW,
-    dedupeKey: "device-sync.wake:yield",
+    dedupeKey: overrides.dedupeKey ?? "device-sync.wake:yield",
     expiresAt: null,
     id: overrides.id ?? "mailbox_item_system_device_sync",
     kind: "device-sync.wake",

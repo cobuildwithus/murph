@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { constants, existsSync, readdirSync, readFileSync } from "node:fs";
 import { access, chmod, copyFile, cp, mkdir, mkdtemp, readFile, rename, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -187,7 +187,11 @@ const MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN_ENV =
   "MURPH_RUNNER_BUNDLE_TEST_PARSER_TOOLCHAIN";
 const HOSTED_LOCAL_CODEX_MODEL_CATALOG_FILE =
   "codex-model-catalog.openai-flex.json";
-const HOSTED_LOCAL_OPENAI_FLEX_MODEL_SLUG = "gpt-5.6-terra";
+const HOSTED_LOCAL_OPENAI_PRODUCT_MODEL_SLUGS = [
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
+] as const;
 const HOSTED_LOCAL_OPENAI_FLEX_SERVICE_TIER = {
   id: "flex",
   name: "Flex",
@@ -2315,7 +2319,7 @@ async function findDockerCliPluginSourceDir(input: {
     }
 
     try {
-      await access(candidate);
+      await access(path.join(candidate, "docker-buildx"), constants.X_OK);
       return candidate;
     } catch {
       continue;
@@ -2546,30 +2550,31 @@ function buildHostedLocalOpenAiCodexModelCatalogText(rawCatalog: string): string
     throw new Error("Hosted local dev received a Codex model catalog without a models array.");
   }
 
-  const targetModel = parsed.models
-    .filter(isRecord)
-    .find((candidate) => candidate.slug === HOSTED_LOCAL_OPENAI_FLEX_MODEL_SLUG);
-  if (!targetModel) {
-    throw new Error(
-      `Hosted local dev Codex model catalog is missing ${HOSTED_LOCAL_OPENAI_FLEX_MODEL_SLUG}.`,
-    );
+  const catalogModels = parsed.models.filter(isRecord);
+  for (const slug of HOSTED_LOCAL_OPENAI_PRODUCT_MODEL_SLUGS) {
+    const targetModel = catalogModels.find((candidate) => candidate.slug === slug);
+    if (!targetModel) {
+      throw new Error(
+        `Hosted local dev Codex model catalog is missing ${slug}.`,
+      );
+    }
+
+    const serviceTiers = Array.isArray(targetModel.service_tiers)
+      ? targetModel.service_tiers
+      : [];
+    const hasFlexTier = serviceTiers
+      .filter(isRecord)
+      .some((candidate) => candidate.id === HOSTED_LOCAL_OPENAI_FLEX_SERVICE_TIER.id);
+    targetModel.service_tiers = hasFlexTier
+      ? serviceTiers
+      : [
+        ...serviceTiers,
+        HOSTED_LOCAL_OPENAI_FLEX_SERVICE_TIER,
+      ];
+    targetModel.tool_mode = "code_mode";
   }
 
-  const serviceTiers = Array.isArray(targetModel.service_tiers)
-    ? targetModel.service_tiers
-    : [];
-  const hasFlexTier = serviceTiers
-    .filter(isRecord)
-    .some((candidate) => candidate.id === HOSTED_LOCAL_OPENAI_FLEX_SERVICE_TIER.id);
-  targetModel.service_tiers = hasFlexTier
-    ? serviceTiers
-    : [
-      ...serviceTiers,
-      HOSTED_LOCAL_OPENAI_FLEX_SERVICE_TIER,
-    ];
-
-  const deploySmokeModel = parsed.models
-    .filter(isRecord)
+  const deploySmokeModel = catalogModels
     .find((candidate) => candidate.slug === HOSTED_LOCAL_DEPLOY_SMOKE_MODEL_SLUG);
   if (deploySmokeModel) {
     Object.assign(deploySmokeModel, {
@@ -2584,8 +2589,7 @@ function buildHostedLocalOpenAiCodexModelCatalogText(rawCatalog: string): string
       use_responses_lite: false,
     });
   } else {
-    const templateModel = parsed.models
-      .filter(isRecord)
+    const templateModel = catalogModels
       .find((candidate) => candidate.slug === HOSTED_LOCAL_DEPLOY_SMOKE_TEMPLATE_MODEL_SLUG);
     if (!templateModel) {
       throw new Error(

@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-09-02
+Last verified: 2026-09-04
 
 ## Decision
 
@@ -1526,18 +1526,16 @@ side table or lane high-water advance past gaps. The runtime-progress monitor
 uses that same terminal distinction without redefining the contiguous floor:
 conversation candidates above the effective floor must still have
 `consumed_at IS NULL`, while system-lane candidates retain their existing
-live-row semantics. A `device-sync.wake` system head covered by the workspace's
-canonical `hostedMailboxSystemImportedSeq` uses the later of its mailbox
-creation time and its canonical model-free `nextWakeAt` as its progress origin.
-The workspace stores an independent assistant deadline in
-`nextDefaultProcessingWakeAt`, so assistant work does not replace the device
-owner and both remain visible to orchestration. The first live system item
-above the imported frontier independently keeps its creation-time origin; an
-absent, malformed, behind-head, or beyond-high-water frontier fails closed to
-the head's creation time. Covered work is therefore not stalled before its
-next runtime opportunity, but becomes
-alertable 15 minutes after it is due.
-Non-device system heads continue to age from mailbox creation. The selected
+live-row semantics. Every unhandled system head ages from mailbox creation.
+Import, workspace version, progress generation, and workspace-wide wake changes
+cannot establish completion or a deferral for that particular item. The runtime
+still projects independent model-free and assistant deadlines through `nextWakeAt`
+and `nextDefaultProcessingWakeAt`; those facts select future runtime opportunities.
+Once the canonical handling frontier advances, the next live item uses its own
+creation time. Durable transfer into a retained device operation can retire its
+mailbox input before the operation finishes, so a clear mailbox does not establish
+that every retained operation completed. Retained-operation health remains the
+responsibility of its existing device owner. The selected
 head and `COUNT(*) OVER()` come from that one lane-aware predicate. A stamped
 conversation row is terminal, not usage-resume evidence; only staging, provider
 start, or accepted delivery can establish post-denial execution for a remaining
@@ -1665,9 +1663,11 @@ pristine slot after exact release, image fingerprints, architecture,
 heavy-runtime, and content-free Codex App Server initialize/stop readiness all
 pass. In allocation mode, one storage transaction removes that slot from ready
 and records an opaque claim tombstone only for fence-free `default` work from
-authenticated Web-direct ingress with a validated direct-attempt identity.
-Temporal requests, background processing modes, and spoofed direct inputs keep
-the unchanged exact-user target. A trusted foreground replacement may claim the
+authenticated Web-direct ingress with a validated direct-attempt identity or
+an authenticated request carrying `conversationWorkPending: true`. Temporal
+derives that fact from fresh admitted conversation lag; generic default mode
+alone does not qualify. Background-only processing and spoofed direct inputs
+keep the unchanged exact-user target. A trusted foreground replacement may claim the
 slot after the exact-user background fence is cleared rather than reusing a
 child that is still shutting down. The requesting `UserRunner`
 durably reserves the opaque stop target before immutable bind-once member
@@ -1684,8 +1684,8 @@ Warm retention renews the handoff idle window and may repeat for the same
 member without another coordinator claim. An explicit native stop or an exact
 prior-release binding enters the existing one-way `retiring` to `retired` scrub
 path. `UserRunner` clears only its exact stop target and only after that
-retirement settles, after which the same eligible authenticated Web-direct
-`default` request may perform one normal fresh claim. Unknown native status,
+retirement settles, after which the same eligible authenticated conversation
+request may perform one normal fresh claim. Unknown native status,
 failed retirement, foreign-member state, contradictory release authority, or
 any result-identity mismatch retains the pending target and yields without a
 second container. An ambiguous bind after the opaque target is reserved follows
@@ -2708,18 +2708,42 @@ still stale. That signal is recovery admission for the existing mailbox/event
 identity and must not mint another schedule-event or mailbox-item identity.
 After mailbox retention has removed a scheduled v3 wake's payload, Web accepts
 the stable duplicate without another signal only when the remaining row matches
-the schedule identity and the runtime checkpoint identifies its lane sequence
-as `hostedMailboxSystemFirstPendingSeq`. The same checkpoint's canonical system
-imported watermark must cover that sequence without exceeding the allocated
-high-water mark, and the lane counter must agree that it is the first unhandled
-sequence. The row must have no inline ciphertext, sidecar, payload reference,
-byte count, or hash. A missing or different first-pending sequence—including
-when supported legacy unsequenced work makes the frontier ambiguous—a
-never-imported row, malformed watermark, remaining payload surface, or
-structural mismatch stays a dedupe conflict and fails recovery closed.
+the schedule identity and the runtime checkpoint supplies one of two exact
+sequence proofs. A first-unhandled row must equal both the lane counter's next
+sequence and `hostedMailboxSystemFirstPendingSeq`. A continuation must appear in
+`hostedMailboxSystemDeviceSyncContinuationSeqs`, the sorted exact set of
+sequenced device continuations still owned by the runtime. Ownership begins only
+when post-checkpoint retention transfers the imported wake to that local owner,
+persists on the existing mailbox item across pending, sending, recording,
+retryable recording, and preemption transitions, and ends when existing
+completion removes the item. Restore promotes the exact legacy pending
+retained-job shape to the marker once so rollout does not strand an existing
+owner; projection after that compatibility read is marker-based. The set admits
+at most one owner per connection and is capped by the existing 100-connection
+complete-snapshot hydration authority. Exact continuation membership is independent
+of the global handled frontier: another connection's earlier retry cannot veto
+a later connection's already-owned work.
+Malformed structure, a duplicate connection, item, or sequence, a sequence past
+the imported watermark, or overflow invalidates the whole projection: the
+runtime publishes an empty owner set and treats every marked item as an ordinary
+frontier blocker. The same checkpoint's
+canonical system imported watermark must cover the sequence without exceeding
+the allocated high-water mark. The row must have no inline ciphertext, sidecar,
+payload reference, byte count, or hash. A missing, malformed, or different
+owner proof—including when supported legacy unsequenced work makes the frontier
+ambiguous—an unowned skipped-ahead or never-imported row, malformed watermark, remaining
+payload surface, or structural mismatch stays a dedupe conflict and fails
+recovery closed.
 Runtime-owned retry state remains the sole continuation owner for an accepted
-retired duplicate. Deploy the runtime checkpoint projection before Web begins
-requiring it; older runtime checkpoints omit the fact and therefore fail closed.
+retired duplicate. Corrected runtimes overwrite the owner set on every
+checkpoint. For initial rollout, deploy Web's compatible reader first, then
+the Worker/runner with immediate container rollout. Old runtimes publish no
+continuation set, so Web preserves the existing first-unhandled behavior until
+the corrected runtime checkpoints. The old Web reader caps arrays at 16 and
+cannot accept the new 100-owner bound. Verify runner convergence before declaring
+recovery restored. Once a continuation set has been published, rolling back the
+runtime requires rolling Web back first so an older runtime cannot preserve a
+stale unknown owner-set field; prefer a forward fix through the managed deploys.
 It does not promise exactly-once provider execution. Dirty rows are not
 independently swept; due-reconcile candidates may include dirty or stuck rows
 when canonical `nextReconcileAt` is due. Dirty state remains the work source,
@@ -3433,6 +3457,18 @@ snapshot planning, diagnostics, and mailbox-import policy; Cloudflare supplies
 only explicit platform capabilities such as mailbox payload decode, direct-R2
 ports, and the local encrypted archive writer.
 
+Direct-R2 snapshot body reads have a 15-second inactivity budget for each pending
+stream read. Consumer hash/decrypt work between reads does not spend that budget;
+the original signed-URL expiry still bounds the complete download. A body-idle
+timeout cancels that stream and uses the existing two-attempt restore read loop.
+Caller cancellation and the overall deadline remain terminal, and neither attempt
+replaces the durable root until byte counts, hashes, and authenticated decryption
+succeed. Other control-plane response readers retain their existing timeout policy.
+Each body attempt emits scalar-only read-wait, maximum read-wait, consumer-elapsed,
+byte-count, and completion diagnostics through the existing structured logger.
+Read-wait includes event-loop scheduling delay and must not be called pure network
+latency. The existing persisted restore timing fields keep their current meaning.
+
 True idle-shutdown maintenance also compacts closed
 `ledger/integration-ingests/YYYY/YYYY-MM.jsonl` shards in place before snapshot
 planning. The core owner streams each raw shard into deterministic level-6
@@ -4081,12 +4117,15 @@ add no request, polling loop, persisted state owner, or reply-path work.
 Failed authoritative startup confirmation has one failure-only local
 observation because Durable Object RPC does not preserve custom properties on a
 thrown error. `Hosted execution container startup confirmation failed.` carries
-only `runtimeStartupFailureStage`, `runtimeStartupFailureElapsedMs`, and
-`runtimeStartupCleanupUnsettled`; it carries no user, workspace, message,
-command, provider, path, URL, prompt, transcript, argument, payload, health
-value, credential, environment value, raw error, stack, hash, or correlation
-identifier. Elapsed time is a non-negative integer saturated at 60,000 ms. The
-four container-local stages are `lifecycle_lock_or_state_read`,
+`runtimeStartupFailureStage`, `runtimeStartupFailureElapsedMs`,
+`runtimeStartupConfirmTimeoutMs`, and `runtimeStartupCleanupUnsettled`. When the
+validated caller supplied one, it also carries the same opaque
+`orchestrationAttemptId` already present on the UserRunner warning so operators
+can join the caller deadline to its exact container-local stage. It carries no
+user, workspace, message, command, provider, path, URL, prompt, transcript,
+argument, payload, health value, credential, environment value, raw error,
+stack, or hash. Elapsed time is a non-negative integer saturated at 60,000 ms.
+The four container-local stages are `lifecycle_lock_or_state_read`,
 `warm_health_or_cleanup`, `cold_start_or_ports`, and
 `cold_health_or_finalization`. The cleanup boolean overlays the stage that
 triggered cleanup instead of replacing it.
@@ -4112,7 +4151,10 @@ without a safely transported local stage; it must never be guessed into a
 container-local bucket. `caller_deadline` means the command budget or the outer
 startup guard elapsed. The generic
 `Hosted runner runtime processing startup confirmation failed.` warning also
-records its already-selected closed retry reason. Retry selection, fence
+records its already-selected closed retry reason. After readiness dispatch, the
+UserRunner failure warnings also record the effective
+`runtimeStartupConfirmTimeoutMs`; pre-dispatch command-budget exhaustion omits
+it because no readiness timeout was assigned. Retry selection, fence
 clearing or preservation, cleanup, readiness, and exception/RPC behavior remain
 unchanged. Both observations reuse the existing structured logger and add no
 awaited I/O, timer, retry, state, queue, or telemetry backend. During skew, an

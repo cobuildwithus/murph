@@ -1,15 +1,12 @@
 name: Linq Production Canary
 
 on:
-  deployment_status:
+  schedule:
+    - cron: "17 * * * *"
   workflow_dispatch:
     inputs:
       deployed_sha:
         description: Current Vercel production commit SHA to prove before the canary.
-        required: true
-        type: string
-      deployment_url:
-        description: Exact ready Vercel production deployment URL to prove.
         required: true
         type: string
 
@@ -22,15 +19,14 @@ concurrency:
 
 jobs:
   production-canary:
-    name: Exercise production iMessage journey
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.deployment_status.state == 'success' && github.event.deployment_status.description == 'Deployment has completed' && contains(fromJSON('["Production","production"]'), github.event.deployment.environment) && (github.event.deployment_status.creator.login == 'vercel[bot]' || github.event.deployment.creator.login == 'vercel[bot]')) }}
+    name: Exercise hourly production iMessage journey
     runs-on: ubuntu-24.04
     environment: production
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
-          ref: ${{ github.event.deployment.sha || inputs.deployed_sha }}
+          ref: ${{ inputs.deployed_sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -38,7 +34,7 @@ jobs:
         id: production-branch
         shell: bash
         env:
-          DEPLOYED_SHA: ${{ github.event.deployment.sha || inputs.deployed_sha }}
+          DEPLOYED_SHA: ${{ inputs.deployed_sha || github.sha }}
         run: |
           set -euo pipefail
 
@@ -70,9 +66,8 @@ jobs:
         if: ${{ steps.production-branch.outputs.should_run == 'true' }}
         shell: bash
         env:
-          DEPLOYED_SHA: ${{ github.event.deployment.sha || inputs.deployed_sha }}
+          DEPLOYED_SHA: ${{ inputs.deployed_sha || github.sha }}
           HOSTED_WEB_PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}
-          HOSTED_WEB_VERCEL_DEPLOYMENT_URL: ${{ github.event.deployment_status.environment_url || inputs.deployment_url }}
           HOSTED_WEB_VERCEL_PROJECT_ID: ${{ vars.HOSTED_WEB_VERCEL_PROJECT_ID }}
           HOSTED_WEB_VERCEL_TEAM_ID: ${{ vars.HOSTED_WEB_VERCEL_TEAM_ID }}
           HOSTED_WEB_VERCEL_TOKEN: ${{ secrets.HOSTED_WEB_VERCEL_TOKEN }}
@@ -91,7 +86,7 @@ jobs:
             exit 0
           fi
 
-          verified_sha="$(pnpm --dir apps/web exec tsx scripts/verify-vercel-production-deployment.ts)"
+          verified_sha="$(pnpm --dir apps/web exec tsx scripts/verify-current-vercel-production-deployment.ts)"
           if [ "${verified_sha}" != "${DEPLOYED_SHA}" ]; then
             echo "::error::Exact Vercel production deployment verification returned an unexpected commit."
             exit 1

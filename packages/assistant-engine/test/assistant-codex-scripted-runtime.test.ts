@@ -11,9 +11,6 @@ import { crc32, deflateSync } from 'node:zlib'
 import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from '@murphai/hosted-execution/env'
-import {
-  HOSTED_ASSISTANT_PRODUCT_MODELS,
-} from '@murphai/hosted-execution/assistant-model'
 import { buildCalendarEventUrl, goalMetricTargetSchema } from '@murphai/contracts'
 import {
   listHostedBundleInlineFiles,
@@ -89,6 +86,9 @@ import type {
 import {
   isCanonicalOnboardingFirstPersonalReadAutomationSaveRequest,
 } from '../src/assistant/onboarding-first-personal-read-automation.ts'
+import {
+  writeHostedOpenAiMixedModeModelCatalogJson,
+} from './support/codex-model-catalog.ts'
 import { sendAssistantAskContinuationLocal } from '../src/assistant/ask-continuation.ts'
 import { conversationRefFromBinding } from '../src/assistant/conversation-ref.ts'
 import { listAssistantOutboxIntents } from '../src/assistant/outbox.ts'
@@ -603,6 +603,7 @@ async function requireScriptedStub(): Promise<ScriptedStub> {
 
 afterEach(async () => {
   await stopWarmCodexAppServer().catch(() => {})
+  stub?.resetQueue()
 })
 
 afterAll(async () => {
@@ -3377,16 +3378,21 @@ text(result.output);
     expect((await readFile(requestLog, 'utf8')).trim().split('\n')).toHaveLength(3)
   })
 
-  it.each(['direct', 'group'] as const)(
-    'carries a delayed V2 child completion into a later %s root turn without waiting',
+  it.each([
+    ['direct', 'gpt-5.6-luna', false],
+    ['group', 'gpt-5.6-luna', false],
+    ['direct', 'gpt-6-astra', true],
+  ] as const)(
+    'carries a delayed V2 %s %s child completion into a later root turn without waiting',
     { timeout: TURN_TIMEOUT_MS },
-    async (conversationScope) => {
+    async (conversationScope, childModel, astraAllowed) => {
       const scenario = await prepareScriptedTurnScenario({
         multiAgentV2: true,
       })
-      const modelCatalogJson = await writeHostedOpenAiFlexModelCatalogJson({
+      const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
         codexCommand: scenario.turnInput.codexCommand,
         directory: scenario.turnInput.codexHome,
+        astraAllowed,
       })
       const scopeLabel = conversationScope.toUpperCase()
       const childResult = `LATE_CHILD_RESULT_${scopeLabel}`
@@ -3398,7 +3404,7 @@ text(result.output);
             arguments: {
               fork_turns: 'none',
               message: `Return exactly ${childResult}.`,
-              model: 'gpt-5.6-luna',
+              model: childModel,
               task_name: `late_child_${conversationScope}`,
             },
             name: 'spawn_agent',
@@ -3451,7 +3457,7 @@ text(result.output);
       ).toContain(childResult)
       expect(
         scenario.stub.requestSummariesSinceBaseline().map(({ model }) => model),
-      ).toContain('gpt-5.6-luna')
+      ).toContain(childModel)
       await delay(100)
 
       scenario.stub.queue({
@@ -3478,13 +3484,13 @@ text(result.output);
     },
   )
 
-  it('rejects a non-product child model before a provider request', {
+  it.each(['gpt-5.5', 'gpt-6-astra'])('rejects an unavailable child model %s before a provider request', {
     timeout: TURN_TIMEOUT_MS,
-  }, async () => {
+  }, async (model) => {
     const scenario = await prepareScriptedTurnScenario({
       multiAgentV2: true,
     })
-    const modelCatalogJson = await writeHostedOpenAiFlexModelCatalogJson({
+    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
       codexCommand: scenario.turnInput.codexCommand,
       directory: scenario.turnInput.codexHome,
     })
@@ -3494,7 +3500,7 @@ text(result.output);
           arguments: {
             fork_turns: 'none',
             message: 'Return exactly NON_PRODUCT_CHILD_SHOULD_NOT_RUN.',
-            model: 'gpt-5.5',
+            model,
             task_name: 'non_product_child',
           },
           name: 'spawn_agent',
@@ -3522,7 +3528,7 @@ text(result.output);
     expect(summaries.flatMap(
       (summary) => summary.functionCallOutputs ?? [],
     )).toEqual([
-      'Unknown model `gpt-5.5` for spawn_agent. Available models: gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna',
+      `Unknown model \`${model}\` for spawn_agent. Available models: gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna`,
     ])
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
@@ -3642,35 +3648,138 @@ text(result.output);
     ])
   })
 
-  it('defers broad Murph schemas through native Codex code-mode discovery', {
+  it('documents why pinned Codex code-only metadata cannot replace native automation schema search', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const modelCatalogJson = await writeHostedOpenAiFlexModelCatalogJson({
+    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
+      codexCommand: scenario.turnInput.codexCommand,
+      directory: scenario.turnInput.codexHome,
+    })
+    const catalog = readRecord(JSON.parse(await readFile(modelCatalogJson, 'utf8')))
+    if (!catalog || !Array.isArray(catalog.models)) {
+      throw new Error('Expected a test model catalog.')
+    }
+    for (const candidate of catalog.models) {
+      const model = readRecord(candidate)
+      if (model) model.tool_mode = 'code_mode_only'
+    }
+    await writeFile(modelCatalogJson, JSON.stringify(catalog), 'utf8')
+    scenario.stub.captureProviderRequestDiagnostics()
+    scenario.stub.queue(
+      { customToolCall: {
+        name: 'exec',
+        input: `
+const tool = ALL_TOOLS.find(({ name }) => name === "murph__automation");
+if (!tool) throw new Error("Deferred automation metadata missing");
+text(tool.description.split("exec tool declaration:")[1]);
+`,
+      } },
+      { text: 'CODE_ONLY_SCHEMA_CHARACTERIZED' },
+    )
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      env: {
+        ...scenario.turnInput.env,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+      },
+      prompt: 'Inspect the automation declaration without calling automation.',
+    })
+    const summaries = scenario.stub.requestSummariesSinceBaseline()
+    expect(result.finalMessage).toBe('CODE_ONLY_SCHEMA_CHARACTERIZED')
+    expect(summaries[0]?.providerRequestDiagnostics).toMatchObject({
+      includesAutomation: false,
+      includesToolSearch: false,
+    })
+    const declaration = summaries[1]?.customToolCallOutputs?.join('\n') ?? ''
+    expect(declaration).toContain('murph__automation')
+    expect(declaration).toContain('contextReferences?: unknown')
+    expect(declaration).not.toContain('entityKind')
+    expect(declaration).not.toContain('entityId')
+    // The schema itself retains the shared fields; Codex 0.151's TypeScript
+    // renderer follows oneOf branches without combining sibling properties.
+    const properties = readRecord(MURPH_AUTOMATION_TOOL.inputSchema.properties)
+    expect(properties?.contextReferences).toMatchObject({
+      items: { required: ['entityKind', 'entityId'] },
+      type: 'array',
+    })
+  })
+
+  it('uses exact Terra mixed mode to discover a condition reminder schema before one save', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    expect(MURPH_AUTOMATION_TOOL.deferLoading).toBe(true)
+    const scenario = await prepareScriptedTurnScenario()
+    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
       codexCommand: scenario.turnInput.codexCommand,
       directory: scenario.turnInput.codexHome,
     })
     scenario.stub.captureProviderRequestDiagnostics()
+    const conditionId = 'condition_rehabilitation_knee'
+    await writeFile(
+      path.join(scenario.turnInput.workingDirectory, 'vault-cli'),
+      [
+        '#!/bin/sh',
+        'set -eu',
+        `if [ "$*" != "condition show ${conditionId} --format json" ]; then`,
+        '  printf \'unsupported canonical read: %s\\n\' "$*" >&2',
+        '  exit 64',
+        'fi',
+        `printf '%s\\n' '${JSON.stringify({
+          entity: {
+            data: { clinicalStatus: 'active' },
+            id: conditionId,
+            kind: 'condition',
+            title: 'Knee rehabilitation',
+          },
+          vault: 'synthetic-vault',
+        })}'`,
+        '',
+      ].join('\n'),
+      { encoding: 'utf8', mode: 0o755 },
+    )
     const automationRequests: unknown[] = []
     scenario.stub.queue(
       {
         customToolCall: {
           input: `
-const tool = ALL_TOOLS.find(({ name }) => name === "murph__automation");
-const groupTool = ALL_TOOLS.find(({ name }) => name === "murph__group_chat");
-if (!tool) {
-  text(JSON.stringify({ found: false, foundGroup: Boolean(groupTool) }));
-} else {
-  const result = await tools.murph__automation({
-    action: "save",
-    instructions: "Send a short reminder.",
-    schedule: { kind: "dailyLocal", localTime: "09:00" },
-    title: "Morning reminder",
-  });
-  text(JSON.stringify({ found: true, foundGroup: Boolean(groupTool), result }));
+const result = await tools.exec_command({
+  cmd: "./vault-cli condition show ${conditionId} --format json",
+});
+if (result.exit_code !== 0) {
+  throw new Error("Canonical condition read failed: " + JSON.stringify({
+    exitCode: result.exit_code,
+    output: result.output,
+  }));
 }
+text(result.output);
 `,
           name: 'exec',
+        },
+      },
+      {
+        toolSearchCall: {
+          limit: 8,
+          query: 'Murph automation save reminder contextReferences entityKind entityId',
+        },
+      },
+      {
+        functionCall: {
+          arguments: {
+            action: 'save',
+            assistantTargetOverride: { model: 'gpt-5.6-luna' },
+            contextReferences: [{
+              entityId: conditionId,
+              entityKind: 'condition',
+            }],
+            instructions:
+              'Send a short reminder to complete the knee rehabilitation exercises.',
+            schedule: { kind: 'dailyLocal', localTime: '09:00' },
+            title: 'Knee rehabilitation reminder',
+          },
+          name: 'automation',
+          namespace: 'murph',
         },
       },
       { text: 'NATIVE_DEFERRED_TOOL_OK' },
@@ -3715,33 +3824,82 @@ if (!tool) {
         },
         vaultFileSendAvailable: false,
       },
-      prompt: 'Save the reminder, then reply exactly NATIVE_DEFERRED_TOOL_OK.',
+      prompt: [
+        `Read condition ${conditionId} with vault-cli.`,
+        'Use native tool search to discover the exact deferred automation schema.',
+        'Then save one daily 9:00 AM knee rehabilitation reminder with that exact condition reference.',
+        'Reply exactly NATIVE_DEFERRED_TOOL_OK after the save succeeds.',
+      ].join(' '),
+      // This proof intentionally executes a staged fake vault CLI. Match the
+      // existing scripted exec lane because GitHub's restricted Linux runner
+      // cannot let nested bubblewrap configure loopback.
+      sandbox: 'danger-full-access',
     })
 
     const summaries = scenario.stub.requestSummariesSinceBaseline()
     expect(summaries[0]).toMatchObject({
+      model: 'gpt-5.6-terra',
       providerRequestDiagnostics: {
         includesAllTools: true,
         includesAutomation: false,
         includesGroup: false,
         includesGroupEmail: false,
+        includesToolSearch: true,
       },
     })
     expect(summaries[0]?.providerRequestDiagnostics?.bytes).toBeGreaterThan(0)
-    const automationOutput =
+    const conditionReadOutput =
       summaries[1]?.customToolCallOutputs?.join('\n') ?? ''
-    expect(automationOutput).toContain('"foundGroup":true')
-    expect(automationOutput).toContain('automation-native-deferred')
-    expect(automationOutput).not.toContain('lookupId')
-    expect(automationOutput).toContain('active')
+    expect(conditionReadOutput).toContain(conditionId)
+    expect(conditionReadOutput).toContain('"kind":"condition"')
+    const automationSearchTools = summaries[2]?.toolSearchOutputTools ?? []
+    const automationSearchTool = automationSearchTools
+      .flatMap((candidate) => {
+        const tool = readRecord(candidate)
+        if (tool?.name === 'automation') {
+          return [tool]
+        }
+        return Array.isArray(tool?.tools)
+          ? tool.tools.map(readRecord).filter((item) => item !== null)
+          : []
+      })
+      .find((tool) => tool.name === 'automation')
+    expect(automationSearchTool).not.toBeUndefined()
+    const automationParameters = readRecord(automationSearchTool?.parameters)
+    const automationProperties = readRecord(automationParameters?.properties)
+    const contextReferences = readRecord(
+      automationProperties?.contextReferences,
+    )
+    const contextReferenceItem = readRecord(contextReferences?.items)
+    const contextReferenceProperties = readRecord(
+      contextReferenceItem?.properties,
+    )
+    expect(contextReferences).toMatchObject({
+      items: {
+        additionalProperties: false,
+        required: expect.arrayContaining(['entityKind', 'entityId']),
+        type: 'object',
+      },
+      type: 'array',
+    })
+    expect(contextReferenceProperties).toMatchObject({
+      entityId: { type: 'string' },
+      entityKind: { type: 'string' },
+    })
     expect(automationRequests).toEqual([{
       action: 'save',
-      instructions: 'Send a short reminder.',
+      assistantTargetOverride: { model: 'gpt-5.6-luna' },
+      contextReferences: [{
+        entityId: conditionId,
+        entityKind: 'condition',
+      }],
+      instructions:
+        'Send a short reminder to complete the knee rehabilitation exercises.',
       schedule: { kind: 'dailyLocal', localTime: '09:00' },
-      title: 'Morning reminder',
+      title: 'Knee rehabilitation reminder',
     }])
     expect(result.finalMessage).toBe('NATIVE_DEFERRED_TOOL_OK')
-    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(4)
 
     const deferredRequestBytes =
       summaries[0]?.providerRequestDiagnostics?.bytes ?? 0
@@ -7604,7 +7762,7 @@ if (!tool) {
       : null
 
     const ordinaryScenario = await prepareScriptedTurnScenario()
-    const modelCatalogJson = await writeHostedOpenAiFlexModelCatalogJson({
+    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
       codexCommand: ordinaryScenario.turnInput.codexCommand,
       directory: ordinaryScenario.turnInput.codexHome,
     })
@@ -7715,7 +7873,7 @@ if (!tool) {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const modelCatalogJson = await writeHostedOpenAiFlexModelCatalogJson({
+    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
       codexCommand: scenario.turnInput.codexCommand,
       directory: scenario.turnInput.codexHome,
     })
@@ -7774,7 +7932,7 @@ text(JSON.stringify(result));
       providerRequestDiagnostics: {
         includesAllTools: true,
         includesAutomation: false,
-        includesGroup: false,
+        includesGroup: true,
         includesReadShared: true,
         includesGroupEmail: false,
       },
@@ -7951,7 +8109,7 @@ text(JSON.stringify(result));
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const modelCatalogJson = await writeHostedOpenAiFlexModelCatalogJson({
+    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
       codexCommand: scenario.turnInput.codexCommand,
       directory: scenario.turnInput.codexHome,
     })
@@ -10023,62 +10181,6 @@ async function prepareScriptedTurnScenario(
   }
 }
 
-async function writeHostedOpenAiFlexModelCatalogJson(input: {
-  codexCommand: string
-  directory: string
-}): Promise<string> {
-  const { stdout } = await execFileAsync(
-    input.codexCommand,
-    ['debug', 'models', '--bundled'],
-    {
-      encoding: 'utf8',
-      maxBuffer: 10 * 1024 * 1024,
-    },
-  )
-  const catalog = readRecord(JSON.parse(stdout))
-  if (!catalog) {
-    throw new Error('Bundled Codex model catalog was not an object.')
-  }
-  const bundledModels = Array.isArray(catalog.models)
-    ? catalog.models.map(readRecord)
-    : []
-  const productModels = HOSTED_ASSISTANT_PRODUCT_MODELS.map((slug) => {
-    const model = bundledModels.find((candidate) => candidate?.slug === slug)
-    if (!model) {
-      throw new Error(`Bundled Codex model catalog did not include ${slug}.`)
-    }
-
-    const serviceTiers = Array.isArray(model.service_tiers)
-      ? model.service_tiers
-      : []
-    const hasFlex = serviceTiers
-      .map(readRecord)
-      .some((tier) => tier?.id === 'flex')
-    if (!hasFlex) {
-      model.service_tiers = [
-        ...serviceTiers,
-        {
-          description: 'Lower-cost flexible processing',
-          id: 'flex',
-          name: 'Flex',
-        },
-      ]
-    }
-    return model
-  })
-  catalog.models = productModels
-
-  const modelCatalogJson = path.join(
-    input.directory,
-    'codex-model-catalog.openai-flex.json',
-  )
-  await writeFile(modelCatalogJson, `${JSON.stringify(catalog)}\n`, {
-    encoding: 'utf8',
-    mode: 0o600,
-  })
-  return modelCatalogJson
-}
-
 function buildScriptedCodexConfigToml(
   baseUrl: string,
   options: {
@@ -10391,9 +10493,18 @@ function readScriptedProviderRequestSummary(
           .filter((width): width is number => width !== null)
       })
     : []
-  const tools = Array.isArray(body?.tools)
+  const directTools = Array.isArray(body?.tools)
     ? body.tools.map(readRecord)
     : []
+  const additionalTools = Array.isArray(body?.input)
+    ? body.input
+      .map(readRecord)
+      .filter((item) => item?.type === 'additional_tools')
+      .flatMap((item) =>
+        Array.isArray(item?.tools) ? item.tools.map(readRecord) : []
+      )
+    : []
+  const tools = [...directTools, ...additionalTools]
   return {
     ...(customToolCallOutputs.length > 0 ? { customToolCallOutputs } : {}),
     ...(functionCallOutputs.length > 0 ? { functionCallOutputs } : {}),

@@ -51,7 +51,7 @@ describe('assistant PDF skill', () => {
     expect(skill).toContain('pdftoppm')
     expect(skill).toContain('.artifacts/pdf')
     expect(skill).toContain('Do not import remote Typst packages')
-    expect(skill).toContain('do not claim it was sent')
+    expect(skill).toContain('Do not claim delivery before sent evidence')
     expect(skill).toContain(
       'Stop when the requested content is complete',
     )
