@@ -345,10 +345,9 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         systemAttemptId: systemFence.attemptId,
         userId: systemMailboxProbe.userId,
       });
-      // Releasing the background owner lets it finish and shut down before the
-      // foreground provider starts on the claimed standby. The provider-start
-      // callback therefore uses durable handoff evidence below instead of
-      // reaching back into volatile instrumentation on the retired owner.
+      // The foreground starts under a new fence after the background owner
+      // settles. It may retain the same member-bound warm target or claim an
+      // observed pristine slot; durable handoff evidence covers either path.
       await expect(releaseForegroundPriorityOrderingBarrier({
         scenario: requireScenario(),
         userId: systemMailboxProbe.userId,
@@ -369,12 +368,13 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
       expect(providerStart.activeFence.attemptId).not.toBe(
         systemFence.attemptId,
       );
-      expect(readyStandbySlotNames).toContain(
+      expect([systemFence.runnerContainerName, ...readyStandbySlotNames]).toContain(
         providerStart.activeFence.runnerContainerName,
       );
-      expect(providerStart.activeFence.runnerContainerName).not.toBe(
-        systemFence.runnerContainerName,
-      );
+      if (providerStart.activeFence.runnerContainerName === systemFence.runnerContainerName) {
+        await expect(waitForReadyStandbySlots(readyStandbySlotNames)).resolves
+          .toEqual(expect.arrayContaining(readyStandbySlotNames));
+      }
       if (!providerStart.systemLane) {
         throw new Error(await requireScenario().buildFailureMessage(
           systemMailboxProbe.userId,
