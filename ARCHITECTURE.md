@@ -4102,8 +4102,12 @@ before excluding them from the archive, and hosted canonical write receipts omit
 matching image/video raw payload artifacts only when the same durable raw-write
 receipt carries their media identity, explicit image/video kind, and lifetime.
 Original MIME is descriptive metadata and may be generic or absent at ingress;
-receipt publication and recovery use the catalogue's explicit kind. Receipt recovery reconstructs
-that catalogue entry without fetching media. Ordinary canonical captures remain
+receipt publication and recovery use the catalogue's explicit kind. Canonical
+event writes that retain existing media by reference also publish preservation
+before acknowledgement and carry the affected lifetime in a payload-free raw
+receipt action. Plain event writes without media references need no media
+publication. Receipt recovery reconstructs the catalogue entry without fetching
+media. Ordinary canonical captures remain
 nonexpiring while their holder exists; only captures identified by core's
 generated-image provenance predicate receive the generated-media TTL. The runner
 atomically records terminal retirement before deleting R2 bytes. Its existing

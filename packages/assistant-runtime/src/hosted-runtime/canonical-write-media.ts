@@ -1,4 +1,12 @@
-import { applyHostedCanonicalWriteReceipt } from "@murphai/core";
+import path from "node:path";
+
+import { collectEventRawReferencePaths } from "@murphai/contracts";
+import {
+  applyHostedCanonicalWriteReceipt,
+  isEventLedgerLogicalPath,
+  normalizeRelativeVaultPath,
+  VAULT_LAYOUT,
+} from "@murphai/core";
 import type {
   HostedCanonicalWritePersistenceInput,
   HostedCanonicalWriteReceipt,
@@ -13,6 +21,7 @@ import {
   publishHostedWorkspaceMediaReferencesForSnapshot,
   readHostedMediaReferenceCatalogue,
   writeHostedMediaReferenceCatalogue,
+  type HostedMediaReference,
 } from "./media-references.ts";
 
 export async function externalizeHostedCanonicalWriteMediaPayloads(input: {
@@ -20,7 +29,9 @@ export async function externalizeHostedCanonicalWriteMediaPayloads(input: {
   persistence: HostedCanonicalWritePersistenceInput;
   vaultRoot: string;
 }): Promise<HostedCanonicalWritePersistenceInput> {
-  if (!input.mediaStore || !receiptHasRawPayload(input.persistence)) {
+  if (!input.mediaStore) return input.persistence;
+  const referencedPaths = readCanonicalEventMediaReferencePaths(input.persistence);
+  if (!receiptHasRawPayload(input.persistence) && referencedPaths.size === 0) {
     return input.persistence;
   }
 
@@ -35,7 +46,7 @@ export async function externalizeHostedCanonicalWriteMediaPayloads(input: {
     catalogue.entries.map((entry) => [entry.relativePath, entry]),
   );
   let omittedPayloadCount = 0;
-  const actions = input.persistence.receipt.actions.map((action) => {
+  const actions: HostedCanonicalWriteReceiptAction[] = input.persistence.receipt.actions.map((action) => {
     if (action.kind !== "raw_upsert" || !action.contentRef) {
       return action;
     }
@@ -51,16 +62,20 @@ export async function externalizeHostedCanonicalWriteMediaPayloads(input: {
     const { contentRef: _contentRef, ...withoutContentRef } = action;
     return {
       ...withoutContentRef,
-      mediaRef: {
-        id: mediaRef.mediaId,
-        mediaKind: mediaRef.mediaKind,
-        expiresAt: mediaRef.expiresAt,
-        recordedAt: mediaRef.recordedAt,
-      },
+      mediaRef: toHostedMediaReceiptAction(mediaRef).mediaRef,
     };
   });
 
-  if (omittedPayloadCount === 0) {
+  // A holder can preserve existing media without writing raw bytes. Carry its
+  // published lifetime in the same receipt so an older snapshot can recover it.
+  const actionPaths = new Set(actions.map((action) => action.targetRelativePath));
+  for (const relativePath of referencedPaths) {
+    const entry = mediaRefsByPath.get(relativePath);
+    if (entry && !actionPaths.has(relativePath)) {
+      actions.push(toHostedMediaReceiptAction(entry));
+    }
+  }
+  if (omittedPayloadCount === 0 && actions.length === input.persistence.receipt.actions.length) {
     return input.persistence;
   }
 
@@ -80,6 +95,67 @@ export async function externalizeHostedCanonicalWriteMediaPayloads(input: {
     receipt: {
       ...input.persistence.receipt,
       actions,
+    },
+  };
+}
+
+function readCanonicalEventMediaReferencePaths(
+  persistence: HostedCanonicalWritePersistenceInput,
+): Set<string> {
+  const paths = new Set<string>();
+  for (const action of persistence.receipt.actions) {
+    if (
+      action.kind !== "jsonl_append"
+      || !action.contentRef
+      || !isEventLedgerLogicalPath(action.targetRelativePath)
+    ) {
+      continue;
+    }
+    const ref = action.contentRef;
+    const payload = persistence.payloads.find((item) =>
+      item.sha256 === ref.sha256 && item.byteLength === ref.byteSize
+    );
+    if (!payload) throw new Error("Canonical event receipt payload is missing.");
+    const lines = Buffer.from(payload.bytes).toString("utf8").split("\n");
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const record: unknown = JSON.parse(line);
+      if (!record || typeof record !== "object" || Array.isArray(record)) continue;
+      for (const rawRef of collectEventRawReferencePaths(record)) {
+        let normalized: string;
+        try {
+          normalized = normalizeRelativeVaultPath(rawRef);
+        } catch {
+          continue;
+        }
+        if (
+          normalized.startsWith(`${VAULT_LAYOUT.rawInboxDirectory}/`)
+          || normalized.startsWith(`${VAULT_LAYOUT.rawCapturesDirectory}/`)
+        ) {
+          paths.add(normalized);
+        }
+      }
+    }
+  }
+  return paths;
+}
+
+function toHostedMediaReceiptAction(
+  entry: HostedMediaReference,
+): Extract<HostedCanonicalWriteReceiptAction, { kind: "raw_upsert" }> {
+  return {
+    kind: "raw_upsert",
+    targetRelativePath: entry.relativePath,
+    sha256: entry.sha256,
+    byteLength: entry.byteSize,
+    mediaType: entry.mimeType ?? "application/octet-stream",
+    originalFileName: path.posix.basename(entry.relativePath),
+    effect: "reuse",
+    mediaRef: {
+      id: entry.mediaId,
+      mediaKind: entry.mediaKind,
+      expiresAt: entry.expiresAt,
+      recordedAt: entry.recordedAt,
     },
   };
 }

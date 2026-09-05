@@ -1,7 +1,7 @@
 import { parseHostedCanonicalWriteReceiptArtifact } from "../src/hosted-runtime/canonical-write-receipt.ts";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -11,6 +11,7 @@ import {
   applyCanonicalWriteBatch,
   appendJsonlRecord,
   initializeVault,
+  upsertEvent,
   withHostedCanonicalWritePort,
   type HostedCanonicalWritePersistenceInput,
   VAULT_LAYOUT,
@@ -724,6 +725,135 @@ test.each([
     await restored.materializeWorkspaceArtifacts([videoPath]);
     assert.deepEqual(await readFile(path.join(restoredRoot, videoPath)), videoBytes);
     assert.equal(getCalls.length, scenario.external ? 1 : 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test.each([
+  { kind: "image", retired: false },
+  { kind: "video", retired: false },
+  { kind: "image", retired: true },
+  { kind: "video", retired: true },
+] as const)("reference-only media saves survive expiry and receipt recovery: %j", async (scenario) => {
+  const root = await mkdtemp(path.join(tmpdir(), "murph-media-reference-save-"));
+  const vaultRoot = path.join(root, "live");
+  const restoredRoot = path.join(root, "restored");
+  const { artifactStore } = createHostedRuntimeArtifactStoreStub();
+  const store = createHostedRuntimeMediaStoreStub();
+  const deadlines = new Map<string, string | null>();
+  const retiredIds = new Set<string>();
+  const recordCalls: string[] = [];
+  const mediaStore: HostedRuntimeMediaStore = {
+    ...store.mediaStore,
+    async put(descriptor) {
+      await store.mediaStore.put(descriptor);
+      deadlines.set(descriptor.mediaId, descriptor.expiresAt ?? null);
+    },
+    async record(descriptor) {
+      recordCalls.push(descriptor.mediaId);
+      if (retiredIds.has(descriptor.mediaId)) throw new Error("Media lifetime registration was rejected.");
+      deadlines.set(descriptor.mediaId, descriptor.expiresAt ?? null);
+    },
+  };
+  // The transport stub enforces the DO's tested retirement contract; the real
+  // owner ordering and no-workspace-wake proof live in user-runner-alarm.test.ts.
+  const cleanupExpired = (now: number) => {
+    for (const [id, deadline] of deadlines) {
+      if (deadline !== null && Date.parse(deadline) <= now) {
+        retiredIds.add(id);
+        store.storedBytesByMediaId.delete(id);
+      }
+    }
+  };
+  const now = new Date().toISOString();
+  const lifetimeDays = scenario.kind === "image" ? 14 : 3;
+  const capturedAt = new Date(Date.parse(now) - lifetimeDays * 86_400_000 + 60_000).toISOString();
+  const imageBytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+cGfoAAAAASUVORK5CYII=", "base64");
+  let status: ReturnType<typeof hostedCanonicalWriteReceiptLogStatusFields> = {};
+  const receipts: HostedCanonicalWritePersistenceInput[] = [];
+  try {
+    await initializeVault({ vaultRoot, createdAt: capturedAt });
+    const input = await normalizeParsedEmailMessage({
+      message: {
+        attachments: [
+          { fileName: "reference.png", contentType: "image/png", data: imageBytes },
+          { fileName: "reference.mp4", contentType: "video/mp4", data: Buffer.from("reference video bytes") },
+        ].map((attachment) => ({ ...attachment, contentDisposition: "attachment", contentId: null, contentTransferEncoding: null })),
+        bcc: [], cc: [], from: "sender@example.test", to: ["assistant@example.test"],
+        headers: {}, html: null, inReplyTo: null, messageId: "reference-save@example.test",
+        occurredAt: capturedAt, receivedAt: capturedAt, rawHash: "b".repeat(64), rawSize: 0,
+        references: [], replyTo: [], subject: "Reference material", text: "Attachments for later.",
+      },
+    });
+    await persistCanonicalInboxCapture({ vaultRoot, input, storedAt: capturedAt, captureId: "cap_reference_save", eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2W3" });
+    await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore });
+    await withHostedCanonicalWritePort({
+      async persistCanonicalWrite(persistence) {
+        // A non-media event must not access the workspace media publisher.
+        assert.equal(await externalizeHostedCanonicalWriteMediaPayloads({
+          persistence, mediaStore, vaultRoot: path.join(root, "absent-vault"),
+        }), persistence);
+        await assert.rejects(stat(path.join(root, "absent-vault")), { code: "ENOENT" });
+      },
+    }, () => upsertEvent({ vaultRoot, payload: {
+      kind: "note", occurredAt: now, source: "manual", title: "Text-only note", note: "No attachment references.",
+    } }));
+    const catalogue = await readHostedMediaReferenceCatalogue({ vaultRoot });
+    const selected = catalogue.entries.find((entry) => entry.mediaKind === scenario.kind)!;
+    const unreferenced = catalogue.entries.find((entry) => entry.mediaKind !== scenario.kind)!;
+    assert.ok(selected.expiresAt);
+    const selectedBytes = Buffer.from(store.storedBytesByMediaId.get(selected.mediaId)!);
+    for (const entry of catalogue.entries) await rm(path.join(vaultRoot, entry.relativePath));
+    const snapshot = await snapshotHostedBundleRoots({ kind: "vault", roots: [{ root: vaultRoot, rootKey: "vault" }] });
+    assert.ok(snapshot);
+    const snapshotHash = sha256HostedBundleHex(snapshot);
+    await artifactStore.put({ bytes: snapshot, sha256: snapshotHash });
+    const afterExpiry = Date.parse(now) + 15 * 86_400_000;
+    if (scenario.retired) cleanupExpired(afterExpiry);
+    const save = () => withHostedCanonicalWritePort({
+      async persistCanonicalWrite(persistence) {
+        assert.ok(persistence.receipt.actions.every((action) => action.kind === "jsonl_append"));
+        const externalized = await externalizeHostedCanonicalWriteMediaPayloads({ persistence, vaultRoot, mediaStore });
+        receipts.push(externalized);
+        status = hostedCanonicalWriteReceiptLogStatusFields(await appendHostedCanonicalWriteReceiptToArtifactLog({
+          ...externalized, artifactStore, previousStatus: status,
+        }));
+      },
+    }, () => upsertEvent({ vaultRoot, payload: {
+      kind: "note", occurredAt: now, source: "manual", title: "Saved source evidence", note: "Durable source reference.", rawRefs: [selected.relativePath],
+    } }));
+    if (scenario.retired) {
+      await assert.rejects(save(), /Media lifetime registration was rejected/);
+      assert.equal(receipts.length, 0);
+      assert.equal(store.storedBytesByMediaId.has(selected.mediaId), false);
+      assert.ok((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries.find((entry) => entry.mediaId === selected.mediaId)?.expiresAt);
+      return;
+    }
+    const saved = await save();
+    assert.deepEqual(recordCalls, [selected.mediaId]);
+    assert.equal(deadlines.get(selected.mediaId), null);
+    cleanupExpired(afterExpiry);
+    assert.equal(store.storedBytesByMediaId.has(selected.mediaId), true);
+    assert.equal(store.storedBytesByMediaId.has(unreferenced.mediaId), false);
+    assert.equal(store.putCalls.length, 2);
+    assert.deepEqual(store.getCalls, []);
+    await rm(vaultRoot, { recursive: true, force: true });
+    const restored = await restoreHostedWorkspaceRuntimeJobWorkspace({
+      vaultRoot: restoredRoot, platform: { artifactStore, logPort: null, mediaStore },
+      workspace: createWorkspaceState({ redactedStatus: status,
+        snapshotRef: { hash: snapshotHash, key: "synthetic/reference-base.bundle", size: snapshot.byteLength, updatedAt: now },
+      }),
+    });
+    assert.equal(restored.canonicalWriteReceiptRecoveryFailed, false);
+    assert.equal(restored.canonicalWriteReceiptCount, receipts.length);
+    assert.deepEqual(store.getCalls, []);
+    assert.ok((await readFile(path.join(restoredRoot, saved.ledgerFile), "utf8")).includes(saved.eventId));
+    assert.equal((await readHostedMediaReferenceCatalogue({ vaultRoot: restoredRoot })).entries.find((entry) => entry.mediaId === selected.mediaId)?.expiresAt, null);
+    await restored.materializeWorkspaceArtifacts([selected.relativePath]);
+    assert.deepEqual(await readFile(path.join(restoredRoot, selected.relativePath)), selectedBytes);
+    assert.equal(store.getCalls.length, 1);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
