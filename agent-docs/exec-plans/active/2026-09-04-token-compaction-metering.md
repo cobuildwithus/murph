@@ -55,7 +55,8 @@ Updated: 2026-09-04
 - Passed: engine parser/process assertions (53), idle accounting assertions (39), hosted usage ledger assertions (26), changelog archive rendering assertions (9), and engine/runtime/hosted-execution typechecks.
 - Focused engine/runtime `test:coverage` runs passed their assertions but failed package-global thresholds because the selected tests do not exercise unrelated package files. Required CI remains the broad coverage gate; these commands are not reported as green.
 - Complexity guard passed: engine debt unchanged; idle-maintenance maximum complexity reduced from 49 to 44. Parent candidate source/privacy review passed.
-- Draft PR: #2865. Web typecheck, required CI, final ReviewGPT, and plan closure remain with completion.
+- Web `pnpm --dir apps/web typecheck` is blocked by the unchanged `test/device-sync-hosted-runtime-authority.test.ts:2` import of `@murphai/device-syncd/service`: its local built declaration is absent and the Web source aliases omit that subpath. Import and export match current main. Next-best validation is the passing changelog archive test; no unrelated source edit was made.
+- Draft PR: #2865. Required CI, final ReviewGPT, and plan closure remain with completion. `git merge-tree --write-tree HEAD origin/main` passed against the refreshed base.
 
 ## Product UX
 
