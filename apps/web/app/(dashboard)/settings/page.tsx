@@ -225,6 +225,7 @@ function renderAuthenticatedSettingsPage(input: {
     usageTopUpReturnTarget,
   } = normalizeSettingsPageData(settingsData);
   const account = settingsSnapshot?.account ?? null;
+  const assistant = account?.assistant;
   const billingRef = settingsSnapshot?.billingRef ?? null;
   const routing = settingsSnapshot?.routing ?? null;
   const {
@@ -409,9 +410,10 @@ function renderAuthenticatedSettingsPage(input: {
           AI model
         </div>
         <HostedAssistantModelSettings
+          availableModels={assistant?.availableModels}
           canUpgradeToEdge={canUpgradeToEdge && !planChangePending}
           chatCompletionsAvailable={isHostedCustomChatCompletionsEnabled()}
-          configurationAvailable={account?.assistant?.configurationAvailable === true}
+          configurationAvailable={assistant?.configurationAvailable === true}
           customInferenceAvailable={isHostedCustomInferenceEnabled()}
           expectedCurrentPlanCode={
             currentPlanCode === "launch_group_monthly"
@@ -423,13 +425,13 @@ function renderAuthenticatedSettingsPage(input: {
             isHostedCustomInferenceEnabled() ? inferenceConnection : null
           }
           initialDormantSolPreference={
-            account?.assistant?.dormantSolPreference === true
+            assistant?.dormantSolPreference === true
           }
-          initialModel={account?.assistant?.model ?? HOSTED_ASSISTANT_TERRA_MODEL}
+          initialModel={assistant?.model ?? HOSTED_ASSISTANT_TERRA_MODEL}
           initialProvider={
-            account?.assistant?.provider ?? HOSTED_ASSISTANT_DEFAULT_PROVIDER
+            assistant?.provider ?? HOSTED_ASSISTANT_DEFAULT_PROVIDER
           }
-          solAvailable={account?.assistant?.solAvailable === true}
+          solAvailable={assistant?.solAvailable === true}
           veniceAvailable={isHostedVeniceAssistantEnabled()}
         />
       </section>

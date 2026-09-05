@@ -22,6 +22,7 @@ export interface HostedSourceDeliveryStallNoticeCandidate {
 export function resolveHostedSourceDeliveryStallNoticeCandidate(input: {
   connectionId: string;
   lastDataAt: string | null;
+  lastErrorCode?: string | null;
   lifecycleEpoch: number | null;
   now: string;
   sourceId: string;
@@ -99,6 +100,7 @@ export async function isHostedSourceDeliveryStallEpisodeCurrentTx(input: {
       connectionId: true,
       id: true,
       lastDataAt: true,
+      lastErrorCode: true,
       lifecycleEpoch: true,
       sourceInstanceKey: true,
       sourceProviderSlug: true,
@@ -117,11 +119,11 @@ export async function isHostedSourceDeliveryStallEpisodeCurrentTx(input: {
     !source
     || source.connection.userId !== input.memberId
     || source.connection.status !== "active"
-    || source.status !== "connected"
     || source.lastDataAt === null
     || !outreachPolicy?.enabled
     || !isSourceRecoveryNoticeEligible({
       lastDataAt: source.lastDataAt.toISOString(),
+      lastErrorCode: source.lastErrorCode,
       now: input.now,
       silentHours: outreachPolicy.silentHours,
       sourceProviderSlug: source.sourceProviderSlug,

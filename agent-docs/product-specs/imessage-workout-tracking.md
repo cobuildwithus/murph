@@ -299,6 +299,18 @@ it, preserves the returned workout event id, and logs only the stated coordinate
 on that new record. An older unfinished workout neither blocks this work nor
 needs to be closed first.
 
+Legacy reminders can lack a canonical workout reference. When the delivered
+reminder has an exact host-preserved automation id, the private reply may inspect
+that saved automation's title and instructions before requesting clarification.
+Inspection is read-only and does not establish that a workout or completed set
+exists. A complete standalone workout definition and the member's explicit set
+completion can start one ad-hoc workout through the ordinary canonical owner.
+Only reported sets receive actual values; numbering a reminder never backfills
+earlier sets. Named formats, regimens, and experiments retain their existing
+exact-record paths. Missing or ambiguous definitions and explicit cleared or
+mismatched event references require clarification without a write. Recovery
+does not patch the reminder or select an older workout by recency.
+
 When immediate causal context instead identifies an existing exact workout event
 id, Murph reads and mutates only that record. A reminder reference alone never
 selects an existing workout. Missing or conflicting record identity, exercise,

@@ -3378,16 +3378,21 @@ text(result.output);
     expect((await readFile(requestLog, 'utf8')).trim().split('\n')).toHaveLength(3)
   })
 
-  it.each(['direct', 'group'] as const)(
-    'carries a delayed V2 child completion into a later %s root turn without waiting',
+  it.each([
+    ['direct', 'gpt-5.6-luna', false],
+    ['group', 'gpt-5.6-luna', false],
+    ['direct', 'gpt-6-astra', true],
+  ] as const)(
+    'carries a delayed V2 %s %s child completion into a later root turn without waiting',
     { timeout: TURN_TIMEOUT_MS },
-    async (conversationScope) => {
+    async (conversationScope, childModel, astraAllowed) => {
       const scenario = await prepareScriptedTurnScenario({
         multiAgentV2: true,
       })
       const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
         codexCommand: scenario.turnInput.codexCommand,
         directory: scenario.turnInput.codexHome,
+        astraAllowed,
       })
       const scopeLabel = conversationScope.toUpperCase()
       const childResult = `LATE_CHILD_RESULT_${scopeLabel}`
@@ -3399,7 +3404,7 @@ text(result.output);
             arguments: {
               fork_turns: 'none',
               message: `Return exactly ${childResult}.`,
-              model: 'gpt-5.6-luna',
+              model: childModel,
               task_name: `late_child_${conversationScope}`,
             },
             name: 'spawn_agent',
@@ -3452,7 +3457,7 @@ text(result.output);
       ).toContain(childResult)
       expect(
         scenario.stub.requestSummariesSinceBaseline().map(({ model }) => model),
-      ).toContain('gpt-5.6-luna')
+      ).toContain(childModel)
       await delay(100)
 
       scenario.stub.queue({
@@ -3479,9 +3484,9 @@ text(result.output);
     },
   )
 
-  it('rejects a non-product child model before a provider request', {
+  it.each(['gpt-5.5', 'gpt-6-astra'])('rejects an unavailable child model %s before a provider request', {
     timeout: TURN_TIMEOUT_MS,
-  }, async () => {
+  }, async (model) => {
     const scenario = await prepareScriptedTurnScenario({
       multiAgentV2: true,
     })
@@ -3495,7 +3500,7 @@ text(result.output);
           arguments: {
             fork_turns: 'none',
             message: 'Return exactly NON_PRODUCT_CHILD_SHOULD_NOT_RUN.',
-            model: 'gpt-5.5',
+            model,
             task_name: 'non_product_child',
           },
           name: 'spawn_agent',
@@ -3523,7 +3528,7 @@ text(result.output);
     expect(summaries.flatMap(
       (summary) => summary.functionCallOutputs ?? [],
     )).toEqual([
-      'Unknown model `gpt-5.5` for spawn_agent. Available models: gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna',
+      `Unknown model \`${model}\` for spawn_agent. Available models: gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna`,
     ])
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })

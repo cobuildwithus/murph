@@ -26,6 +26,7 @@ const TEST_TEMPLATE_KEYS = [
   "linq.home_redirect",
   "linq.device_delivery_stalled",
   "linq.apple_health_delivery_stalled",
+  "linq.device_connection_check",
   "linq.ai_usage.starter_limit_reached",
   "linq.ai_usage.edge_limit_reached",
   "linq.ai_usage.family_limit_reached",
@@ -53,6 +54,11 @@ const USAGE_RECOVERY_SETTINGS_URL =
   "https://withmurph.ai/settings?usageRecovery=true#subscription";
 
 const TEST_CONTEXT_BY_KEY = {
+  "linq.device_connection_check": {
+    companionAppName: "WHOOP",
+    deviceDisplayName: "WHOOP",
+    providerDisplayName: "WHOOP",
+  },
   "assistant.signup_welcome": {},
   "assistant.family_welcome": {},
   "linq.invite_signup": {
@@ -101,6 +107,13 @@ const TEST_CONTEXT_BY_KEY = {
 };
 
 describe("user-facing message variants", () => {
+  it("offers WHOOP help without asserting a cause or requiring reconnect", () => {
+    for (const text of collectRenderedTexts("linq.device_connection_check")) {
+      expect(text).toContain("WHOOP");
+      expect(text).toContain("?");
+      expect(text).not.toMatch(/expired|revoked|reconnect|disconnected|charged|Junction|OAuth|https?:/iu);
+    }
+  });
   it("offers Apple Health recovery without inventing app closure or a device fault", () => {
     for (const text of collectRenderedTexts("linq.apple_health_delivery_stalled")) {
       expect(text).toContain("Apple Health");
