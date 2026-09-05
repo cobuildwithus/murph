@@ -1,4 +1,5 @@
 import {
+  cliTimingLaunchArgs,
   MURPH_DYNAMIC_TOOLS,
   MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
   MURPH_DYNAMIC_TOOLS_WITH_COMPUTER,
@@ -899,6 +900,7 @@ describe('assistant codex runtime', () => {
         `model="${model}"`,
         '--config',
         'model_catalog_json="/opt/murph/codex-model-catalog.openai-flex.json"',
+        ...cliTimingLaunchArgs,
         'app-server',
       ],
       expect.objectContaining({

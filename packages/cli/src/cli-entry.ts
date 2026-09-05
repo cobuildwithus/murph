@@ -1,3 +1,4 @@
+import { finishCliTimingAction, isCliTimingActive, noteCliTimingExit, startCliPhase, withCliTiming } from '@murphai/runtime-state/node/cli-timing'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Cli, Formatter } from 'incur'
@@ -32,22 +33,28 @@ export async function runMurphCliEntrypoint(
   argv: string[] = process.argv.slice(2),
   options: MurphCliRunOptions = {},
 ): Promise<void> {
-  installBrokenPipeHandler()
-  installSqliteExperimentalWarningFilter()
-  loadCliEnvFiles()
-  let actionCompleted = false
-  try {
-    await runMurphCliAction(argv, options)
-    actionCompleted = true
-  } finally {
+  return withCliTiming(async () => {
+    installBrokenPipeHandler()
+    installSqliteExperimentalWarningFilter()
+    loadCliEnvFiles()
+    let actionCompleted = false
     try {
-      await stopWarmCodexAppServerForCliExit()
-    } catch (error) {
-      if (actionCompleted) {
-        throw error
+      await runMurphCliActionInternal(argv, options)
+      actionCompleted = true
+    } finally {
+      finishCliTimingAction()
+      const endTeardown = startCliPhase('teardown')
+      try {
+        await stopWarmCodexAppServerForCliExit()
+      } catch (error) {
+        if (actionCompleted) {
+          throw error
+        }
+      } finally {
+        endTeardown()
       }
     }
-  }
+  })
 }
 
 let brokenPipeHandlerInstalled = false
@@ -98,6 +105,19 @@ export function resolveBrokenPipeExitCode(
 export async function runMurphCliAction(
   argv: string[],
   options: MurphCliRunOptions = {},
+): Promise<void> {
+  return withCliTiming(async () => {
+    try {
+      await runMurphCliActionInternal(argv, options)
+    } finally {
+      finishCliTimingAction()
+    }
+  })
+}
+
+async function runMurphCliActionInternal(
+  argv: string[],
+  options: MurphCliRunOptions,
 ): Promise<void> {
   const programName = detectCliProgramName(options.argv0 ?? process.argv[1])
   const plannedInvocation = planVaultCliInvocation(argv, {
@@ -491,7 +511,13 @@ export function createCliServeOptions(
 ): CliServeOptions {
   return {
     env: process.env,
-    ...(exit ? { exit: (code: number) => exit(code) } : {}),
+    ...(isCliTimingActive()
+      ? { exit: (code: number) => {
+          noteCliTimingExit(code, exit === undefined)
+          if (exit) exit(code)
+          else process.exit(code)
+        } }
+      : exit ? { exit: (code: number) => exit(code) } : {}),
     ...(stdout ? { stdout } : {}),
   }
 }

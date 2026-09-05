@@ -1,4 +1,5 @@
 import {
+  cliTimingLaunchArgs,
   CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA,
   MockChildProcess,
   asRecord,
@@ -3622,7 +3623,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
     expect(codexMocks.spawn).toHaveBeenCalledWith(
       codexCommand,
-      ['app-server'],
+      [...cliTimingLaunchArgs, 'app-server'],
       expect.objectContaining({
         cwd: tmpdir(),
         env: expect.objectContaining({
@@ -3643,7 +3644,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
       const child = new MockChildProcess()
 
       expect(command).toBe(codexCommand)
-      expect(args).toEqual(['app-server'])
+      expect(args).toEqual([...cliTimingLaunchArgs, 'app-server'])
       expect(options).toMatchObject({
         env: expect.objectContaining({
           CODEX_HOME: explicitCodexHome,
@@ -3712,7 +3713,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
     expect(codexMocks.spawn).toHaveBeenCalledWith(
       codexCommand,
-      ['app-server'],
+      [...cliTimingLaunchArgs, 'app-server'],
       expect.any(Object),
     )
   })
@@ -3764,7 +3765,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
       expect(codexMocks.spawn).toHaveBeenCalledWith(
         '/tmp/attacker-controlled-codex',
-        ['app-server'],
+        [...cliTimingLaunchArgs, 'app-server'],
         expect.any(Object),
       )
     } finally {
@@ -3817,7 +3818,7 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
     expect(codexMocks.spawn).toHaveBeenCalledWith(
       'codex',
-      ['app-server'],
+      [...cliTimingLaunchArgs, 'app-server'],
       expect.any(Object),
     )
   })
