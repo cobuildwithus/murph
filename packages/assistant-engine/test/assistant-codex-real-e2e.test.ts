@@ -24097,7 +24097,7 @@ describe('real Codex app-server cache usage e2e harness', () => {
         observedConfigOverrides = input.configOverrides
         throw new Error('Stop after capturing the launch input.')
       },
-    )).rejects.toThrow('Real Codex cache probe failed')
+    )).rejects.toThrow('Real Codex turn failed')
 
     expect(observedConfigOverrides).toEqual([
       'allow_login_shell=false',
@@ -24187,7 +24187,7 @@ describe('real Codex app-server cache usage e2e harness', () => {
     )
   })
 
-  it('sanitizes live provider failures before Vitest prints them', () => {
+  it.each([0, 2])('identifies failed live turns with %i actions without inventing a cache probe', async (providerActionCount) => {
     const rawError = Object.assign(
       new Error('Quota exceeded for request req_sensitive_123'),
       {
@@ -24195,16 +24195,32 @@ describe('real Codex app-server cache usage e2e harness', () => {
         context: {
           codexFailureStage: 'turn_failed',
           codexTurnStatus: 'failed',
-          providerActionCount: 2,
+          providerActionCount,
           codexThreadId: 'thread_sensitive_123',
         },
       },
     )
 
-    const message = buildRealCodexE2eFailureMessage(rawError)
+    let attempts = 0
+    const error = await executeRealCodexAppServerTurn(
+      {
+        dynamicTools: [],
+        env: {},
+        prompt: 'Run the selected synthetic journey.',
+        workingDirectory: '/synthetic-workspace',
+      },
+      async () => {
+        attempts += 1
+        throw rawError
+      },
+    ).catch((failure: unknown) => failure)
+    expect(error).toBeInstanceOf(Error)
+    if (!(error instanceof Error)) throw new Error('Expected the journey to fail')
+    const message = error.message
 
+    expect(attempts).toBe(1)
     expect(message).toBe(
-      'Real Codex cache probe failed: code=ASSISTANT_CODEX_FAILED stage=turn_failed status=failed providerActionCount=2',
+      `Real Codex turn failed: code=ASSISTANT_CODEX_FAILED stage=turn_failed status=failed providerActionCount=${providerActionCount}`,
     )
     expect(message).not.toContain('Quota')
     expect(message).not.toContain('req_sensitive')
@@ -34079,7 +34095,7 @@ function buildRealCodexE2eFailureMessage(error: unknown): string {
     parts.push(`providerActionCount=${providerActionCount}`)
   }
 
-  return `Real Codex cache probe failed: ${parts.join(' ')}`
+  return `Real Codex turn failed: ${parts.join(' ')}`
 }
 
 async function removeRealCodexTemporaryPaths(paths: readonly string[]): Promise<void> {

@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-09-04
+Last verified: 2026-09-05
 
 Read the delivery-path rules first, then only the changed owner's matrix row
 or runtime procedure. The detailed command descriptions below are reference
@@ -29,13 +29,16 @@ The delivery path decides who owns broad verification:
   the PR-focused and docs-only fast paths because there is no PR feedback loop
   before the shared branch changes. If the remote advances while acceptance
   runs, fetch it and allow the unchanged accepted patch one post-acceptance
-  normal rebase. Require a conflict-free rebase, prove the patch is unchanged,
-  inspect the intervening base diff for overlap or invalidated assumptions, and
-  rerun affected focused checks. Do not restart full acceptance solely because
-  the base moved. Push immediately after that proof. If the patch changes, the
-  rebase conflicts, the intervening diff invalidates acceptance, or the push is
-  rejected because the remote advances again, do not rebase or rerun acceptance
-  again: report `moving-base race` and stop or move the change to a PR. The
+  normal rebase. Resolve bounded conflicts within the authorized scope without
+  another permission pause. Preserve both sides' intended changes, inspect the
+  resulting patch and intervening base diff for overlap or invalidated
+  assumptions, and rerun affected focused checks. A meaning-preserving docs or
+  context resolution does not invalidate acceptance. Do not restart full
+  acceptance solely because the base moved or a conflict needed resolution.
+  Push immediately after that proof. If the resolution changes behavior, the
+  intervening diff invalidates acceptance, or the push is rejected because the
+  remote advances again, do not rebase or rerun acceptance again: report
+  `moving-base race` and stop or move the change to a PR. The
   one-rebase budget remains consumed until push or handoff; a later agent turn
   does not reset it.
 
@@ -887,17 +890,19 @@ does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`. The
 Vercel package build starts the parent Next process with a direct 1 GiB
 old-space flag and appends a 3 GiB old-space flag to `NODE_OPTIONS` for the
 Webpack build worker. The same runner first performs route type generation and
-an explicit app-local generated-contract TypeScript check at 3.5 GiB, then marks
+an explicit app-local generated-contract TypeScript check at 6 GiB, then marks
 only that prepared check complete before starting the Webpack build. Node
 applies the direct flag to the parent; Next 16.3.0 rebuilds non-isolated child
 options from the parent arguments followed by `NODE_OPTIONS`, so the sequential
 Webpack compiler workers receive 3 GiB while the separate TypeScript CLI child
-receives 3.5 GiB. Next removes the flag from isolated static workers. The same
+receives 6 GiB. Next removes the flag from isolated static workers. The same
 script owns the Vercel package build and the CI memory-observation invocation.
 This bounds the compile parent without weakening validation, but only repeated
 forced-cold Standard previews prove the real Vercel boundary. The generated-
-contract worker limit moved from 3 GiB to 3.5 GiB only after an exact cold check
-succeeded at 3.5 GiB and deterministically exhausted the 3 GiB heap. A 2 GiB
+contract check uses 6 GiB after the cold check exhausted 3.5 GiB; the same
+source passed with incremental caching disabled and reported about 4 GiB of
+compiler memory. This local compiler measurement does not prove the total
+Vercel container peak. A 2 GiB
 parent-bound candidate passed one forced-cold
 preview but the next identical build was still killed by the 8 GB container
 OOM boundary. Single

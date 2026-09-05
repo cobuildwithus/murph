@@ -3519,16 +3519,49 @@ non-2xx responses, malformed output, non-completed responses, max-output
 exhaustion, and OpenAI quota or credits exhaustion, intentionally fail open by
 recording a deterministic allow decision so a legitimate first contact is not
 permanently dropped. With enforcement off, only a genuinely unknown member on a
-provider-authenticated direct iMessage from a configured E.164 phone prefix may
-use a persisted model-source allow to enter instant start. The selected
+provider-authenticated direct iMessage whose participant is either on a
+configured E.164 phone prefix or is a normalized email handle may use a
+persisted model-source allow to enter instant start. The selected
 permanent home line must be the same line the person contacted. The first
-planner transaction creates the canonical member, verified phone identity,
-pending route, and invite. That invite carries only the event id of the
+planner transaction creates the canonical member, either verified phone
+identity or a unique blinded Linq email-handle identity with its encrypted
+normalized source, the pending route,
+and the invite. A provider-observed email handle is routing identity only and
+never asserts verified email authorization. Privy email authentication must
+later converge the Linq handle owner, verified-email owner, and Privy
+principal owner when more than one exists; any disagreement fails closed.
+The additive migration copies each route's blinded key and matching same-member
+pending participant ciphertext, preserving its existing encryption context.
+It rejects active-only or missing-source history before changing identity;
+it never substitutes a verified-email ciphertext with a different field binding
+or grants starter access retroactively. Validation and backfill share one
+transaction-scoped route set; failure rolls back both columns and scratch state.
+The identity keeps the encrypted source after activation clears pending routing.
+Durable-handle admission is direct-only. Group preflight and transaction planning
+both resolve email through verified authorization or an exact pending recovery
+route; a handle alone grants no group admission. Group recovery retains the
+existing identity owner: under contact-before-chat/member locks it rejects a
+foreign handle, binds the authenticated member's handle and encrypted source,
+and writes the exact temporary route atomically. Crypto preparation and current
+routing opens precede the transaction, which permits cached crypto only. Thus
+recovered direct routing and later promotion cannot lose the identity source.
+Direct inbound resolution uses the existing handle or verified-email authority
+without rewriting either. A member's retained iMessage handle and separate
+verified email can both resolve to that member; verified email is not copied
+into the single retained-handle slot. Handle writes belong to new identity
+creation, explicit recovery, and owner-controlled source re-derivation.
+Canonical verified-email writes and email unlink take the participant contact
+lock before the member lock. A foreign handle blocks a primary email write;
+optional secondary enrichment skips that email while preserving phone or
+Telegram sign-in. Unlink clears only the matching handle and encrypted source.
+Email identity lookup and
+creation use the existing participant contact lock, with the unique index as
+the final backstop. That invite carries only the event id of the
 persisted model-source allow and is the single-owner token for that exact
 original inbound. Only the transaction creating a genuinely new member may
 mint that token; an existing inactive member without the exact same-event token
-remains on the signup path. The phone identity owner reports whether its unique
-insert actually won; a stale outer lookup that loses that insert exits
+remains on the signup path. The participant identity owner reports whether it
+created the member; a stale outer lookup that resolves an existing owner exits
 retryably before invite or accounting work. While the token remains pending, a
 different inbound for the inactive member exits retryably before counting or
 creating an effect; it cannot continue or cancel the admitted start. The
@@ -3537,7 +3570,7 @@ exact invite and event, appends the one semantic-keyed $4.50 starter grant when
 absent, activates the member, and clears the token atomically. It creates no
 Stripe Customer or Subscription. A second ordinary planner pass counts and
 appends the original inbound exactly once after active access is visible. Any
-block, deterministic fail-open, unsupported prefix/channel, cross-line route,
+block, deterministic fail-open, unsupported phone prefix or channel, cross-line route,
 existing member, conflicting billing history, or definitive enrollment failure
 keeps the existing signup-link or ignored behavior. Active members, explicit thread routes, own
 messages, group chats, local guard rejects, deterministic URL/STOP-style spam,
