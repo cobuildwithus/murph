@@ -3,6 +3,8 @@ import {
   CLINICAL_FHIR_MAX_RETRIEVAL_SLICES,
   CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES,
   clinicalFhirManifestPathSchema,
+  clinicalFhirScopeAllowsOperation,
+  clinicalFhirPageHasIncompleteSearchOutcome,
   clinicalFhirRetrievalPlanSchema,
   clinicalImportDecisionSchema,
   clinicalImportPlanSchema,
@@ -610,5 +612,59 @@ describe("clinical records contracts", () => {
         }],
       }],
     })).not.toThrow();
+  });
+});
+
+
+describe("operation-aware clinical permissions", () => {
+  it.each([
+    ["patient/Observation.read", true, true],
+    ["patient/Observation.rs", true, true],
+    ["patient/Observation.r", true, false],
+    ["patient/Observation.s", false, true],
+    ["patient/*.read", true, true],
+    ["user/Observation.cruds", true, true],
+    ["system/Observation.s", false, true],
+    ["patient/Patient.rs", false, false],
+    ["patient/Observation.cud", false, false],
+    ["patient/Observation.sr", false, false],
+    ["patient/Observation.write", false, false],
+    ["patient/Observation.", false, false],
+    ["Observation.rs", false, false],
+  ])("matches read/search independently for %s", (scope, read, search) => {
+    expect(clinicalFhirScopeAllowsOperation(scope, "Observation", "read")).toBe(read);
+    expect(clinicalFhirScopeAllowsOperation(scope, "Observation", "search")).toBe(search);
+  });
+});
+
+describe("clinical search warning completeness", () => {
+  it.each([null, {}, { resourceType: "Observation" }, { resourceType: "Bundle" },
+    { resourceType: "Bundle", entry: null },
+    { resourceType: "Bundle", entry: [null, {}, { resource: null }, { resource: {} },
+      { resource: { resourceType: "Observation" } }] },
+  ])("does not invent a search warning in unrelated evidence %#", (page) => {
+    expect(clinicalFhirPageHasIncompleteSearchOutcome(JSON.stringify(page))).toBe(false);
+  });
+
+  it.each([
+    [{}, true],
+    [{ issue: null }, true],
+    [{ issue: [] }, true],
+    [{ issue: [null] }, true],
+    [{ issue: [{}] }, true],
+    [{ issue: [{ severity: "warning" }] }, true],
+    [{ issue: [{ severity: "error" }] }, true],
+    [{ issue: [{ severity: "fatal" }] }, true],
+    [{ issue: [{ severity: "information" }] }, false],
+    [{ issue: [{ severity: "information" }, { severity: "warning" }] }, true],
+  ])("preserves uncertainty from a search outcome %#", (outcome, incomplete) => {
+    expect(clinicalFhirPageHasIncompleteSearchOutcome(JSON.stringify({
+      resourceType: "Bundle",
+      entry: [{ resource: { resourceType: "OperationOutcome", ...outcome } }],
+    }))).toBe(incomplete);
+  });
+
+  it("rejects malformed JSON at the evidence boundary", () => {
+    expect(() => clinicalFhirPageHasIncompleteSearchOutcome("{")).toThrow(SyntaxError);
   });
 });

@@ -679,6 +679,47 @@ describe("Clinical Records connect page", () => {
     expect(input.hasAttribute("readOnly")).toBe(false);
   });
 
+  it("keeps a failed start bound to the selected provider while allowing its retry", async () => {
+    const claim = `cr_${"f".repeat(32)}`;
+    mocks.requestHostedOnboardingJson
+      .mockResolvedValueOnce({
+        directoryVersion: "test-v1", ok: true,
+        providers: ["first", "second"].map((id) => ({
+          brandName: `Example ${id}`, facilities: [], id: `epic-${id}`, sourceSystem: "epic-fhir",
+        })),
+      })
+      .mockRejectedValueOnce(new Error("Temporary start failure"))
+      .mockResolvedValueOnce({
+        authorizationUrl: "https://epic.example.test/oauth2/authorize",
+        expiresAt: "2026-07-16T18:15:00.000Z", ok: true,
+      });
+    const { ProviderSearch } = await import("../app/(dashboard)/records/connect/records-connect-client");
+    const rendered = await renderClientComponent(createElement(ProviderSearch, {
+      intentClaim: claim, onConsentRequired: vi.fn(),
+    }));
+    cleanup = rendered.cleanup;
+    const input = rendered.container.querySelector("#clinical-provider-search");
+    assert.ok(input instanceof rendered.window.HTMLInputElement);
+    await act(async () => { setInputValue(rendered.window, input, "Example"); });
+    await submitProviderSearch(rendered);
+    const portalButtons = () => Array.from(rendered.container.querySelectorAll("button"))
+      .filter((button) => button.textContent?.includes("Continue to portal"));
+    await vi.waitFor(() => { expect(portalButtons()).toHaveLength(2); });
+    await act(async () => { portalButtons()[0]!.click(); });
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Could not continue with Example first");
+    });
+    expect(portalButtons()[0]!.disabled).toBe(false);
+    expect(portalButtons()[1]!.disabled).toBe(true);
+    await act(async () => { portalButtons()[1]!.click(); });
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+    await act(async () => { portalButtons()[0]!.click(); });
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenLastCalledWith(expect.objectContaining({
+      payload: { claim, providerDirectoryEntryId: "epic-first" },
+    }));
+    expect(rendered.assign).toHaveBeenCalledWith("https://epic.example.test/oauth2/authorize");
+  });
+
   it("closes a committed connection flow when a successful response has a non-HTTPS redirect", async () => {
     const claim = `cr_${"d".repeat(32)}`;
     mocks.requestHostedOnboardingJson

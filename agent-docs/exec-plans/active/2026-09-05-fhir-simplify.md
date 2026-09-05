@@ -61,3 +61,7 @@ The authorized September FHIR refactor covers correctness, policy/contract delet
 - Expansion migration permits old database readers during deploy. Existing guarded post-deploy contract lane drops unused columns only after the new reader is deployed; this sets the rollback floor.
 - The rollout aggregate was rechecked before PR creation and remained zero.
 - Parent candidate review covers source and test deletions, frozen identities, partial outcomes, privacy, migration ordering and UI states. Live provider validation remains unavailable; synthetic proof is explicitly scoped.
+
+- Branch preview is deployed and the real-component study returns HTTP 200. ReviewGPT round one is running on its immutable first head, concurrently with CI.
+- CI exposed stale test expectations, a missing sharded-test package alias, and missing direct predicate coverage. Focused corrections pass 68 Web cases and 44 clinical domain cases with 78% branch coverage; package test typechecks pass.
+- React lint caught selection read from a ref during render. Selection now uses state while the existing in-flight ref still prevents duplicate starts. Lint, Web typecheck and 25 records UI tests pass, including failed-start provider binding. Complexity guard still passes. A later review round must include this source correction.

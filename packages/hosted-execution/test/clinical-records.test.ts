@@ -272,9 +272,7 @@ describe("clinical records hosted execution contracts", () => {
       ...descriptor,
       retrievalProtocol: "query-slices-v2",
       retrievalSlices: [{
-        queryScopeId: "observations",
-        sliceId: "whole",
-        ...descriptor.retrievalScopes[0],
+        ...descriptor.retrievalSlices[0],
         resourceType: "Medication",
       }],
     })).toThrow();

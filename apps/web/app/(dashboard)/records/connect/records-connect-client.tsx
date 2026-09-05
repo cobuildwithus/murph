@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import {
   ArrowRightIcon,
   Building2Icon,
@@ -203,7 +202,7 @@ export function ProviderSearch({
   const searchInFlightRef = useRef(false);
   const startInFlightRef = useRef(false);
   const startCommittedRef = useRef(false);
-  const selectedProviderRef = useRef<string | null>(null);
+  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
   const operationGenerationRef = useRef(0);
   const attachSearchInput = useCallback((node: HTMLInputElement | null) => {
     searchInputRef.current = node;
@@ -284,13 +283,13 @@ export function ProviderSearch({
   }
 
   async function startConnection(provider: ClinicalProviderSearchResultContract) {
-    if (selectedProviderRef.current && selectedProviderRef.current !== provider.id) return;
-    selectedProviderRef.current = provider.id;
+    if (selectedProviderId && selectedProviderId !== provider.id) return;
     if (searchInFlightRef.current || startInFlightRef.current) {
       return;
     }
 
     startInFlightRef.current = true;
+    setSelectedProviderId(provider.id);
     const operationGeneration = operationGenerationRef.current + 1;
     operationGenerationRef.current = operationGeneration;
     setStartingProviderId(provider.id);
@@ -459,7 +458,7 @@ export function ProviderSearch({
               {providers.map((provider) => (
                 <ProviderResult
                   key={provider.id}
-                  disabled={searchPending || Boolean(startingProviderId) || Boolean(selectedProviderRef.current && selectedProviderRef.current !== provider.id)}
+                  disabled={searchPending || Boolean(startingProviderId) || Boolean(selectedProviderId && selectedProviderId !== provider.id)}
                   pending={startingProviderId === provider.id}
                   provider={provider}
                   onSelect={() => void startConnection(provider)}
