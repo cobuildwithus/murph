@@ -58,6 +58,30 @@ describe('assistant proactive follow-through', () => {
       'topic-specific no-proactive-support boundary',
     )
     expect(normalizedSkill).toContain('canonical memory or preference surface')
+    expect(normalizedSkill).toContain(
+      'For every accepted non-experiment repeated-action plan, including `habit_plan` and `training_plan`',
+    )
+    expect(normalizedSkill).toContain(
+      'Save the concrete plan into exactly one `kind=habit` regimen linked to the Goal',
+    )
+    expect(normalizedSkill).toContain(
+      "Also include the user's reason in their own words and the practical constraints that materially shaped the accepted loop.",
+    )
+    expect(normalizedSkill).toContain(
+      'Do not save inferred motives or a generic reason manufactured from the goal title.',
+    )
+    expect(normalizedSkill).toContain(
+      '`vault-cli automation list --support-series-id habit:<regimenId> --compact --limit 200`',
+    )
+    expect(normalizedSkill).toContain(
+      'Every automation owned by a non-experiment repeated-action plan, including a training plan, must set `supportSeriesId: "habit:<regimenId>"`',
+    )
+    expect(normalizedSkill).toContain(
+      'An exact redelivery of an already-persisted package performs no write.',
+    )
+    expect(normalizedSkill).toContain(
+      'Follow every returned `nextCursor` with `--cursor` until it is null',
+    )
   })
 
   it('keeps the first health read separate from one finite three-day support check', () => {

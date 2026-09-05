@@ -1,9 +1,7 @@
 import { appendFile, readFile } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
 const MAX_CHANGED_FILES = 3_000;
-const MAX_GIT_OUTPUT_BYTES = 4 * 1_024 * 1_024;
 const PAGE_SIZE = 100;
 const SHA_PATTERN = /^[0-9a-f]{40}$/u;
 const SAFE_REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
@@ -58,97 +56,6 @@ export function classifyChangedFiles(files) {
     }
   }
   return { markdownOnly: true, reason: "eligible-markdown-docs" };
-}
-
-export function parseGitNameStatus(output) {
-  if (
-    typeof output !== "string"
-    || output.length === 0
-    || Buffer.byteLength(output, "utf8") > MAX_GIT_OUTPUT_BYTES
-    || !output.endsWith("\0")
-  ) {
-    return null;
-  }
-
-  const fields = output.split("\0");
-  fields.pop();
-  if (fields.length % 2 !== 0) return null;
-
-  const statusByCode = new Map([
-    ["A", "added"],
-    ["D", "removed"],
-    ["M", "modified"],
-  ]);
-  const files = [];
-  for (let index = 0; index < fields.length; index += 2) {
-    const status = statusByCode.get(fields[index]);
-    const filename = fields[index + 1];
-    if (!status || typeof filename !== "string") return null;
-    files.push({ filename, status });
-    if (files.length > MAX_CHANGED_FILES) return null;
-  }
-  return files;
-}
-
-export function classifyCurrentVercelBuild({
-  env = process.env,
-  runGit = runGitCommand,
-} = {}) {
-  try {
-    if (env.VERCEL_ENV === "preview" || env.VERCEL_ENV === "development") {
-      if (
-        typeof env.VERCEL_TARGET_ENV === "string"
-        && env.VERCEL_TARGET_ENV !== env.VERCEL_ENV
-      ) {
-        return { reason: "custom-environment", skipBuild: false };
-      }
-      return { reason: "non-production", skipBuild: true };
-    }
-    if (
-      env.VERCEL_ENV !== "production"
-      || env.VERCEL_GIT_COMMIT_REF !== "main"
-      || !SHA_PATTERN.test(env.VERCEL_GIT_PREVIOUS_SHA ?? "")
-      || !SHA_PATTERN.test(env.VERCEL_GIT_COMMIT_SHA ?? "")
-      || env.VERCEL_GIT_PREVIOUS_SHA === env.VERCEL_GIT_COMMIT_SHA
-    ) {
-      return { reason: "invalid-vercel-context", skipBuild: false };
-    }
-
-    const repositoryRoot = requireGitOutput(runGit, ["rev-parse", "--show-toplevel"]).trim();
-    if (repositoryRoot.length === 0 || repositoryRoot.includes("\0")) {
-      return { reason: "invalid-repository-root", skipBuild: false };
-    }
-
-    const currentSha = env.VERCEL_GIT_COMMIT_SHA;
-    const previousSha = env.VERCEL_GIT_PREVIOUS_SHA;
-    const headSha = requireGitOutput(runGit, ["-C", repositoryRoot, "rev-parse", "HEAD"]).trim();
-    if (headSha !== currentSha) {
-      return { reason: "current-commit-mismatch", skipBuild: false };
-    }
-
-    requireGitSuccess(runGit, ["-C", repositoryRoot, "cat-file", "-e", `${previousSha}^{commit}`]);
-    requireGitSuccess(runGit, ["-C", repositoryRoot, "merge-base", "--is-ancestor", previousSha, currentSha]);
-    const inventory = parseGitNameStatus(requireGitOutput(runGit, [
-      "-C",
-      repositoryRoot,
-      "diff",
-      "--name-status",
-      "-z",
-      "--no-ext-diff",
-      "--no-renames",
-      "--diff-filter=ACDMRTUXB",
-      previousSha,
-      currentSha,
-      "--",
-    ]));
-    if (!inventory) {
-      return { reason: "invalid-git-inventory", skipBuild: false };
-    }
-    const result = classifyChangedFiles(inventory);
-    return { reason: result.reason, skipBuild: result.markdownOnly };
-  } catch {
-    return { reason: "classifier-unavailable", skipBuild: false };
-  }
 }
 
 export async function classifyCurrentPullRequest({
@@ -333,38 +240,7 @@ function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function runGitCommand(args) {
-  return spawnSync("git", args, {
-    encoding: "utf8",
-    maxBuffer: MAX_GIT_OUTPUT_BYTES,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-}
-
-function requireGitSuccess(runGit, args) {
-  const result = runGit(args);
-  if (!isRecord(result) || result.status !== 0) throw new Error("Git command failed");
-  return result;
-}
-
-function requireGitOutput(runGit, args) {
-  const result = requireGitSuccess(runGit, args);
-  if (typeof result.stdout !== "string") throw new Error("Git output unavailable");
-  return result.stdout;
-}
-
 async function main() {
-  if (process.argv[2] === "--vercel") {
-    const result = classifyCurrentVercelBuild();
-    console.log(
-      result.skipBuild
-        ? "Vercel build skipped by the repository documentation policy."
-        : `Vercel build retained (${result.reason}).`,
-    );
-    process.exitCode = result.skipBuild ? 0 : 1;
-    return;
-  }
-
   const result = await classifyCurrentPullRequest();
   const outputPath = process.env.GITHUB_OUTPUT;
   if (typeof outputPath === "string" && outputPath.length > 0) {

@@ -82,6 +82,7 @@ import { EnvironmentProgressStudy } from "./environment-progress-study";
 import { EnvironmentPrintStudy } from "./environment-print-study";
 import { PersonalPatternsStudy } from "./personal-patterns-study";
 import { BrowserVaultLoadingTransitionsStudy } from "./browser-vault-loading-transitions-study";
+import { FoodLabelLabStudy } from "./food-label-lab-study";
 import {
   SCREENSHOT_CATEGORIES,
   type ScreenshotCategory,
@@ -141,6 +142,7 @@ export function SectionsContent({
                 authenticated={false}
                 contactInfo={{
                   phone: "+15555550100",
+                  phoneConfigured: false,
                   telegram: "murph_test_bot",
                 }}
                 messengerChannel="imessage"
@@ -305,6 +307,14 @@ export function SectionsContent({
 
       {category === "health" ? (
         <>
+          <Separator />
+
+          <StudySection title="Food Label Lab">
+            <div className="-mx-5 sm:-mx-8 lg:-mx-12" inert>
+              <FoodLabelLabStudy />
+            </div>
+          </StudySection>
+
           <Separator />
 
           <StudySection title="Environment full-width progressive voice capture">

@@ -64,6 +64,12 @@ interface ImportJsonResult {
   entity?: never;
 }
 
+interface ShowResult {
+  entity: {
+    id: string;
+  };
+}
+
 function assertCompactSavedEntity(entity: SavedEntitySnapshot) {
   assert.equal("markdown" in entity, false);
   for (const field of ["body", "markdown", "path", "relativePath"]) {
@@ -208,6 +214,78 @@ test("regimen save schema exposes typed product and primary ingredient fields", 
     false,
   );
   assert.deepEqual(regimenJsonFallback.args.required ?? [], []);
+});
+
+test("regimen save fails closed when the selected regimen is deleted after read", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-regimen-save-deleted-after-read-",
+  );
+
+  try {
+    const cli = createRegimenSaveCli();
+    const initialized = await runInProcessJsonCli<{ created: boolean }>(cli, [
+      "init",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(initialized.exitCode, null);
+
+    const created = await runInProcessJsonCli<SaveResult>(cli, [
+      "regimen",
+      "save",
+      "Durable behavior plan",
+      "--kind",
+      "habit",
+      "--status",
+      "active",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(created.exitCode, null);
+    const saved = requireData(created.envelope);
+    const shown = await runInProcessJsonCli<ShowResult>(cli, [
+      "regimen",
+      "show",
+      saved.regimenId,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.exitCode, null);
+    assert.equal(requireData(shown.envelope).entity.id, saved.regimenId);
+
+    await rm(path.join(vaultRoot, requireSavedPath(saved)));
+    const filesAfterDeletion = await snapshotVaultFiles(vaultRoot);
+
+    const update = await runInProcessJsonCli<SaveResult>(cli, [
+      "regimen",
+      "save",
+      "Durable behavior plan",
+      "--id",
+      saved.regimenId,
+      "--kind",
+      "habit",
+      "--status",
+      "paused",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(update.exitCode, 1);
+    assert.equal(update.envelope.ok, false);
+    if (!update.envelope.ok) {
+      assert.equal(update.envelope.error.code, "not_found");
+      assert.equal(update.envelope.error.message, "Regimen was not found.");
+      assert.equal(update.envelope.error.retryable, false);
+      assert.equal(update.envelope.error.stage, "read");
+      assert.equal(
+        update.envelope.error.hint,
+        "After this error, run only regimen list once. Do not write again this turn. If a listed regimen matches, end with one question naming its exact regimen id and the requested change; retry only after the user confirms. If none is intended, stop and ask for a separate follow-up. Never offer creation here.",
+      );
+    }
+    assert.deepEqual(await snapshotVaultFiles(vaultRoot), filesAfterDeletion);
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
 });
 
 test("protocol list forwards commons-protocol filtering to the query service before limiting", async () => {

@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  HOSTED_GEMINI_VIDEO_ANALYSIS_PREVIOUS_MODEL,
   HOSTED_GEMINI_VIDEO_ANALYSIS_SYSTEM_INSTRUCTION,
 } from "@murphai/hosted-execution/assistant-capabilities";
 
 import {
   HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_BODY_BYTES,
   HOSTED_GEMINI_VIDEO_ANALYSIS_PATH,
+  HOSTED_GEMINI_VIDEO_ANALYSIS_PREVIOUS_MODEL_PATH,
   isAllowedHostedGeminiVideoAnalysisRequest,
   parseHostedGeminiVideoAnalysisRequestBody,
+  readHostedGeminiVideoAnalysisRequestModel,
   readHostedGeminiVideoAnalysisUsageMetadata,
 } from "../src/runner-egress-gemini.ts";
 
@@ -48,11 +51,23 @@ function createLegacyRequestBody() {
 }
 
 describe("hosted Gemini video egress contract", () => {
-  it("pins the only admitted method and model path", () => {
+  it("pins the current and rollout model paths to POST", () => {
     expect(isAllowedHostedGeminiVideoAnalysisRequest(
       "POST",
       HOSTED_GEMINI_VIDEO_ANALYSIS_PATH,
     )).toBe(true);
+    expect(readHostedGeminiVideoAnalysisRequestModel(
+      "POST",
+      HOSTED_GEMINI_VIDEO_ANALYSIS_PATH,
+    )).toBe("gemini-3.8-flash");
+    expect(isAllowedHostedGeminiVideoAnalysisRequest(
+      "POST",
+      HOSTED_GEMINI_VIDEO_ANALYSIS_PREVIOUS_MODEL_PATH,
+    )).toBe(true);
+    expect(readHostedGeminiVideoAnalysisRequestModel(
+      "POST",
+      HOSTED_GEMINI_VIDEO_ANALYSIS_PREVIOUS_MODEL_PATH,
+    )).toBe(HOSTED_GEMINI_VIDEO_ANALYSIS_PREVIOUS_MODEL);
     expect(isAllowedHostedGeminiVideoAnalysisRequest(
       "GET",
       HOSTED_GEMINI_VIDEO_ANALYSIS_PATH,
@@ -77,8 +92,14 @@ describe("hosted Gemini video egress contract", () => {
   });
 
   it("accepts only the exact deployed legacy profile during rollout", () => {
-    expect(parseHostedGeminiVideoAnalysisRequestBody(createLegacyRequestBody()))
+    expect(parseHostedGeminiVideoAnalysisRequestBody(
+      createLegacyRequestBody(),
+      HOSTED_GEMINI_VIDEO_ANALYSIS_PREVIOUS_MODEL,
+    ))
       .toEqual(createLegacyRequestBody());
+    expect(() => parseHostedGeminiVideoAnalysisRequestBody(
+      createLegacyRequestBody(),
+    )).toThrow();
 
     const legacyAtDetailedFps = createLegacyRequestBody();
     legacyAtDetailedFps.contents[0]!.parts[0]!.videoMetadata!.fps = 5;
@@ -92,7 +113,10 @@ describe("hosted Gemini video egress contract", () => {
       mediumWithLegacyCap,
       lowWithoutLegacyCap,
     ]) {
-      expect(() => parseHostedGeminiVideoAnalysisRequestBody(candidate)).toThrow();
+      expect(() => parseHostedGeminiVideoAnalysisRequestBody(
+        candidate,
+        HOSTED_GEMINI_VIDEO_ANALYSIS_PREVIOUS_MODEL,
+      )).toThrow();
     }
   });
 

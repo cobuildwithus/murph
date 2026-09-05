@@ -22,6 +22,10 @@ import type {
 
 import { HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT } from "../hosted-device-sync-limits.ts";
 import {
+  isHostedDeviceSyncCompletionFenceWake,
+  publishHostedDeviceSyncCompletionFence,
+} from "../hosted-device-sync-runtime.ts";
+import {
   createHostedAssistantChannelTypingDependencies,
 } from "./channel-activity.ts";
 import {
@@ -864,7 +868,22 @@ function upsertHostedSystemMailboxPendingItem(
   return next;
 }
 
+export function resolveHostedDeviceSyncCompletionRecordInput(input: {
+  item: HostedSystemMailboxPendingItem;
+  preparation: HostedSystemMailboxCheckpointPreparation | null;
+}): { deviceSyncCompletionAcceptedInCurrentAdmission?: true } {
+  if (
+    input.preparation?.status !== "processed"
+    || input.preparation.item.itemId !== input.item.itemId
+    || input.item.routeAction !== "run-device-sync-wake"
+  ) {
+    return {};
+  }
+  return { deviceSyncCompletionAcceptedInCurrentAdmission: true };
+}
+
 export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
+  deviceSyncCompletionAcceptedInCurrentAdmission?: boolean;
   item: HostedSystemMailboxPendingItem;
   operatorHomeRoot?: string | null;
   runtime: HostedSystemMailboxRuntime;
@@ -872,6 +891,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
   vaultShareProjectionResult?: HostedVaultShareProjectionOfferResult;
   vaultRoot: string;
 }): Promise<{
+  deviceSyncWake?: HostedRuntimeWakeCandidate;
   errorCode?: string | null;
   errorMessage?: string | null;
   failed: number;
@@ -904,7 +924,15 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       vaultShareProjectionResult: input.vaultShareProjectionResult,
       vaultRoot: input.vaultRoot,
     });
-    const retainUntil = resolveHostedDeviceSyncMailboxRetentionAt(input.item);
+    const completion = await finalizeHostedDeviceSyncMailboxAfterCheckpoint({
+      acceptedInCurrentAdmission:
+        input.deviceSyncCompletionAcceptedInCurrentAdmission === true,
+      item: input.item,
+      runtime: input.runtime,
+      signal: input.signal,
+      stillDirty: recordResult.stillDirty,
+    });
+    const retainUntil = completion.retainUntil;
     const immediateDirtyContinuationCanProgress = retainUntil !== null
       && recordResult.newerRevisionPending
       && hostedDeviceSyncRetainedWakeHasCapacity(input.item);
@@ -921,20 +949,27 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
         vaultRoot: input.vaultRoot,
       });
     }
-    const nextWake = selectHostedRuntimeWakeCandidate([
-      await resolveHostedSystemMailboxNextWakeCandidate({ vaultRoot: input.vaultRoot }),
+    const deviceSyncWake = selectHostedRuntimeWakeCandidate([
       createHostedRuntimeWakeCandidate(
         retainUntil,
         HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
       ),
       createHostedRuntimeWakeCandidate(
         retainUntil === null || immediateDirtyContinuationCanProgress
-          ? recordResult.nextWakeAt
+          ? earliestHostedSystemMailboxWakeAt(
+              recordResult.nextWakeAt,
+              completion.nextWakeAt,
+            )
           : null,
         HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
       ),
     ]);
+    const nextWake = selectHostedRuntimeWakeCandidate([
+      await resolveHostedSystemMailboxNextWakeCandidate({ vaultRoot: input.vaultRoot }),
+      deviceSyncWake,
+    ]);
     return {
+      deviceSyncWake: presentHostedRuntimeWakeCandidate(deviceSyncWake),
       failed: 0,
       nextWakeAt: nextWake.at,
       ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}),
@@ -985,6 +1020,12 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
   }
 }
 
+function presentHostedRuntimeWakeCandidate(
+  candidate: HostedRuntimeWakeCandidate,
+): HostedRuntimeWakeCandidate | undefined {
+  return candidate.at ? candidate : undefined;
+}
+
 function resolveHostedDeviceSyncMailboxRetentionAt(
   item: HostedSystemMailboxPendingItem,
 ): string | null {
@@ -995,6 +1036,52 @@ function resolveHostedDeviceSyncMailboxRetentionAt(
     return null;
   }
   return item.postCheckpointRecord.retainMailboxItemUntil ?? null;
+}
+
+function resolveHostedDeviceSyncCompletionFenceWake(
+  item: HostedSystemMailboxPendingItem,
+) {
+  if (
+    item.routeAction !== "run-device-sync-wake"
+    || item.postCheckpointRecord?.kind !== "device-sync.dirty-processed-batch"
+    || !item.postCheckpointRecord.retainedWake
+    || !isHostedDeviceSyncCompletionFenceWake(item.postCheckpointRecord.retainedWake)
+  ) {
+    return null;
+  }
+  return item.postCheckpointRecord.retainedWake;
+}
+
+async function finalizeHostedDeviceSyncMailboxAfterCheckpoint(input: {
+  acceptedInCurrentAdmission: boolean;
+  item: HostedSystemMailboxPendingItem;
+  runtime: HostedSystemMailboxRuntime;
+  signal?: AbortSignal | null;
+  stillDirty: boolean;
+}): Promise<{
+  nextWakeAt: string | null;
+  retainUntil: string | null;
+}> {
+  const retainUntil = resolveHostedDeviceSyncMailboxRetentionAt(input.item);
+  const completionWake = resolveHostedDeviceSyncCompletionFenceWake(input.item);
+  if (!input.acceptedInCurrentAdmission || !completionWake || input.stillDirty) {
+    return { nextWakeAt: null, retainUntil };
+  }
+
+  const deviceSyncPort = input.runtime.platform.deviceSyncPort;
+  if (!deviceSyncPort) {
+    throw new Error(
+      "Hosted device-sync completion fence requires a configured runtime port.",
+    );
+  }
+  return {
+    nextWakeAt: await publishHostedDeviceSyncCompletionFence({
+      deviceSyncPort,
+      signal: input.signal ?? null,
+      wake: completionWake,
+    }),
+    retainUntil: null,
+  };
 }
 
 function hostedDeviceSyncRetainedWakeHasCapacity(
@@ -1034,6 +1121,7 @@ async function retainHostedDeviceSyncSystemMailboxItem(input: {
         if (index === retainedIndex) {
           return {
             ...input.item,
+            deviceSyncContinuationOwner: true,
             lastErrorCode: null,
             lastErrorMessage: null,
             nextAttemptAt: input.nextAttemptAt,
@@ -1309,6 +1397,7 @@ function hostedSystemMailboxPendingItemsMatchForClaim(
   right: HostedSystemMailboxPendingItem,
 ): boolean {
   return left.itemId === right.itemId
+    && left.deviceSyncContinuationOwner === right.deviceSyncContinuationOwner
     && left.attemptCount === right.attemptCount
     && left.lastAttemptAt === right.lastAttemptAt
     && left.mailboxDedupeKey === right.mailboxDedupeKey

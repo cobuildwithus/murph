@@ -201,6 +201,7 @@ export class RuntimeInvocationService {
         userId: string,
         input?: { timeoutMs?: number },
       ): Promise<HostedWorkspaceReadResponse>;
+      waitUntil(promise: Promise<unknown>): void;
     },
   ) {}
 
@@ -744,10 +745,49 @@ export class RuntimeInvocationService {
       return { completed: false };
     }
 
+    this.input.waitUntil(
+      this.notifyRunnerContainerCompletionRecordedBestEffort(input),
+    );
     if (!shouldDeferHostedRuntimeOwnerReleaseCallback(input.result)) {
       await this.notifyRuntimeOwnerReleasedBestEffort(input);
     }
     return { completed: true };
+  }
+
+  private async notifyRunnerContainerCompletionRecordedBestEffort(input: {
+    token: RunnerWriteFenceToken;
+    userId: string;
+  }): Promise<void> {
+    try {
+      if (!this.input.runnerContainerNamespace) {
+        return;
+      }
+      const runnerContainerName = input.token.runnerContainerName ?? input.userId;
+      const container = this.input.runnerContainerNamespace.getByName(
+        runnerContainerName,
+      );
+      if (!container.onRuntimeCompletionRecorded) {
+        return;
+      }
+      await container.onRuntimeCompletionRecorded({
+        attemptId: input.token.attemptId,
+        leaseGeneration: input.token.generation,
+        userId: input.userId,
+      });
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          ...buildHostedRunnerMetadataOnlyErrorDetails(error),
+          workspaceAttemptId: input.token.attemptId,
+        },
+        level: "warn",
+        message:
+          "Hosted runner completion cleanup notification failed; preserving the lifecycle timer fallback.",
+        phase: "checkpoint",
+        userId: input.userId,
+      });
+    }
   }
 
   private async notifyRuntimeOwnerReleasedBestEffort(input: {

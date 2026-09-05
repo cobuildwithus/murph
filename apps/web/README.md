@@ -104,7 +104,8 @@ Verification uses natural traffic only. From the Web deployment-ready timestamp
 through the next natural occurrence, filter Vercel logs by the exact message and
 schema, then count grouped only by message, `stage`, and `errorClass`. The record
 is additive and Web-only: older deployments and readers tolerate its absence,
-and rollback is an ordinary Web rollback with no state or cross-plane drain.
+and recovery uses a fresh revert or forward-fix commit on `main` so the replacement
+deployment receives current production admission.
 
 ## Health-data withdrawal rollback floor
 
@@ -723,6 +724,7 @@ Optional but recommended:
 - `HOSTED_WEB_BASE_URL`
 - `MURPH_LABELS_DB_URL` for the shared product labels Postgres database required by `/api/foods` and `/api/supplements`
 - `MURPH_DATA_API_KEY` for server-to-server data API auth on `/api/foods` and `/api/supplements`; hosted Cloudflare owns the same secret for Worker-side injection and the key must not be exposed to browsers or runner env
+- `BRANDFETCH_CLIENT_ID` enables brand logos on the public `/food` page. It is a browser-safe Brandfetch client identifier, not server authority. The page searches Brandfetch with a bounded brand and broad food category, accepts only matching brand names from the fixed Brandfetch CDN, falls back to local category art, and keeps results only in page memory.
 - `CRON_SECRET`
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK`
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`
@@ -793,10 +795,15 @@ product-threshold application rows.
 Attribution lives under `sql/product-tests/`.
 
 The current search path uses built-in Postgres full-text search plus the
-`pg_trgm` extension for indexed name similarity. Public food searches retain
-their existing 250-candidate SQL bound, and supplement searches retain their
-existing ranking path. Private food-name search uses a separate bounded
-retrieval contract for the roughly two-million-row foods corpus: it admits at
+`pg_trgm` extension for indexed name similarity. Public and private food-name
+searches share the bounded retrieval path for the roughly two-million-row foods
+corpus. Public search keeps at most 250 deduplicated candidates before its
+optional comparison-readiness filter and bounded page selection. Food callers
+can request an evidence-first order for related comparison choices. That order
+checks exact indexed `product_tests.food_id` links inside the bounded candidate
+set, then prefers records with a reported package size, then keeps the existing
+relevance order. It does not claim sales or usage popularity. Supplement
+searches retain their existing ranking path. Food retrieval admits at
 most 250 literal exact-name rows and 10,000 GIN full-text matches before
 similarity scoring, canonical-key deduplication, and window sorting. When the
 GIN set reaches that cap and may be truncated, one GiST branch admits up to
@@ -853,18 +860,40 @@ fields; an older importer requires an explicit constraint rollback first.
 
 ## Murph Safe public product data
 
-`/search` exposes the public Murph Safe product-evidence experience. Its browser
-search calls `POST /api/public/v1/products/search`; server-rendered product
-details use the same service as
+`/search` exposes the public Murph Safe product-evidence experience. `/food`
+uses the same records for a conclusion-first comparison of up to ten branded
+foods. Browser searches call `POST /api/public/v1/products/search`;
+server-rendered product details use the same service as
 `GET /api/public/v1/products/[productRef]`. The generated OpenAPI 3.1 document
 is available at `/api/public/v1/openapi.json`, and the current schema id is
 `murph.public-products.v1`.
+
+On `/food`, autocomplete keeps relevance order. Category comparisons and the
+related-product grid use a dated US Google Shopping brand snapshot for 342 food
+queries. The database keeps category relevance and usable nutrition as gates,
+spreads results across brands, then uses exact-linked test count as a secondary
+signal. It rejects empty, zero-only, and physically impossible nutrition rows.
+A single exact food derives a peer category when the local food taxonomy can
+identify one, so a branded soda can lead to other sodas.
+Share URLs contain only public product references and the nutrition basis. They
+never contain the typed search query.
 
 The public catalog includes current supplement and branded-food sources and
 excludes generic food origins. Search and detail DTOs are bounded normalized
 projections; product tests join only through the selected row's exact
 `food_id` or `supplement_id`. Search terms stay in POST bodies and are not
 echoed, persisted, analyzed, or logged.
+
+Compatible browsers expose four page-scoped, read-only WebMCP tools while
+`/food` is open: `search_food_products`, `compare_food_products`,
+`get_food_comparison`, and `show_food_evidence`. The tools use exact public
+product references and update the same visible page state as manual controls.
+Comparison results carry returned, total, and truncated observation scope so a
+bounded evidence response cannot look complete to an agent. They also include
+the same four nutrition values, complete-row winners, ties, and the row-win
+counts behind the visible rows-led caption.
+One abort signal removes every registration when the page unmounts. This is a
+browser surface, not a remote MCP server, and it adds no account or vault access.
 
 Before a production build, configure these Production-scoped server values:
 
@@ -904,7 +933,7 @@ Hosted onboarding extras:
 - `HOSTED_MAILBOX_FINGERPRINT_KEY`
 - `HOSTED_ONBOARDING_SIGNUP_PHONE_NUMBER`
 - `RESEND_API_KEY`, `HOSTED_SIGNUP_WELCOME_EMAIL_FROM`, and `HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME` enable the plain-text post-activation signup welcome email to the member's verified email address, or to the Stripe checkout email when no verified email is linked yet. Leave any of them unset to disable the send path.
-- `HOSTED_SIGNUP_NOTIFICATION_EMAILS` optionally enables a plain-text internal notification to comma-separated recipients after hosted onboarding commits a member activation. Starter enrollment, the Checkout success return, Stripe reconciliation, and Family invite acceptance from the browser, Linq, or Telegram register one post-response task at their first post-commit boundary and share the same canonical-access, durable per-member notification gate. The fixed identity configured by `HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_PHONE_NUMBER` is skipped before that gate and is also omitted from operator Growth member reporting. When available, the email uses temporary encrypted context to add approximate network city/region/country, local time, and the exact signup surface. A context-free direct path can label its exact activation surface; batch activation omits source when per-member provenance is unavailable. The email never includes the member ID, request IP, coordinates, or provider event identifiers. Leave the variable unset to disable the internal notification path.
+- `HOSTED_SIGNUP_NOTIFICATION_EMAILS` optionally enables a plain-text internal notification to comma-separated recipients after hosted onboarding commits a member activation. Starter enrollment, the Checkout success return, Stripe reconciliation, and Family invite acceptance from the browser, Linq, or Telegram register one post-response task at their first post-commit boundary and share the same canonical-access, durable per-member notification gate. The fixed identity configured by `HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_PHONE_NUMBER` is skipped before that gate and is also omitted from operator Growth member reporting and reply-latency email alerts; the protected postdeploy canary workflow remains the owner of its latency SLO. When available, the email uses temporary encrypted context to add approximate network city/region/country, local time, and the exact signup surface. A context-free direct path can label its exact activation surface; batch activation omits source when per-member provenance is unavailable. The email never includes the member ID, request IP, coordinates, or provider event identifiers. Leave the variable unset to disable the internal notification path.
 - `HOSTED_SIGNUP_WELCOME_EMAIL_TIMEOUT_MS` optionally bounds the Resend request timeout; the default is 10 seconds.
 - `HOSTED_LINQ_ALERT_EMAIL_FROM` and `HOSTED_LINQ_ALERT_EMAILS`, together with
   `RESEND_API_KEY`, enable the shared plain-text operational channel. Stripe
@@ -1715,10 +1744,9 @@ Destructive contract cleanup belongs under
 `Hosted Web Contract Migrations` GitHub workflow after Vercel reports a
 successful production deployment. That workflow only accepts Vercel-originated
 completed production deployment statuses, checks out the exact deployed commit,
-verifies it is reachable from `origin/main`, and requires the current main tip
-to be the deployment serving the configured production base domain. A stale
-current-main release fails instead of being reported as a successful no-op;
-late events for older main ancestors remain safe no-op candidates. The workflow
+requires it to equal current `origin/main`, and requires that exact commit to be
+the deployment serving the configured production base domain. Stale or late
+deployment events fail before database authority is exposed. The workflow
 then enumerates and proves every production custom domain against the event's
 exact deployment id, waits
 `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` seconds for prior production
@@ -1732,9 +1760,9 @@ It requires
 `HOSTED_WEB_PRODUCTION_BASE_URL`, and `HOSTED_WEB_DIRECT_DATABASE_URL` in
 GitHub Actions; `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` defaults to
 `300` and is capped at `600` unless the workflow timeout is raised. The workflow
-does not use GitHub Actions concurrency for this lane; the final alias check and
-the contract migration advisory lock make stale or duplicate runs skip safely
-without letting stale events replace valid pending runs. After those gates, it calls
+does not use GitHub Actions concurrency for this lane; the final alias check
+rejects stale runs, and the contract migration advisory lock serializes exact
+deployment retries before the migration ledger is evaluated. After those gates, it calls
 `pnpm --dir apps/web release:production:contract-migrate` with explicit opt-in.
 The public workflow is verification-only: it does not assign aliases, promote a
 deployment, or roll production back.
@@ -2064,24 +2092,21 @@ This branch is a greenfield hosted-runtime cutover. If you have an older local
 database from the superseded run/ingress/cursor chain, reset it before
 reapplying migrations.
 
-## Local Vercel prebuilt deployment
+## Production deployment ownership
 
-Use the repository-owned local prebuilt boundary instead of running a bare
-`vercel build` followed by `vercel deploy --prebuilt`:
+The Vercel Git integration is the only production deployment owner. Every
+commit pushed to `main` creates one managed production candidate; no
+repository ignore command may suppress that candidate. The candidate remains
+off the production domains until its configured Deployment Checks, including
+`Temporal Web production admission`, pass for that exact current commit.
 
-```bash
-pnpm --dir apps/web vercel:deploy:prebuilt -- --prod
-```
-
-Omit `--prod` for a preview deployment. The command runs `vercel build`,
-captures the SDK-generated Workflow function config in an ephemeral local file
-before the normal generated-source cleanup, and applies every exact generated
-trigger to the resolved final function bundle. It handles distinct functions
-and Next.js-deduplicated route links, revalidates the finished Build Output
-artifact, removes the captured evidence, and starts `vercel deploy --prebuilt`
-only after that proof succeeds. Missing, malformed, escaping, or conflicting
-evidence stops before upload. Managed Vercel builds continue to use the
-checked-in `vercel.json` build command and do not use this local boundary.
+Do not deploy production from the local CLI, promote an existing deployment,
+use Instant Rollback, or force-promote past a Deployment Check. Those paths do
+not create fresh compatibility evidence against current private `main` and live
+Temporal readers. Vercel access must withhold Full Production Deployment
+authority from ordinary operators and automation. Recover by reverting or
+forward-fixing on `main`; the new commit creates a fresh managed deployment and
+reruns production admission before domains move.
 
 ## Local dev aids
 

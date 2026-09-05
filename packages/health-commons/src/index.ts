@@ -1,6 +1,7 @@
 export * from "./biomarker-entity-mappings.ts";
 export * from "./biomarker-runtime-artifacts.ts";
 export * from "./catalog.ts";
+export * from "./goal-sources.ts";
 export * from "./load.ts";
 export * from "./normalize.ts";
 export * from "./protocol-artifacts.ts";

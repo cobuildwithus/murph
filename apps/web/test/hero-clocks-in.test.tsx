@@ -772,6 +772,7 @@ async function renderHero({
         authenticated: false,
         contactInfo: {
           phone: "+15555550100",
+          phoneConfigured: false,
           telegram: "murph_test_bot",
         },
         messengerChannel,

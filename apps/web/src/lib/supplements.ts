@@ -70,6 +70,7 @@ export function createPublicSupplementsQueries(
 ): {
   searchPublicSupplements: (input: {
     limit: number;
+    offset?: number;
     q: string;
   }) => Promise<PublicProductLabelSearchItem[]>;
   getPublicSupplementRecordById: (input: {

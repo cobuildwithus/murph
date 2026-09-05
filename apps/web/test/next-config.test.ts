@@ -456,6 +456,78 @@ test("next.config uses Workflow lazy discovery to avoid eager dev rebuild loops"
 
 test("next.config traces generated Health Commons route files without the monolithic catalog", () => {
   assert.deepEqual(
+    productionNextConfig.outputFileTracingIncludes?.["/goals"],
+    [
+      "../../packages/health-commons/generated/web/browse/goals.json",
+    ],
+  );
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingIncludes?.["/goals/[goalId]"],
+    [
+      "../../packages/health-commons/generated/web/browse/goals.json",
+      "../../packages/health-commons/generated/web/routes/index.json",
+      "../../packages/health-commons/generated/web/pages/goals/**/*.json",
+    ],
+  );
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingIncludes?.["/api/goals/contact"],
+    [
+      "../../packages/health-commons/generated/web/browse/goals.json",
+    ],
+  );
+  for (const route of [
+    "/api/hosted-onboarding/linq/webhook",
+    "/api/hosted-onboarding/telegram/webhook",
+  ]) {
+    assert.deepEqual(
+      productionNextConfig.outputFileTracingIncludes?.[route],
+      ["../../packages/health-commons/generated/web/browse/goals.json"],
+    );
+  }
+  const expectedGoalTraceExcludes = [
+    "../../packages/health-commons/generated/web/browse/biomarkers.json",
+    "../../packages/health-commons/generated/web/browse/experiments.json",
+    "../../packages/health-commons/generated/web/bundles/**/*.json",
+    "../../packages/health-commons/generated/web/pages/biomarkers/**/*.json",
+    "../../packages/health-commons/generated/web/shell/**/*.json",
+    "../../packages/health-commons/generated/web/tabs/**/*.json",
+  ];
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingExcludes?.["/goals"],
+    expectedGoalTraceExcludes,
+  );
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingExcludes?.["/goals/[goalId]"],
+    expectedGoalTraceExcludes,
+  );
+  const expectedGoalIndexOnlyTraceExcludes = [
+    "../../packages/health-commons/generated/web/pages/goals/**/*.json",
+    "../../packages/health-commons/generated/web/routes/index.json",
+  ];
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingExcludes?.["/goals!(/**)"],
+    expectedGoalIndexOnlyTraceExcludes,
+  );
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingExcludes?.["/api/goals/contact"],
+    [
+      ...expectedGoalTraceExcludes,
+      ...expectedGoalIndexOnlyTraceExcludes,
+    ],
+  );
+  for (const route of [
+    "/api/hosted-onboarding/linq/webhook",
+    "/api/hosted-onboarding/telegram/webhook",
+  ]) {
+    assert.deepEqual(
+      productionNextConfig.outputFileTracingExcludes?.[route],
+      [
+        ...expectedGoalTraceExcludes,
+        ...expectedGoalIndexOnlyTraceExcludes,
+      ],
+    );
+  }
+  assert.deepEqual(
     productionNextConfig.outputFileTracingIncludes?.["/measurement-methods/[measurementMethodId]"],
     [
       "../../packages/health-commons/generated/web/routes/index.json",
@@ -737,6 +809,7 @@ test("buildHostedWebContentSecurityPolicy includes Privy, WalletConnect, and hos
   assert.match(csp, /script-src [^;]*https:\/\/challenges\.cloudflare\.com/);
   assert.match(csp, /script-src-attr 'none'/);
   assert.match(csp, /style-src 'self' 'unsafe-inline'/);
+  assert.match(csp, /img-src [^;]*https:\/\/cdn\.brandfetch\.io/);
   assert.match(csp, /manifest-src 'self'/);
   assert.match(csp, /media-src 'self' blob:/);
   assert.match(csp, /object-src 'none'/);
@@ -757,8 +830,20 @@ test("buildHostedWebContentSecurityPolicy includes Privy, WalletConnect, and hos
   assert.match(csp, /connect-src [^;]*https:\/\/\*\.rpc\.privy\.systems/);
   assert.match(csp, /connect-src [^;]*https:\/\/explorer-api\.walletconnect\.com/);
   assert.match(csp, /connect-src [^;]*https:\/\/status\.withmurph\.ai/);
+  assert.match(csp, /connect-src [^;]*https:\/\/api\.brandfetch\.io/);
+  assert.match(csp, /img-src [^;]*https:\/\/cdn\.brandfetch\.io/);
   assert.match(csp, /upgrade-insecure-requests/);
   assert.doesNotMatch(csp, /'unsafe-eval'/);
+});
+
+test("next.config permits only the Brandfetch CDN for remote brand images", () => {
+  assert.deepEqual(productionNextConfig.images?.remotePatterns, [
+    {
+      protocol: "https",
+      hostname: "cdn.brandfetch.io",
+      pathname: "/**",
+    },
+  ]);
 });
 
 test("buildHostedWebContentSecurityPolicy keeps production script origins on a tight allowlist", () => {

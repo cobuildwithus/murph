@@ -6,7 +6,6 @@ import {
   HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS,
   HOSTED_RUNTIME_SYSTEM_MAILBOX_FRONTIER_CLASSES,
   projectHostedRuntimeReconciliationFactsWireResponse,
-  type HostedRuntimeReconciliationFacts,
   type HostedRuntimeReconciliationFactsWireResponse,
 } from "../packages/hosted-execution/src/reconciliation-facts-wire.ts";
 
@@ -17,44 +16,79 @@ export function buildTemporalCompatibilityProducerFixtures():
     null,
     undefined,
   ] as const;
+  const blockedFixtures = HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS.map(
+    (reason, index) => projectHostedRuntimeReconciliationFactsWireResponse({
+      blocked: {
+        reason,
+        retryAt: index % 2 === 0 ? "2026-01-01T00:02:00.000Z" : null,
+      },
+      mailboxLag: [{
+        importedSeq: String(index),
+        lag: String(index + 1),
+        lane: index % 2 === 0 ? "conversation" : "system",
+        maxSeq: String(index + 1),
+        ...(index === 0
+          ? { maxUpdatedAt: "2026-01-01T00:00:00.000Z" }
+          : {}),
+      }],
+      workspace: {
+        hostedMailboxSystemHandledThroughSeq: String(index),
+        inboxMediaRetentionWakeAt: index % 2 === 0
+          ? "2026-01-01T00:00:00.000Z"
+          : null,
+        nextWakeAt: index % 2 === 0
+          ? "2026-01-01T00:01:00.000Z"
+          : null,
+        nextWakeReason: index % 2 === 0 ? "assistant_delivery" : null,
+        version: index % 2 === 0 ? "1" : null,
+      },
+    }),
+  );
+  const frontierFixtures = frontierVariants.map((systemMailboxFrontier, index) =>
+    projectHostedRuntimeReconciliationFactsWireResponse({
+      blocked: null,
+      mailboxLag: [{
+        importedSeq: String(index + 10),
+        lag: "1",
+        lane: "system",
+        maxSeq: String(index + 11),
+      }],
+      workspace: {
+        ...(systemMailboxFrontier === undefined
+          ? {}
+          : { hostedMailboxSystemHandledThroughSeq: String(index + 10) }),
+        inboxMediaRetentionWakeAt: null,
+        ...(index === 0
+          ? {
+              nextDefaultProcessingWakeAt: "2026-01-01T00:03:00.000Z",
+              nextDefaultProcessingWakeReason: "assistant_due",
+              systemMailboxProgressGeneration: "7",
+            }
+          : {}),
+        ...(index === 1
+          ? {
+              nextDefaultProcessingWakeAt: null,
+              nextDefaultProcessingWakeReason: null,
+              systemMailboxProgressGeneration: "8",
+            }
+          : {}),
+        nextWakeAt: null,
+        nextWakeReason: null,
+        ...(systemMailboxFrontier === undefined
+          ? {}
+          : { systemMailboxFrontier }),
+        version: "2",
+      },
+    }));
+
   return [
     projectHostedRuntimeReconciliationFactsWireResponse({
       blocked: null,
       mailboxLag: [],
       workspace: null,
     }),
-    ...HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS.map((reason, index) => {
-      const systemMailboxFrontier = frontierVariants[index];
-      return projectHostedRuntimeReconciliationFactsWireResponse({
-        blocked: {
-          reason,
-          retryAt: index % 2 === 0 ? "2026-01-01T00:02:00.000Z" : null,
-        },
-        mailboxLag: [{
-          importedSeq: String(index),
-          lag: String(index + 1),
-          lane: index % 2 === 0 ? "conversation" : "system",
-          maxSeq: String(index + 1),
-          ...(index === 0
-            ? { maxUpdatedAt: "2026-01-01T00:00:00.000Z" }
-            : {}),
-        }],
-        workspace: {
-          hostedMailboxSystemHandledThroughSeq: String(index),
-          inboxMediaRetentionWakeAt: index % 2 === 0
-            ? "2026-01-01T00:00:00.000Z"
-            : null,
-          nextWakeAt: index % 2 === 0
-            ? "2026-01-01T00:01:00.000Z"
-            : null,
-          nextWakeReason: index % 2 === 0 ? "assistant_delivery" : null,
-          ...(systemMailboxFrontier === undefined
-            ? {}
-            : { systemMailboxFrontier }),
-          version: index % 2 === 0 ? "1" : null,
-        },
-      });
-    }),
+    ...blockedFixtures,
+    ...frontierFixtures,
   ];
 }
 

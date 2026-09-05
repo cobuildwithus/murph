@@ -448,6 +448,7 @@ export function registerProtocolCommands(
         manufacturer: context.options.manufacturer,
         note: context.options.note,
         regimenId: context.options.id,
+        requireExistingRegimenId: context.options.id !== undefined,
         relatedConditionId: context.options.relatedConditionId,
         relatedGoalId: context.options.relatedGoalId,
         relatedRegimenId: context.options.relatedRegimenId,

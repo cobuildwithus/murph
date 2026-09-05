@@ -6,9 +6,10 @@ import {
   buildMurphHostedPermissionProfileTomlLines,
   buildMurphMemberReadPermissionProfileTomlLines,
   buildMurphMemberWorkspacePermissionProfileTomlLines,
+  buildMurphOperatorDiagnosticReadPermissionProfileTomlLines,
 } from "../src/assistant-permissions.ts";
 
-describe("group-read Codex permissions", () => {
+describe("hosted Codex permissions", () => {
   it("grants read-only workspace access with non-overlapping secret carve-outs", () => {
     expect(buildMurphGroupReadPermissionProfileTomlLines()).toEqual([
       "# Read-only, ephemeral consultations initiated by a current group member.",
@@ -26,6 +27,33 @@ describe("group-read Codex permissions", () => {
       '"**/.env.*" = "deny"',
       "",
       "[permissions.murph-group-read.network]",
+      "enabled = false",
+      "",
+    ]);
+  });
+
+  it("grants operator diagnostics only the exact read roots and denies protected material", () => {
+    expect(buildMurphOperatorDiagnosticReadPermissionProfileTomlLines()).toEqual([
+      "# Authenticated operator diagnostics inspect only exact host-bound read roots.",
+      "[permissions.murph-operator-diagnostic-read.filesystem]",
+      '":minimal" = "read"',
+      "glob_scan_max_depth = 64",
+      "",
+      '[permissions.murph-operator-diagnostic-read.filesystem.":workspace_roots"]',
+      '"." = "read"',
+      '".runtime/operations/assistant/secrets" = "deny"',
+      '".codex" = "deny"',
+      '".git" = "deny"',
+      '"**/.env" = "deny"',
+      '"**/.env.*" = "deny"',
+      '"**/.mcp.json" = "deny"',
+      '"**/auth.json" = "deny"',
+      '"**/config.toml" = "deny"',
+      '"**/credential*" = "deny"',
+      '"**/*.key" = "deny"',
+      '"**/*.pem" = "deny"',
+      "",
+      "[permissions.murph-operator-diagnostic-read.network]",
       "enabled = false",
       "",
     ]);
@@ -72,6 +100,7 @@ describe("group-read Codex permissions", () => {
   it("composes every hosted permission profile from the canonical builders", () => {
     expect(buildMurphHostedPermissionProfileTomlLines()).toEqual([
       ...buildMurphGroupReadPermissionProfileTomlLines(),
+      ...buildMurphOperatorDiagnosticReadPermissionProfileTomlLines(),
       ...buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines(),
       ...buildMurphMemberReadPermissionProfileTomlLines(),
       ...buildMurphMemberWorkspacePermissionProfileTomlLines(),

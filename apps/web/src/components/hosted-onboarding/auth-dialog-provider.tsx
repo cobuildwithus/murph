@@ -49,6 +49,7 @@ const HOSTED_USAGE_CREDIT_PURCHASE_ID_PATTERN = /^hucp_[A-Za-z0-9_-]{16}$/u;
 
 interface AuthContextValue {
   authenticated: boolean;
+  authenticationStatus: "ready" | "unavailable";
   openAuthDialog: () => void;
   openDataPrivacyAuthDialog?: () => void;
   prepareAuth: () => void;
@@ -57,6 +58,7 @@ interface AuthContextValue {
 
 export const AuthContext = createContext<AuthContextValue>({
   authenticated: false,
+  authenticationStatus: "ready",
   openAuthDialog: () => {},
   openDataPrivacyAuthDialog: () => {},
   prepareAuth: () => {},
@@ -69,9 +71,11 @@ export function useAuth() {
 
 export function AuthProvider({
   authenticated,
+  authenticationStatus = "ready",
   children,
 }: {
   authenticated: boolean;
+  authenticationStatus?: "ready" | "unavailable";
   children?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -129,12 +133,13 @@ export function AuthProvider({
   const value = useMemo(
     () => ({
       authenticated,
+      authenticationStatus,
       openAuthDialog,
       openDataPrivacyAuthDialog,
       prepareAuth: () => {},
       shared: false,
     }),
-    [authenticated, openAuthDialog, openDataPrivacyAuthDialog],
+    [authenticated, authenticationStatus, openAuthDialog, openDataPrivacyAuthDialog],
   );
 
   return (

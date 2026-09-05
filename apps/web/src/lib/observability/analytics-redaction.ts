@@ -6,6 +6,7 @@ export const VERCEL_TELEMETRY_PATHNAMES = [
   "/biomarkers",
   "/changelog",
   "/clubs",
+  "/compare",
   "/connect",
   "/consumer-health-data-privacy-policy",
   "/contact",
@@ -16,6 +17,9 @@ export const VERCEL_TELEMETRY_PATHNAMES = [
   "/experiments",
   "/family/setup",
   "/farewell",
+  "/goals",
+  "/goals/methodology",
+  "/food",
   "/groups/start",
   "/growth",
   "/history",
@@ -78,10 +82,24 @@ const VERCEL_TELEMETRY_DYNAMIC_PATHNAME_RULES = [
   },
   {
     pattern: new RegExp(
+      `^/compare/(?:murph-vs-${PUBLIC_PATH_SEGMENT_PATTERN}|\\[competitor\\])$`,
+      "iu",
+    ),
+    pathname: "/compare/[competitor]",
+  },
+  {
+    pattern: new RegExp(
       `^/experiments/(?!runs(?:/|$))(?:${PUBLIC_PATH_SEGMENT_PATTERN}|\\[experimentId\\])$`,
       "iu",
     ),
     pathname: "/experiments/[experiment]",
+  },
+  {
+    pattern: new RegExp(
+      `^/goals/(?:${PUBLIC_PATH_SEGMENT_PATTERN}|\\[goalId\\])$`,
+      "iu",
+    ),
+    pathname: "/goals/[goal]",
   },
   {
     pattern: new RegExp(

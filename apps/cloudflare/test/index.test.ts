@@ -2064,6 +2064,14 @@ describe("cloudflare worker routes", () => {
         slotName: standbyContainerName,
         state: "bound" as const,
       })),
+      resolveRetainedStandbySlot: vi.fn(async () => ({
+        claimId: "standby-claim-00000000-0000-4000-8000-000000000000",
+        releaseId: "release_1",
+        region: HOSTED_STANDBY_REGION,
+        slotName: standbyContainerName,
+        state: "bound" as const,
+        userId: "member_123",
+      })),
       retireStandbySlot: vi.fn(async () => ({ retired: true as const })),
     } satisfies HostedStandbyRunnerContainerStubLike & {
       beginShutdownCheckpointGracefulStopForTest(
@@ -3169,7 +3177,10 @@ describe("cloudflare worker routes", () => {
   });
 
   describe("hosted runtime control", () => {
-    it("maps runtime ensure-processing route calls to the Durable Object adapter", async () => {
+    it.each([
+      { assistantExecutionBlocked: true, processingMode: "system_mailbox" },
+      { conversationWorkPending: true, processingMode: "default" },
+    ] as const)("maps signed runtime ensure-processing $processingMode calls to the Durable Object adapter", async (processingRequest) => {
       const stub = createUserRunnerStub({
         ensureRuntimeProcessingForUser: vi.fn(async () => ({
           action: "started" as const,
@@ -3184,9 +3195,8 @@ describe("cloudflare worker routes", () => {
         await signWebCallbackControlRequest(
           new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
             body: JSON.stringify({
-              assistantExecutionBlocked: true,
+              ...processingRequest,
               orchestrationAttemptId: "orchestration-attempt-test",
-              processingMode: "system_mailbox",
             }),
             headers: {
               "content-type": "application/json; charset=utf-8",
@@ -3211,7 +3221,7 @@ describe("cloudflare worker routes", () => {
         runtimeAttemptId: "runtime-attempt-test",
       });
       expect(stub.ensureRuntimeProcessingForUser).toHaveBeenCalledWith({
-        assistantExecutionBlocked: true,
+        ...processingRequest,
         orchestrationAttemptId: "orchestration-attempt-test",
         commandStartedAtEpochMs: expect.any(Number),
         commandTimeoutMs: 10_000,
@@ -3222,9 +3232,28 @@ describe("cloudflare worker routes", () => {
           runtimeControlAuthStartedAtEpochMs: expect.any(Number),
           cloudflareRouteReceivedAtEpochMs: expect.any(Number),
         },
-        processingMode: "system_mailbox",
         userId: "test-user",
       });
+    });
+
+    it("rejects a conversation work marker added after runtime request signing", async () => {
+      const stub = createUserRunnerStub();
+      const env = createWorkerEnv(stub);
+      const requestBody = { orchestrationAttemptId: "orchestration-attempt-test" };
+      const signedRequest = await signWebCallbackControlRequest(
+        new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
+          body: JSON.stringify(requestBody),
+          headers: { "content-type": "application/json; charset=utf-8" },
+          method: "POST",
+        }),
+        env,
+      );
+      const response = await worker.fetch(new Request(signedRequest, {
+        body: JSON.stringify({ ...requestBody, conversationWorkPending: true }),
+      }), env);
+
+      expect(response.status).toBe(401);
+      expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
     });
 
     it("runs runtime health-data consent reconciliation synchronously for Web OIDC", async () => {
@@ -4732,6 +4761,7 @@ function createCodexShellSmokeResult() {
     cliSurfaceContractBytes: 37282,
     cliSurfaceHotPathProofCount: 5,
     client: "codex-app-server",
+    healthCommonsCliGoalProofCount: 6,
     murphPathBytes: 28,
     noteAddBytes: 128,
     stderrBytes: 0,

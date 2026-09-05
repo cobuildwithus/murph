@@ -38,7 +38,9 @@ afterEach(() => {
 
 describe('Codex thread instructions', () => {
   it('keeps the Murph execution kernel compact without coding-agent baggage', () => {
-    expect(Buffer.byteLength(MURPH_CODEX_BASE_INSTRUCTIONS, 'utf8')).toBeLessThan(3_400)
+    // Includes native result-reading guidance; complete provider input grows by
+    // 41 tokens in both the individual and group capture fixtures.
+    expect(Buffer.byteLength(MURPH_CODEX_BASE_INSTRUCTIONS, 'utf8')).toBeLessThan(3_600)
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       "Complete the user's in-scope request end to end",
     )

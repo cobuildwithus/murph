@@ -109,17 +109,8 @@ export function TechnicalCapabilitiesSection({
       <div className="mx-auto max-w-[1120px]">
         <div className="grid items-center gap-x-16 gap-y-12 lg:grid-cols-[1.05fr_0.95fr]">
           <div>
-            <div className="flex items-center gap-4">
-              <span
-                aria-hidden="true"
-                className="h-px w-10 bg-[#c4a882]/70"
-              />
-              <p className="font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-[#c4a882]">
-                Under the hood
-              </p>
-            </div>
             <h2
-              className="mt-6 max-w-[16ch] text-balance font-serif text-[clamp(2rem,4.5vw,3.5rem)] font-semibold leading-[1.05] tracking-[-0.03em]"
+              className="max-w-[16ch] text-balance font-serif text-[clamp(2rem,4.5vw,3.5rem)] font-semibold leading-[1.05] tracking-[-0.03em]"
               id="technical-capabilities-title"
             >
               Built on Codex, with&nbsp;a&nbsp;computer of&nbsp;its&nbsp;own.
@@ -135,23 +126,12 @@ export function TechnicalCapabilitiesSection({
         </div>
 
         <div className="mt-14 grid gap-px overflow-hidden rounded-[1.25rem] border border-[#c4a882]/20 bg-[#c4a882]/20 sm:grid-cols-2 lg:mt-20 lg:grid-cols-3">
-          {capabilities.map((capability, index) => (
+          {capabilities.map((capability) => (
             <article
               className="bg-[#2a2520] p-6 sm:p-7 lg:p-8"
               key={capability.title}
             >
-              <div className="flex items-baseline justify-between gap-4">
-                <p className="font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-[#c4a882]">
-                  {capability.label}
-                </p>
-                <span
-                  aria-hidden="true"
-                  className="font-mono text-[10px] text-[#f5f0e8]/55"
-                >
-                  {String(index + 1).padStart(2, "0")}
-                </span>
-              </div>
-              <h3 className="mt-4 font-serif text-[1.375rem] font-semibold tracking-[-0.02em] text-[#f5f0e8]">
+              <h3 className="font-serif text-[1.375rem] font-semibold tracking-[-0.02em] text-[#f5f0e8]">
                 {capability.title}
               </h3>
               <p className="mt-3 max-w-[36ch] text-pretty text-[0.9375rem] leading-[1.7] text-[#f5f0e8]/60">
@@ -164,10 +144,7 @@ export function TechnicalCapabilitiesSection({
         <div className="mt-14 border-t border-[#c4a882]/20 pt-12 lg:mt-20 lg:pt-14">
           <div className="grid gap-x-16 gap-y-10 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
             <div>
-              <p className="font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-[#c4a882]">
-                Inference is a choice
-              </p>
-              <h3 className="mt-5 max-w-[22ch] text-balance font-serif text-[clamp(1.625rem,3vw,2.25rem)] font-semibold leading-[1.1] tracking-[-0.02em]">
+              <h3 className="max-w-[22ch] text-balance font-serif text-[clamp(1.625rem,3vw,2.25rem)] font-semibold leading-[1.1] tracking-[-0.02em]">
                 The inference path is yours.
               </h3>
             </div>
@@ -233,12 +210,6 @@ function RuntimeDossier() {
               {"> "}
             </span>
             be the most capable health agent in the world
-          </p>
-          <p className="-indent-[2ch] pl-[2ch]">
-            <span className="select-none text-[#d4b87a]" aria-hidden="true">
-              {"> "}
-            </span>
-            keep the member in control
             <span
               aria-hidden="true"
               className="ml-1.5 inline-block h-[0.85em] w-[0.5ch] translate-y-[0.15em] rounded-[1px] bg-[#d4b87a]/80"

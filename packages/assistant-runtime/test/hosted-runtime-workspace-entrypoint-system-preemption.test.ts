@@ -3410,8 +3410,10 @@ describe("hosted workspace runtime entrypoint", () => {test("fresh foreground in
           hostedMailboxFetchedCount: 1,
           hostedMailboxImportedCount: 1,
           hostedMailboxRetryableBlockedCount: 0,
+          hostedMailboxSystemFirstPendingSeq: null,
           hostedMailboxSystemHandledThroughSeq: "0",
           hostedMailboxSystemImportedSeq: "0",
+          hostedMailboxSystemDeviceSyncContinuationSeqs: [],
         },
         status: "idle",
       });

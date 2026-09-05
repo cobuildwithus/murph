@@ -3,6 +3,7 @@ import {
   requireBankEntityRegistryDefinition,
   type BankEntityDefinitionWithRegistry,
   type BankEntityKind,
+  type CommonsGoalRef,
   type FamilyConditionHistoryEntry,
   type NutritionData,
   type NutritionProvenance,
@@ -391,6 +392,7 @@ export function createProjectedRegistryQueries<TEntity extends RegistryQueryEnti
 }
 
 export interface GoalQueryEntity extends RegistryQueryEntity {
+  commonsGoalRef: CommonsGoalRef | null;
   horizon: string | null;
   priority: number | null;
   windowStartAt: string | null;

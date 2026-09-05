@@ -84,10 +84,7 @@ export function FaqSection({
       <div className="mx-auto max-w-[1080px]">
         <div className="grid gap-10 lg:grid-cols-[280px_1fr] lg:gap-20">
           <div>
-            <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#736a58]">
-              FAQ
-            </span>
-            <h2 className="mt-4 font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.1] tracking-[-0.03em] text-[#2d3436]">
+            <h2 className="font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.1] tracking-[-0.03em] text-[#2d3436]">
               Common questions
             </h2>
           </div>
