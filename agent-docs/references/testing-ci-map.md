@@ -493,11 +493,11 @@ gate unset and makes no paid request.
   parent Next process a direct 1 GiB old-space flag and appends a 3 GiB flag to
   `NODE_OPTIONS` for the Webpack build worker. Before Webpack starts, the shared
   production runner performs route type generation and an explicit app-local
-  generated-contract TypeScript check in a separate 3.5 GiB child, then marks
+  generated-contract TypeScript check in a separate 6 GiB child, then marks
   only that check prepared. Node applies the direct flag to the parent; Next
   16.3.0 rebuilds non-isolated child options from the parent arguments followed
   by `NODE_OPTIONS`, so the sequential Webpack compiler workers receive 3 GiB,
-  while the separate TypeScript CLI child receives 3.5 GiB and isolated static
+  while the separate TypeScript CLI child receives 6 GiB and isolated static
   workers have the flag removed. The same script owns the Vercel package build
   and CI memory-observation invocation.
   `apps/web/README.md` § "Production build memory guard" is the single prose
