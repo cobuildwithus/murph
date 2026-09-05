@@ -29,6 +29,12 @@ import type {
   DeviceAccountCredentialKind,
 } from "@murphai/device-syncd/types";
 
+import {
+  HostedDomainRootPreparationMismatchError,
+  revalidatePreparedHostedDomainRootForWebTx,
+  type PreparedHostedDomainRootForWeb,
+} from "../../hosted-crypto/domain-root-store";
+import { runWithFreshHostedDomainRootUnwrapCache } from "../../hosted-crypto/domain-root-unwrap-cache";
 import type { HostedSecureBoxPrismaClient } from "../../hosted-crypto/secure-box";
 import {
   HOSTED_HEALTH_DATA_CONSENT_SCOPE,
@@ -80,6 +86,7 @@ export { sanitizeHostedDeviceSyncConnectionMetadata } from "./connection-records
 import {
   HOSTED_DEVICE_SYNC_SECURE_BOX_KEY_VERSION,
   encryptHostedConnectionSecret,
+  prepareHostedConnectionSecretRoot,
   prepareHostedRuntimeApplyTokenWrites,
   readHostedRuntimeConnectionSecretMaterial,
   readHostedStoredExternalAccountId,
@@ -211,10 +218,13 @@ export class PrismaHostedConnectionStore {
       attempt += 1
     ) {
       try {
-        return await this.upsertConnectionWithPreviousOnce(input, binding);
+        return await runWithFreshHostedDomainRootUnwrapCache(
+          () => this.upsertConnectionWithPreviousOnce(input, binding),
+        );
       } catch (error) {
         if (
-          isHostedDirtyPayloadClassificationPendingError(error)
+          (isHostedDirtyPayloadClassificationPendingError(error)
+            || error instanceof HostedDomainRootPreparationMismatchError)
           && attempt < HOSTED_CONNECTION_UPSERT_MAX_ATTEMPTS - 1
         ) {
           continue;
@@ -275,39 +285,26 @@ export class PrismaHostedConnectionStore {
       });
     }
 
+    // This read is admission for key preparation only; the transaction repeats it
+    // under the member lock before granting authority to persist credentials.
+    await assertHostedConnectionOwnerAdmission({
+      ownerId,
+      ownsFailedOauthProviderCleanup,
+      prisma: this.prisma,
+    });
+    const preparedRoot = await prepareHostedConnectionSecretRoot({
+      prisma: this.prisma,
+      testCodec: this.testCodec,
+      userId: ownerId,
+    });
+
     const result = await this.prisma.$transaction(async (tx) => {
       await lockHostedMemberRow(tx, ownerId);
-      const ownerStatus = await readHostedMemberSuspensionAfterLockTx(
-        tx,
+      await assertHostedConnectionOwnerAdmission({
         ownerId,
-      );
-      if (ownerStatus === "missing") {
-        throw deviceSyncError({
-          code: "CONNECTION_OWNER_REQUIRED",
-          message: "Hosted device-sync connection owner no longer exists.",
-          retryable: false,
-          httpStatus: 404,
-        });
-      }
-      if (ownerStatus === "suspended" && !ownsFailedOauthProviderCleanup) {
-        throw deviceSyncError({
-          code: "CONNECTION_OWNER_SUSPENDED",
-          message: "Device connections cannot be completed while account deletion is active.",
-          retryable: false,
-          httpStatus: 409,
-        });
-      }
-      if (!ownsFailedOauthProviderCleanup && await readHostedHealthDataConsentState({
-        memberId: ownerId,
+        ownsFailedOauthProviderCleanup,
         prisma: tx,
-      }) === "revoked") {
-        throw deviceSyncError({
-          code: "HEALTH_DATA_CONSENT_REQUIRED",
-          httpStatus: 403,
-          message: "Use Murph again before connecting a health source.",
-          retryable: false,
-        });
-      }
+      });
 
       let existing = await tx.deviceConnection.findUnique({
         where: {
@@ -396,7 +393,11 @@ export class PrismaHostedConnectionStore {
           }
         }
 
+        if (preparedRoot) {
+          await revalidatePreparedHostedDomainRootForWebTx({ prepared: preparedRoot, tx });
+        }
         const credentialWrite = await buildHostedConnectionCredentialWrite({
+          preparedRoot,
           connectionId: existing.id,
           credential,
           prisma: tx,
@@ -420,6 +421,7 @@ export class PrismaHostedConnectionStore {
             providerApplicationId: binding?.applicationId ?? null,
             providerApplicationRevision: binding?.revision ?? null,
             externalAccountIdEncrypted: await encryptHostedConnectionSecret({
+              preparedRoot,
               connectionId: existing.id,
               provider: input.provider,
               prisma: tx,
@@ -459,7 +461,11 @@ export class PrismaHostedConnectionStore {
       });
 
       const connectionId = generateHostedRandomPrefixedId("dsc");
+      if (preparedRoot) {
+        await revalidatePreparedHostedDomainRootForWebTx({ prepared: preparedRoot, tx });
+      }
       const credentialWrite = await buildHostedConnectionCredentialWrite({
+        preparedRoot,
         connectionId,
         credential,
         prisma: tx,
@@ -476,6 +482,7 @@ export class PrismaHostedConnectionStore {
           connectedAt,
           displayName,
           externalAccountIdEncrypted: await encryptHostedConnectionSecret({
+            preparedRoot,
             connectionId,
             provider: input.provider,
             prisma: tx,
@@ -1846,6 +1853,7 @@ function resolveHostedDeviceSyncSetupExpiresAt(input: {
 }
 
 async function buildHostedConnectionCredentialWrite(input: {
+  preparedRoot: PreparedHostedDomainRootForWeb | null;
   connectionId: string;
   credential: DeviceAccountCredential;
   prisma: HostedPrismaTransactionClient;
@@ -1859,6 +1867,7 @@ async function buildHostedConnectionCredentialWrite(input: {
   switch (input.credential.kind) {
     case "oauth_tokens":
       return await buildHostedOAuthCredentialWrite({
+        preparedRoot: input.preparedRoot,
         connectionId: input.connectionId,
         prisma: input.prisma,
         provider: input.provider,
@@ -1957,6 +1966,7 @@ function normalizeDefaultProviderProfileKey(provider: string): string | null {
 }
 
 async function buildHostedOAuthCredentialWrite(input: {
+  preparedRoot: PreparedHostedDomainRootForWeb | null;
   connectionId: string;
   prisma: HostedPrismaTransactionClient;
   provider: string;
@@ -1976,6 +1986,7 @@ async function buildHostedOAuthCredentialWrite(input: {
 
   return {
     accessTokenEncrypted: await encryptHostedConnectionSecret({
+        preparedRoot: input.preparedRoot,
       connectionId: input.connectionId,
       provider: input.provider,
       prisma: input.prisma,
@@ -1992,6 +2003,7 @@ async function buildHostedOAuthCredentialWrite(input: {
     providerConfigKey: null,
     refreshTokenEncrypted: input.tokens.refreshToken
       ? await encryptHostedConnectionSecret({
+        preparedRoot: input.preparedRoot,
         connectionId: input.connectionId,
         provider: input.provider,
         prisma: input.prisma,
@@ -2054,4 +2066,43 @@ function buildHostedLocalHeartbeatUpdateData(
       ? { lastErrorMessage: sanitizeHostedConnectionLastErrorMessage(localState.lastErrorMessage ?? null) }
       : {}),
   };
+}
+
+// The preflight is advisory. Call again after the member lock before mutation.
+async function assertHostedConnectionOwnerAdmission(input: {
+  ownerId: string;
+  ownsFailedOauthProviderCleanup: boolean;
+  prisma: HostedPrismaTransactionClient;
+}): Promise<void> {
+  const ownerStatus = await readHostedMemberSuspensionAfterLockTx(
+    input.prisma,
+    input.ownerId,
+  );
+  if (ownerStatus === "missing") {
+    throw deviceSyncError({
+      code: "CONNECTION_OWNER_REQUIRED",
+      message: "Hosted device-sync connection owner no longer exists.",
+      retryable: false,
+      httpStatus: 404,
+    });
+  }
+  if (ownerStatus === "suspended" && !input.ownsFailedOauthProviderCleanup) {
+    throw deviceSyncError({
+      code: "CONNECTION_OWNER_SUSPENDED",
+      message: "Device connections cannot be completed while account deletion is active.",
+      retryable: false,
+      httpStatus: 409,
+    });
+  }
+  if (!input.ownsFailedOauthProviderCleanup && await readHostedHealthDataConsentState({
+    memberId: input.ownerId,
+    prisma: input.prisma,
+  }) === "revoked") {
+    throw deviceSyncError({
+      code: "HEALTH_DATA_CONSENT_REQUIRED",
+      httpStatus: 403,
+      message: "Use Murph again before connecting a health source.",
+      retryable: false,
+    });
+  }
 }
