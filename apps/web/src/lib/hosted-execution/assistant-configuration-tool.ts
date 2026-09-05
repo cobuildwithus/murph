@@ -84,7 +84,7 @@ export async function handleHostedRuntimeAssistantConfigurationTool(input: {
       !isHostedOnboardingError(error) ||
       (
         error.code !== "ASSISTANT_MODEL_SOL_REQUIRES_EDGE" &&
-        error.code !== "ASSISTANT_MODEL_ASTRA_REQUIRES_MAX" &&
+        error.code !== "ASSISTANT_MODEL_ASTRA_REQUIRES_EDGE" &&
         error.code !== "ASSISTANT_MODEL_ASTRA_REQUIRES_OPENAI" &&
         error.code !== "ASSISTANT_PROVIDER_VENICE_UNAVAILABLE" &&
         error.code !== "ASSISTANT_CONFIGURATION_PERSONAL_CHAT_REQUIRED" &&
@@ -100,9 +100,8 @@ export async function handleHostedRuntimeAssistantConfigurationTool(input: {
         prisma,
       }),
     );
-    const requiredPlan = error.code === "ASSISTANT_MODEL_ASTRA_REQUIRES_MAX"
-      ? "max"
-      : error.code === "ASSISTANT_MODEL_SOL_REQUIRES_EDGE" ? "edge" : null;
+    const requiredPlan = error.code === "ASSISTANT_MODEL_ASTRA_REQUIRES_EDGE"
+      || error.code === "ASSISTANT_MODEL_SOL_REQUIRES_EDGE" ? "edge" : null;
     return {
       action: "update",
       result: {

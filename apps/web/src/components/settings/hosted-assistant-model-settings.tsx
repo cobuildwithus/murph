@@ -793,7 +793,7 @@ function HostedAssistantModelSettingsForm(
                   meta={
                     unavailable
                       ? `${option.usage} · ${option.model === HOSTED_ASSISTANT_ASTRA_MODEL
-                        ? availableModels?.includes(HOSTED_ASSISTANT_ASTRA_MODEL) ? "OpenAI required" : "Max required"
+                        ? availableModels?.includes(HOSTED_ASSISTANT_ASTRA_MODEL) ? "OpenAI required" : "Edge required"
                         : "Edge required"}`
                       : option.usage
                   }
@@ -914,7 +914,7 @@ function readModelOptionBadge(input: {
   }
 
   if (input.unavailable) {
-    return <ModelOptionBadge>{input.model === HOSTED_ASSISTANT_ASTRA_MODEL ? "Max" : "Edge"}</ModelOptionBadge>;
+    return <ModelOptionBadge>Edge</ModelOptionBadge>;
   }
 
   if (input.model === HOSTED_ASSISTANT_TERRA_MODEL) {

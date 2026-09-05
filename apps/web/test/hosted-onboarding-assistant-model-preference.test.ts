@@ -140,9 +140,11 @@ describe("hosted member assistant model preference", () => {
   });
 
   it.each([
+    { currentBillingPlanCode: "launch_edge_monthly" },
+    { currentBillingPlanCode: "launch_monthly", familyPlanCode: "edge", familyBillingStatus: HostedBillingStatus.active },
     { currentBillingPlanCode: "launch_max_monthly" },
     { currentBillingPlanCode: "launch_monthly", familyPlanCode: "max", familyBillingStatus: HostedBillingStatus.active },
-  ])("allows individual and Family Max to save Astra for the next query: %j", async (plan) => {
+  ])("allows individual and Family Edge/Max to save Astra for the next query: %j", async (plan) => {
     mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
       assistantModelPreference: null,
       ...plan,
@@ -160,18 +162,22 @@ describe("hosted member assistant model preference", () => {
   });
 
   it.each([
-    { currentBillingPlanCode: "launch_edge_monthly" },
-    { currentBillingPlanCode: "launch_monthly", familyPlanCode: "edge", familyBillingStatus: HostedBillingStatus.active },
+    { currentBillingPlanCode: "launch_monthly" },
+    { currentBillingPlanCode: "launch_monthly", familyPlanCode: "pulse", familyBillingStatus: HostedBillingStatus.active },
+    { currentBillingPlanCode: "launch_edge_monthly", currentBillingPhase: "trial" },
+    { currentBillingPlanCode: "launch_monthly", familyPlanCode: "edge", familyBillingStatus: HostedBillingStatus.unpaid },
+    { currentBillingPlanCode: "launch_monthly", familyPlanCode: "edge", familyBillingStatus: HostedBillingStatus.active, familyMembershipStatus: "inactive" },
+    { currentBillingPlanCode: "launch_monthly", familyPlanCode: "edge", familyBillingStatus: HostedBillingStatus.active, familySuspendedAt: new Date("2026-09-01T00:00:00Z") },
     { currentBillingPlanCode: "launch_max_monthly", currentBillingPhase: "trial" },
     { currentBillingPlanCode: "launch_monthly", familyPlanCode: "max", familyBillingStatus: HostedBillingStatus.active, familyMembershipStatus: "inactive" },
     { currentBillingPlanCode: "launch_monthly", familyPlanCode: "max", familyBillingStatus: HostedBillingStatus.active, familySuspendedAt: new Date("2026-09-01T00:00:00Z") },
-  ])("denies Astra outside active paid Max and retains a dormant preference: %j", async (plan) => {
+  ])("denies Astra outside active paid Edge/Max and retains a dormant preference: %j", async (plan) => {
     mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({ assistantModelPreference: "gpt-6-astra", ...plan }));
     const result = await readHostedMemberAssistantModelPreference({ memberId: "member_other", prisma: createReadClient() });
     expect(result.model).toBe("gpt-5.6-terra");
     expect(result.availableModels).not.toContain("gpt-6-astra");
     await expect(updateHostedMemberAssistantModelPreferenceTx({ memberId: "member_other", model: "gpt-6-astra", prisma: createTransactionClient() }))
-      .rejects.toMatchObject({ code: "ASSISTANT_MODEL_ASTRA_REQUIRES_MAX" });
+      .rejects.toMatchObject({ code: "ASSISTANT_MODEL_ASTRA_REQUIRES_EDGE" });
     expect(mocks.updateHostedMember).not.toHaveBeenCalled();
   });
 
@@ -183,6 +189,22 @@ describe("hosted member assistant model preference", () => {
     const room = await readHostedMemberAssistantModelPreference({ memberId: "room", prisma: createReadClient() });
     expect(room.availableModels).not.toContain("gpt-6-astra");
     expect(room.model).not.toBe("gpt-6-astra");
+  });
+
+  it("keeps Astra from Max to Edge, falls back on Pulse, and restores it on Edge", async () => {
+    for (const [plan, model] of [
+      ["launch_max_monthly", "gpt-6-astra"],
+      ["launch_edge_monthly", "gpt-6-astra"],
+      ["launch_monthly", "gpt-5.6-terra"],
+      ["launch_edge_monthly", "gpt-6-astra"],
+    ]) {
+      mocks.findUniqueHostedMember.mockResolvedValue(buildMemberState({
+        assistantModelPreference: "gpt-6-astra", currentBillingPlanCode: plan,
+      }));
+      const result = await readHostedMemberAssistantModelPreference({ memberId: "member_premium", prisma: createReadClient() });
+      expect(result.model).toBe(model);
+    }
+    expect(mocks.updateHostedMember).not.toHaveBeenCalled();
   });
 
   it("resolves an eligible stored Sol preference to the runtime override", async () => {
@@ -255,6 +277,7 @@ describe("hosted member assistant model preference", () => {
         "gpt-5.6-luna",
         "gpt-5.6-terra",
         "gpt-5.6-sol",
+        "gpt-6-astra",
       ],
       availableProviders: ["openai"],
       availableReasoningEfforts: ["low", "medium", "high", "xhigh"],

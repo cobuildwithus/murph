@@ -1847,8 +1847,11 @@ describe("hosted runtime internal web routes", () => {
   });
 
   it.each([
-    ["individual Edge", "launch_edge_monthly", null, false, "openai", false],
-    ["Family Edge", null, "edge", false, "openai", false],
+    ["individual Edge", "launch_edge_monthly", null, false, "openai", true],
+    ["Family Edge", null, "edge", false, "openai", true],
+    ["individual Pulse", "launch_monthly", null, false, "openai", false],
+    ["Family Pulse", null, "pulse", false, "openai", false],
+    ["Edge on Venice", "launch_edge_monthly", null, false, "venice", false],
     ["group", "launch_max_monthly", null, true, "openai", false],
     ["individual Max", "launch_max_monthly", null, false, "openai", true],
     ["Family Max", null, "max", false, "openai", true],
@@ -1882,7 +1885,7 @@ describe("hosted runtime internal web routes", () => {
     expect(response.status).toBe(200);
     const workspace = parseHostedWorkspaceReadResponse(await response.json());
     expect(workspace.hostedAssistantAstraAllowed).toBe(astraAllowed);
-    expect(workspace.hostedAssistantSubagentModelOverridesAllowed).toBe(true);
+    expect(workspace.hostedAssistantSubagentModelOverridesAllowed).toBe(!["individual Pulse", "Family Pulse"].includes(_name));
   });
 
   it("reads workspace state and checkpoints with the workspace CAS fence", async () => {

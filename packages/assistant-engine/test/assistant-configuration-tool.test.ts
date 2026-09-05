@@ -29,6 +29,13 @@ describe("assistant configuration tool", () => {
     );
   });
 
+  it("describes Astra as available on paid Edge or Max with OpenAI", () => {
+    expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.description).toContain("Sol and Astra require an active paid Edge or Max plan");
+    expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.description).toContain("Astra requires OpenAI");
+    expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.description).toContain("Call update once for a requested change");
+    expect(MURPH_ASSISTANT_CONFIGURATION_TOOL.description).not.toContain("Astra requires an active paid Max");
+  });
+
   it("exposes the scope-specific dynamic tool only when configuration is available", () => {
     expect(resolveMurphDynamicTools({
       assistantConfigurationAvailable: true,
@@ -442,7 +449,7 @@ describe("assistant configuration tool", () => {
     });
   });
 
-  it.each([[HOSTED_ASSISTANT_SOL_MODEL, "edge"], ["gpt-6-astra", "max"]] as const)("returns the authoritative %s upgrade requirement", async (model, requiredPlan) => {
+  it.each([[HOSTED_ASSISTANT_SOL_MODEL, "edge"], ["gpt-6-astra", "edge"]] as const)("returns the authoritative %s upgrade requirement", async (model, requiredPlan) => {
     const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {

@@ -239,7 +239,7 @@ export function SectionsContent({
         <>
           <Separator />
 
-          <StudySection title="Settings model choice for Max">
+          <StudySection title="Settings model choice for Edge and Max">
             <div
               id="settings-model-provider-save-controls"
               data-design-section="settings-compact-provider-control"
@@ -264,7 +264,9 @@ export function SectionsContent({
           <Separator />
 
           <StudySection title="Settings inference routing, locked models, and endpoint">
-            <SettingsCustomInferenceStudy />
+            <ModelSettingsHoverPreview>
+              <SettingsCustomInferenceStudy />
+            </ModelSettingsHoverPreview>
           </StudySection>
 
           <Separator />

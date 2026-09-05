@@ -275,7 +275,6 @@ export async function updateHostedMemberAssistantConfigurationTx(input: {
   }
   assertHostedAssistantModelSelection({
     current,
-    member,
     model: input.model,
     provider: input.provider,
   });
@@ -362,7 +361,6 @@ async function readHostedMemberAssistantModelState(input: {
 
 function assertHostedAssistantModelSelection(input: {
   current: HostedMemberAssistantModelResolution;
-  member: HostedMemberAssistantModelState;
   model: HostedAssistantProductModel | undefined;
   provider: HostedAssistantProvider | undefined;
 }): void {
@@ -374,11 +372,11 @@ function assertHostedAssistantModelSelection(input: {
     });
   }
   if (input.model === HOSTED_ASSISTANT_ASTRA_MODEL
-      && !isHostedMemberAstraModelEligible(input.member)) {
+      && !input.current.availableModels.includes(HOSTED_ASSISTANT_ASTRA_MODEL)) {
     throw hostedOnboardingError({
-      code: "ASSISTANT_MODEL_ASTRA_REQUIRES_MAX",
+      code: "ASSISTANT_MODEL_ASTRA_REQUIRES_EDGE",
       httpStatus: 403,
-      message: "GPT-6 Astra requires an active paid Max plan.",
+      message: "GPT-6 Astra requires an active paid Edge or Max plan.",
     });
   }
   if ((input.model ?? input.current.model) === HOSTED_ASSISTANT_ASTRA_MODEL
@@ -408,24 +406,6 @@ function resolveEffectiveHostedAssistantModel(input: {
     return defaultModel;
   }
   return input.storedModel ?? defaultModel;
-}
-
-function isHostedMemberAstraModelEligible(
-  member: HostedMemberAssistantModelState,
-): boolean {
-  if (member.suspendedAt !== null || member.threadContainer !== null) {
-    return false;
-  }
-  return (
-    member.billingStatus === HostedBillingStatus.active
-    && parseHostedBillingPhase(member.billingRef?.currentBillingPhase) === "paid"
-    && parseHostedBillingPlanCode(member.billingRef?.currentBillingPlanCode) === "launch_max_monthly"
-  ) || member.accountGroupMemberships.some((membership) =>
-    membership.status === "active"
-    && parseHostedFamilyPlanCode(membership.planCode) === "max"
-    && membership.group.billingStatus === HostedBillingStatus.active
-    && membership.group.suspendedAt === null
-  );
 }
 
 export function resolveHostedMemberAssistantModel(
@@ -482,7 +462,7 @@ export function resolveHostedMemberAssistantModel(
     isThreadContainerMember,
     suspendedAt: member.suspendedAt,
   });
-  const astraAvailable = isHostedMemberAstraModelEligible(member);
+  const astraAvailable = !isThreadContainerMember && solAvailable;
   const storedModelPreference = configurationAvailable
     ? isThreadContainerMember
       ? isHostedAssistantProductModel(member.assistantModelPreference)

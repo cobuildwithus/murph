@@ -1058,6 +1058,7 @@ test("non-Edge members can explicitly save Luna as their default model", async (
 
 test.each([
   ["Edge", HOSTED_ASSISTANT_SOL_MODEL, "Sol"],
+  ["Edge", HOSTED_ASSISTANT_ASTRA_MODEL, "Astra"],
   ["Max", HOSTED_ASSISTANT_ASTRA_MODEL, "Astra"],
 ] as const)("%s members can save their selected premium model", async (_plan, model, name) => {
   mocks.requestHostedOnboardingJson.mockResolvedValue({

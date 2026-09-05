@@ -2,7 +2,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 
-test("Max model choice shows Astra on phone and desktop", async ({ browser }) => {
+test("Premium model choice shows Astra on phone and desktop", async ({ browser }) => {
   const outputDir = process.env.DESIGN_PROOF_OUTPUT_DIR;
   test.skip(!outputDir, "Dedicated model-choice design proof");
   if (!outputDir) return;
@@ -44,13 +44,37 @@ test("Max model choice shows Astra on phone and desktop", async ({ browser }) =>
       )).toBeGreaterThan(0);
       await study.screenshot({ path: path.join(outputDir, `astra-models-${width}.png`) });
       await artwork.scrollIntoViewIfNeeded();
-      const star = artwork.locator('[data-depth="2"]').nth(2);
-      const resting = await star.boundingBox();
-      expect(resting).not.toBeNull();
-      await page.mouse.move(resting!.x - 24, resting!.y);
-      await expect.poll(async () => resting!.x - (await star.boundingBox())!.x).toBeGreaterThan(5);
+      const displacements: number[] = [];
+      for (const depth of [0, 1, 2]) {
+        const star = artwork.locator(`[data-depth="${depth}"]`).nth(2);
+        const resting = (await star.boundingBox())!;
+        await page.mouse.move(resting.x - 24, resting.y);
+        await expect.poll(async () => resting.x - (await star.boundingBox())!.x).toBeGreaterThan(0.8);
+        await page.waitForTimeout(750);
+        displacements.push(resting.x - (await star.boundingBox())!.x);
+        await page.mouse.move(0, 0);
+        await expect.poll(async () => Math.abs((await star.boundingBox())!.x - resting.x)).toBeLessThan(0.1);
+      }
+      expect(Math.max(...displacements) - Math.min(...displacements)).toBeLessThan(0.5);
+      expect(Math.max(...displacements)).toBeLessThan(3);
+      await artwork.evaluate((element) => {
+        const rotation = element.getAnimations({ subtree: true }).find((animation) =>
+          animation instanceof CSSAnimation && animation.animationName.includes("galaxy-rotation"));
+        if (!rotation) throw new Error("Galaxy rotation is missing");
+        rotation.pause();
+        rotation.currentTime = 60_000;
+      });
+      const rotatedStar = artwork.locator('[data-depth]').nth(100);
+      const rotatedResting = (await rotatedStar.boundingBox())!;
+      await page.mouse.move(rotatedResting.x - 24, rotatedResting.y);
+      await expect.poll(async () => rotatedResting.x - (await rotatedStar.boundingBox())!.x).toBeGreaterThan(0.8);
       await page.mouse.move(0, 0);
-      await expect.poll(async () => Math.abs((await star.boundingBox())!.x - resting!.x)).toBeLessThan(0.5);
+      await expect.poll(async () => Math.abs((await rotatedStar.boundingBox())!.x - rotatedResting.x)).toBeLessThan(0.1);
+      await artwork.evaluate((element) => {
+        for (const animation of element.getAnimations({ subtree: true })) animation.play();
+      });
+      const star = artwork.locator('[data-depth="2"]').nth(2);
+      const resting = (await star.boundingBox())!;
       await page.emulateMedia({ reducedMotion: "reduce" });
       await expect.poll(() => artwork.evaluate((element) =>
         element.getAnimations({ subtree: true }).length,
@@ -60,6 +84,27 @@ test("Max model choice shows Astra on phone and desktop", async ({ browser }) =>
       expect(Math.abs((await star.boundingBox())!.x - resting!.x)).toBeLessThan(0.5);
       await expect(study.locator('[id="assistant-model-gpt-6-astra"]')).toBeEnabled();
       await study.screenshot({ path: path.join(outputDir, `astra-models-${width}-reduced-motion.png`) });
+      await page.emulateMedia({ reducedMotion: "no-preference" });
+      const disabledStudy = page.locator('[data-design-variant="venice-terra-sol-locked"]');
+      const disabledArtwork = disabledStudy.locator('[data-model-artwork="astra"]');
+      const disabledRadio = disabledStudy.locator('[id="assistant-model-gpt-6-astra"]');
+      await expect(disabledRadio).toBeDisabled();
+      // Exercise native pointer targeting and disabled controls outside the inert study shell.
+      await disabledArtwork.evaluate((element) => {
+        for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+          parent.removeAttribute("inert");
+        }
+      });
+      await disabledArtwork.scrollIntoViewIfNeeded();
+      const disabledStar = disabledArtwork.locator('[data-depth="0"]').nth(2);
+      const disabledResting = (await disabledStar.boundingBox())!;
+      await page.mouse.move(disabledResting.x - 24, disabledResting.y);
+      await expect.poll(async () => disabledResting.x - (await disabledStar.boundingBox())!.x).toBeGreaterThan(0.8);
+      await page.mouse.click(disabledResting.x - 24, disabledResting.y);
+      await expect(disabledRadio).not.toBeChecked();
+      await expect(disabledStudy.locator('[id="assistant-model-gpt-5.6-terra"]')).toBeChecked();
+      await page.mouse.move(0, 0);
+      await expect.poll(async () => Math.abs((await disabledStar.boundingBox())!.x - disabledResting.x)).toBeLessThan(0.1);
       expect(hydrationErrors).toEqual([]);
     } finally {
       await context.close();

@@ -1121,9 +1121,9 @@ Hosted managed crypto:
 Hosted AI usage metering:
 
 - Hosted AI usage rows are recorded locally for allowance, audit, and future billing analysis. The hosted app no longer attaches Stripe usage prices at checkout or posts Stripe meter events.
-- GPT-6 Astra is an optional managed OpenAI model for active paid individual Max
-  and active Family Max seats. The existing assistant preference owner enforces
-  eligibility on writes and runtime reads; losing Max access retains the preference
+- GPT-6 Astra is an optional managed OpenAI model for active paid individual Edge/Max
+  and active Family Edge/Max seats. The existing assistant preference owner enforces
+  eligibility on writes and runtime reads; losing Edge/Max access retains the preference
   while using Terra until access returns. Group rooms retain Luna/Terra/Sol.
   Astra uses $10 input, $1 cache reads, $12.50 cache writes, and $50 output per
   million tokens; OpenAI Flex uses half those rates. Exact requests above 272K

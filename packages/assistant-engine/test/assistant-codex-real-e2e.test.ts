@@ -825,7 +825,7 @@ describeRealCodex('real Codex voice memo attachment evidence e2e', () => {
 })
 
 describeRealCodex('real Codex Astra configuration e2e', () => {
-  it('saves Astra exactly once for the next Max query', async () => {
+  it('saves Astra exactly once for the next Edge query', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-astra-selection-'))
     const updates: unknown[] = []
@@ -870,7 +870,7 @@ describeRealCodex('real Codex Astra configuration e2e', () => {
         },
         model: config.model,
         modelProvider: config.modelProvider,
-        prompt: 'Please use GPT-6 Astra for my future queries. Keep my provider and reasoning settings as they are.',
+        prompt: 'I am on the paid Edge plan. Please use GPT-6 Astra for my future queries. Keep my provider and reasoning settings as they are.',
         reasoningEffort: 'low',
         sandbox: 'workspace-write',
         vaultRoot: workingDirectory,
