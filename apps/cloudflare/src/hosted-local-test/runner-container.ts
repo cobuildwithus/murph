@@ -426,6 +426,13 @@ export function releaseShutdownCheckpointPublicationBarrier(userId: string): boo
 
   shutdownCheckpointPublicationBarriers.delete(normalizedUserId);
   barrier.release();
+  emitHostedExecutionStructuredLog({
+    component: "runner",
+    details: { barrierKind: barrier.target, checkpointBarrierStage: "released" },
+    message: "Hosted-local test released checkpoint publication.",
+    phase: "checkpoint",
+    userId: normalizedUserId,
+  });
   return true;
 }
 
@@ -459,6 +466,17 @@ export function wrapShutdownCheckpointPublicationBarrierForTest(
       userId,
     });
     await barrier.released;
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        barrierKind: barrier.target,
+        checkpointBarrierStage: "resumed",
+        requestAborted: request.signal.aborted,
+      },
+      message: "Hosted-local checkpoint request resumed after its test barrier.",
+      phase: "checkpoint",
+      userId,
+    });
     if (request.signal.aborted) {
       throw request.signal.reason instanceof Error
         ? request.signal.reason
