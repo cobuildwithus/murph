@@ -1,6 +1,6 @@
 # Durable follow-ups through existing automations
 
-Status: active
+Status: completed
 Created: 2026-09-05
 Updated: 2026-09-05
 
@@ -54,8 +54,18 @@ Effort: feature. Cover private direct reminder occurrences and important private
 - Core suite: 847 tests pass, including five follow-up ownership tests (registration replay, concurrent capacity, finite deferral, parent consumption/cancellation, stale parent revision).
 - Engine outbox/planning/cron: 326 tests pass, including dispatch-before-registration, interrupted confirmation recovery without duplicate send, capacity rejection, queued-input invalidation, protected source retention, group exclusion, and scheduled retry without consuming the child.
 - Actual pinned Codex App Server with scripted provider: two attachment-authority cases pass.
-- Live Terra subscription journeys pass for reminder/question attachment, unanswered reminder, answered reminder, older unanswered question, and older answered question. The initial unanswered-reminder failure exposed missing host-supplied canonical context; the source context now includes the actual canonical follow-up and distinguishes no linked completion record from missing history.
-- Relevant core/query/contracts/operator-config/engine/runtime typechecks pass. Web initially required an unprepared device-syncd service declaration; build the existing package boundary and rerun Web typecheck. The repository-actionable preparation gap is recorded in Frog. Contracts generation succeeds.
+- Seven live Terra subscription journeys pass: reminder/question attachment, unanswered reminder, answered reminder, older unanswered question, older answered question, and incomplete history (skip). The initial unanswered-reminder failure exposed missing host-supplied canonical context; the source context now includes the actual canonical follow-up and distinguishes no linked completion record from missing history.
+- Relevant core/query/contracts/operator-config/engine/runtime typechecks pass. Web initially required an unprepared device-syncd service declaration; the existing package build and subsequent Web typecheck both pass. Changelog render tests pass (9). The repository-actionable preparation gap is recorded in Frog. Contracts generation succeeds.
 - Complete initial Responses API captures use identical synthetic direct/group fixtures at base and candidate, the real pinned Codex runtime, production system-prompt builder and tool catalog, and gpt-tokenizer 3.4.0 o200k_base. After normalizing volatile IDs, timestamp, fixture paths and object ordering: direct 31,076 tokens / 142,794 UTF-8 bytes; group 26,925 / 124,150, identical at base/head (0, +0.00%). Both fixtures have no pending follow-ups. Deferred automation schemas and lazily read behavioral skill bodies are not loaded in the first request; the measurement excludes subsequent requests, not fields from the first request.
 - Foreground adds one serial local canonical-list read, with 16 file reads at a time and at most two projected results; no database, network, model call, retry, or persistent index. Optional read failure yields empty projection, while due evaluation still validates evidence. Local synthetic lookup benchmark: empty 0.88 ms; 128 archived records median 10.62 ms; 4,096 records median 493.08 ms (five samples, warm filesystem). Base has no added lookup. Cost scales with retained canonical history; no second index is introduced. The existing outbox excludes failed intents from deduplication, so fresh evaluation can retain the occurrence token and create a new intent without changing cron identity.
-- Product UX: Ready. PR #2916 is open on the task branch; the member-facing changelog entry is included. PR CI and final exact-head ReviewGPT remain required; no merge or deploy is authorized.
+- Product UX: Ready. PR #2916 is open on the task branch; the member-facing changelog entry is included. Final ReviewGPT is resolved with zero findings. Exact-head GitHub CI remains the delivery gate and is being completed by the task owner; no merge or deploy is authorized.
+
+## Review and integration
+
+- PR #2916, first reviewed head `bcc0317899c9f3ce35e76ed00c3de06f440a8f7f`: ReviewGPT round 1 PASS, zero qualifying bugs or Complexity Collapse findings; no accepted or rejected findings and no remediation round.
+- Pro model selection and captured response slug both identify `gpt-6-pro`; response hash `47cc0193c4c07c804ef5a8bd8c8d6eb6bb04307618e29e4096344056c1675ba1`. Phlebas lane. Approximately 380 seconds from send to captured response, above the 270-second gate. The exact committed turn and attachment were confirmed; the review checked all 41 changed head blobs and the interacting lifecycle owners. Accepted as a completed source/test inspection, not test execution.
+- The managed tool removed its generated ZIP after capture; its successful exact-head packaging preflight and retained capture/model evidence remain local. No response text or private artifacts are committed.
+- Main integration commit `3f42155fb5` resolves the existing maintenance-evidence rename around the unchanged follow-up wrapper, adopts main's snapshot format, and refreshes the two affected direct/scheduled digests. No new production behavior is authored in the resolution. All 102 planning tests and assistant typecheck pass after integration. This uses the behavior-preserving base-update exception; the first-reviewed baseline stays immutable.
+- Parent final review: source ownership, delivered-message binding, source/parent immutability, finite admission, read-only due authority, input cursor comparison, failed-intent retry, source retention, and private audience checked. No further architecture expansion is justified.
+- Worktree remains with the open PR. Auxiliary measurement checkout was retired after restoring its test fixture. Final plan closure is documentation-only; CI gates the resulting PR head.
+Completed: 2026-09-05
