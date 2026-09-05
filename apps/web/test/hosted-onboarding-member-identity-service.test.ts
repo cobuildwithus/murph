@@ -471,6 +471,79 @@ describe("hosted-onboarding member-identity-service", () => {
     expect(identityUpsert).not.toHaveBeenCalled();
   });
 
+  it("rejects verified Privy email when its Linq handle belongs to another member", async () => {
+    const identityUpsert = vi.fn();
+    const prisma = asRootPrisma({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(makeMember()),
+        update: vi.fn(),
+      },
+      hostedMemberIdentity: {
+        findMany: vi.fn().mockResolvedValue([{
+          createdAt: NOW,
+          linqEmailHandleLookupKey: requireHostedEmailLookupKey("person@example.com"),
+          maskedPhoneNumberHint: null,
+          member: makeMember({ id: "member_linq_email" }),
+          memberId: "member_linq_email",
+          phoneLookupKey: null,
+          phoneNumberEncrypted: null,
+          phoneNumberVerifiedAt: null,
+          privyUserIdEncrypted: null,
+          privyUserLookupKey: null,
+          signupPhoneCodeSendAttemptId: null,
+          signupPhoneCodeSendAttemptStartedAt: null,
+          signupPhoneCodeSentAt: null,
+          signupPhoneNumberEncrypted: null,
+          updatedAt: NOW,
+          walletAddressEncrypted: null,
+          walletAddressLookupKey: null,
+          walletChainType: null,
+          walletCreatedAt: null,
+          walletProvider: null,
+        }]),
+        findUnique: vi.fn().mockResolvedValue({
+          maskedPhoneNumberHint: null,
+          memberId: "member_123",
+          phoneLookupKey: null,
+          phoneNumberEncrypted: null,
+          phoneNumberVerifiedAt: null,
+          privyUserIdEncrypted: null,
+          privyUserLookupKey: null,
+          signupPhoneCodeSendAttemptId: null,
+          signupPhoneCodeSendAttemptStartedAt: null,
+          signupPhoneCodeSentAt: null,
+          signupPhoneNumberEncrypted: null,
+          walletAddressEncrypted: null,
+          walletAddressLookupKey: null,
+          walletChainType: null,
+          walletCreatedAt: null,
+          walletProvider: null,
+        }),
+        upsert: identityUpsert,
+      },
+    });
+
+    await expect(reconcileHostedPrivyIdentityOnMember({
+      authMethod: "email",
+      identity: makeIdentity({
+        email: {
+          address: "person@example.com",
+          verifiedAt: 1_788_555_160,
+        },
+        phone: null,
+      }),
+      member: makeMember(),
+      now: NOW,
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_EMAIL_HANDLE_IDENTITY_CONFLICT",
+      httpStatus: 409,
+    });
+
+    expect(identityUpsert).not.toHaveBeenCalled();
+  });
+
   it("does not write wallet fields when reconciling an identity without a stored wallet", async () => {
     const identityUpsert = vi.fn(async ({
       create,

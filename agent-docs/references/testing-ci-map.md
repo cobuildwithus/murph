@@ -4,6 +4,28 @@ Last verified: 2026-09-04
 
 ## Current Repo Checks
 
+Linq email identity remediation is covered by the focused
+`hosted-onboarding-linq-email-authority.test.ts` and
+`hosted-onboarding-linq-email-crypto.test.ts` suites, plus linked-account,
+Settings email, Privy, and dispatch regressions. The crypto proof uses real
+authenticated encryption with a synthetic local root. With an isolated local
+`DATABASE_URL` and `MURPH_TEST_POSTGRES_CONCURRENCY=1`, run
+`hosted-onboarding-linq-email-identity-migration-postgres.test.ts` and the
+`Linq email-handle identity` slice of `hosted-onboarding-member-lock-postgres.test.ts`
+through `pnpm --dir apps/web test:prepared -- test/<file>`. These prove exact
+same-member ciphertext copying, source/ownership rejection and rollback,
+concurrent creation, and unlink followed by a fresh inbound identity.
+The same local lane runs `hosted-group-start-recovery-postgres.test.ts` through
+the real recovery endpoint, identity writer, routing owner, and activation
+promotion: foreign-owner rejection, exactly one concurrent recovery claimant,
+route-failure rollback, and retained identity/source without verified-email
+authorization, plus a recovered member's separate verified-email inbound and
+duplicate replay through the real planner and mailbox without identity writes.
+Its external session/token and crypto boundaries are synthetic;
+the separate crypto suite owns authenticated-encryption proof. Recovery route
+and Linq thread-route regressions cover ordered mutation and direct-only group
+admission alongside existing verified and recovered group behavior.
+
 | Command | Purpose | Current coverage |
 | --- | --- | --- |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm --dir apps/web test:prepared test/hosted-onboarding-linq-terminal-retry-postgres.test.ts` | Opt-in real-PostgreSQL proof for one terminal Linq send retry; requires an isolated loopback test database with the current schema. | Concurrent claims, provider ambiguity, direct/group and multipart recovery, both acceptance/receipt arrival orders, replacement receipt projection, and current route/access/line/chat blocks. Companion terminal-retry, HTTP, and delivery-route tests prove exact failure matching, preserved payloads, disabled SDK retries, and post-response scheduling. |
