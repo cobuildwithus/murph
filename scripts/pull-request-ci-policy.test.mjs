@@ -248,6 +248,7 @@ function inspectHostSupportReleaseGraph(source) {
     "markdown-docs-scope",
   ]);
   assert.match(webBuild, /^      MURPH_HOSTED_WEB_VERIFY_LANE: build$/mu);
+  assert.match(webBuild, /^      MURPH_HOSTED_WEB_WEBPACK_CACHE: "1"$/mu);
   assert.match(webBuild, /^      MURPH_HOSTED_WEB_VERIFY_SKIP_TYPECHECK: "1"$/mu);
   assert.match(webBuild, /^      MURPH_VERIFY_STEP_PARALLEL: "1"$/mu);
   assert.match(webBuild, /^        run: pnpm --dir apps\/web verify$/mu);

@@ -9104,9 +9104,6 @@ function junctionTimeseriesRecordValueIdentity(
     return providerRowId ? [providerRowId] : [];
   }
   if (resource === "weight") {
-    if (includeProviderRowId && providerRowId) {
-      return [providerRowId];
-    }
     const { weightKilograms } = resolveJunctionWeightProviderRecordIdentity(entry);
     return weightKilograms === undefined ? [] : [`kg:${weightKilograms}`];
   }
@@ -9125,105 +9122,74 @@ function junctionTimeseriesRecordValueIdentity(
     ];
   }
 
-  const fidelityPointResource = resource === "glucose"
-    || resource === "blood_oxygen"
-    || resource === "stress_level";
   const fidelityIntervalResource = resource === "caffeine"
     || resource === "water"
     || resource === "mindfulness_minutes";
   const rowId = includeProviderRowId ? providerRowId : "";
-  const fidelitySourceRevision = String(
-    entry.recordedAt
-      ?? entry.recorded_at
-      ?? entry.updatedAt
-      ?? entry.updated_at
-      ?? "",
-  );
+  const fidelitySourceRevision = readJunctionTimeseriesIdentityField(entry, [
+    "recordedAt",
+    "recorded_at",
+    "updatedAt",
+    "updated_at",
+  ]);
   const timeZoneIdentity = [
-    String(entry.timeZone ?? entry.timezone ?? entry.time_zone ?? ""),
-    String(
-      entry.timeZoneOffsetMinutes
-        ?? entry.time_zone_offset_minutes
-        ?? entry.timezoneOffsetMinutes
-        ?? entry.timezone_offset_minutes
-        ?? entry.utcOffsetMinutes
-        ?? entry.utc_offset_minutes
-        ?? "",
-    ),
-    String(
-      entry.timezone_offset
-        ?? entry.timezoneOffset
-        ?? entry.timeZoneOffset
-        ?? entry.time_zone_offset
-        ?? entry.timezoneOffsetSeconds
-        ?? entry.timezone_offset_seconds
-        ?? entry.timeZoneOffsetSeconds
-        ?? entry.time_zone_offset_seconds
-        ?? entry.utcOffsetSeconds
-        ?? entry.utc_offset_seconds
-        ?? "",
-    ),
+    readJunctionTimeseriesIdentityField(entry, ["timeZone", "timezone", "time_zone"]),
+    readJunctionTimeseriesIdentityField(entry, [
+      "timeZoneOffsetMinutes",
+      "time_zone_offset_minutes",
+      "timezoneOffsetMinutes",
+      "timezone_offset_minutes",
+      "utcOffsetMinutes",
+      "utc_offset_minutes",
+    ]),
+    readJunctionTimeseriesIdentityField(entry, [
+      "timezone_offset",
+      "timezoneOffset",
+      "timeZoneOffset",
+      "time_zone_offset",
+      "timezoneOffsetSeconds",
+      "timezone_offset_seconds",
+      "timeZoneOffsetSeconds",
+      "time_zone_offset_seconds",
+      "utcOffsetSeconds",
+      "utc_offset_seconds",
+    ]),
   ];
   const providerDayIdentity = [
-    String(
-      entry.calendarDate
-        ?? entry.calendar_date
-        ?? entry.localDate
-        ?? entry.local_date
-        ?? "",
-    ),
-    String(entry.timestampSemantics ?? entry.timestamp_semantics ?? ""),
+    readJunctionTimeseriesIdentityField(entry, ["calendarDate", "calendar_date", "localDate", "local_date"]),
+    readJunctionTimeseriesIdentityField(entry, ["timestampSemantics", "timestamp_semantics"]),
   ];
 
   if (fidelityIntervalResource) {
-    const intervalValue = resource === "mindfulness_minutes"
-      ? entry.value ?? entry.mindfulnessMinutes ?? entry.mindfulness_minutes
-      : resource === "caffeine"
-        ? entry.value ?? entry.caffeine
-        : entry.value ?? entry.water;
+    const intervalValueKeys = resource === "mindfulness_minutes"
+      ? ["value", "mindfulnessMinutes", "mindfulness_minutes"]
+      : ["value", resource];
     return [
       rowId,
-      String(entry.start ?? entry.startAt ?? entry.start_at ?? entry.timeStart ?? entry.time_start ?? ""),
-      String(entry.end ?? entry.endAt ?? entry.end_at ?? entry.timeEnd ?? entry.time_end ?? ""),
-      String(entry.unit ?? entry.valueUnit ?? entry.value_unit ?? ""),
-      String(intervalValue ?? ""),
+      readJunctionTimeseriesIdentityField(entry, ["start", "startAt", "start_at", "timeStart", "time_start"]),
+      readJunctionTimeseriesIdentityField(entry, ["end", "endAt", "end_at", "timeEnd", "time_end"]),
+      readJunctionTimeseriesIdentityField(entry, ["unit", "valueUnit", "value_unit"]),
+      readJunctionTimeseriesIdentityField(entry, intervalValueKeys),
       ...providerDayIdentity,
       ...timeZoneIdentity,
       fidelitySourceRevision,
     ];
   }
 
-  if (fidelityPointResource) {
+  if (resource === "glucose") {
     return [
       rowId,
-      String(
-        entry.observedAt
-          ?? entry.observed_at
-          ?? entry.observed_at_utc
-          ?? entry.timestamp
-          ?? entry.time
-          ?? entry.date
-          ?? entry.day
-          ?? "",
-      ),
-      String(entry.value ?? (resource === "glucose"
-        ? entry.glucose ?? entry.bloodGlucose ?? entry.blood_glucose
-        : resource === "blood_oxygen"
-          ? entry.spo2
-            ?? entry.spO2
-            ?? entry.bloodOxygen
-            ?? entry.blood_oxygen
-            ?? entry.oxygenSaturation
-            ?? entry.oxygen_saturation
-          : entry.stressLevel
-            ?? entry.stress_level
-            ?? entry.averageStressLevel
-            ?? entry.average_stress_level
-            ?? readPlainObject(entry.stress)?.average
-            ?? entry.stressLevelValue
-            ?? entry.stress_level_value
-            ?? entry.score) ?? ""),
-      String(entry.unit ?? entry.valueUnit ?? entry.value_unit ?? ""),
+      readJunctionTimeseriesIdentityField(entry, [
+        "observedAt",
+        "observed_at",
+        "observed_at_utc",
+        "timestamp",
+        "time",
+        "date",
+        "day",
+      ]),
+      readJunctionTimeseriesIdentityField(entry, ["value", "glucose", "bloodGlucose", "blood_glucose"]),
+      readJunctionTimeseriesIdentityField(entry, ["unit", "valueUnit", "value_unit"]),
       ...providerDayIdentity,
       ...timeZoneIdentity,
       fidelitySourceRevision,
@@ -9243,10 +9209,25 @@ function junctionTimeseriesRecordValueIdentity(
     String(entry.value ?? ""),
     String(entry.unit ?? ""),
     String(entry.type ?? ""),
-    String(entry.bolus_purpose ?? entry.bolusPurpose ?? ""),
-    String(entry.delivery_form ?? entry.deliveryForm ?? ""),
-    String(entry.delivery_mode ?? entry.deliveryMode ?? ""),
+    readJunctionTimeseriesIdentityField(entry, ["bolus_purpose", "bolusPurpose"]),
+    readJunctionTimeseriesIdentityField(entry, ["delivery_form", "deliveryForm"]),
+    readJunctionTimeseriesIdentityField(entry, ["delivery_mode", "deliveryMode"]),
   ];
+}
+
+// Identity aliases use nullish precedence: empty strings, zero, and false are
+// values and must not fall through to a later provider spelling.
+function readJunctionTimeseriesIdentityField(
+  entry: Record<string, unknown>,
+  keys: readonly string[],
+): string {
+  for (const key of keys) {
+    const value = entry[key];
+    if (value !== null && value !== undefined) {
+      return String(value);
+    }
+  }
+  return "";
 }
 
 function firstJunctionTimeseriesIdentityValue(

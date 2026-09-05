@@ -551,6 +551,17 @@ describe("hosted-local run CLI", () => {
     }
   });
 
+  test("passes an explicit process shard through the canonical E2E command", async () => {
+    await runHostedLocalCli(["e2e", "foreground-reply-priority", "--no-bundle", "--process-shard", "2/2"], {
+      env: {}, stdout: createBufferedStdout().stdout,
+    });
+    expect(runHostedLocalE2eSuite).toHaveBeenCalledWith(expect.objectContaining({
+      prepareRunnerBundle: false,
+      processShard: "2/2",
+      scenario: ["foreground-reply-priority"],
+    }));
+  });
+
   test("marks interrupted hosted-local e2e runs as stopped", async () => {
     runHostedLocalE2eSuite.mockResolvedValueOnce({ terminationSignal: "SIGINT" });
     const output = createBufferedStdout();

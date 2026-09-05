@@ -12,6 +12,31 @@ const currentWorkoutId = 'evt_current_workout'
 const olderWorkoutId = 'evt_older_workout'
 
 describe('Codex workout delivery context', () => {
+  it.each([
+    'workout start --help', 'workout set log --help', 'workout show --help',
+    'workout start -h', 'workout set log --schema --format json',
+  ])(
+    'does not treat command help as a failed workout result: %s',
+    (command) => {
+      const tracker = createCodexWorkoutDeliveryContextTracker({})
+      observeCommand(tracker, {
+        command: `vault-cli ${command}`,
+        id: 'command-help',
+        output: 'Usage: vault-cli workout ...',
+      })
+      expect(tracker.readReferences(0)).toBeUndefined()
+      observeCommand(tracker, {
+        command: 'vault-cli workout start Current --format json',
+        id: 'start-after-help',
+        output: workoutStartResult(currentWorkoutId),
+      })
+      expect(tracker.readReferences(0)).toEqual([{
+        entityId: currentWorkoutId,
+        entityKind: 'activity_session',
+      }])
+    },
+  )
+
   it('attributes a live-workout start to the ordinal captured when the command began', () => {
     const tracker = createCodexWorkoutDeliveryContextTracker({})
     observeCommand(tracker, {
