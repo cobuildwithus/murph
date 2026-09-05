@@ -37,6 +37,7 @@ import {
   AssistantActiveTurnInputUnavailableError,
   applyMurphManagedAutomations,
   getAssistantCronAutomationTimingProjection,
+  getAssistantCronAutomationInspection,
   getAssistantCronStatus,
   isCanonicalOnboardingFirstPersonalReadAutomationSaveRequest,
   readAssistantOnboardingState,
@@ -1957,6 +1958,10 @@ async function buildHostedAutomationToolResponse(
     return {
       action: "inspect" as const,
       ...responseFields,
+      executionInspection: await getAssistantCronAutomationInspection(
+        input.vaultRoot,
+        record.automationId,
+      ),
       routeBinding: "preserved" as const,
     };
   }

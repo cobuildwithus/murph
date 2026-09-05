@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-09-04",
+  "order": 100,
+  "item": {
+    "id": "reminder-outcome-explanations",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Understand what happened to a reminder",
+    "summary": "Ask Murph whether a reminder ran, is retrying, or is waiting for delivery.",
+    "details": "Murph can explain recent attempt outcomes and recorded failures. A queued or failed attempt is never treated as confirmation that a message was sent.",
+    "relevanceTags": [
+      "reminders"
+    ],
+    "sourcePullRequests": [],
+    "tryIt": {
+      "label": "Ask Murph",
+      "prompt": "What happened to my last reminder?"
+    }
+  }
+}

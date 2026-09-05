@@ -1,3 +1,4 @@
+import type { AssistantAutomationExecutionInspection } from './cron/inspection.js'
 import {
   normalizeAssistantBackendTarget,
   type AssistantModelTarget,
@@ -269,6 +270,7 @@ export type AssistantAutomationOccurrenceProjection =
 export type AssistantHostedAutomationToolResponse =
   | {
       action: 'inspect'
+      executionInspection?: AssistantAutomationExecutionInspection
       automationId: string
       contextReferences?: readonly AutomationContextReference[]
       effectiveTimeZone: string | null

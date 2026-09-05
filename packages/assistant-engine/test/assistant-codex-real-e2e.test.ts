@@ -1,3 +1,6 @@
+import { resolveAssistantStatePaths } from '../src/assistant/store/paths.js'
+import { getAssistantCronAutomationInspection } from '../src/assistant/cron/inspection.js'
+import { appendAssistantCronRun } from '../src/assistant/cron/store.js'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
@@ -34372,3 +34375,55 @@ function tomlString(value: string): string {
 function tomlKey(value: string): string {
   return /^[A-Za-z0-9_-]+$/u.test(value) ? value : tomlString(value)
 }
+
+
+describeRealCodex('real Codex reminder execution inspection e2e', () => {
+  it('explains a consumed failed reminder without claiming delivery or recreating it', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-reminder-inspection-e2e-'))
+    const automationId = 'automation_stretch_break'
+    const requests: AssistantHostedAutomationToolRequest[] = []
+    try {
+      const paths = resolveAssistantStatePaths(workingDirectory)
+      await appendAssistantCronRun(paths, {
+        schema: 'murph.assistant-cron-run.v1', runId: 'cronrun_stretch_break', jobId: automationId,
+        trigger: 'scheduled', outcome: 'failed', reason: 'provider_unavailable',
+        startedAt: '2026-07-28T20:00:00.000Z', finishedAt: '2026-07-28T20:01:00.000Z',
+        scheduledOccurrenceAt: '2026-07-28T20:00:00.000Z', sessionId: null,
+        response: null, responseLength: 0, error: 'The assistant service was temporarily unavailable.',
+      })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, developerInstructions: buildMidnightLinqReminderDeveloperInstructions(),
+        dynamicTools: [MURPH_AUTOMATION_TOOL], env: config.env, excludeResumeTurns: true,
+        hostedToolContext: {
+          computerToolsAvailable: false,
+          automationTool: { request: async (request) => {
+            requests.push(request)
+            if (request.action !== 'inspect' || request.lookup !== automationId) throw new Error('Inspection only; no changes authorized.')
+            return {
+              action: 'inspect', automationId, lookupId: automationId, effectiveTimeZone: null,
+              executionInspection: await getAssistantCronAutomationInspection(workingDirectory, automationId),
+              occurrenceProjection: { status: 'resolved', nextOccurrenceAt: null },
+              routeBinding: 'preserved', schedule: { kind: 'at', at: '2026-07-28T20:00:00.000Z' },
+              status: 'active', updatedAt: '2026-07-28T18:00:00.000Z',
+            }
+          } },
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => { throw new Error('No file send authorized.') }, vaultFileSendAvailable: false,
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'What happened to my stretch-break reminder yesterday? Please just check it. Current automation inventory: stretch-break reminder, automationId=automation_stretch_break.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      process.stdout.write(JSON.stringify({ scenario: 'consumed failed reminder inspection', reply: result.finalMessage }) + '\n')
+      expect(requests).toEqual([{ action: 'inspect', lookup: automationId }])
+      expect(result.finalMessage).toMatch(/fail|couldn.t|unavailable|didn.t/iu)
+      expect(result.finalMessage).toMatch(/reschedul|another time|new time|set.*again/iu)
+      expect(result.finalMessage).not.toMatch(/(?:was|has been|successfully) delivered|I.ve (?:created|rescheduled)|will (?:retry|automatically send)|no reminder was sent/iu)
+    } finally {
+      await rm(workingDirectory, { force: true, recursive: true })
+    }
+  }, 720_000)
+})

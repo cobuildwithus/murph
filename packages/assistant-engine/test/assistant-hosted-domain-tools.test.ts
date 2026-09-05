@@ -1624,6 +1624,7 @@ describe('hosted domain dynamic tools', () => {
     const automationTool = {
       request: vi.fn(async () => ({
         action: 'inspect' as const,
+        executionInspection: { status: 'unavailable' as const },
         automationId: 'automation-1',
         effectiveTimeZone: 'America/Chicago',
         lookupId: 'evening-wind-down',
@@ -1664,6 +1665,7 @@ describe('hosted domain dynamic tools', () => {
     }, { signal: null })
     expect(readResultPayload(result)).toEqual({
       action: 'inspect',
+      executionInspection: { status: 'unavailable' },
       automationId: 'automation-1',
       effectiveTimeZone: 'America/Chicago',
       occurrenceProjection: {

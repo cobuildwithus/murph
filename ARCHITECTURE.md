@@ -192,6 +192,13 @@ that narrow state tool through canonical core memory operations. The turn uses
 the shared restricted maintenance configuration and needs no separate
 permission profile or filesystem mutation path; native controls are not an
 additional memory owner, and the host suppresses their effects in this lane.
+Read-only hosted automation inspection also projects execution evidence from
+that automation's existing runtime state, its ten newest retained cron runs,
+and at most one exact outstanding outbox intent. It exposes phase, retry timing,
+bounded sanitized failure detail and delivery status without prompts, responses,
+recipient identities or a new history store. A consumed or failed occurrence is
+not delivery confirmation; inspection never retries or recreates it.
+
 Reminder availability uses no
 model turn or separate automation: the existing hosted background automation
 pass deterministically scans active private automations that explicitly store
