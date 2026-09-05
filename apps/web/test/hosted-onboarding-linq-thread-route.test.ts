@@ -9247,16 +9247,32 @@ describe("Linq group chat auto-provision", () => {
     }
   });
 
-  it("ignores group messages received on an unknown unmanaged recipient", async () => {
+  it.each([
+    ["unmanaged", "recipient-line-unmanaged"],
+    ["conflicting", "recipient-line-conflicting"],
+    ["structurally_unavailable", "recipient-line-structurally-unavailable"],
+    ["degraded_unavailable", "recipient-line-degraded-unavailable"],
+  ] as const)("ignores group messages on a %s recipient line", async (kind, reason) => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const prisma = createStatefulThreadRoutePrisma();
-    prisma.seedActiveManagedLinqLine("+15550000000");
+    const recipient = "+15558889999";
+    if (kind === "conflicting") {
+      // The production line-state reader rejects ambiguous row cardinality
+      // before it inspects either row's fields.
+      prisma.hostedLinqLine.findMany.mockResolvedValueOnce([{}, {}]);
+    } else if (kind !== "unmanaged") {
+      prisma.seedActiveManagedLinqLine(recipient, {
+        egressPolicy: kind === "structurally_unavailable" ? "disabled" : "enabled",
+        healthStatus: "degraded",
+        providerReputationStatus: "HEALTHY",
+      });
+    }
     mockSenderLookup(senderCore);
 
     try {
       const plan = await planHostedOnboardingLinqWebhook({
         event: buildLinqMessageReceivedEvent({
-          recipient: "+15558889999",
+          recipient,
         }),
         prisma: prisma as never,
       });
@@ -9266,16 +9282,18 @@ describe("Linq group chat auto-provision", () => {
         ok: true,
         reason: "group-chat-line-unavailable",
       });
-      expectManagedLineAuthorityLookup(prisma, "+15558889999");
+      expectManagedLineAuthorityLookup(prisma, recipient);
+      expect(plan.desiredSideEffects).toEqual([]);
       expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
       expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+      expect(prisma.hostedLinqLine.updateMany).not.toHaveBeenCalled();
 
       const plannerDetails = info.mock.calls.find(
         ([message]) => message === "Hosted Linq webhook planner decision.",
       )?.[1];
       expect(plannerDetails).toMatchObject({
         existingMemberMatch: "phone-identity",
-        reason: "recipient-line-unmanaged",
+        reason,
         responseReason: "group-chat-line-unavailable",
         routeStage: "new-group-admission-ignored",
       });
