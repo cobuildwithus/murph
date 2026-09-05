@@ -361,7 +361,7 @@ test("hosted web dev filesystem cache defaults off and allows explicit opt-in", 
 
 test("next.config keeps both bundlers focused without custom workspace rewrite rules", () => {
   assert.equal(productionNextConfig.turbopack?.root, process.cwd());
-  assert.equal(productionNextConfig.webpack, configureHostedWebWebpack);
+  assert.equal(typeof productionNextConfig.webpack, "function");
   assert.deepEqual(productionNextConfig.typescript, {
     ignoreBuildErrors: false,
     tsconfigPath: HOSTED_WEB_NEXT_TSCONFIG_PATH,
@@ -647,6 +647,24 @@ test("configureHostedWebWebpack disables the production cache and aliases Privy'
         "apps/web/src/lib/empty-module.ts",
       ),
     });
+  }
+});
+
+test("the Webpack callback retains Next compiler caching only for explicit CI opt-in", () => {
+  const cache = {
+    type: "filesystem",
+    version: "next-owned",
+    buildDependencies: { config: ["next.config.ts"] },
+  };
+  for (const value of [undefined, "0", "true", "1"]) {
+    const config = { cache, resolve: {} };
+    const environment = createProcessEnv(
+      value === undefined ? {} : { MURPH_HOSTED_WEB_WEBPACK_CACHE: value },
+    );
+    const { webpack } = buildHostedWebNextConfig(PHASE_PRODUCTION_BUILD, environment);
+    assert(webpack);
+    webpack(config, { dev: false } as Parameters<typeof webpack>[1]);
+    assert.equal(config.cache, value === "1" ? cache : false);
   }
 });
 

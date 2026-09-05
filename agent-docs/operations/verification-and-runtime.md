@@ -789,6 +789,26 @@ change did not cause a pre-existing failure, and the best focused evidence.
 This does not turn a required red check green or permit bypassing CI. Do not run
 an unrelated broad command merely to establish that a baseline is already red.
 
+### Temporal integration build performance
+
+`pnpm hosted-local e2e foreground-reply-priority --process-shard 1/2` and
+`--process-shard 2/2` run the two existing isolated Vitest processes separately.
+The private workflow requires both jobs; an omitted flag retains the complete
+serial command. Sharding requires exactly one scenario and a denominator equal
+to its declared process count, failing before setup if that inventory changes.
+The nine priority tests retain their order and shared latency evidence.
+
+Private integration pins one public source before independent runner-bundle and
+Web builds. Its Web job may set `MURPH_HOSTED_WEB_WEBPACK_CACHE=1` and persist the
+Next compiler cache plus `.next/cache` TypeScript metadata. The full Web build,
+route type generation, and both TypeScript checks still run after restoration.
+Vercel and ordinary builds retain cold Webpack compilation unless explicitly
+opted in; heap and static-generation limits are unchanged. Focused proof lives
+in `apps/web/test/next-config.test.ts` and
+`apps/web/test/production-next-build-runner.test.ts`. Cross-repository timing
+must be measured in the actual private integration workflow, including queue,
+artifact preparation, E2E, and attestation time.
+
 ## Hosted Temporal Replay Proof
 
 Private `cobuildwithus/murph-cloud` owns the Temporal Workflows, Activities,
