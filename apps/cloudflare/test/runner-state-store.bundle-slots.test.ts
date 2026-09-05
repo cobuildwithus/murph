@@ -411,17 +411,17 @@ describe("RunnerStateStore schema guard", () => {
     expect(state).not.toHaveProperty(retiredBrowserVaultRefreshProjection);
   });
 
-  it("blocks the previous runner before it can read a version-17 workspace", () => {
+  it("blocks the previous runner before it can read a version-18 workspace", () => {
     const readWorkspace = vi.fn();
-    expect(RUNNER_STATE_SCHEMA_VERSION).toBe(17);
+    expect(RUNNER_STATE_SCHEMA_VERSION).toBe(18);
     expect(() => {
       assertRunnerStateSchemaVersionSupported({
         observedVersion: RUNNER_STATE_SCHEMA_VERSION,
-        supportedVersion: 16,
+        supportedVersion: 17,
       });
       readWorkspace();
     }).toThrow(
-      "Hosted runner Durable Object schema version 17 is newer than supported version 16.",
+      "Hosted runner Durable Object schema version 18 is newer than supported version 17.",
     );
     expect(readWorkspace).not.toHaveBeenCalled();
   });

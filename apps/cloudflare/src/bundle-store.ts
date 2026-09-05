@@ -14,6 +14,7 @@ import {
   hostedBundleObjectKey,
   hostedBundleUserPrefix,
   hostedArtifactObjectKey,
+  hostedMediaObjectKey,
   isUserScopedHostedBundleObjectKey,
   hostedRunnerSecretsObjectKey,
 } from "./storage-paths.js";
@@ -48,6 +49,23 @@ export interface HostedArtifactStore {
   deleteArtifact(sha256: string): Promise<void>;
   readArtifact(sha256: string): Promise<Uint8Array | null>;
   writeArtifact(sha256: string, plaintext: Uint8Array): Promise<void>;
+}
+
+export type HostedMediaKind = "image" | "video";
+
+export interface HostedMediaDescriptor {
+  byteSize: number;
+  mediaId: string;
+  mediaKind: HostedMediaKind;
+  sha256: string;
+}
+
+export interface HostedMediaStore {
+  deleteMedia(mediaId: string): Promise<void>;
+  readMedia(input: HostedMediaDescriptor): Promise<Uint8Array | null>;
+  writeMedia(input: HostedMediaDescriptor & {
+    plaintext: Uint8Array;
+  }): Promise<void>;
 }
 
 export class MissingHostedBundleError extends Error {
@@ -316,6 +334,92 @@ export function createHostedArtifactStore(input: {
   };
 }
 
+export function createHostedMediaStore(input: {
+  bucket: R2BucketLike;
+  key: Uint8Array;
+  keyId: string;
+  keysById?: Readonly<Record<string, Uint8Array>>;
+  resolveKeyById?: (keyId: string) => Promise<Uint8Array | null>;
+  userId: string;
+}): HostedMediaStore {
+  return {
+    async deleteMedia(mediaId) {
+      if (!input.bucket.delete) {
+        return;
+      }
+
+      const key = await hostedMediaObjectKey({
+        mediaId,
+        userId: input.userId,
+      });
+      await input.bucket.delete(key);
+    },
+
+    async readMedia(media) {
+      const descriptor = normalizeHostedMediaDescriptor(media);
+      const key = await hostedMediaObjectKey({
+        mediaId: descriptor.mediaId,
+        userId: input.userId,
+      });
+      const plaintext = await readEncryptedR2Payload({
+        aad: buildHostedStorageAad({
+          byteSize: descriptor.byteSize,
+          key,
+          mediaId: descriptor.mediaId,
+          mediaKind: descriptor.mediaKind,
+          purpose: "media",
+          sha256: descriptor.sha256,
+          userId: input.userId,
+        }),
+        bucket: input.bucket,
+        callerLabel: "Hosted media envelope",
+        cryptoKey: input.key,
+        cryptoKeysById: input.keysById,
+        expectedKeyId: input.keyId,
+        resolveCryptoKeyById: input.resolveKeyById,
+        key,
+        scope: "media",
+      });
+
+      if (plaintext) {
+        await assertHostedMediaBytesMatchDescriptor(plaintext, descriptor);
+      }
+      return plaintext;
+    },
+
+    async writeMedia(media) {
+      const descriptor = normalizeHostedMediaDescriptor(media);
+      if (media.plaintext.byteLength !== descriptor.byteSize) {
+        throw new Error(
+          `Hosted media byte-size mismatch: expected ${descriptor.byteSize}, got ${media.plaintext.byteLength}.`,
+        );
+      }
+      await assertHostedArtifactHash(media.plaintext, descriptor.sha256);
+      const key = await hostedMediaObjectKey({
+        mediaId: descriptor.mediaId,
+        userId: input.userId,
+      });
+      await writeEncryptedR2Payload({
+        aad: buildHostedStorageAad({
+          byteSize: descriptor.byteSize,
+          key,
+          mediaId: descriptor.mediaId,
+          mediaKind: descriptor.mediaKind,
+          purpose: "media",
+          sha256: descriptor.sha256,
+          userId: input.userId,
+        }),
+        bucket: input.bucket,
+        cryptoKey: input.key,
+        key,
+        keyId: input.keyId,
+        plaintext: media.plaintext,
+        scope: "media",
+      });
+    },
+  };
+}
+
 export function createHostedRunnerSecretsReader(input: {
   bucket: R2BucketLike;
   key: Uint8Array;
@@ -398,4 +502,37 @@ async function assertHostedArtifactHash(plaintext: Uint8Array, expectedSha256: s
   if (actualSha256 !== expectedSha256) {
     throw new Error(`Hosted artifact hash mismatch: expected ${expectedSha256}, got ${actualSha256}.`);
   }
+}
+
+function normalizeHostedMediaDescriptor(input: HostedMediaDescriptor): HostedMediaDescriptor {
+  if (!/^[a-f0-9]{64}$/u.test(input.mediaId)) {
+    throw new Error("Hosted media id is invalid.");
+  }
+  if (!/^[a-f0-9]{64}$/u.test(input.sha256)) {
+    throw new Error("Hosted media sha256 is invalid.");
+  }
+  if (input.mediaKind !== "image" && input.mediaKind !== "video") {
+    throw new Error("Hosted media kind is invalid.");
+  }
+  if (!Number.isSafeInteger(input.byteSize) || input.byteSize < 0) {
+    throw new Error("Hosted media byte size is invalid.");
+  }
+  return {
+    byteSize: input.byteSize,
+    mediaId: input.mediaId,
+    mediaKind: input.mediaKind,
+    sha256: input.sha256,
+  };
+}
+
+async function assertHostedMediaBytesMatchDescriptor(
+  plaintext: Uint8Array,
+  descriptor: HostedMediaDescriptor,
+): Promise<void> {
+  if (plaintext.byteLength !== descriptor.byteSize) {
+    throw new Error(
+      `Hosted media byte-size mismatch: expected ${descriptor.byteSize}, got ${plaintext.byteLength}.`,
+    );
+  }
+  await assertHostedArtifactHash(plaintext, descriptor.sha256);
 }

@@ -35,6 +35,9 @@ import { openInboxRuntime, type InboxRuntimeStore } from "../kernel/sqlite.js";
 
 export const INBOX_MEDIA_RETENTION_DAYS = 14;
 export const INBOX_MEDIA_RETENTION_WINDOW_MS = INBOX_MEDIA_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+export const INBOX_VIDEO_RETENTION_DAYS = 3;
+export const INBOX_VIDEO_RETENTION_WINDOW_MS =
+  INBOX_VIDEO_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 const INBOX_MEDIA_RETENTION_PROTECTED_RECHECK_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_INBOX_MEDIA_RETENTION_BATCH_SIZE = 100;
 const MAX_PROMOTED_DOCUMENT_EVIDENCE_PATHS = 20;
@@ -156,7 +159,7 @@ export async function runInboxMediaRetention(
         ) {
           continue;
         }
-        const retentionWindowMs = INBOX_MEDIA_RETENTION_WINDOW_MS;
+        const retentionWindowMs = resolveInboxAttachmentRetentionWindowMs(attachment.kind);
         const cutoffMs = nowMs - retentionWindowMs;
 
         const alreadyRetained =
@@ -830,6 +833,14 @@ function isRetainableInboxMediaKind(
   return kind === "audio" || kind === "image" || kind === "video";
 }
 
+function resolveInboxAttachmentRetentionWindowMs(
+  kind: InboxCaptureAttachmentRecord["kind"],
+): number {
+  return kind === "video"
+    ? INBOX_VIDEO_RETENTION_WINDOW_MS
+    : INBOX_MEDIA_RETENTION_WINDOW_MS;
+}
+
 function emptyRetentionResult(input: {
   hasMoreEligibleAttachments?: boolean;
   nextEligibleAt?: string | null;
@@ -927,7 +938,7 @@ function resolveActiveAttachmentParseJobProtectionExpiresAt(
   attachment: InboxCaptureAttachmentRecord,
   cutoffMs: number,
 ): string | null {
-  if (attachment.kind !== "audio" && attachment.kind !== "video") {
+  if (!isParserProtectedInboxAttachmentKind(attachment.kind)) {
     return null;
   }
 
@@ -960,6 +971,12 @@ function resolveActiveAttachmentParseJobProtectionExpiresAt(
   }
 
   return protectionExpiresAt;
+}
+
+function isParserProtectedInboxAttachmentKind(
+  kind: InboxCaptureAttachmentRecord["kind"],
+): kind is "audio" | "image" | "video" {
+  return kind === "audio" || kind === "image" || kind === "video";
 }
 
 function resolveFreshAttachmentParseJobProtectionExpiresAt(input: {

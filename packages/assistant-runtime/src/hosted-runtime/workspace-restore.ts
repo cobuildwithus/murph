@@ -118,7 +118,7 @@ export interface HostedWorkspaceRuntimeRestoreResult
 
 export type HostedWorkspaceRuntimeRestorePlatform = Pick<
   HostedRuntimePlatform,
-  "artifactStore" | "logPort" | "workspaceSnapshotPort"
+  "artifactStore" | "logPort" | "mediaStore" | "workspaceSnapshotPort"
 >;
 
 export type HostedWorkspaceWarmIdleCheckpointOpenResult =
@@ -203,16 +203,12 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       canonicalWriteReceiptRecoveryFailed: true,
     };
   };
-  const recoverCanonicalWriteReceipts = async (
-    vaultRoot: string,
-    materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null,
-  ) => {
+  const recoverCanonicalWriteReceipts = async (vaultRoot: string) => {
     try {
       return {
         count: await applyHostedCanonicalWriteReceiptsFromWorkspaceState({
           platform: input.platform,
           status: input.workspace?.redactedStatus ?? null,
-          materializeWorkspaceArtifacts,
           vaultRoot,
         }),
         restored: null,
@@ -252,10 +248,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       workspace: input.workspace ?? null,
     });
     if (warmRestored) {
-      const receiptRecovery = await recoverCanonicalWriteReceipts(
-        warmRestored.vaultRoot,
-        warmRestored.materializeWorkspaceArtifacts,
-      );
+      const receiptRecovery = await recoverCanonicalWriteReceipts(warmRestored.vaultRoot);
       if (receiptRecovery.restored) {
         return receiptRecovery.restored;
       }
@@ -286,6 +279,12 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     const restoredMaterializedArtifactPaths = await readHostedMaterializedArtifactPaths({
       vaultRoot: restored.vaultRoot,
     });
+    const materializeWorkspaceArtifacts = createHostedWorkspaceRuntimeArtifactMaterializer({
+      materializedArtifactPaths: restoredMaterializedArtifactPaths,
+      platform: input.platform,
+      restored,
+      readBundles: materializerBundles,
+    });
     const receiptRecovery = await recoverCanonicalWriteReceipts(restored.vaultRoot);
     if (receiptRecovery.restored) {
       return receiptRecovery.restored;
@@ -295,12 +294,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
       ...restored,
       canonicalWriteReceiptCount: receiptRecovery.count,
       canonicalWriteReceiptRecoveryFailed: false,
-      materializeWorkspaceArtifacts: createHostedWorkspaceRuntimeArtifactMaterializer({
-        materializedArtifactPaths: restoredMaterializedArtifactPaths,
-        platform: input.platform,
-        restored,
-        readBundles: materializerBundles,
-      }),
+      materializeWorkspaceArtifacts,
       materializedArtifactPaths: restoredMaterializedArtifactPaths,
       mode: "snapshot",
       restoreWasCold: true,
@@ -432,10 +426,7 @@ export async function restoreHostedWorkspaceRuntimeJobWorkspace(input: {
     restored,
     readBundles: materializerBundles,
   });
-  const receiptRecovery = await recoverCanonicalWriteReceipts(
-    restored.vaultRoot,
-    materializeWorkspaceArtifacts,
-  );
+  const receiptRecovery = await recoverCanonicalWriteReceipts(restored.vaultRoot);
   if (receiptRecovery.restored) {
     return receiptRecovery.restored;
   }
@@ -1058,13 +1049,13 @@ function createHostedWorkspaceRuntimeArtifactMaterializer(input: {
     }),
     bundles: input.readBundles,
     materializedArtifactPaths: input.materializedArtifactPaths,
+    mediaStore: input.platform.mediaStore ?? null,
     operatorHomeRoot: input.restored.operatorHomeRoot,
     vaultRoot: input.restored.vaultRoot,
   });
 }
 
 async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
-  materializeWorkspaceArtifacts?: HostedWorkspaceArtifactMaterializer | null;
   platform: HostedWorkspaceRuntimeRestorePlatform;
   status: HostedWorkspaceState["redactedStatus"] | null | undefined;
   vaultRoot: string;
@@ -1119,9 +1110,6 @@ async function applyHostedCanonicalWriteReceiptsFromWorkspaceState(input: {
       for (const domain of listAssistantContextSnapshotDirtyDomainsForCanonicalWrite(parsed)) {
         dirtyDomains.add(domain);
       }
-      await input.materializeWorkspaceArtifacts?.(
-        parsed.actions.map((action) => action.targetRelativePath),
-      );
       await applyHostedCanonicalWriteReceipt({
         readPayload: async (ref) =>
           await readHostedCanonicalWritePayloadForRestore({

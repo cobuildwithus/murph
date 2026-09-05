@@ -59,6 +59,7 @@ import {
   hostedBundleUserPrefix,
   hostedEmailRawMessageUserPrefix,
   hostedEnvironmentVoiceUserPrefix,
+  hostedMediaObjectKey,
   hostedRunnerSecretsObjectKey,
   hostedWorkspaceSnapshotObjectKey,
   hostedWorkspaceSnapshotUserPrefix,
@@ -8021,6 +8022,112 @@ describe("HostedUserRunner execution coordination", () => {
     expect(alarms.at(-1)).toBe("deleted");
   });
 
+  it("cleans expired hosted media from the runner alarm without waking the workspace", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const bucket = new MemoryEncryptedR2Bucket();
+    const mediaId = "b".repeat(64);
+    const sha256 = "a".repeat(64);
+    const mediaObjectKey = await hostedMediaObjectKey({
+      mediaId,
+      userId: TEST_USER_ID,
+    });
+    await bucket.put(mediaObjectKey, "encrypted-media");
+    const workspaceRead = vi.fn();
+    const { alarms, invoke, runner, sql } = createRunnerHarness({
+      bucket,
+      onWorkspaceRead: workspaceRead,
+    });
+    await activateWorkspaceSnapshotSessionOwner({ runner, sql });
+
+    await expect(runner.recordHostedMediaAsset({
+      attemptId: "attempt_1",
+      byteSize: 15,
+      expiresAt: "2026-04-26T00:00:00.000Z",
+      leaseGeneration: "9",
+      mediaId,
+      mediaKind: "video",
+      sha256,
+      userId: TEST_USER_ID,
+    })).resolves.toBe(true);
+    expect(alarms).toContain("2026-04-26T00:00:00.000Z");
+
+    await runner.alarm();
+
+    expect(bucket.deleted).toContain(mediaObjectKey);
+    expect(bucket.objects.has(mediaObjectKey)).toBe(false);
+    expect(readHostedMediaAssetRowCount(sql)).toBe(0);
+    expect(workspaceRead).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("preserves hosted media rows without retention deadlines", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const bucket = new MemoryEncryptedR2Bucket();
+    const mediaId = "c".repeat(64);
+    const sha256 = "d".repeat(64);
+    const mediaObjectKey = await hostedMediaObjectKey({
+      mediaId,
+      userId: TEST_USER_ID,
+    });
+    await bucket.put(mediaObjectKey, "encrypted-media");
+    const { alarms, runner, sql } = createRunnerHarness({ bucket });
+    await activateWorkspaceSnapshotSessionOwner({ runner, sql });
+
+    await expect(runner.recordHostedMediaAsset({
+      attemptId: "attempt_1",
+      byteSize: 15,
+      expiresAt: null,
+      leaseGeneration: "9",
+      mediaId,
+      mediaKind: "image",
+      sha256,
+      userId: TEST_USER_ID,
+    })).resolves.toBe(true);
+
+    await runner.alarm();
+
+    expect(bucket.deleted).not.toContain(mediaObjectKey);
+    expect(bucket.objects.has(mediaObjectKey)).toBe(true);
+    expect(readHostedMediaAssetRowCount(sql)).toBe(1);
+    expect(alarms).toEqual(["deleted"]);
+  });
+
+  it("forgets hosted media retention rows under the active write fence", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { runner, sql } = createRunnerHarness();
+    await activateWorkspaceSnapshotSessionOwner({ runner, sql });
+    const mediaId = "e".repeat(64);
+
+    await expect(runner.recordHostedMediaAsset({
+      attemptId: "attempt_1",
+      byteSize: 15,
+      expiresAt: null,
+      leaseGeneration: "9",
+      mediaId,
+      mediaKind: "image",
+      sha256: "f".repeat(64),
+      userId: TEST_USER_ID,
+    })).resolves.toBe(true);
+
+    await expect(runner.forgetHostedMediaAsset({
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      mediaId,
+      userId: TEST_USER_ID,
+    })).resolves.toBe(true);
+    await expect(runner.forgetHostedMediaAsset({
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      mediaId,
+      userId: TEST_USER_ID,
+    })).resolves.toBe(true);
+
+    expect(readHostedMediaAssetRowCount(sql)).toBe(0);
+  });
+
   it("moves the shared orphan alarm earlier without scanning or postponing it", async () => {
     const storageList = vi.fn();
     const { alarms, runner } = createRunnerHarness({
@@ -9067,6 +9174,13 @@ async function activateWorkspaceSnapshotSessionOwner(input: {
     FIXED_NOW,
     "4",
   );
+}
+
+function readHostedMediaAssetRowCount(sql: TestSqlStorageLike): number {
+  const row = sql.exec<{ count: number }>(
+    "SELECT count(*) AS count FROM runner_hosted_media_asset",
+  ).toArray()[0];
+  return row?.count ?? 0;
 }
 
 function createRunnerHarness(input: {

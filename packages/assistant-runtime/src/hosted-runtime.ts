@@ -8696,6 +8696,10 @@ function createAbortGuardedHostedRuntimePlatform(
         guard(() => platform.artifactStore.get(sha256, context)),
       put: (putInput) => guard(() => platform.artifactStore.put(putInput)),
     },
+    ...createAbortGuardedHostedRuntimeMediaStoreProperty(
+      platform.mediaStore,
+      guard,
+    ),
     ...(platform.browserVaultReplicaPort
       ? {
           browserVaultReplicaPort: {
@@ -8887,6 +8891,40 @@ function createAbortGuardedHostedRuntimePlatform(
           },
         }
       : {}),
+  };
+}
+
+function createAbortGuardedHostedRuntimeMediaStoreProperty(
+  mediaStore: HostedRuntimePlatform["mediaStore"],
+  guard: <T>(run: () => Promise<T>) => Promise<T>,
+): Partial<Pick<HostedRuntimePlatform, "mediaStore">> {
+  if (!mediaStore) {
+    return {};
+  }
+  return {
+    mediaStore: createAbortGuardedHostedRuntimeMediaStore(mediaStore, guard),
+  };
+}
+
+function createAbortGuardedHostedRuntimeMediaStore(
+  mediaStore: NonNullable<HostedRuntimePlatform["mediaStore"]>,
+  guard: <T>(run: () => Promise<T>) => Promise<T>,
+): NonNullable<HostedRuntimePlatform["mediaStore"]> {
+  return {
+    ...(mediaStore.delete
+      ? {
+          delete: (deleteInput) =>
+            guard(() => mediaStore.delete!(deleteInput)),
+        }
+      : {}),
+    get: (getInput, context) => guard(() => mediaStore.get(getInput, context)),
+    ...(mediaStore.record
+      ? {
+          record: (recordInput) =>
+            guard(() => mediaStore.record!(recordInput)),
+        }
+      : {}),
+    put: (putInput) => guard(() => mediaStore.put(putInput)),
   };
 }
 

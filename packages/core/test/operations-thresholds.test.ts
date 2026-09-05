@@ -779,6 +779,66 @@ test("hosted canonical receipts preserve raw delete authority during replay", as
   assert.equal(await fs.readFile(targetAbsolutePath, "utf8"), "expired private bytes");
 });
 
+test("hosted raw media receipt replay accepts an already materialized target without payload", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-hosted-raw-media-replay");
+  await initializeVault({ vaultRoot });
+
+  const targetRelativePath = "raw/inbox/telegram/self/2026/06/cap_media/attachments/01__photo.png";
+  const targetAbsolutePath = resolveVaultPath(vaultRoot, targetRelativePath).absolutePath;
+  const bytes = Buffer.from("materialized image bytes\n", "utf8");
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  await fs.mkdir(path.dirname(targetAbsolutePath), { recursive: true });
+  await fs.writeFile(targetAbsolutePath, bytes);
+  const receipt: HostedCanonicalWriteReceipt = {
+    actions: [{
+      byteLength: bytes.byteLength,
+      effect: "copy",
+      kind: "raw_upsert",
+      mediaType: "image/png",
+      originalFileName: "photo.png",
+      sha256,
+      targetRelativePath,
+    }],
+    committedAt: "2026-07-09T00:00:00.000Z",
+    createdAt: "2026-07-09T00:00:00.000Z",
+    occurredAt: "2026-07-09T00:00:00.000Z",
+    operationId: "op_hosted_raw_media_payloadless_replay",
+    operationType: "hosted_raw_media_replay",
+    schema: HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
+    summary: "Replay a materialized hosted media raw write.",
+    updatedAt: "2026-07-09T00:00:00.000Z",
+  };
+  let readPayloadCalled = false;
+
+  await applyHostedCanonicalWriteReceipt({
+    readPayload: async () => {
+      readPayloadCalled = true;
+      return null;
+    },
+    receipt,
+    vaultRoot,
+  });
+
+  assert.equal(readPayloadCalled, false);
+
+  await fs.rm(targetAbsolutePath, { force: true });
+  await applyHostedCanonicalWriteReceipt({
+    readPayload: async () => null,
+    receipt,
+    vaultRoot,
+  });
+
+  await fs.writeFile(targetAbsolutePath, "different bytes\n", "utf8");
+  await assert.rejects(
+    applyHostedCanonicalWriteReceipt({
+      readPayload: async () => null,
+      receipt,
+      vaultRoot,
+    }),
+    /conflicting existing bytes/u,
+  );
+});
+
 test("hosted guarded-delete replay preserves the inspected byte precondition", async () => {
   const vaultRoot = await makeTempDirectory("murph-core-hosted-guarded-delete-replay");
   await initializeVault({ vaultRoot });

@@ -1,8 +1,8 @@
 import { type DurableObjectSqlStorageLike, type DurableObjectSqlValue } from "./types.js";
 
-// Version 17 is also a semantic rollback floor: its runner can persist the
-// outbound message-volume receipt marker inside strict outbox intents.
-export const RUNNER_STATE_SCHEMA_VERSION = 17;
+// Version 18 is also a semantic rollback floor: its runner owns hosted media
+// retention rows for no-container-wake expiry.
+export const RUNNER_STATE_SCHEMA_VERSION = 18;
 
 export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void {
   sql.exec(`
@@ -40,6 +40,25 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       last_error_code TEXT,
       last_invocation_at TEXT
     )
+  `);
+
+  sql.exec(`
+    CREATE TABLE IF NOT EXISTS runner_hosted_media_asset (
+      media_id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      media_kind TEXT NOT NULL,
+      byte_size INTEGER NOT NULL,
+      sha256 TEXT NOT NULL,
+      expires_at TEXT,
+      object_key TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  sql.exec(`
+    CREATE INDEX IF NOT EXISTS runner_hosted_media_asset_expiry_idx
+    ON runner_hosted_media_asset (user_id, expires_at, media_id)
+    WHERE expires_at IS NOT NULL
   `);
 
   for (const [columnName, definition] of Object.entries({
@@ -82,6 +101,18 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       "last_error_at",
       "last_error_code",
       "last_invocation_at",
+    ],
+  });
+  assertRunnerStateTableColumns(sql, "runner_hosted_media_asset", {
+    requiredColumns: [
+      "media_id",
+      "user_id",
+      "media_kind",
+      "byte_size",
+      "sha256",
+      "expires_at",
+      "object_key",
+      "updated_at",
     ],
   });
 }

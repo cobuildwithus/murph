@@ -76,6 +76,10 @@ import {
 import {
   pruneHostedWorkspaceSnapshotRuntimeOwnedSymlinks,
 } from "./snapshot-cleanup.ts";
+import {
+  publishHostedWorkspaceMediaReferencesForSnapshot,
+  type PublishHostedWorkspaceMediaReferencesResult,
+} from "./media-references.ts";
 import type {
   HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "./workspace-runner.ts";
@@ -604,6 +608,13 @@ async function createHostedWorkspaceV2Snapshot(
         });
       }
     }
+    const mediaReferences =
+      await publishHostedWorkspaceMediaReferencesForLoggedSnapshot({
+        platform: input.platform,
+        signal: input.signal,
+        userId: input.userId,
+        vaultRoot: input.vaultRoot,
+      });
     const encrypted = await runHostedWorkspaceSnapshotMeasuredStep({
       key: "snapshotArchiveBuildElapsedMs",
       run: async () => {
@@ -611,6 +622,7 @@ async function createHostedWorkspaceV2Snapshot(
         const archivePlan = await collectHostedWorkspaceSnapshotArchivePlan({
           codexHomeSnapshotHashSecret: input.snapshotDiagnosticsHashSecret,
           durableRoot,
+          excludedVaultPaths: mediaReferences.excludedVaultPaths,
           extraFiles: legacySnapshotExtraFiles,
           operatorHomeRoot,
           signal: input.signal,
@@ -1418,6 +1430,44 @@ function createAssistantGeneratedDeliveryResiduePruneLogDetails(
     prunedAssistantRuntimeResidueFileCount:
       result.generatedDeliveryFilesPruned,
   };
+}
+
+async function publishHostedWorkspaceMediaReferencesForLoggedSnapshot(input: {
+  platform: HostedWorkspaceRuntimeJobOptions["platform"];
+  signal: AbortSignal | null;
+  userId: string;
+  vaultRoot: string;
+}): Promise<PublishHostedWorkspaceMediaReferencesResult> {
+  const mediaReferences = await publishHostedWorkspaceMediaReferencesForSnapshot({
+    mediaStore: input.platform.mediaStore ?? null,
+    signal: input.signal,
+    vaultRoot: input.vaultRoot,
+  });
+  if (shouldLogHostedWorkspaceMediaReferencePublication(mediaReferences)) {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        excludedVaultPathCount: mediaReferences.excludedVaultPaths.length,
+        mediaReferenceCount: mediaReferences.referenceCount,
+        prunedMediaCount: mediaReferences.prunedMediaCount,
+        snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
+        uploadedMediaCount: mediaReferences.uploadedMediaCount,
+      },
+      level: "info",
+      message: "Hosted workspace snapshot published media references.",
+      phase: "checkpoint",
+      userId: input.userId,
+    });
+  }
+  return mediaReferences;
+}
+
+function shouldLogHostedWorkspaceMediaReferencePublication(
+  mediaReferences: PublishHostedWorkspaceMediaReferencesResult,
+): boolean {
+  return mediaReferences.referenceCount > 0
+    || mediaReferences.uploadedMediaCount > 0
+    || mediaReferences.prunedMediaCount > 0;
 }
 
 async function writeHostedCheckpointSnapshotFinishedLog(input: {

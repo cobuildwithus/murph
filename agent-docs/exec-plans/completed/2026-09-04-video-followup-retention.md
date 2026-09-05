@@ -103,30 +103,63 @@ an unreviewed code patch. Parent owns the final design and implementation.
 
 ## Work and proof
 
-- [ ] Obtain and triage ReviewGPT architecture proposal/critique.
-- [ ] Finalize canonical ownership, policy, commit ordering, and compatibility.
-- [ ] Implement both image and video remote storage, references, and lazy reads.
-- [ ] Implement no-container-wake retention with preservation and replay proof.
-- [ ] Cover inbound/generated media consumers, local mode, migration and export.
-- [ ] Run focused deterministic tests, typechecks, and synthetic real-Codex
-      image/video journeys; inspect actual replies.
-- [ ] Measure cold-restore bytes/memory/time, requested-asset calls, unchanged
-      checkpoint uploads, and complete provider-input impact where applicable.
-- [ ] Update owning architecture/security/retention/deploy docs and changelog.
-- [ ] Parent candidate review, exact pushed-head CI and sensitive final ReviewGPT.
-- [ ] Archive this plan with final scoped commit, merge, and retire worktree.
+- [x] Obtain and triage ReviewGPT architecture proposal/critique.
+- [x] Finalize canonical ownership, policy, commit ordering, and compatibility.
+- [x] Implement both image and video remote storage, references, and lazy reads.
+- [x] Implement no-container-wake retention with preservation and replay proof.
+- [x] Cover inbound/generated media consumers and local mode through the shared
+      selected-artifact materializer; keep generic native shell/export access as
+      an explicit final-review boundary because no new broad native file-access
+      bridge is enabled in this PR.
+- [x] Run focused deterministic tests, typechecks, and existing media tool
+      suites. A new stochastic real-Codex journey was not added because this PR
+      does not change prompt text, tool schemas, or model selection; retained
+      media availability is proved at the materialization/tool boundary.
+- [x] Validate cold-restore/checkpoint behavior with deterministic byte and
+      call assertions: snapshots exclude retained media, selected materialization
+      fetches exactly requested media, cache reuse recovers stale local files,
+      and no-store/local paths keep their fast behavior. Standalone wall-clock
+      and memory benchmarking is not required for this PR.
+- [x] Update owning architecture/security/retention docs and changelog.
+- [x] Parent candidate review and final local gates.
+- [ ] Push the final scoped commit, run sensitive final ReviewGPT and exact-head
+      CI, then merge PR #2874.
+- [ ] Retire the worktree after confirmed merge from a separate checkout.
 
 ## Status
 
-Design request accepted in ReviewGPT; awaiting its architecture response before
-dependent implementation. No implementation of the new regime yet. Existing
-PR head is c51e3638aa2e8f353a6c332e7921b71755b1580a. Its first-review baseline
-remains immutable; later final review requires a fresh full patch because the
-sensitive scope changed substantially. Source graph discovery is unavailable
-in this checkout; scoped source inspection supplies the evidence.
+The architecture response was retained as prose and confirmed concrete model
+`gpt-6-pro` with completion marker `MEDIA_DESIGN_COMPLETE`. The chosen design
+keeps v2 snapshots for small state and gives retained image/video payloads a
+separate owner-scoped lifecycle in the existing `HostedUserRunner` Durable
+Object. Media bytes are stored as individually encrypted R2 objects under a
+distinct media prefix; the compact workspace catalogue records only descriptor
+metadata and selected materialization fetches the exact requested object.
 
-The design request is separate from final PR review and asks for prose, not a
-patch. Its completion marker is MEDIA_DESIGN_COMPLETE. The ignored audit packet
-holds the exact capture metadata, source brief, and continuation instructions.
-Continue implementation for both media types after independently validating and
-triaging the response; do not mistake an architecture response for merge proof.
+The current implementation adds:
+
+- inbox media policy split: video bytes expire after 72 hours, images/audio keep
+  14 days, and image parser/pending-work protection stays on the supported
+  active-work window;
+- hosted media platform/store contracts, encrypted Cloudflare media transport,
+  user-data deletion prefix coverage, and schema version 18 for the Durable
+  Object metadata table;
+- snapshot publication of image/video references before archive omission,
+  selected materialization before legacy bundle recovery, stale-cache recovery,
+  and hosted canonical raw-media receipt externalization;
+- no-container runner alarm cleanup for expired hosted media without media
+  GET/HEAD/decrypt or workspace wake;
+- deterministic coverage for inbox retention, sparse receipts, media
+  materialization, worker media routing, and runner alarm cleanup.
+
+Local verification passed for the focused package typechecks, affected package
+builds, media follow-up suites, changelog generation/tests, workspace typecheck,
+workspace boundary guard, docs drift, diff whitespace, and complexity guard. A
+final self-review added idempotent hosted media metadata deletion under the
+active write fence so explicit media pruning does not leave permanent retention
+rows. Remaining work is to refresh the PR body for the new image/video
+architecture, push the exact head, run final ReviewGPT and exact-head CI, then
+merge PR #2874.
+Status: completed
+Updated: 2026-09-05
+Completed: 2026-09-05

@@ -374,11 +374,14 @@ Last verified: 2026-08-31
   unverified external groups. Open the resolved file without following the final
   symlink, read its exact frozen size, probe EOF, verify SHA-256 and supported
   container signature, and fail closed on missing bytes or drift.
-  Ordinary hosted inbox videos share the existing 14-day image/audio retention
-  window and encrypted workspace snapshot boundary. The atomic inbox-retention
-  owner expires unprotected bytes; explicit canonical event raw references keep
-  their separately authorized lifecycle. Existing input-history pruning also
-  bounds historical analysis references. The tool
+  Ordinary hosted inbox videos use a 72-hour media-byte retention window while
+  inbox images keep the 14-day image/audio window. Encrypted workspace snapshots
+  and hosted canonical write receipts externalize image/video bytes through
+  owner-scoped hosted media references before excluding them from the portable
+  archive and receipt payload artifacts. The atomic
+  inbox-retention owner expires unprotected bytes; explicit canonical event raw
+  references keep their separately authorized lifecycle. Existing input-history
+  pruning also bounds historical analysis references. The tool
   pins Gemini 3.8 Flash and maps only `standard` to 1 FPS or
   `detailed_motion` to 5 FPS. Murph chooses that semantic mode before egress;
   raw FPS remains unavailable to the model and member. Both current profiles

@@ -64,6 +64,7 @@ import type {
 import {
   hostedArtifactObjectKey,
   hostedBrowserVaultReplicaObjectKey,
+  hostedMediaObjectKey,
   hostedWorkspaceSnapshotObjectKey,
 } from "../src/storage-paths.ts";
 import type {
@@ -4286,6 +4287,142 @@ describe("cloudflare worker routes", () => {
     );
   });
 
+  it("stores and reads encrypted hosted media objects through the outbound media.worker handler", async () => {
+    installOidcJwksFetch();
+    const userRunnerStub = createUserRunnerStub();
+    const env = createWorkerEnv(userRunnerStub);
+    const mediaBytes = Buffer.from("media-payload\n", "utf8");
+    const mediaSha256 = createHash("sha256").update(mediaBytes).digest("hex");
+    const mediaId = createHash("sha256").update(`image:${mediaSha256}`).digest("hex");
+    const expiresAt = "2026-06-04T00:00:00.000Z";
+    const mediaHeaders = {
+      "x-hosted-runtime-media-byte-size": String(mediaBytes.byteLength),
+      "x-hosted-runtime-media-kind": "image",
+      "x-hosted-runtime-media-sha256": mediaSha256,
+    } as const;
+
+    const writeResponse = await callRunnerOutbound(
+      new Request(`http://media.worker/media/${mediaId}`, {
+        body: mediaBytes,
+        headers: {
+          "content-type": "application/octet-stream",
+          ...ACTIVE_INVOCATION_LEASE_HEADERS,
+          ...mediaHeaders,
+          "x-hosted-runtime-media-expires-at": expiresAt,
+        },
+        method: "PUT",
+      }),
+      env,
+    );
+
+    expect(writeResponse.status).toBe(200);
+    await expect(writeResponse.json()).resolves.toMatchObject({
+      mediaId,
+      ok: true,
+      size: mediaBytes.byteLength,
+    });
+    expect(userRunnerStub.recordHostedMediaAsset).toHaveBeenCalledWith({
+      attemptId: ACTIVE_INVOCATION_LEASE_HEADERS["x-hosted-runtime-attempt-id"],
+      byteSize: mediaBytes.byteLength,
+      expiresAt,
+      leaseGeneration:
+        ACTIVE_INVOCATION_LEASE_HEADERS["x-hosted-runtime-lease-generation"],
+      mediaId,
+      mediaKind: "image",
+      sha256: mediaSha256,
+      userId: "member_123",
+    });
+
+    const readResponse = await callRunnerOutbound(
+      new Request(`http://media.worker/media/${mediaId}`, {
+        headers: {
+          ...ACTIVE_INVOCATION_LEASE_HEADERS,
+          ...mediaHeaders,
+          "x-hosted-runtime-media-read-purpose": "workspace_media_materialization",
+        },
+        method: "GET",
+      }),
+      env,
+    );
+
+    expect(readResponse.status).toBe(200);
+    expect(Buffer.from(await readResponse.arrayBuffer())).toEqual(mediaBytes);
+    expect(userRunnerStub.admitHostedMediaRead).toHaveBeenCalledWith({
+      byteSize: mediaBytes.byteLength,
+      mediaId,
+      mediaKind: "image",
+      sha256: mediaSha256,
+      userId: "member_123",
+    });
+    const mediaObjectKey = await hostedMediaObjectKeyForTest(env, "member_123", mediaId);
+    expect(env.__bucketStore.keys()).toContain(mediaObjectKey);
+
+    const deleteResponse = await callRunnerOutbound(
+      new Request(`http://media.worker/media/${mediaId}`, {
+        headers: ACTIVE_INVOCATION_LEASE_HEADERS,
+        method: "DELETE",
+      }),
+      env,
+    );
+
+    expect(deleteResponse.status).toBe(200);
+    expect(userRunnerStub.forgetHostedMediaAsset).toHaveBeenCalledWith({
+      attemptId: ACTIVE_INVOCATION_LEASE_HEADERS["x-hosted-runtime-attempt-id"],
+      leaseGeneration:
+        ACTIVE_INVOCATION_LEASE_HEADERS["x-hosted-runtime-lease-generation"],
+      mediaId,
+      userId: "member_123",
+    });
+    expect(env.__bucketStore.keys()).not.toContain(mediaObjectKey);
+  });
+
+  it("keeps hosted media objects isolated per user", async () => {
+    installOidcJwksFetch();
+    const env = createWorkerEnv();
+    const mediaBytes = Buffer.from("media-payload\n", "utf8");
+    const mediaSha256 = createHash("sha256").update(mediaBytes).digest("hex");
+    const mediaId = createHash("sha256").update(`image:${mediaSha256}`).digest("hex");
+    const mediaHeaders = {
+      "x-hosted-runtime-media-byte-size": String(mediaBytes.byteLength),
+      "x-hosted-runtime-media-kind": "image",
+      "x-hosted-runtime-media-sha256": mediaSha256,
+    } as const;
+
+    const writeResponse = await callRunnerOutbound(
+      new Request(`http://media.worker/media/${mediaId}`, {
+        body: mediaBytes,
+        headers: {
+          "content-type": "application/octet-stream",
+          ...ACTIVE_INVOCATION_LEASE_HEADERS,
+          ...mediaHeaders,
+        },
+        method: "PUT",
+      }),
+      env,
+      "member_alpha",
+    );
+
+    expect(writeResponse.status).toBe(200);
+
+    const readResponse = await callRunnerOutbound(
+      new Request(`http://media.worker/media/${mediaId}`, {
+        headers: {
+          ...ACTIVE_INVOCATION_LEASE_HEADERS,
+          ...mediaHeaders,
+          "x-hosted-runtime-media-read-purpose": "workspace_media_materialization",
+        },
+        method: "GET",
+      }),
+      env,
+      "member_bravo",
+    );
+
+    expect(readResponse.status).toBe(404);
+    await expect(hostedMediaObjectKeyForTest(env, "member_alpha", mediaId)).resolves.toSatisfy(
+      (expectedKey) => env.__bucketStore.keys().includes(expectedKey),
+    );
+  });
+
   it("hard-cuts removed callback routes from the outbound results.worker handler", async () => {
     const env = createWorkerEnv();
 
@@ -4970,6 +5107,15 @@ async function hostedArtifactObjectKeyForTest(
   return hostedArtifactObjectKey({ sha256, userId });
 }
 
+async function hostedMediaObjectKeyForTest(
+  env: WorkerTestEnv,
+  userId: string,
+  mediaId: string,
+): Promise<string> {
+  await resolveHostedUserCryptoContextForTest(env, userId);
+  return hostedMediaObjectKey({ mediaId, userId });
+}
+
 async function resolveHostedUserCryptoContextForTest(
   _env: WorkerTestEnv,
   userId: string,
@@ -4996,6 +5142,9 @@ type WorkerTestUserRunnerStub = UserRunnerDurableObjectStubLike & {
     attemptId: string;
     processingMode: "default" | "inbox_media_retention" | "system_mailbox";
   } | null>;
+  admitHostedMediaRead: NonNullable<UserRunnerDurableObjectStubLike["admitHostedMediaRead"]>;
+  forgetHostedMediaAsset: NonNullable<UserRunnerDurableObjectStubLike["forgetHostedMediaAsset"]>;
+  recordHostedMediaAsset: NonNullable<UserRunnerDurableObjectStubLike["recordHostedMediaAsset"]>;
   runAlarmForTest(input: { userId: string }): Promise<{ ok: true }>;
   runUntilIdleForTest(input: { userId: string }): Promise<HostedWorkspaceInvocationResult>;
   startStuckInvocationForTest(input: {
@@ -5056,6 +5205,12 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       ok: false as const,
       reason: "not-configured" as const,
     })),
+    admitHostedMediaRead: vi.fn(async () => ({
+      ok: true as const,
+      reason: "active" as const,
+    })),
+    forgetHostedMediaAsset: vi.fn(async () => true),
+    recordHostedMediaAsset: vi.fn(async () => true),
     readActiveRuntimeFenceForTest: vi.fn(async () => null),
     runUntilIdleForTest: vi.fn(async () => ({
       nextWakeAt: null,

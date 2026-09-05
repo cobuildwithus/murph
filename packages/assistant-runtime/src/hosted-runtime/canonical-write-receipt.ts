@@ -129,9 +129,6 @@ function parseHostedCanonicalWriteReceiptAction(
         throw new Error("Hosted canonical raw write receipt action is invalid.");
       }
       const contentRef = parseHostedCanonicalWriteReceiptContentRef(raw.contentRef);
-      if (!contentRef) {
-        throw new Error("Hosted canonical raw write receipt action is missing content.");
-      }
       return {
         kind: "raw_upsert",
         targetRelativePath: raw.targetRelativePath,
@@ -140,7 +137,7 @@ function parseHostedCanonicalWriteReceiptAction(
         mediaType: raw.mediaType,
         originalFileName: raw.originalFileName,
         effect: raw.effect,
-        contentRef,
+        ...(contentRef ? { contentRef } : {}),
       };
     }
     case "delete": {
