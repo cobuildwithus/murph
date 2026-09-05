@@ -11074,10 +11074,13 @@ describeRealCodex('real Codex official weather-alert context e2e', () => {
 })
 
 describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
-  it('stops Apple Health no-data check-ins once from a private member request', async () => {
+  it.each([
+    { label: 'Apple Health', sourceProvider: 'apple_health_kit' },
+    { label: 'WHOOP', sourceProvider: 'whoop_v2' },
+  ])('stops $label no-data check-ins once from a private member request', async ({ label, sourceProvider }) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(
-      path.join(tmpdir(), 'murph-apple-health-checkin-preference-e2e-'),
+      path.join(tmpdir(), 'murph-wearable-checkin-preference-e2e-'),
     )
     const requests: AssistantHostedDeviceToolRequest[] = []
     try {
@@ -11101,23 +11104,23 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
             origin: {
               assistantInputId: 'ain_00000000000000000000000000000026',
               kind: 'accepted_input',
-              sessionId: 'session-apple-health-preference',
+              sessionId: 'session-wearable-preference',
             },
-            originSessionId: 'session-apple-health-preference',
+            originSessionId: 'session-wearable-preference',
           }),
           deviceTool: {
             request: async (request) => {
               requests.push(request)
               if (request.action !== 'configure_no_data_outreach'
-                || request.sourceProvider !== 'apple_health_kit'
+                || request.sourceProvider !== sourceProvider
                 || request.mode !== 'off') {
-                throw new Error('Only the requested Apple Health check-in opt-out is supported.')
+                throw new Error('Only the requested source check-in opt-out is supported.')
               }
               return {
                 action: 'configure_no_data_outreach',
                 effectiveAfterDays: null,
                 setting: 'off',
-                sourceProvider: 'apple_health_kit',
+                sourceProvider,
                 status: 'saved',
               }
             },
@@ -11127,23 +11130,23 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
         },
         model: config.model,
         modelProvider: config.modelProvider,
-        prompt: 'Please stop the Apple Health no-data check-ins. Keep the connection and syncing on.',
+        prompt: `Please stop the ${label} no-data check-ins. Keep the connection and syncing on.`,
         reasoningEffort: 'low',
         sandbox: 'workspace-write',
         workingDirectory,
       })
-      process.stdout.write(`[apple-health-checkin-opt-out-e2e] ${JSON.stringify({
+      process.stdout.write(`[wearable-checkin-opt-out-e2e] ${JSON.stringify({
         actions: readCapabilityRoutingActions(result.jsonEvents),
         finalMessage: result.finalMessage,
       })}\n`)
       expect(requests).toEqual([{
         action: 'configure_no_data_outreach',
         mode: 'off',
-        sourceProvider: 'apple_health_kit',
+        sourceProvider,
       }])
       expect(hasNoFurtherWearableCheckinMeaning(result.finalMessage), result.finalMessage).toBe(true)
       expect(result.finalMessage).not.toMatch(/could not|cannot|can't|couldn't|unable|unconfirmed|not confirm/iu)
-      expect(result.finalMessage).not.toMatch(/(?:disconnected|disabled|stopped) (?:your )?(?:Apple Health|syncing)|force.quit/iu)
+      expect(result.finalMessage).not.toMatch(/(?:disconnected|disabled|stopped) (?:your )?(?:Apple Health|WHOOP|syncing)|force.quit/iu)
     } finally {
       await removeRealCodexTemporaryPath(workingDirectory)
       await removeRealCodexTemporaryPaths(config.temporaryPaths)

@@ -1,5 +1,5 @@
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
-import { SqliteDeviceSyncStore } from "@murphai/device-syncd/service";
+import { SqliteDeviceSyncStore } from "@murphai/device-syncd";
 import {
   addJunctionExtendedTimeseriesHistoryBackfillCoverage,
   resolveJunctionExtendedTimeseriesHistoryBackfillVersion,
@@ -1195,14 +1195,21 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     ]);
   });
 
-  it("hands an established eligible source to the existing notice scheduler", async () => {
+  it.each([
+    { sourceProviderSlug: "garmin", status: "connected", lastErrorCode: null },
+    { sourceProviderSlug: "whoop_v2", status: "connected", lastErrorCode: null },
+    { sourceProviderSlug: "whoop_v2", status: "error", lastErrorCode: "TOKEN_REFRESH_FAILED" },
+    { sourceProviderSlug: "whoop_v2", status: "error", lastErrorCode: "token_refresh_failed" },
+  ] as const)("hands an established $sourceProviderSlug $status source to the existing notice scheduler", async ({ sourceProviderSlug, status, lastErrorCode }) => {
     createAuthorityHarness({
       connectionSources: [{
-        displayName: "Garmin",
+        displayName: sourceProviderSlug,
+        status,
+        lastErrorCode,
         id: "dcs_abcdefghijklmnop",
         lastDataAt: "2026-08-01T00:00:00.000Z",
-        sourceInstanceKey: "junction:garmin",
-        sourceProviderSlug: "garmin",
+        sourceInstanceKey: `junction:${sourceProviderSlug}`,
+        sourceProviderSlug,
       }],
     });
     const { applyHostedDeviceSyncRuntimeResult } = await import(
@@ -1226,8 +1233,8 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         lastDataAt: "2026-08-01T00:00:00.000Z",
         lifecycleEpoch: 1,
         sourceId: "dcs_abcdefghijklmnop",
-        sourceInstanceKey: "junction:garmin",
-        sourceProviderSlug: "garmin",
+        sourceInstanceKey: `junction:${sourceProviderSlug}`,
+        sourceProviderSlug,
       }],
       now: expect.any(String),
       userId: "user_123",
