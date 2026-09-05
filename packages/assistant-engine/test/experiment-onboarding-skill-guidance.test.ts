@@ -1,3 +1,4 @@
+import { readWorkflowSkillPolicy } from './support/workflow-skill-policy.js'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -17,10 +18,7 @@ describe('experiment onboarding skill guidance', () => {
       throw new Error('experiment-onboarding skill is not registered')
     }
 
-    return readFile(
-      path.join(resolveAssistantSkillsRoot(), skill.slug, 'SKILL.md'),
-      'utf8',
-    )
+    return readWorkflowSkillPolicy('experiment-onboarding')
   }
 
   async function readBehaviorFollowthroughSkill() {
@@ -32,10 +30,7 @@ describe('experiment onboarding skill guidance', () => {
       throw new Error('behavior-followthrough skill is not registered')
     }
 
-    return readFile(
-      path.join(resolveAssistantSkillsRoot(), skill.slug, 'SKILL.md'),
-      'utf8',
-    )
+    return readWorkflowSkillPolicy('behavior-followthrough')
   }
 
   async function readSelfManagementExperimentsSkill() {

@@ -231,3 +231,13 @@ An exact action retry may continue; a conflicting action requires new eligible
 member input. That binding proves current authority, not the meaning of the
 message. The result exposes a Stripe-hosted URL only when payment is required,
 and the tool never exposes a general billing or Stripe client.
+
+## Task-specific skill policy
+
+The behavior-followthrough and experiment-onboarding skill entrypoints keep
+shared constraints, ordinary behavior setup, and active-experiment logging rules
+directly available. They route to co-packaged `references/` files before
+specialized setup or support effects instead of loading the whole directory. The normal
+skill filesystem remains the only loader; references are neither eager prompt
+content nor a separate skill registry. Keep the entrypoint routing, reference
+assets, and focused real-Codex fixtures together when changing these policies.

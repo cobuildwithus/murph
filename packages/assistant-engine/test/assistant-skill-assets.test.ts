@@ -1,3 +1,4 @@
+import { readWorkflowSkillPolicy } from './support/workflow-skill-policy.js'
 import { existsSync, readFileSync } from 'node:fs'
 import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
@@ -1185,7 +1186,11 @@ describe('assistant skill assets', () => {
       modelBehaviorProfile: 'gpt5-agentic',
       turnTrigger: null,
     })
-    const skillTexts = await Promise.all(ASSISTANT_SKILLS.map(readSkillFile))
+    const skillTexts = await Promise.all(ASSISTANT_SKILLS.map((skill) =>
+      skill.slug === 'behavior-followthrough' || skill.slug === 'experiment-onboarding'
+        ? readWorkflowSkillPolicy(skill.slug)
+        : readSkillFile(skill),
+    ))
     const registeredSkillText = skillTexts.join('\n')
 
     expectNoDeletedCommonsCommands(systemPrompt)
@@ -1210,7 +1215,7 @@ describe('assistant skill assets', () => {
     )
   })
 
-  it('keeps experiment onboarding details in the skill file, not the prompt', async () => {
+  it('keeps experiment onboarding details in its skill policy, not the prompt', async () => {
     const experimentOnboardingSkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'experiment-onboarding',
     )
@@ -1222,7 +1227,7 @@ describe('assistant skill assets', () => {
       'planned-session support reminders',
     )
 
-    const raw = await readSkillFile(experimentOnboardingSkill)
+    const raw = await readWorkflowSkillPolicy('experiment-onboarding')
 
     expect(raw).toContain(
       'Before asking any experiment onboarding question, perform a bounded vault-first evidence pass',
@@ -1278,7 +1283,7 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('.codex-hosted')
   })
 
-  it('keeps behavior follow-through policy in the skill file with only compact bridges elsewhere', async () => {
+  it('keeps behavior follow-through policy in its skill owner with only compact bridges elsewhere', async () => {
     const behaviorSkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'behavior-followthrough',
     )
@@ -1302,7 +1307,7 @@ describe('assistant skill assets', () => {
     }
 
     const [raw, stressRaw] = await Promise.all([
-      readSkillFile(behaviorSkill),
+      readWorkflowSkillPolicy('behavior-followthrough'),
       readSkillFile(stressSkill),
     ])
     const compact = raw.replace(/\s+/gu, ' ')
