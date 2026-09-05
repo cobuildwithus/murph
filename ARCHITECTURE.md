@@ -454,6 +454,11 @@ effect or delivery tools. Its answer returns directly to the existing
 encrypted, expiring Ops-only result owner; it does not enter the member
 disclosure-review composition.
 
+Diagnostic results expire 48 hours after `completed_at`. Ops reads suppress
+expired results immediately; the hourly control-plane retention job clears
+`result_encrypted` in bounded, indexed batches. Task audit/status and
+idempotency records remain intact, so result expiry cannot replay a task.
+
 Assistant Ask is one typed request/reply primitive over the existing encrypted
 hosted mailbox. `assistant.ask.requested` carries one bounded question to an
 authorized target runtime, and `assistant.ask.completed` returns one bounded

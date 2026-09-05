@@ -116,6 +116,7 @@ describe("hosted retention cleanup", () => {
       ['DELETE FROM "device_webhook_trace"', 4],
       ['UPDATE "hosted_linq_provider_event"', 5],
       ['UPDATE "hosted_member"', 3],
+      ['UPDATE "hosted_operator_task"', 2],
     ]);
     const executeRaw = vi.fn(async (strings: TemplateStringsArray) => {
       const sql = strings.join("?");
@@ -154,6 +155,7 @@ describe("hosted retention cleanup", () => {
       expiredIngressLatencyTracesDeleted: 1,
       expiredMailboxContentRetired: 7,
       expiredMailboxTombstonesDeleted: 3,
+      expiredOperatorTaskResultsRetired: 2,
       expiredSensitiveActionChallengesDeleted: 2,
       expiredSignupNotificationContextsRetired: 3,
       staleWebSessionsDeleted: 9,
@@ -217,7 +219,7 @@ describe("hosted retention cleanup", () => {
     ]);
 
     // One statement per category: every short batch stops that category's loop.
-    expect(executeRaw).toHaveBeenCalledTimes(16);
+    expect(executeRaw).toHaveBeenCalledTimes(17);
 
     const groupParticipantObservationCall = findRetentionCall(
       executeRaw,
@@ -489,7 +491,7 @@ describe("hosted retention cleanup", () => {
     expect(callbackNonceCall.slice(1)).toEqual([HOSTED_RETENTION_BATCH_SIZE]);
   });
 
-  it("caps aggregate short-lived control-artifact work across all seven owners", async () => {
+  it("caps aggregate short-lived control-artifact work across all eight owners", async () => {
     const controlFragments = [
       'DELETE FROM "hosted_connected_app_connect_intent"',
       'DELETE FROM "hosted_email_public_bootstrap_attempt"',
@@ -498,6 +500,7 @@ describe("hosted retention cleanup", () => {
       'DELETE FROM "device_oauth_session"',
       'DELETE FROM "clinical_record_connect_intent"',
       'DELETE FROM "clinical_record_oauth_session"',
+      'UPDATE "hosted_operator_task"',
     ] as const;
     const executeRaw = vi.fn(async (strings: TemplateStringsArray) => {
       const sql = strings.join("?");
@@ -522,6 +525,7 @@ describe("hosted retention cleanup", () => {
       deviceConnect: result.expiredDeviceConnectIntentsDeleted,
       deviceOauth: result.expiredDeviceOauthSessionsDeleted,
       sensitiveAction: result.expiredSensitiveActionChallengesDeleted,
+      operatorResults: result.expiredOperatorTaskResultsRetired,
     }).toEqual({
       clinicalConnect: perOwnerCeiling,
       clinicalOauth: perOwnerCeiling,
@@ -530,6 +534,7 @@ describe("hosted retention cleanup", () => {
       deviceConnect: perOwnerCeiling,
       deviceOauth: perOwnerCeiling,
       sensitiveAction: perOwnerCeiling,
+      operatorResults: perOwnerCeiling,
     });
     const controlCalls = executeRaw.mock.calls.filter((call) =>
       controlFragments.some((fragment) => sqlOf(call).includes(fragment))
@@ -540,7 +545,7 @@ describe("hosted retention cleanup", () => {
     );
     expect(
       controlCalls.length * HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE,
-    ).toBe(3_500);
+    ).toBe(4_000);
   });
 
   it("runs retention categories one at a time", async () => {
