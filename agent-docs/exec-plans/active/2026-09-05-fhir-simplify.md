@@ -44,24 +44,20 @@ The authorized September FHIR refactor covers correctness, policy/contract delet
 
 ## Verification
 
-- Composed Web page responses reach the real vault snapshot importer and save two lab results without outgoing pagination metadata.
-- Focused tests cover catalog equivalence, received bytes, consent admission, entitlement-independent disconnect, partial bounds, warnings, saved authorization-ended outcomes, revision ordering, SUBSETTED resources, bounded reconnect and permanent outcome conflicts.
-- Six PostgreSQL concurrency cases pass against an isolated synthetic database, including both callback/withdrawal orderings and callback/account-deletion orderings.
-- Workspace incremental build and affected typechecks passed; rerun after final contract/schema edits.
-- Phone (390 px) and desktop (1280 px) real-component studies and signed-out route inspected; Playwright overflow and keyboard proof passed. No live provider journey has been exercised.
-- Postdeploy contract SQL applied successfully to the isolated database; the six concurrency tests still pass. Complexity guard passes with no increased per-file debt.
-- All affected typechecks and the workspace incremental build pass. Changelog archive proof adds nine passing cases.
-- PR #2918 is draft; 461 focused cases, the workspace build, affected typechecks, boundary and complexity guards pass. Screenshots are attached to the PR.
-- Preview build exposed one obsolete refresh-token write in authorization expiry handling. Removed it and stale fixture fields; 52 affected tests and the production Next TypeScript check pass. Exact-head CI, a reachable preview and final ReviewGPT remain.
+- 516 focused cases pass across Web, PostgreSQL, runtime, importers, vault, domain/contracts, Cloudflare and changelog. Direct Web response → vault import proof saves two lab results without manufactured pagination metadata.
+- Ten PostgreSQL cases pass against an isolated synthetic database after the contract column drop. These cover callback/withdrawal and callback/account-deletion orderings, plus disconnect/withdrawal before and after authorization-ended finalization, second-generation same-patient import and stale outcome rejection.
+- The new unresolved-finalization cases fail on the reviewed head and pass with the two cleanup-query corrections. Already-finalized outcomes remain unchanged.
+- Workspace build and affected typechecks pass, including the additional production Next TypeScript check. Boundary, crypto and complexity guards pass. Clinical domain branch coverage is 78%.
+- Real-component phone (390 px) and desktop (1280 px) studies and signed-out route inspected; Playwright overflow and keyboard proof passes. Branch preview is deployed and the design study returns HTTP 200. No live provider journey has been exercised.
+- CI is green on the prior correction head; the latest cleanup correction requires its own exact-head CI and second ReviewGPT round.
 
 ## Progress
 
-- Implemented all five workstreams within existing owners; removed obsolete hosted protocols, duplicate state, policy registries, filesystem facade and UI steps/sidebars.
-- Reconnect reuses source identity and encrypted patient binding. Limit to eight retained imports per source and twenty sources; retain immutable evidence rather than adding garbage collection.
-- Expansion migration permits old database readers during deploy. Existing guarded post-deploy contract lane drops unused columns only after the new reader is deployed; this sets the rollback floor.
-- The rollout aggregate was rechecked before PR creation and remained zero.
-- Parent candidate review covers source and test deletions, frozen identities, partial outcomes, privacy, migration ordering and UI states. Live provider validation remains unavailable; synthetic proof is explicitly scoped.
-
-- Branch preview is deployed and the real-component study returns HTTP 200. ReviewGPT round one is running on its immutable first head, concurrently with CI.
-- CI exposed stale test expectations, a missing sharded-test package alias, and missing direct predicate coverage. Focused corrections pass 68 Web cases and 44 clinical domain cases with 78% branch coverage; package test typechecks pass.
-- React lint caught selection read from a ref during render. Selection now uses state while the existing in-flight ref still prevents duplicate starts. Lint, Web typecheck and 25 records UI tests pass, including failed-start provider binding. Complexity guard still passes. A later review round must include this source correction.
+- All five implementation workstreams are complete within existing owners. Obsolete hosted protocols, duplicate state, policy registries, filesystem facade and UI steps/sidebars are removed.
+- Reconnect reuses source identity and encrypted patient binding, bounded to eight retained imports per source and twenty sources. Immutable evidence is retained without adding garbage collection.
+- Expansion migration preserves old reader columns during deploy. The existing guarded postdeploy contract lane drops them only after the new Web reader is current and prior functions have drained; this sets the rollback floor.
+- The production aggregate was rechecked before PR creation and remained zero. Recheck at actual rollout.
+- ReviewGPT round one on c83331087764b8ccbfe154c767f16309f3b17c4a reported one high-severity original-PR finding. Parent accepted: disconnect/withdrawal could strand a timestamped needs_reauth run with no saved outcome. User resumed the required disposition boundary.
+- The fix extends cancellation at the two existing cleanup owners to unresolved authorization-ended runs. It adds no state owner, dependency or abstraction. Finalized outcomes and generation/patient fences remain intact.
+- CI corrections before the review result fixed obsolete fixture expectations, sharded test package resolution, direct predicate coverage and React selection state. The prior correction head passed all 33 non-skipped checks.
+- Parent candidate review and focused proof pass. Next: push the cleanup correction, run second ReviewGPT concurrently with exact-head CI, close the plan and merge when gates pass.

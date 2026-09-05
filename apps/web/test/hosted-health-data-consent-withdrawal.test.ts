@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
@@ -131,7 +132,8 @@ describe("withdrawHostedHealthDataConsent", () => {
     expect(mocks.lockMember.mock.invocationCallOrder[0]).toBeLessThan(mocks.readHostedHealthDataConsentState.mock.invocationCallOrder[0]!);
     expect(mocks.connections).toHaveBeenCalledWith({ where: { memberId: "member_123" },
       data: { accessTokenEncrypted: null, accessTokenExpiresAt: null, patientIdEncrypted: null, disconnectedAt: expect.any(Date), status: "disconnected" } });
-    expect(mocks.runs).toHaveBeenCalledWith({ where: { memberId: "member_123", completedAt: null }, data: { completedAt: expect.any(Date), status: "canceled" } });
+    expect(mocks.runs).toHaveBeenCalledWith({ where: { memberId: "member_123", OR: [{ completedAt: null },
+      { status: "needs_reauth", outcomeCountsJson: { equals: Prisma.DbNull } }] }, data: { completedAt: expect.any(Date), status: "canceled" } });
     expect(mocks.sessions).toHaveBeenCalledWith({ where: { memberId: "member_123" } });
     expect(mocks.intents).toHaveBeenCalledWith({ where: { memberId: "member_123" } });
   });

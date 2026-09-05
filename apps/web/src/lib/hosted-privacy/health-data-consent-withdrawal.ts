@@ -2,7 +2,7 @@ import "server-only";
 
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import type { CloudflareHostedControlClient } from "@murphai/cloudflare-hosted-control/client";
 
 import { revokeAllMealPhotoCaptureEnrollmentsForMember } from "../device-sync/meal-photo-capture";
@@ -71,7 +71,13 @@ export async function cleanupWithdrawnHostedHealthDataConsent(input: {
         },
       });
       await tx.clinicalRecordRetrievalRun.updateMany({
-        where: { memberId: input.memberId, completedAt: null },
+        where: {
+          memberId: input.memberId,
+          OR: [
+            { completedAt: null },
+            { status: "needs_reauth", outcomeCountsJson: { equals: Prisma.DbNull } },
+          ],
+        },
         data: { completedAt: now, status: "canceled" },
       });
       await tx.clinicalRecordOauthSession.deleteMany({ where: { memberId: input.memberId } });

@@ -281,7 +281,10 @@ reconciliation, so a failed stop cannot skip credential/session invalidation
 and run cancellation. Cleanup takes the same member lock and rechecks for a
 newer consent grant before mutation. Callback persistence also checks member
 suspension after locking. Network and crypto preparation remain outside the
-persistence transaction; mailbox sealing reuses the prewarmed ingress root.
+persistence transaction; mailbox sealing reuses the prewarmed ingress root. A timestamped
+`needs_reauth` run without outcome counts still has unfinished finalization:
+disconnect and withdrawal cancel it so it cannot strand reconnect. Runs with
+finalized counts retain those results; late outcomes cannot alter a new generation.
 
 Account deletion removes requests, runs, OAuth sessions, intents and encrypted
 connections. Normal vault export never exposes control-plane credentials.

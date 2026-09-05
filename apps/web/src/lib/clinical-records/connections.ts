@@ -1,5 +1,7 @@
 import "server-only";
 
+import { Prisma } from "@prisma/client";
+
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 
 import { assertHostedOnboardingMutationOrigin } from "../hosted-onboarding/csrf";
@@ -128,10 +130,12 @@ export async function disconnectClinicalRecordConnection(input: {
     await tx.clinicalRecordRetrievalRun.updateMany({
       data: { completedAt: now, status: "canceled" },
       where: {
-        completedAt: null,
         connectionId: input.connectionId,
         memberId: auth.member.id,
-        status: { in: ["queued", "retrieving", "importing"] },
+        OR: [
+          { completedAt: null, status: { in: ["queued", "retrieving", "importing"] } },
+          { status: "needs_reauth", outcomeCountsJson: { equals: Prisma.DbNull } },
+        ],
       },
     });
     return { connectionId: input.connectionId, status: "disconnected" as const };

@@ -92,6 +92,8 @@ vi.mock("@/src/lib/hosted-onboarding/app-session", async (importOriginal) => {
     ...actual,
     requireActiveHostedAppSessionFromRequest:
       externalEdges.requireActiveHostedAppSessionFromRequest,
+    requireHostedAppSessionFromRequest:
+      externalEdges.requireActiveHostedAppSessionFromRequest,
   };
 });
 
@@ -223,6 +225,9 @@ import { cleanupWithdrawnHostedHealthDataConsent, withdrawHostedHealthDataConsen
 import { GET as clinicalRecordsCallbackGet } from "../app/api/clinical-records/oauth/callback/route";
 import {
   buildClinicalRetrievalWakeEventId,
+  fetchClinicalRetrievalPage,
+  readClinicalRetrievalRun,
+  recordClinicalRetrievalOutcome,
 } from "@/src/lib/clinical-records/retrieval";
 import {
   readClinicalProviderDirectory,
@@ -230,6 +235,9 @@ import {
 import {
   sealClinicalOauthVerifier,
 } from "@/src/lib/clinical-records/secrets";
+import { disconnectClinicalRecordConnection, listClinicalRecordConnectionsForMember } from "@/src/lib/clinical-records/connections";
+import { startClinicalRecordConnection } from "@/src/lib/clinical-records/control-plane";
+import { createClinicalRecordConnectIntent } from "@/src/lib/clinical-records/connect-intents";
 import { createSmartState } from "@/src/lib/clinical-records/smart";
 import {
   provisionHostedCryptoDomainRootsForUser,
@@ -358,6 +366,90 @@ afterEach(() => {
 describe.skipIf(!runPostgresConcurrencyProof)(
   "Clinical Records callback/account-deletion PostgreSQL concurrency",
   () => {
+    it.each([
+      { cleanup: "disconnect", finalized: false },
+      { cleanup: "withdrawal", finalized: false },
+      { cleanup: "disconnect", finalized: true },
+      { cleanup: "withdrawal", finalized: true },
+    ])("recovers after $cleanup races authorization-ended finalization (finalized=$finalized)", async ({ cleanup, finalized }) => {
+      const fixture = await createClinicalFixture();
+      boundary.callbackPrisma = fixture.callbackBaseClient;
+      const provider = readClinicalProviderDirectory().entries.find((entry) => entry.id === fixture.providerDirectoryEntryId)!;
+      vi.stubEnv(provider.clientIdEnvironmentKey, "clinical-records-proof-client");
+      const request = new Request(`${CALLBACK_ORIGIN}/api/clinical-records/connect/start`, {
+        method: "POST", headers: { origin: CALLBACK_ORIGIN },
+      });
+      try {
+        await fixture.observer.hostedMember.update({ where: { id: fixture.memberId }, data: { billingStatus: HostedBillingStatus.active } });
+        expectConnectedRedirect(await invokeClinicalRecordsCallback(fixture));
+        const initial = await fixture.observer.clinicalRecordRetrievalRun.findFirstOrThrow({ where: { memberId: fixture.memberId } });
+        const identity = { generation: initial.generation, memberId: fixture.memberId, runId: initial.id };
+        const loaded = await readClinicalRetrievalRun(identity);
+        expect(loaded.status).toBe("ready");
+        if (loaded.status !== "ready") throw new Error("Expected a runnable clinical fixture");
+        const slice = loaded.run.retrievalSlices[0]!;
+        const pageRequest = {
+          generation: initial.generation, runId: initial.id, retrievalProtocol: "query-slices-v2" as const,
+          queryScopeId: slice.queryScopeId, queryFingerprint: slice.queryFingerprint,
+          resourceType: slice.resourceType, sliceId: slice.sliceId, cursor: null,
+        };
+        expect((await fetchClinicalRetrievalPage({
+          memberId: fixture.memberId,
+          request: { ...pageRequest, requestId: "clinical-proof-page" },
+          fetchImpl: vi.fn().mockResolvedValue(Response.json({ resourceType: "Patient", id: boundary.token!.patientId })),
+        })).status).toBe("page");
+        expect(await fetchClinicalRetrievalPage({
+          memberId: fixture.memberId,
+          request: { ...pageRequest, requestId: "clinical-proof-expired" },
+          fetchImpl: vi.fn().mockResolvedValue(new Response(null, { status: 401 })),
+        })).toMatchObject({ status: "unavailable", errorCode: "authorization-required" });
+        const outcome = {
+          generation: initial.generation, runId: initial.id, retrievalProtocol: "query-slices-v2" as const,
+          retrievalSlices: loaded.run.retrievalSlices.map(({ queryScopeId, sliceId }) => ({ queryScopeId, sliceId })),
+          status: "partial" as const, errorCode: "authorization-required",
+          counts: { createdCount: 0, executableDecisionCount: 0, fetchedPageCount: 1,
+            fetchedResourceFamilyCount: 1, rawFileCount: 1, retractedCount: 0,
+            reviewDecisionCount: 1, skippedExistingCount: 0, supersededCount: 0 },
+        };
+        if (finalized) await recordClinicalRetrievalOutcome({ memberId: fixture.memberId, request: outcome });
+        if (cleanup === "withdrawal") {
+          await withdrawHostedHealthDataConsent({ memberId: fixture.memberId, prisma: fixture.deletionBaseClient });
+          await cleanupWithdrawnHostedHealthDataConsent({ memberId: fixture.memberId, prisma: fixture.deletionBaseClient, request });
+          await recordHostedLaunchRequiredConsent({ memberId: fixture.memberId, prisma: fixture.observer,
+            scope: "launch.health-data", source: "clinical-records-reconnect-proof" });
+        } else {
+          await disconnectClinicalRecordConnection({ connectionId: initial.connectionId, request });
+        }
+        const canceled = await fixture.observer.clinicalRecordRetrievalRun.findUniqueOrThrow({ where: { id: initial.id } });
+        expect(canceled).toMatchObject({ status: finalized ? "needs_reauth" : "canceled",
+          outcomeCountsJson: finalized ? outcome.counts : null });
+        expect(await readClinicalRetrievalRun(identity)).toMatchObject({ status: "unavailable", errorCode: "run-already-terminal" });
+        expect((await listClinicalRecordConnectionsForMember(fixture.memberId))[0]).toMatchObject({ canImport: true, status: "disconnected" });
+        await expect(recordClinicalRetrievalOutcome({ memberId: fixture.memberId, request: outcome }))
+          .rejects.toMatchObject({ code: "CLINICAL_RECORD_OUTCOME_CONFLICT" });
+        const intent = await createClinicalRecordConnectIntent({ memberId: fixture.memberId, providerDirectoryEntryId: provider.id, request });
+        const started = await startClinicalRecordConnection({ claim: intent.claim, providerDirectoryEntryId: provider.id, request,
+          fetchImpl: vi.fn().mockResolvedValue(Response.json({
+            authorization_endpoint: `${provider.fhirBaseUrl}/oauth/authorize`, token_endpoint: `${provider.fhirBaseUrl}/oauth/token`,
+            code_challenge_methods_supported: ["S256"],
+            capabilities: ["context-standalone-patient", "permission-patient", "permission-v2"],
+          })),
+        });
+        const nextState = new URL(started.authorizationUrl).searchParams.get("state")!;
+        expectConnectedRedirect(await invokeClinicalRecordsCallback({ ...fixture, state: nextState }));
+        const connection = await fixture.observer.clinicalRecordConnection.findUniqueOrThrow({ where: { id: initial.connectionId } });
+        expect(connection).toMatchObject({ retrievalGeneration: 2, status: "active" });
+        expect(await readClinicalRetrievalRun(identity)).toMatchObject({ status: "unavailable", errorCode: "run-generation-stale" });
+        await expect(recordClinicalRetrievalOutcome({ memberId: fixture.memberId, request: outcome }))
+          .rejects.toMatchObject({ code: "CLINICAL_RECORD_OUTCOME_CONFLICT" });
+        expect(await fixture.observer.clinicalRecordConnection.findUniqueOrThrow({ where: { id: initial.connectionId } })).toEqual(connection);
+        expect(await fixture.observer.clinicalRecordRetrievalRun.findUniqueOrThrow({ where: { id: initial.id } })).toEqual(canceled);
+      } finally {
+        vi.unstubAllEnvs();
+        await cleanupClinicalFixture(fixture);
+      }
+    }, TEST_TIMEOUT_MS);
+
     it("rejects a callback when withdrawal commits during credential preparation", async () => {
       const fixture = await createClinicalFixture();
       const barrier = createIngressDecryptBarrier();
