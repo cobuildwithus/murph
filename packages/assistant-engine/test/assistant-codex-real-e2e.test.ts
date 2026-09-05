@@ -3966,6 +3966,7 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
       ])
       const sha256 = createHash('sha256').update(videoBytes).digest('hex')
       const providerBodies: unknown[] = []
+      const materializedVideoPaths: string[] = []
 
       try {
         await mkdir(path.join(workingDirectory, path.dirname(rawPath)), {
@@ -4120,6 +4121,15 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
           env: config.env,
           excludeResumeTurns: true,
           hostedToolContext,
+          materializeWorkspaceArtifacts: 'followup' in scenario ? async (relativePaths) => {
+            expect(relativePaths).toEqual([rawPath])
+            materializedVideoPaths.push(...relativePaths)
+            await writeFile(path.join(workingDirectory, rawPath), videoBytes)
+            return {
+              materializedArtifactPaths: new Set(relativePaths),
+              missingArtifactPaths: new Set<string>(),
+            }
+          } : null,
           model: config.model,
           modelProvider: config.modelProvider,
           prompt,
@@ -4141,12 +4151,14 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
           const first = await runVideoTurn(firstPrompt.prompt)
           process.stdout.write(`[video-followup-first-turn] ${JSON.stringify({ finalMessage: first.finalMessage })}\n`)
           expect(providerBodies).toHaveLength(0)
+          expect(materializedVideoPaths).toHaveLength(0)
           expect(readCapabilityRoutingActions(first.jsonEvents).filter((action) =>
             action.kind === 'dynamic' && action.tool === MURPH_ANALYZE_VIDEO_TOOL.name
           )).toHaveLength(0)
           expect(first.finalMessage.trim()).not.toBe('')
           expect(first.finalMessage).not.toMatch(/permanent|forever/iu)
           resumeSessionId = first.sessionId
+          await rm(path.join(workingDirectory, rawPath))
           acceptedVideoInputIds = [`ain_${'b'.repeat(32)}`]
           const followupPrompt = buildAssistantAutoReplyPrompt([{
             ...videoInput,
@@ -4176,7 +4188,10 @@ describeRealCodex('real Codex video-analysis detail e2e', () => {
               && videoCalls[0].success,
           })}\n`,
         )
-        if ('followup' in scenario) expect(videoCalls).toHaveLength(1)
+        if ('followup' in scenario) {
+          expect(videoCalls).toHaveLength(1)
+          expect(materializedVideoPaths).toEqual([rawPath])
+        }
         expect(videoCalls.length).toBeGreaterThanOrEqual(1)
         const videoCall = videoCalls[0]
         if (videoCall?.kind !== 'dynamic') {

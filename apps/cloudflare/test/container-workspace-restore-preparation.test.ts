@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   createArtifactStore: vi.fn(),
   createInternalFetch: vi.fn(),
   createLogPort: vi.fn(),
+  createMediaStore: vi.fn(),
   createSnapshotPort: vi.fn(),
   createTrustedInternalFetch: vi.fn(),
   createWorkspacePort: vi.fn(),
@@ -27,6 +28,10 @@ vi.mock("../src/hosted-runner-warm-workspace.js", () => ({
 
 vi.mock("../src/runtime-platform/artifact-store.js", () => ({
   createCloudflareArtifactStore: mocks.createArtifactStore,
+}));
+
+vi.mock("../src/runtime-platform/media-store.js", () => ({
+  createCloudflareMediaStore: mocks.createMediaStore,
 }));
 
 vi.mock("../src/runtime-platform/log-port.js", () => ({
@@ -106,6 +111,7 @@ describe("container workspace restore preparation", () => {
     mocks.createInternalFetch.mockReturnValue(fetch);
     mocks.createTrustedInternalFetch.mockReturnValue(fetch);
     mocks.createArtifactStore.mockReturnValue({ get: vi.fn(), put: vi.fn() });
+    mocks.createMediaStore.mockReturnValue({ get: vi.fn(), put: vi.fn(), record: vi.fn(), delete: vi.fn() });
     mocks.createLogPort.mockReturnValue({ write: vi.fn() });
     mocks.createWorkspacePort.mockReturnValue({ checkpoint: vi.fn(), read: vi.fn() });
     mocks.createSnapshotPort.mockReturnValue({ restoreWorkspaceSnapshot: vi.fn() });
@@ -133,6 +139,7 @@ describe("container workspace restore preparation", () => {
       platform: {
         artifactStore: mocks.createArtifactStore.mock.results[0]?.value,
         logPort: mocks.createLogPort.mock.results[0]?.value,
+        mediaStore: mocks.createMediaStore.mock.results[0]?.value,
         workspacePort: mocks.createWorkspacePort.mock.results[0]?.value,
         workspaceSnapshotPort: mocks.createSnapshotPort.mock.results[0]?.value,
       },
@@ -154,5 +161,10 @@ describe("container workspace restore preparation", () => {
       preparedSnapshotRestore: job.preparedSnapshotRestore,
       workspaceCheckpointBridge: workspacePortInput.workspaceCheckpointBridge,
     }));
+    expect(mocks.createMediaStore).toHaveBeenCalledWith({
+      fetchImpl: fetch,
+      timeoutMs: 4_321,
+      workspaceCheckpointBridge: workspacePortInput.workspaceCheckpointBridge,
+    });
   });
 });

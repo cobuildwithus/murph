@@ -125,6 +125,11 @@ export type HostedCanonicalWriteReceiptAction =
       originalFileName: string;
       effect: "copy" | "reuse";
       contentRef?: HostedCanonicalWriteReceiptContentRef;
+      mediaRef?: {
+        id: string;
+        expiresAt: string | null;
+        recordedAt: string;
+      };
     }
   | {
       kind: "delete";
@@ -621,7 +626,7 @@ export async function applyHostedCanonicalWriteReceipt(input: {
         break;
       }
       case "raw_upsert": {
-        if (!action.contentRef) {
+        if (action.mediaRef && !action.contentRef) {
           const existingReceipt = await readExistingHostedCanonicalWriteTargetReceipt({
             targetRelativePath: action.targetRelativePath,
             vaultRoot,

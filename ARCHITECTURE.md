@@ -4012,7 +4012,16 @@ Hosted inbox videos use a 72-hour media-byte retention window, while inbox
 images keep the 14-day image/audio window. Encrypted workspace snapshots
 externalize image/video bytes through owner-scoped hosted media references
 before excluding them from the archive, and hosted canonical write receipts omit
-matching image/video raw payload artifacts after those references are published.
+matching image/video raw payload artifacts only when the same durable raw-write
+receipt carries their media identity and lifetime. Receipt recovery reconstructs
+that catalogue entry without fetching media. Ordinary canonical captures remain
+nonexpiring while their holder exists; only captures identified by core's
+generated-image provenance predicate receive the generated-media TTL. The runner
+atomically records terminal retirement before deleting R2 bytes. Its existing
+media row retains the deletion obligation until purge succeeds, and a revision
+check preserves that obligation if a late upload races deletion. Retired
+identities cannot be registered as live again. Schema version 19 is the semantic
+rollback floor for this ordering.
 The existing atomic inbox-retention pass expires unprotected media and preserves
 retention descriptors. Explicit canonical event raw references retain their
 separately authorized lifecycle. Already-expired or previously snapshot-excluded

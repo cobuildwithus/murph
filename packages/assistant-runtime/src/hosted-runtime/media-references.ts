@@ -12,6 +12,8 @@ import {
   type InboxCaptureRecord,
 } from "@murphai/contracts";
 import {
+  GENERATED_IMAGE_CAPTURE_RETENTION_WINDOW_MS,
+  isGeneratedImageCaptureEvent,
   listEventLedgerShardPaths,
   normalizeRelativeVaultPath,
   readJsonlRecords,
@@ -220,6 +222,13 @@ export async function materializeHostedWorkspaceMediaReferences(input: {
       missingArtifactPaths.add(key);
       continue;
     }
+    if (entry.expiresAt !== null && Date.parse(entry.expiresAt) <= Date.now()) {
+      const resolved = await resolveVaultPathOnDisk(input.vaultRoot, entry.relativePath);
+      await rm(resolved.absolutePath, { force: true });
+      input.materializedArtifactPaths.delete(key);
+      missingArtifactPaths.add(key);
+      continue;
+    }
     if (await localHostedMediaReferenceIsValid({
       entry,
       signal: input.signal,
@@ -293,7 +302,7 @@ async function collectHostedMediaCandidates(
       signal,
       vaultRoot,
     }),
-    ...collectGeneratedImageHostedMediaCandidates(eventInventory.latestEvents),
+    ...collectCaptureHostedMediaCandidates(eventInventory.latestEvents),
   ]);
 }
 
@@ -354,7 +363,7 @@ async function collectInboxHostedMediaCandidates(input: {
   return candidates;
 }
 
-function collectGeneratedImageHostedMediaCandidates(
+function collectCaptureHostedMediaCandidates(
   latestEvents: Iterable<EventRecord>,
 ): HostedMediaCandidate[] {
   const candidates: HostedMediaCandidate[] = [];
@@ -370,11 +379,9 @@ function collectGeneratedImageHostedMediaCandidates(
       }
       candidates.push({
         byteSize: null,
-        expiresAt: resolveHostedMediaReferenceExpiresAt({
-          mediaKind,
-          pendingProtected: false,
-          recordedAt: record.recordedAt,
-        }),
+        expiresAt: isGeneratedImageCaptureEvent(record)
+          ? new Date(Date.parse(record.recordedAt) + GENERATED_IMAGE_CAPTURE_RETENTION_WINDOW_MS).toISOString()
+          : null,
         mediaKind,
         mimeType: readHostedMediaMimeTypeFromPath(normalized),
         recordedAt: normalizeHostedMediaRecordedAt(record.recordedAt),
@@ -608,7 +615,7 @@ function hostedMediaBytesMatchEntry(
   return createHash("sha256").update(bytes).digest("hex") === entry.sha256;
 }
 
-async function writeHostedMediaReferenceCatalogue(input: {
+export async function writeHostedMediaReferenceCatalogue(input: {
   catalogue: HostedMediaReferenceCatalogue;
   vaultRoot: string;
 }): Promise<void> {

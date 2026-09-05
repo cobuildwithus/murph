@@ -272,7 +272,7 @@ describe("RunnerStateStore schema guard", () => {
 
     expect(() => new RunnerStateStore(state)).not.toThrow();
 
-    expect(sql.queries).toHaveLength(21);
+    expect(sql.queries).toHaveLength(28);
     expect(sql.queries[0]).toBe(ENSURE_RUNNER_SCHEMA_META_SQL);
     expect(sql.queries[1]).toBe(READ_RUNNER_STATE_SCHEMA_VERSION_SQL);
     expect(sql.queries.filter((query) => query === READ_RUNNER_STATE_SCHEMA_VERSION_SQL))
@@ -280,13 +280,14 @@ describe("RunnerStateStore schema guard", () => {
     expect(sql.queries[2]).toMatch(/^CREATE TABLE IF NOT EXISTS runner_meta/u);
     expect(sql.queries.filter((query) => query === READ_RUNNER_META_COLUMNS_SQL))
       .toHaveLength(16);
-    expect(sql.queries.at(-3)).toBe("DROP TABLE IF EXISTS runner_bundle_slots");
-    expect(sql.queries.at(-2)).toBe(normalizeSql(`
+    expect(sql.queries.at(-4)).toBe("DROP TABLE IF EXISTS runner_bundle_slots");
+    expect(sql.queries.at(-3)).toBe(normalizeSql(`
       INSERT INTO runner_schema_meta (key, value)
       VALUES ('runner_state_schema_version', ${RUNNER_STATE_SCHEMA_VERSION})
       ON CONFLICT(key) DO UPDATE SET value = excluded.value
     `));
-    expect(sql.queries.at(-1)).toBe(READ_RUNNER_META_COLUMNS_SQL);
+    expect(sql.queries.at(-2)).toBe(READ_RUNNER_META_COLUMNS_SQL);
+    expect(sql.queries.at(-1)).toBe("PRAGMA table_info(runner_hosted_media_asset)");
     expect(readRunnerStateSchemaVersion(db)).toBe(RUNNER_STATE_SCHEMA_VERSION);
     expect(runnerBundleSlotsTableExists(db)).toBe(false);
   });
@@ -411,17 +412,38 @@ describe("RunnerStateStore schema guard", () => {
     expect(state).not.toHaveProperty(retiredBrowserVaultRefreshProjection);
   });
 
-  it("blocks the previous runner before it can read a version-18 workspace", () => {
+  it("migrates existing media rows without changing their retention deadline", () => {
+    const db = new DatabaseSync(":memory:");
+    const sql = new SqliteDurableObjectSqlStorage(db);
+    const state = createDurableObjectState(db, new Map(), sql);
+    new RunnerStateStore(state);
+    db.exec(`
+      DROP INDEX runner_hosted_media_asset_expiry_idx;
+      ALTER TABLE runner_hosted_media_asset DROP COLUMN retired_at;
+      ALTER TABLE runner_hosted_media_asset DROP COLUMN purged_at;
+      ALTER TABLE runner_hosted_media_asset DROP COLUMN revision;
+      UPDATE runner_schema_meta SET value = 18 WHERE key = 'runner_state_schema_version';
+      INSERT INTO runner_hosted_media_asset
+        (media_id, user_id, media_kind, byte_size, sha256, expires_at, object_key, updated_at)
+      VALUES ('asset', 'member', 'image', 4, 'digest', NULL, 'object', '2026-01-01');
+    `);
+    new RunnerStateStore(state);
+    expect(db.prepare("SELECT expires_at, retired_at, purged_at, revision FROM runner_hosted_media_asset").get())
+      .toMatchObject({ expires_at: null, retired_at: null, purged_at: null, revision: 0 });
+    expect(readRunnerStateSchemaVersion(db)).toBe(RUNNER_STATE_SCHEMA_VERSION);
+  });
+
+  it("blocks the previous runner before it can read a version-19 workspace", () => {
     const readWorkspace = vi.fn();
-    expect(RUNNER_STATE_SCHEMA_VERSION).toBe(18);
+    expect(RUNNER_STATE_SCHEMA_VERSION).toBe(19);
     expect(() => {
       assertRunnerStateSchemaVersionSupported({
         observedVersion: RUNNER_STATE_SCHEMA_VERSION,
-        supportedVersion: 17,
+        supportedVersion: 18,
       });
       readWorkspace();
     }).toThrow(
-      "Hosted runner Durable Object schema version 18 is newer than supported version 17.",
+      "Hosted runner Durable Object schema version 19 is newer than supported version 18.",
     );
     expect(readWorkspace).not.toHaveBeenCalled();
   });

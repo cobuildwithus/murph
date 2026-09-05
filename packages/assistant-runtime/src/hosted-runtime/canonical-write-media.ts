@@ -1,5 +1,7 @@
+import { applyHostedCanonicalWriteReceipt } from "@murphai/core";
 import type {
   HostedCanonicalWritePersistenceInput,
+  HostedCanonicalWriteReceipt,
   HostedCanonicalWriteReceiptAction,
   HostedCanonicalWriteReceiptContentRef,
 } from "@murphai/core";
@@ -10,6 +12,7 @@ import type {
 import {
   publishHostedWorkspaceMediaReferencesForSnapshot,
   readHostedMediaReferenceCatalogue,
+  writeHostedMediaReferenceCatalogue,
 } from "./media-references.ts";
 
 export async function externalizeHostedCanonicalWriteMediaPayloads(input: {
@@ -46,7 +49,14 @@ export async function externalizeHostedCanonicalWriteMediaPayloads(input: {
     }
     omittedPayloadCount += 1;
     const { contentRef: _contentRef, ...withoutContentRef } = action;
-    return withoutContentRef;
+    return {
+      ...withoutContentRef,
+      mediaRef: {
+        id: mediaRef.mediaId,
+        expiresAt: mediaRef.expiresAt,
+        recordedAt: mediaRef.recordedAt,
+      },
+    };
   });
 
   if (omittedPayloadCount === 0) {
@@ -98,4 +108,50 @@ function toHostedCanonicalWriteContentRefKey(
   ref: HostedCanonicalWriteReceiptContentRef,
 ): string {
   return `${ref.sha256}:${ref.byteSize}`;
+}
+// Rebuild only metadata after applying the durable receipt. Media bytes remain
+// absent until a consumer requests them; later receipt actions supersede earlier ones.
+async function restoreHostedCanonicalWriteMediaReferences(input: {
+  receipt: HostedCanonicalWriteReceipt;
+  vaultRoot: string;
+}): Promise<void> {
+  if (!input.receipt.actions.some((action) => action.targetRelativePath.startsWith("raw/"))) return;
+  const catalogue = await readHostedMediaReferenceCatalogue(input);
+  const entries = new Map(catalogue.entries.map((entry) => [entry.relativePath, entry]));
+  let changed = false;
+  for (const action of input.receipt.actions) {
+    if (action.kind === "raw_upsert" && action.mediaRef) {
+      const mediaKind = action.mediaType.toLowerCase().startsWith("image/") ? "image" : "video";
+      entries.set(action.targetRelativePath, {
+        byteSize: action.byteLength,
+        expiresAt: action.mediaRef.expiresAt,
+        mediaId: action.mediaRef.id,
+        mediaKind,
+        mimeType: action.mediaType,
+        recordedAt: action.mediaRef.recordedAt,
+        relativePath: action.targetRelativePath,
+        sha256: action.sha256,
+      });
+      changed = true;
+    } else {
+      const existing = entries.get(action.targetRelativePath);
+      if (existing && (action.kind !== "delete_if_match" || (
+        existing.sha256 === action.expectedSha256 && existing.byteSize === action.expectedByteLength
+      ))) {
+        changed = entries.delete(action.targetRelativePath) || changed;
+      }
+    }
+  }
+  if (changed) {
+    await writeHostedMediaReferenceCatalogue({
+      catalogue: { ...catalogue, entries: [...entries.values()] },
+      vaultRoot: input.vaultRoot,
+    });
+  }
+}
+export async function applyHostedCanonicalWriteReceiptWithMedia(
+  input: Parameters<typeof applyHostedCanonicalWriteReceipt>[0],
+): Promise<void> {
+  await applyHostedCanonicalWriteReceipt(input);
+  await restoreHostedCanonicalWriteMediaReferences(input);
 }

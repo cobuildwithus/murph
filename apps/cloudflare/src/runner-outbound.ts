@@ -661,7 +661,6 @@ async function handleRunnerMediaDeleteRequest(input: {
     }, 409);
     return jsonError("Media deletion was rejected.", 409);
   }
-  await input.mediaStore.deleteMedia(input.mediaId);
   input.emitCompleted({
     mediaAuthorized: true,
     mediaForgotten: true,

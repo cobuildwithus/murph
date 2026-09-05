@@ -29,6 +29,9 @@ type HostedMediaRetentionStateStore = Pick<
 interface HostedMediaAssetRow extends Record<string, DurableObjectSqlValue> {
   byte_size: number;
   expires_at: string | null;
+  retired_at: string | null;
+  purged_at: string | null;
+  revision: number;
   media_id: string;
   media_kind: string;
   object_key: string;
@@ -104,13 +107,8 @@ export function createHostedMediaRetentionService(input: {
       ) {
         return { ok: false, reason: "descriptor_mismatch" };
       }
-      if (hostedMediaAssetIsExpired(row, Date.now())) {
-        await deleteHostedMediaAssetObjectIfOwned({
-          bucket: input.bucket,
-          row,
-          userId: descriptor.userId,
-        });
-        deleteHostedMediaAssetRowIfUnchanged(input.state, row);
+      if (row.retired_at !== null || hostedMediaAssetIsExpired(row, Date.now())) {
+        await retireHostedMediaAsset({ ...input, mediaId: row.media_id, userId: descriptor.userId });
         return { ok: false, reason: "expired" };
       }
       return { ok: true, reason: "active" };
@@ -127,11 +125,15 @@ export function createHostedMediaRetentionService(input: {
           byte_size,
           sha256,
           expires_at,
+          retired_at,
+          purged_at,
+          revision,
           object_key,
           updated_at
         FROM runner_hosted_media_asset
         WHERE user_id = ?
           AND expires_at IS NOT NULL
+          AND purged_at IS NULL
           AND expires_at <= ?
         ORDER BY expires_at ASC, media_id ASC
         LIMIT ${HOSTED_MEDIA_RETENTION_BATCH_SIZE}`,
@@ -143,15 +145,10 @@ export function createHostedMediaRetentionService(input: {
         if (row.user_id !== boundUserId) {
           continue;
         }
-        const deleted = await deleteHostedMediaAssetObjectIfOwned({
-          bucket: input.bucket,
-          row,
-          userId: boundUserId,
+        const deleted = await retireHostedMediaAsset({
+          ...input, mediaId: row.media_id, userId: boundUserId,
         });
-        if (deleted) {
-          deletedMediaCount += 1;
-        }
-        deleteHostedMediaAssetRowIfUnchanged(input.state, row);
+        if (deleted) deletedMediaCount += 1;
       }
       const nextAlarmAt = await scheduleNextHostedMediaRetentionAlarm({
         state: input.state,
@@ -190,13 +187,9 @@ export function createHostedMediaRetentionService(input: {
       if (!HOSTED_MEDIA_ID_PATTERN.test(deleteInput.mediaId)) {
         return false;
       }
-      input.state.storage.sql!.exec(
-        `DELETE FROM runner_hosted_media_asset
-         WHERE media_id = ?
-           AND user_id = ?`,
-        deleteInput.mediaId,
-        boundUserId,
-      );
+      await retireHostedMediaAsset({
+        ...input, mediaId: deleteInput.mediaId, userId: boundUserId, explicit: true,
+      });
       return true;
     },
 
@@ -223,6 +216,16 @@ export function createHostedMediaRetentionService(input: {
       if (existing && existing.user_id !== boundUserId) {
         throw new Error("Hosted media asset row belongs to another user.");
       }
+      if (existing?.retired_at) {
+        // A late PUT may have recreated ciphertext. Keep the identity retired and
+        // re-arm physical cleanup; metadata-only preservation must never succeed.
+        input.state.storage.sql!.exec(
+          "UPDATE runner_hosted_media_asset SET purged_at = NULL, revision = revision + 1 WHERE media_id = ?",
+          descriptor.mediaId,
+        );
+        await setHostedMediaRetentionAlarmIfEarlier(input.state, Date.now());
+        return false;
+      }
       const expiresAt = resolveHostedMediaAssetExpiresAt({
         candidate: descriptor.expiresAt ?? null,
         existing: existing?.expires_at ?? null,
@@ -245,7 +248,8 @@ export function createHostedMediaRetentionService(input: {
           sha256 = excluded.sha256,
           expires_at = excluded.expires_at,
           object_key = excluded.object_key,
-          updated_at = excluded.updated_at`,
+          updated_at = excluded.updated_at,
+          revision = runner_hosted_media_asset.revision + 1`,
         descriptor.mediaId,
         boundUserId,
         descriptor.mediaKind,
@@ -275,6 +279,7 @@ export async function readHostedMediaRetentionNextAlarmAt(input: {
      FROM runner_hosted_media_asset
      WHERE user_id = ?
        AND expires_at IS NOT NULL
+       AND purged_at IS NULL
      ORDER BY expires_at ASC
      LIMIT 1`,
     input.userId,
@@ -335,6 +340,9 @@ function readHostedMediaAssetRow(
       byte_size,
       sha256,
       expires_at,
+      retired_at,
+      purged_at,
+      revision,
       object_key,
       updated_at
     FROM runner_hosted_media_asset
@@ -361,21 +369,38 @@ async function deleteHostedMediaAssetObjectIfOwned(input: {
   return true;
 }
 
-function deleteHostedMediaAssetRowIfUnchanged(
-  state: DurableObjectStateLike,
-  row: HostedMediaAssetRow,
-): void {
-  state.storage.sql!.exec(
-    `DELETE FROM runner_hosted_media_asset
-     WHERE media_id = ?
-       AND user_id = ?
-       AND object_key = ?
-       AND updated_at = ?`,
-    row.media_id,
-    row.user_id,
-    row.object_key,
-    row.updated_at,
+// SQL executes synchronously in the existing Durable Object. This is the
+// irreversible retirement boundary; no network call may precede the claim.
+async function retireHostedMediaAsset(input: {
+  bucket: R2BucketLike;
+  state: DurableObjectStateLike;
+  mediaId: string;
+  userId: string;
+  explicit?: boolean;
+}): Promise<boolean> {
+  const now = new Date().toISOString();
+  input.state.storage.sql!.exec(
+    `UPDATE runner_hosted_media_asset
+     SET retired_at = ?, expires_at = CASE WHEN expires_at IS NULL OR expires_at > ? THEN ? ELSE expires_at END
+     WHERE media_id = ? AND user_id = ? AND retired_at IS NULL
+       AND (? = 1 OR expires_at <= ?)`,
+    now, now, now, input.mediaId, input.userId, input.explicit ? 1 : 0, now,
   );
+  const row = readHostedMediaAssetRow(input.state, input.mediaId);
+  if (!row || row.retired_at === null || row.purged_at !== null) return false;
+  try {
+    const deleted = await deleteHostedMediaAssetObjectIfOwned({ ...input, row });
+    if (!deleted) throw new Error("Hosted media object deletion is unavailable.");
+    input.state.storage.sql!.exec(
+      "UPDATE runner_hosted_media_asset SET purged_at = ? WHERE media_id = ? AND retired_at = ? AND revision = ?",
+      now, row.media_id, row.retired_at, row.revision,
+    );
+    return true;
+  } catch (error) {
+    // Preserve the durable deletion obligation even after platform alarm retries.
+    await setHostedMediaRetentionAlarmIfEarlier(input.state, Date.now() + 60_000);
+    throw error;
+  }
 }
 
 function hostedMediaAssetIsExpired(

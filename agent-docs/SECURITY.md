@@ -378,7 +378,12 @@ Last verified: 2026-08-31
   inbox images keep the 14-day image/audio window. Encrypted workspace snapshots
   and hosted canonical write receipts externalize image/video bytes through
   owner-scoped hosted media references before excluding them from the portable
-  archive and receipt payload artifacts. The atomic
+  archive and receipt payload artifacts. A sparse raw receipt must carry its
+  external media identity; receipt replay restores metadata before selected use.
+  Durable captures do not inherit inbox TTLs. The existing runner SQL owner
+  claims irreversible retirement before network deletion, rejects preservation
+  of retired identities, and keeps retry evidence until ciphertext is purged.
+  Selected local cache reads also enforce the reference deadline. The atomic
   inbox-retention owner expires unprotected bytes; explicit canonical event raw
   references keep their separately authorized lifecycle. Existing input-history
   pruning also bounds historical analysis references. The tool

@@ -853,6 +853,9 @@ export async function sendAssistantMessageLocal(
           initialAcceptedInputJournal.inputIds,
           true,
         )
+        const initialVideoAuthorityInputIds = new Set(
+          [...analyzeVideoAttachmentAuthorities.values()].map((authority) => authority.messageRef),
+        )
         const threadScope = resolveAssistantCodexThreadScope({})
         const turnTimingStartedAt = lockAcquiredAt
         let currentInput = input
@@ -1021,9 +1024,18 @@ export async function sendAssistantMessageLocal(
                 messageInput: currentInput,
                 session: currentSession,
               }),
-              getAnalyzeVideoAttachmentAuthorities: () => [
-                ...analyzeVideoAttachmentAuthorities.values(),
-              ],
+              getAnalyzeVideoAttachmentAuthorities: () => {
+                const acceptedInputIds = new Set(resolveAssistantUserActionAcceptedInputIds({
+                  acceptedInputItems: acceptedInputItemsForProviderRequest,
+                  turnTrigger: currentInput.turnTrigger ?? null,
+                }))
+                // Retained history is frozen at turn start. Newly steered clips
+                // still require the current provider request's accepted boundary.
+                return [...analyzeVideoAttachmentAuthorities.values()].filter((authority) =>
+                  initialVideoAuthorityInputIds.has(authority.messageRef)
+                  || acceptedInputIds.has(authority.messageRef)
+                )
+              },
               getConversationScope: () =>
                 resolveAssistantConversationScope(
                   sharedPlan.conversationPolicy.audience,

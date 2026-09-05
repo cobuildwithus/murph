@@ -4356,6 +4356,10 @@ describe("cloudflare worker routes", () => {
     });
     const mediaObjectKey = await hostedMediaObjectKeyForTest(env, "member_123", mediaId);
     expect(env.__bucketStore.keys()).toContain(mediaObjectKey);
+    vi.mocked(userRunnerStub.forgetHostedMediaAsset).mockImplementationOnce(async () => {
+      await env.BUNDLES.delete!(mediaObjectKey);
+      return true;
+    });
 
     const deleteResponse = await callRunnerOutbound(
       new Request(`http://media.worker/media/${mediaId}`, {

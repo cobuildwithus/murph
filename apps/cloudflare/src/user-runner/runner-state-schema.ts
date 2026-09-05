@@ -1,8 +1,8 @@
 import { type DurableObjectSqlStorageLike, type DurableObjectSqlValue } from "./types.js";
 
-// Version 18 is also a semantic rollback floor: its runner owns hosted media
-// retention rows for no-container-wake expiry.
-export const RUNNER_STATE_SCHEMA_VERSION = 18;
+// Version 19 preserves terminal media retirement before asynchronous object deletion.
+// Older writers must not revive retired identities.
+export const RUNNER_STATE_SCHEMA_VERSION = 19;
 
 export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void {
   sql.exec(`
@@ -50,15 +50,23 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       byte_size INTEGER NOT NULL,
       sha256 TEXT NOT NULL,
       expires_at TEXT,
+      retired_at TEXT,
+      purged_at TEXT,
+      revision INTEGER NOT NULL DEFAULT 0,
       object_key TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )
   `);
 
+  ensureRunnerStateTableColumn(sql, "runner_hosted_media_asset", "retired_at", "TEXT");
+  ensureRunnerStateTableColumn(sql, "runner_hosted_media_asset", "purged_at", "TEXT");
+  ensureRunnerStateTableColumn(sql, "runner_hosted_media_asset", "revision", "INTEGER NOT NULL DEFAULT 0");
+
+  sql.exec("DROP INDEX IF EXISTS runner_hosted_media_asset_expiry_idx");
   sql.exec(`
     CREATE INDEX IF NOT EXISTS runner_hosted_media_asset_expiry_idx
     ON runner_hosted_media_asset (user_id, expires_at, media_id)
-    WHERE expires_at IS NOT NULL
+    WHERE expires_at IS NOT NULL AND purged_at IS NULL
   `);
 
   for (const [columnName, definition] of Object.entries({
@@ -111,6 +119,9 @@ export function ensureRunnerStateSchema(sql: DurableObjectSqlStorageLike): void 
       "byte_size",
       "sha256",
       "expires_at",
+      "retired_at",
+      "purged_at",
+      "revision",
       "object_key",
       "updated_at",
     ],

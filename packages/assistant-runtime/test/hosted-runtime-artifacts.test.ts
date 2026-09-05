@@ -1,13 +1,16 @@
+import { parseHostedCanonicalWriteReceiptArtifact } from "../src/hosted-runtime/canonical-write-receipt.ts";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import {
+  addCapture,
   appendJsonlRecord,
   initializeVault,
+  withHostedCanonicalWritePort,
   type HostedCanonicalWritePersistenceInput,
   VAULT_LAYOUT,
 } from "@murphai/core";
@@ -28,6 +31,7 @@ import {
 } from "../src/hosted-runtime/artifacts.ts";
 import {
   externalizeHostedCanonicalWriteMediaPayloads,
+  applyHostedCanonicalWriteReceiptWithMedia,
 } from "../src/hosted-runtime/canonical-write-media.ts";
 import {
   createHostedRuntimeArtifactStoreStub,
@@ -38,6 +42,7 @@ import type {
 } from "../src/hosted-runtime/platform.ts";
 import {
   publishHostedWorkspaceMediaReferencesForSnapshot,
+  readHostedMediaReferenceCatalogue,
 } from "../src/hosted-runtime/media-references.ts";
 
 test("hosted artifact resolver caches repeated reads by artifact hash", async () => {
@@ -234,6 +239,7 @@ test("hosted artifact materializer records only paths that restore", async () =>
 });
 
 test("hosted artifact materializer restores retained inbox media from media references", async () => {
+  const clock = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-06-02T00:00:00.000Z"));
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-media-vault-"));
   const operatorHomeRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-media-home-"));
   const imageBytes = Buffer.from(
@@ -401,6 +407,7 @@ test("hosted artifact materializer restores retained inbox media from media refe
       externalizedReceipt.payloads.map((payload) => payload.sha256),
       [textSha256],
     );
+    assert.ok("mediaRef" in externalizedReceipt.receipt.actions[0]!);
     assert.equal(putCalls.length, 2);
 
     await rm(path.join(vaultRoot, sourceDirectory), {
@@ -441,7 +448,13 @@ test("hosted artifact materializer restores retained inbox media from media refe
       "workspace_media_materialization",
       "workspace_media_materialization",
     ]);
+    clock.mockReturnValue(Date.parse("2026-06-16T00:00:00.000Z"));
+    const expired = await materialize([imagePath, videoPath]);
+    assert.equal(expired.missingArtifactPaths.size, 2);
+    await assert.rejects(readFile(path.join(vaultRoot, imagePath)), { code: "ENOENT" });
+    assert.equal(getCalls.length, 2);
   } finally {
+    clock.mockRestore();
     await rm(vaultRoot, { force: true, recursive: true });
     await rm(operatorHomeRoot, { force: true, recursive: true });
   }
@@ -518,3 +531,92 @@ function createHostedRuntimeMediaStoreStub(): {
     storedBytesByMediaId,
   };
 }
+
+
+test("ordinary canonical captures have no transient media deadline", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-durable-capture-"));
+  try {
+    await initializeVault({ vaultRoot });
+    const sourcePath = path.join(vaultRoot, "saved.png");
+    await writeFile(sourcePath, "durable image bytes");
+    const capture = await addCapture({
+      vaultRoot,
+      draft: { occurredAt: "2025-01-01T00:00:00.000Z", recordedAt: "2025-01-01T00:00:00.000Z", source: "manual", title: "Saved reference", note: "Retained attachment." },
+      attachments: [{ role: "photo", sourcePath }],
+    });
+    const { mediaStore, putCalls, getCalls } = createHostedRuntimeMediaStoreStub();
+    await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore });
+    assert.equal(putCalls.length, 1);
+    assert.equal((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]?.expiresAt, null);
+    assert.ok(capture.event.rawRefs?.length);
+    const entry = (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]!;
+    assert.equal(entry.recordedAt, "2025-01-01T00:00:00.000Z");
+    await rm(path.join(vaultRoot, entry.relativePath));
+    const { artifactStore } = createHostedRuntimeArtifactStoreStub();
+    const materialize = createHostedArtifactMaterializer({
+      artifactResolver: createHostedArtifactResolver({ artifactStore }),
+      bundles: [], materializedArtifactPaths: new Set(), mediaStore,
+      operatorHomeRoot: vaultRoot, vaultRoot,
+    });
+    assert.equal((await materialize([entry.relativePath])).missingArtifactPaths.size, 0);
+    assert.equal(await readFile(path.join(vaultRoot, entry.relativePath), "utf8"), "durable image bytes");
+    assert.equal(getCalls.length, 1);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+
+test("acknowledged capture receipts recover media references without a newer snapshot", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "murph-media-receipt-recovery-"));
+  const vaultRoot = path.join(root, "live");
+  const restoredRoot = path.join(root, "restored");
+  const { mediaStore, getCalls } = createHostedRuntimeMediaStoreStub();
+  const persisted: HostedCanonicalWritePersistenceInput[] = [];
+  try {
+    // The older checkpoint has only the initialized vault, before this capture.
+    await initializeVault({ vaultRoot, createdAt: "2026-01-01T00:00:00.000Z" });
+    await initializeVault({ vaultRoot: restoredRoot, createdAt: "2026-01-01T00:00:00.000Z" });
+    const bytes = Buffer.from("receipt recovery image bytes");
+    const sourcePath = path.join(root, "receipt.png");
+    await writeFile(sourcePath, bytes);
+    const capture = await withHostedCanonicalWritePort({
+      async persistCanonicalWrite(persistence) {
+        persisted.push(await externalizeHostedCanonicalWriteMediaPayloads({ persistence, mediaStore, vaultRoot }));
+      },
+    }, () => addCapture({
+      vaultRoot,
+      draft: { occurredAt: "2026-01-01T00:00:00.000Z", source: "manual", title: "Saved image", note: "Durable reference." },
+      attachments: [{ role: "photo", sourcePath }],
+    }));
+    const relativePath = capture.event.attachments?.[0]?.relativePath;
+    assert.ok(relativePath);
+    assert.ok(persisted.some(({ receipt }) => receipt.actions.some((action) => action.kind === "raw_upsert" && action.mediaRef)));
+    assert.ok(persisted.every(({ payloads }) => payloads.every((payload) => !Buffer.from(payload.bytes).equals(bytes))));
+    await rm(vaultRoot, { recursive: true, force: true });
+    for (const persistence of persisted) {
+      const receipt = parseHostedCanonicalWriteReceiptArtifact(JSON.stringify(persistence.receipt));
+      assert.ok(receipt);
+      const replay = () => applyHostedCanonicalWriteReceiptWithMedia({
+        receipt, vaultRoot: restoredRoot,
+        readPayload: async (ref) => persistence.payloads.find((payload) => payload.sha256 === ref.sha256)?.bytes ?? null,
+      });
+      await replay();
+      await replay();
+    }
+    assert.deepEqual(getCalls, []);
+    await assert.rejects(readFile(path.join(restoredRoot, relativePath)), { code: "ENOENT" });
+    const { artifactStore } = createHostedRuntimeArtifactStoreStub();
+    const materialize = createHostedArtifactMaterializer({
+      artifactResolver: createHostedArtifactResolver({ artifactStore }), bundles: [],
+      materializedArtifactPaths: new Set(), mediaStore, operatorHomeRoot: path.join(root, "home"), vaultRoot: restoredRoot,
+    });
+    assert.equal((await materialize([relativePath])).missingArtifactPaths.size, 0);
+    assert.deepEqual(await readFile(path.join(restoredRoot, relativePath)), bytes);
+    assert.equal(getCalls.length, 1);
+    await materialize([relativePath]);
+    assert.equal(getCalls.length, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
