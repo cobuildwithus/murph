@@ -51,6 +51,11 @@ Updated: 2026-09-04
 
 - Focused engine parser/process tests, hosted-execution usage tests, assistant-runtime config/idle tests, affected typechecks, pinned-Codex provider-shape proof, complexity diff.
 - Expected outcomes: measured token buckets and exact identities, unchanged provider payload/result semantics, legacy compatibility, no duplicate estimate.
+- Passed: pinned Codex 0.151.0 synthetic-provider config/compaction tests (48 passed, 2 unrelated auth tests skipped), including measured fresh-thread usage, cold-resume estimate fallback, and a next foreground turn containing only its own 300 input/80 output tokens.
+- Passed: engine parser/process assertions (53), idle accounting assertions (39), hosted usage ledger assertions (26), changelog archive rendering assertions (9), and engine/runtime/hosted-execution typechecks.
+- Focused engine/runtime `test:coverage` runs passed their assertions but failed package-global thresholds because the selected tests do not exercise unrelated package files. Required CI remains the broad coverage gate; these commands are not reported as green.
+- Complexity guard passed: engine debt unchanged; idle-maintenance maximum complexity reduced from 49 to 44. Parent candidate source/privacy review passed.
+- Draft PR: #2865. Web typecheck, required CI, final ReviewGPT, and plan closure remain with completion.
 
 ## Product UX
 

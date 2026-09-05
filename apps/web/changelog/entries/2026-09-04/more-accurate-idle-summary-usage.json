@@ -9,6 +9,6 @@
     "summary": "When Murph summarizes an idle conversation, usage accounting now uses the provider's reported input, output, and cached tokens when available.",
     "details": "Conversations without exact usage reports retain the existing estimate. Recorded usage may be higher or lower than that estimate.",
     "relevanceTags": ["usage", "conversation"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [2865]
   }
 }
