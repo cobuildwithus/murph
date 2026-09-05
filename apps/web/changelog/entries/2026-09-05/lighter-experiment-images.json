@@ -1,0 +1,21 @@
+{
+  "publishedOn": "2026-09-05",
+  "order": 100,
+  "item": {
+    "id": "lighter-experiment-images",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Lighter experiment images on phones",
+    "summary": "Experiment cards download images sized for their mobile layout.",
+    "details": "The same photos and card layouts remain, with smaller image downloads where the screen needs fewer pixels.",
+    "relevanceTags": [
+      "website",
+      "performance"
+    ],
+    "sourcePullRequests": [],
+    "tryIt": {
+      "label": "Browse experiments",
+      "href": "/experiments"
+    }
+  }
+}
