@@ -371,6 +371,29 @@ test('wearables activity list keeps routine reads compact while explicit detail 
       detailed.data.items.map((item) => item.date),
       compact.data.items.map((item) => item.date),
     )
+    const summariesRaw = await runBudgetedRawCli(cli, [
+      'wearables', 'activity', 'list', '--date', '2026-08-31', '--include-workout-summaries',
+    ], vaultRoot)
+    const summaries = JSON.parse(summariesRaw) as {
+      ok: boolean
+      data: { count: number; filters: unknown; items: Array<Record<string, unknown>> }
+    }
+    assert.equal(summaries.ok, true)
+    assert.deepEqual(summaries.data.filters, detailed.data.filters)
+    assert.equal(summaries.data.count, detailed.data.count)
+    assert.deepEqual(summaries.data.items, detailed.data.items.map((day) => ({
+      ...day,
+      workoutFeatures: day.workoutFeatures?.map(({ splits: _splits, ...workout }) => ({
+        ...workout,
+        splitsOmitted: true,
+      })),
+    })))
+    assert.ok(Buffer.byteLength(summariesRaw) < Buffer.byteLength(detailedRaw) / 5)
+    const bothRaw = await runBudgetedRawCli(cli, [
+      'wearables', 'activity', 'list', '--date', '2026-08-31',
+      '--include-workout-summaries', '--include-workout-details',
+    ], vaultRoot)
+    assert.deepEqual(JSON.parse(bothRaw).data, detailed.data)
     const detailedFeatures = detailed.data.items[0]?.workoutFeatures
     assert.equal(detailedFeatures?.length, WEARABLE_ACTIVITY_MAX_WORKOUTS_PER_DAY)
     assert.ok(detailedFeatures)
@@ -556,6 +579,7 @@ test('wearables activity list keeps routine reads compact while explicit detail 
         baselineBytes: WEARABLE_ACTIVITY_OVERSIZED_BASELINE_BYTES,
         compactBytes,
         detailedBytes,
+        summaryBytes: Buffer.byteLength(summariesRaw, 'utf8'),
         savedBytesVsBaseline: WEARABLE_ACTIVITY_OVERSIZED_BASELINE_BYTES - compactBytes,
       })}\n`,
     )

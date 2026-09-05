@@ -1696,6 +1696,12 @@ describe('assistant local PDF evidence guidance', () => {
     expect(prompt).toContain(
       'Do not read memory solely because that block is absent',
     )
+    expect(prompt).toContain('memory show <id> --record-only --format json')
+    expect(prompt).toContain('keep the complete memory read above when resolving context or conflicts')
+    expect(prompt).toContain('Use `--compact` on memory upsert, update, forget, and set-name')
+    expect(prompt).toContain('`--include-workout-summaries` for individual workout facts')
+    expect(prompt).toContain('`--include-workout-details` for lap/split rows')
+    expect(prompt).toContain('Never probe with a smaller level and retry; omitted splits are not absent splits')
     expect(prompt).toContain(
       'only when exact saved context could materially change the current answer',
     )

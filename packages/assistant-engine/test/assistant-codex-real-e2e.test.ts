@@ -303,7 +303,7 @@ const COMPACT_SUPPORT_KEEP_AUTOMATION_ID =
 const COMPACT_SUPPORT_STALE_AUTOMATION_ID =
   'automation_01JNV447V6K3SW1Q9NJ7XVQZ7V'
 const WEARABLE_ACTIVITY_DETAIL_OPTION_DESCRIPTION =
-  'Include bounded workoutFeatures and splits (up to 32 workouts per day and 64 splits per workout). Choose compact or detailed output from the question before the first and only activity-list data read; never use compact output as a probe before retrying with detail. Omit this option only when the answer is entirely available from day-level sessionCount, sessionMinutes, and distinct activityTypes. Pass it truthy whenever selecting, comparing, grouping, ordering, or attributing individual workouts, including type-specific count, duration, distance, start time, provider, heart rate, cadence, power, speed, or splits.'
+  'Include bounded workoutFeatures and splits (up to 32 workouts per day and 64 splits per workout). Use when the question needs lap or split rows. Prefer --include-workout-summaries for individual workout facts without splits; omit both options for day totals. Choose the required level before the first and only activity-list data read; never use a smaller output as a probe before retrying with detail.'
 const REPEATED_SET_ALPHA_EVENT_IDS = Array.from(
   { length: 5 },
   (_, index) => `evt_01JNV447V6K3SW1Q9NJ7XVQZ7${index + 1}`,
@@ -12899,6 +12899,74 @@ describeRealCodex('real Codex on-demand updates after product-note retirement e2
   )
 })
 
+describeRealCodex('real Codex memory compact receipt e2e', () => {
+  it('updates one known memory with a compact receipt and exact record verification', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-memory-receipt-e2e-'))
+    try {
+      await initializeVault({ timezone: 'UTC', vaultRoot: workingDirectory })
+      const saved = await upsertMemory(workingDirectory, {
+        section: 'Preferences', text: 'Weekly summaries should be one paragraph.',
+      })
+      for (let index = 0; index < 12; index += 1) {
+        await upsertMemory(workingDirectory, {
+          section: 'Context', text: `Synthetic unrelated context item ${index}.`,
+        })
+      }
+      const before = await readMemoryDocument(workingDirectory)
+      const binDirectory = path.join(workingDirectory, 'bin')
+      const commandLogPath = path.join(workingDirectory, 'commands.log')
+      await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory })
+      const manifest = await readAssistantCliLlmsFullManifest({
+        timeoutMs: 5 * 60_000,
+        workingDirectory: fileURLToPath(new URL('../../../', import.meta.url)),
+      })
+      const assistantCliContract = buildAssistantCliSurfaceContract(manifest)
+      expect(assistantCliContract).not.toBeNull()
+      const promptTimeContext = await resolveAssistantPromptTimeContext(workingDirectory)
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract,
+          assistantContextSnapshotPrompt: `Canonical saved memory: ${JSON.stringify(saved.record)}`,
+          canonicalTimeZoneAvailable: true, channel: 'linq',
+          cliAccess: { rawCommand: 'vault-cli', setupCommand: 'murph' },
+          conversationScope: 'direct', currentLocalDate: promptTimeContext.currentLocalDate,
+          currentTimeZone: 'UTC', hostedRuntime: true, modelBehaviorProfile: 'gpt5-agentic',
+          onboardingGuidance: false, turnTrigger: null,
+        }),
+        dynamicTools: [],
+        env: { ...config.env, PATH: `${binDirectory}${path.delimiter}${config.env.PATH ?? ''}` },
+        excludeResumeTurns: true, model: config.model, modelProvider: config.modelProvider,
+        prompt: 'Replace my saved weekly-summary preference: use exactly three concise bullets instead of a paragraph. Verify the saved change, then confirm briefly.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const commands = (await readFile(commandLogPath, 'utf8')).trim().split('\n').filter(Boolean)
+      process.stdout.write(`[memory-compact-receipt-e2e] ${JSON.stringify({ commands, reply: result.finalMessage })}\n`)
+      const dataCommands = commands.filter((command) => !command.includes('--schema') && !command.includes('--help'))
+      const writes = dataCommands.filter((command) => command.startsWith('memory update '))
+      expect(writes).toHaveLength(1)
+      expect(writes[0]).toContain(saved.record.id)
+      expect(writes[0]).toContain('--compact')
+      expect(dataCommands.some((command) => /memory (?:upsert|forget|set-name)/u.test(command))).toBe(false)
+      const exactReads = dataCommands.filter((command) => command.startsWith('memory show '))
+      expect(exactReads.length).toBeGreaterThanOrEqual(1)
+      expect(exactReads.every((command) => command.includes(saved.record.id) && /--record(?:-only|Only)/u.test(command))).toBe(true)
+      const after = await readMemoryDocument(workingDirectory)
+      const updated = after.records.find((record) => record.id === saved.record.id)
+      expect(updated?.text).toMatch(/(?:three|3).+bullets?/iu)
+      expect(after.records.filter((record) => record.id !== saved.record.id)).toEqual(before.records.filter((record) => record.id !== saved.record.id))
+      expect(result.finalMessage).toMatch(/(?:three|3).+bullets?/iu)
+      expect(result.finalMessage).not.toContain(saved.record.id)
+      process.stdout.write(`[memory-compact-receipt-e2e] ${JSON.stringify({ commandCount: commands.length, reply: result.finalMessage })}\n`)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 720_000)
+})
+
 describeRealCodex('real Codex wearable activity compact read e2e', () => {
   it(
     'answers same-day workout count and duration without loading bounded split detail',
@@ -13046,9 +13114,12 @@ describeRealCodex('real Codex wearable activity compact read e2e', () => {
     720_000,
   )
 
-  it(
-    'answers one run duration and distance from detailed workout data',
-    async () => {
+  it.each([
+    { detail: false, label: 'workout summaries', question: 'How long and how far was my run?' },
+    { detail: true, label: 'full split detail', question: 'How long and how far was my run, and how long and far was its first split?' },
+  ])(
+    'answers one run duration and distance from $label',
+    async ({ detail, question }) => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
         path.join(tmpdir(), 'murph-wearable-activity-selection-e2e-'),
@@ -13095,7 +13166,7 @@ describeRealCodex('real Codex wearable activity compact read e2e', () => {
                 distanceKm: 6.8,
                 durationMinutes: 42,
                 provider: 'garmin',
-                splits: [],
+                splits: [{ index: 1, durationSeconds: 300, distanceMeters: 1000, endedAt: '2026-08-31T07:05:00.000Z' }],
                 startedAt: '2026-08-31T07:00:00.000Z',
               },
               {
@@ -13122,7 +13193,7 @@ describeRealCodex('real Codex wearable activity compact read e2e', () => {
         const prompt = await buildWearableArrivalPrompt({
           occurredAt: '2026-08-31T20:00:00.000Z',
           promptTimeContext,
-          text: 'How long and how far was my run?',
+          text: question,
           vaultRoot: workingDirectory,
         })
         const inheritedPath = normalizeEnvString(config.env.PATH)
@@ -13177,7 +13248,7 @@ describeRealCodex('real Codex wearable activity compact read e2e', () => {
           activityListActions[0]?.kind === 'command'
             ? activityListActions[0].command
             : '',
-        )).toBe(true)
+        )).toBe(detail)
 
         const activityListReads = loggedCommands.filter(
           (command) =>
@@ -13186,11 +13257,17 @@ describeRealCodex('real Codex wearable activity compact read e2e', () => {
             && !command.includes('--help'),
         )
         expect(activityListReads).toHaveLength(1)
+        if (!detail) {
+          expect(activityListReads[0]).toMatch(/--include(?:-workout-summaries|WorkoutSummaries)/u)
+        } else {
+          expect(result.finalMessage).toMatch(/(?:5\s*(?:min|minutes)|300\s*(?:sec|seconds))/iu)
+          expect(result.finalMessage).toMatch(/(?:1\s*(?:km|kilomet)|1[,.]?000\s*(?:m|met))/iu)
+        }
         expect(activityListReads[0]).toContain('--date')
         expect(activityListReads[0]).toContain('2026-08-31')
         expect(commandIncludesTruthyWearableActivityWorkoutDetailOption(
           activityListReads[0] ?? '',
-        )).toBe(true)
+        )).toBe(detail)
         expect(
           loggedCommands.some(
             (command) =>
@@ -31658,6 +31735,16 @@ async function materializeWearableActivityCompactionVaultCli(input: {
       workoutFeatures: activityFixture.workoutFeatures,
     }],
   })
+  const summariesResult = JSON.stringify({
+    ...JSON.parse(compactResult),
+    items: [{
+      ...compactItem,
+      workoutFeatures: activityFixture.workoutFeatures.map(({ splits: _splits, ...workout }) => ({
+        ...workout,
+        splitsOmitted: true,
+      })),
+    }],
+  })
   const dayResult = JSON.stringify({
     activity: {
       date: '2026-08-31',
@@ -31681,8 +31768,18 @@ async function materializeWearableActivityCompactionVaultCli(input: {
       'command="$*"',
       `printf '%s\\n' "$command" >> ${quoteNutritionShellLiteral(input.commandLogPath)}`,
       'include_workout_details=false',
+      'include_workout_summaries=false',
       'while [ "$#" -gt 0 ]; do',
       '  case "$1" in',
+      '    --include-workout-summaries|--includeWorkoutSummaries)',
+      '      if [ "${2-}" != "false" ]; then include_workout_summaries=true; fi',
+      '      ;;',
+      '    --include-workout-summaries=true|--includeWorkoutSummaries=true)',
+      '      include_workout_summaries=true',
+      '      ;;',
+      '    --include-workout-summaries=false|--includeWorkoutSummaries=false)',
+      '      include_workout_summaries=false',
+      '      ;;',
       '    --include-workout-details|--includeWorkoutDetails)',
       '      if [ "${2-}" = "false" ]; then',
       '        include_workout_details=false',
@@ -31712,6 +31809,10 @@ async function materializeWearableActivityCompactionVaultCli(input: {
       '      exit 0',
       '      ;;',
       '  esac',
+      'fi',
+      'if [ "$include_workout_summaries" = true ]; then',
+      `  printf '%s\\n' ${quoteNutritionShellLiteral(summariesResult)}`,
+      '  exit 0',
       'fi',
       'case "$command" in',
       '  *"wearables activity list"*"--date 2026-08-31"*|*"wearables activity list"*"--date=2026-08-31"*)',
