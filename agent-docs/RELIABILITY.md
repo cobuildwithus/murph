@@ -1681,8 +1681,16 @@ Last verified: 2026-09-04
   It then compare-and-sets the marker and deletes credential-scoped payloads
   set-wise in that transaction. Reconnect and acknowledgement therefore both
   lock the dirty marker before touching payload rows.
-  A larger nullable backlog fails retryably until runtime acknowledgement
-  reduces it; classification may never run before the consent fence.
+  A larger nullable backlog commits only its bounded classification annotations
+  before the existing reconnect retry. Connection credentials and epoch, marker
+  reset, payload deletion and OAuth claim resolution wait until classification
+  is complete. Exhausting the request retry budget returns the existing retryable
+  error with annotation progress retained for the next request. The OAuth
+  callback must not run failed-setup replacement cleanup for this outcome:
+  the old connection remains intact and the exact consumed claim retains
+  unresolved provider authority behind the existing replay/recovery fence.
+  Every pass reacquires authority and consent; classification never precedes
+  that fence.
 - Queue-enabled provider webhooks verify once, freeze a versioned prepared
   event, and encrypt before any Postgres read. Raw provider signature headers
   and payload bytes do not enter Queue state. The prepared event enters one
