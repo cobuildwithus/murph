@@ -4541,6 +4541,33 @@ function resolveDeviceEventIdentity(
   return { associationSafe, latest, matchedEntries, refKey };
 }
 
+function findHistoricalDeviceEventContentOwners(
+  entry: PreparedDeviceEventEntry,
+  index: EventExternalRefIndex,
+): Map<string, Set<number>> {
+  let incomingContentFingerprint: string | undefined;
+  const owners = new Map<string, Set<number>>();
+  for (const externalRef of [entry.record.externalRef, ...entry.legacyExternalRefs]) {
+    if (!externalRef) {
+      continue;
+    }
+    const ownersByFingerprint =
+      index.deviceOwnerRevisionsByRefKeyAndFingerprint.get(eventExternalRefKey(externalRef));
+    if (!ownersByFingerprint) {
+      continue;
+    }
+    incomingContentFingerprint ??= deviceEventContentFingerprint(entry.record);
+    for (const [ownerId, revisions] of ownersByFingerprint.get(incomingContentFingerprint) ?? []) {
+      const ownerRevisions = owners.get(ownerId) ?? new Set<number>();
+      for (const revision of revisions) {
+        ownerRevisions.add(revision);
+      }
+      owners.set(ownerId, ownerRevisions);
+    }
+  }
+  return owners;
+}
+
 function mapCurrentDeviceEventOwners(
   entries: readonly PreparedDeviceEventEntry[],
   context: DeviceEventIdentityContext,
@@ -4560,25 +4587,7 @@ function mapCurrentDeviceEventOwners(
     if (context.index.latestById.has(entry.record.id)) {
       physicallyExistingPreparedIds.add(entry.record.id);
     }
-    const incomingContentFingerprint = deviceEventContentFingerprint(entry.record);
-    const historicalContentOwnerRevisions = new Map<string, Set<number>>();
-    for (const externalRef of [entry.record.externalRef, ...entry.legacyExternalRefs]) {
-      if (!externalRef) {
-        continue;
-      }
-      const refKey = eventExternalRefKey(externalRef);
-      const ownersByFingerprint =
-        context.index.deviceOwnerRevisionsByRefKeyAndFingerprint.get(refKey);
-      for (
-        const [ownerId, revisions] of ownersByFingerprint?.get(incomingContentFingerprint) ?? []
-      ) {
-        const ownerRevisions = historicalContentOwnerRevisions.get(ownerId) ?? new Set<number>();
-        for (const revision of revisions) {
-          ownerRevisions.add(revision);
-        }
-        historicalContentOwnerRevisions.set(ownerId, ownerRevisions);
-      }
-    }
+    const historicalContentOwnerRevisions = findHistoricalDeviceEventContentOwners(entry, context.index);
     if (historicalContentOwnerRevisions.size > 0) {
       historicalContentOwnerRevisionsByPreparedId.set(
         entry.record.id,
@@ -7835,7 +7844,7 @@ timing: DeviceBatchImportTiming,
     && sessionVaultState.dependencyChanges.every((dependencyChange) =>
       !deviceEventIdentityDependenciesOverlap(eventIdentityDependency, dependencyChange)
     )
-    ? cloneDeviceEventIdentityContext(sessionVaultState.eventIdentityContext)
+    ? sessionVaultState.eventIdentityContext
     : undefined;
   let initialEventIdentityContext = cachedEventIdentityContext
     ?? await buildDeviceEventIdentityContext(
@@ -7861,12 +7870,13 @@ timing: DeviceBatchImportTiming,
     timing.eventIdentityIndexCacheHit = true;
   }
   timing.eventIdentityIndexElapsedMs = Math.max(0, performance.now() - indexStartedAt);
-  if (requiresEventIdentityContext && !timing.eventIdentityIndexCacheHit) {
+  if (options.session && requiresEventIdentityContext && !timing.eventIdentityIndexCacheHit) {
     const eventLedgerFingerprint = await tryBuildDeviceEventLedgerFingerprint(vaultRoot);
     if (eventLedgerFingerprint) {
       replaceDeviceBatchImportSessionVaultState(options.session, vaultRoot, {
         dependencyChanges: [],
-        eventIdentityContext: cloneDeviceEventIdentityContext(initialEventIdentityContext),
+        // The baseline is read-only; reconciliation clones at its mutation boundary.
+        eventIdentityContext: initialEventIdentityContext,
         eventLedgerFingerprint,
       });
     } else {
