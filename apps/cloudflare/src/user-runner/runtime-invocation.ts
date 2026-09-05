@@ -53,11 +53,11 @@ import {
   readHostedRunnerContainerIdentity,
 } from "../hosted-runner-container-identity.js";
 import {
-  HOSTED_STANDBY_LOCATION_HINT,
-  HOSTED_STANDBY_REGION,
-  isHostedStandbySlotName,
-  readHostedStandbyReleaseId,
-  type HostedStandbyRunnerContainerNamespaceLike,
+  hostedRunnerSlotBindingMatchesTarget,
+  isHostedRunnerTargetName,
+  isHostedStandbyClaimId,
+  requireHostedRunnerSlotLifecycle,
+  resolveHostedRunnerReleaseId,
 } from "../standby-runner-contract.js";
 import {
   createHostedProviderEgressCredential,
@@ -190,7 +190,6 @@ export class RuntimeInvocationService {
     private readonly input: {
       env: HostedExecutionEnvironment;
       runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
-      standbyContainerNamespace?: HostedStandbyRunnerContainerNamespaceLike | null;
       runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
       runnerStoreCache: RunnerStoreCache;
       stateStore: RunnerStateStore;
@@ -1139,18 +1138,16 @@ export class RuntimeInvocationService {
   }): Promise<string> {
     if (
       typeof input.runnerContainerName === "string"
-      && isHostedStandbySlotName(input.runnerContainerName)
+      && isHostedRunnerTargetName(input.runnerContainerName)
     ) {
       const runnerContainerName = input.runnerContainerName;
-      const namespace = this.input.standbyContainerNamespace;
-      const releaseId = readHostedStandbyReleaseId(this.input.runnerRuntimeEnvSource);
+      const namespace = this.input.runnerContainerNamespace;
+      const releaseId = resolveHostedRunnerReleaseId(this.input.runnerRuntimeEnvSource);
       if (!namespace || !releaseId) {
         throw new Error("Hosted standby invocation binding is unavailable.");
       }
       const readBinding = async () =>
-        await namespace.getByName(runnerContainerName, {
-          locationHint: HOSTED_STANDBY_LOCATION_HINT,
-        }).readStandbySlotBinding();
+        await requireHostedRunnerSlotLifecycle(namespace.getByName(runnerContainerName)).readStandbySlotBinding();
       const binding = input.commandBudget
         ? await runRuntimeProcessingCommandStep({
             budget: input.commandBudget,
@@ -1159,11 +1156,11 @@ export class RuntimeInvocationService {
           })
         : await readBinding();
       if (
-        binding.state !== "bound"
+        !hostedRunnerSlotBindingMatchesTarget(binding, runnerContainerName)
+        || binding.state !== "bound"
         || binding.userId !== input.userId
-        || binding.slotName !== runnerContainerName
+        || !isHostedStandbyClaimId(binding.claimId)
         || binding.releaseId !== releaseId
-        || binding.region !== HOSTED_STANDBY_REGION
       ) {
         throw new Error("Hosted standby slot binding did not match the runtime invocation user.");
       }

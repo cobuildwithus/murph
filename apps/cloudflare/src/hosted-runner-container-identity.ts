@@ -1,3 +1,5 @@
+import { isHostedRunnerTargetName } from "./standby-runner-contract.js";
+
 export type HostedRunnerContainerIdentitySource = Readonly<Record<string, unknown>>;
 
 export interface HostedRunnerContainerIdentity {
@@ -22,7 +24,7 @@ export function readHostedRunnerContainerIdentity(input: {
   const runnerContainerName = typeof input.containerName === "string"
     ? input.containerName.trim()
     : "";
-  if (!runnerContainerName) {
+  if (!runnerContainerName || isHostedRunnerTargetName(runnerContainerName)) {
     return null;
   }
 

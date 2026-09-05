@@ -83,7 +83,6 @@ import {
 import {
   type HostedLinqMessageEditedEvent,
   type HostedLinqMessageReceivedEvent,
-  type HostedLinqTypingIndicatorStartedEvent,
   type HostedLinqWebhookEvent,
   shouldIgnoreHostedLinqForLocalInboundGuard,
 } from "./linq";
@@ -250,26 +249,6 @@ type HostedLinqDailyState = Awaited<ReturnType<typeof incrementHostedLinqInbound
 interface VerifiedHostedLinqInboundParticipant {
   contact: HostedLinqParticipantContact;
   memberId: string;
-}
-
-/**
- * Resolves a typing hint only through an established direct home-chat binding.
- * This result is speculative latency data, never authorization to process work.
- */
-export async function resolveHostedLinqTypingPrewarmMemberId(input: {
-  event: HostedLinqTypingIndicatorStartedEvent;
-  prisma: HostedOnboardingReadClient;
-}): Promise<string | null> {
-  const memberId = (await lookupHostedLinqHomeChatCoreCandidate({
-    chatId: input.event.data.chat_id,
-    prisma: input.prisma,
-  }))?.memberId ?? null;
-  return memberId && await isHostedLinqMailboxRootPrewarmEligible({
-    memberId,
-    prisma: input.prisma,
-  })
-    ? memberId
-    : null;
 }
 
 /**

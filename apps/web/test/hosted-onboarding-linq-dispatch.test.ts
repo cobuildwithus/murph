@@ -228,8 +228,6 @@ const mocks = vi.hoisted(() => {
       rootKeyId: `root-${input.domain}-active`,
       userId: input.userId,
     }),
-    resolveHostedLinqTypingPrewarmMemberId:
-      vi.fn(async (): Promise<string | null> => null),
     unwrapHostedDomainRootForWebByRootKeyId: vi.fn(),
     unwrapHostedDomainRootsForWebByRootKeyIds: vi.fn(),
   };
@@ -294,8 +292,6 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq", async (importOrigin
       mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
     resolveHostedLinqMailboxPayloadRootPrewarmMemberId:
       mocks.resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
-    resolveHostedLinqTypingPrewarmMemberId:
-      mocks.resolveHostedLinqTypingPrewarmMemberId,
   };
 });
 
@@ -1309,118 +1305,24 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
   });
 
-  it("acknowledges Linq typing before resolving the best-effort shell prewarm", async () => {
-    const afterResponseTasks: Array<() => Promise<void>> = [];
-    const prewarmRuntimeShell = vi.fn(async () => ({ accepted: true as const }));
-    mocks.resolveHostedLinqTypingPrewarmMemberId.mockResolvedValueOnce("member_typing");
-    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
-      ensureRuntimeProcessing: vi.fn(),
-      prewarmRuntimeShell,
-    });
+  it("acknowledges Linq typing without scheduling runtime or member lookup work", async () => {
+    const scheduleAfterResponse = vi.fn();
     const response = await handleHostedOnboardingLinqWebhook({
       prisma: asPrismaTransactionClient({}),
       rawBody: buildTypingWebhookBody(),
-      scheduleAfterResponse: (task) => {
-        afterResponseTasks.push(task);
-      },
+      scheduleAfterResponse,
       signature: null,
       timestamp: null,
     });
 
-    expect(response).toEqual({
-      ignored: true,
-      ok: true,
-      reason: "typing-ignored",
-    });
-    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
-    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(prewarmRuntimeShell).not.toHaveBeenCalled();
-    expect(afterResponseTasks).toHaveLength(1);
-
-    await Promise.all(afterResponseTasks.map((task) => task()));
-
-    expect(mocks.resolveHostedLinqTypingPrewarmMemberId).toHaveBeenCalledWith({
-      event: expect.objectContaining({
-        data: {
-          chat_id: "chat_typing_123",
-        },
-        event_type: "chat.typing_indicator.started",
-      }),
-      prisma: expect.any(Object),
-    });
-    expect(prewarmRuntimeShell).toHaveBeenCalledWith(expect.objectContaining({
-      orchestrationAttemptId: expect.stringMatching(/^web-prewarm-/u),
-      requestStartedAtEpochMs: expect.any(Number),
-      source: "linq-typing-started",
-      userId: "member_typing",
-    }));
-    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
-  });
-
-  it("keeps unresolved Linq typing hints best-effort and process-free", async () => {
-    const afterResponseTasks: Array<() => Promise<void>> = [];
-    const prewarmRuntimeShell = vi.fn(async () => ({ accepted: true as const }));
-    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
-      ensureRuntimeProcessing: vi.fn(),
-      prewarmRuntimeShell,
-    });
-
-    await expect(handleHostedOnboardingLinqWebhook({
-      prisma: asPrismaTransactionClient({}),
-      rawBody: buildTypingWebhookBody(),
-      scheduleAfterResponse: (task) => {
-        afterResponseTasks.push(task);
-      },
-      signature: null,
-      timestamp: null,
-    })).resolves.toMatchObject({
-      ignored: true,
-      reason: "typing-ignored",
-    });
-
-    await Promise.all(afterResponseTasks.map((task) => task()));
-
-    expect(prewarmRuntimeShell).not.toHaveBeenCalled();
+    expect(response).toEqual({ ignored: true, ok: true, reason: "typing-ignored" });
+    expect(scheduleAfterResponse).not.toHaveBeenCalled();
+    expect(mocks.readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
-  it("settles Linq typing lookup failures after acknowledgement", async () => {
-    const afterResponseTasks: Array<() => Promise<void>> = [];
-    const prewarmRuntimeShell = vi.fn(async () => ({ accepted: true as const }));
-    mocks.resolveHostedLinqTypingPrewarmMemberId.mockRejectedValueOnce(
-      hostedOnboardingError({
-        code: "LINQ_HOME_CHAT_ROUTING_LOOKUP_AMBIGUOUS",
-        httpStatus: 500,
-        message: "Hosted Linq prewarm lookup matched multiple members.",
-        retryable: true,
-      }),
-    );
-    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
-      ensureRuntimeProcessing: vi.fn(),
-      prewarmRuntimeShell,
-    });
-
-    await expect(handleHostedOnboardingLinqWebhook({
-      prisma: asPrismaTransactionClient({}),
-      rawBody: buildTypingWebhookBody(),
-      scheduleAfterResponse: (task) => {
-        afterResponseTasks.push(task);
-      },
-      signature: null,
-      timestamp: null,
-    })).resolves.toMatchObject({
-      ignored: true,
-      reason: "typing-ignored",
-    });
-
-    await expect(Promise.all(afterResponseTasks.map((task) => task())))
-      .resolves.toEqual([undefined]);
-    expect(prewarmRuntimeShell).not.toHaveBeenCalled();
-    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
-  });
-
-  it("rejects malformed Linq typing events before scheduling a hint", async () => {
+  it("rejects malformed Linq typing events before acknowledgement", async () => {
     const scheduleAfterResponse = vi.fn();
 
     await expect(handleHostedOnboardingLinqWebhook({
@@ -1441,7 +1343,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(scheduleAfterResponse).not.toHaveBeenCalled();
-    expect(mocks.resolveHostedLinqTypingPrewarmMemberId).not.toHaveBeenCalled();
+    expect(mocks.readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
   });
 
   it("routes message edits through the narrow correction planner without a read receipt", async () => {
@@ -3506,13 +3408,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expectHostedLinqPointerSignalAccepted("evt_required_nudge_failed");
-    expect(prewarmRuntimeShell).toHaveBeenCalledOnce();
-    expect(prewarmRuntimeShell).toHaveBeenCalledWith(expect.objectContaining({
-      orchestrationAttemptId: expect.stringMatching(/^web-prewarm-/u),
-      requestStartedAtEpochMs: expect.any(Number),
-      source: "linq-message-routing",
-      userId: "member_123",
-    }));
+    expect(prewarmRuntimeShell).not.toHaveBeenCalled();
     expectHostedLinqReadReceiptSent();
     expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -4769,18 +4665,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(hostedMemberRouting.findUnique.mock.calls.filter(([query]) =>
       isFullHostedMemberRoutingRecordQuery(query)
     )).toHaveLength(4);
-    expect(prewarmRuntimeShell).toHaveBeenCalledOnce();
-    expect(prewarmRuntimeShell).toHaveBeenCalledWith(expect.objectContaining({
-      source: "linq-message-routing",
-      userId: "member_123",
-    }));
-    expect(
-      prewarmRuntimeShell.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      vi.mocked(prepareHostedCryptoDomainRootCandidates).mock
-        .invocationCallOrder[0]
-        ?? Number.NEGATIVE_INFINITY,
-    );
+    expect(prewarmRuntimeShell).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
   });
 
@@ -8052,7 +7937,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("starts the web reply beside shell prewarm and wakes the runtime from the completed first turn", async () => {
+  it("preserves enrollment and completed first-turn ordering before waking the runtime", async () => {
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
     const memberId = "member_instant_start_prewarm";
     const eventId = "evt_instant_start_prewarm";
@@ -8153,14 +8038,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     const typingResult = createDeferred<{ ok: boolean; status: number }>();
     const ensureRuntimeProcessing = vi.fn();
-    const prewarmRuntimeShell = vi.fn<
-      (request: {
-        source: "linq-instant-start" | "linq-message-routing" | "linq-typing-started";
-      }) => Promise<{ accepted: true }>
-    >(() => {
-      callOrder.push("shell-prewarm");
-      return new Promise<{ accepted: true }>(() => undefined);
-    });
+    const prewarmRuntimeShell = vi.fn();
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       ensureRuntimeProcessing,
       prewarmRuntimeShell,
@@ -8252,7 +8130,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     const activationWakeIndex = callOrder.indexOf("activation-continuation");
     const replanIndex = callOrder.indexOf("replan");
     const signalIndex = callOrder.indexOf("conversation-signal");
-    const shellPrewarmIndex = callOrder.indexOf("shell-prewarm");
     const typingIndex = callOrder.indexOf("typing:chat_123");
     expect(enrollmentIndex).toBeGreaterThanOrEqual(0);
     expect(replanIndex).toBeGreaterThan(enrollmentIndex);
@@ -8260,17 +8137,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(activationWakeIndex).toBeGreaterThan(signalIndex);
     expect(typingIndex).toBeGreaterThanOrEqual(0);
     expect(typingIndex).toBeLessThan(enrollmentIndex);
-    expect(shellPrewarmIndex).toBeGreaterThanOrEqual(0);
-    expect(shellPrewarmIndex).toBeLessThan(enrollmentIndex);
-    expect(prewarmRuntimeShell).toHaveBeenCalledOnce();
-    expect(prewarmRuntimeShell).toHaveBeenCalledWith(expect.objectContaining({
-      orchestrationAttemptId: expect.stringMatching(/^web-prewarm-/u),
-      requestStartedAtEpochMs: expect.any(Number),
-      source: "linq-instant-start",
-      userId: memberId,
-    }));
-    expect(prewarmRuntimeShell.mock.calls.map(([request]) => request.source))
-      .toEqual(["linq-instant-start"]);
+    expect(prewarmRuntimeShell).not.toHaveBeenCalled();
     expect(mocks.maybeHandoffHostedExecutionWebhookWake).toHaveBeenCalledWith(
       expect.objectContaining({
         wakeHandoff: expect.not.objectContaining({
@@ -8477,13 +8344,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       reason: "sent-signup-link",
     });
 
-    expect(prewarmRuntimeShell).toHaveBeenCalledOnce();
-    expect(prewarmRuntimeShell).toHaveBeenCalledWith(expect.objectContaining({
-      orchestrationAttemptId: expect.stringMatching(/^web-prewarm-/u),
-      requestStartedAtEpochMs: expect.any(Number),
-      source: "linq-instant-start",
-      userId: memberId,
-    }));
+    expect(prewarmRuntimeShell).not.toHaveBeenCalled();
     expect(ensureRuntimeProcessing).not.toHaveBeenCalled();
     expect(mocks.startHostedLinqChatTypingIndicator).toHaveBeenCalledTimes(1);
     await vi.waitFor(() => {

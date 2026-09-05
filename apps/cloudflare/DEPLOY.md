@@ -1285,7 +1285,7 @@ Normal deploy smoke targets the public Worker banner and health endpoints after 
 The Worker also enforces that fingerprint contract on the normal user path. Before a warm or newly started runner receives a workspace invocation, its `/health` response must report the bundle and source fingerprints embedded in the generated Worker config. A stale warm shell is destroyed and restarted. Direct cold readiness may destroy and replace one stale bundle/source image inside the same lifecycle operation, using only the original caller deadline; the replacement must pass the exact architecture and fingerprint checks. A second mismatch, any other readiness failure, unsettled cleanup, an expired deadline, or changed container ownership still fails closed without receiving user work. Post-deploy smoke remains the rollout proof, while per-invocation admission prevents the window between a direct Worker deploy and that smoke from serving work through an old runner.
 
 The Worker pins and locally patches `@cloudflare/containers` so the
-shell-prewarm, direct cold-start, and deploy-smoke paths time out one TCP
+pristine-inventory, direct cold-start, and deploy-smoke paths time out one TCP
 readiness request after 1.5 seconds while the existing total startup deadline,
 health validation, lifecycle hooks, and failure cleanup remain unchanged. The
 helper's implicit `containerFetch()` auto-start fallback retains the upstream
@@ -1294,8 +1294,8 @@ image, schema, or persisted-data migration. Before widening traffic, compare
 30–50 alternating fresh starts for the prior and candidate Worker versions.
 Require at least a 2-second p50 improvement, no new startup-failure category or
 increase in failed starts, and a candidate p95 no more than one second slower
-than the prior version. Rollback is the prior Worker version; no data rollback
-is needed.
+than the prior version. A rollback must also preserve the unified-fleet
+identity compatibility floor described in the migration section.
 
 The production smoke also runs one real `gpt-5.6-terra` model turn inside the deployed runner container (`HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true`, set by the deploy workflow's `live_model_turn` input, default on). The container runs a single non-interactive `codex exec` in a scratch workspace with the injected-credential placeholder; the Worker egress intercept authorizes exactly one deploy-smoke fenced `POST /v1/responses` request for `gpt-5.6-terra` and injects the real Worker-owned `OPENAI_API_KEY`, so the smoke proves the rollout target's OpenAI auth, account availability, quota, request compatibility, and network path without the raw key ever entering the container. The container accepts the smoke only when Codex JSONL reports the final agent output as exactly `OK`. Cost posture: exactly one bounded model turn per production deploy; the flag is never set in per-PR CI or hosted-local E2E, so those paths are byte-for-byte unchanged.
 
@@ -1442,10 +1442,6 @@ Core execution tuning:
 
 - `CF_COMPATIBILITY_DATE` defaults to `2026-03-27`
 - `CF_CONTAINER_INSTANCE_TYPE` defaults to `{"vcpu":2,"memory_mib":6144,"disk_mb":6000}`. This restores the two-vCPU production shape after measured cold-start and same-size workspace-restore regressions on the smaller allocation. The post-completion conversation idle lease remains independently configured at ten minutes.
-- `CF_CONTAINER_MAX_INSTANCES` defaults to `1000`
-- `CF_STANDBY_CONTAINER_MAX_INSTANCES` defaults to the resolved
-  `CF_CONTAINER_MAX_INSTANCES` value. Set it separately only when the standby
-  application needs a different ceiling from ordinary member runners.
 - `CF_MAX_EVENT_ATTEMPTS` defaults to `3`
 - `CF_RETRY_DELAY_MS` defaults to `30000`
 - `CF_WEB_CONTROL_TIMEOUT_MS` defaults to `30000`
@@ -1458,30 +1454,25 @@ Core execution tuning:
 - `HOSTED_EXECUTION_CONTAINER_ROLLOUT` controls the one-off Wrangler container rollout flag during deploy. While the vault-share selector-scope migration is active, production deploy helpers default to `immediate` and production preflight rejects explicit `gradual`; use `gradual` only for non-production deploys or after the selector-scope rollout guard is removed.
 - `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant` baseline; deploy automation defaults to `exa,hosted-email,linq,mapbox,telegram`. Hosted device-sync runtime config is resolved from worker env directly rather than a runtime-env profile.
 - `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000` (production sets `600000`) and controls the post-completion warm lease minted only by observed conversation activity. Reducing production from 20 minutes to 10 minutes means a follow-up in the former 11–20 minute warm window can take the existing cold-start path instead. `HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS` defaults to the idle TTL when absent for rollback compatibility. Leave it unset for the additive code deploy and one legacy-TTL observation window, drain old containers, then set it to `60000` for a canary before widening the rollout. Device sync, system maintenance, replay, and generic runner activity do not extend conversation warmth. RunnerContainer derives the lease directly from the resident child process's private health watermark on every expiry, re-arms the platform timeout while the lease or active work remains, yields on uncertain cleanup state, and otherwise destroys the idle shell. An old child without the watermark remains protected and re-arms the lifecycle timer; its active-work count independently protects active work. A replacement child starts without inheriting the old process's warmth. Dirty foreground runtime state is checkpointed by the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` path before the invocation returns; RunnerContainer never records pending checkpoint intent.
-- `HOSTED_EXECUTION_STANDBY_MODE` defaults to `off`. `shadow` maintains one
-  release-scoped ENAM standby and measures readiness without allocating it;
-  `allocate` lets fence-free `default` work from authenticated Web-direct ingress
-  or an authenticated request with `conversationWorkPending: true` claim it
-  with a 250 ms total coordinator/bind deadline. Temporal derives that fact
-  solely from fresh admitted conversation lag. Background-only requests use
-  the unchanged exact-user path. A trusted foreground
-  replacement may claim the standby after clearing an exact-user background
-  fence so it does not reuse a child that is still shutting down. Pending or
-  retained standby targets still reconcile before that fresh-claim gate. In
-  `allocate` mode the standby coordinator is the sole shell-prewarm owner; the
-  exact-user prewarm hint is skipped so it cannot reserve a competing target
-  before the claim. An unsuccessful claim still uses the ordinary exact-user
-  fallback. Accepted fresh starts persist the bounded allocation outcome,
-  reason, and elapsed milliseconds in the existing latency phase breakdown;
-  the Worker selection log emits the same metadata before fence and readiness
-  work. Deploy Web first so its strict telemetry parser accepts these additive
-  leaves, then deploy Cloudflare. Reversing that order affects diagnostics only:
-  old Web drops the unknown phase breakdown while retaining core milestones.
-  The fields remain in Worker-owned orchestration and do not change the
-  Worker/container invocation job, so this diagnostic itself needs no special
-  container rollout mode; obey any independently active production rollout
-  requirement.
-  Invalid values fail deploy/runtime parsing closed.
+- `HOSTED_EXECUTION_STANDBY_MODE` defaults to `off`; `shadow` maintains ready
+  inventory without allocating it, and `allocate` lets authenticated foreground
+  conversation work claim it. Modes control inventory only; all fresh cold
+  targets use the unified fleet as well. Background-only work may reuse its
+  member-owned warm target but never consumes ready inventory. Pending targets
+  reconcile before new allocation. Invalid modes fail deploy/runtime parsing.
+- `HOSTED_EXECUTION_STANDBY_TARGET` defaults to `2`, accepts integers from `0`
+  through `32`, and cannot exceed the unified application's capacity. This is
+  a total global ready inventory, not a per-region reservation. Rendered Worker
+  config carries its canonical string value.
+- `CF_CONTAINER_MAX_INSTANCES` is the total member fleet budget (default `1000`
+  for an unconfigured environment, with zero legacy reservation).
+  `CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES` reserves part of that total for
+  the legacy standby application during drain. The unified application's limit
+  is total minus legacy; the fixed deploy-smoke instance remains outside this
+  member budget. When supplying a total, explicitly supply the legacy
+  reservation, including `0` after drain. The old
+  `CF_STANDBY_CONTAINER_MAX_INSTANCES` setting is rejected rather than silently
+  reinterpreted. See the migration procedure below.
 
 The `conversationWorkPending` request extension is a separate receiver-first
 rollout: deploy this accepting Cloudflare version before a Temporal worker emits
@@ -1508,42 +1499,57 @@ below this request contract.
 the per-user Durable Object consecutive failure cap. Exhausted runners stop
 scheduling retry alarms until fresh nudge/manual input resets the counter.
 
-#### Standby activation and rollback
+#### Unified fleet migration and rollback
 
-Deploy the Worker, both new Durable Object classes, bindings, migration `v7`,
-and the prepared `StandbyRunnerContainer` image while the mode remains `off`.
-For the bounded 100-instance standby capacity trial, set the protected
-production environment to `CF_CONTAINER_MAX_INSTANCES=648` and
-`CF_STANDBY_CONTAINER_MAX_INSTANCES=100`. Together with the fixed one-instance
-deploy-smoke application, this preserves the existing 749-instance declared
-total. The standby ceiling does not reserve a ready slot: at saturation, a
-100th claimed standby can leave no ready replacement until capacity frees.
-Run exact-version endpoint smoke and managed-container smoke to prove the
-effective standby mode, expected Worker release, and runner bundle/source
-fingerprints first. Then use `shadow` for at least one ordinary
-observation window and verify that exactly one current-release ENAM slot stays
-ready, failed/stale slots retire, and no processing reports a claimed standby.
-Only then set `allocate`; changing the mode itself requires no Web or Temporal
-deploy. In the bounded post-deploy observation, require every fresh claim to be
-default work from validated Web-direct ingress or an authenticated request
-carrying the admitted-conversation fact. Background-only starts must report
-the exact-user path instead of a fresh claim. The Temporal producer requires
-the separate receiver-first rollout described above.
+Merge the matching public renderer/runtime and private deploy-forwarding changes
+before deploying. The private workflow requires the unified fleet environment
+contract from the selected public revision and checks the rendered total,
+legacy reservation, global placement, ready target, and mode before deployment.
+It deliberately rejects an older renderer instead of guessing capacity semantics.
 
-At the current 2-vCPU, 6-GiB-memory, 6-GB-disk shape, one continuously ready
-slot costs about $40.52 per average 730-hour month for allocated memory and
-disk at the published Containers rates before any unused shared included
-allotment, plus actual vCPU time used by startup, health re-probes, and Codex
-preflight. In `allocate`, temporarily add the
-ordinary cost of claimed same-member containers until their existing idle
-lifecycle retires them. Check current Cloudflare rates before activation.
+For a deployment migrating a regular limit of `648` and standby limit of `100`,
+configure `CF_CONTAINER_MAX_INSTANCES=748` and
+`CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES=100`, then remove the retired
+`CF_STANDBY_CONTAINER_MAX_INSTANCES` setting. This initially keeps the application
+limits at 648 unified plus 100 legacy, with one separate deploy-smoke instance.
+It does not reserve 100 ready containers. The new ready target is independently
+configured with `HOSTED_EXECUTION_STANDBY_TARGET=2`.
 
-The immediate operational rollback is to set the mode to `off`; current and
-stale release coordinators converge by retiring only coordinator-owned slots,
-while already bound member containers finish or stop through their exact
-`UserRunner` owner. Once migration `v7` has deployed, do not roll Worker code
-back to a version that removes the new class exports, bindings, or migration
-history. Forward-deploy compatible code with mode `off` instead.
+Deploy the Worker and matching image with standby mode `off` first. Retain the
+existing Durable Object exports, bindings, and migration history, including `v7`.
+New warm and cold targets use `RUNNER_CONTAINER` and globally eligible placement;
+existing exact-user and ENAM standby references continue through their original
+namespace and exact retirement path. There is no new member coordinator or
+cross-namespace identity rewrite. Old coordinators drain their own pristine slots.
+A mixed rollout must prove both a retained legacy binding and a new opaque binding
+can complete or retire through their exact owner before allocation is enabled.
+
+Use `shadow` to verify two current-release pristine slots can stay ready, failed
+preparations recover, and stale slots drain. Then enable `allocate` and verify
+concurrent authenticated foreground requests claim distinct slots, background-only
+starts do not claim inventory, and completion clears the member's exact fence.
+Mode changes do not require a Web or Temporal change; preserve the already deployed
+`conversationWorkPending` receiver/producer contract described above.
+
+Keep the legacy reservation until its running containers have drained. Reduce it
+explicitly as capacity is released; at `0`, the unified application receives the
+entire member budget. Keep the zero-capacity legacy application and Durable Object
+binding while dormant stored references can still require recovery. Removing the
+binding or class requires separate proof that both live and dormant references
+are gone; a low running-container count alone is insufficient.
+
+Turning mode `off` stops speculative warm inventory; it does not undo the unified
+cold lifecycle or terminate bound member work. Once a new opaque target has been
+persisted, versions that cannot read that identity are below the rollback floor.
+Forward-deploy compatible fixes while retaining both namespace readers. Any actual
+Cloudflare rollback still requires explicit authorization for that exact action.
+
+Ready inventory shares finite fleet capacity with member-owned containers, so a
+burst beyond available warmth or full fleet saturation can still cold-start or
+wait for capacity. Observe warm-hit rate, refill duration, claim/bind timeouts,
+retirement failures, and foreground latency after an authorized rollout. Validate
+current account quotas and pricing before changing the total budget; source
+limits do not prove live account headroom.
 
 Observability:
 
@@ -1800,9 +1806,9 @@ If the selected GitHub environment already defines container sizing overrides, u
 
 - `CF_CONTAINER_INSTANCE_TYPE={"vcpu":2,"memory_mib":6144,"disk_mb":6000}`
 - `CF_CONTAINER_MAX_INSTANCES=1000`
-- `CF_STANDBY_CONTAINER_MAX_INSTANCES=1000` when standby needs a ceiling that
-  differs from the ordinary runner application; otherwise omit it to inherit
-  `CF_CONTAINER_MAX_INSTANCES`
+- `CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES=0` after legacy drain; during
+  migration set the explicit reservation within the total budget above.
+- `HOSTED_EXECUTION_STANDBY_TARGET=2` for two globally eligible ready slots.
 
 When hosted email sender identity is configured, deploy automation renders one native `send_email` binding named `HOSTED_EMAIL` and constrains it with `allowed_sender_addresses` to that resolved sender address. Hosted email outbound send no longer requires a runtime Cloudflare account id or email-send API token inside the Worker.
 
@@ -2352,21 +2358,15 @@ Optional smoke env:
 
 If neither managed-container smoke nor `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, smoke stops after the public banner and health checks.
 
-## Linq message shell-prewarm rollout
+## Retiring member shell-prewarm producers
 
-This additive telemetry cutover is Web-first. Deploy Web with the expanded
-latency parser and the best-effort message-routing producer, then deploy the
-Cloudflare Worker/runner reader. During that short window the old Worker may
-reject the new optional request shape; the authoritative post-Temporal ensure
-and message path are unchanged. After Cloudflare converges, verify a synthetic
-established-direct-message trace has matching expected/observed prewarm attempt
-ids and the request, auth, UserRunner, admission, and container-hint phase stamps.
-
-There is no persisted-state rollback floor. Rolling Web back first stops the
-new producer; rolling Cloudflare back first merely makes remaining hints fail
-best-effort. A Web version without the expanded parser may drop only the
-optional phase breakdown from a newer Worker, never the core latency milestones
-or runtime work.
+Current Web removes the optional typing, message-routing, and instant-start
+shell-prewarm calls. The new Worker accepts the old authenticated receiver
+contract as a no-op. Either deployment order preserves authoritative mailbox
+signaling and the post-Temporal direct ensure; an older Worker may simply receive
+fewer optional hints. Historical latency fields remain readable, while current
+Web stops producing their per-hint correlation metadata. Container identity and
+state rollback constraints remain those of the unified fleet migration above.
 
 ## Container Operator Access
 

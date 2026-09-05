@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-
 import type {
   Prisma,
   PrismaClient,
@@ -54,7 +52,6 @@ import {
   readHostedLinqMessageEditPreparation,
   resolveHostedLinqDirectPreparationMemberId,
   resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
-  resolveHostedLinqTypingPrewarmMemberId,
   type HostedLinqMessageEditPreparation,
   type HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq";
@@ -149,9 +146,6 @@ import {
 import {
   maybeHandoffHostedExecutionWebhookWake,
 } from "./webhook-service-wake";
-import {
-  startHostedRuntimeShellPrewarmBestEffort,
-} from "../hosted-execution/direct-runtime-wake";
 import {
   signalHostedPhoneCallResultNotificationRecovery,
 } from "../phone-calls/reconciliation-workflow-start";
@@ -286,24 +280,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
   let messagePartsInspection: HostedLinqMessageReceivedPartsInspection | null = null;
   let responseReason: string | null = null;
   let instantStartTypingHint: HostedLinqInstantStartTypingHint | null = null;
-  const messageRoutingShellPrewarm: {
-    current: {
-      orchestrationAttemptId: string;
-      userId: string;
-    } | null;
-  } = { current: null };
-  const startMessageRoutingShellPrewarm = (userId: string): void => {
-    if (messageRoutingShellPrewarm.current?.userId === userId) {
-      return;
-    }
-    const orchestrationAttemptId = `web-prewarm-${randomUUID()}`;
-    messageRoutingShellPrewarm.current = { orchestrationAttemptId, userId };
-    void startHostedRuntimeShellPrewarmBestEffort({
-      orchestrationAttemptId,
-      source: "linq-message-routing",
-      userId,
-    });
-  };
   let pendingInstantStartActivationWake: {
     continuation: HostedLinqInstantStartDeferredActivationWake;
     prisma: PrismaClient;
@@ -342,11 +318,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
 
     if (event.event_type === "chat.typing_indicator.started") {
-      scheduleHostedLinqTypingShellPrewarmBestEffort({
-        event: requireHostedLinqTypingIndicatorStartedEvent(event),
-        prisma: input.prisma,
-        scheduleAfterResponse: input.scheduleAfterResponse,
-      });
+      requireHostedLinqTypingIndicatorStartedEvent(event);
       const response: HostedOnboardingLinqWebhookResponse = {
         ignored: true,
         ok: true,
@@ -679,11 +651,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       let requiredPendingGroupSetupCandidateId: string | null = null;
       const runPlan = async (options: {
         instantStartAllowed?: boolean;
-        messageRoutingShellPrewarmAllowed?: boolean;
       } = {}) => {
         const {
           instantStartAllowed = true,
-          messageRoutingShellPrewarmAllowed = true,
         } = options;
         let reusableDirectCryptoDomainRoots: {
           memberId: string;
@@ -779,9 +749,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           prepare: async ({ attempt }) => {
             const preparation = await prepareHostedLinqThreadRoutingCrypto({
               event: planningEvent,
-              ...(messageRoutingShellPrewarmAllowed
-                ? { onEligibleMember: startMessageRoutingShellPrewarm }
-                : {}),
               participantMemberIds:
                 planningResolution.pendingGroupParticipantMemberIds ?? [],
               pendingGroupRosterUnavailable:
@@ -930,14 +897,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         instantStartTypingHint = startHostedLinqInstantStartTypingHintBestEffort({
           event: planningEvent,
         });
-        // The member row is committed, so issue only the deterministic
-        // container start command while enrollment runs. This does not resolve
-        // a runtime owner, inspect workspace state, create a fence, or process
-        // mailbox work; the ordinary post-Temporal ensure owns those steps.
-        void startHostedRuntimeShellPrewarmBestEffort({
-          source: "linq-instant-start",
-          userId: instantStartEnrollment.memberId,
-        });
         let enrollmentFailed = false;
         try {
           const enrollment = await ensureHostedLinqInstantStartStarterUsageEnrollment({
@@ -973,7 +932,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         }
         plan = await runPlan({
           instantStartAllowed: !enrollmentFailed,
-          messageRoutingShellPrewarmAllowed: false,
         });
         if (plan.instantStartEnrollment) {
           logHostedOnboardingDiagnostic(
@@ -984,7 +942,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           );
           plan = await runPlan({
             instantStartAllowed: false,
-            messageRoutingShellPrewarmAllowed: false,
           });
         }
       }
@@ -1188,17 +1145,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       }
     }
 
-    if (
-      wakeHandoff
-      && messageRoutingShellPrewarm.current?.userId === wakeHandoff.userId
-    ) {
-      wakeHandoff = {
-        ...wakeHandoff,
-        runtimeShellPrewarmOrchestrationAttemptId:
-          messageRoutingShellPrewarm.current.orchestrationAttemptId,
-      };
-    }
-
     scheduleHostedLinqProviderEventIngestionBestEffort({
       event: providerEvent,
       prisma,
@@ -1327,62 +1273,6 @@ function classifyHostedLinqWebhookVersion(
     return value;
   }
   return value ? "other" : "missing";
-}
-
-function scheduleHostedLinqTypingShellPrewarmBestEffort(input: {
-  event: ReturnType<typeof requireHostedLinqTypingIndicatorStartedEvent>;
-  prisma?: PrismaClient;
-  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
-}): void {
-  const task = async (): Promise<void> => {
-    try {
-      const memberId = await resolveHostedLinqTypingPrewarmMemberId({
-        event: input.event,
-        prisma: input.prisma ?? getPrisma(),
-      });
-      if (!memberId) {
-        logHostedOnboardingDiagnostic(
-          "linq-typing-shell-prewarm",
-          { outcome: "target-not-found" },
-        );
-        return;
-      }
-
-      logHostedOnboardingDiagnostic(
-        "linq-typing-shell-prewarm",
-        { outcome: "target-resolved" },
-      );
-      await startHostedRuntimeShellPrewarmBestEffort({
-        source: "linq-typing-started",
-        userId: memberId,
-      });
-    } catch (error) {
-      logHostedOnboardingDiagnostic(
-        "linq-typing-shell-prewarm",
-        {
-          errorName: deriveHostedOnboardingTimingErrorName(error),
-          outcome: "failed",
-        },
-      );
-    }
-  };
-
-  if (input.scheduleAfterResponse) {
-    try {
-      input.scheduleAfterResponse(task);
-      return;
-    } catch (error) {
-      logHostedOnboardingDiagnostic(
-        "linq-typing-shell-prewarm",
-        {
-          errorName: deriveHostedOnboardingTimingErrorName(error),
-          outcome: "schedule-failed",
-        },
-      );
-    }
-  }
-
-  void task();
 }
 
 interface HostedLinqPlanningEventResolution {
@@ -2389,7 +2279,6 @@ async function prepareHostedThreadDeliveryRouteAndWarmMailbox(input: {
 
 async function prepareHostedLinqThreadRoutingCrypto(input: {
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
-  onEligibleMember?: (memberId: string) => void;
   participantMemberIds: readonly string[];
   pendingGroupRosterUnavailable: boolean;
   prisma: PrismaClient;
@@ -2494,7 +2383,6 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
       preparedDirectMailboxPayloadRoot:
         await prepareHostedLinqDirectMailboxPayloadRoot({
           event: input.event,
-          onEligibleMember: input.onEligibleMember,
           prisma: input.prisma,
           ...(input.reusableDirectCryptoDomainRoots
             ? {
@@ -3005,7 +2893,6 @@ export async function warmHostedLinqMailboxPayloadRoot(input: {
 
 async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
-  onEligibleMember?: (memberId: string) => void;
   prisma: PrismaClient;
   reusableDirectCryptoDomainRoots?: {
     memberId: string;
@@ -3035,11 +2922,6 @@ async function prepareHostedLinqDirectMailboxPayloadRoot(input: {
   const activeMemberAccess = readActiveHostedMemberAccess({
     memberId,
     prisma: input.prisma,
-  }).then((accessAllowed) => {
-    if (accessAllowed) {
-      input.onEligibleMember?.(memberId);
-    }
-    return accessAllowed;
   });
   const [identityRecord, routingRecord, accessAllowed, preparedFamilyInvite] =
     await Promise.all([

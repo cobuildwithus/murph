@@ -1061,6 +1061,8 @@ export function buildWranglerLocalDevConfig(
     HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: resolveWranglerEnvValue("HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS", source) ?? "45000",
     // Local Cloudflare container cold starts are materially slower than the hosted runtime.
     HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: resolveWranglerEnvValue("HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS", source) ?? "60000",
+    HOSTED_EXECUTION_STANDBY_MODE: resolveWranglerEnvValue("HOSTED_EXECUTION_STANDBY_MODE", source) ?? "off",
+    HOSTED_EXECUTION_STANDBY_TARGET: resolveWranglerEnvValue("HOSTED_EXECUTION_STANDBY_TARGET", source) ?? "2",
     HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: resolveWranglerEnvValue("HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT", source) ?? "development",
   };
 
@@ -1118,7 +1120,8 @@ export function buildWranglerLocalDevConfig(
     containers: [
       buildRunnerContainerConfig({ className: "RunnerContainer", maxInstances: 50 }),
       buildRunnerContainerConfig({ className: "DeploySmokeRunnerContainer", maxInstances: 1 }),
-      buildRunnerContainerConfig({ className: "StandbyRunnerContainer", maxInstances: 50 }),
+      // Keep the legacy binding/application even after its reservation reaches zero.
+      buildRunnerContainerConfig({ className: "StandbyRunnerContainer", maxInstances: 0 }),
     ],
     durable_objects: {
       bindings: [
