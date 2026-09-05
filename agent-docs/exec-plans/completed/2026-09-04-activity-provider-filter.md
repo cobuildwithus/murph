@@ -1,6 +1,6 @@
 # Support explicit activity provider filters
 
-Status: active
+Status: completed
 Created: 2026-09-04
 Updated: 2026-09-05
 
@@ -85,3 +85,12 @@ The exact-shape Garmin journey first failed before any provider action because t
 The first eligible alternate profile passed the same exact Garmin journey on GPT-5.6 Terra through the local subscription. It requested and saved exactly one canonical deviceActivity schedule with source=garmin, activityKind=workout, and the exact requested cutoff. The reply truthfully confirmed the saved future check-in, with no invented clock occurrence, duplicate effect, unnecessary question, or internal terminology. Parent accepted the direct evidence and Ready UX verdict. No further subscription profiles were tried. Web typecheck is the remaining local gate; final pushed-head ReviewGPT and CI are pending.
 
 Web typecheck completed successfully with generated changelog/health-commons data and Prisma client preparation. All local candidate gates passed; no process was signaled. Final diff readback and identifier scan found no leakage or unrelated changes. Candidate publication, final exact-head ReviewGPT, and CI follow with the plan retained active.
+
+## Final review and handoff
+
+PR #2911 is ready on implementation candidate 2b38c73e612ae831244493963c1db81c33ae3406. The changelog now includes its source PR and production archive rendering remained 9/9 passed. Parent candidate and current-base mergeability reviews found no source remediation.
+
+Final managed ReviewGPT round one returned PASS on that exact candidate using GPT-6 Pro on Phlebas, with a full guarded snapshot. Exact response hash, model sidecar, committed user-turn linkage, checked head, and final markers were validated independently by the parent. The conservative confirmed-send wait-to-capture duration was 425.675 seconds; send-stage-to-capture was 555.755 seconds. Parent accepted the near-threshold conservative duration because the review traced all changed owners, reconstructed changed-head/base hashes, and reported 225 production matching and compatibility assertions, proportional to the small source change. There were zero findings and no source remediation. The earlier Apollo attempt failed before sending any review prompt and did not count as a round.
+
+Implementation, direct proof, and review are complete. This final closure changes explanatory plan documentation only, so it does not require another substantive review. Required CI must still be green on the resulting final authored head before task handoff; its live result is recorded on the PR. No merge or deployment is authorized or performed. The documented consumer-first rollout and compatible-reader rollback floor remain applicable.
+Completed: 2026-09-05
