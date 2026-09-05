@@ -253,42 +253,48 @@ interface HostedLocalFullStackScenarioInput {
 export async function startHostedLocalFullStackScenario(
   input: HostedLocalFullStackScenarioInput,
 ): Promise<HostedLocalFullStackScenario> {
-  for (let attempt = 1; attempt <= maxHostedLocalFullStackStartupAttempts; attempt += 1) {
-    const setup: HostedLocalFullStackScenarioSetup = {
-      abortController: new AbortController(),
-      cleanupPromise: null,
-      scenario: null,
-      startupPromise: null,
-    };
-    activeScenarioSetups.add(setup);
-    setup.startupPromise = startHostedLocalFullStackScenarioAttempt(
-      input,
-      setup.abortController.signal,
-    ).then((scenario) => {
-      setup.scenario = scenario;
-      return scenario;
-    });
-
-    try {
-      const scenario = await setup.startupPromise;
-      return {
-        ...scenario,
-        stop: async (): Promise<void> => {
-          await cleanupHostedLocalFullStackScenarioSetup(setup);
-        },
-      };
-    } catch (error) {
-      activeScenarioSetups.delete(setup);
-      if (
-        attempt === maxHostedLocalFullStackStartupAttempts
-        || !isHostedLocalPortBindCollision(error)
-      ) {
-        throw error;
+  const setup: HostedLocalFullStackScenarioSetup = {
+    abortController: new AbortController(),
+    cleanupPromise: null,
+    scenario: null,
+    startupPromise: null,
+  };
+  activeScenarioSetups.add(setup);
+  setup.startupPromise = (async () => {
+    for (let attempt = 1; attempt <= maxHostedLocalFullStackStartupAttempts; attempt += 1) {
+      try {
+        setup.abortController.signal.throwIfAborted();
+        const scenario = await startHostedLocalFullStackScenarioAttempt(
+          input,
+          setup.abortController.signal,
+        );
+        setup.scenario = scenario;
+        return scenario;
+      } catch (error) {
+        if (
+          setup.abortController.signal.aborted
+          || attempt === maxHostedLocalFullStackStartupAttempts
+          || !isHostedLocalPortBindCollision(error)
+        ) {
+          throw error;
+        }
       }
     }
-  }
+    throw new Error("Hosted local full-stack startup exhausted its bounded attempts.");
+  })();
 
-  throw new Error("Hosted local full-stack startup exhausted its bounded attempts.");
+  try {
+    const scenario = await setup.startupPromise;
+    return {
+      ...scenario,
+      stop: async (): Promise<void> => {
+        await cleanupHostedLocalFullStackScenarioSetup(setup);
+      },
+    };
+  } catch (error) {
+    activeScenarioSetups.delete(setup);
+    throw error;
+  }
 }
 
 async function startHostedLocalFullStackScenarioAttempt(
@@ -706,7 +712,9 @@ async function cleanupHostedLocalFullStackScenarioSetup(
   setup: HostedLocalFullStackScenarioSetup,
 ): Promise<void> {
   setup.cleanupPromise ??= (async () => {
-    setup.abortController.abort();
+    if (setup.scenario === null) {
+      setup.abortController.abort();
+    }
     try {
       await setup.startupPromise?.catch(() => {});
       await setup.scenario?.stop();

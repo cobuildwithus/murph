@@ -347,8 +347,11 @@ export async function startHostedLocalDevStack(input: {
   let hostedWebTestPreloadOutputDir: string | null = null;
   let keepAliveTimer: ReturnType<typeof setInterval> | null = null;
   let minioMonitor: HostedLocalMinioMonitor | null = null;
+  const abortController = new AbortController();
+  const readinessChecks: Promise<void>[] = [];
   const kill = (signal: NodeJS.Signals = "SIGTERM"): void => {
     const childSignal = resolveHostedLocalChildShutdownSignal(signal);
+    abortController.abort(childSignal);
     killHostedLocalMinioMonitor();
     for (const { child } of children) {
       terminateChildProcess(child, childSignal);
@@ -357,6 +360,9 @@ export async function startHostedLocalDevStack(input: {
       for (const { child } of minioServer.processes()) {
         terminateChildProcess(child, childSignal);
       }
+    }
+    if (minioServer === null && minioProcess !== null) {
+      terminateChildProcess(minioProcess.child, childSignal);
     }
     if (stripeListener !== null) {
       terminateChildProcess(stripeListener.child, childSignal);
@@ -376,7 +382,7 @@ export async function startHostedLocalDevStack(input: {
         cwd: webDir,
         env: initialProcessEnv,
         name: "setup",
-        signal: input.abortSignal,
+        signal: abortController.signal,
       });
     }
 
@@ -389,7 +395,7 @@ export async function startHostedLocalDevStack(input: {
     const pulledEnv = (config.skipVercelPull || providedVercelOidcToken)
       ? {}
       : await readSimpleEnvFile(pulledEnvPath);
-    throwIfAbortSignalAborted(input.abortSignal);
+    throwIfAbortSignalAborted(abortController.signal);
     const localStripeAuthorityEnv = pickHostedLocalStripeAuthorityEnv({
       inheritedEnv: initialEnv,
       localEnvFiles: [
@@ -490,7 +496,7 @@ export async function startHostedLocalDevStack(input: {
       }
     }
     const oidcToken = await resolveVercelOidcToken(vercelEnv);
-    throwIfAbortSignalAborted(input.abortSignal);
+    throwIfAbortSignalAborted(abortController.signal);
     const oidcIdentity = parseHostedExecutionOidcIdentity(oidcToken);
     if (isolatedDockerConfigDir !== null) {
       await prepareIsolatedDockerConfig({
@@ -498,13 +504,15 @@ export async function startHostedLocalDevStack(input: {
         sourceEnv: initialEnv,
       });
     }
-    throwIfAbortSignalAborted(input.abortSignal);
+    throwIfAbortSignalAborted(abortController.signal);
     const containerReachableHost = new URL(resolveContainerReachableWorkerOrigin(
       config,
       initialEnv,
     )).hostname;
     minioServer = workerPortMode === "start"
       ? await maybeStartHostedLocalMinio({
+        abortSignal: abortController.signal,
+        onProcessStarted: (process) => { minioProcess = process; },
         buildId: hostedRunnerLocalBuildId,
         containerHost: containerReachableHost,
         env: {
@@ -531,7 +539,7 @@ export async function startHostedLocalDevStack(input: {
         stderrTarget: input.stderrTarget,
       });
     }
-    throwIfAbortSignalAborted(input.abortSignal);
+    throwIfAbortSignalAborted(abortController.signal);
     const cloudflareDevVars = await resolveCloudflareLocalEnv({
       config,
       oidcIdentity,
@@ -543,7 +551,7 @@ export async function startHostedLocalDevStack(input: {
         ...temporalEnvironmentOverlay,
       },
     });
-    throwIfAbortSignalAborted(input.abortSignal);
+    throwIfAbortSignalAborted(abortController.signal);
     const localOverrides = buildHostedLocalDevOverrides(config, cloudflareDevVars, {
       retellWebhookPublicBaseUrl: linqWebhookSetup?.publicBaseUrl ?? null,
       webPublicBaseUrl: initialEnv.MURPH_DEV_WEB_PUBLIC_BASE_URL,
@@ -649,7 +657,7 @@ export async function startHostedLocalDevStack(input: {
         await symlink(workerDevVarsPath, cloudflareDevVarsPath);
       }
     }
-    throwIfAbortSignalAborted(input.abortSignal);
+    throwIfAbortSignalAborted(abortController.signal);
 
     requireEnvValue(
       "DATABASE_URL",
@@ -670,10 +678,10 @@ export async function startHostedLocalDevStack(input: {
       stderrTarget: input.stderrTarget,
       stripeListenerWillCaptureSecret,
     });
-    throwIfAbortSignalAborted(input.abortSignal);
+    throwIfAbortSignalAborted(abortController.signal);
 
     await maybeGenerateHostedWebPrismaClient({
-      abortSignal: input.abortSignal,
+      abortSignal: abortController.signal,
       env: runtimeEnv,
       stderrTarget: input.stderrTarget,
     });
@@ -692,14 +700,14 @@ export async function startHostedLocalDevStack(input: {
           cwd: repoRoot,
           env: runtimeEnv,
           name: "setup",
-          signal: input.abortSignal,
+          signal: abortController.signal,
         });
       } else {
         await runCommand("pnpm", ["--dir", "apps/web", "prisma:migrate:deploy"], {
           cwd: repoRoot,
           env: runtimeEnv,
           name: "setup",
-          signal: input.abortSignal,
+          signal: abortController.signal,
         });
       }
 
@@ -725,7 +733,7 @@ export async function startHostedLocalDevStack(input: {
           cwd: repoRoot,
           env: runtimeEnv,
           name: "setup",
-          signal: input.abortSignal,
+          signal: abortController.signal,
         });
       } else {
         (input.stderrTarget ?? process.stderr).write(
@@ -736,7 +744,7 @@ export async function startHostedLocalDevStack(input: {
 
     if (!config.skipWeb) {
       await maybeGenerateHostedWebHealthCommons({
-        abortSignal: input.abortSignal,
+        abortSignal: abortController.signal,
         env: runtimeEnv,
         stderrTarget: input.stderrTarget,
       });
@@ -758,7 +766,7 @@ export async function startHostedLocalDevStack(input: {
           cwd: repoRoot,
           env: runnerBundleEnv,
           name: "setup",
-          signal: input.abortSignal,
+          signal: abortController.signal,
         });
         if (workerProcessEnv !== null) {
           workerProcessEnv.MURPH_DEV_SKIP_RUNNER_BUNDLE = "1";
@@ -772,7 +780,7 @@ export async function startHostedLocalDevStack(input: {
         workerRuntimeEnv,
       });
       const cloudflareSourceSnapshot = await prepareHostedLocalCloudflareSourceSnapshot({
-        abortSignal: input.abortSignal,
+        abortSignal: abortController.signal,
         tempDir,
       });
       await writeFile(
@@ -814,7 +822,7 @@ export async function startHostedLocalDevStack(input: {
         persistDir: workerPersistDir,
       });
     }
-    throwIfAbortSignalAborted(input.abortSignal);
+    throwIfAbortSignalAborted(abortController.signal);
 
     // Wrangler prefers CLOUDFLARE_API_TOKEN over OAuth, and account-scoped
     // tokens cannot open the remote session backing the Workers AI binding.
@@ -884,7 +892,7 @@ export async function startHostedLocalDevStack(input: {
         keepAliveTimer = setInterval(() => {}, 2_147_483_647);
       }
     }
-    throwIfAbortSignalAborted(input.abortSignal);
+    throwIfAbortSignalAborted(abortController.signal);
 
     if (linqWebhookSetup?.shouldStartTunnel) {
       linqTunnelProcess = spawnChildProcess("linq-tunnel", "cloudflared", [
@@ -901,7 +909,7 @@ export async function startHostedLocalDevStack(input: {
       });
       children.push(linqTunnelProcess);
     }
-    throwIfAbortSignalAborted(input.abortSignal);
+    throwIfAbortSignalAborted(abortController.signal);
 
     stripeListener = await maybeStartStripeWebhookListener({
       config,
@@ -929,7 +937,7 @@ export async function startHostedLocalDevStack(input: {
         );
       });
     }
-    throwIfAbortSignalAborted(input.abortSignal);
+    throwIfAbortSignalAborted(abortController.signal);
 
     healthCommonsWatcher = config.skipWeb || config.skipHealthCommonsWatch
       ? null
@@ -946,7 +954,7 @@ export async function startHostedLocalDevStack(input: {
     if (healthCommonsWatcher) {
       children.push(healthCommonsWatcher);
     }
-    throwIfAbortSignalAborted(input.abortSignal);
+    throwIfAbortSignalAborted(abortController.signal);
 
     const shouldUseWebProductionStart = config.skipWeb
       ? false
@@ -976,7 +984,7 @@ export async function startHostedLocalDevStack(input: {
     const webProcessEnvironment = hostedWebTestPreloadOutputDir === null
       ? webProcessSourceEnv
       : await prepareHostedLocalTemporalMailboxSignalFaultPreload({
-        abortSignal: input.abortSignal,
+        abortSignal: abortController.signal,
         env: webProcessSourceEnv,
         expectedUserId: input.webTemporalMailboxSignalFaultUserId ?? "",
         outputDir: hostedWebTestPreloadOutputDir,
@@ -998,7 +1006,7 @@ export async function startHostedLocalDevStack(input: {
     if (webProcess) {
       children.push(webProcess);
     }
-    throwIfAbortSignalAborted(input.abortSignal);
+    throwIfAbortSignalAborted(abortController.signal);
 
     const tlsProxyProcess = config.skipWeb
       ? null
@@ -1011,7 +1019,7 @@ export async function startHostedLocalDevStack(input: {
     if (tlsProxyProcess) {
       children.push(tlsProxyProcess);
     }
-    throwIfAbortSignalAborted(input.abortSignal);
+    throwIfAbortSignalAborted(abortController.signal);
 
     const { internalWebBaseUrl, webBaseUrl } = resolveHostedLocalWebBaseUrls(
       config,
@@ -1022,7 +1030,7 @@ export async function startHostedLocalDevStack(input: {
       runtimeEnv,
     });
     temporalRuntime = await startHostedLocalTemporalRuntime({
-      abortSignal: input.abortSignal,
+      abortSignal: abortController.signal,
       cloudflareHostedControlBaseUrl: workerBaseUrl,
       config,
       env: temporalRuntimeEnv,
@@ -1037,7 +1045,7 @@ export async function startHostedLocalDevStack(input: {
     if (temporalRuntime?.workerProcess) {
       children.push(temporalRuntime.workerProcess);
     }
-    throwIfAbortSignalAborted(input.abortSignal);
+    throwIfAbortSignalAborted(abortController.signal);
 
     const cleanupTemporaryInputs = async (): Promise<void> => {
       if (restoreCloudflareDevVars) {
@@ -1066,7 +1074,7 @@ export async function startHostedLocalDevStack(input: {
         }
 
         stopped = true;
-        releaseLifecycleListeners();
+        abortController.abort(resolveHostedLocalChildShutdownSignal(signal));
         if (keepAliveTimer !== null) {
           clearInterval(keepAliveTimer);
           keepAliveTimer = null;
@@ -1093,6 +1101,7 @@ export async function startHostedLocalDevStack(input: {
             ]
             : []),
         ]);
+        await Promise.allSettled(readinessChecks);
         const terminationFailure = terminationResults.find(
           (result): result is PromiseRejectedResult => result.status === "rejected",
         );
@@ -1124,7 +1133,7 @@ export async function startHostedLocalDevStack(input: {
         if (terminationFailure) {
           throw terminationFailure.reason;
         }
-      })();
+      })().finally(releaseLifecycleListeners);
 
       return await stopPromise;
     };
@@ -1138,20 +1147,22 @@ export async function startHostedLocalDevStack(input: {
 
     const ready = (async (): Promise<void> => {
       try {
-        const healthChecks = [
+        readinessChecks.push(
           waitForHealthyHttpEndpoint({
             host: resolveHostedLocalClientWorkerHost(config.workerHost),
             label: "cloudflare",
+            signal: abortController.signal,
             path: "/health",
             port: config.workerPort,
             protocol: config.workerProtocol,
           }),
-        ];
+        );
         if (internalWebBaseUrl !== null) {
-          healthChecks.push(
+          readinessChecks.push(
             waitForHealthyHttpEndpoint({
               host: config.webHost,
               label: "web",
+              signal: abortController.signal,
               path: HOSTED_WEB_HEALTH_PATH,
               port: config.webPort,
               protocol: "http",
@@ -1159,7 +1170,7 @@ export async function startHostedLocalDevStack(input: {
           );
         }
         await Promise.race([
-          Promise.all(healthChecks).then(() => undefined),
+          Promise.all(readinessChecks).then(() => undefined),
           waitForFirstChildExit(children).then((child) => {
             const exitedChild = children.find((candidate) => candidate.child === child.child);
             const portBindCollision = exitedChild
@@ -1173,14 +1184,18 @@ export async function startHostedLocalDevStack(input: {
             );
           }),
         ]);
+        throwIfAbortSignalAborted(abortController.signal);
         ensurePreparedRunnerContainerImageAlias(combineChildOutput(children));
         if (workerRuntimeEnv !== null) {
-          await maybeRunRunnerContainerSmoke({
+          const smoke = maybeRunRunnerContainerSmoke({
+            abortSignal: abortController.signal,
             config,
             env: workerProcessEnv ?? workerRuntimeEnv,
             stderrTarget: input.stderrTarget,
             workerBaseUrl,
           });
+          readinessChecks.push(smoke);
+          await smoke;
         }
       } catch (error) {
         if (!stopped) {
@@ -1238,63 +1253,67 @@ export async function startHostedLocalDevStack(input: {
       workerBaseUrl,
     };
   } catch (error) {
-    releaseLifecycleListeners();
-    await stopHostedLocalMinioMonitor().catch(() => {});
-    for (const { child } of children) {
-      await terminateChildProcessAndWait(child, { signal: "SIGTERM" }).catch(() => {});
-    }
-    if (minioServer !== null) {
-      for (const { child } of minioServer.processes()) {
+    abortController.abort("SIGTERM");
+    try {
+      await stopHostedLocalMinioMonitor().catch(() => {});
+      for (const { child } of children) {
         await terminateChildProcessAndWait(child, { signal: "SIGTERM" }).catch(() => {});
       }
-    }
-    if (stripeListener !== null) {
-      await terminateChildProcessAndWait(stripeListener.child, { signal: "SIGTERM" }).catch(() => {});
-    }
-    if (dockerEventsProcess !== null) {
-      await terminateChildProcessAndWait(dockerEventsProcess.child, { signal: "SIGTERM" })
-        .catch(() => {});
-    }
-    if (workerRuntimeEnv && workerPortMode === "start") {
-      await cleanupHostedRunnerContainers({
-        cwd: repoRoot,
-        env: workerProcessEnv ?? workerRuntimeEnv,
-        ignoreErrors: true,
-        scope: "current-build",
-      }).catch(() => {});
-      // Preserve suite-owned reuse even when this scenario fails to start; the
-      // outer E2E finally block still removes the current-build image.
-      if (!shouldRunHostedLocalE2eRunnerSmokeOnce(initialProcessEnv)) {
-        await cleanupHostedRunnerImages({
+      if (minioServer !== null) {
+        for (const { child } of minioServer.processes()) {
+          await terminateChildProcessAndWait(child, { signal: "SIGTERM" }).catch(() => {});
+        }
+      }
+      if (stripeListener !== null) {
+        await terminateChildProcessAndWait(stripeListener.child, { signal: "SIGTERM" }).catch(() => {});
+      }
+      if (dockerEventsProcess !== null) {
+        await terminateChildProcessAndWait(dockerEventsProcess.child, { signal: "SIGTERM" })
+          .catch(() => {});
+      }
+      if (workerRuntimeEnv && workerPortMode === "start") {
+        await cleanupHostedRunnerContainers({
           cwd: repoRoot,
           env: workerProcessEnv ?? workerRuntimeEnv,
           ignoreErrors: true,
           scope: "current-build",
         }).catch(() => {});
-      }
-    }
-    if (minioServer !== null) {
-      await cleanupHostedLocalMinioContainerBestEffort(
-        workerProcessEnv ?? workerRuntimeEnv ?? initialProcessEnv,
-        minioServer.containerName,
-      ).catch(() => {});
-    }
-    if (!stopped) {
-      await rm(workerConfigPath, { force: true }).catch(() => {});
-      if (hostedWebTestPreloadOutputDir !== null) {
-        await rm(hostedWebTestPreloadOutputDir, { force: true, recursive: true }).catch(() => {});
-      }
-      if (restoreCloudflareDevVars) {
-        await rm(cloudflareDevVarsPath, { force: true }).catch(() => {});
-        if (hadExistingCloudflareDevVars) {
-          await rename(workerDevVarsBackupPath, cloudflareDevVarsPath).catch(() => {});
+        // Preserve suite-owned reuse even when this scenario fails to start; the
+        // outer E2E finally block still removes the current-build image.
+        if (!shouldRunHostedLocalE2eRunnerSmokeOnce(initialProcessEnv)) {
+          await cleanupHostedRunnerImages({
+            cwd: repoRoot,
+            env: workerProcessEnv ?? workerRuntimeEnv,
+            ignoreErrors: true,
+            scope: "current-build",
+          }).catch(() => {});
         }
       }
-      if (!tempDirOverride) {
-        await rm(tempDir, { force: true, recursive: true }).catch(() => {});
+      if (minioServer !== null) {
+        await cleanupHostedLocalMinioContainerBestEffort(
+          workerProcessEnv ?? workerRuntimeEnv ?? initialProcessEnv,
+          minioServer.containerName,
+        ).catch(() => {});
       }
+      if (!stopped) {
+        await rm(workerConfigPath, { force: true }).catch(() => {});
+        if (hostedWebTestPreloadOutputDir !== null) {
+          await rm(hostedWebTestPreloadOutputDir, { force: true, recursive: true }).catch(() => {});
+        }
+        if (restoreCloudflareDevVars) {
+          await rm(cloudflareDevVarsPath, { force: true }).catch(() => {});
+          if (hadExistingCloudflareDevVars) {
+            await rename(workerDevVarsBackupPath, cloudflareDevVarsPath).catch(() => {});
+          }
+        }
+        if (!tempDirOverride) {
+          await rm(tempDir, { force: true, recursive: true }).catch(() => {});
+        }
+      }
+      throw error;
+    } finally {
+      releaseLifecycleListeners();
     }
-    throw error;
   }
 
   async function stopHostedLocalMinioMonitor(): Promise<void> {
@@ -1308,7 +1327,6 @@ export async function startHostedLocalDevStack(input: {
   function killHostedLocalMinioMonitor(): void {
     if (minioMonitor !== null) {
       minioMonitor.kill();
-      minioMonitor = null;
     }
   }
 }
@@ -2669,6 +2687,7 @@ function stripHostedCryptoMaterialEnv<TEnv extends Record<string, string | undef
 }
 
 async function maybeRunRunnerContainerSmoke(input: {
+  abortSignal?: AbortSignal;
   config: HostedLocalDevConfig;
   env: NodeJS.ProcessEnv | null;
   stderrTarget?: NodeJS.WritableStream;
@@ -2698,9 +2717,11 @@ async function maybeRunRunnerContainerSmoke(input: {
           input.env.HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS?.trim() || "1000",
       },
       name: "setup",
+      signal: input.abortSignal,
     });
     await markHostedLocalE2eRunnerSmokeProved(input.env);
   } catch (error) {
+    throwIfAbortSignalAborted(input.abortSignal);
     if (requiresHostedLocalE2eIsolation(input.env)) {
       throw error;
     }
