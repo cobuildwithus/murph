@@ -96,6 +96,63 @@ export async function publishHostedWorkspaceMediaReferencesForSnapshot(input: {
     };
   }
 
+  const { existingCatalogue, entries, uploadedMediaCount } = await prepareHostedWorkspaceMediaReferences({
+    ...input,
+    mediaStore: input.mediaStore,
+  });
+  await writeHostedMediaReferenceCatalogue({
+    catalogue: {
+      entries,
+      schema: HOSTED_MEDIA_REFS_SCHEMA,
+    },
+    vaultRoot: input.vaultRoot,
+  });
+
+  const nextMediaIds = new Set(entries.map((entry) => entry.mediaId));
+  let prunedMediaCount = 0;
+  for (const entry of existingCatalogue.entries) {
+    assertHostedMediaReferenceLive(input.signal);
+    if (nextMediaIds.has(entry.mediaId)) {
+      continue;
+    }
+    await input.mediaStore.delete?.({ mediaId: entry.mediaId });
+    prunedMediaCount += 1;
+  }
+
+  return {
+    excludedVaultPaths: entries.map((entry) => entry.relativePath),
+    prunedMediaCount,
+    referenceCount: entries.length,
+    uploadedMediaCount,
+  };
+}
+
+// Canonical writes can still roll back until their receipt is acknowledged.
+// Preserve earlier references; only snapshot reconciliation may reclaim them.
+export async function publishHostedWorkspaceMediaReferences(input: {
+  mediaStore: HostedRuntimeMediaStore;
+  signal?: AbortSignal | null;
+  vaultRoot: string;
+}): Promise<HostedMediaReference[]> {
+  const { existingCatalogue, entries } = await prepareHostedWorkspaceMediaReferences(input);
+  const byPath = new Map(existingCatalogue.entries.map((entry) => [entry.relativePath, entry]));
+  for (const entry of entries) byPath.set(entry.relativePath, entry);
+  await writeHostedMediaReferenceCatalogue({
+    catalogue: { entries: [...byPath.values()], schema: HOSTED_MEDIA_REFS_SCHEMA },
+    vaultRoot: input.vaultRoot,
+  });
+  return entries;
+}
+
+async function prepareHostedWorkspaceMediaReferences(input: {
+  mediaStore: HostedRuntimeMediaStore;
+  signal?: AbortSignal | null;
+  vaultRoot: string;
+}): Promise<{
+  entries: HostedMediaReference[];
+  existingCatalogue: HostedMediaReferenceCatalogue;
+  uploadedMediaCount: number;
+}> {
   const existingCatalogue = await readHostedMediaReferenceCatalogue({
     vaultRoot: input.vaultRoot,
   });
@@ -157,30 +214,9 @@ export async function publishHostedWorkspaceMediaReferencesForSnapshot(input: {
     }
   }
 
-  const dedupedEntries = dedupeHostedMediaReferenceEntries(nextEntries);
-  await writeHostedMediaReferenceCatalogue({
-    catalogue: {
-      entries: dedupedEntries,
-      schema: HOSTED_MEDIA_REFS_SCHEMA,
-    },
-    vaultRoot: input.vaultRoot,
-  });
-
-  const nextMediaIds = new Set(dedupedEntries.map((entry) => entry.mediaId));
-  let prunedMediaCount = 0;
-  for (const entry of existingCatalogue.entries) {
-    assertHostedMediaReferenceLive(input.signal);
-    if (nextMediaIds.has(entry.mediaId)) {
-      continue;
-    }
-    await input.mediaStore.delete?.({ mediaId: entry.mediaId });
-    prunedMediaCount += 1;
-  }
-
   return {
-    excludedVaultPaths: dedupedEntries.map((entry) => entry.relativePath),
-    prunedMediaCount,
-    referenceCount: dedupedEntries.length,
+    entries: dedupeHostedMediaReferenceEntries(nextEntries),
+    existingCatalogue,
     uploadedMediaCount,
   };
 }

@@ -11,6 +11,7 @@ import {
   applyCanonicalWriteBatch,
   appendJsonlRecord,
   initializeVault,
+  readEvent,
   upsertEvent,
   withHostedCanonicalWritePort,
   type HostedCanonicalWritePersistenceInput,
@@ -575,6 +576,86 @@ test("ordinary canonical captures have no transient media deadline", async () =>
   }
 });
 
+
+test("failed capture replacement preserves saved media until committed snapshot cleanup", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "murph-media-write-rollback-"));
+  const vaultRoot = path.join(root, "live");
+  const restoredRoot = path.join(root, "restored");
+  const { artifactStore } = createHostedRuntimeArtifactStoreStub();
+  const store = createHostedRuntimeMediaStoreStub();
+  const now = new Date().toISOString();
+  try {
+    await initializeVault({ vaultRoot });
+    const captures: Array<Awaited<ReturnType<typeof addCapture>>> = [];
+    for (const name of ["first", "second"]) {
+      const sourcePath = path.join(root, `${name}.png`);
+      await writeFile(sourcePath, `${name} saved image bytes`);
+      captures.push(await addCapture({
+        vaultRoot,
+        draft: { occurredAt: now, source: "manual", title: name, note: "Saved attachment." },
+        attachments: [{ role: "photo", sourcePath }],
+      }));
+    }
+    await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore: store.mediaStore });
+    const catalogue = await readHostedMediaReferenceCatalogue({ vaultRoot });
+    const original = catalogue.entries.find((entry) => entry.relativePath === captures[0]!.event.rawRefs![0])!;
+    const replacement = catalogue.entries.find((entry) => entry.relativePath === captures[1]!.event.rawRefs![0])!;
+    assert.ok(original);
+    assert.ok(replacement);
+    for (const entry of catalogue.entries) await rm(path.join(vaultRoot, entry.relativePath));
+    const snapshot = await snapshotHostedBundleRoots({ kind: "vault", roots: [{ root: vaultRoot, rootKey: "vault" }] });
+    assert.ok(snapshot);
+    const snapshotHash = sha256HostedBundleHex(snapshot);
+    await artifactStore.put({ bytes: snapshot, sha256: snapshotHash });
+
+    const replace = (failUpload: boolean) => withHostedCanonicalWritePort({
+      async persistCanonicalWrite(persistence) {
+        assert.ok(persistence.receipt.actions.every((action) => action.kind === "jsonl_append"));
+        const externalized = await externalizeHostedCanonicalWriteMediaPayloads({
+          persistence, vaultRoot, mediaStore: store.mediaStore,
+        });
+        await appendHostedCanonicalWriteReceiptToArtifactLog({
+          ...externalized, previousStatus: {},
+          artifactStore: failUpload ? {
+            ...artifactStore,
+            async put() { throw new Error("Synthetic receipt upload failure"); },
+          } : artifactStore,
+        });
+      },
+    }, () => upsertEvent({ vaultRoot, payload: {
+      id: captures[0]!.event.id, kind: "note", occurredAt: now, source: "manual",
+      title: "Updated attachment", note: "Use the second attachment.", rawRefs: [replacement.relativePath],
+    } }));
+
+    await assert.rejects(replace(true), /Synthetic receipt upload failure/);
+    assert.deepEqual((await readEvent({ vaultRoot, eventId: captures[0]!.event.id })).event.rawRefs, [original.relativePath]);
+    assert.deepEqual(store.deleteCalls, []);
+    assert.deepEqual((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries, catalogue.entries);
+    assert.ok(store.storedBytesByMediaId.has(original.mediaId));
+    const restored = await restoreHostedWorkspaceRuntimeJobWorkspace({
+      vaultRoot: restoredRoot, platform: { artifactStore, logPort: null, mediaStore: store.mediaStore },
+      workspace: createWorkspaceState({
+        snapshotRef: { hash: snapshotHash, key: "synthetic/rollback-base.bundle", size: snapshot.byteLength, updatedAt: now },
+      }),
+    });
+    assert.deepEqual(store.getCalls, []);
+    await restored.materializeWorkspaceArtifacts([original.relativePath]);
+    assert.equal(await readFile(path.join(restoredRoot, original.relativePath), "utf8"), "first saved image bytes");
+    assert.equal(store.getCalls.length, 1);
+
+    await replace(false);
+    assert.deepEqual((await readEvent({ vaultRoot, eventId: captures[0]!.event.id })).event.rawRefs, [replacement.relativePath]);
+    assert.deepEqual(store.deleteCalls, []);
+    assert.ok((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries.some((entry) => entry.mediaId === original.mediaId));
+    await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore: store.mediaStore });
+    assert.deepEqual(store.deleteCalls, [original.mediaId]);
+    assert.deepEqual((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries, [replacement]);
+    assert.equal(store.storedBytesByMediaId.has(original.mediaId), false);
+    assert.ok(store.storedBytesByMediaId.has(replacement.mediaId));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("acknowledged capture receipts recover media references without a newer snapshot", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "murph-media-receipt-recovery-"));

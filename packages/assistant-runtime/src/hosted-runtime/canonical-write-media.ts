@@ -18,7 +18,7 @@ import type {
   HostedRuntimeMediaStore,
 } from "./platform.ts";
 import {
-  publishHostedWorkspaceMediaReferencesForSnapshot,
+  publishHostedWorkspaceMediaReferences,
   readHostedMediaReferenceCatalogue,
   writeHostedMediaReferenceCatalogue,
   type HostedMediaReference,
@@ -35,15 +35,12 @@ export async function externalizeHostedCanonicalWriteMediaPayloads(input: {
     return input.persistence;
   }
 
-  await publishHostedWorkspaceMediaReferencesForSnapshot({
+  const entries = await publishHostedWorkspaceMediaReferences({
     mediaStore: input.mediaStore,
     vaultRoot: input.vaultRoot,
   });
-  const catalogue = await readHostedMediaReferenceCatalogue({
-    vaultRoot: input.vaultRoot,
-  });
   const mediaRefsByPath = new Map(
-    catalogue.entries.map((entry) => [entry.relativePath, entry]),
+    entries.map((entry) => [entry.relativePath, entry]),
   );
   let omittedPayloadCount = 0;
   const actions: HostedCanonicalWriteReceiptAction[] = input.persistence.receipt.actions.map((action) => {
