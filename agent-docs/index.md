@@ -4,6 +4,11 @@ Last verified: 2026-09-02
 
 ## Purpose
 
+Runtime-owned terminal Linq send recovery and replacement receipt ownership
+are specified by `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, and
+`agent-docs/SECURITY.md`; focused provider and PostgreSQL proof is indexed in
+`agent-docs/references/testing-ci-map.md`.
+
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists only live architecture, product, verification, and package-boundary docs.
 

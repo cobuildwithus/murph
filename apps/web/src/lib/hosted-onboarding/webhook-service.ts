@@ -75,6 +75,9 @@ import {
   ingestHostedLinqProviderEventTx,
 } from "./linq-provider-event-store";
 import {
+  retryHostedLinqTerminalSendForEvent,
+} from "./linq-terminal-retry";
+import {
   parseHostedLinqProviderEvent,
 } from "./linq-provider-events";
 import {
@@ -493,6 +496,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         prisma,
         scheduleAfterResponse: input.scheduleAfterResponse,
       });
+      await retryHostedLinqTerminalSendForEvent({ event: providerEvent, prisma });
       const response: HostedOnboardingLinqWebhookResponse = {
         duplicate: providerResult.duplicate || undefined,
         ignored: true,

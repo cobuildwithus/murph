@@ -4,6 +4,45 @@ Last verified: 2026-09-01
 
 ## Current Guardrails
 
+- Runtime-owned Linq iMessages with code `4001` and the exact terminal
+  reason `Message send failed` may resend each failed provider message once.
+  The existing delivery-message row owns the permanent attempt timestamp and
+  original lookup key; a parent delivery lock serializes competing claims.
+  Acceptance replaces the existing active message key (and matching parent
+  scalar key), preserving the established receipt-reader contract. Receipt
+  updates recheck that active key after acquiring the parent lock.
+  Duplicate webhooks, callback replay, and a failed or transport-ambiguous
+  replacement never create another attempt. The original failure remains
+  observable, while replacement receipts advance the same logical delivery;
+  receipts for a replaced original cannot regress it. Group multi-message
+  delivery retries only the failed part and preserves no-receipt status.
+  Recovery runs after failure ingestion and after runtime acceptance to cover
+  both receipt/acceptance arrival orders. It is limited to deliveries accepted
+  within 24 hours and current configured sender, route, account access, and
+  line/chat egress policy. Read the exact failed outbound through the official
+  SDK (three-second limit), then claim in a short database-only transaction,
+  then resend once (five-second limit, SDK retries disabled) into that same
+  chat with a stable retry idempotency key. Retrieved content stays in memory.
+  Text, native links, and non-audio attachments preserve their send shape;
+  voice memos, app cards, absent/expired content, and other non-reconstructible
+  formats retain the original failure instead of changing their semantics.
+  Web-owned onboarding sends and manual/provider-only sends retain their
+  existing recovery owners. Other `4001` reasons and `4006` remain excluded
+  because they can still deliver late. Scheduling failure cannot invalidate an
+  accepted runtime handoff. An unavailable provider response or interrupted
+  post-dispatch recording may leave failure evidence unresolved; the consumed
+  claim deliberately prevents a further resend.
+  The post-response acceptance check performs one exact failed-delivery lookup
+  per provider ID (at most ten, sequentially), with no provider work on normal
+  success. Recovery reads at most eleven child rows to reject an oversized
+  delivery, reuses bounded canonical access reads, and opens at most one
+  transaction/connection per invocation at a time. Network calls occur between
+  the claim and acceptance transactions; there is no collection worker,
+  scheduler, or new retry queue.
+  Apply the additive delivery-message migration before deploying the new Web
+  reader/writer. Existing Web readers continue using the active message key;
+  the new nullable fields do not require a Cloudflare runtime deployment.
+
 - Keep behavior deterministic and documented as the first modules are added.
 - Prefer explicit failure paths and actionable errors over silent fallback behavior.
 - A successful Vercel build is not production convergence. For the current
