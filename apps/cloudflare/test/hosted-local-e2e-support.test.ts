@@ -707,6 +707,10 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       [buildResponsesRequest(allToolNames, "code-mode")],
       allToolsAvailable,
     );
+    expectAdvertisedMurphDynamicTools(
+      [buildResponsesRequest(allToolNames, "code-mode-namespaced")],
+      allToolsAvailable,
+    );
   });
 });
 
@@ -936,6 +940,9 @@ function buildResponsesRequest(
     description: namespacedToolNames
       .filter((name) =>
         name !== "murph.automation"
+        && name !== "murph.attach_response_card"
+        && name !== "murph.attach_exercise_routine_card"
+        && name !== "murph.attach_telegram_rich_content"
         && !hostedGroupFamilyToolNames.includes(name)
       )
       .map((name) => name.replace(/^murph\./u, "murph__"))

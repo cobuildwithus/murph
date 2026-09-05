@@ -1,8 +1,14 @@
 # Testing And CI Map
 
-Last verified: 2026-09-04
+Last verified: 2026-09-05
 
 ## Current Repo Checks
+
+`apps/cloudflare/test/hosted-local-e2e-support.test.ts` proves the shared hosted
+E2E tool-advertisement assertion across structured and code-mode requests.
+Code-mode fixtures omit deferred response, exercise-routine, and Telegram rich
+content cards from resident descriptions while requiring discovery. Both plain
+and namespaced code-mode wrappers retain an exact resident-tool inventory check.
 
 Linq email identity remediation is covered by the focused
 `hosted-onboarding-linq-email-authority.test.ts` and
@@ -621,6 +627,10 @@ gate unset and makes no paid request.
   boundary are observational. Private Murph Cloud owns its dedicated
   `Public Murph Integration` matrix leg and includes that leg in the Temporal
   orchestration aggregator.
+- Focused hosted-local lifecycle tests prove that file teardown aborts and
+  joins a scenario setup still pending after a suite-hook timeout, propagates
+  that cancellation through the dev harness, and signals only the exact child
+  handles owned by a stack when its parent process exits.
 - `apps/cloudflare/test/hosted-local-usage-limit-ambiguous-send-e2e.test.ts`
   composes the real private-to-group route, plain-text isolated model turn,
   deterministic group delivery, Web allowance settlement, warm-fence
