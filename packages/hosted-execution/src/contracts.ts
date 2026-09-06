@@ -109,6 +109,7 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "device-sync.wake",
   "environment-interview.completed",
   "environment-voice.captured",
+  "journal.group-fact.recorded",
   "health.daily-metric.reported",
   "meal-photo.captured",
   "member.action.requested",
@@ -289,6 +290,7 @@ export interface HostedExecutionPrivateAssistantAskCompletionNotification {
 export interface HostedExecutionGroupContextHandoffNotification {
   membershipId: string;
   originAssistantInputId: string;
+  sourceDisplayName?: string | null;
 }
 
 export interface HostedExecutionOperatorTaskNotification {
@@ -928,6 +930,29 @@ export interface HostedExecutionDailyMetricReportedWake
   kind: "health.daily-metric.reported";
 }
 
+export const HOSTED_EXECUTION_GROUP_JOURNAL_FACT_NOTE_TYPES = [
+  "journal-context",
+  "journal-factor",
+  "journal-outcome",
+  "journal-plan",
+] as const;
+export const HOSTED_EXECUTION_GROUP_JOURNAL_FACT_MAX_NOTE_LENGTH = 1000;
+export const HOSTED_EXECUTION_GROUP_JOURNAL_FACT_MAX_TITLE_LENGTH = 120;
+
+export interface HostedExecutionGroupJournalFactPayload {
+  date: string;
+  factIndex: number;
+  note: string;
+  noteType: typeof HOSTED_EXECUTION_GROUP_JOURNAL_FACT_NOTE_TYPES[number];
+  title: string;
+}
+
+export interface HostedExecutionGroupJournalFactRecordedWake
+  extends HostedExecutionBaseWake {
+  journalFact: HostedExecutionGroupJournalFactPayload;
+  kind: "journal.group-fact.recorded";
+}
+
 export interface HostedExecutionEnvironmentInterviewTopicCompletion {
   answers: Array<{
     aspectId: string;
@@ -1016,6 +1041,7 @@ export type HostedExecutionWake =
   | HostedExecutionDeviceSyncWake
   | HostedExecutionEnvironmentInterviewCompletedWake
   | HostedExecutionEnvironmentVoiceCapturedWake
+  | HostedExecutionGroupJournalFactRecordedWake
   | HostedExecutionDailyMetricReportedWake
   | HostedExecutionMealPhotoCapturedWake
   | HostedExecutionMemberActionRequestedWake

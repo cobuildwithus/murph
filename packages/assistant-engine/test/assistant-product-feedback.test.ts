@@ -1,4 +1,7 @@
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
+import {
+  HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
+} from "@murphai/hosted-execution/runtime-control";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -11,10 +14,6 @@ import {
   createAssistantProductFeedbackRecorder,
   resolveAssistantProductFeedbackAcceptedInputIds,
 } from "../src/assistant/turn-progress.js";
-import {
-  MURPH_MANAGED_AUTOMATIONS,
-  MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
-} from "../src/assistant/managed-automations.js";
 import {
   buildAssistantSystemPrompt,
 } from "../src/assistant/system-prompt.js";
@@ -127,7 +126,7 @@ describe("assistant product feedback", () => {
     expect(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema.required).toEqual(["kind", "summary"]);
     expect(
       MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema.properties.summary.maxLength,
-    ).toBe(5_000);
+    ).toBe(HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH);
     expect(description).toContain("one structured Murph product-feedback candidate");
     expect(description).toContain("current accepted request");
     expect(description).toContain("optional related changelog item ids");
@@ -209,11 +208,6 @@ describe("assistant product feedback", () => {
       onboardingGuidance: false,
       turnTrigger: null,
     });
-    const productNotes = MURPH_MANAGED_AUTOMATIONS.find(
-      (automation) =>
-        automation.automationId === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
-    );
-    expect(productNotes).toBeDefined();
     expect(systemPrompt).toContain(
       "append a privacy-safe `Reproduction:` section in that same summary field",
     );
@@ -222,11 +216,8 @@ describe("assistant product feedback", () => {
       MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema,
     );
     const ordinaryStack = `${systemPrompt}\n${toolSchema}`;
-    const managedStack =
-      `${systemPrompt}\n${productNotes?.instructions ?? ""}\n${toolSchema}`;
 
     expect(ordinaryStack.split(rubricMarker)).toHaveLength(2);
-    expect(managedStack.split(rubricMarker)).toHaveLength(2);
   });
 
   it("parses and collects one explicit feedback candidate without a pre-reply write", async () => {
@@ -399,13 +390,14 @@ describe("assistant product feedback", () => {
 
   it("returns an actionable value-free length error and accepts the corrected retry", async () => {
     const privateMarker = "synthetic-private-feedback-marker";
+    const summaryMaxLength = HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH;
     const oversizedRequest = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
           kind: "frustration",
           relatedChangelogItemIds: [],
-          summary: `Support escalation: ${"x".repeat(5_000)}${privateMarker}`,
+          summary: `Support escalation: ${"x".repeat(summaryMaxLength)}${privateMarker}`,
         },
         namespace: "murph",
         tool: "submit_product_feedback",
@@ -432,7 +424,7 @@ describe("assistant product feedback", () => {
       validationIssues: expect.arrayContaining([
         expect.objectContaining({
           code: "too_big",
-          maximum: 5_000,
+          maximum: summaryMaxLength,
           path: ["summary"],
         }),
       ]),

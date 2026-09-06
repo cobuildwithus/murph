@@ -39,17 +39,22 @@ card gate fails, return the owning food-journal skill's short truthful fallback.
 ## Target authority
 
 - Before treating any target bundle as complete or deciding that a metric is
-  missing, run `vault-cli goal list --status active --limit 200 --format json`.
-  If it returns 200 records, the bounded read may be incomplete: fail closed
-  with ordinary text, no Goal or measurement mutation, and no card. Otherwise,
-  run `vault-cli goal show <goal-id> --format json` for every returned active
-  Goal whose list item reports a nonzero `data.metricTargetsCount`. Do not
-  select detail reads by title, slug, domain, context-snapshot visibility, or
-  the default list prefix. Resolve metric identity, unit, comparator, effective
-  date, conflicts, and the 1,200-kcal boundary only after inspecting that
-  complete detail set. Keep this active-target authority read separate from the
-  all-status lookup used below to reuse or honor Murph's managed paused or
-  abandoned proposal; neither read substitutes for the other.
+  missing, run `vault-cli meal totals --from <date> --to <same-date> --resolve-goals --format json`.
+  The date is the selected card localDate. Copy the fresh canonical totals and
+  resolved `goalContext.targets` points. This query owns the complete active
+  target scan and deterministic rules below; do not repeat goal list/show to
+  re-resolve active authority. `ready` permits a card only after the existing
+  suitability, intent, and meal-completeness gates pass. `missing` permits only
+  this workflow's already-authorized paused proposal, holding resolved points
+  fixed. `conflict`, `incompatible`, or `capacity` means ordinary text, no Goal
+  or measurement mutation, and no card. Never derive from or replace unresolved
+  values. Historical compatibility is read-only display authority.
+  Rerun after any meal or Goal mutation before a card. Otherwise reuse this
+  turn's successful read after read-only suitability checks or skill reads.
+  Keep this active-target
+  authority read separate from the all-status lookup used below to reuse or
+  honor Murph's managed paused or abandoned proposal; neither read substitutes
+  for the other.
 - Read already-known goals, body measurements, training, weight trend, activity,
   and stated body-composition direction before asking. Never infer a missing
   physiological sex input from a name, pronouns, or gender label, and never infer
@@ -113,9 +118,10 @@ card gate fails, return the owning food-journal skill's short truthful fallback.
   and let a scheduled closeout use ordinary text without a question or card.
   Apply this rule before any low-energy check or derivation.
 - Effective dates are also part of target authority. Resolve them against the
-  exact card `localDate`: the selected capture date for a scheduled closeout,
-  which may be a historical catch-up date rather than the occurrence date, or
-  the explicitly requested date. Never use wall-clock today as a substitute.
+  exact card `localDate`: the engine-supplied occurrence local date for a
+  scheduled closeout, or the explicitly requested date for an interactive
+  request. A historical automatic capture cannot authorize a scheduled card.
+  Never use wall-clock today as a substitute.
   The containing Goal applies only when
   `window.startAt <= localDate` and its optional `window.targetAt` is absent or
   `localDate <= window.targetAt`. A target inside it also applies only when its

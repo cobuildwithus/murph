@@ -41,6 +41,13 @@ import {
 import {
   readWorkerVersionId,
 } from "../public-routes.ts";
+import {
+  HOSTED_RUNNER_REGION,
+  readHostedStandbyMode,
+  readHostedStandbyReleaseId,
+  readHostedStandbyTarget,
+  resolveHostedStandbyCoordinatorName,
+} from "../../standby-runner-contract.ts";
 
 const DEPLOY_DIRECT_R2_PRESIGNED_PUT_SMOKE_BYTES = 160 * 1024 * 1024;
 const DEPLOY_DIRECT_R2_PRESIGNED_PUT_SMOKE_KEY_PREFIX =
@@ -108,6 +115,14 @@ export async function handleDeployContainerSmokeRoute(
       ok: false,
     }, 400);
   }
+  // The initial smoke proves inventory before running the separate live-model
+  // phase. A later foreground claim must not invalidate that model-only probe.
+  const standbyInventory = liveModelTurnModel === null
+    ? await readDeployStandbyInventory(context.env)
+    : null;
+  if (standbyInventory && !standbyInventory.ready) {
+    return json({ ok: false, error: "Deploy standby inventory is not ready.", standbyInventory }, 503);
+  }
   const container = context.env.RUNNER_CONTAINER_SMOKE
     .getByName(resolveDeployContainerSmokeObjectName(context.env, attempt));
   const directR2Smoke = directR2PresignedPut
@@ -174,8 +189,39 @@ export async function handleDeployContainerSmokeRoute(
   return json({
     ok: result.ok === true,
     runnerContainer: result,
+    ...(standbyInventory ? { standbyInventory } : {}),
     service: "cloudflare-hosted-runner",
   });
+}
+
+async function readDeployStandbyInventory(env: WorkerEnvironmentSource) {
+  if (readHostedStandbyMode(env) === "off") return null;
+  const releaseId = readHostedStandbyReleaseId(env);
+  const namespace = env.STANDBY_COORDINATOR;
+  if (!releaseId || !namespace) {
+    throw new Error("Deploy standby inventory requires current release coordination.");
+  }
+  const coordinator = namespace.getByName(resolveHostedStandbyCoordinatorName({
+    releaseId, region: HOSTED_RUNNER_REGION,
+  }));
+  if (!coordinator.readStandbyCoordinatorState) {
+    throw new Error("Deploy standby inventory inspection is unavailable.");
+  }
+  // Reuse the same bounded fill owner as the scheduled coordinator maintenance.
+  // This never claims a slot or invokes a member's runtime.
+  await coordinator.ensureReadyStandby({ releaseId, region: HOSTED_RUNNER_REGION });
+  const state = await coordinator.readStandbyCoordinatorState();
+  const target = readHostedStandbyTarget(env);
+  const readyCount = new Set(state.readySlotNames).size;
+  const provisioningCount = state.provisioningSlotNames.length;
+  const releaseMatches = state.releaseId === releaseId && state.region === HOSTED_RUNNER_REGION;
+  return {
+    ready: releaseMatches && readyCount === target && provisioningCount === 0,
+    readyCount,
+    provisioningCount,
+    target,
+    releaseMatches,
+  };
 }
 
 export async function createDeployContainerDirectR2PresignedPutSmoke(

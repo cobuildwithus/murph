@@ -17,6 +17,10 @@ import {
   type CanonicalEntity,
   type VaultReadModel,
 } from '@murphai/query'
+import {
+  automationDeviceActivitySourceValues,
+  type AutomationDeviceActivitySource,
+} from '@murphai/contracts'
 import { assistantCronJobSchema } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   appendAssistantDeviceActivityCronJobMetadata,
@@ -31,14 +35,18 @@ const deviceActivityMocks = vi.hoisted(() => ({
   useRealVaultReader: false,
 }))
 
-vi.mock('@murphai/core', () => ({
-  advanceAutomationDeviceActivityCursor: deviceActivityMocks.advanceAutomationDeviceActivityCursor,
-  loadVault: vi.fn(async () => ({
-    metadata: {
-      timezone: 'UTC',
-    },
-  })),
-}))
+vi.mock('@murphai/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@murphai/core')>()
+  return {
+    ...actual,
+    advanceAutomationDeviceActivityCursor: deviceActivityMocks.advanceAutomationDeviceActivityCursor,
+    loadVault: vi.fn(async () => ({
+      metadata: {
+        timezone: 'UTC',
+      },
+    })),
+  }
+})
 
 vi.mock('@murphai/query', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@murphai/query')>()
@@ -366,6 +374,118 @@ describe('device activity triggered automations', () => {
         vaultRoot,
       }),
     )
+  })
+
+  it.each([
+    ['Junction Garmin', 'garmin', 'junction', 'junction-garmin-workout', ['garmin']],
+    ['Junction Oura', 'oura', 'junction', 'junction-oura-workout', ['oura']],
+    ['legacy Fitbit', 'fitbit', 'junction', 'junction-fitbit-workout', ['fitbit']],
+    ['current Fitbit', 'google_health', 'junction', 'junction-google-health-workout', ['fitbit']],
+    ['normalized Fitbit', 'google-health', 'junction', 'junction-google-health-workout', ['fitbit']],
+    ['external Garmin', null, 'garmin', 'workout', ['garmin']],
+    ['direct Oura', null, 'oura', 'workout', ['oura']],
+    ['external Fitbit', null, 'fitbit', 'workout', ['fitbit']],
+    ['external Google Health', null, 'google_health', 'workout', ['fitbit']],
+    ['normalized external Google Health', null, 'google-health', 'workout', ['fitbit']],
+    ['canonical source wins', 'garmin', 'oura', 'junction-whoop-v2-workout', ['garmin']],
+    ['canonical Fitbit wins', 'google-health', 'garmin', 'junction-whoop-v2-workout', ['fitbit']],
+    ['unknown canonical source wins', 'unknown-provider', 'fitbit', 'junction-whoop-v2-workout', []],
+    ['external source wins over WHOOP fallback', 'junction', 'oura', 'junction-whoop-v2-workout', ['oura']],
+    ['unknown external source wins', 'junction', 'unknown-provider', 'junction-whoop-v2-workout', []],
+    ['Google Fit is not Fitbit', 'google_fit', 'junction', 'junction-google-fit-workout', []],
+    ['no inferred Garmin resource alias', 'junction', 'junction', 'junction-garmin-workout', []],
+    ['unknown source', 'unknown-provider', 'junction', 'workout', []],
+    ['no provider metadata', null, null, 'workout', []],
+    ['WHOOP v1', 'whoop', 'junction', 'junction-whoop-workout', ['whoop']],
+    ['WHOOP v2', 'whoop_v2', 'junction', 'junction-whoop-v2-workout', ['whoop', 'whoop_v2']],
+    ['external WHOOP v1', null, 'whoop', 'workout', ['whoop']],
+    ['external WHOOP v2', null, 'whoop-v2', 'workout', ['whoop', 'whoop_v2']],
+    ['legacy WHOOP fallback', 'junction', 'junction', 'junction-whoop-workout', ['whoop']],
+    ['legacy WHOOP v2 fallback', 'junction', 'junction', 'whoop_v2/activity_session', ['whoop', 'whoop_v2']],
+  ] as const)('matches only canonical source evidence: %s', async (
+    _label, sourceProviderSlug, externalRefSystem, externalRefResourceType, matchingSources,
+  ) => {
+    deviceActivityMocks.automations = [undefined, ...automationDeviceActivitySourceValues].map((source) =>
+      createDeviceActivityAutomation({
+        activityKind: 'run',
+        after: '2026-06-07T11:00:00.000Z',
+        automationId: `auto_source_${source ?? 'all'}`,
+        source,
+      }),
+    )
+    const activity = createActivityEntity({
+      entityId: 'evt_source_run',
+      externalRefResourceType,
+      externalRefSystem: externalRefSystem ?? undefined,
+      occurredAt: '2026-06-07T12:00:00.000Z',
+      sourceProviderSlug: sourceProviderSlug ?? undefined,
+      title: 'Morning run',
+      workoutType: 'running',
+    })
+    if (sourceProviderSlug === null) delete activity.attributes.dataOrigin
+    if (externalRefSystem === null) delete activity.attributes.externalRef
+    deviceActivityMocks.readModel = createVaultReadModel({ entities: [activity], vaultRoot })
+    const expectedIds = ['auto_source_all', ...matchingSources.map((source) => `auto_source_${source}`)].sort()
+    const input = { now: () => '2026-06-07T12:01:00.000Z', vault: vaultRoot }
+
+    await expect(scheduleDeviceActivityTriggeredAutomations(input)).resolves.toEqual({
+      matched: expectedIds.length,
+      nextWakeAt: input.now(),
+      scheduled: expectedIds.length,
+    })
+    const jobs = await readQueuedCronJobs(vaultRoot)
+    expect(jobs.map((job) => readAssistantDeviceActivityCronJobMetadata(job.name)?.parentAutomationId).sort())
+      .toEqual(expectedIds)
+    for (const source of [undefined, ...matchingSources]) {
+      expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).toHaveBeenCalledWith(
+        expect.objectContaining({
+          expectedSource: source,
+          lookup: `auto_source_${source ?? 'all'}`,
+          afterEntityId: activity.entityId,
+        }),
+      )
+    }
+
+    // A retry with the pre-advance snapshot reuses queued occurrences, not new notifications.
+    await expect(scheduleDeviceActivityTriggeredAutomations(input)).resolves.toEqual({
+      matched: expectedIds.length,
+      nextWakeAt: input.now(),
+      scheduled: 0,
+    })
+    expect((await readQueuedCronJobs(vaultRoot)).map((job) => job.jobId))
+      .toEqual(jobs.map((job) => job.jobId))
+  })
+
+  it.each([
+    ['garmin', 'garmin'],
+    ['oura', 'oura'],
+    ['fitbit', 'fitbit'],
+    ['fitbit', 'google-health'],
+  ] as const)('keeps %s workout, sleep, and all-kind filters distinct for %s imports', async (source, provider) => {
+    deviceActivityMocks.automations = ['sleep', 'workout', undefined].map((activityKind) =>
+      createDeviceActivityAutomation({
+        activityKind,
+        after: '2026-06-07T11:00:00.000Z',
+        automationId: `auto_kind_${activityKind ?? 'all'}`,
+        source,
+      }),
+    )
+    const sleep = createSleepEntity({
+      entityId: 'evt_source_sleep',
+      occurredAt: '2026-06-07T12:00:00.000Z',
+      title: 'Sleep session',
+    })
+    sleep.attributes.dataOrigin = { sourceProviderSlug: provider }
+    sleep.attributes.externalRef = { system: 'junction', resourceType: `junction-${provider}-sleep` }
+    deviceActivityMocks.readModel = createVaultReadModel({ entities: [sleep], vaultRoot })
+
+    await expect(scheduleDeviceActivityTriggeredAutomations({
+      now: () => '2026-06-07T12:01:00.000Z',
+      vault: vaultRoot,
+    })).resolves.toMatchObject({ matched: 2, scheduled: 2 })
+    const jobs = await readQueuedCronJobs(vaultRoot)
+    expect(jobs.map((job) => readAssistantDeviceActivityCronJobMetadata(job.name)?.parentAutomationId).sort())
+      .toEqual(['auto_kind_all', 'auto_kind_sleep'])
   })
 
   it('matches activity kind from sportName-only device sessions', async () => {
@@ -1778,7 +1898,7 @@ function createDeviceActivityAutomation(input: {
   continuityPolicy?: 'fresh' | 'preserve'
   contextReferences?: AutomationQueryRecord['contextReferences']
   instructions?: string
-  source?: 'whoop' | 'whoop_v2'
+  source?: AutomationDeviceActivitySource
   tags?: string[]
 }): AutomationQueryRecord {
   const automationId = input.automationId ?? 'auto_walk'

@@ -1,18 +1,21 @@
 ---
-description: Frontend lens for the preliminary unified ReviewGPT pass
-action: preliminary specialist frontend review
+description: On-demand review guidance for frontend implementation quality
+action: on-demand frontend review
 ---
 
-Use this review-only frontend lens for user-facing `apps/web` changes inside
-the preliminary `completion-specialists` ReviewGPT pass or the separate Claude
-Code UI double-check.
+Use this review-only guidance when the user explicitly requests a frontend
+review or when the parent wants a checklist for its own final review.
 
-The Product UX lens in the same preliminary ReviewGPT pass owns the
-irreducible purpose, complete cross-surface journey, timing and delivery, and
+The Product UX plan and walkthrough own the irreducible purpose, complete
+cross-surface journey, timing and delivery, and
 whether words, actions, choices, or screens can be removed. This lens owns
 rendered implementation quality, responsive behavior, accessibility, and
 design-system execution; do not duplicate subjective product-taste findings or
 decide the copy, state selection, action count, or whether an element exists.
+
+When used as the parent's checklist, the review-only restrictions apply to this
+inspection step, not to the surrounding authorized implementation. This file
+does not add a separate completion gate.
 
 Outcome:
 Determine whether the declared product experience renders faithfully, visually coherently, responsively, accessibly, and with a maintainable frontend implementation.
@@ -31,8 +34,7 @@ Mode:
 - Review only. Do not edit files.
 - Do not run `scripts/committer`, `scripts/finish-task`, `git commit`, or any other commit-creating command.
 - Do not claim to have implemented, landed, or committed changes. Report findings only.
-- Follow the invoking review's evidence, finding, output, and stop contract. Do
-  not request or create a patch artifact for frontend findings.
+- Follow the invoking review's evidence, finding, output, and stop contract.
 
 Preflight (required):
 - Read `agent-docs/FRONTEND.md` before reviewing the diff.
@@ -66,7 +68,7 @@ Output requirements:
 - If no evidence-backed findings remain, state that explicitly and note only material rendered-verification gaps.
 
 Response format:
-- Return a normal text review, not patch attachments and not follow-on prompts for more agents.
+- Return a normal text review, not follow-on prompts for more agents.
 - Keep the focus on concrete rendered-fidelity, design-system, accessibility, and maintainability failures rather than subjective preference.
 
 Stop rule:

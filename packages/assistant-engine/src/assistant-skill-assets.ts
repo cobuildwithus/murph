@@ -20,6 +20,12 @@ export const ASSISTANT_SKILLS = [
       'Use when direct first-run Murph onboarding is open and the assistant needs to establish the broad private relationship, capture and park one or two change/understand/handle/explore aspiration threads, resolve the six progressive foundation-context checkpoints, return with context, choose a first step together, mark completion, or record an overall decline. Immediate requests and safety needs come first; answering a discovery question is not permission for a plan.',
   },
   {
+    slug: 'goal-setup',
+    name: 'goal-setup',
+    triggerHint:
+      'Use when a person explicitly asks Murph to help start, resume, pause, or change a concrete health, fitness, behavior, biomarker, skill, or event outcome, including a public Murph Goals handoff such as "Hey Murph, help me improve my deep sleep." It resolves an exact public goal template when available, reuses an equivalent private Goal, previews the smallest useful plan, and composes existing domain and persistence owners. Do not use for a purely informational question, an onboarding aspiration answer without an action request, an acute train-or-rest decision, or a request specifically for an experiment.',
+  },
+  {
     slug: 'hosted-low-usage',
     name: 'hosted-low-usage',
     triggerHint:
@@ -161,13 +167,13 @@ export const ASSISTANT_SKILLS = [
     slug: 'automatic-meal-capture',
     name: 'automatic-meal-capture',
     triggerHint:
-      'Use for Murph iPhone automatic meal capture setup, App Store handoff, Full Photos permission, best-effort background behavior, the on-device Meals review page, missing or delayed photo imports, verifying what Murph received, the automatic 9pm closeout, retained-photo privacy cleanup, and calorie- or macro-aware enrichment of photo-backed device meals without duplicate logging. Always co-load with food-journal on eligible interactive meal turns.',
+      'Use in a private direct conversation when someone asks how to start recurring meal tracking or how Murph can track meals, even when they do not say automatic, and whenever someone explicitly asks about Murph iPhone automatic meal capture setup, App Store handoff, Full Photos permission, best-effort background behavior, the on-device Meals review page, missing or delayed photo imports, verifying what Murph received, the automatic 9pm closeout, retained-photo privacy cleanup, or calorie- and macro-aware enrichment of photo-backed device meals without duplicate logging. Co-load food-journal on eligible interactive automatic-capture turns.',
   },
   {
     slug: 'food-journal',
     name: 'food-journal',
     triggerHint:
-      'Use when the user logs meals, asks what connected carbohydrate data recorded, or asks Murph to notice patterns between food and digestion, symptoms, energy, appetite, or performance, especially when a photo, voice note, or rough description should be enough and calorie or macro tracking is not necessarily the goal.',
+      'Use when the user asks how to track meals, starts or maintains recurring meal tracking, logs meals, asks what connected carbohydrate data recorded, or asks Murph to notice patterns between food and digestion, symptoms, energy, appetite, or performance, especially when a photo, voice note, or rough description should be enough and calorie or macro tracking is not necessarily the goal. For a private direct request about how to start recurring meal tracking or how Murph can track meals, co-load automatic-meal-capture even when the user does not say automatic.',
   },
   {
     slug: 'nutrition-strategy',
@@ -185,13 +191,19 @@ export const ASSISTANT_SKILLS = [
     slug: 'appointment-scheduling',
     name: 'appointment-scheduling',
     triggerHint:
-      'Use for booking, rescheduling, canceling, or joining a waitlist for medical, dental, vision, therapy, lab, imaging, vaccination, or rehabilitation care by phone, browser, portal, or structured integration. Owns intake completeness, availability and fallback bounds, canonical-memory reuse, durable scheduling-preference persistence, and the ready-to-act gate; transport skills own execution.',
+      'Use for check-in, intake, booking, rescheduling, canceling, or joining a waitlist for medical, dental, vision, therapy, lab, imaging, vaccination, or rehabilitation care by phone, browser, portal, or structured integration. Owns intake completeness, availability and fallback bounds, canonical-memory reuse, durable scheduling-preference persistence, and the ready-to-act gate; transport skills own execution.',
   },
   {
     slug: 'connected-apps',
     name: 'connected-apps',
     triggerHint:
       'Use when Murph needs connected email, calendar, documents, storage, notes, or tasks; an approved accountless service such as weather, places, provider registry, product search, or Instacart; account connection or removal; connected-app context for another action; or a verified manual export or one-time import fallback for a health or fitness source without a proven direct Murph connection. Owns account selection, narrow discovery and reads, limited calendar writes, verified provider export handoffs, privacy, and untrusted provider content.',
+  },
+  {
+    slug: 'journal-connected-context',
+    name: 'journal-connected-context',
+    triggerHint:
+      'Use for automatic private Journal context from newly connected calendars or narrow email travel confirmations, and when a member changes or stops that capture. Owns the private connection notice, new-account baseline, category filters, normalized Journal plans, reconciliation, follow-ups, and opt-outs.',
   },
   {
     slug: 'computer-use',

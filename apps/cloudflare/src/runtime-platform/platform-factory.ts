@@ -9,6 +9,7 @@ import type {
 } from "../workspace-snapshot-restore-preparation.ts";
 import type { HostedWorkspaceCheckpointBridgeAuthority } from "./authority-headers.ts";
 import { createCloudflareArtifactStore } from "./artifact-store.ts";
+import { createCloudflareMediaStore } from "./media-store.ts";
 import { createHostedWebActionApprovalPort } from "./action-approval-port.ts";
 import { createHostedRuntimeAssistantPersonalizationToolPort } from "./assistant-personalization-tool-port.ts";
 import { createHostedRuntimeAssistantConfigurationToolPort } from "./assistant-configuration-tool-port.ts";
@@ -30,7 +31,9 @@ import {
 import { createHostedRuntimeSubscriptionToolPort } from "./subscription-tool-port.ts";
 import { createHostedRuntimeIssueExportPort } from "./issue-export-port.ts";
 import { createHostedWebRuntimeLatencyTracePort } from "./latency-trace-port.ts";
-import { createHostedWebRuntimeLogPort } from "./log-port.ts";
+import {
+  createHostedWebControlLoggingTransport,
+} from "./log-port.ts";
 import { createHostedWebVaultSharePort } from "./vault-share-port.ts";
 import { createHostedWebPhoneCallPort } from "./phone-calls-port.ts";
 import { createHostedWebPhysicalNotePort } from "./physical-notes-port.ts";
@@ -78,10 +81,16 @@ export function buildHostedExecutionRuntimePlatform(input: {
     },
   );
   const timeoutMs = readHostedRunnerCommitTimeoutMs(input.commitTimeoutMs ?? null);
-  const transport = resolveHostedWebControlTransport({
+  const baseTransport = resolveHostedWebControlTransport({
     webCallbackSigning: input.webCallbackSigning ?? null,
     webControlBaseUrl: input.webControlBaseUrl ?? null,
     workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+  });
+  const { logPort, transport } = createHostedWebControlLoggingTransport({
+    boundUserId: input.boundUserId,
+    fetchImpl,
+    timeoutMs,
+    transport: baseTransport,
   });
   const deviceSyncPort = transport
     ? createHostedWebDeviceSyncPort({
@@ -119,6 +128,11 @@ export function buildHostedExecutionRuntimePlatform(input: {
             boundUserId: input.boundUserId,
             fetchImpl: trustedInternalFetchImpl,
             preparedSnapshotRestore: input.preparedSnapshotRestore ?? null,
+            timeoutMs,
+            workspaceCheckpointBridge: input.workspaceCheckpointBridge,
+          }),
+          mediaStore: createCloudflareMediaStore({
+            fetchImpl: trustedInternalFetchImpl,
             timeoutMs,
             workspaceCheckpointBridge: input.workspaceCheckpointBridge,
           }),
@@ -188,12 +202,7 @@ export function buildHostedExecutionRuntimePlatform(input: {
             transport,
             workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
           }),
-          logPort: createHostedWebRuntimeLogPort({
-            boundUserId: input.boundUserId,
-            fetchImpl,
-            timeoutMs,
-            transport,
-          }),
+          logPort,
           latencyTracePort: createHostedWebRuntimeLatencyTracePort({
             boundUserId: input.boundUserId,
             fetchImpl: trustedInternalFetchImpl,

@@ -303,6 +303,139 @@ describe("createHostedAssistantInputSource", () => {
     expect(listSpy).not.toHaveBeenCalled();
   });
 
+  it("recovers an invocation-local group successor when its pre-controller notification was missed", async () => {
+    const listSpy = vi.spyOn(assistantEngine, "listAssistantInputEvents");
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const initial = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        actorId: "actor_a",
+        causalSeq: "20",
+        dedupeKey: "dedupe_pre_controller_initial",
+        eventId: "evt_pre_controller_initial",
+        itemId: "item_pre_controller_initial",
+        laneSeq: "20",
+        messageId: "msg_pre_controller_initial",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        routeAuthority: true,
+        replyToMessageId: "assistant_message_a",
+        text: "initial group question",
+        threadIsDirect: false,
+      }),
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: initial.inputId,
+      vaultRoot,
+    });
+    let invocationInputIds: string[] = [];
+    const source = createHostedAssistantInputSource({
+      initialPendingInputIds: [initial.inputId],
+      pendingInputRefreshMode: "none",
+      readForegroundInputIds: () => invocationInputIds,
+      selectedInputIds: [initial.inputId],
+      vaultRoot,
+    });
+
+    const successor = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        actorId: "actor_b",
+        causalSeq: "21",
+        dedupeKey: "dedupe_pre_controller_successor",
+        eventId: "evt_pre_controller_successor",
+        itemId: "item_pre_controller_successor",
+        laneSeq: "21",
+        messageId: "msg_pre_controller_successor",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        routeAuthority: true,
+        replyToMessageId: "assistant_message_b",
+        text: "rapid group clarification",
+        threadIsDirect: false,
+      }),
+    });
+    const causalGap = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        actorId: "actor_c",
+        causalSeq: "23",
+        dedupeKey: "dedupe_pre_controller_gap",
+        eventId: "evt_pre_controller_gap",
+        itemId: "item_pre_controller_gap",
+        laneSeq: "23",
+        messageId: "msg_pre_controller_gap",
+        occurredAt: "2026-04-23T00:00:05.000Z",
+        receivedAt: "2026-04-23T00:00:06.000Z",
+        routeAuthority: true,
+        replyToMessageId: "assistant_message_c",
+        text: "same group message after a causal gap",
+        threadIsDirect: false,
+      }),
+    });
+    const otherConversation = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        causalSeq: "1",
+        dedupeKey: "dedupe_pre_controller_other",
+        eventId: "evt_pre_controller_other",
+        itemId: "item_pre_controller_other",
+        laneSeq: "22",
+        messageId: "msg_pre_controller_other",
+        occurredAt: "2026-04-23T00:00:03.500Z",
+        receivedAt: "2026-04-23T00:00:04.500Z",
+        routeAuthority: true,
+        text: "different group message",
+        threadId: "thread_other",
+        threadIsDirect: false,
+      }),
+    });
+    for (const inputId of [
+      successor.inputId,
+      causalGap.inputId,
+      otherConversation.inputId,
+    ]) {
+      await enqueueHostedPendingAssistantInputId({ inputId, vaultRoot });
+    }
+    // The foreground importer already captured these exact IDs, but its
+    // best-effort notification ran before an active-turn controller existed.
+    invocationInputIds = [
+      successor.inputId,
+      causalGap.inputId,
+      otherConversation.inputId,
+    ];
+
+    await expect(source.refresh()).resolves.toEqual({
+      progressed: true,
+      reason: "ingested_input",
+    });
+    const selected = await source.listInputCandidates({ sourceId: "linq" });
+    const lateConversationInputs = await source.listNewConversationInputs({
+      afterCursor: initial.cursor,
+      conversation: initial.conversation!,
+    });
+
+    expect(source.readSelectedInputIds()).toEqual([initial.inputId]);
+    expect(selected.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      initial.inputId,
+    ]);
+    expect(
+      lateConversationInputs.inputs.map((candidate) => candidate.event.inputId),
+    ).toEqual([successor.inputId]);
+    expect(source.readObservedInputIds()).toEqual([
+      initial.inputId,
+      successor.inputId,
+      causalGap.inputId,
+      otherConversation.inputId,
+    ]);
+    await expect(source.refresh()).resolves.toEqual({
+      progressed: false,
+      reason: "no_new_input",
+    });
+    expect(listSpy).not.toHaveBeenCalled();
+  });
+
   it("does not live-steer an exact notified input across a causal gap", async () => {
     const listSpy = vi.spyOn(assistantEngine, "listAssistantInputEvents");
     const vaultRoot = await createTempVault();
@@ -973,6 +1106,10 @@ describe("selectHostedAssistantInputIds", () => {
       conversationActivity: "observed",
       currentInputId: fresh.inputId,
       foregroundPriorityInputAccepted: true,
+      latencyTraceInputGroups: [{
+        assistantInputIds: [completion.inputId, fresh.inputId],
+        source: "linq",
+      }],
     });
   });
 
@@ -1146,6 +1283,14 @@ describe("selectHostedAssistantInputIds", () => {
       conversationActivity: "observed",
       currentInputId: newestFresh.inputId,
       foregroundPriorityInputAccepted: true,
+      latencyTraceInputGroups: [{
+        assistantInputIds: [
+          completion.inputId,
+          fresh.inputId,
+          newestFresh.inputId,
+        ],
+        source: "linq",
+      }],
     });
   });
 
@@ -1615,14 +1760,19 @@ describe("selectHostedAssistantInputIds", () => {
 
     expect(selection.inputIds).toEqual(inputIds.slice(0, 50));
     expect(selection.inputIds).not.toContain(inputIds[50]);
-    await expect(resolveHostedCurrentInputIdForAcceptedInputs({
+    const acceptedContext = await resolveHostedCurrentInputIdForAcceptedInputs({
       assistantInputIds: inputIds,
       vaultRoot,
-    })).resolves.toEqual({
+    });
+    expect(acceptedContext).toMatchObject({
       conversationActivity: "observed",
       currentInputId: null,
       foregroundPriorityInputAccepted: true,
     });
+    expect(acceptedContext.latencyTraceInputGroups).toEqual([{
+      assistantInputIds: inputIds,
+      source: "linq",
+    }]);
   });
 
   it("does not select mismatched pending input during fresh foreground selection", async () => {
@@ -1969,6 +2119,7 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
       conversationActivity: "not_observed",
       currentInputId: null,
       foregroundPriorityInputAccepted: false,
+      latencyTraceInputGroups: [],
     });
   });
 
@@ -2002,6 +2153,10 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
       conversationActivity: "observed",
       currentInputId: second.inputId,
       foregroundPriorityInputAccepted: true,
+      latencyTraceInputGroups: [{
+        assistantInputIds: [second.inputId, first.inputId],
+        source: "linq",
+      }],
     });
   });
 
@@ -2035,6 +2190,10 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
       conversationActivity: "observed",
       currentInputId: null,
       foregroundPriorityInputAccepted: true,
+      latencyTraceInputGroups: [{
+        assistantInputIds: [first.inputId, afterGap.inputId],
+        source: "linq",
+      }],
     });
   });
 
@@ -2048,7 +2207,39 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
       conversationActivity: "uncertain",
       currentInputId: null,
       foregroundPriorityInputAccepted: true,
+      latencyTraceInputGroups: [],
     });
+  });
+
+  it("groups supported trace sources without exposing or suppressing mixed input", async () => {
+    const vaultRoot = await createTempVault();
+    const [linq, unsupported, telegram] = await Promise.all(
+      (["linq", "email", "telegram"] as const).map((source) =>
+        upsertAssistantInputEvent({
+          vault: vaultRoot,
+          event: createAssistantInputEvent({
+            dedupeKey: `dedupe_trace_group_${source}`,
+            eventId: `event_trace_group_${source}`,
+            itemId: `item_trace_group_${source}`,
+            source,
+            text: `private ${source} trace grouping text`,
+          }),
+        })
+      ),
+    );
+
+    const acceptedContext = await resolveHostedCurrentInputIdForAcceptedInputs({
+      assistantInputIds: [unsupported.inputId, telegram.inputId, linq.inputId],
+      vaultRoot,
+    });
+
+    expect(acceptedContext.latencyTraceInputGroups).toEqual([
+      { assistantInputIds: [telegram.inputId], source: "telegram" },
+      { assistantInputIds: [linq.inputId], source: "linq" },
+    ]);
+    expect(JSON.stringify(acceptedContext.latencyTraceInputGroups)).not.toContain(
+      "private",
+    );
   });
 
   it("does not treat recovered system-lane input as conversation activity", async () => {

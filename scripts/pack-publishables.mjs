@@ -15,12 +15,9 @@ import { verifyReleaseArtifacts } from './release-artifact-secret-guard.mjs';
 
 const execFileAsync = promisify(execFile);
 const npmPackMetadataMaxBufferBytes = 64 * 1024 * 1024;
-const assistantCliSurfaceGeneratorPath = path.join(
-  'packages',
-  'assistant-engine',
-  'dist',
-  'assistant',
-  'generate-cli-surface-contract.js',
+const assistantCliSurfaceAssemblyPath = path.join(
+  'scripts',
+  'assemble-assistant-cli-surface.mjs',
 );
 const murphAssistantCliSurfaceTarballPath = path.posix.join(
   'node_modules',
@@ -87,7 +84,9 @@ function shouldSkipExternalPayloadArtifact(sourcePath) {
 }
 
 function isNonRuntimeIncurPayloadPath(relativePath) {
-  return /(?:^|\/)[^/]+\.test\.[cm]?[jt]sx?$/u.test(relativePath);
+  return relativePath === 'docs'
+    || relativePath.startsWith('docs/')
+    || /(?:^|\/)[^/]+\.test(?:-d)?\.[cm]?[jt]sx?$/u.test(relativePath);
 }
 
 async function pathExists(targetPath) {
@@ -342,7 +341,7 @@ async function ensureGeneratedPackageArtifacts(context) {
   if (context.workspacePackageByName.has('@murphai/assistant-engine')) {
     await execFileAsync(
       process.execPath,
-      [assistantCliSurfaceGeneratorPath],
+      [assistantCliSurfaceAssemblyPath],
       {
         cwd: context.repoRoot,
       },

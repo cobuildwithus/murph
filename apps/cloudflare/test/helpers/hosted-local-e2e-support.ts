@@ -147,7 +147,7 @@ export function scopeHostedLocalAssistantProviderResponse(
 
 /**
  * Scripts a sandboxed shell execution through the real Codex app-server.
- * Codex 0.149.1 (CODEX_CLI_VERSION in Dockerfile.cloudflare-hosted-runner-base)
+ * Codex 0.153.4 (CODEX_CLI_VERSION in Dockerfile.cloudflare-hosted-runner-base)
  * advertises the unified `exec_command` tool on Linux; bump the tool name here
  * if a Codex upgrade changes the advertised exec tool.
  */
@@ -240,6 +240,7 @@ export function expectAdvertisedMurphDynamicTools(
   requests: readonly HostedLocalAssistantProviderStubRequest[],
   options: {
     analyzeVideoAvailable?: boolean;
+    calendarLinkAvailable?: boolean;
     connectedAppsAvailable?: boolean;
     computerToolsAvailable?: boolean;
     exerciseRoutineResponseCardAvailable?: boolean;
@@ -266,6 +267,13 @@ export function expectAdvertisedMurphDynamicTools(
       if (
         options.analyzeVideoAvailable !== true
         && name === "murph.analyze_video"
+      ) {
+        return false;
+      }
+
+      if (
+        options.calendarLinkAvailable !== true
+        && name === "murph.create_calendar_link"
       ) {
         return false;
       }
@@ -396,6 +404,9 @@ export function expectAdvertisedMurphDynamicTools(
   const expectedAdvertisedToolNames = advertisement.codeMode
     ? expectedToolNames.filter((name) =>
         name !== "automation"
+        && name !== "attach_response_card"
+        && name !== "attach_exercise_routine_card"
+        && name !== "attach_telegram_rich_content"
         && !hostedGroupFamilyToolNames.has(`murph.${name}`)
       )
     : expectedToolNames;

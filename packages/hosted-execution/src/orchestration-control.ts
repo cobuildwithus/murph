@@ -7,10 +7,10 @@ import {
 
 import type {
   HostedRuntimeReconciliationBlockedReason,
+  HostedRuntimeSystemMailboxFrontierClass,
 } from "./reconciliation-facts-wire.ts";
 
 export {
-  HOSTED_RUNTIME_RECONCILIATION_ENVIRONMENT_INTERVIEW_SEARCH,
   HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS,
   HOSTED_RUNTIME_SYSTEM_MAILBOX_FRONTIER_CLASSES,
   projectHostedRuntimeReconciliationFactsWireResponse,
@@ -38,6 +38,7 @@ export const HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON =
 
 export const HOSTED_RUNTIME_SIGNAL_KINDS = [
   "mailbox_appended",
+  "runtime_owner_released",
   "runtime_recheck_requested",
   "runtime_wake_requested",
 ] as const;
@@ -50,6 +51,10 @@ export type HostedRuntimeSignal =
       mailboxItemId: string;
       lane: HostedMailboxLane;
       laneSeq: string;
+    }
+  | {
+      kind: "runtime_owner_released";
+      runtimeAttemptId: string;
     }
   | {
       kind: "runtime_recheck_requested";
@@ -76,6 +81,10 @@ export type HostedRuntimeProcessingMode = HostedWorkspaceInvocationProcessingMod
 export const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS = [
   "assistant.notification.requested",
   "device-sync.wake",
+  "environment-interview.completed",
+  "health.daily-metric.reported",
+  "journal.group-fact.recorded",
+  "member.channels.updated",
   "runtime.browser-vault-refresh-requested",
   "runtime.maintenance-requested",
 ] as const satisfies readonly HostedMailboxKind[];
@@ -100,8 +109,29 @@ export function isHostedSystemMailboxModelFreeNotification(input: {
   );
 }
 
+export function classifyHostedSystemMailboxExecutionClass(input: {
+  dedupeKey: string | null | undefined;
+  kind: string;
+}): HostedRuntimeSystemMailboxFrontierClass {
+  if (
+    isHostedSystemMailboxModelFreeNotification({
+      dedupeKey: input.dedupeKey,
+      kind: input.kind,
+    })
+  ) {
+    return "model_free";
+  }
+
+  return HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS.some((kind) =>
+    kind === input.kind && kind !== "assistant.notification.requested"
+  )
+    ? "model_free"
+    : "default_owned";
+}
+
 export interface HostedRuntimeEnsureProcessingRequest {
   assistantExecutionBlocked?: true;
+  conversationWorkPending?: true;
   orchestrationAttemptId: string;
   processingMode?: HostedRuntimeProcessingMode | null;
 }

@@ -410,6 +410,104 @@ test("upsertEvent stores the vault-local dayKey without persisting the fallback 
   assert.equal(eventRecord.timeZone, undefined);
 });
 
+test("upsertEvent rejects unusable explicit identity aliases before minting an event", async () => {
+  const vaultRoot = await makeTempDirectory("murph-event-id-guard");
+  await initializeVault({ vaultRoot });
+
+  const basePayload = {
+    kind: "note",
+    occurredAt: "2026-03-26T21:00:00.000Z",
+    title: "Identity guard",
+  };
+  const invalidValues: unknown[] = [
+    null,
+    "   ",
+    { privateValue: "not-an-id" },
+    "invalid-event-id",
+  ];
+
+  for (const identityField of ["id", "eventId"] as const) {
+    for (const [invalidValueIndex, invalidValue] of invalidValues.entries()) {
+      await assert.rejects(
+        () =>
+          upsertEvent({
+            vaultRoot,
+            payload: {
+              ...basePayload,
+              [identityField]: invalidValue,
+            },
+          }),
+        (error: unknown) => {
+          assert.ok(error instanceof VaultError);
+          assert.equal(error.code, "EVENT_CONTRACT_INVALID");
+          assert.ok(Array.isArray(error.details.errors));
+          assert.equal(
+            error.details.errors.some(
+              (entry) => typeof entry === "string" && entry.startsWith("$.id:"),
+            ),
+            true,
+          );
+          assert.equal(JSON.stringify(error.details).includes("not-an-id"), false);
+          assert.equal(JSON.stringify(error.details).includes("invalid-event-id"), false);
+          return true;
+        },
+        `${identityField} invalid value ${invalidValueIndex} must reject`,
+      );
+    }
+  }
+
+  assert.deepEqual(
+    await fs.readdir(path.join(vaultRoot, "ledger", "events"), { recursive: true }),
+    [],
+  );
+});
+
+test("upsertEvent gives canonical id precedence over the legacy eventId alias", async () => {
+  const vaultRoot = await makeTempDirectory("murph-event-id-precedence");
+  await initializeVault({ vaultRoot });
+
+  const created = await upsertEvent({
+    vaultRoot,
+    payload: {
+      kind: "note",
+      occurredAt: "2026-03-26T21:00:00.000Z",
+      title: "Identity precedence baseline",
+      note: "Initial identity precedence note.",
+    },
+  });
+  const updated = await upsertEvent({
+    vaultRoot,
+    payload: {
+      id: created.eventId,
+      eventId: null,
+      kind: "note",
+      occurredAt: "2026-03-26T21:00:00.000Z",
+      title: "Identity precedence update",
+      note: "Updated identity precedence note.",
+    },
+  });
+
+  assert.equal(updated.created, false);
+  assert.equal(updated.eventId, created.eventId);
+
+  await assert.rejects(
+    () =>
+      upsertEvent({
+        vaultRoot,
+        payload: {
+          id: null,
+          eventId: created.eventId,
+          kind: "note",
+          occurredAt: "2026-03-26T21:00:00.000Z",
+          title: "Invalid canonical identity",
+          note: "Invalid canonical identity note.",
+        },
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "EVENT_CONTRACT_INVALID",
+  );
+});
+
 test("upsertEvent rejects specialized event kinds on the generic public boundary", async () => {
   const vaultRoot = await makeTempDirectory("murph-event-kind-guard");
   await initializeVault({ vaultRoot });
@@ -1410,6 +1508,42 @@ test("readOwnedEvent resolves the current meal owner without a query projection"
   assert.equal(owned.eventId, meal.event.id);
   assert.equal(owned.event.kind, "meal");
   assert.equal(owned.ledgerFile, meal.eventPath);
+
+  const healthyLedger = await fs.readFile(
+    path.join(vaultRoot, meal.eventPath),
+    "utf8",
+  );
+  const corruptLedger = healthyLedger
+    .trim()
+    .split("\n")
+    .map((line) => {
+      const record = JSON.parse(line) as Record<string, unknown>;
+      return JSON.stringify(
+        record.kind === "meal" && record.mealId === meal.event.mealId
+          ? { ...record, id: null }
+          : record,
+      );
+    })
+    .join("\n");
+  await fs.writeFile(
+    path.join(vaultRoot, meal.eventPath),
+    `${corruptLedger}\n`,
+    "utf8",
+  );
+  await assert.rejects(
+    () => readOwnedEvent({
+      vaultRoot,
+      kind: "meal",
+      ownerId: meal.event.mealId,
+    }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "EVENT_CONTRACT_INVALID",
+  );
+  await fs.writeFile(
+    path.join(vaultRoot, meal.eventPath),
+    healthyLedger,
+    "utf8",
+  );
 
   await deleteEvent({ vaultRoot, eventId: meal.event.id });
   await assert.rejects(

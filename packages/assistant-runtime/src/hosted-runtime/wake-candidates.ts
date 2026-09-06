@@ -1,5 +1,6 @@
 import {
   HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+  type HostedRuntimeSystemMailboxFrontierClass,
 } from "@murphai/hosted-execution/orchestration-control";
 
 export { HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON };
@@ -10,6 +11,30 @@ export const HOSTED_ASSISTANT_WAKE_REASON = "assistant";
 export interface HostedRuntimeWakeCandidate {
   at: string | null;
   reason: string | null;
+}
+
+export interface HostedSystemMailboxWakeCandidate extends HostedRuntimeWakeCandidate {
+  executionClass: HostedRuntimeSystemMailboxFrontierClass | null;
+}
+
+export function isHostedSystemMailboxWakeCandidate(
+  candidate: HostedRuntimeWakeCandidate | null | undefined,
+): candidate is HostedSystemMailboxWakeCandidate {
+  if (!candidate || !("executionClass" in candidate)) {
+    return false;
+  }
+  return candidate.executionClass === null
+    || candidate.executionClass === "model_free"
+    || candidate.executionClass === "default_owned";
+}
+
+export function hostedSystemMailboxWakeIsDueForModelFreeOwner(
+  candidate: HostedRuntimeWakeCandidate | null | undefined,
+  nowMs: number,
+): candidate is HostedSystemMailboxWakeCandidate {
+  return isHostedSystemMailboxWakeCandidate(candidate)
+    && candidate.executionClass === "model_free"
+    && hostedRuntimeWakeCandidateIsDue(candidate, nowMs);
 }
 
 export function createHostedRuntimeWakeCandidate(
@@ -40,6 +65,42 @@ export function selectHostedRuntimeWakeCandidate(
     },
     { at: null, reason: null },
   );
+}
+
+export function selectHostedRuntimeOwnerWakeCandidate(input: {
+  backgroundCandidates: ReadonlyArray<HostedRuntimeWakeCandidate | null | undefined>;
+  foregroundCandidates: ReadonlyArray<HostedRuntimeWakeCandidate | null | undefined>;
+  nowMs: number;
+  systemMailboxWake: HostedSystemMailboxWakeCandidate;
+}): HostedRuntimeWakeCandidate {
+  const foregroundWake = selectHostedRuntimeWakeCandidate(
+    input.foregroundCandidates,
+  );
+  if (hostedRuntimeWakeCandidateIsDue(foregroundWake, input.nowMs)) {
+    return foregroundWake;
+  }
+  if (hostedSystemMailboxWakeIsDueForModelFreeOwner(
+    input.systemMailboxWake,
+    input.nowMs,
+  )) {
+    return {
+      at: input.systemMailboxWake.at,
+      reason: input.systemMailboxWake.reason,
+    };
+  }
+  return selectHostedRuntimeWakeCandidate([
+    foregroundWake,
+    input.systemMailboxWake,
+    ...input.backgroundCandidates,
+  ]);
+}
+
+export function hostedRuntimeWakeCandidateIsDue(
+  candidate: HostedRuntimeWakeCandidate,
+  nowMs: number,
+): boolean {
+  const wakeAtMs = Date.parse(candidate.at ?? "");
+  return Number.isFinite(wakeAtMs) && wakeAtMs <= nowMs;
 }
 
 function hostedWakeCandidateWins(

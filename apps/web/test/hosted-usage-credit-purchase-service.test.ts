@@ -206,6 +206,9 @@ import {
   hostedUsageCreditPolicySupportsSavedCardTarget,
 } from "@/src/lib/hosted-onboarding/usage-credit-offers";
 import {
+  readHostedUsageCreditPurchaseMemberLockOrder,
+} from "@/src/lib/hosted-onboarding/usage-credit-purchase-reservation-lock";
+import {
   HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE,
   HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_MESSAGE,
 } from "@/src/lib/hosted-onboarding/usage-credit-capacity-conflict";
@@ -215,6 +218,29 @@ const GROUP_REFILL_RECOVERY_NOW = new Date("2026-08-01T12:00:00.000Z");
 const LAST_STRIPE_EVENT_AT = new Date("2026-07-16T16:59:00.000Z");
 const MEMBER_ID = "hbm_member123";
 const CLIENT_REQUEST_KEY = "request_key_123456";
+
+describe("usage-credit purchase member lock order", () => {
+  it("recognizes only a distinct Family return marker as owner-first", () => {
+    expect(readHostedUsageCreditPurchaseMemberLockOrder({
+      beneficiaryMemberId: "hbm_familymember1",
+      checkoutSuccessUrl:
+        "https://example.test/settings?usageCheckout=success&usageFamily=hbag_abcdefghijklmnop&usageMember=hbm_familymember1&usagePurchase=hucp_abcdefghijklmnop#family",
+      payerMemberId: MEMBER_ID,
+    })).toBe("payer_first");
+    expect(readHostedUsageCreditPurchaseMemberLockOrder({
+      beneficiaryMemberId: "member_group_runtime",
+      checkoutSuccessUrl:
+        "https://example.test/groups/fund/group_join_code_1234?usageCheckout=success&usagePurchase=hucp_abcdefghijklmnop",
+      payerMemberId: MEMBER_ID,
+    })).toBe("beneficiary_first");
+    expect(readHostedUsageCreditPurchaseMemberLockOrder({
+      beneficiaryMemberId: MEMBER_ID,
+      checkoutSuccessUrl:
+        "https://example.test/settings?usageCheckout=success&usageFamily=hbag_abcdefghijklmnop&usageMember=hbm_familymember1&usagePurchase=hucp_abcdefghijklmnop#family",
+      payerMemberId: MEMBER_ID,
+    })).toBe("beneficiary_first");
+  });
+});
 
 function buildPersonalSavedCardBillingSnapshot(input?: {
   billingStatus?: "active" | "canceled";
@@ -565,7 +591,7 @@ describe("parseHostedGroupSponsorshipCheckoutRequest", () => {
 });
 
 describe("createHostedUsageCreditCheckout", () => {
-  it("admits a new Family checkout with 31 combined occupied slots under beneficiary-first locking", async () => {
+  it("admits a new Family checkout with 31 combined occupied slots under owner-first locking", async () => {
     const usageCreditEvents: string[] = [];
     const fake = createFakePrisma({
       occupiedUsageCreditSlotCount: 31,
@@ -588,8 +614,8 @@ describe("createHostedUsageCreditCheckout", () => {
     })).resolves.toMatchObject({ status: "checkout_open" });
 
     expect(usageCreditEvents).toEqual([
-      "beneficiary-lock",
       "payer-lock",
+      "beneficiary-lock",
       "capacity-read",
       "purchase-create",
     ]);
@@ -649,8 +675,8 @@ describe("createHostedUsageCreditCheckout", () => {
 
     expect(released).toMatchObject({ status: "expired" });
     expect(usageCreditEvents).toEqual([
-      "beneficiary-lock",
       `payer-lock:${MEMBER_ID}`,
+      "beneficiary-lock",
       `payer-lock:${MEMBER_ID}`,
     ]);
     expect(fake.purchases.get(released.purchaseId)).toMatchObject({
@@ -3878,6 +3904,8 @@ describe("createHostedUsageCreditCheckout", () => {
     );
     expect(queryText).toContain('"group"."join_code" = ');
     expect(queryText).toContain('"group"."runtime_member_id" = ');
+    expect(queryText).toContain('FOR SHARE OF "group"');
+    expect(queryText).not.toContain('FOR SHARE OF "group", "container"');
     expect(queryCall.values).toEqual([
       "group_join_code_1234",
       "member_group_runtime",
@@ -3885,6 +3913,62 @@ describe("createHostedUsageCreditCheckout", () => {
     expect(fake.purchases.size).toBe(0);
     expect(mocks.stripeCheckoutCreate).not.toHaveBeenCalled();
   });
+
+  it.each([
+    [
+      "owner-created join code",
+      "group_join_code_1234",
+      [
+        "owner-group-lock",
+        "beneficiary-lock",
+        "container-lock",
+        "owner-group-lock",
+        "beneficiary-lock",
+        "container-lock",
+      ],
+    ],
+    [
+      "signed funding-only locator",
+      "gf1.member_group_runtime.signed_funding_locator",
+      [
+        "beneficiary-lock",
+        "container-lock",
+        "beneficiary-lock",
+        "container-lock",
+      ],
+    ],
+  ] as const)(
+    "keeps canonical funding lock order for the %s",
+    async (_label, joinCode, expectedLockOrder) => {
+      const usageCreditEvents: string[] = [];
+      const fake = createFakePrisma({ usageCreditEvents });
+      mocks.readHostedGroupUsageFundingTargetByJoinCode.mockResolvedValue({
+        displayName: "Sunday sleep crew",
+        fundingPath: `/groups/fund/${encodeURIComponent(joinCode)}`,
+        joinCode,
+        kind: "friends",
+        runtimeMemberId: "member_group_runtime",
+      });
+      mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+        buildStripeSession(request)
+      );
+
+      await createHostedGroupUsageCreditCheckout({
+        clientRequestKey: CLIENT_REQUEST_KEY,
+        joinCode,
+        now: NOW,
+        offerCode: "usage_10_usd",
+        payerMemberId: MEMBER_ID,
+        prisma: fake.prisma as never,
+      });
+
+      expect(usageCreditEvents.filter((event) =>
+        event === "beneficiary-lock"
+        || event === "container-lock"
+        || event === "owner-group-lock"
+      )).toEqual(expectedLockOrder);
+    },
+  );
 
   it.each([
     [
@@ -7773,6 +7857,11 @@ function createFakePrisma(input: {
               : input.occupiedUsageCreditSlotCount ?? 0,
         }];
       }
+      input.usageCreditEvents?.push(
+        sql.includes('FROM "hosted_group" AS "group"')
+          ? "owner-group-lock"
+          : "container-lock",
+      );
       groupFundingQueryCalls.push({ queryParts, values });
       return input.groupFundingTargetLocked === false
         ? []

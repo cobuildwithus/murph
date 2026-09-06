@@ -1,4 +1,4 @@
-ARG HOSTED_RUNNER_BASE_IMAGE=ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.149.1
+ARG HOSTED_RUNNER_BASE_IMAGE=ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.14.1-codex0.153.4
 
 FROM ${HOSTED_RUNNER_BASE_IMAGE} AS runner-app-permissions
 
@@ -11,29 +11,56 @@ COPY --chown=root:root ${HOSTED_RUNNER_BUNDLE_DIR}/ /app/
 RUN chmod -R a-w /app \
   && chmod -R a+rX /app
 
+# Re-layer the exact pinned native runtime beside /app so lazy image loading
+# fetches the app-server hot set before the first provider turn.
+FROM ${HOSTED_RUNNER_BASE_IMAGE} AS runner-codex-hotset
+
+USER root
+
+RUN native_codex="$(readlink -f "$(command -v codex)")" \
+  && native_root="$(dirname "$(dirname "${native_codex}")")" \
+  && test -x "${native_root}/bin/codex" \
+  && test -x "${native_root}/codex-resources/bwrap" \
+  && mkdir -p /opt/murph-codex-hot/usr/local/lib/murph-codex \
+    /opt/murph-codex-hot/usr/local/bin \
+  && cp -a "${native_root}/." /opt/murph-codex-hot/usr/local/lib/murph-codex/ \
+  && ln -s ../lib/murph-codex/bin/codex /opt/murph-codex-hot/usr/local/bin/codex
+
 FROM ${HOSTED_RUNNER_BASE_IMAGE}
 
 USER root
 
 ENV MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON="/usr/local/share/murph/codex-model-catalog.openai-flex.json"
 
+# Use the pinned native model catalog; missing product models fail validation.
 RUN mkdir -p /usr/local/share/murph \
   && chmod a-w /app \
   && chmod a+rX /app \
   && codex debug models --bundled \
-    | jq 'def add_flex: (.service_tiers) |= ((. // []) | if any(.[]?; .id == "flex") then . else . + [{"id":"flex","name":"Flex","description":"Lower-cost flexible processing"}] end); .models |= map(select(.slug == "gpt-5.6-sol" or .slug == "gpt-5.6-terra" or .slug == "gpt-5.6-luna") | add_flex)' \
+    | jq 'def add_flex: (.service_tiers) |= ((. // []) | if any(.[]?; .id == "flex") then . else . + [{"id":"flex","name":"Flex","description":"Lower-cost flexible processing"}] end); def enable_mixed_tool_search: .tool_mode = "code_mode"; .models |= map(select(.slug == "gpt-6-astra" or .slug == "gpt-5.6-sol" or .slug == "gpt-5.6-terra" or .slug == "gpt-5.6-luna") | add_flex | enable_mixed_tool_search)' \
     > /tmp/murph-codex-model-catalog.openai-flex.json \
-  && jq -s -e 'length == 1 and (.[0] as $catalog | ([$catalog.models[]?.slug] | sort) == (["gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna"] | sort) and all(["gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna"][]; . as $slug | ($catalog | any(.models[]?; .slug == $slug and any(.service_tiers[]?; .id == "flex")))))' /tmp/murph-codex-model-catalog.openai-flex.json >/dev/null \
-  && install -m 0444 /tmp/murph-codex-model-catalog.openai-flex.json "${MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON}" \
-  && rm -f /tmp/murph-codex-model-catalog.openai-flex.json
+  && jq -s -e 'length == 1 and (.[0] as $catalog | ([$catalog.models[]?.slug] | sort) == (["gpt-6-astra","gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna"] | sort) and any($catalog.models[]?; .slug == "gpt-6-astra" and (.context_window | type) == "number" and .context_window > 0 and .context_window <= 272000) and all(["gpt-6-astra","gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna"][]; . as $slug | ($catalog | any(.models[]?; .slug == $slug and .tool_mode == "code_mode" and any(.service_tiers[]?; .id == "flex")))))' /tmp/murph-codex-model-catalog.openai-flex.json >/dev/null \
+  && install -m 0444 /tmp/murph-codex-model-catalog.openai-flex.json "${MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON}.astra" \
+  && jq '.models |= map(select(.slug != "gpt-6-astra"))' /tmp/murph-codex-model-catalog.openai-flex.json > /tmp/murph-codex-model-catalog.standard.json \
+  && install -m 0444 /tmp/murph-codex-model-catalog.standard.json "${MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON}" \
+  && rm -f /tmp/murph-codex-model-catalog.standard.json \
+  && rm -f /tmp/murph-codex-model-catalog.openai-flex.json \
+  && rm -f /usr/local/bin/codex
 
 COPY --from=runner-app-permissions --chown=root:root /app/ /app/
+
+COPY --from=runner-codex-hotset --chown=root:root /opt/murph-codex-hot/ /
+
+RUN test "$(readlink -f /usr/local/bin/codex)" = "/usr/local/lib/murph-codex/bin/codex" \
+  && codex --version
 
 USER runner
 
 ARG HOSTED_RUNNER_LOCAL_BUILD_ID=local
+ARG HOSTED_RUNNER_LOCAL_WORKER_NAME=murph-hosted
 
 LABEL murph.hosted.local-build-id="${HOSTED_RUNNER_LOCAL_BUILD_ID}"
+LABEL murph.hosted.local-worker-name="${HOSTED_RUNNER_LOCAL_WORKER_NAME}"
 
 # Differentiates the per-class image config so sibling container classes built
 # from this shared Dockerfile (RunnerContainer, DeploySmokeRunnerContainer)

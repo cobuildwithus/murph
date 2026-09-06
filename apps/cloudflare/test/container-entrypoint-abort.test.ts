@@ -2,9 +2,19 @@ import { request as httpRequest } from "node:http";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type {
+  HostedWorkspaceRestorePreparation,
+} from "@murphai/assistant-runtime/hosted-workspace-restore-preparation";
 import { HOSTED_RUNTIME_ARCHITECTURE_VERSION } from "../src/hosted-runtime-architecture.js";
+import "../src/container-entrypoint-heavy-runtime.js";
 
 const mocks = vi.hoisted(() => ({
+  recordHostedContainerRuntimeCompletionBestEffort: vi.fn(
+    async (_input: {
+      job: { request: { attemptId: string } };
+      result: { status: string };
+    }) => undefined,
+  ),
   reportHostedContainerFatalBestEffort: vi.fn(async () => undefined),
   runHostedWorkspaceInvocation: vi.fn(),
 }));
@@ -29,11 +39,19 @@ vi.mock("../src/container-fatal-report.js", async () => {
   };
 });
 
+vi.mock("../src/container-runtime-completion.js", () => ({
+  recordHostedContainerRuntimeCompletionBestEffort:
+    mocks.recordHostedContainerRuntimeCompletionBestEffort,
+}));
+
 import { startHostedContainerEntrypoint } from "../src/container-entrypoint.js";
 
 const servers: Array<Awaited<ReturnType<typeof startHostedContainerEntrypoint>>> = [];
 
 beforeEach(() => {
+  mocks.recordHostedContainerRuntimeCompletionBestEffort.mockResolvedValue(
+    undefined,
+  );
   mocks.runHostedWorkspaceInvocation.mockResolvedValue(buildWorkspaceRunnerResult());
 });
 
@@ -96,6 +114,33 @@ function createDeferred<T = void>() {
     reject,
     resolve,
   };
+}
+
+function createTestHostedWorkspaceRestorePreparer() {
+  return vi.fn(async (input: {
+    signal: AbortSignal;
+  }): Promise<HostedWorkspaceRestorePreparation> => {
+    const promise = new Promise<never>((_resolve, reject) => {
+      const rejectForAbort = () => reject(input.signal.reason);
+      if (input.signal.aborted) {
+        rejectForAbort();
+        return;
+      }
+      input.signal.addEventListener("abort", rejectForAbort, { once: true });
+    });
+    void promise.catch(() => undefined);
+    return {
+      adoptRuntimeAbortGuard: vi.fn(),
+      phaseLogger: {
+        close: vi.fn(),
+        emit: vi.fn(),
+        failOpenPhases: vi.fn(() => []),
+      },
+      promise,
+      runtimePhaseStartedAt: "2026-08-27T15:00:00.000Z",
+      vaultRoot: "/tmp/murph-entrypoint-abort-prepared-restore/durable/vault",
+    };
+  });
 }
 
 async function sendHostedContainerGetRequest(input: {
@@ -199,6 +244,11 @@ describe("container entrypoint abort boundary", () => {
   it("keeps an accepted workspace invocation running when only the response closes", async () => {
     const invocationStarted = createDeferred<AbortSignal>();
     const finishInvocation = createDeferred();
+    const completionStarted = createDeferred<{
+      job: { request: { attemptId: string } };
+      result: { status: string };
+    }>();
+    const releaseCompletion = createDeferred();
     const exit = vi.fn();
     const readFile = vi.fn(async () => {
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
@@ -216,11 +266,23 @@ describe("container entrypoint abort boundary", () => {
         return buildWorkspaceRunnerResult();
       },
     );
+    let completionCallCount = 0;
+    mocks.recordHostedContainerRuntimeCompletionBestEffort.mockImplementation(
+      async (input) => {
+        completionCallCount += 1;
+        if (completionCallCount !== 1) {
+          return;
+        }
+        completionStarted.resolve(input);
+        await releaseCompletion.promise;
+      },
+    );
 
     const server = await startHostedContainerEntrypoint({
       port: 0,
       runtime: {
         exitScheduler: exit,
+        prepareWorkspaceRestore: createTestHostedWorkspaceRestorePreparer(),
         processApi: { readFile },
       },
     });
@@ -245,16 +307,24 @@ describe("container entrypoint abort boundary", () => {
 
     finishInvocation.resolve();
 
-    await waitForAssertion(async () => {
-      const health = await sendHostedContainerGetRequest({
-        path: "/health",
-        port: address.port,
-      });
-      expect(health.status).toBe(200);
-      expect(health.json).toMatchObject({
-        activeJobCount: 0,
-        poisoned: false,
-      });
+    await expect(completionStarted.promise).resolves.toMatchObject({
+      job: {
+        request: {
+          attemptId: "attempt_evt_response_close_after_accept",
+        },
+      },
+      result: {
+        status: "idle",
+      },
+    });
+    const healthDuringCompletion = await sendHostedContainerGetRequest({
+      path: "/health",
+      port: address.port,
+    });
+    expect(healthDuringCompletion.status).toBe(200);
+    expect(healthDuringCompletion.json).toMatchObject({
+      activeJobCount: 0,
+      poisoned: false,
     });
     expect(exit).not.toHaveBeenCalled();
     expect(mocks.reportHostedContainerFatalBestEffort).not.toHaveBeenCalled();
@@ -268,16 +338,24 @@ describe("container entrypoint abort boundary", () => {
     });
     expect(nextInvocation.status).toBe(200);
     expect(mocks.runHostedWorkspaceInvocation).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.recordHostedContainerRuntimeCompletionBestEffort,
+    ).toHaveBeenCalledTimes(2);
+    releaseCompletion.resolve();
   });
 
   it("aborts an accepted workspace invocation through the internal abort endpoint", async () => {
     const invocationStarted = createDeferred<AbortSignal>();
     const invocationAborted = createDeferred();
-    const warmCodexStopStarted = createDeferred<string>();
-    const allowWarmCodexStop = createDeferred();
+    const stopWarmCodex = vi.fn(async () => undefined);
     const exit = vi.fn();
+    let invocationCallCount = 0;
     mocks.runHostedWorkspaceInvocation.mockImplementation(
       async (_job, options) => {
+        invocationCallCount += 1;
+        if (invocationCallCount > 1) {
+          return buildWorkspaceRunnerResult();
+        }
         const signal = options?.signal;
         if (!signal) {
           throw new Error("Expected hosted workspace invocation signal.");
@@ -304,10 +382,8 @@ describe("container entrypoint abort boundary", () => {
       port: 0,
       runtime: {
         exitScheduler: exit,
-        async stopWarmCodex(reason) {
-          warmCodexStopStarted.resolve(reason);
-          await allowWarmCodexStop.promise;
-        },
+        prepareWorkspaceRestore: createTestHostedWorkspaceRestorePreparer(),
+        stopWarmCodex,
       },
     });
     servers.push(server);
@@ -342,30 +418,6 @@ describe("container entrypoint abort boundary", () => {
     );
     expect(abortResponse.status).toBe(204);
     await invocationAborted.promise;
-    await expect(warmCodexStopStarted.promise).resolves.toBe("workspace-invocation-abort");
-
-    const healthWhileStopping = await sendHostedContainerGetRequest({
-      path: "/health",
-      port: address.port,
-    });
-    expect(healthWhileStopping.json).toMatchObject({
-      activeJobCount: 1,
-      poisoned: false,
-    });
-
-    const replacementWhileStopping = await fetch(
-      `http://127.0.0.1:${address.port}/internal/workspace-invocation`,
-      {
-        body: JSON.stringify(buildWorkspaceJobBody({ eventId: "evt_during_abort_stop" })),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      },
-    );
-    expect(replacementWhileStopping.status).toBe(409);
-
-    allowWarmCodexStop.resolve();
     await request.done;
 
     expect(signal.aborted).toBe(true);
@@ -384,7 +436,128 @@ describe("container entrypoint abort boundary", () => {
         poisoned: false,
       });
     });
-    expect(mocks.runHostedWorkspaceInvocation).toHaveBeenCalledTimes(1);
+    expect(stopWarmCodex).toHaveBeenCalledTimes(1);
+    expect(stopWarmCodex).toHaveBeenCalledWith("hosted-workspace-restore");
+
+    const replacement = await fetch(
+      `http://127.0.0.1:${address.port}/internal/workspace-invocation`,
+      {
+        body: JSON.stringify(buildWorkspaceJobBody({ eventId: "evt_after_abort" })),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      },
+    );
+    expect(replacement.status).toBe(200);
+    expect(mocks.runHostedWorkspaceInvocation).toHaveBeenCalledTimes(2);
+    expect(stopWarmCodex).toHaveBeenCalledTimes(2);
+    expect(stopWarmCodex).toHaveBeenNthCalledWith(
+      2,
+      "hosted-workspace-restore",
+    );
+  });
+
+  it("releases a preempted invocation without waiting for heavy hydration", async () => {
+    const hydration = createDeferred<never>();
+    const restoreAbortObserved = createDeferred();
+    const allowRestoreToSettle = createDeferred();
+    const preparationStarted = createDeferred();
+    const stopWarmCodex = vi.fn(async () => undefined);
+    const prepareWorkspaceRestore = vi.fn(async (input: {
+      signal: AbortSignal;
+    }): Promise<HostedWorkspaceRestorePreparation> => {
+      const promise = (async (): Promise<never> => {
+        if (!input.signal.aborted) {
+          await new Promise<void>((resolve) => {
+            input.signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+        }
+        restoreAbortObserved.resolve();
+        await allowRestoreToSettle.promise;
+        throw input.signal.reason;
+      })();
+      void promise.catch(() => undefined);
+      preparationStarted.resolve();
+      return {
+        adoptRuntimeAbortGuard: vi.fn(),
+        phaseLogger: {
+          close: vi.fn(),
+          emit: vi.fn(),
+          failOpenPhases: vi.fn(() => []),
+        },
+        promise,
+        runtimePhaseStartedAt: "2026-08-27T15:00:00.000Z",
+        vaultRoot: "/tmp/murph-entrypoint-abort-pending-hydration/durable/vault",
+      };
+    });
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        loadHeavyRuntime: () => hydration.promise,
+        prepareWorkspaceRestore,
+        stopWarmCodex,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const requestBody = buildWorkspaceJobBody({ eventId: "evt_abort_pending_hydration" });
+    let invocationSettled = false;
+    const invocation = fetch(
+      `http://127.0.0.1:${address.port}/internal/workspace-invocation`,
+      {
+        body: JSON.stringify(requestBody),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      },
+    );
+    void invocation.then(() => {
+      invocationSettled = true;
+    });
+    await preparationStarted.promise;
+
+    const abortResponse = await fetch(
+      `http://127.0.0.1:${address.port}/internal/workspace-invocation/abort`,
+      {
+        body: JSON.stringify({
+          attemptId: requestBody.job.request.attemptId,
+          leaseGeneration: requestBody.job.request.leaseGeneration,
+          userId: requestBody.job.request.userId,
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      },
+    );
+    expect(abortResponse.status).toBe(204);
+    await restoreAbortObserved.promise;
+    await Promise.resolve();
+    expect(invocationSettled).toBe(false);
+    expect((await sendHostedContainerGetRequest({
+      path: "/health",
+      port: address.port,
+    })).json).toMatchObject({ activeJobCount: 1 });
+
+    allowRestoreToSettle.resolve();
+    await expect(invocation).resolves.toMatchObject({ status: 204 });
+    expect((await sendHostedContainerGetRequest({
+      path: "/health",
+      port: address.port,
+    })).json).toMatchObject({
+      activeJobCount: 0,
+      poisoned: false,
+    });
+    expect(mocks.runHostedWorkspaceInvocation).not.toHaveBeenCalled();
+    expect(stopWarmCodex).toHaveBeenCalledTimes(1);
+    expect(stopWarmCodex).toHaveBeenCalledWith("hosted-workspace-restore");
   });
 
   it("rejects replacement invocations until an aborted workspace invocation settles", async () => {
@@ -422,6 +595,7 @@ describe("container entrypoint abort boundary", () => {
       port: 0,
       runtime: {
         exitScheduler: exit,
+        prepareWorkspaceRestore: createTestHostedWorkspaceRestorePreparer(),
       },
     });
     servers.push(server);
@@ -503,27 +677,13 @@ describe("container entrypoint abort boundary", () => {
   });
 
   it("applies an abort that arrives before the matching workspace invocation is accepted", async () => {
-    const invocationAborted = createDeferred<AbortSignal>();
     const exit = vi.fn();
-    mocks.runHostedWorkspaceInvocation.mockImplementation(
-      async (_job, options) => {
-        const signal = options?.signal;
-        if (!signal) {
-          throw new Error("Expected hosted workspace invocation signal.");
-        }
-
-        expect(signal.aborted).toBe(true);
-        invocationAborted.resolve(signal);
-        throw signal.reason instanceof Error
-          ? signal.reason
-          : new Error("workspace invocation preempted");
-      },
-    );
 
     const server = await startHostedContainerEntrypoint({
       port: 0,
       runtime: {
         exitScheduler: exit,
+        prepareWorkspaceRestore: createTestHostedWorkspaceRestorePreparer(),
       },
     });
     servers.push(server);
@@ -560,10 +720,7 @@ describe("container entrypoint abort boundary", () => {
         method: "POST",
       },
     );
-    expect(invocationResponse.ok).toBe(false);
-    const signal = await invocationAborted.promise;
-    expect(signal.reason).toBeInstanceOf(Error);
-    expect((signal.reason as Error).message).toBe("workspace invocation preempted");
+    expect(invocationResponse.status).toBe(204);
 
     await waitForAssertion(async () => {
       const health = await sendHostedContainerGetRequest({
@@ -576,6 +733,7 @@ describe("container entrypoint abort boundary", () => {
         poisoned: false,
       });
     });
+    expect(mocks.runHostedWorkspaceInvocation).not.toHaveBeenCalled();
     expect(exit).not.toHaveBeenCalled();
     expect(mocks.reportHostedContainerFatalBestEffort).not.toHaveBeenCalled();
   });
@@ -602,6 +760,7 @@ describe("container entrypoint abort boundary", () => {
       port: 0,
       runtime: {
         exitScheduler: exit,
+        prepareWorkspaceRestore: createTestHostedWorkspaceRestorePreparer(),
       },
     });
     servers.push(server);
@@ -654,90 +813,4 @@ describe("container entrypoint abort boundary", () => {
     expect(exit).not.toHaveBeenCalled();
   });
 
-  it("poisons the container when exact warm Codex teardown fails after abort", async () => {
-    const invocationStarted = createDeferred<AbortSignal>();
-    const exit = vi.fn();
-    mocks.runHostedWorkspaceInvocation.mockImplementation(
-      async (_job, options) => {
-        const signal = options?.signal;
-        if (!signal) {
-          throw new Error("Expected hosted workspace invocation signal.");
-        }
-
-        invocationStarted.resolve(signal);
-        if (!signal.aborted) {
-          await new Promise<void>((resolve) => {
-            signal.addEventListener("abort", () => resolve(), { once: true });
-          });
-        }
-        throw signal.reason instanceof Error
-          ? signal.reason
-          : new Error("Request aborted.");
-      },
-    );
-
-    const server = await startHostedContainerEntrypoint({
-      port: 0,
-      runtime: {
-        exitScheduler: exit,
-        stopWarmCodex: async () => {
-          throw new Error("exact stop failed");
-        },
-      },
-    });
-    servers.push(server);
-    const address = server.address();
-
-    if (!address || typeof address === "string") {
-      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
-    }
-
-    const requestBody = buildWorkspaceJobBody({ eventId: "evt_abort_stop_failure" });
-    const request = sendHostedContainerPostRequest({
-      body: requestBody,
-      path: "/internal/workspace-invocation",
-      port: address.port,
-    });
-    await invocationStarted.promise;
-
-    const abortResponse = await fetch(
-      `http://127.0.0.1:${address.port}/internal/workspace-invocation/abort`,
-      {
-        body: JSON.stringify({
-          attemptId: requestBody.job.request.attemptId,
-          leaseGeneration: requestBody.job.request.leaseGeneration,
-          userId: requestBody.job.request.userId,
-        }),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      },
-    );
-    expect(abortResponse.status).toBe(204);
-    await request.done;
-
-    expect(exit).toHaveBeenCalledTimes(1);
-    const health = await sendHostedContainerGetRequest({
-      path: "/health",
-      port: address.port,
-    });
-    expect(health.json).toMatchObject({
-      activeJobCount: 0,
-      poisoned: true,
-    });
-
-    const replacement = await fetch(
-      `http://127.0.0.1:${address.port}/internal/workspace-invocation`,
-      {
-        body: JSON.stringify(buildWorkspaceJobBody({ eventId: "evt_after_stop_failure" })),
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        method: "POST",
-      },
-    );
-    expect(replacement.status).toBe(503);
-    expect(mocks.runHostedWorkspaceInvocation).toHaveBeenCalledTimes(1);
-  });
 });

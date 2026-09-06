@@ -107,7 +107,7 @@ going,” “continue,” or another reply that only advances an intake or setup
 - Ask at most one high-leverage setup or repair question per reply.
 - Prefer one concrete default the user can edit over a menu of options.
 - Formal tone is not quiet support. Useful reminders and the text celebration still deliver.
-- Do not increase reminder frequency after non-response.
+- Do not increase recurring reminder frequency after non-response. One optional follow-up attached to the original delivered message is allowed under the bounded exception below; silence never authorizes a chain.
 - Reuse a good concise reminder cue when context has not changed; do not force novelty.
 - Use social, visual, or voice support only when the medium adds something useful.
 - Protect privacy in shared channels. Do not expose sensitive health details, private struggles, or inferred psychology in group chats unless the user explicitly asked and the content is safe.
@@ -362,11 +362,24 @@ Use existing Murph surfaces:
 - experiment sessions/context/progress/outcomes for experiment behavior
 - intervention, workout, meal, event, journal, memory, or automation records for non-experiment support as appropriate
 - goal records for the desired outcome/window when useful
-- regimen records with `kind=habit` as the canonical plan record for accepted non-experiment repeated behaviors, routines, ramps, and habit plans
+- regimen records with `kind=habit` as the one canonical behavior-loop and support owner for every accepted public-Goal `habit_plan` or `training_plan`
+- domain workout, program, tracking, or care records for details they explicitly own; they may support the linked regimen but do not replace its repeated-action lifecycle
 - automation records only for reminders, check-ins, and bounded support
 - knowledge only for durable synthesized patterns, not one-off reminder details
 
-For accepted non-experiment habit, routine, or ramp plans, do not leave the only copy of the plan in chat history, automation instructions, assistant runtime state, memory, or knowledge. Save the concrete plan into the habit regimen note. Include known baseline/current state, target and target date, explicit ladder or ramp schedule, standard/tiny/fallback versions, anchor or action window, support style/privacy boundary, review point, and off-ramp.
+For every accepted non-experiment repeated-action plan, including
+`habit_plan` and `training_plan`, do not leave the only copy of the plan in chat
+history, automation instructions, assistant runtime state, memory, or
+knowledge. Save the concrete plan into exactly one `kind=habit` regimen linked
+to the Goal, including when a domain skill also creates workout formats,
+sessions, or other supporting records. Use the regimen note for known
+baseline/current state, target and target date, explicit
+ladder, progression, or ramp schedule, standard/tiny/fallback versions, anchor
+or action window, support style/privacy boundary, review point, and off-ramp.
+
+Also include the user's reason in their own words and the practical constraints
+that materially shaped the accepted loop. Do not save inferred motives or a
+generic reason manufactured from the goal title.
 
 Memory is for durable user preferences or broad context, not the source of truth for the active plan. Knowledge is for synthesized patterns, not the operational state of a short habit plan.
 
@@ -376,20 +389,30 @@ A clarification that only names the current target authorizes only the current c
 
 In a group conversation, do not perform the private routine lookup or write a private completion. Acknowledge briefly and ask the speaker to continue in their private Murph conversation.
 
+Before creating or changing plan-owned support, inventory the exact series with
+`vault-cli automation list --support-series-id habit:<regimenId> --compact --limit 200`.
+Follow every returned `nextCursor` with `--cursor` until it is null; an
+incomplete inventory fails closed before save, patch, or reconcile.
+Reuse or patch exact current members, save only missing accepted support, and
+finish by reconciling the series to the exact desired automation ids. An exact
+redelivery of an already-persisted package performs no write. Quiet support
+reconciles existing members to empty so a resumed or changed plan cannot retain
+stale messages; an already empty series needs no effect.
+
 When creating automations, keep their instructions to the durable user request
 and request-specific context. The scheduled runtime owns generic recurring
 reminder cadence, including how it reacts to a prior delivered reminder and
 later conversation while the immediately prior confirmed output remains inside
 the existing evidence horizon. A longer cadence or unusual delay sends normally
 when that evidence has expired instead of guessing silence. Do not copy that
-execution policy into every automation. The habit regimen remains the source of
-truth for the plan.
+execution policy into every automation. The linked habit regimen remains the
+source of truth for the repeated-action plan.
 
-Every automation owned by a non-experiment habit plan must set `supportSeriesId: "habit:<regimenId>"` and persist the exact accepted purpose as `supportKind: "reminder"`, `"check_in"`, or `"review"` when the automation is saved or patched, where `<regimenId>` is the canonical habit-regimen id. The active canonical automation is the exact persisted support-consent record for that purpose; pausing or archiving it withdraws scheduled delivery. Never pass a raw `system:support-series:*` tag; `tags` are only for ordinary descriptive values. Keep the support-series id stable, and do not key lifecycle cleanup only by a mutable slug, title, or reminder text.
+Every automation owned by a non-experiment repeated-action plan, including a training plan, must set `supportSeriesId: "habit:<regimenId>"` and persist the exact accepted purpose as `supportKind: "reminder"`, `"check_in"`, or `"review"` when the automation is saved or patched, where `<regimenId>` is its canonical habit-regimen id. The active canonical automation is the exact persisted support-consent record for that purpose; pausing or archiving it withdraws scheduled delivery. Never pass a raw `system:support-series:*` tag; `tags` are only for ordinary descriptive values. Keep the support-series id stable, and do not key lifecycle cleanup only by a mutable slug, title, or reminder text.
 
 Support kind also bounds the user-facing message shape. `reminder` authorizes a
-cue or skip. Its only question exception is runtime-owned cadence
-administration: after one delivered recurring cue whose confirmed output is
+cue or skip. Apart from the separately attached one-time check described below,
+its only question exception is runtime-owned cadence administration: after one delivered recurring cue whose confirmed output is
 still available receives no relevant reply, Murph may ask once whether to keep,
 change, or pause the interruption. It does not authorize a completion, repair,
 accountability, or reflection question. This cadence exception is limited to
@@ -433,7 +456,7 @@ remain its off-ramp. Do not add a finite check-in or review lifecycle merely
 because the reminder recurs. Never use silence to stop clinical or
 safety-critical support.
 
-When support is replaced or repaired, keep only the intended active automation ids through the current shared automation action surface: in a hosted turn use `murph.automation` action `reconcile` with `supportSeriesId: "habit:<regimenId>"` and exact `desiredAutomationIds`; use `vault-cli automation reconcile-support-series` only in a privileged local route. Use the read-only `vault-cli automation list --support-series-id habit:<regimenId>` when the plan does not already store the ids needed to reconcile safely. Never infer membership from text or a title.
+When support is replaced or repaired, keep only the intended active automation ids through the current shared automation action surface: in a hosted turn use `murph.automation` action `reconcile` with `supportSeriesId: "habit:<regimenId>"` and exact `desiredAutomationIds`; use `vault-cli automation reconcile-support-series` only in a privileged local route. Use the read-only, fully paginated `vault-cli automation list --support-series-id habit:<regimenId> --compact --limit 200` when the plan does not already store the ids needed to reconcile safely. Use `vault-cli automation show <automationId>` only when a fact needed for the reconciliation decision is absent from that compact inventory. Never infer membership from text or a title.
 
 Ordinary recurring reminder instructions should include only:
 - the concise cue or durable target
@@ -517,7 +540,22 @@ whose job is to learn the outcome, not repeat the cue. The runtime-owned
 keep/change/pause cadence question does not ask about the outcome and does not
 turn a reminder into a check-in. Default to a simple reminder.
 
-Do not offer a check-in for every reminder. A request such as "remind me" or
+The existing automation tool's `attach_follow_up` action is a narrow exception:
+Murph may attach one optional, expiring check to an original private reminder
+or an important unresolved question when it would help and no saved quiet,
+decline, or no-proactive-support preference forbids it. Choose a useful delay
+and self-contained instructions with explicit skip conditions. Do not attach
+to casual offers, every question, reminder-cadence questions, or an already
+ignored check-in. A reminder needing no context can remain a simple cue;
+contextual follow-ups use the host-selected contextual model. The host binds
+the attachment to actual delivery. The later turn reads current conversation
+and completion evidence, then sends once or stays silent; it cannot attach
+another follow-up or write future automations. Do not create a separate
+accountability automation for the same attached check. This exception does
+not authorize an ongoing accountability loop.
+
+Do not offer a check-in for every reminder. Outside the bounded attached check
+above, a request such as "remind me" or
 "remind me every other day" authorizes the cue only. A direct request to check
 back later authorizes that exact check-in. When the user asks more generally
 for accountability, describes a meaningful repeated commitment, or says the
@@ -529,7 +567,8 @@ Once authorized, create each authorized action as a separate canonical
 automation during the interactive setup. Create both only when the user
 requested or accepted both; a check-in-only request does not authorize an
 extra cue. Scheduled turns can skip or send their own occurrence; they do not
-create or mutate future automations. For recurring support, add a review point
+create or mutate future automations, except for attaching the single optional
+follow-up to their own original message as described above. For recurring support, add a review point
 or bounded trial by default, and let the user stop the check-in without losing
 an independently authorized cue.
 
@@ -639,7 +678,7 @@ Count an ignored support attempt only when the action window passed and a channe
 
 ## Non-Experiment Closeout
 
-At the bounded review for a habit, routine, or ramp, compare the saved baseline and intended outcome with current user-reported function and reliable passive evidence. Choose one explicit disposition: adopt, modify, pause, complete, stop, or escalate. Update the full canonical habit regimen with the outcome, decision, and date. Keep it active only when the adopted or modified behavior continues; otherwise use the matching `paused`, `completed`, or `stopped` status and save `stoppedOn` when stopped. End linked support rather than leaving a stale active plan or open-ended reminder loop: reconcile `habit:<regimenId>` with the exact desired active automation ids for an adopted or modified plan, or reconcile it with an empty desired-id list to archive the whole series for pause, completion, stop, or an unsupported escalation. Do not claim the behavior caused the result when the evidence only shows an association.
+At the bounded review for a habit, routine, ramp, or training plan, compare the saved baseline and intended outcome with current user-reported function and reliable passive evidence. Choose one explicit disposition: adopt, modify, pause, complete, stop, or escalate. Update the full canonical habit regimen with the outcome, decision, and date. Keep it active only when the adopted or modified behavior continues; otherwise use the matching `paused`, `completed`, or `stopped` status and save `stoppedOn` when stopped. End linked support rather than leaving a stale active plan or open-ended reminder loop: reconcile `habit:<regimenId>` with the exact desired active automation ids for an adopted or modified plan, or reconcile it with an empty desired-id list to archive the whole series for pause, completion, stop, or an unsupported escalation. Do not claim the behavior caused the result when the evidence only shows an association.
 
 ## Support fit over time
 

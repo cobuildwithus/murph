@@ -1,22 +1,20 @@
 import { Cli, z } from 'incur'
 import {
   isStrictIsoDate,
-  wearablePreferenceProviderValues,
 } from '@murphai/contracts'
+import {
+  normalizeWearableQueryProviderSlug,
+} from '@murphai/health-metrics'
 import {
   resolveWearableCanonicalMetricKey,
   wearableCanonicalMetricKeys,
 } from '@murphai/importers/device-providers/metric-catalog'
-import {
-  canonicalizeDeviceProviderSlug,
-} from '@murphai/importers/device-providers/provider-descriptors'
 import {
   emptyArgsSchema,
   requestIdFromOptions,
   withBaseOptions,
 } from '@murphai/operator-config/command-helpers'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { normalizeRepeatableEnumFlagOption } from '@murphai/vault-usecases'
 import {
   isoTimestampSchema,
   localDateSchema,
@@ -24,6 +22,9 @@ import {
 } from '@murphai/operator-config/vault-cli-contracts'
 import type { VaultServices } from '@murphai/vault-usecases'
 import { publicValidationIssue } from './public-validation-issue.js'
+
+export const wearablesActivityListHint =
+  'One read: day totals omit flags; workout facts use --include-workout-summaries; lap/split facts use --include-workout-details. Choose first; never probe and retry.'
 
 const nullableTimestampSchema = z.string().min(1).nullable()
 const nullableTextSchema = z.string().min(1).nullable()
@@ -57,10 +58,10 @@ const personalPatternWindowDaysOptionSchema = z
     'Calendar-day window for matched personal patterns. Defaults to 120 days.',
   )
 const repeatableProviderOptionSchema = z
-  .array(z.string().min(1))
+  .array(z.string())
   .optional()
   .describe(
-    'Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.',
+    'Optional public source filter. Repeat --provider for multiple values such as fitbit, withings, or google-health. Run an unfiltered `wearables sources list` to discover sources in this vault.',
   )
 const wearableInputDateSchema = localDateSchema.refine(
   isStrictIsoDate,
@@ -200,7 +201,12 @@ const wearableActivitySummarySchema = z.object({
   totalCalories: wearableResolvedMetricSchema.optional(),
   totalElevationGainMeters: wearableResolvedMetricSchema.optional(),
   walkingAverageHeartRate: wearableResolvedMetricSchema.optional(),
-  workoutFeatures: z.array(wearableWorkoutFeatureSchema).max(32).optional(),
+  workoutFeatures: z.array(z.union([
+    wearableWorkoutFeatureSchema,
+    wearableWorkoutFeatureSchema.omit({ splits: true }).extend({
+      splitsOmitted: z.literal(true),
+    }),
+  ])).max(32).optional(),
   workoutStrain: wearableResolvedMetricSchema.optional(),
 })
 
@@ -412,19 +418,30 @@ const personalPatternStageSchema = z.enum([
   'seen_again',
   'worth_testing',
 ])
+const personalPatternGradeSchema = z.enum(['A', 'B', 'C', 'D', 'E'])
+const personalPatternClassificationSchema = z.enum([
+  'observation',
+  'early_signal',
+  'pattern',
+])
 
 const personalPatternReportSchema = z.object({
   asOfDate: localDateSchema,
   cells: z.array(z.object({
+    classification: personalPatternClassificationSchema.nullable().optional(),
+    comparisonBasis: z.enum(['confirmed_absence', 'unobserved_baseline']).optional(),
+    comparisonDates: z.array(localDateSchema).optional(),
     comparisonDays: z.number().int().nonnegative(),
     comparisonMean: z.number().nullable(),
     delta: z.number().nullable(),
     deltaPercent: z.number().nullable(),
     direction: z.enum(['higher', 'lower', 'flat']),
     exposedDays: z.number().int().nonnegative(),
+    exposedDates: z.array(localDateSchema).optional(),
     exposedMean: z.number().nullable(),
     factorId: z.string().min(1),
     firstExposedDate: localDateSchema.nullable(),
+    grade: personalPatternGradeSchema.nullable().optional(),
     lastExposedDate: localDateSchema.nullable(),
     outcomeId: z.string().min(1),
     repeatedDirection: z.boolean(),
@@ -435,11 +452,14 @@ const personalPatternReportSchema = z.object({
     kind: z.enum(['activity', 'intervention', 'mixed']),
     label: z.string().min(1),
     observedDays: z.number().int().nonnegative(),
+    confirmedAbsentDays: z.number().int().nonnegative().optional(),
+    episodeCount: z.number().int().nonnegative().optional(),
   })),
   lagDays: z.literal(1),
   notes: z.array(z.string()),
   outcomes: z.array(z.object({
     id: z.string().min(1),
+    lagDays: z.union([z.literal(0), z.literal(1)]).optional(),
     label: z.string().min(1),
     unit: z.string(),
   })),
@@ -688,11 +708,25 @@ function withPersonalPatternOptions() {
 }
 
 function normalizeWearableProviders(value: readonly string[] | undefined): string[] {
-  return normalizeRepeatableEnumFlagOption(
-    value?.map((entry) => canonicalizeDeviceProviderSlug(entry)),
-    'provider',
-    wearablePreferenceProviderValues,
-  ) ?? []
+  if (value === undefined) {
+    return []
+  }
+
+  const providers = value.map((entry) => normalizeWearableQueryProviderSlug(entry))
+  if (providers.some((provider) => provider === null)) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Invalid wearable --provider. Use a public provider slug; internal transport names and malformed values are not accepted.',
+      {
+        retryable: false,
+        hint: 'Run `vault-cli wearables sources list --format json` without --provider to list the providers present in this vault.',
+        issues: [publicValidationIssue({ code: 'custom' }, ['provider'])],
+        stage: 'validation',
+      },
+    )
+  }
+
+  return [...new Set(providers.filter((provider): provider is string => provider !== null))]
 }
 
 function isSupportedWearableMetricRequest(value: string): boolean {
@@ -796,7 +830,7 @@ export function registerWearablesCommands(
       },
     ],
     hint:
-      'Use `wearables day` as the first read for date-specific wearable questions. Use the list subcommands for longer windows and provider/source freshness checks.',
+      'Use `wearables day` first for date-specific questions except workouts; use `wearables activity list` for workouts. Choose the output before the first and only data read: day totals omit both detail options; individual workout facts use --include-workout-summaries; lap/split facts use --include-workout-details. Never probe with smaller output and retry. Use the other list subcommands for longer windows and provider/source freshness checks.',
     output: wearablesDayResultSchema,
     async run({ args, options }) {
       const result = await services.query.showWearableDay({
@@ -968,7 +1002,18 @@ export function registerWearablesCommands(
     description:
       'List semantic daily activity summaries instead of raw activity-session and sample rows.',
     args: emptyArgsSchema,
-    options: withWearableListOptions(),
+    options: withWearableListOptions().extend({
+      includeWorkoutSummaries: z.boolean().default(false).describe(
+        'Include bounded per-workout facts without lap/split rows. Use for workout counts, types, start times, duration, distance, heart rate, cadence, power, or speed. Each workout marks splitsOmitted true; this never proves splits are absent. Use --include-workout-details instead when the question needs splits; full detail wins if both options are true.',
+      ),
+      includeWorkoutDetails: z
+        .boolean()
+        .default(false)
+        .describe(
+          'Include bounded workoutFeatures and splits (up to 32 workouts per day and 64 splits per workout). Use when the question needs lap or split rows. Prefer --include-workout-summaries for individual workout facts without splits; omit both options for day totals. Choose the required level before the first and only activity-list data read; never use a smaller output as a probe before retrying with detail.',
+        ),
+    }),
+    hint: wearablesActivityListHint,
     output: wearablesActivityListResultSchema,
     async run({ options }) {
       assertWearableDateRangeOrdered(options)
@@ -980,6 +1025,8 @@ export function registerWearablesCommands(
         to: options.to,
         providers: normalizeWearableProviders(options.provider),
         limit: options.limit,
+        includeWorkoutDetails: options.includeWorkoutDetails,
+        includeWorkoutSummaries: options.includeWorkoutSummaries,
       })
 
       return wearablesActivityListResultSchema.parse(withoutWearableVaultPath(result))

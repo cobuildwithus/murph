@@ -15,14 +15,6 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const BLACKSMITH_PROVIDER = "blacksmith-testbox";
-const BLACKSMITH_ORG = "cobuildwithus";
-const BLACKSMITH_REF = "main";
-const BLACKSMITH_WORKFLOW = ".github/workflows/crabbox-bounded.yml";
-const BLACKSMITH_JOB = "hydrate";
-const DEFAULT_CRABBOX_PROFILE = "murph-verification";
-const CRABBOX_IDLE_TIMEOUT = "10m";
-const TRUSTED_CRABBOX_ENTRYPOINT = "/usr/local/bin/murph-crabbox-verify";
 const SSH_PROVIDER = "ssh";
 const SSH_TARGET = "macos";
 const SSH_WORK_ROOT = "/Users/Shared/murph-crabbox";
@@ -31,7 +23,6 @@ const SSH_VERIFICATION_ENTRYPOINT =
   "scripts/crabbox/run-ssh-locked-verification.sh";
 const STATIC_GIT_SNAPSHOT_DIRECTORY = ".murph-static-git-snapshot";
 const SNAPSHOT_ORIGIN = "https://github.com/cobuildwithus/murph.git";
-const WORKSPACE_ARTIFACT_LOCK = "scripts/run-with-workspace-artifact-lock.mjs";
 const SAFE_CRABBOX_CLI_ENVIRONMENT_NAMES = [
   "HOME",
   "LANG",
@@ -45,7 +36,7 @@ const SAFE_CRABBOX_CLI_ENVIRONMENT_NAMES = [
   "XDG_CACHE_HOME",
   "XDG_CONFIG_HOME",
 ];
-const VALID_EXECUTORS = new Set(["auto", "local", "ssh", "crabbox"]);
+const VALID_EXECUTORS = new Set(["auto", "local", "ssh"]);
 const SUPPORTED_VERIFICATION_COMMANDS = new Set([
   "test:diff",
   "verify:acceptance",
@@ -62,51 +53,13 @@ export function parseVerificationRequest(argv) {
   return { commandArgs, verificationCommand };
 }
 
-function assertTestboxSpendAllowed(env) {
-  if (
-    readBooleanFlag(
-      env.MURPH_ALLOW_TESTBOX_SPEND,
-      "MURPH_ALLOW_TESTBOX_SPEND",
-    )
-  ) {
-    return;
-  }
-
-  throw new Error(
-    "MURPH_VERIFY_EXECUTOR=crabbox creates paid Blacksmith Testbox spend and is disabled by default. Run the canonical command with MURPH_VERIFY_EXECUTOR=local, or route it to the free dedicated worker with MURPH_VERIFY_EXECUTOR=ssh. Set MURPH_ALLOW_TESTBOX_SPEND=1 on a single deliberate invocation to accept the spend.",
-  );
-}
-
-function assertSafeBlacksmithRoutingInputs(env) {
-  const leaseId = readOptionalValue(
-    env.MURPH_CRABBOX_LEASE_ID,
-    "MURPH_CRABBOX_LEASE_ID",
-  );
-  const legacyPool = readOptionalValue(
-    env.MURPH_CRABBOX_POOL,
-    "MURPH_CRABBOX_POOL",
-  );
-
-  if (legacyPool) {
-    throw new Error(
-      "Blacksmith Testbox does not use Crabbox pools; set MURPH_VERIFY_EXECUTOR=crabbox for a fresh pinned Testbox.",
-    );
-  }
-
-  if (leaseId) {
-    throw new Error(
-      "MURPH_CRABBOX_LEASE_ID is not supported for canonical verification because an arbitrary existing lease cannot prove the organization that installed its trusted entrypoint. Use a fresh pinned Testbox run.",
-    );
-  }
-}
-
 export function resolveVerificationExecutor({
   env = process.env,
   isExecutorAvailable = detectExecutorStack,
 } = {}) {
   const requestedExecutor = (env.MURPH_VERIFY_EXECUTOR ?? "auto").trim();
   if (!VALID_EXECUTORS.has(requestedExecutor)) {
-    throw new Error("MURPH_VERIFY_EXECUTOR must be auto, local, ssh, or crabbox.");
+    throw new Error("MURPH_VERIFY_EXECUTOR must be auto, local, or ssh.");
   }
 
   const requiresVercelDevelopmentEnvironment = readBooleanFlag(
@@ -119,7 +72,7 @@ export function resolveVerificationExecutor({
   }
 
   if (requiresVercelDevelopmentEnvironment) {
-    if (requestedExecutor === "crabbox" || requestedExecutor === "ssh") {
+    if (requestedExecutor === "ssh") {
       throw new Error(
         `MURPH_VERIFY_REQUIRES_VERCEL_ENV=1 cannot be combined with MURPH_VERIFY_EXECUTOR=${requestedExecutor}; remote verification never forwards Vercel development credentials.`,
       );
@@ -135,18 +88,10 @@ export function resolveVerificationExecutor({
     return { executor: "local", reason: "auto" };
   }
 
-  if (requestedExecutor === "crabbox") {
-    assertTestboxSpendAllowed(env);
-    assertSafeBlacksmithRoutingInputs(env);
-  } else {
-    readSshRoutingInputs(env);
-  }
+  readSshRoutingInputs(env);
   if (!isExecutorAvailable(requestedExecutor)) {
-    const requiredStack = requestedExecutor === "crabbox"
-      ? "Crabbox and Blacksmith CLIs are"
-      : "Crabbox CLI is";
     throw new Error(
-      `MURPH_VERIFY_EXECUTOR=${requestedExecutor} was requested, but the ${requiredStack} unavailable.`,
+      `MURPH_VERIFY_EXECUTOR=${requestedExecutor} was requested, but the Crabbox CLI is unavailable.`,
     );
   }
 
@@ -162,38 +107,6 @@ export function buildLocalInvocation(request) {
     ],
     command: "bash",
   };
-}
-
-export function buildCrabboxInvocation(request) {
-  const args = [
-    "run",
-    "--profile",
-    DEFAULT_CRABBOX_PROFILE,
-    "--provider",
-    BLACKSMITH_PROVIDER,
-    "--blacksmith-org",
-    BLACKSMITH_ORG,
-    "--blacksmith-ref",
-    BLACKSMITH_REF,
-    "--blacksmith-workflow",
-    BLACKSMITH_WORKFLOW,
-    "--blacksmith-job",
-    BLACKSMITH_JOB,
-    "--idle-timeout",
-    CRABBOX_IDLE_TIMEOUT,
-    "--label",
-    `murph ${request.verificationCommand}`,
-    "--timing-json",
-  ];
-
-  args.push(
-    "--",
-    TRUSTED_CRABBOX_ENTRYPOINT,
-    request.verificationCommand,
-    ...request.commandArgs,
-  );
-
-  return { args, command: "crabbox" };
 }
 
 export function buildSshInvocation(request, routing, repoRoot) {
@@ -250,42 +163,13 @@ export function buildSshWorktreeIdentity(
   };
 }
 
-export function buildLockedRemoteDispatcherInvocation({ request, argv }) {
-  return {
-    args: [
-      WORKSPACE_ARTIFACT_LOCK,
-      `remote ${request.verificationCommand}`,
-      "--",
-      "node",
-      "scripts/verification-dispatch.mjs",
-      ...argv,
-    ],
-    command: "node",
-  };
-}
-
 export async function runVerification(argv, env = process.env) {
   const request = parseVerificationRequest(argv);
   const resolution = resolveVerificationExecutor({ env });
-  const isRemote = resolution.executor === "crabbox" ||
-    resolution.executor === "ssh";
-
-  if (isRemote && env.MURPH_WORKSPACE_ARTIFACT_LOCK_HELD !== "1") {
-    process.stderr.write(
-      `[verification-dispatch] command=${request.verificationCommand} executor=${resolution.executor} reason=${resolution.reason} state=waiting-for-workspace-lock\n`,
-    );
-    return await runChild(
-      buildLockedRemoteDispatcherInvocation({ request, argv }),
-      env,
-    );
-  }
-
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-  const remoteInvocation = resolution.executor === "crabbox"
-    ? buildCrabboxInvocation(request)
-    : resolution.executor === "ssh"
-      ? buildSshInvocation(request, readSshRoutingInputs(env), repoRoot)
-      : null;
+  const remoteInvocation = resolution.executor === "ssh"
+    ? buildSshInvocation(request, readSshRoutingInputs(env), repoRoot)
+    : null;
   const invocation = remoteInvocation ?? buildLocalInvocation(request);
 
   process.stderr.write(
@@ -1067,10 +951,7 @@ function isSensitiveRemoteSyncPath(filePath) {
 
 function detectExecutorStack(executor) {
   const environment = buildCrabboxCliEnvironment(process.env);
-  if (!isCommandAvailable("crabbox", environment)) {
-    return false;
-  }
-  return executor !== "crabbox" || isCommandAvailable("blacksmith", environment);
+  return executor === "ssh" && isCommandAvailable("crabbox", environment);
 }
 
 function isCommandAvailable(command, environment) {
@@ -1154,6 +1035,8 @@ function readBooleanFlag(value, name) {
 function runChild(invocation, env) {
   return new Promise((resolve, reject) => {
     const useDetachedProcessGroup = process.platform !== "win32";
+    let settled = false;
+
     const child = spawn(invocation.command, invocation.args, {
       cwd: invocation.cwd,
       detached: useDetachedProcessGroup,
@@ -1174,18 +1057,26 @@ function runChild(invocation, env) {
     process.once("SIGTERM", onSigterm);
     process.once("SIGHUP", onSighup);
 
-    const cleanup = () => {
+    const cleanupChildOwnership = () => {
       process.off("SIGINT", onSigint);
       process.off("SIGTERM", onSigterm);
       process.off("SIGHUP", onSighup);
     };
 
     child.once("error", (error) => {
-      cleanup();
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanupChildOwnership();
       reject(error);
     });
-    child.once("exit", (code, signal) => {
-      cleanup();
+    child.once("close", (code, signal) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanupChildOwnership();
       if (signal === "SIGINT") {
         resolve(130);
         return;

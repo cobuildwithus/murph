@@ -25,6 +25,24 @@ export type RuntimeProcessingRetryReason =
   | "missing_container_binding"
   | "starting_fence_preserved";
 
+export type RuntimeProcessingContainerBusyStage =
+  | "active_runtime_contention"
+  | "background_preemption_not_accepted"
+  | "background_preemption_unavailable"
+  | "cooperative_handoff_pending"
+  | "non_runtime_write_fence"
+  | "stopped_container_record_pending";
+
+export type RuntimeProcessingRetryAttribution =
+  | {
+      reason: "container_busy";
+      stage: RuntimeProcessingContainerBusyStage;
+    }
+  | {
+      reason: Exclude<RuntimeProcessingRetryReason, "container_busy">;
+      stage?: never;
+    };
+
 export type RuntimeProcessingStartFailureRetryReason = Extract<
   RuntimeProcessingRetryReason,
   | "command_budget_exhausted"
@@ -239,7 +257,7 @@ export function mapRunnerProcessingRetryReason(
     RunnerContainerEnsureProcessingResult,
     { kind: "wake-unconfirmed" }
   >["reason"],
-): RuntimeProcessingRetryReason {
+): Exclude<RuntimeProcessingRetryReason, "container_busy"> {
   switch (reason) {
     case "active-child-rejected":
       return "active_child_rejected";

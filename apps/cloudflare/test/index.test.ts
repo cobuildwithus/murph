@@ -51,6 +51,13 @@ import type {
   HostedExecutionContainerNamespaceLike,
   HostedExecutionContainerStubLike,
 } from "../src/runner-container.ts";
+import {
+  HOSTED_RUNNER_REGION,
+  HOSTED_STANDBY_LOCATION_HINT,
+  HOSTED_STANDBY_REGION,
+  createHostedStandbySlotName,
+  type HostedStandbyRunnerContainerStubLike,
+} from "../src/standby-runner-contract.ts";
 import type {
   DurableObjectStateLike,
   DurableObjectStorageLike,
@@ -58,6 +65,7 @@ import type {
 import {
   hostedArtifactObjectKey,
   hostedBrowserVaultReplicaObjectKey,
+  hostedMediaObjectKey,
   hostedWorkspaceSnapshotObjectKey,
 } from "../src/storage-paths.ts";
 import type {
@@ -103,6 +111,7 @@ import {
 } from "./hosted-runtime-crypto-fixtures";
 import { asWorkerStringEnvironment } from "../src/worker-contracts.ts";
 import { createTestSqlStorage } from "./sql-storage.ts";
+import { RunnerSlotBindingStore } from "../src/runner-slot-binding.ts";
 
 const describe = baseDescribe.sequential;
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -299,6 +308,7 @@ describe("cloudflare worker routes", () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       service: "cloudflare-hosted-runner",
+      standbyMode: "off",
     });
   });
 
@@ -312,6 +322,7 @@ describe("cloudflare worker routes", () => {
     await expect(rootResponse.json()).resolves.toEqual({
       ok: true,
       service: "cloudflare-hosted-runner",
+      standbyMode: "off",
     });
 
     const healthResponse = await worker.fetch(
@@ -323,6 +334,7 @@ describe("cloudflare worker routes", () => {
     await expect(healthResponse.json()).resolves.toEqual({
       ok: true,
       service: "cloudflare-hosted-runner",
+      standbyMode: "off",
     });
 
     const unknownResponse = await worker.fetch(
@@ -374,6 +386,7 @@ describe("cloudflare worker routes", () => {
       "test-read-active-runtime-fence",
       "test-age-active-runtime-fence",
       "test-start-stuck-invocation",
+      "test-ensure-standby-ready",
       "test-temporal-mailbox-signal-fault-arm",
       "test-temporal-mailbox-signal-fault-clear",
       "test-temporal-mailbox-signal-fault-consume",
@@ -408,6 +421,7 @@ describe("cloudflare worker routes", () => {
           tag: "test",
           timestamp: "2026-04-24T00:00:00.000Z",
         },
+        HOSTED_EXECUTION_STANDBY_MODE: "shadow",
       },
     );
 
@@ -415,6 +429,7 @@ describe("cloudflare worker routes", () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
       service: "cloudflare-hosted-runner",
+      standbyMode: "shadow",
       workerVersionId: "version-123",
     });
   });
@@ -454,6 +469,56 @@ describe("cloudflare worker routes", () => {
       },
       service: "cloudflare-hosted-runner",
     });
+  });
+
+  it.each([
+    { label: "ready", ready: ["slot-one", "slot-two"], provisioning: [], releaseId: "version-123", status: 200 },
+    { label: "still preparing", ready: ["slot-one"], provisioning: ["slot-two"], releaseId: "version-123", status: 503 },
+    { label: "missing inventory", ready: [], provisioning: [], releaseId: "version-123", status: 503 },
+    { label: "stale release", ready: ["slot-one", "slot-two"], provisioning: [], releaseId: "version-old", status: 503 },
+    { label: "duplicate slots", ready: ["slot-one", "slot-one"], provisioning: [], releaseId: "version-123", status: 503 },
+  ])("checks $label standby inventory through the signed smoke route", async ({ ready, provisioning, releaseId, status }) => {
+    const ensureReadyStandby = vi.fn(async () => ({ accepted: true as const }));
+    const claimReadyStandby = vi.fn(async () => ({ outcome: "disabled" as const }));
+    const getByName = vi.fn(() => ({
+      claimReadyStandby,
+      ensureReadyStandby,
+      async readStandbyCoordinatorState() {
+        return { readySlotNames: ready, provisioningSlotNames: provisioning, releaseId, region: HOSTED_RUNNER_REGION };
+      },
+    }));
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      CF_VERSION_METADATA: { id: "version-123" },
+      HOSTED_EXECUTION_STANDBY_MODE: "shadow",
+      HOSTED_EXECUTION_STANDBY_TARGET: "2",
+      STANDBY_COORDINATOR: { getByName },
+    });
+    const url = new URL("https://runner.example.test/internal/deploy/container-smoke");
+    const unsigned = await worker.fetch(new Request(url, { method: "POST" }), env);
+    expect(unsigned.status).toBe(401);
+    expect(getByName).not.toHaveBeenCalled();
+    const response = await worker.fetch(new Request(url, {
+      headers: await createHostedWebCallbackSignatureHeaders({
+        environment: readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning,
+        method: "POST", path: url.pathname, payload: "", search: url.search,
+      }),
+      method: "POST",
+    }), env);
+    expect(response.status).toBe(status);
+    const payload = await response.json();
+    expect(payload).toMatchObject({
+      standbyInventory: {
+        ready: status === 200,
+        readyCount: new Set(ready).size,
+        provisioningCount: provisioning.length,
+        target: 2,
+        releaseMatches: releaseId === "version-123",
+      },
+    });
+    expect(JSON.stringify(payload)).not.toContain("slot-one");
+    expect(getByName).toHaveBeenCalledWith("standby-coordinator--v-version-123--r-global");
+    expect(ensureReadyStandby).toHaveBeenCalledWith({ releaseId: "version-123", region: HOSTED_RUNNER_REGION });
+    expect(claimReadyStandby).not.toHaveBeenCalled();
   });
 
   it("returns the signed Temporal worker binding admission without caching it", async () => {
@@ -673,6 +738,12 @@ describe("cloudflare worker routes", () => {
       };
     });
     const env = createWorkerEnv(createUserRunnerStub(), {
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
+      STANDBY_COORDINATOR: {
+        getByName() {
+          throw new Error("The model-only phase must not repeat inventory verification.");
+        },
+      },
       RUNNER_CONTAINER_SMOKE: {
         getByName() {
           return {
@@ -2018,6 +2089,100 @@ describe("cloudflare worker routes", () => {
     expect(invalidResponse.status).toBe(400);
   });
 
+  it("stops the standby container that owns the active runtime fence", async () => {
+    const standbyContainerName = createHostedStandbySlotName("release_1");
+    const beginExactShutdown = vi.fn(async () => ({ ok: true as const }));
+    const beginStandbyShutdown = vi.fn(async () => ({ ok: true as const }));
+    const baseRunnerContainerNamespace = createRunnerContainerNamespace();
+    const exactStub = {
+      ...baseRunnerContainerNamespace.getByName("member_123"),
+      beginShutdownCheckpointGracefulStopForTest: beginExactShutdown,
+    };
+    const standbyStub = {
+      ...baseRunnerContainerNamespace.getByName(standbyContainerName),
+      bindStandbySlot: vi.fn(async (input) => ({
+        ...input,
+        bound: true as const,
+      })),
+      beginShutdownCheckpointGracefulStopForTest: beginStandbyShutdown,
+      prepareStandbySlot: vi.fn(async (input) => ({
+        ...input,
+        prepared: true as const,
+      })),
+      readStandbySlotBinding: vi.fn(async () => ({
+        claimId: "standby-claim-00000000-0000-4000-8000-000000000000",
+        releaseId: "release_1",
+        region: HOSTED_STANDBY_REGION,
+        slotName: standbyContainerName,
+        state: "bound" as const,
+        userId: "member_123",
+      })),
+      readStandbySlotCoordinatorState: vi.fn(async () => ({
+        coordinatorOwned: false,
+        releaseId: "release_1",
+        slotName: standbyContainerName,
+        state: "bound" as const,
+      })),
+      resolveRetainedStandbySlot: vi.fn(async () => ({
+        claimId: "standby-claim-00000000-0000-4000-8000-000000000000",
+        releaseId: "release_1",
+        region: HOSTED_STANDBY_REGION,
+        slotName: standbyContainerName,
+        state: "bound" as const,
+        userId: "member_123",
+      })),
+      retireStandbySlot: vi.fn(async () => ({ retired: true as const })),
+    } satisfies HostedStandbyRunnerContainerStubLike & {
+      beginShutdownCheckpointGracefulStopForTest(
+        input: { userId: string },
+      ): Promise<{ ok: true }>;
+    };
+    const exactGetByName = vi.fn(() => exactStub);
+    const standbyGetByName = vi.fn(() => standbyStub);
+    const readActiveRuntimeFenceForTest = vi.fn(async () => ({
+      attemptId: "runtime-attempt-standby",
+      processingMode: "default" as const,
+      runnerContainerName: standbyContainerName,
+    }));
+    const env = createWorkerEnv(createUserRunnerStub({
+      readActiveRuntimeFenceForTest,
+    }), {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+      RUNNER_CONTAINER: {
+        getByName: exactGetByName,
+      },
+      STANDBY_RUNNER_CONTAINER: {
+        getByName: standbyGetByName,
+      },
+    });
+
+    const response = await hostedLocalTestWorker.fetch(
+      await signControlRequest(new Request(
+        "https://runner.example.test/__test/users/member_123"
+          + "/shutdown-checkpoint-publication-barrier?action=shutdown",
+        { method: "POST" },
+      ), {
+        boundUserId: "member_123",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+    expect(readActiveRuntimeFenceForTest).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    expect(standbyGetByName).toHaveBeenCalledWith(standbyContainerName, {
+      locationHint: HOSTED_STANDBY_LOCATION_HINT,
+    });
+    expect(beginStandbyShutdown).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    expect(exactGetByName).not.toHaveBeenCalled();
+    expect(beginExactShutdown).not.toHaveBeenCalled();
+  });
+
   it("maps the user-scoped foreground-priority ordering controls", async () => {
     const baseRunnerContainerNamespace = createRunnerContainerNamespace();
     const foregroundPriorityOrderingControlForTest = vi.fn(
@@ -3071,7 +3236,10 @@ describe("cloudflare worker routes", () => {
   });
 
   describe("hosted runtime control", () => {
-    it("maps runtime ensure-processing route calls to the Durable Object adapter", async () => {
+    it.each([
+      { assistantExecutionBlocked: true, processingMode: "system_mailbox" },
+      { conversationWorkPending: true, processingMode: "default" },
+    ] as const)("maps signed runtime ensure-processing $processingMode calls to the Durable Object adapter", async (processingRequest) => {
       const stub = createUserRunnerStub({
         ensureRuntimeProcessingForUser: vi.fn(async () => ({
           action: "started" as const,
@@ -3086,9 +3254,8 @@ describe("cloudflare worker routes", () => {
         await signWebCallbackControlRequest(
           new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
             body: JSON.stringify({
-              assistantExecutionBlocked: true,
+              ...processingRequest,
               orchestrationAttemptId: "orchestration-attempt-test",
-              processingMode: "system_mailbox",
             }),
             headers: {
               "content-type": "application/json; charset=utf-8",
@@ -3113,7 +3280,7 @@ describe("cloudflare worker routes", () => {
         runtimeAttemptId: "runtime-attempt-test",
       });
       expect(stub.ensureRuntimeProcessingForUser).toHaveBeenCalledWith({
-        assistantExecutionBlocked: true,
+        ...processingRequest,
         orchestrationAttemptId: "orchestration-attempt-test",
         commandStartedAtEpochMs: expect.any(Number),
         commandTimeoutMs: 10_000,
@@ -3124,9 +3291,28 @@ describe("cloudflare worker routes", () => {
           runtimeControlAuthStartedAtEpochMs: expect.any(Number),
           cloudflareRouteReceivedAtEpochMs: expect.any(Number),
         },
-        processingMode: "system_mailbox",
         userId: "test-user",
       });
+    });
+
+    it("rejects a conversation work marker added after runtime request signing", async () => {
+      const stub = createUserRunnerStub();
+      const env = createWorkerEnv(stub);
+      const requestBody = { orchestrationAttemptId: "orchestration-attempt-test" };
+      const signedRequest = await signWebCallbackControlRequest(
+        new Request("https://runner.example.test/internal/users/test-user/runtime/ensure-processing", {
+          body: JSON.stringify(requestBody),
+          headers: { "content-type": "application/json; charset=utf-8" },
+          method: "POST",
+        }),
+        env,
+      );
+      const response = await worker.fetch(new Request(signedRequest, {
+        body: JSON.stringify({ ...requestBody, conversationWorkPending: true }),
+      }), env);
+
+      expect(response.status).toBe(401);
+      expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
     });
 
     it("runs runtime health-data consent reconciliation synchronously for Web OIDC", async () => {
@@ -3543,7 +3729,9 @@ describe("cloudflare worker routes", () => {
     });
 
     it("routes shell startup through the consent-owning user runner", async () => {
-      const prewarmRuntimeShellForUser = vi.fn(async () => undefined);
+      const prewarmRuntimeShellForUser = vi.fn<
+        NonNullable<UserRunnerDurableObjectStubLike["prewarmRuntimeShellForUser"]>
+      >(async () => undefined);
       const stub = createUserRunnerStub({ prewarmRuntimeShellForUser });
       const runnerContainerGetByName = vi.fn();
       const userRunnerGetByName = vi.fn(() => stub);
@@ -3556,7 +3744,12 @@ describe("cloudflare worker routes", () => {
         await signControlRequest(new Request(
           "https://runner.example.test/internal/users/test-user/runtime/shell-prewarm",
           {
-            body: JSON.stringify({ source: "linq-typing-started" }),
+            body: JSON.stringify({
+              orchestrationAttemptId:
+                "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+              requestStartedAtEpochMs: 1_788_000_000_000,
+              source: "linq-message-routing",
+            }),
             headers: { "content-type": "application/json; charset=utf-8" },
             method: "POST",
           },
@@ -3570,8 +3763,22 @@ describe("cloudflare worker routes", () => {
       expect(stub.bindUser).not.toHaveBeenCalled();
       expect(prewarmRuntimeShellForUser).toHaveBeenCalledWith(
         "test-user",
-        "linq-typing-started",
+        "linq-message-routing",
+        expect.objectContaining({
+          shellPrewarmRuntimeControlAuthFinishedAtEpochMs: expect.any(Number),
+          shellPrewarmRuntimeControlAuthStartedAtEpochMs: expect.any(Number),
+          shellPrewarmCloudflareRouteReceivedAtEpochMs: expect.any(Number),
+          shellPrewarmOrchestrationAttemptId:
+            "web-prewarm-123e4567-e89b-42d3-a456-426614174000",
+          shellPrewarmRequestStartedAtEpochMs: 1_788_000_000_000,
+        }),
       );
+      const orchestration = prewarmRuntimeShellForUser.mock.calls[0]?.[2];
+      expect(orchestration?.shellPrewarmRuntimeControlAuthStartedAtEpochMs)
+        .toBeLessThanOrEqual(
+          orchestration?.shellPrewarmRuntimeControlAuthFinishedAtEpochMs
+            ?? Number.NEGATIVE_INFINITY,
+        );
       expect(runnerContainerGetByName).not.toHaveBeenCalled();
     });
 
@@ -3598,9 +3805,15 @@ describe("cloudflare worker routes", () => {
       const bindUser = vi.fn(async (userId: string) =>
         await harness.runner.bindUser(userId)
       );
-      const prewarmRuntimeShellForUser = vi.fn(async (userId: string) =>
-        await harness.runner.prewarmRuntimeShellForUser(userId)
-      );
+      const prewarmRuntimeShellForUser = vi.fn(async (
+        userId: string,
+        source?: Parameters<typeof harness.runner.prewarmRuntimeShellForUser>[1],
+        orchestration?: Parameters<typeof harness.runner.prewarmRuntimeShellForUser>[2],
+      ) => await harness.runner.prewarmRuntimeShellForUser(
+        userId,
+        source,
+        orchestration,
+      ));
       const stub = createUserRunnerStub({
         bindUser,
         prewarmRuntimeShellForUser,
@@ -3619,6 +3832,9 @@ describe("cloudflare worker routes", () => {
       expect(prewarmRuntimeShellForUser).toHaveBeenCalledWith(
         "test-user",
         undefined,
+        expect.objectContaining({
+          shellPrewarmCloudflareRouteReceivedAtEpochMs: expect.any(Number),
+        }),
       );
       expect(harness.namespace.getByName).not.toHaveBeenCalled();
       expect(
@@ -4129,6 +4345,146 @@ describe("cloudflare worker routes", () => {
     );
   });
 
+  it("stores and reads encrypted hosted media objects through the outbound media.worker handler", async () => {
+    installOidcJwksFetch();
+    const userRunnerStub = createUserRunnerStub();
+    const env = createWorkerEnv(userRunnerStub);
+    const mediaBytes = Buffer.from("media-payload\n", "utf8");
+    const mediaSha256 = createHash("sha256").update(mediaBytes).digest("hex");
+    const mediaId = createHash("sha256").update(`image:${mediaSha256}`).digest("hex");
+    const expiresAt = "2026-06-04T00:00:00.000Z";
+    const mediaHeaders = {
+      "x-hosted-runtime-media-byte-size": String(mediaBytes.byteLength),
+      "x-hosted-runtime-media-kind": "image",
+      "x-hosted-runtime-media-sha256": mediaSha256,
+    } as const;
+
+    const writeResponse = await callRunnerOutbound(
+      new Request(`http://media.worker/media/${mediaId}`, {
+        body: mediaBytes,
+        headers: {
+          "content-type": "application/octet-stream",
+          ...ACTIVE_INVOCATION_LEASE_HEADERS,
+          ...mediaHeaders,
+          "x-hosted-runtime-media-expires-at": expiresAt,
+        },
+        method: "PUT",
+      }),
+      env,
+    );
+
+    expect(writeResponse.status).toBe(200);
+    await expect(writeResponse.json()).resolves.toMatchObject({
+      mediaId,
+      ok: true,
+      size: mediaBytes.byteLength,
+    });
+    expect(userRunnerStub.recordHostedMediaAsset).toHaveBeenCalledWith({
+      attemptId: ACTIVE_INVOCATION_LEASE_HEADERS["x-hosted-runtime-attempt-id"],
+      byteSize: mediaBytes.byteLength,
+      expiresAt,
+      leaseGeneration:
+        ACTIVE_INVOCATION_LEASE_HEADERS["x-hosted-runtime-lease-generation"],
+      mediaId,
+      mediaKind: "image",
+      sha256: mediaSha256,
+      userId: "member_123",
+    });
+
+    const readResponse = await callRunnerOutbound(
+      new Request(`http://media.worker/media/${mediaId}`, {
+        headers: {
+          ...ACTIVE_INVOCATION_LEASE_HEADERS,
+          ...mediaHeaders,
+          "x-hosted-runtime-media-read-purpose": "workspace_media_materialization",
+        },
+        method: "GET",
+      }),
+      env,
+    );
+
+    expect(readResponse.status).toBe(200);
+    expect(Buffer.from(await readResponse.arrayBuffer())).toEqual(mediaBytes);
+    expect(userRunnerStub.admitHostedMediaRead).toHaveBeenCalledWith({
+      byteSize: mediaBytes.byteLength,
+      mediaId,
+      mediaKind: "image",
+      sha256: mediaSha256,
+      userId: "member_123",
+    });
+    const mediaObjectKey = await hostedMediaObjectKeyForTest(env, "member_123", mediaId);
+    expect(env.__bucketStore.keys()).toContain(mediaObjectKey);
+    vi.mocked(userRunnerStub.forgetHostedMediaAsset).mockImplementationOnce(async () => {
+      await env.BUNDLES.delete!(mediaObjectKey);
+      return true;
+    });
+
+    const deleteResponse = await callRunnerOutbound(
+      new Request(`http://media.worker/media/${mediaId}`, {
+        headers: ACTIVE_INVOCATION_LEASE_HEADERS,
+        method: "DELETE",
+      }),
+      env,
+    );
+
+    expect(deleteResponse.status).toBe(200);
+    expect(userRunnerStub.forgetHostedMediaAsset).toHaveBeenCalledWith({
+      attemptId: ACTIVE_INVOCATION_LEASE_HEADERS["x-hosted-runtime-attempt-id"],
+      leaseGeneration:
+        ACTIVE_INVOCATION_LEASE_HEADERS["x-hosted-runtime-lease-generation"],
+      mediaId,
+      userId: "member_123",
+    });
+    expect(env.__bucketStore.keys()).not.toContain(mediaObjectKey);
+  });
+
+  it("keeps hosted media objects isolated per user", async () => {
+    installOidcJwksFetch();
+    const env = createWorkerEnv();
+    const mediaBytes = Buffer.from("media-payload\n", "utf8");
+    const mediaSha256 = createHash("sha256").update(mediaBytes).digest("hex");
+    const mediaId = createHash("sha256").update(`image:${mediaSha256}`).digest("hex");
+    const mediaHeaders = {
+      "x-hosted-runtime-media-byte-size": String(mediaBytes.byteLength),
+      "x-hosted-runtime-media-kind": "image",
+      "x-hosted-runtime-media-sha256": mediaSha256,
+    } as const;
+
+    const writeResponse = await callRunnerOutbound(
+      new Request(`http://media.worker/media/${mediaId}`, {
+        body: mediaBytes,
+        headers: {
+          "content-type": "application/octet-stream",
+          ...ACTIVE_INVOCATION_LEASE_HEADERS,
+          ...mediaHeaders,
+        },
+        method: "PUT",
+      }),
+      env,
+      "member_alpha",
+    );
+
+    expect(writeResponse.status).toBe(200);
+
+    const readResponse = await callRunnerOutbound(
+      new Request(`http://media.worker/media/${mediaId}`, {
+        headers: {
+          ...ACTIVE_INVOCATION_LEASE_HEADERS,
+          ...mediaHeaders,
+          "x-hosted-runtime-media-read-purpose": "workspace_media_materialization",
+        },
+        method: "GET",
+      }),
+      env,
+      "member_bravo",
+    );
+
+    expect(readResponse.status).toBe(404);
+    await expect(hostedMediaObjectKeyForTest(env, "member_alpha", mediaId)).resolves.toSatisfy(
+      (expectedKey) => env.__bucketStore.keys().includes(expectedKey),
+    );
+  });
+
   it("hard-cuts removed callback routes from the outbound results.worker handler", async () => {
     const env = createWorkerEnv();
 
@@ -4440,7 +4796,32 @@ function createRuntimeControlRunnerHarness(input: {
     });
     return next;
   });
+  const slotStore = new RunnerSlotBindingStore(createTestSqlStorage());
   const stub: HostedExecutionContainerStubLike = {
+    bindStandbySlot: vi.fn(async (binding) => {
+      slotStore.initialize(binding);
+      const bound = slotStore.bind(binding);
+      return { ...bound, bound: true as const };
+    }),
+    prepareStandbySlot: vi.fn(async () => {
+      throw new Error("Runtime control route tests must not prewarm shared inventory.");
+    }),
+    readStandbySlotBinding: vi.fn(async () => slotStore.read()),
+    readStandbySlotCoordinatorState: vi.fn(async () => {
+      const binding = slotStore.read();
+      return {
+        coordinatorOwned: binding.userId === null,
+        releaseId: binding.releaseId,
+        slotName: binding.slotName,
+        state: binding.state,
+      };
+    }),
+    resolveRetainedStandbySlot: vi.fn(async () => {
+      throw new Error("Runtime control route tests must not reuse an idle target.");
+    }),
+    retireStandbySlot: vi.fn(async () => {
+      throw new Error("Runtime control route tests must not retire a bound target.");
+    }),
     destroyInstance: vi.fn(async () => undefined),
     ensureReadyForProcessing: vi.fn<
       NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
@@ -4602,8 +4983,9 @@ function createRunnerContainerNamespace(): WorkerEnvironmentSource["RUNNER_CONTA
 function createCodexShellSmokeResult() {
   return {
     cliSurfaceContractBytes: 37282,
-    cliSurfaceHotPathProofCount: 4,
+    cliSurfaceHotPathProofCount: 5,
     client: "codex-app-server",
+    healthCommonsCliGoalProofCount: 6,
     murphPathBytes: 28,
     noteAddBytes: 128,
     stderrBytes: 0,
@@ -4812,6 +5194,15 @@ async function hostedArtifactObjectKeyForTest(
   return hostedArtifactObjectKey({ sha256, userId });
 }
 
+async function hostedMediaObjectKeyForTest(
+  env: WorkerTestEnv,
+  userId: string,
+  mediaId: string,
+): Promise<string> {
+  await resolveHostedUserCryptoContextForTest(env, userId);
+  return hostedMediaObjectKey({ mediaId, userId });
+}
+
 async function resolveHostedUserCryptoContextForTest(
   _env: WorkerTestEnv,
   userId: string,
@@ -4838,6 +5229,9 @@ type WorkerTestUserRunnerStub = UserRunnerDurableObjectStubLike & {
     attemptId: string;
     processingMode: "default" | "inbox_media_retention" | "system_mailbox";
   } | null>;
+  admitHostedMediaRead: NonNullable<UserRunnerDurableObjectStubLike["admitHostedMediaRead"]>;
+  forgetHostedMediaAsset: NonNullable<UserRunnerDurableObjectStubLike["forgetHostedMediaAsset"]>;
+  recordHostedMediaAsset: NonNullable<UserRunnerDurableObjectStubLike["recordHostedMediaAsset"]>;
   runAlarmForTest(input: { userId: string }): Promise<{ ok: true }>;
   runUntilIdleForTest(input: { userId: string }): Promise<HostedWorkspaceInvocationResult>;
   startStuckInvocationForTest(input: {
@@ -4898,6 +5292,12 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       ok: false as const,
       reason: "not-configured" as const,
     })),
+    admitHostedMediaRead: vi.fn(async () => ({
+      ok: true as const,
+      reason: "active" as const,
+    })),
+    forgetHostedMediaAsset: vi.fn(async () => true),
+    recordHostedMediaAsset: vi.fn(async () => true),
     readActiveRuntimeFenceForTest: vi.fn(async () => null),
     runUntilIdleForTest: vi.fn(async () => ({
       nextWakeAt: null,

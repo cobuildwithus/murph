@@ -1,4 +1,4 @@
-import { createHostedArtifactStore } from "./bundle-store.ts";
+import { createHostedArtifactStore, createHostedMediaStore } from "./bundle-store.ts";
 import { HostedEncryptedR2PayloadUnreadableError } from "./crypto.ts";
 import { HostedBundleGarbageCollector } from "./bundle-gc.ts";
 import type {
@@ -67,19 +67,31 @@ import {
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
-import { CLOUDFLARE_HOSTED_RUNTIME_HOSTS } from "./internal-hosts.ts";
+import {
+  CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_PATH,
+  CLOUDFLARE_HOSTED_RUNTIME_HOSTS,
+} from "./internal-hosts.ts";
 import { json, jsonError, methodNotAllowed, notFound, readJsonObject, unauthorized } from "./json.ts";
 import {
+  HOSTED_RUNTIME_ARTIFACT_UPLOAD_DEADLINE_HEADER,
   readHostedRuntimeArtifactFetchTelemetry,
+  readHostedRuntimeMediaFetchTelemetry,
+  HOSTED_RUNTIME_MEDIA_BYTE_SIZE_HEADER,
+  HOSTED_RUNTIME_MEDIA_EXPIRES_AT_HEADER,
+  HOSTED_RUNTIME_MEDIA_KIND_HEADER,
+  HOSTED_RUNTIME_MEDIA_SHA256_HEADER,
 } from "./runner-outbound/headers.ts";
 import {
-  requireRunnerRuntimeWriteFenceHeaders,
   requireRunnerRuntimeWriteFenceWrite,
   RunnerRuntimeWriteFenceError,
   requireRunnerRuntimeWriteFenceWorkspaceWrite,
+  type RunnerRuntimeWriteFenceWriteAuthority,
   writeRunnerRuntimeWriteFenceHeaders,
 } from "./runner-outbound/write-fence.ts";
 import { handleRunnerResultsRequest } from "./runner-outbound/results.ts";
+import {
+  handleRunnerRuntimeCompletionRequest,
+} from "./runner-outbound/runtime-completion.ts";
 import { handleRunnerWebControlRequest } from "./runner-outbound/web-control.ts";
 import {
   readHostedRunnerDiagnosticMethod,
@@ -88,8 +100,8 @@ import {
 } from "./runner-outbound/diagnostics.ts";
 import {
   resolveRunnerOutboundUserCryptoContext,
-  resolveRunnerOutboundUserRunnerStub,
   requireRunnerOutboundUserStubMethod,
+  resolveRunnerOutboundUserRunnerStub,
   type RunnerOutboundEnvironmentSource,
 } from "./runner-outbound/shared.ts";
 import {
@@ -115,6 +127,9 @@ import {
 import {
   fetchHostedExecutionWebControlPlaneResponse,
 } from "./web-control-plane.ts";
+import {
+  matchesRequestedHostedSystemProgressProjection,
+} from "./runtime-platform/workspace-progress-projection.ts";
 
 export type { RunnerOutboundEnvironmentSource } from "./runner-outbound/shared.ts";
 
@@ -128,6 +143,13 @@ const HOSTED_WORKSPACE_SNAPSHOT_PRESIGN_MIN_REMAINING_SECONDS = 30;
 const HOSTED_RUNNER_DIAGNOSTIC_FINGERPRINT_BYTES = 12;
 const hostedRunnerDiagnosticTextEncoder = new TextEncoder();
 type HostedExecutionSnapshotRefValue = NonNullable<HostedExecutionSnapshotRef>;
+type RunnerMediaStore = ReturnType<typeof createHostedMediaStore>;
+type HostedRunnerMediaDescriptor =
+  NonNullable<ReturnType<typeof readHostedRunnerMediaDescriptor>>;
+type RunnerMediaRequestCompletedEmitter = (
+  details: Record<string, boolean | number | string | null>,
+  responseStatus: number,
+) => void;
 
 export async function handleRunnerOutboundRequest(
   request: Request,
@@ -138,15 +160,15 @@ export async function handleRunnerOutboundRequest(
     const url = new URL(request.url);
 
     const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
-    if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort) {
-      return handleRunnerResultsRequest({
-        bucket: env.BUNDLES,
-        env,
-        environment,
-        request,
-        url,
-        userId,
-      });
+    const dedicatedPortResponse = await handleRunnerDedicatedPortRequest({
+      env,
+      environment,
+      request,
+      url,
+      userId,
+    });
+    if (dedicatedPortResponse) {
+      return dedicatedPortResponse;
     }
 
     if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane) {
@@ -159,22 +181,15 @@ export async function handleRunnerOutboundRequest(
       });
     }
 
-    if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore) {
-      if (url.pathname !== "/replicas") {
-        return notFound();
-      }
-
-      if (request.method !== "POST") {
-        return methodNotAllowed();
-      }
-
-      return handleRunnerBrowserVaultReplicaWriteRequest({
-        bucket: env.BUNDLES,
-        env,
-        environment,
-        request,
-        userId,
-      });
+    const storageHostResponse = handleRunnerStorageHostRequest({
+      env,
+      environment,
+      request,
+      url,
+      userId,
+    });
+    if (storageHostResponse) {
+      return storageHostResponse;
     }
 
     if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.workspaceSnapshotStore) {
@@ -275,26 +290,6 @@ export async function handleRunnerOutboundRequest(
       return methodNotAllowed();
     }
 
-    if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore) {
-      const match = /^\/objects\/(?<sha256>[a-f0-9]{64})$/u.exec(url.pathname);
-      if (!match?.groups) {
-        return notFound();
-      }
-
-      if (request.method !== "GET" && request.method !== "PUT") {
-        return methodNotAllowed();
-      }
-
-      return handleRunnerArtifactRequest({
-        bucket: env.BUNDLES,
-        env,
-        environment,
-        request,
-        sha256: match.groups.sha256,
-        userId,
-      });
-    }
-
     return notFound();
   } catch (error) {
     const safeUrl = safeRunnerOutboundRequestUrl(request.url);
@@ -323,6 +318,144 @@ export async function handleRunnerOutboundRequest(
   }
 }
 
+async function handleRunnerDedicatedPortRequest(input: {
+  env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  request: Request;
+  url: URL;
+  userId: string;
+}): Promise<Response | null> {
+  if (input.url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.runnerControl) {
+    if (input.url.pathname !== CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_PATH) {
+      return notFound();
+    }
+    if (input.request.method !== "POST") {
+      return methodNotAllowed();
+    }
+    return await handleRunnerRuntimeCompletionRequest(input);
+  }
+  if (input.url.hostname !== CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort) {
+    return null;
+  }
+  return await handleRunnerResultsRequest({
+    bucket: input.env.BUNDLES,
+    env: input.env,
+    environment: input.environment,
+    request: input.request,
+    url: input.url,
+    userId: input.userId,
+  });
+}
+
+function handleRunnerStorageHostRequest(input: {
+  env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  request: Request;
+  url: URL;
+  userId: string;
+}): Promise<Response> | null {
+  if (input.url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore) {
+    return handleRunnerBrowserVaultReplicaStoreRequest(input);
+  }
+  if (input.url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore) {
+    return handleRunnerArtifactStoreRequest(input);
+  }
+  if (input.url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.mediaStore) {
+    return handleRunnerMediaStoreRequest({
+      bucket: input.env.BUNDLES,
+      env: input.env,
+      environment: input.environment,
+      request: input.request,
+      url: input.url,
+      userId: input.userId,
+    });
+  }
+  return null;
+}
+
+async function handleRunnerBrowserVaultReplicaStoreRequest(input: {
+  env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  request: Request;
+  url: URL;
+  userId: string;
+}): Promise<Response> {
+  if (input.url.pathname !== "/replicas") {
+    return notFound();
+  }
+  if (input.request.method !== "POST") {
+    return methodNotAllowed();
+  }
+  return await handleRunnerBrowserVaultReplicaWriteRequest({
+    bucket: input.env.BUNDLES,
+    env: input.env,
+    environment: input.environment,
+    request: input.request,
+    userId: input.userId,
+  });
+}
+
+async function handleRunnerArtifactStoreRequest(input: {
+  env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  request: Request;
+  url: URL;
+  userId: string;
+}): Promise<Response> {
+  const match = /^\/objects\/(?<sha256>[a-f0-9]{64})$/u.exec(input.url.pathname);
+  if (!match?.groups) {
+    return notFound();
+  }
+  if (input.request.method !== "GET" && input.request.method !== "PUT") {
+    return methodNotAllowed();
+  }
+  return await handleRunnerArtifactRequest({
+    bucket: input.env.BUNDLES,
+    env: input.env,
+    environment: input.environment,
+    request: input.request,
+    sha256: match.groups.sha256,
+    userId: input.userId,
+  });
+}
+
+async function handleRunnerMediaStoreRequest(input: {
+  bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
+  env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  request: Request;
+  url: URL;
+  userId: string;
+}): Promise<Response> {
+  const match = /^\/media\/(?<mediaId>[a-f0-9]{64})$/u.exec(input.url.pathname);
+  if (!match?.groups) {
+    return notFound();
+  }
+  if (!isHostedRunnerMediaMethod(input.request.method)) {
+    return methodNotAllowed();
+  }
+  return await handleRunnerMediaRequest({
+    bucket: input.bucket,
+    env: input.env,
+    environment: input.environment,
+    mediaId: match.groups.mediaId,
+    request: input.request,
+    userId: input.userId,
+  });
+}
+
+function isHostedRunnerMediaMethod(method: string): boolean {
+  switch (method) {
+    case "DELETE":
+    case "GET":
+    case "POST":
+    case "PUT":
+      return true;
+    default:
+      return false;
+  }
+}
+
 function safeRunnerOutboundRequestUrl(value: string): URL | null {
   try {
     return new URL(value);
@@ -345,6 +478,461 @@ function readRunnerOutboundOperation(url: URL, method: string): string {
   return operation === "unknown_internal_operation" ? "unknown_operation" : operation;
 }
 
+async function handleRunnerMediaRequest(input: {
+  bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
+  env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  mediaId: string;
+  request: Request;
+  userId: string;
+}): Promise<Response> {
+  const startedAt = Date.now();
+  const method = readHostedRunnerDiagnosticMethod(input.request.method);
+  const operation = readRunnerMediaRequestOperation(input.request.method);
+  const fetchTelemetry = input.request.method === "GET"
+    ? readHostedRuntimeMediaFetchTelemetry(input.request.headers)
+    : null;
+  const descriptor = readHostedRunnerMediaDescriptor(input.request.headers, input.mediaId);
+  if (!descriptor && input.request.method !== "DELETE") {
+    return jsonError("Media descriptor headers are invalid.", 400);
+  }
+  const logDetails = {
+    ...(fetchTelemetry
+      ? {
+          mediaFetchCorrelationId: fetchTelemetry.correlationId,
+          mediaReadPurpose: fetchTelemetry.purpose,
+        }
+      : {}),
+    mediaKind: descriptor?.mediaKind ?? null,
+    method,
+    operation,
+    userIdPresent: input.userId.length > 0,
+  };
+  const emitCompleted = (
+    details: Record<string, boolean | number | string | null>,
+    responseStatus: number,
+  ) => {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        ...logDetails,
+        durationMs: Date.now() - startedAt,
+        responseStatus,
+        ...details,
+      },
+      level: responseStatus >= 400 ? "warn" : "info",
+      message: "Hosted runner media request completed.",
+      phase: "wake.running",
+    });
+  };
+
+  const writeAuthority = await readRunnerMediaWriteAuthority({
+    env: input.env,
+    request: input.request,
+    userId: input.userId,
+  });
+  if (!writeAuthority) {
+    emitCompleted({
+      mediaAuthorized: false,
+    }, 401);
+    return unauthorized();
+  }
+
+  try {
+    const crypto = await resolveRunnerOutboundUserCryptoContext({
+      bucket: input.bucket,
+      domain: "runtime",
+      env: input.env,
+      environment: input.environment,
+      userId: input.userId,
+    });
+    const mediaStore = createHostedMediaStore({
+      bucket: input.bucket,
+      key: crypto.rootKey,
+      keyId: crypto.rootKeyId,
+      keysById: crypto.keysById,
+      resolveKeyById: crypto.resolveKeyById,
+      userId: input.userId,
+    });
+
+    if (input.request.method === "DELETE") {
+      return await handleRunnerMediaDeleteRequest({
+        env: input.env,
+        emitCompleted,
+        mediaId: input.mediaId,
+        mediaStore,
+        userId: input.userId,
+        writeAuthority,
+      });
+    }
+
+    if (!descriptor) {
+      throw new Error("Hosted media descriptor missing after validation.");
+    }
+
+    if (input.request.method === "GET") {
+      return await handleRunnerMediaGetRequest({
+        descriptor,
+        emitCompleted,
+        env: input.env,
+        mediaStore,
+        userId: input.userId,
+      });
+    }
+
+    if (input.request.method === "POST") {
+      return await handleRunnerMediaRecordRequest({
+        descriptor,
+        emitCompleted,
+        env: input.env,
+        writeAuthority,
+        userId: input.userId,
+      });
+    }
+
+    return await handleRunnerMediaPutRequest({
+      descriptor,
+      emitCompleted,
+      env: input.env,
+      mediaStore,
+      request: input.request,
+      writeAuthority,
+      userId: input.userId,
+    });
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        ...logDetails,
+        durationMs: Date.now() - startedAt,
+        errorCode: deriveHostedExecutionErrorCode(error),
+        errorMessagePresent: error instanceof Error && error.message.trim().length > 0,
+        ...(readHostedExecutionSafeErrorName(error)
+          ? { errorName: readHostedExecutionSafeErrorName(error) }
+          : {}),
+      },
+      level: "warn",
+      message: "Hosted runner media request failed.",
+      phase: "wake.running",
+    });
+    if (
+      input.request.method === "GET"
+      && error instanceof HostedEncryptedR2PayloadUnreadableError
+    ) {
+      emitCompleted({
+        mediaReadable: false,
+      }, 422);
+      return jsonError("Media is unreadable.", 422);
+    }
+    throw error;
+  }
+}
+
+function readRunnerMediaRequestOperation(method: string): string {
+  switch (method) {
+    case "DELETE":
+      return "media_delete";
+    case "POST":
+      return "media_record";
+    case "PUT":
+      return "media_upload";
+    default:
+      return "media_fetch";
+  }
+}
+
+async function handleRunnerMediaDeleteRequest(input: {
+  env: RunnerOutboundEnvironmentSource;
+  emitCompleted: RunnerMediaRequestCompletedEmitter;
+  mediaId: string;
+  mediaStore: RunnerMediaStore;
+  userId: string;
+  writeAuthority: RunnerRuntimeWriteFenceWriteAuthority;
+}): Promise<Response> {
+  const forgotten = await forgetHostedMediaAsset({
+    env: input.env,
+    mediaId: input.mediaId,
+    userId: input.userId,
+    writeAuthority: input.writeAuthority,
+  });
+  if (!forgotten) {
+    input.emitCompleted({
+      mediaAuthorized: true,
+      mediaForgotten: false,
+    }, 409);
+    return jsonError("Media deletion was rejected.", 409);
+  }
+  input.emitCompleted({
+    mediaAuthorized: true,
+    mediaForgotten: true,
+  }, 200);
+  return json({
+    ok: true,
+  });
+}
+
+async function handleRunnerMediaGetRequest(input: {
+  descriptor: HostedRunnerMediaDescriptor;
+  emitCompleted: RunnerMediaRequestCompletedEmitter;
+  env: RunnerOutboundEnvironmentSource;
+  mediaStore: RunnerMediaStore;
+  userId: string;
+}): Promise<Response> {
+  const readAdmission = await admitHostedMediaRead({
+    descriptor: input.descriptor,
+    env: input.env,
+    userId: input.userId,
+  });
+  if (!readAdmission.ok) {
+    input.emitCompleted({
+      mediaReadable: false,
+      mediaReadAdmissionReason: readAdmission.reason,
+    }, 404);
+    return notFound();
+  }
+  const bytes = await input.mediaStore.readMedia(input.descriptor);
+  if (!bytes) {
+    input.emitCompleted({
+      mediaFound: false,
+    }, 404);
+    return notFound();
+  }
+  input.emitCompleted({
+    mediaByteLength: bytes.byteLength,
+    mediaFound: true,
+  }, 200);
+  return new Response(copyBytesToArrayBuffer(bytes), {
+    headers: {
+      "content-type": "application/octet-stream",
+    },
+    status: 200,
+  });
+}
+
+async function handleRunnerMediaRecordRequest(input: {
+  descriptor: HostedRunnerMediaDescriptor;
+  emitCompleted: RunnerMediaRequestCompletedEmitter;
+  env: RunnerOutboundEnvironmentSource;
+  userId: string;
+  writeAuthority: RunnerRuntimeWriteFenceWriteAuthority;
+}): Promise<Response> {
+  const recorded = await recordHostedMediaAsset({
+    descriptor: input.descriptor,
+    env: input.env,
+    userId: input.userId,
+    writeAuthority: input.writeAuthority,
+  });
+  input.emitCompleted({
+    mediaAuthorized: true,
+    mediaRecorded: recorded,
+  }, recorded ? 200 : 409);
+  return recorded
+    ? json({
+        mediaId: input.descriptor.mediaId,
+        ok: true,
+      })
+    : jsonError("Media lifetime registration was rejected.", 409);
+}
+
+async function handleRunnerMediaPutRequest(input: {
+  descriptor: HostedRunnerMediaDescriptor;
+  emitCompleted: RunnerMediaRequestCompletedEmitter;
+  env: RunnerOutboundEnvironmentSource;
+  mediaStore: RunnerMediaStore;
+  request: Request;
+  userId: string;
+  writeAuthority: RunnerRuntimeWriteFenceWriteAuthority;
+}): Promise<Response> {
+  const bytes = new Uint8Array(await input.request.arrayBuffer());
+  await input.mediaStore.writeMedia({
+    ...input.descriptor,
+    plaintext: bytes,
+  });
+  const recorded = await recordHostedMediaAsset({
+    descriptor: input.descriptor,
+    env: input.env,
+    userId: input.userId,
+    writeAuthority: input.writeAuthority,
+  });
+  if (!recorded) {
+    input.emitCompleted({
+      mediaAuthorized: true,
+      mediaByteLength: bytes.byteLength,
+      mediaRecorded: false,
+    }, 409);
+    return jsonError("Media lifetime registration was rejected.", 409);
+  }
+  input.emitCompleted({
+    mediaAuthorized: true,
+    mediaByteLength: bytes.byteLength,
+    mediaRecorded: true,
+  }, 200);
+  return json({
+    mediaId: input.descriptor.mediaId,
+    ok: true,
+    size: bytes.byteLength,
+  });
+}
+
+function readHostedRunnerMediaDescriptor(
+  headers: Headers,
+  mediaId: string,
+): {
+  byteSize: number;
+  mediaId: string;
+  mediaKind: "image" | "video";
+  sha256: string;
+  expiresAt: string | null;
+} | null {
+  const mediaKind = headers.get(HOSTED_RUNTIME_MEDIA_KIND_HEADER);
+  const sha256 = headers.get(HOSTED_RUNTIME_MEDIA_SHA256_HEADER);
+  const rawByteSize = headers.get(HOSTED_RUNTIME_MEDIA_BYTE_SIZE_HEADER);
+  const expiresAt = readHostedRunnerMediaExpiresAt(headers);
+  const byteSize = rawByteSize ? Number(rawByteSize) : Number.NaN;
+  if (
+    (mediaKind !== "image" && mediaKind !== "video")
+    || !sha256
+    || !/^[a-f0-9]{64}$/u.test(sha256)
+    || !Number.isSafeInteger(byteSize)
+    || byteSize < 0
+    || expiresAt === false
+  ) {
+    return null;
+  }
+
+  return {
+    byteSize,
+    mediaId,
+    mediaKind,
+    sha256,
+    expiresAt,
+  };
+}
+
+function readHostedRunnerMediaExpiresAt(headers: Headers): string | null | false {
+  if (!headers.has(HOSTED_RUNTIME_MEDIA_EXPIRES_AT_HEADER)) {
+    return null;
+  }
+  const raw = headers.get(HOSTED_RUNTIME_MEDIA_EXPIRES_AT_HEADER);
+  if (raw === null || raw.trim() === "") {
+    return null;
+  }
+  const expiresAtMs = Date.parse(raw);
+  return Number.isFinite(expiresAtMs)
+    ? new Date(expiresAtMs).toISOString()
+    : false;
+}
+
+async function readRunnerMediaWriteAuthority(input: {
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  userId: string;
+}): Promise<RunnerRuntimeWriteFenceWriteAuthority | null> {
+  try {
+    return await requireRunnerRuntimeWriteFenceWrite(input);
+  } catch (error) {
+    if (error instanceof RunnerRuntimeWriteFenceError) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function admitHostedMediaRead(input: {
+  descriptor: NonNullable<ReturnType<typeof readHostedRunnerMediaDescriptor>>;
+  env: RunnerOutboundEnvironmentSource;
+  userId: string;
+}) {
+  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
+  requireRunnerOutboundUserStubMethod(stub, "admitHostedMediaRead");
+  return await stub.admitHostedMediaRead({
+    byteSize: input.descriptor.byteSize,
+    mediaId: input.descriptor.mediaId,
+    mediaKind: input.descriptor.mediaKind,
+    sha256: input.descriptor.sha256,
+    userId: input.userId,
+  });
+}
+
+async function recordHostedMediaAsset(input: {
+  descriptor: NonNullable<ReturnType<typeof readHostedRunnerMediaDescriptor>>;
+  env: RunnerOutboundEnvironmentSource;
+  userId: string;
+  writeAuthority: RunnerRuntimeWriteFenceWriteAuthority;
+}): Promise<boolean> {
+  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
+  requireRunnerOutboundUserStubMethod(stub, "recordHostedMediaAsset");
+  return await stub.recordHostedMediaAsset({
+    attemptId: input.writeAuthority.attemptId,
+    byteSize: input.descriptor.byteSize,
+    expiresAt: input.descriptor.expiresAt,
+    leaseGeneration: input.writeAuthority.generation,
+    mediaId: input.descriptor.mediaId,
+    mediaKind: input.descriptor.mediaKind,
+    sha256: input.descriptor.sha256,
+    userId: input.userId,
+  });
+}
+
+async function forgetHostedMediaAsset(input: {
+  env: RunnerOutboundEnvironmentSource;
+  mediaId: string;
+  userId: string;
+  writeAuthority: RunnerRuntimeWriteFenceWriteAuthority;
+}): Promise<boolean> {
+  const stub = await resolveRunnerOutboundUserRunnerStub(input.env, input.userId);
+  requireRunnerOutboundUserStubMethod(stub, "forgetHostedMediaAsset");
+  return await stub.forgetHostedMediaAsset({
+    attemptId: input.writeAuthority.attemptId,
+    leaseGeneration: input.writeAuthority.generation,
+    mediaId: input.mediaId,
+    userId: input.userId,
+  });
+}
+
+// A short request-local recovery window, not a timeout for an in-flight binding PUT.
+const RUNNER_ARTIFACT_PUT_RECOVERY_WINDOW_MS = 1_000;
+const RUNNER_ARTIFACT_PUT_RETRY_DELAY_MS = 100;
+
+function readRunnerArtifactPutServiceCode(error: unknown): 10001 | 10043 | null {
+  // Workers R2 binding errors end with a numeric code. Do not infer retryability
+  // from arbitrary prose, HTTP status, nested causes, or generic fetch/TypeError.
+  if (!(error instanceof Error) || error.name !== "Error" || !error.message.startsWith("put: ")) {
+    return null;
+  }
+  const match = /\((10001|10043)\)$/u.exec(error.message);
+  return match ? (match[1] === "10001" ? 10001 : 10043) : null;
+}
+
+function readRunnerArtifactPutRetryDeadline(request: Request, startedAt: number): number {
+  const localDeadline = startedAt + RUNNER_ARTIFACT_PUT_RECOVERY_WINDOW_MS;
+  const value = request.headers.get(HOSTED_RUNTIME_ARTIFACT_UPLOAD_DEADLINE_HEADER);
+  // Older callers still have their original fetch cancellation signal. Never
+  // grant more than the short local window; a malformed supplied budget opts out.
+  if (value === null) {
+    return localDeadline;
+  }
+  const deadline = Number(value);
+  return /^[0-9]{1,16}$/u.test(value) && Number.isSafeInteger(deadline)
+    ? Math.min(localDeadline, deadline)
+    : startedAt;
+}
+
+function waitForRunnerArtifactPutRetry(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    signal.throwIfAborted();
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, RUNNER_ARTIFACT_PUT_RETRY_DELAY_MS);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 async function handleRunnerArtifactRequest(input: {
   bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
   env: RunnerOutboundEnvironmentSource;
@@ -354,6 +942,8 @@ async function handleRunnerArtifactRequest(input: {
   userId: string;
 }): Promise<Response> {
   const startedAt = Date.now();
+  const retryDeadline = readRunnerArtifactPutRetryDeadline(input.request, startedAt);
+  const recoveryDetails: Record<string, boolean | number | string | null> = {};
   const method = readHostedRunnerDiagnosticMethod(input.request.method);
   const operation = input.request.method === "PUT" ? "artifact_upload" : "artifact_fetch";
   const fetchTelemetry = input.request.method === "GET"
@@ -428,6 +1018,9 @@ async function handleRunnerArtifactRequest(input: {
   }
 
   try {
+    if (input.request.method === "PUT") {
+      input.request.signal.throwIfAborted();
+    }
     const cryptoStartedAt = Date.now();
     emitPhase("Hosted runner artifact crypto context started.");
     const crypto = await resolveRunnerOutboundUserCryptoContext({
@@ -486,8 +1079,49 @@ async function handleRunnerArtifactRequest(input: {
       artifactAuthorized: true,
       artifactByteLength: bytes.byteLength,
     });
-    await artifactStore.writeArtifact(input.sha256, bytes);
+    await artifactStore.writeArtifact(input.sha256, bytes, {
+      signal: input.request.signal,
+      beforeRetry: async (error) => {
+        const code = readRunnerArtifactPutServiceCode(error);
+        if (code === null) {
+          return false;
+        }
+        Object.assign(recoveryDetails, {
+          artifactR2Code: code,
+          artifactStorageStage: "r2_put",
+          artifactWriteAttempt: 1,
+          artifactWriteDisposition: "budget_exhausted",
+        });
+        input.request.signal.throwIfAborted();
+        // Leave at least one backoff-sized margin for the repeat effect. Include
+        // initial fence, crypto, body, encryption and first-PUT time in admission.
+        if (Date.now() + 2 * RUNNER_ARTIFACT_PUT_RETRY_DELAY_MS >= retryDeadline) {
+          return false;
+        }
+        recoveryDetails.artifactWriteDisposition = "backoff";
+        emitPhase("Hosted runner artifact write recovery backoff.", recoveryDetails, "warn");
+        await waitForRunnerArtifactPutRetry(input.request.signal);
+        input.request.signal.throwIfAborted();
+        recoveryDetails.artifactWriteDisposition = "budget_exhausted";
+        if (Date.now() + RUNNER_ARTIFACT_PUT_RETRY_DELAY_MS >= retryDeadline) {
+          return false;
+        }
+        await requireRunnerRuntimeWriteFenceWrite(input);
+        input.request.signal.throwIfAborted();
+        if (Date.now() + RUNNER_ARTIFACT_PUT_RETRY_DELAY_MS >= retryDeadline) {
+          return false;
+        }
+        recoveryDetails.artifactWriteAttempt = 2;
+        recoveryDetails.artifactWriteDisposition = "exhausted";
+        return true;
+      },
+    });
+    input.request.signal.throwIfAborted();
+    if (recoveryDetails.artifactR2Code !== undefined) {
+      recoveryDetails.artifactWriteDisposition = "recovered";
+    }
     emitPhase("Hosted runner artifact write completed.", {
+      ...recoveryDetails,
       artifactAuthorized: true,
       artifactByteLength: bytes.byteLength,
       artifactWriteDurationMs: Date.now() - writeStartedAt,
@@ -502,10 +1136,18 @@ async function handleRunnerArtifactRequest(input: {
       size: bytes.byteLength,
     });
   } catch (error) {
+    if (recoveryDetails.artifactR2Code !== undefined) {
+      if (input.request.signal.aborted) {
+        recoveryDetails.artifactWriteDisposition = "cancelled";
+      } else if (error instanceof RunnerRuntimeWriteFenceError) {
+        recoveryDetails.artifactWriteDisposition = "unauthorized";
+      }
+    }
     emitHostedExecutionStructuredLog({
       component: "runner",
       details: {
         ...logDetails,
+        ...recoveryDetails,
         durationMs: Date.now() - startedAt,
         errorCode: deriveHostedExecutionErrorCode(error),
         errorMessagePresent: error instanceof Error && error.message.trim().length > 0,
@@ -517,6 +1159,10 @@ async function handleRunnerArtifactRequest(input: {
       message: "Hosted runner artifact request failed.",
       phase: "wake.running",
     });
+    if (recoveryDetails.artifactR2Code !== undefined && error instanceof RunnerRuntimeWriteFenceError) {
+      emitCompleted({ artifactAuthorized: false }, 401);
+      return unauthorized();
+    }
     if (
       input.request.method === "GET"
       && error instanceof HostedEncryptedR2PayloadUnreadableError
@@ -1615,10 +2261,15 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   if (!await requestOwnsWorkspaceSnapshotSession(input, session)) {
     return jsonError("Hosted workspace snapshot upload session is stale.", 409);
   }
+  const checkpointRequestWithoutSnapshotRef = parseHostedWorkspaceCheckpointRequest({
+    ...readWorkspaceSnapshotCompleteCheckpointRequest(body.checkpointRequest),
+    snapshotRef: null,
+  });
 
   if (Date.parse(session.expiresAt) <= Date.now()) {
     const alreadyCurrentResponse = await completeExpiredCurrentWorkspaceSnapshotUploadSession({
       bucket: input.bucket,
+      checkpointRequest: checkpointRequestWithoutSnapshotRef,
       env: input.env,
       environment: input.environment,
       request: input.request,
@@ -1756,7 +2407,7 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
     return jsonError("Hosted workspace snapshot object metadata does not match its ref.", 409);
   }
   const checkpointRequest = parseHostedWorkspaceCheckpointRequest({
-    ...readWorkspaceSnapshotCompleteCheckpointRequest(body.checkpointRequest),
+    ...checkpointRequestWithoutSnapshotRef,
     snapshotRef,
   });
   if (checkpointRequest.reason !== "idle_shutdown") {
@@ -1887,6 +2538,7 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   if (!checkpoint.checkpointed) {
     const cleanupRetryResponse = await completeAlreadyCheckpointedWorkspaceSnapshotResponse({
       attemptId: writeFence.attemptId,
+      checkpointRequest,
       checkpoint,
       env: input.env,
       leaseGeneration: writeFence.generation,
@@ -2109,6 +2761,7 @@ async function recordReplacedWorkspaceSnapshotOrphanCandidate(input: {
 
 async function completeAlreadyCheckpointedWorkspaceSnapshotResponse(input: {
   attemptId: string;
+  checkpointRequest: ReturnType<typeof parseHostedWorkspaceCheckpointRequest>;
   checkpoint: ReturnType<typeof parseHostedWorkspaceCheckpointResponse>;
   env: RunnerOutboundEnvironmentSource;
   leaseGeneration: string;
@@ -2122,6 +2775,12 @@ async function completeAlreadyCheckpointedWorkspaceSnapshotResponse(input: {
     !hostedWorkspaceSnapshotV2RefsMatch(currentSnapshotRef, input.snapshotRef)
   ) {
     return null;
+  }
+  if (!matchesRequestedHostedSystemProgressProjection({
+    request: input.checkpointRequest,
+    workspace: input.checkpoint.workspace,
+  })) {
+    return jsonError("Hosted workspace snapshot checkpoint state mismatch.", 409);
   }
   const replacedSnapshotRef = input.session.replacedSnapshotRef ?? null;
   await completeWorkspaceSnapshotUploadSessionHandoffBestEffort({
@@ -2148,6 +2807,7 @@ async function completeAlreadyCheckpointedWorkspaceSnapshotResponse(input: {
 
 async function completeExpiredCurrentWorkspaceSnapshotUploadSession(input: {
   bucket: WorkspaceSnapshotR2BucketLike | null;
+  checkpointRequest: ReturnType<typeof parseHostedWorkspaceCheckpointRequest>;
   env: RunnerOutboundEnvironmentSource;
   environment: ReturnType<typeof readHostedExecutionEnvironment>;
   request: Request;
@@ -2177,6 +2837,12 @@ async function completeExpiredCurrentWorkspaceSnapshotUploadSession(input: {
     }))
   ) {
     return null;
+  }
+  if (!matchesRequestedHostedSystemProgressProjection({
+    request: input.checkpointRequest,
+    workspace: currentWorkspace,
+  })) {
+    return jsonError("Hosted workspace snapshot checkpoint state mismatch.", 409);
   }
 
   if (

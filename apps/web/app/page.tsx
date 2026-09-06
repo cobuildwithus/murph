@@ -6,6 +6,7 @@ import { AssistantSection } from "@/src/components/homepage/assistant-section";
 import { EnvironmentSection } from "@/src/components/homepage/environment-section";
 import { ErrandsSection } from "@/src/components/homepage/errands-section";
 import { FaqSection } from "@/src/components/homepage/faq-section";
+import { GoalsSection } from "@/src/components/homepage/goals-section";
 import {
   HeroClocksIn,
   type HeroMessengerChannel,
@@ -28,6 +29,10 @@ import { TrustSection } from "@/src/components/homepage/trust-section";
 import type { HomepageSignupCta } from "@/src/components/homepage/types";
 import { HomepageAuthRuntimeProvider } from "@/src/components/hosted-onboarding/homepage-auth-runtime-provider";
 import { scheduleHomepageBrowserVaultPreparation } from "@/src/lib/browser-vault/homepage-preparation";
+import { resolveGoalContactOption } from "@/src/lib/goals/goal-contact";
+import { resolveHomepageGoalPersonas } from "@/src/lib/goals/homepage-goal-personas";
+import { resolvePublicMurphLinePhoneNumber } from "@/src/lib/goals/public-murph-line";
+import { listHealthCommonsGoalEntries } from "@/src/lib/health-commons/goal-projections";
 import { fetchHeroContactInfo } from "@/src/lib/hero-contact-info";
 import { isHostedCustomInferenceEnabled } from "@/src/lib/hosted-inference/feature";
 import { isHostedVeniceAssistantEnabled } from "@/src/lib/hosted-onboarding/assistant-model-preference";
@@ -103,11 +108,13 @@ export default async function HomePage() {
     githubStarCount,
     heroContactInfo,
     headerList,
+    publicMurphLinePhoneNumber,
   ] = await Promise.all([
     getHostedPageAuthSnapshot(),
     getMurphGithubStarCount(),
     fetchHeroContactInfo(),
     headers(),
+    resolvePublicMurphLinePhoneNumber(),
   ]);
   if (authenticatedMember) {
     scheduleHomepageBrowserVaultPreparation({
@@ -118,24 +125,27 @@ export default async function HomePage() {
   const country = headerList.get("x-vercel-ip-country") ?? "";
   const messengerChannel = resolveHeroMessengerChannel(country);
   const murphHeadshotSrc = pickRandomMurphHeadshotSrc();
+  const goalEntries = listHealthCommonsGoalEntries();
+  // The same health-checked public line the goal library hands out.
+  const goalStartOption = resolveGoalContactOption({
+    murphPhoneNumber: publicMurphLinePhoneNumber,
+    preferredKind: messengerChannel === "telegram" ? "telegram" : "text",
+    startPrompt: "Hey Murph, I have a goal in mind.",
+    textAvailable: true,
+  });
   const referralRewards = getAvailableHostedPublicReferralRewards();
   const installCommandUrl =
     resolveHostedInstallScriptUrl() ?? "https://www.withmurph.ai/install.sh";
   const signupCta: HomepageSignupCta = authenticated
     ? {
         body: "Manage billing and connected wearables from one place.",
-        eyebrow: "Welcome back",
         metaItems: ["Subscription and billing", "Wearable connections"],
-        note: null,
         signupLabel: "Go to dashboard",
         title: "You’re already set up.",
       }
     : {
         body: null,
-        eyebrow: "Sign up",
         metaItems: ["Free starter usage", "Open source"],
-        note:
-          "Starter usage does not expire. No card required; choose a plan when you need more.",
         signupLabel: "Get started",
         title: "Whatever your goal, you don’t have to hit it alone.",
       };
@@ -156,7 +166,6 @@ export default async function HomePage() {
         <StickyNav
           authenticated={authenticated}
           githubStarCount={githubStarCount}
-          preloadAuthPanel
         />
         <HeroClocksIn
           authenticated={authenticated}
@@ -164,10 +173,15 @@ export default async function HomePage() {
           messengerChannel={messengerChannel}
           murphHeadshotSrc={murphHeadshotSrc}
         />
+        <GoalsSection
+          personas={resolveHomepageGoalPersonas(goalEntries)}
+          startOption={goalStartOption}
+          totalGoalCount={goalEntries.length}
+        />
         <TogetherSection />
         <AsksGridSection />
         <TrustSection />
-        <MealPhotosSection />
+        <MealPhotosSection authenticated={authenticated} />
         <NutritionSection />
         <EnvironmentSection />
         <PersonasSection murphHeadshotSrc={murphHeadshotSrc} />

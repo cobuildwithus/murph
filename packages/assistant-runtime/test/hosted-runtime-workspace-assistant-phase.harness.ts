@@ -30,7 +30,7 @@ import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
 } from "@murphai/hosted-execution/env";
-import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 
 type HostedAssistantPhaseMockName =
@@ -217,7 +217,8 @@ vi.mock("../src/hosted-runtime/callbacks.ts", () => ({
   resolveHostedAssistantOutboxNextWakeAt: mocks.resolveHostedAssistantOutboxNextWakeAt,
 }));
 
-vi.mock("../src/hosted-runtime/channel-activity.ts", () => ({
+vi.mock("../src/hosted-runtime/channel-activity.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/hosted-runtime/channel-activity.ts")>()),
   buildHostedLinqChannelEnv: mocks.buildHostedLinqChannelEnv,
   createHostedAssistantChannelTypingDependencies:
     mocks.createHostedAssistantChannelTypingDependencies,
@@ -272,17 +273,24 @@ vi.mock("../src/hosted-runtime/provider-cleanup.ts", () => ({
     mocks.resolveHostedProviderCleanupScheduledWakeAt,
 }));
 
-vi.mock("../src/hosted-runtime/system-mailbox.ts", () => ({
-  prepareHostedSystemMailboxItemForCheckpoint:
-    mocks.prepareHostedSystemMailboxItemForCheckpoint,
-  recordHostedDeviceSyncDirtyPostCheckpointRecord:
-    mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord,
-  recordHostedSystemMailboxItemAfterCheckpoint:
-    mocks.recordHostedSystemMailboxItemAfterCheckpoint,
-  resolveHostedSystemMailboxNextWakeCandidate:
-    mocks.resolveHostedSystemMailboxNextWakeCandidate,
-  resolveHostedSystemMailboxNextWakeAt: mocks.resolveHostedSystemMailboxNextWakeAt,
-}));
+vi.mock("../src/hosted-runtime/system-mailbox.ts", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../src/hosted-runtime/system-mailbox.ts")
+  >();
+  return {
+    prepareHostedSystemMailboxItemForCheckpoint:
+      mocks.prepareHostedSystemMailboxItemForCheckpoint,
+    recordHostedDeviceSyncDirtyPostCheckpointRecord:
+      mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord,
+    recordHostedSystemMailboxItemAfterCheckpoint:
+      mocks.recordHostedSystemMailboxItemAfterCheckpoint,
+    resolveHostedDeviceSyncCompletionRecordInput:
+      actual.resolveHostedDeviceSyncCompletionRecordInput,
+    resolveHostedSystemMailboxNextWakeCandidate:
+      mocks.resolveHostedSystemMailboxNextWakeCandidate,
+    resolveHostedSystemMailboxNextWakeAt: mocks.resolveHostedSystemMailboxNextWakeAt,
+  };
+});
 
 import {
   initializeVault,
@@ -311,7 +319,7 @@ import {
   type AssistantOutboxIntent,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import {
-  runHostedWorkspaceAssistantPhase,
+  runHostedWorkspaceAssistantPhase as runHostedWorkspaceAssistantPhaseWithoutDrain,
   type HostedWorkspaceRuntimeAssistantPhaseInput,
 } from "../src/hosted-runtime/workspace-assistant-phase.ts";
 import {
@@ -337,6 +345,7 @@ import type {
 import {
   buildHostedRuntimeLogContextFields,
   compactHostedRuntimeLogCodes,
+  drainHostedRuntimeLogWritesBestEffort,
   summarizeHostedRuntimeStatusCounts,
   toHostedRuntimeLogCode,
   writeHostedRuntimeLogBestEffort,
@@ -374,10 +383,16 @@ type HostedSystemMailboxModule =
 function withoutAssistantTurnTimingLogs(
   logRequests: HostedRuntimeLogRequest[],
 ): HostedRuntimeLogRequest[] {
-  return logRequests.filter(
-    (request) =>
-      request.entries[0]?.redactedJson?.schema
-        !== "murph.assistant-turn-timing.v1",
+  return logRequests.flatMap((request) =>
+    request.entries
+      .filter(
+        (entry) =>
+          entry.redactedJson?.schema !== "murph.assistant-turn-timing.v1",
+      )
+      .map((entry) => ({
+        ...request,
+        entries: [entry],
+      }))
   );
 }
 
@@ -824,6 +839,20 @@ beforeEach(() => {
     scheduled: 0,
   });
 });
+
+afterEach(async () => {
+  await drainHostedRuntimeLogWritesBestEffort();
+});
+
+async function runHostedWorkspaceAssistantPhase(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+) {
+  try {
+    return await runHostedWorkspaceAssistantPhaseWithoutDrain(input);
+  } finally {
+    await drainHostedRuntimeLogWritesBestEffort();
+  }
+}
 
 function expectAssistantLaneCallWithoutDeviceSyncOptions(
   expected?: Record<string, unknown>,
@@ -2098,6 +2127,7 @@ export {
   loadHostedSystemMailboxRealImplementation,
   mocks,
   resolveHostedPendingAssistantInputWakeAtWithRealImplementation,
+  runHostedWorkspaceAssistantPhase,
   runHostedWorkspaceDurableCheckpointEffects,
   runRealForegroundApprovalAdmissionScenario,
   seedDirectLinqAssistantInputRoute,

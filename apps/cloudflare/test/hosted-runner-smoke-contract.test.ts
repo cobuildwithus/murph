@@ -4,6 +4,7 @@ import {
   HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT,
+  HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_MUTATION_DENIED_COUNT,
   HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_READ_PROOF_COUNT,
   HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_LOCAL_MUTATION_PROOF_COUNT,
@@ -48,6 +49,7 @@ const validHostedRunnerSmokeResult = {
   codexHostedShellVaultCliLlmsBytes: 4096,
   codexVersion: "codex-cli 0.125.0",
   healthCommonsCatalogHash: "sha256:catalog",
+  healthCommonsCliGoalProofCount: HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT,
   healthCommonsCliProtocolListBytes: 768,
   healthCommonsFinnishDrySaunaTitle: "Finnish Dry Sauna",
   healthCommonsRuntimeProtocolHitKeys: [
@@ -137,6 +139,8 @@ describe("parseHostedRunnerSmokeResult", () => {
       ripgrepVersion: "ripgrep 13.0.0",
       schema: HOSTED_RUNNER_SMOKE_RESULT_SCHEMA,
       healthCommonsCatalogHash: "sha256:catalog",
+      healthCommonsCliGoalProofCount:
+        HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT,
       healthCommonsCliProtocolListBytes: 768,
       healthCommonsFinnishDrySaunaTitle: "Finnish Dry Sauna",
       reportedVaultIdMatchesExpected: true,
@@ -162,6 +166,30 @@ describe("parseHostedRunnerSmokeResult", () => {
       healthCommonsRuntimeSearchHitKeys: [],
     })).toThrow(
       "Hosted runner smoke result.healthCommonsRuntimeSearchHitKeys must be a non-empty array.",
+    );
+
+    expect(() => parseHostedRunnerSmokeResult({
+      ...validHostedRunnerSmokeResult,
+      healthCommonsCliGoalProofCount:
+        HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT - 1,
+    })).toThrow(
+      `Hosted runner smoke result.healthCommonsCliGoalProofCount must be the integer ${HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT}.`,
+    );
+
+    expect(() => parseHostedRunnerSmokeResult({
+      ...validHostedRunnerSmokeResult,
+      healthCommonsCliGoalProofCount:
+        HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT + 0.5,
+    })).toThrow(
+      `Hosted runner smoke result.healthCommonsCliGoalProofCount must be the integer ${HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT}.`,
+    );
+
+    expect(() => parseHostedRunnerSmokeResult({
+      ...validHostedRunnerSmokeResult,
+      healthCommonsCliGoalProofCount:
+        HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT + 1,
+    })).toThrow(
+      `Hosted runner smoke result.healthCommonsCliGoalProofCount must be the integer ${HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT}.`,
     );
   });
 
@@ -383,14 +411,25 @@ describe("countAssistantCliSurfaceHotPathProofs", () => {
   it("counts only detailed hot-path command signatures", () => {
     const detailedContract = [
       "- `memory upsert`: args <text>; options --section=Identity|Preferences|Instructions|Context.",
-      "- `goal save`: args <title>; options --status=active|paused|completed|abandoned, --horizon=short_term|medium_term|long_term|ongoing, --priority=integer, repeat --domain=string.",
+      "- `goal save`: args [title]; options --status=active|paused|completed|abandoned, --horizon=short_term|medium_term|long_term|ongoing, --priority=integer, repeat --domain=string.",
       "- `device account list`: options --provider=string, --source-provider=string.",
       "- `device connect`: args <provider>; options --returnTo=string.",
+      "- `wearables activity list`: options --date=string, --includeWorkoutSummaries, --includeWorkoutDetails; hint One read: day totals omit flags; workout facts use --include-workout-summaries; lap/split facts use --include-workout-details. Choose first; never probe and retry.",
     ].join("\n");
 
     expect(countAssistantCliSurfaceHotPathProofs(detailedContract)).toBe(
       HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT,
     );
+    expect(
+      countAssistantCliSurfaceHotPathProofs(
+        detailedContract.replace("args [title]", "args <title>"),
+      ),
+    ).toBe(HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT - 1);
+    for (const option of ["--includeWorkoutSummaries", "--includeWorkoutDetails"]) {
+      expect(countAssistantCliSurfaceHotPathProofs(
+        detailedContract.replace(option, ""),
+      )).toBe(HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT - 1);
+    }
     expect(countAssistantCliSurfaceHotPathProofs("- `memory upsert`: Add a memory.")).toBe(0);
     expect(countAssistantCliSurfaceHotPathProofs([
       "- `device connect`: Create a browser-based OAuth connection link.",

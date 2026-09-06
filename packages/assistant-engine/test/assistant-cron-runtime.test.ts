@@ -13,9 +13,11 @@ import type {
 import {
   AVAILABILITY_CONFLICT_BLOCK_END,
   AVAILABILITY_CONFLICT_BLOCK_START,
+  readMemoryDocument,
   shouldSkipAutomationOccurrenceForAvailability,
   splitAutomationAvailabilityConflictBlock,
   stripAutomationAvailabilityConflictEvidenceForProvider,
+  upsertMemory,
 } from '@murphai/core'
 import {
   assistantCronJobSchema,
@@ -31,6 +33,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createAssistantGroupEmailOutboxTool,
 } from '../src/assistant/group-email-outbox.js'
+import {
+  executeMemberMemoryDynamicTool,
+} from '../src/assistant-codex/dynamic-tools/member-memory.js'
 import * as assistantDiagnostics from '../src/assistant/diagnostics.js'
 import * as assistantOutboxReceiptRepair from '../src/assistant/outbox/receipt-repair.js'
 import {
@@ -38,6 +43,7 @@ import {
 } from './onboarding-followup-predecessor-fixtures.ts'
 
 type MockAutomationRecord = {
+  followUpSourceIntentId?: string
   activeUntil?: string | null
   automationId: string
   assistantTargetOverride?: {
@@ -221,6 +227,9 @@ import {
   resolveAssistantOnboardingStatePath,
 } from '../src/assistant/onboarding-state.ts'
 import {
+  seedMurphOnboardingFollowupAutomation,
+} from '../src/assistant/onboarding-followup-seed.ts'
+import {
   ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
 } from '../src/assistant/shared.ts'
 import type { AssistantExecutionContext } from '../src/assistant/execution-context.ts'
@@ -235,14 +244,18 @@ import {
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_PRIVATE_SUMMARY,
+  MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID,
+  MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
+  MURPH_MANAGED_AUTOMATIONS,
   MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
+  MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
-  MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+  MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.ts'
 import type { AssistantRunEvent } from '../src/assistant/automation/shared.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
@@ -802,6 +815,101 @@ describe('assistant cron runtime orchestration', () => {
       'archived',
     )
     expect(cronMocks.upsertAutomation).toHaveBeenCalledTimes(3)
+  })
+
+  it('persists hosted email onboarding follow-up and delivers a due occurrence', async () => {
+    vi.useFakeTimers()
+    const now = new Date('2026-04-08T15:00:00.000Z')
+    const dueAt = '2026-04-09T13:45:00.000Z'
+    vi.setSystemTime(now)
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-hosted-email-onboarding-followup-',
+    )
+    const route = {
+      channel: 'email' as const,
+      deliverySource: null,
+      deliveryTarget: 'member@example.test',
+      identityId: 'hid_email_member',
+      participantId: null,
+      threadId: null,
+      threadIsDirect: true,
+    }
+    const seedInput = {
+      activeUntil: '2026-04-11T15:00:00.000Z',
+      firstOccurrenceAt: dueAt,
+      now,
+      route,
+      stableKey: 'member_email_onboarding_followup',
+      vault: vaultRoot,
+    }
+
+    await expect(
+      seedMurphOnboardingFollowupAutomation(seedInput),
+    ).rejects.toMatchObject({
+      code: 'ASSISTANT_CRON_DELIVERY_REQUIRED',
+    })
+
+    const job = await seedMurphOnboardingFollowupAutomation({
+      ...seedInput,
+      routeValidationProfile: 'hosted',
+    })
+    if (!job) {
+      throw new Error('Expected hosted email onboarding follow-up to be seeded.')
+    }
+    expect(findCanonicalAutomation(
+      vaultRoot,
+      MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+    )?.route).toEqual(route)
+
+    cronMocks.sendAssistantMessageLocal.mockResolvedValueOnce({
+      decision: {
+        kind: 'send_message',
+        privateSummary: 'Prepared the onboarding continuation.',
+        text: 'Want to pick this back up?',
+      },
+      deliveryOutcome: {
+        delivery: {
+          channel: 'email',
+          sentAt: '2026-04-09T13:45:05.000Z',
+          target: 'member@example.test',
+          targetKind: 'explicit',
+        },
+        intentId: 'outbox_hosted_email_onboarding_followup',
+        kind: 'sent',
+        media: [],
+        session: {
+          sessionId: 'session_hosted_email_onboarding_followup',
+        },
+      },
+      response: 'Want to pick this back up?',
+      session: {
+        sessionId: 'session_hosted_email_onboarding_followup',
+      },
+    })
+    vi.setSystemTime(new Date('2026-04-09T13:45:05.000Z'))
+
+    await expect(processDueAssistantCronJobsLocal({
+      executionContext: {
+        hosted: {
+          memberId: 'member_email_onboarding_followup',
+          userEnvKeys: [],
+        },
+      },
+      limit: 1,
+      vault: vaultRoot,
+    })).resolves.toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 1,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingDeliveryTarget: 'member@example.test',
+        channel: 'email',
+        deliveryTarget: 'member@example.test',
+        threadIsDirect: true,
+      }),
+    )
   })
 
   it('keeps an explicit recurring timezone instead of reinterpreting its wall clock in the vault timezone', async () => {
@@ -4165,6 +4273,21 @@ describe('assistant cron runtime orchestration', () => {
         | undefined
       expect(providerInput?.instructions).toContain(expectedScope)
       expect(providerInput?.instructions).toContain(expectedBoundary)
+      if (supportKind === 'reminder') {
+        expect(providerInput?.instructions).toContain(
+          'treat every exercise-catalog id, slug, source token, and path in saved instructions or context as private routing data',
+        )
+        expect(providerInput?.instructions).toContain(
+          'read the matching movement skill and its shared exercise-catalog reference',
+        )
+        expect(providerInput?.instructions).toContain(
+          'attach reviewed catalog media when that reference requires it for the current channel',
+        )
+      } else {
+        expect(providerInput?.instructions).not.toContain(
+          'treat every exercise-catalog id, slug, source token, and path in saved instructions or context as private routing data',
+        )
+      }
       expect(providerInput?.instructions).toContain(
         `- automationId: ${canonicalAutomation.automationId}`,
       )
@@ -4191,6 +4314,52 @@ describe('assistant cron runtime orchestration', () => {
       )
     },
   )
+
+  it('passes exercise cue guidance into an ordinary independent automation after its saved task', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-independent-exercise-cue-',
+    )
+    const canonicalJob = await createCanonicalJob(
+      vaultRoot,
+      'independent-exercise-cue',
+    )
+    const canonicalAutomation = findCanonicalAutomation(
+      vaultRoot,
+      canonicalJob.jobId,
+    )
+    expect(canonicalAutomation).toBeDefined()
+    if (!canonicalAutomation) {
+      throw new Error('Expected the canonical automation to exist.')
+    }
+    const savedInstructions =
+      'Send the saved mobility cue using Ankle circles (MB101).'
+    canonicalAutomation.instructions = savedInstructions
+    canonicalAutomation.supportKind = null
+
+    await runAssistantCronJobNow({
+      job: canonicalJob.jobId,
+      vault: vaultRoot,
+    })
+
+    const providerInput = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
+      | {
+          instructions?: string
+          outboxAutomationContextReferences?: AssistantOutboxIntent['automationContextReferences']
+        }
+      | undefined
+    expect(providerInput?.outboxAutomationContextReferences).toBeNull()
+    expect(providerInput?.instructions).toContain(
+      'Independent automation authority (engine-supplied):',
+    )
+    expect(providerInput?.instructions).toContain(
+      'read the matching movement skill and its shared exercise-catalog reference',
+    )
+    expect(providerInput?.instructions?.indexOf(savedInstructions)).toBeLessThan(
+      providerInput?.instructions?.indexOf(
+        'read the matching movement skill and its shared exercise-catalog reference',
+      ) ?? -1,
+    )
+  })
 
   it('omits the support-scope override for weekly_digest consent metadata', async () => {
     const { vaultRoot } = await createRuntimeContext(
@@ -4248,6 +4417,9 @@ describe('assistant cron runtime orchestration', () => {
     )
     expect(providerInput?.instructions).not.toContain(
       'surprise accountability, repair, or coaching question',
+    )
+    expect(providerInput?.instructions).not.toContain(
+      'read the matching movement skill and its shared exercise-catalog reference',
     )
   })
 
@@ -4314,6 +4486,12 @@ describe('assistant cron runtime orchestration', () => {
           'Recurring reminder conversation (engine-supplied',
         ),
       }),
+    )
+    const providerInput = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
+      | { instructions?: string }
+      | undefined
+    expect(providerInput?.instructions).not.toContain(
+      'read the matching movement skill and its shared exercise-catalog reference',
     )
   })
 
@@ -4436,36 +4614,42 @@ describe('assistant cron runtime orchestration', () => {
         'Recurring reminder conversation (engine-supplied',
       )
       expect(notificationInput.instructions).toContain(
-        'If no relevant human reply followed and that output already asked whether to keep, change, or pause these interruptions, return `skip`.',
-      )
-      expect(notificationInput.instructions).toContain(
-        'If that output is unavailable under the existing evidence-retention horizon, send the current cue normally.',
-      )
-      expect(notificationInput.instructions).toContain(
-        'In a group, address the room collectively.',
-      )
-      expect(notificationInput.instructions).toContain(
-        'The silence policy below does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders.',
-      )
-      expect(notificationInput.instructions).toContain(
-        ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
-      )
-      expect(notificationInput.instructions).toContain(
-        'inside this provider request\'s engine-supplied recent-conversation-history section',
-      )
-      expect(notificationInput.instructions).toContain(
-        'That marker expires after the provider request that supplied it',
+        'Any silence-based cadence policy appended below does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders.',
       )
       expect(notificationInput.instructions).not.toContain('carry-forward grace')
       if (occurrenceIndex === 0) {
         expect(notificationInput.instructions).not.toContain(
           'Recent outputs from this automation',
         )
+        expect(notificationInput.instructions).not.toContain(
+          'keep, change, or pause these interruptions',
+        )
+        expect(notificationInput.instructions).toContain(
+          'Otherwise send the current concise cue normally.',
+        )
       } else {
         expect(notificationInput.instructions).toContain(
           'Recent outputs from this automation',
         )
         expect(notificationInput.instructions).toContain('1. "Quick room reset.')
+        expect(notificationInput.instructions).toContain(
+          'If no relevant human reply followed and that output already asked whether to keep, change, or pause these interruptions, return `skip`.',
+        )
+        expect(notificationInput.instructions).toContain(
+          'If that output is unavailable under the existing evidence-retention horizon, send the current cue normally.',
+        )
+        expect(notificationInput.instructions).toContain(
+          'In a group, address the room collectively.',
+        )
+        expect(notificationInput.instructions).toContain(
+          ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+        )
+        expect(notificationInput.instructions).toContain(
+          'inside this provider request\'s engine-supplied recent-conversation-history section',
+        )
+        expect(notificationInput.instructions).toContain(
+          'That marker expires after the provider request that supplied it',
+        )
       }
       await input.onProviderRequestStarted?.()
 
@@ -4576,7 +4760,7 @@ describe('assistant cron runtime orchestration', () => {
         input as AssistantNotificationInput,
       )
       expect(notificationInput.instructions).toContain(
-        'The silence policy below does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders.',
+        'Any silence-based cadence policy appended below does not apply to medication, prescribed treatment, clinician-directed care, clinical monitoring, or safety-critical reminders.',
       )
       expect(notificationInput.instructions).toContain(
         'Send those cues normally unless the direct-conversation completion rule above applies, the member explicitly changes or pauses them, or another authoritative skip condition applies.',
@@ -4973,7 +5157,7 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
-  it('aborts and releases overnight memory consolidation when hosted maintenance yields during provider work before side effects', async () => {
+  it('preserves shown memory and releases its retry when foreground work arrives before forget', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-09T03:10:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
@@ -4981,13 +5165,41 @@ describe('assistant cron runtime orchestration', () => {
     )
     const paths = resolveAssistantStatePaths(vaultRoot)
     addOvernightMemoryConsolidationAutomation(vaultRoot)
+    const saved = await upsertMemory(vaultRoot, {
+      section: 'Preferences',
+      text: 'Keep the saved value.',
+    })
     let shouldYield = false
     cronMocks.sendAssistantMessageLocal.mockImplementationOnce(
       async (input: { abortSignal?: AbortSignal }) => {
         expect(input.abortSignal?.aborted).toBe(false)
+        const shown = await executeMemberMemoryDynamicTool({
+          abortSignal: input.abortSignal ?? null,
+          managedMaintenanceAuthorized: true,
+          request: {
+            args: { action: 'show' },
+            kind: 'member-memory',
+          },
+          vaultRoot,
+        })
+        expect(shown.rpcResult.success).toBe(true)
         shouldYield = true
         await vi.advanceTimersByTimeAsync(300)
         expect(input.abortSignal?.aborted).toBe(true)
+        const forgotten = await executeMemberMemoryDynamicTool({
+          abortSignal: input.abortSignal ?? null,
+          managedMaintenanceAuthorized: true,
+          request: {
+            args: {
+              action: 'forget',
+              expectedUpdatedAt: saved.record.updatedAt,
+              memoryId: saved.record.id,
+            },
+            kind: 'member-memory',
+          },
+          vaultRoot,
+        })
+        expect(forgotten.rpcResult.success).toBe(false)
         throw input.abortSignal?.reason ??
           new VaultCliError(
             'ASSISTANT_TURN_ABORTED',
@@ -5026,6 +5238,25 @@ describe('assistant cron runtime orchestration', () => {
     expect(runtimeRecord?.state.lastRunAt).toBeNull()
     expect(runtimeRecord?.state.lastSucceededAt).toBeNull()
     expect(runtimeRecord?.state.lastFailedAt).toBeNull()
+    await expect(readMemoryDocument(vaultRoot)).resolves.toMatchObject({
+      records: [{
+        id: saved.record.id,
+        section: 'Preferences',
+        text: 'Keep the saved value.',
+      }],
+    })
+    await expect(getAssistantCronStatus(vaultRoot, {
+      executionContext: {
+        hosted: {
+          memberId: 'member-hosted',
+          userEnvKeys: [],
+        },
+      },
+      shouldYieldBackgroundMaintenance: () => true,
+    })).resolves.toMatchObject({
+      dueJobs: 0,
+      nextRunAt: runtimeRecord?.state.retryAfterAt,
+    })
     await expect(listAssistantCronRuns({
       job: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
       vault: vaultRoot,
@@ -5658,6 +5889,7 @@ describe('assistant cron runtime orchestration', () => {
       )
       const canonicalJob = await createCanonicalJob(vaultRoot, 'yield-in-flight')
       let shouldYield = false
+      const events: AssistantRunEvent[] = []
       cronMocks.sendAssistantMessageLocal.mockImplementationOnce(
         async (input: { abortSignal?: AbortSignal }) => {
           expect(input.abortSignal?.aborted).toBe(false)
@@ -5670,6 +5902,7 @@ describe('assistant cron runtime orchestration', () => {
 
       const summary = await processDueAssistantCronJobsLocal({
         limit: 1,
+        onEvent: (event) => events.push(event),
         shouldYield: () => shouldYield,
         vault: vaultRoot,
       })
@@ -5698,6 +5931,15 @@ describe('assistant cron runtime orchestration', () => {
       expect(current.state.lastFailedAt).toBeNull()
       expect(current.state.consecutiveFailures).toBe(0)
       expect(current.state.nextRunAt).toBe('2026-04-08T10:20:10.050Z')
+      expect(events).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          failureContext: expect.objectContaining({
+            retryScheduled: true,
+            runOutcome: 'failed',
+          }),
+          type: 'cron.job.completed',
+        }),
+      ]))
     } finally {
       vi.useRealTimers()
     }
@@ -5974,6 +6216,189 @@ describe('assistant cron runtime orchestration', () => {
       processed: 1,
       succeeded: 1,
     })
+  })
+
+  it.each([
+    {
+      automationId: MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
+      name: 'Journal morning',
+      occurrenceAt: '2026-04-08T08:00:00.000Z',
+    },
+    {
+      automationId: MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID,
+      name: 'Journal afternoon',
+      occurrenceAt: '2026-04-08T16:00:00.000Z',
+    },
+    {
+      automationId: MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
+      name: 'Personal Patterns',
+      occurrenceAt: '2026-04-08T13:00:00.000Z',
+    },
+  ])('uses Flex then Standard after a failed managed $name occurrence', async ({
+    automationId,
+    occurrenceAt,
+  }) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(occurrenceAt))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-managed-flex-',
+    )
+    const seed = addManagedBackgroundAutomation(vaultRoot, automationId)
+    const executionContext: AssistantExecutionContext = {
+      hosted: {
+        memberId: 'member-managed-flex',
+        userEnvKeys: [],
+      },
+    }
+    cronMocks.sendAssistantMessageLocal
+      .mockImplementationOnce(async (input: AssistantNotificationInput) => {
+        await input.onProviderRequestStarted?.({
+          acceptedInputIds: [],
+          providerRequestOrdinal: 1,
+          startedAt: occurrenceAt,
+        })
+        throw new Error('Synthetic Flex provider capacity failure.')
+      })
+      .mockResolvedValueOnce({
+        decision: {
+          kind: 'skip',
+          privateSummary: 'No new background context required attention.',
+        },
+        response: null,
+        session: { sessionId: 'session-managed-flex-retry' },
+      })
+
+    const first = await processDueAssistantCronJobsLocal({
+      executionContext,
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(
+      await listAssistantCronRuns({ job: automationId, vault: vaultRoot }),
+    ).toMatchObject({
+      runs: [{ status: 'failed', error: 'Synthetic Flex provider capacity failure.' }],
+    })
+    expect(first).toEqual({ failed: 1, processed: 1, succeeded: 0 })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        ...(seed.assistantTargetOverride
+          ? { assistantTargetOverride: seed.assistantTargetOverride }
+          : {}),
+        scheduledInvocationAuthority: { automationId, occurrenceAt },
+        serviceTier: 'flex',
+        turnTrigger: 'automation-cron',
+      }),
+    )
+    const failedJob = await getAssistantCronJob(vaultRoot, automationId)
+    expect(failedJob.state.consecutiveFailures).toBe(1)
+    expect(failedJob.state.nextRunAt).toBe(
+      new Date(Date.parse(occurrenceAt) + 30_000).toISOString(),
+    )
+
+    vi.setSystemTime(new Date(Date.parse(occurrenceAt) + 30_000))
+    const retried = await processDueAssistantCronJobsLocal({
+      executionContext,
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(retried).toEqual({ failed: 0, processed: 1, succeeded: 1 })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(2)
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        ...(seed.assistantTargetOverride
+          ? { assistantTargetOverride: seed.assistantTargetOverride }
+          : {}),
+        scheduledInvocationAuthority: { automationId, occurrenceAt },
+        serviceTier: null,
+        turnTrigger: 'automation-cron',
+      }),
+    )
+    const completedJob = await getAssistantCronJob(vaultRoot, automationId)
+    expect(completedJob.state.consecutiveFailures).toBe(0)
+    expect(completedJob.state.nextRunAt).toBe(
+      new Date(Date.parse(occurrenceAt) + 86_400_000).toISOString(),
+    )
+  })
+
+  it.each([
+    {
+      automationId: MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
+      name: 'Journal morning without accounts',
+      occurrenceAt: '2026-04-08T08:00:00.000Z',
+      hasAccount: false,
+    },
+    {
+      automationId: MURPH_JOURNAL_CONNECTED_CONTEXT_AFTERNOON_AUTOMATION_ID,
+      name: 'Journal afternoon without accounts',
+      occurrenceAt: '2026-04-08T16:00:00.000Z',
+      hasAccount: false,
+    },
+    {
+      automationId: MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
+      name: 'Journal morning with a new account',
+      occurrenceAt: '2026-04-08T08:00:00.000Z',
+      hasAccount: true,
+    },
+  ])('preserves managed $name provider eligibility', async ({
+    automationId,
+    hasAccount,
+    occurrenceAt,
+  }) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(occurrenceAt))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-journal-eligibility-',
+    )
+    addManagedBackgroundAutomation(vaultRoot, automationId)
+    const request = vi.fn(async () => ({
+      result: {
+        accounts: hasAccount ? [{ id: 'account-new', toolkit: { slug: 'googlecalendar' } }] : [],
+        toolkits: [],
+      },
+    }))
+    const summary = await processDueAssistantCronJobsLocal({
+      executionContext: {
+        hosted: {
+          connectedApps: { request },
+          memberId: 'member-journal-eligibility',
+          userEnvKeys: [],
+        },
+      },
+      limit: 1,
+      vault: vaultRoot,
+    })
+
+    expect(request).toHaveBeenCalledExactlyOnceWith({
+      input: { action: 'list' },
+      operation: 'manage',
+    }, { signal: expect.any(AbortSignal) })
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: hasAccount ? 1 : 0,
+    })
+    if (hasAccount) {
+      expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          scheduledInvocationAuthority: { automationId, occurrenceAt },
+          serviceTier: 'flex',
+        }),
+      )
+    } else {
+      expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+      expect(await listAssistantOutboxIntents(vaultRoot)).toEqual([])
+      expect(
+        await listAssistantCronRuns({ job: automationId, vault: vaultRoot }),
+      ).toMatchObject({ runs: [{ outcome: 'skipped_gate', status: 'skipped' }] })
+    }
+    const job = await getAssistantCronJob(vaultRoot, automationId)
+    expect(job.state.consecutiveFailures).toBe(0)
+    expect(job.state.nextRunAt).toBe(
+      new Date(Date.parse(occurrenceAt) + 86_400_000).toISOString(),
+    )
   })
 
   it('makes optional group email authority available at the first natural cron occurrence', async () => {
@@ -6885,13 +7310,17 @@ describe('assistant cron runtime orchestration', () => {
           failureContext: expect.objectContaining({
             automationSlug: 'expired-one-shot-reminder',
             latenessMinutes: 240,
+            occurrenceAt: '2026-04-08T09:00:00.000Z',
+            priorFailureCount: 0,
           }),
           safeDetails: 'cron_occurrence_expired',
           type: 'cron.occurrence.expired',
         }),
         expect.objectContaining({
           failureContext: expect.objectContaining({
+            automationSlug: 'expired-one-shot-reminder',
             errorPresent: true,
+            occurrenceAt: '2026-04-08T09:00:00.000Z',
             runOutcome: 'expired',
             scheduleKind: 'at',
             sourceKind: 'automation',
@@ -7607,6 +8036,7 @@ describe('assistant cron runtime orchestration', () => {
           failureContext: expect.objectContaining({
             errorCode: 'ASSISTANT_CODEX_USAGE_LIMIT',
             errorPresent: true,
+            retryScheduled: true,
             runOutcome: 'failed',
             scheduleKind: 'at',
             sourceKind: 'automation',
@@ -7641,9 +8071,16 @@ describe('assistant cron runtime orchestration', () => {
       },
     )
     cronMocks.sendAssistantMessageLocal.mockRejectedValueOnce(error)
+    const events: Array<{
+      failureContext?: Record<string, boolean | number | string | null>
+      type: string
+    }> = []
 
     const summary = await processDueAssistantCronJobsLocal({
       limit: 1,
+      onEvent: (event) => {
+        events.push(event)
+      },
       vault: vaultRoot,
     })
 
@@ -7663,6 +8100,15 @@ describe('assistant cron runtime orchestration', () => {
       'Hosted Linq egress authority assertion request failed.',
     )
     expect(runtimeRecord?.state.consecutiveFailures).toBe(0)
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        failureContext: expect.objectContaining({
+          retryScheduled: false,
+          runOutcome: 'failed',
+        }),
+        type: 'cron.job.completed',
+      }),
+    ]))
     await expect(
       listAssistantCronRuns({
         job: canonicalJob.jobId,
@@ -7872,6 +8318,36 @@ describe('assistant cron runtime orchestration', () => {
       'Hosted Linq egress engagement failed with HTTP 500. Internal error.',
     )
     expect(runtimeRecord?.state.consecutiveFailures).toBe(1)
+  })
+
+  it('re-evaluates a finite follow-up after input changes before delivery', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-follow-up-retry-')
+    const canonicalJob = await createCanonicalJob(vaultRoot, 'Optional arrival choice check')
+    const source = getVaultAutomationStore(vaultRoot)[0]!
+    source.followUpSourceIntentId = 'source-delivered-message'
+    source.schedule = { kind: 'at', at: '2026-04-08T10:00:00.000Z' }
+    source.activeUntil = '2026-04-08T11:00:00.000Z'
+    cronMocks.sendAssistantMessageLocal.mockRejectedValueOnce(Object.assign(new Error('New input requires reconsideration.'), {
+      code: 'ASSISTANT_FOLLOW_UP_CONTEXT_CHANGED',
+      details: { assistantNotificationStage: 'delivery' },
+    })).mockResolvedValueOnce({
+      decision: { kind: 'skip', privateSummary: 'The choice was answered.' },
+      response: null, session: { sessionId: 'session-follow-up-retry' },
+    })
+    expect(await processDueAssistantCronJobsLocal({ limit: 1, vault: vaultRoot })).toEqual({ failed: 1, processed: 1, succeeded: 0 })
+    expect(source.status).toBe('active')
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const pending = (await readAssistantCronCanonicalRuntimeStore(paths)).jobs.find((record) => record.jobId === canonicalJob.jobId)!
+    expect(pending.state.pendingOccurrenceAt).toBe('2026-04-08T10:00:00.000Z')
+    expect(pending.state.retryAfterAt).toBe('2026-04-08T10:00:30.000Z')
+    vi.setSystemTime(new Date(pending.state.retryAfterAt!))
+    expect(await processDueAssistantCronJobsLocal({ limit: 1, vault: vaultRoot })).toEqual({ failed: 0, processed: 1, succeeded: 1 })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(2)
+    expect(getVaultAutomationStore(vaultRoot)[0]?.status).toBe('archived')
+    const [first, second] = cronMocks.sendAssistantMessageLocal.mock.calls
+    expect(first![0].deliveryDedupeToken).toBe(second![0].deliveryDedupeToken)
   })
 
   it('retries the same scheduled occurrence and session after a provider-stage failure', async () => {
@@ -8242,8 +8718,10 @@ describe('assistant cron runtime orchestration', () => {
       },
     }))
 
+    const onEvent = vi.fn()
     const summary = await processDueAssistantCronJobsLocal({
       limit: 1,
+      onEvent,
       vault: vaultRoot,
     })
 
@@ -8253,6 +8731,14 @@ describe('assistant cron runtime orchestration', () => {
       succeeded: 0,
     })
     expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'cron.occurrence.expired',
+      failureContext: expect.objectContaining({
+        occurrenceAt: '2026-04-08T09:00:00.000Z',
+        latenessMinutes: 65,
+        priorFailureCount: 1,
+      }),
+    }))
     await expect(listAssistantCronJobs(vaultRoot)).resolves.toEqual([])
     await expect(
       listAssistantCronRuns({
@@ -8891,6 +9377,85 @@ describe('assistant cron runtime orchestration', () => {
     expect(stillRunning.state.lastSucceededAt).toBeNull()
   })
 
+  it('recovers a fresh one-shot canonical claim from its only future wake and becomes quiescent', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T10:10:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-running-recovery-wake-',
+    )
+    const job = await addAssistantCronJob({
+      channel: 'telegram',
+      deliveryTarget: 'room-1',
+      name: 'running-recovery-wake',
+      now: new Date('2026-04-08T08:00:00.000Z'),
+      prompt: 'Recover the stranded one-shot occurrence.',
+      resolveTargetDefaults: false,
+      schedule: {
+        at: '2026-04-08T10:00:00.000Z',
+        kind: 'at',
+      },
+      threadIsDirect: true,
+      vault: vaultRoot,
+    })
+
+    await updateCanonicalRuntimeState(vaultRoot, job.jobId, (record) => ({
+      ...record,
+      state: {
+        ...record.state,
+        pendingOccurrenceAt: '2026-04-08T10:00:00.000Z',
+        runningAt: '2026-04-08T10:05:00.000Z',
+        runningClaimId: 'claim_running_recovery_wake',
+        runningPid: 42,
+      },
+      updatedAt: '2026-04-08T10:05:00.000Z',
+    }))
+
+    await expect(getAssistantCronStatus(vaultRoot)).resolves.toEqual({
+      dueJobs: 0,
+      enabledJobs: 1,
+      nextRunAt: '2026-04-08T11:05:00.001Z',
+      runningJobs: 1,
+      totalJobs: 1,
+    })
+
+    vi.setSystemTime(new Date('2026-04-08T11:05:00.000Z'))
+    await expect(getAssistantCronStatus(vaultRoot)).resolves.toMatchObject({
+      dueJobs: 0,
+      nextRunAt: '2026-04-08T11:05:00.001Z',
+      runningJobs: 1,
+    })
+
+    vi.setSystemTime(new Date('2026-04-08T11:05:00.001Z'))
+    await expect(getAssistantCronStatus(vaultRoot)).resolves.toMatchObject({
+      dueJobs: 1,
+      nextRunAt: '2026-04-08T10:00:00.000Z',
+      runningJobs: 0,
+    })
+
+    const summary = await processDueAssistantCronJobsLocal({
+      limit: 1,
+      vault: vaultRoot,
+    })
+    expect(summary).toEqual({
+      failed: 0,
+      processed: 1,
+      succeeded: 0,
+    })
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    await expect(getAssistantCronStatus(vaultRoot)).resolves.toMatchObject({
+      dueJobs: 0,
+      nextRunAt: null,
+      runningJobs: 0,
+    })
+
+    const runtimeStore = await readAssistantCronCanonicalRuntimeStore(
+      resolveAssistantStatePaths(vaultRoot),
+      { reclaimStaleRunningClaims: false },
+    )
+    expect(runtimeStore.jobs.find((record) => record.jobId === job.jobId))
+      .toBeUndefined()
+  })
+
   it('does not run or append a canonical cron result after the claim is replaced', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T13:00:00.000Z'))
@@ -9391,7 +9956,7 @@ describe('assistant cron runtime orchestration', () => {
   })
 
   it.each([
-    ['static', MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID],
+    ['static', MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID],
     ['dynamic onboarding', MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID],
   ] as const)(
     'skips a %s member managed automation on a group route before lifecycle or model work',
@@ -9496,9 +10061,9 @@ describe('assistant cron runtime orchestration', () => {
   })
 
   it.each([
-    ['static group from an unspecified route', MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID, undefined, 'mismatch'],
-    ['static group from a direct route', MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID, true, 'mismatch'],
-    ['static direct chat from an unspecified route', MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID, undefined, 'direct'],
+    ['static group from an unspecified route', MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID, undefined, 'mismatch'],
+    ['static group from a direct route', MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID, true, 'mismatch'],
+    ['static direct chat from an unspecified route', MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID, undefined, 'direct'],
     ['dynamic onboarding direct chat from an old route', MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID, true, 'direct'],
   ] as const)(
     'enforces a member managed automation when live Linq authority resolves a %s',
@@ -9522,7 +10087,7 @@ describe('assistant cron runtime orchestration', () => {
             ? 'preserve'
             : 'fresh',
         createdAt: '2026-04-12T16:00:00.000Z',
-        instructions: 'Send product notes.',
+        instructions: 'Send the weekly health digest.',
         route: {
           channel: 'linq',
           deliverySource: null,
@@ -9535,11 +10100,11 @@ describe('assistant cron runtime orchestration', () => {
             : { threadIsDirect: savedThreadIsDirect }),
         },
         schedule: { at: '2026-04-12T18:00:00.000Z', kind: 'at' },
-        slug: 'weekly-product-updates',
+        slug: 'weekly-health-digest',
         status: 'active',
         summary: null,
         tags: ['assistant', 'scheduled', 'murph-managed'],
-        title: 'Murph product notes',
+        title: 'Weekly health digest',
         updatedAt: '2026-04-12T16:00:00.000Z',
       })
       const resolveScheduledLinqRoute = liveAuthority === 'mismatch'
@@ -9619,10 +10184,10 @@ describe('assistant cron runtime orchestration', () => {
       'assistant-cron-runtime-member-owner-live-route-change-',
     )
     getVaultAutomationStore(vaultRoot).push({
-      automationId: MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+      automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
       continuityPolicy: 'fresh',
       createdAt: '2026-04-12T16:00:00.000Z',
-      instructions: 'Send product notes.',
+      instructions: 'Send the weekly health digest.',
       route: {
         channel: 'linq',
         deliverySource: null,
@@ -9633,11 +10198,11 @@ describe('assistant cron runtime orchestration', () => {
         threadIsDirect: true,
       },
       schedule: { at: '2026-04-12T18:00:00.000Z', kind: 'at' },
-      slug: 'weekly-product-updates',
+      slug: 'weekly-health-digest',
       status: 'active',
       summary: null,
       tags: ['assistant', 'scheduled', 'murph-managed'],
-      title: 'Murph product notes',
+      title: 'Weekly health digest',
       updatedAt: '2026-04-12T16:00:00.000Z',
     })
     const resolveScheduledLinqRoute = vi.fn()
@@ -9701,7 +10266,7 @@ describe('assistant cron runtime orchestration', () => {
     const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
     const runtimeRecord = runtimeStore.jobs.find(
       (record) =>
-        record.jobId === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+        record.jobId === MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
     )
     expect(runtimeRecord?.state.pendingOccurrenceAt ?? null).toBeNull()
     expect(runtimeRecord?.state.retryAfterAt ?? null).toBeNull()
@@ -9784,6 +10349,55 @@ describe('assistant cron runtime orchestration', () => {
     const result = await executeClaimedAssistantCronJob({
       executionContext: {
         hosted: { memberId: 'retired-group-runtime', userEnvKeys: [] },
+      },
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run).toMatchObject({
+      outcome: 'skipped_gate',
+      reason: 'managed_automation_retired',
+      status: 'skipped',
+    })
+    expect(cronMocks.runExperimentLifecycleOutcomePrecondition).not.toHaveBeenCalled()
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+  })
+
+  it('skips a persisted product-notes occurrence after the seed is retired', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-03T18:10:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-retired-product-notes-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: MURPH_RETIRED_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+      continuityPolicy: 'fresh',
+      createdAt: '2026-09-03T16:00:00.000Z',
+      instructions: 'Legacy biweekly product-note instructions.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'legacy-member-chat',
+        identityId: null,
+        participantId: null,
+        threadId: 'legacy-member-chat',
+        threadIsDirect: true,
+      },
+      schedule: { at: '2026-09-03T18:00:00.000Z', kind: 'at' },
+      slug: 'weekly-product-updates',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled', 'murph-managed'],
+      title: 'Murph product notes',
+      updatedAt: '2026-09-03T16:00:00.000Z',
+    })
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+
+    const result = await executeClaimedAssistantCronJob({
+      executionContext: {
+        hosted: { memberId: 'retired-product-notes-runtime', userEnvKeys: [] },
       },
       job: claimed,
       paths,
@@ -13027,6 +13641,32 @@ async function createLocalJob(
   store.jobs.push(job)
   await writeAssistantCronStore(paths, store)
   return job
+}
+
+function addManagedBackgroundAutomation(vaultRoot: string, automationId: string) {
+  const seed = MURPH_MANAGED_AUTOMATIONS.find(
+    (candidate) => candidate.automationId === automationId,
+  )
+  if (!seed) {
+    throw new Error('Expected the production managed automation seed.')
+  }
+  getVaultAutomationStore(vaultRoot).push({
+    ...seed,
+    createdAt: '2026-04-08T00:00:00.000Z',
+    route: {
+      channel: 'telegram',
+      deliverySource: null,
+      deliveryTarget: 'room-1',
+      identityId: null,
+      participantId: null,
+      threadId: 'room-1',
+      threadIsDirect: true,
+    },
+    status: 'active',
+    tags: [...seed.tags],
+    updatedAt: '2026-04-08T00:00:00.000Z',
+  })
+  return seed
 }
 
 async function createCanonicalJob(

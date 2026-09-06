@@ -780,9 +780,9 @@ describe('buildAssistantAutoReplyPrompt', () => {
       'Sender: +15551110000\n\nSpeaker name: \"Legacy Direct Name\"',
     )
     expect(result.prompt).not.toContain('Must Not Render')
-    expect(result.prompt).not.toContain('Profile name (display only)')
+    expect(result.prompt).not.toContain('Profile name:')
     expect(result.prompt).not.toContain(
-      'Address-book name (display only)',
+      'Address-book name:',
     )
   })
 
@@ -1566,10 +1566,10 @@ describe('buildAssistantAutoReplyPrompt', () => {
       throw new Error('Expected a ready prompt result.')
     }
     expect(result.prompt).toContain(
-      `Message ref: ${linqInputId}\n\nSender: +15551110000\n\nProfile name (display only): \"Alice \\\"A\\\"\"`,
+      `Message ref: ${linqInputId}\n\nSender: +15551110000\n\nProfile name: \"Alice \\\"A\\\"\"`,
     )
     expect(result.prompt).toContain(
-      `Message ref: ${contactFallbackInputId}\n\nSender: +15552220000\n\nAddress-book name (display only): \"Mara P.\"`,
+      `Message ref: ${contactFallbackInputId}\n\nSender: +15552220000\n\nAddress-book name: \"Mara P.\"`,
     )
     expect(result.prompt).toContain(
       `Message ref: ${telegramInputId}\n\nSender: 1234567890\n\nSpeaker name: \"Bob Example\"`,

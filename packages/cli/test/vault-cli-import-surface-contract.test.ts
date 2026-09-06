@@ -116,8 +116,14 @@ const scopedImportSurfaceProbes: readonly ScopedImportSurfaceProbe[] = [
     // Measured 222 resolved modules on 2026-07-10 after scoping the family
     // and deferring its typed-save core import. Compose that 30% ratchet with
     // the one reviewed CLI-owned domain-projector module; the exact candidate
-    // resolves 290 modules locally and on Linux CI without adding a package.
-    maxResolvedModules: 290,
+    // resolved 290 modules locally and on Linux CI without adding a package.
+    // Remeasured 300 modules on 2026-09-01 after Incur 0.5.1 added nine
+    // modules to its deliberate scoped import graph without adding a package.
+    // PR #2872 CI measured 303: runtime-state/dist/{cli-timing,node/cli-timing}.js
+    // and node:dgram are the complete added timing subtree. node:async_hooks
+    // was already loaded by vault-cli-vault-context. Admit only those three;
+    // the package allowlist and startup-byte budgets remain unchanged.
+    maxResolvedModules: 303,
   },
 ]
 

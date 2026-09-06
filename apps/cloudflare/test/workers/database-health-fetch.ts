@@ -261,6 +261,7 @@ function readValidDatabaseHealthMessageRequest(input: {
       || value.message.parts[0].value.includes(
         "Database monitor telemetry was incomplete",
       )
+      || value.message.parts[0].value.startsWith("SEV1 OpenAI ")
     )
     || !Array.isArray(value.to)
     || value.to.length !== 1

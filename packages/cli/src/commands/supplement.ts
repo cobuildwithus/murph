@@ -32,14 +32,10 @@ const supplementSlugSchema = z
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, 'Expected a lowercase kebab-case slug.')
 
 const supplementStatusSchema = z.enum(REGIMEN_STATUSES)
-const statusOptionSchema = z
-  .string()
-  .min(1)
+const statusOptionSchema = supplementStatusSchema
   .optional()
   .describe('Optional supplement status to filter by.')
-const compoundStatusOptionSchema = z
-  .string()
-  .min(1)
+const compoundStatusOptionSchema = supplementStatusSchema
   .optional()
   .describe('Optional supplement status to filter by. Defaults to active for compound rollups.')
 
@@ -439,6 +435,7 @@ export function registerSupplementCommands(
         ingredient: context.options.ingredient,
         manufacturer: context.options.manufacturer,
         regimenId: context.options.id,
+        requireExistingRegimenId: context.options.id !== undefined,
         relatedConditionId: context.options.relatedConditionId,
         relatedGoalId: context.options.relatedGoalId,
         relatedRegimenId: context.options.relatedRegimenId,

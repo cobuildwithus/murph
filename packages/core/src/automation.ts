@@ -10,6 +10,7 @@ import {
   automationActiveUntilSchema,
   automationContextReferencesSchema,
   automationFrontmatterSchema,
+  automationFollowUpSourceIntentIdSchema,
   automationContinuityPolicyValues,
   automationDeviceActivityKindSchema,
   automationDeviceActivitySourceValues,
@@ -116,6 +117,8 @@ export interface AutomationRecord {
   status: AutomationStatus;
   summary: string | null;
   activeUntil: string | null;
+  followUpSourceIntentId?: string;
+  followUpParentAutomationId?: string;
   schedule: AutomationSchedule;
   route: AutomationRoute;
   assistantTargetOverride: AutomationAssistantTargetOverride | null;
@@ -146,9 +149,13 @@ export function resolveAutomationUpsertSlug(input: {
 export type AutomationScaffoldPayload = ContractAutomationScaffoldPayload;
 
 export interface UpsertAutomationInput extends AutomationScaffoldPayload {
+  /** Scheduler-only consumption; explicit edits always retire attached children. */
+  completedOccurrence?: true;
   allowSlugRename?: boolean;
   automationId?: string;
   createOnly?: boolean;
+  followUpSourceIntentId?: string;
+  followUpParentAutomationId?: string;
   now?: Date;
   vaultRoot: string;
 }
@@ -811,6 +818,8 @@ function buildAutomationFrontmatter(record: AutomationRecord): FrontmatterObject
     ...(record.plannedOccurrenceOffsetMs === null
       ? {}
       : { plannedOccurrenceOffsetMs: record.plannedOccurrenceOffsetMs }),
+    ...(record.followUpParentAutomationId ? { followUpParentAutomationId: record.followUpParentAutomationId } : {}),
+    ...(record.followUpSourceIntentId ? { followUpSourceIntentId: record.followUpSourceIntentId } : {}),
     ...(record.contextReferences.length === 0
       ? {}
       : { contextReferences: record.contextReferences }),
@@ -863,6 +872,12 @@ function parseAutomationRecord(
     plannedOccurrenceOffsetMs: normalizeAutomationPlannedOccurrenceOffsetMs(
       attributes.plannedOccurrenceOffsetMs,
     ),
+    ...(attributes.followUpParentAutomationId === undefined ? {} : {
+      followUpParentAutomationId: normalizeId(attributes.followUpParentAutomationId, "followUpParentAutomationId", "automation")!,
+    }),
+    ...(attributes.followUpSourceIntentId === undefined ? {} : {
+      followUpSourceIntentId: automationFollowUpSourceIntentIdSchema.parse(attributes.followUpSourceIntentId),
+    }),
     contextReferences: normalizeAutomationContextReferences(
       attributes.contextReferences,
     ),
@@ -1093,6 +1108,39 @@ export async function upsertAutomation(
   input: UpsertAutomationInput,
 ): Promise<UpsertAutomationResult> {
   return withAutomationRegistryLock(input.vaultRoot, () => upsertAutomationWithLatestRegistry(input));
+}
+
+/** Registers one child per dispatched message under the existing registry lock. */
+export async function registerAutomationFollowUp(
+  input: UpsertAutomationInput & { followUpSourceIntentId: string; parentExpectedUpdatedAt?: string },
+): Promise<AutomationRecord | null> {
+  return withAutomationRegistryLock(input.vaultRoot, async () => {
+    const sourceId = automationFollowUpSourceIntentIdSchema.parse(input.followUpSourceIntentId);
+    const route = normalizeAutomationRoute(input.route);
+    if (route.threadIsDirect !== true) return null;
+    const records = await loadAutomationRecords(input.vaultRoot);
+    const existing = records.find((record) => record.followUpSourceIntentId === sourceId);
+    // A replay must never reactivate an already consumed or cancelled child.
+    if (existing) return existing;
+    if (input.followUpParentAutomationId) {
+      const parent = records.find((record) => record.automationId === input.followUpParentAutomationId);
+      if (!parent || parent.followUpSourceIntentId || parent.status !== "active"
+        || parent.updatedAt !== input.parentExpectedUpdatedAt) return null;
+    }
+    const now = input.now ?? new Date();
+    const pending = records.filter((record) => record.followUpSourceIntentId
+      && record.status !== "archived"
+      && record.activeUntil && Date.parse(record.activeUntil) > now.getTime()
+      && record.route.channel === route.channel
+      && record.route.identityId === route.identityId
+      && record.route.threadId === route.threadId
+      && (route.threadId !== null || (record.route.participantId === route.participantId
+        && record.route.deliveryTarget === route.deliveryTarget)));
+    if (pending.length >= 2) return null;
+    return (await upsertAutomationWithLatestRegistry({
+      ...input, createOnly: true, followUpSourceIntentId: sourceId,
+    }, records)).record;
+  });
 }
 
 export async function patchAutomation(
@@ -1403,7 +1451,11 @@ async function reconcileAutomationSupportSeriesRecords(input: {
   }
 
   const now = input.now.toISOString();
-  const targetIds = stale.map(({ record }) => record.automationId);
+  const parentIds = new Set(stale.map(({ record }) => record.automationId));
+  const retiredChildren = input.records.filter((record) => record.status !== "archived"
+    && record.followUpParentAutomationId && parentIds.has(record.followUpParentAutomationId));
+  const retiringRecords = [...stale.map(({ record }) => record), ...retiredChildren];
+  const targetIds = retiringRecords.map((record) => record.automationId);
   const assertCanContinue = () =>
     assertAutomationSupportSeriesReconciliationCanContinue(input.shouldYield);
   let committed: Awaited<ReturnType<typeof commitAuditedCanonicalWrite>>;
@@ -1424,12 +1476,12 @@ async function reconcileAutomationSupportSeriesRecords(input: {
       mutate: async ({ batch }) => {
         const changes = [];
         const files: string[] = [];
-        for (const { record } of stale) {
+        for (const record of retiringRecords) {
           assertCanContinue();
           const archivedRecord: AutomationRecord = {
             ...record,
             status: "archived",
-            tags: record.tags.includes(AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG)
+            tags: record.followUpSourceIntentId || record.tags.includes(AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG)
               ? record.tags
               : [...record.tags, AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG],
             updatedAt: now,
@@ -1742,6 +1794,7 @@ async function upsertAutomationWithLatestRegistry(
         : normalizeAutomationPlannedOccurrenceOffsetMs(
             input.plannedOccurrenceOffsetMs,
           ),
+    ...resolveAutomationFollowUpFields({ input, existingRecord, schedule, activeUntil, status }),
     contextReferences:
       input.contextReferences === undefined
         ? existingRecord?.contextReferences ?? []
@@ -1759,6 +1812,8 @@ async function upsertAutomationWithLatestRegistry(
     relativePath: target.relativePath,
     markdown: "",
   };
+
+  await retireAutomationFollowUpsBeforeParentWrite({ input, existingRecord, currentRecords, status });
 
   const { auditPath, record: writtenRecord } = await writeMarkdownRegistryRecord({
     vaultRoot: input.vaultRoot,
@@ -1782,6 +1837,50 @@ async function upsertAutomationWithLatestRegistry(
     created: target.created,
     record: writtenRecord,
   };
+}
+
+function resolveAutomationFollowUpFields({ input, existingRecord, schedule, activeUntil, status }: {
+  input: UpsertAutomationInput;
+  existingRecord: AutomationRecord | null;
+  schedule: AutomationSchedule;
+  activeUntil: string | null;
+  status: AutomationRecord["status"];
+}): Pick<AutomationRecord, "followUpSourceIntentId" | "followUpParentAutomationId"> {
+  const sourceId = existingRecord?.followUpSourceIntentId ?? input.followUpSourceIntentId;
+  if (sourceId === undefined) return {};
+  if (schedule.kind !== "at" || activeUntil === null) {
+    throw new VaultError("VAULT_INVALID_INPUT", "A follow-up must be a finite one-shot automation.");
+  }
+  if (existingRecord?.status === "archived" && status !== "archived") {
+    throw new VaultError("VAULT_INVALID_INPUT", "A consumed follow-up cannot be reactivated.");
+  }
+  const parentId = existingRecord?.followUpParentAutomationId ?? input.followUpParentAutomationId;
+  return {
+    followUpSourceIntentId: automationFollowUpSourceIntentIdSchema.parse(sourceId),
+    ...(parentId ? { followUpParentAutomationId: normalizeId(parentId, "followUpParentAutomationId", "automation")! } : {}),
+  };
+}
+
+async function retireAutomationFollowUpsBeforeParentWrite({ input, existingRecord, currentRecords, status }: {
+  input: UpsertAutomationInput;
+  existingRecord: AutomationRecord | null;
+  currentRecords: AutomationRecord[];
+  status: AutomationRecord["status"];
+}): Promise<void> {
+  if (input.completedOccurrence && (existingRecord?.schedule.kind !== "at" || status !== "archived")) {
+    throw new VaultError("VAULT_INVALID_INPUT", "Only a consumed one-shot can preserve attached follow-ups.");
+  }
+  // Retire children first: a crash must not leave an edited parent authorizing
+  // obsolete optional work. Ordinary one-shot consumption keeps its child.
+  if (existingRecord && !input.completedOccurrence) {
+    for (const child of currentRecords) {
+      if (child.followUpParentAutomationId !== existingRecord.automationId || child.status === "archived") continue;
+      await upsertAutomationWithLatestRegistry({
+        ...child, vaultRoot: input.vaultRoot, status: "archived", now: input.now,
+      }, currentRecords);
+    }
+  }
+
 }
 
 function withAutomationRegistryLock<TResult>(

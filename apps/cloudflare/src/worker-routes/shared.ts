@@ -1,5 +1,6 @@
 import type {
   HostedRuntimeLatencyPhaseBreakdown,
+  HostedRuntimeShellPrewarmOrchestrationDiagnostics,
   HostedRunnerStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
@@ -20,6 +21,10 @@ import type {
   HostedRuntimeHealthDataConsentReconcileResult,
 } from "../user-runner.js";
 import type { HostedExecutionContainerNamespaceLike } from "../runner-container.js";
+import type {
+  HostedStandbyCoordinatorNamespaceLike,
+  HostedStandbyRunnerContainerNamespaceLike,
+} from "../standby-runner-contract.js";
 import type {
   HostedWorkspaceSnapshotOrphanCandidate,
   HostedWorkspaceSnapshotUploadSession,
@@ -56,6 +61,7 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
   prewarmRuntimeShellForUser?(
     userId: string,
     source?: CloudflareHostedControlRuntimeShellPrewarmSource,
+    orchestration?: HostedRuntimeShellPrewarmOrchestrationDiagnostics,
   ): Promise<void>;
   validateRuntimeWriteFence?(input: {
     attemptId: string;
@@ -99,6 +105,8 @@ export interface WorkerEnvironmentSource
   extends WorkerEnvironmentContract<UserRunnerDurableObjectStubLike> {
   RUNNER_CONTAINER: HostedExecutionContainerNamespaceLike;
   RUNNER_CONTAINER_SMOKE: HostedExecutionContainerNamespaceLike;
+  STANDBY_COORDINATOR?: HostedStandbyCoordinatorNamespaceLike;
+  STANDBY_RUNNER_CONTAINER?: HostedStandbyRunnerContainerNamespaceLike;
 }
 
 export interface WorkerExecutionContext {

@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 
 import {
+  HOSTED_ASSISTANT_ASTRA_MODEL,
   HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_OPENAI_PROVIDER,
   HOSTED_ASSISTANT_SOL_MODEL,
@@ -229,7 +230,7 @@ test("the routing dialog offers the member's endpoint as a third option", () => 
         revision: 4,
         selected: true,
         supportsImages: false,
-        verificationProfile: "murph-codex-0.149.1-portable-responses-v1",
+        verificationProfile: "murph-codex-0.151.0-portable-responses-v1",
         verifiedAt: "2026-07-30T12:00:00.000Z",
       },
       initialDormantSolPreference: false,
@@ -402,7 +403,7 @@ test("one save routes replies to the endpoint and keeps the managed default", as
         revision: 4,
         selected: false,
         supportsImages: false,
-        verificationProfile: "murph-codex-0.149.1-portable-responses-v1",
+        verificationProfile: "murph-codex-0.151.0-portable-responses-v1",
         verifiedAt: "2026-07-30T12:00:00.000Z",
       },
       initialDormantSolPreference: false,
@@ -627,7 +628,7 @@ function endpointConnection(selected: boolean, revision = 4) {
     selected,
     supportsImages: false,
     verificationProfile:
-      "murph-codex-0.149.1-portable-responses-v1" as const,
+      "murph-codex-0.151.0-portable-responses-v1" as const,
     verifiedAt: "2026-07-30T12:00:00.000Z",
   };
 }
@@ -1055,16 +1056,21 @@ test("non-Edge members can explicitly save Luna as their default model", async (
   view.cleanup();
 });
 
-test("Edge members can explicitly save Sol as their default model", async () => {
+test.each([
+  ["Edge", HOSTED_ASSISTANT_SOL_MODEL, "Sol"],
+  ["Edge", HOSTED_ASSISTANT_ASTRA_MODEL, "Astra"],
+  ["Max", HOSTED_ASSISTANT_ASTRA_MODEL, "Astra"],
+] as const)("%s members can save their selected premium model", async (_plan, model, name) => {
   mocks.requestHostedOnboardingJson.mockResolvedValue({
     dormantSolPreference: false,
-    model: HOSTED_ASSISTANT_SOL_MODEL,
+    model,
     ok: true,
     solAvailable: true,
     updated: true,
   });
   const view = await renderClient(
     createElement(HostedAssistantModelSettings, {
+      availableModels: [HOSTED_ASSISTANT_LUNA_MODEL, HOSTED_ASSISTANT_TERRA_MODEL, HOSTED_ASSISTANT_SOL_MODEL, ...(model === HOSTED_ASSISTANT_ASTRA_MODEL ? [model] : [])],
       canUpgradeToEdge: false,
       configurationAvailable: true,
       initialDormantSolPreference: false,
@@ -1080,25 +1086,25 @@ test("Edge members can explicitly save Sol as their default model", async () => 
     view.container,
     HOSTED_ASSISTANT_TERRA_MODEL,
   );
-  const solInput = findModelRadio(view.container, HOSTED_ASSISTANT_SOL_MODEL);
+  const selectedInput = findModelRadio(view.container, model);
   const saveButton = findButton(view.container, "Save change");
 
   assert.ok(isRadioChecked(terraInput));
-  assert.equal(isRadioChecked(solInput), false);
+  assert.equal(isRadioChecked(selectedInput), false);
   assert.ok(saveButton.disabled);
 
   await act(async () => {
-    solInput?.click();
+    selectedInput?.click();
   });
 
   assert.equal(isRadioChecked(terraInput), false);
-  assert.ok(isRadioChecked(solInput));
+  assert.ok(isRadioChecked(selectedInput));
   assert.match(
     findModelLabel(view.container, HOSTED_ASSISTANT_TERRA_MODEL).textContent ?? "",
     /Default/,
   );
   assert.match(
-    findModelLabel(view.container, HOSTED_ASSISTANT_SOL_MODEL).textContent ?? "",
+    findModelLabel(view.container, model).textContent ?? "",
     /Selected/,
   );
   assert.equal(saveButton.disabled, false);
@@ -1110,12 +1116,12 @@ test("Edge members can explicitly save Sol as their default model", async () => 
 
   expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
     method: "POST",
-    payload: { model: HOSTED_ASSISTANT_SOL_MODEL },
+    payload: { model },
     url: "/api/settings/assistant-model",
   });
   assertHiddenSaveAnnouncement(
     view.container,
-    /Saved\. Sol through OpenAI is your default\./u,
+    new RegExp(`Saved\\. ${name} through OpenAI is your default\\.`),
   );
   assert.ok(findButton(view.container, "Save change").disabled);
 
@@ -1223,7 +1229,7 @@ test("model radios stay labeled and the form becomes busy while saving", async (
       accent: "#8f6817",
       artwork: "sol",
       backgroundAccent: "#d9ad35",
-      description: "Highest health intelligence",
+      description: "Deep health intelligence",
       model: HOSTED_ASSISTANT_SOL_MODEL,
       name: "Sol",
       usage: "High usage",
@@ -1687,6 +1693,11 @@ function installGlobals(
   document: Document,
 ) {
   const restoreEntries = [
+    setGlobal("matchMedia", () => ({
+      matches: true,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    })),
     setGlobal("window", window),
     setGlobal("self", window),
     setGlobal("document", document),

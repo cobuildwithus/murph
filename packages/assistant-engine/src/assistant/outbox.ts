@@ -1,3 +1,4 @@
+import { registerDeliveredAssistantFollowUp } from './follow-ups.js'
 import { randomUUID } from 'node:crypto'
 import {
   ASSISTANT_ANSWERED_MAILBOX_ITEM_ID_LIMIT,
@@ -58,10 +59,10 @@ import {
   assistantDeliveryErrorPreventsFreshIntentRetry,
   createAssistantDeliveryAmbiguousError,
   createAssistantDeliveryConfirmationPendingError,
-  createAssistantDeliveryRetryExhaustedError,
   isAssistantOutboxRetryBudgetExhausted,
   isAssistantOutboxRetryableError,
   normalizeAssistantDeliveryError,
+  resolveAssistantOutboxRetryExhaustionDisposition,
   shouldBeginAssistantOutboxDispatch,
   shouldDispatchAssistantOutboxIntent,
 } from './outbox/retry-policy.js'
@@ -280,6 +281,8 @@ export type AssistantOutboxCreateIntentInput = {
   actorId?: string | null
   answeredMailboxItemIds?: readonly string[] | null
   reviewedAssistantAskCompletionExpiresAt?: string | null
+  followUpRequest?: AssistantOutboxIntent['followUpRequest']
+  followUpEvaluatedThrough?: AssistantOutboxIntent['followUpEvaluatedThrough']
   automationAuthority?: AssistantOutboxIntent['automationAuthority']
   automationContextReferences?: AssistantOutboxIntent['automationContextReferences']
   plannedOccurrenceAt?: string | null
@@ -405,11 +408,12 @@ export async function createAssistantOutboxIntent(
     const answeredMailboxItemIds = normalizeAssistantOutboxAnsweredMailboxItemIds(
       input.answeredMailboxItemIds ?? [],
     )
-    const automationContextReferences =
-      input.automationContextReferences?.map((reference) => ({
+    const automationContextReferences = input.automationContextReferences?.map(
+      (reference) => ({
         entityId: reference.entityId,
         entityKind: reference.entityKind,
-      })) ?? []
+      }),
+    ) ?? null
     const deliveryTransportIdempotent =
       operation
         ? resolveAssistantOutboxReactionTransportIdempotent({
@@ -526,10 +530,10 @@ export async function createAssistantOutboxIntent(
       dedupeKey,
       targetFingerprint: hashAssistantOutboxTargetFingerprint(rawTargetIdentity),
       ...persistedTarget,
+      followUpRequest: input.followUpRequest,
+      followUpEvaluatedThrough: input.followUpEvaluatedThrough,
       automationAuthority: input.automationAuthority ?? null,
-      ...(automationContextReferences.length === 0
-        ? {}
-        : { automationContextReferences }),
+      automationContextReferences,
       plannedOccurrenceAt: input.plannedOccurrenceAt ?? null,
       scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
       externalThreadRouteAuthority: input.externalThreadRouteAuthority ?? null,
@@ -969,9 +973,9 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       }
     }
 
-    const retryExhaustedError =
-      createAssistantDeliveryRetryExhaustedError(prepared.intent.lastError)
-    const failedIntent = assistantOutboxIntentRequiresTerminalConfirmation({
+    const retryExhaustionDisposition =
+      resolveAssistantOutboxRetryExhaustionDisposition(prepared.intent)
+    const terminalIntent = assistantOutboxIntentRequiresTerminalConfirmation({
       dispatchHooks: input.dispatchHooks,
       intent: prepared.intent,
       vault: input.vault,
@@ -981,24 +985,24 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
           deliveryTransportIdempotent:
             prepared.intent.deliveryTransportIdempotent,
           dispatchHooks: input.dispatchHooks,
-          error: retryExhaustedError,
+          error: retryExhaustionDisposition.error,
           failedAt: now,
           intent: prepared.intent,
           intentPath: prepared.intentPath,
           vault: input.vault,
         })
       : await markAssistantOutboxIntentMirrorTerminal({
-          error: retryExhaustedError,
+          error: retryExhaustionDisposition.error,
           failedAt: now,
           intent: prepared.intent,
           intentPath: prepared.intentPath,
           onlyCurrentStatuses: ['retryable', 'sending'],
-          status: 'failed',
+          status: retryExhaustionDisposition.status,
           vault: input.vault,
         })
     return {
-      intent: failedIntent,
-      deliveryError: failedIntent.lastError,
+      intent: terminalIntent,
+      deliveryError: terminalIntent.lastError,
       session: null,
     }
   }
@@ -1407,11 +1411,11 @@ function assistantOutboxIntentRequiresTerminalConfirmation(input: {
   intent: AssistantOutboxIntent
   vault: string
 }): boolean {
-  return input.dispatchHooks?.confirmTerminalIntent !== undefined &&
+  return input.intent.followUpRequest !== undefined || (input.dispatchHooks?.confirmTerminalIntent !== undefined &&
     input.dispatchHooks.requiresTerminalConfirmation?.({
       intent: input.intent,
       vault: input.vault,
-    }) === true
+    }) === true)
 }
 
 function readAssistantOutboxPendingTerminalConfirmation(input: {
@@ -1457,16 +1461,15 @@ async function confirmAssistantOutboxTerminalIntent(input: {
   vault: string
 }): Promise<AssistantOutboxIntent> {
   const confirmTerminalIntent = input.dispatchHooks?.confirmTerminalIntent
-  if (!confirmTerminalIntent) {
-    return input.intent
-  }
-
   try {
-    await confirmTerminalIntent({
+    await confirmTerminalIntent?.({
       intent: input.intent,
       outcome: input.outcome,
       vault: input.vault,
     })
+    if (input.outcome.status === "sent") {
+      await registerDeliveredAssistantFollowUp({ intent: input.intent, vault: input.vault })
+    }
   } catch {
     return rescheduleAssistantOutboxConfirmationRetry({
       error:
@@ -1497,6 +1500,7 @@ async function confirmAssistantOutboxTerminalIntent(input: {
     status: input.outcome.status === 'failed_ambiguous'
       ? 'abandoned'
       : 'failed',
+    terminalConfirmationCompleted: true,
     vault: input.vault,
   })
 }
@@ -1627,6 +1631,8 @@ export async function deliverAssistantOutboxMessage(input: {
   actorId?: string | null
   answeredMailboxItemIds?: readonly string[] | null
   reviewedAssistantAskCompletionExpiresAt?: string | null
+  followUpRequest?: AssistantOutboxIntent['followUpRequest']
+  followUpEvaluatedThrough?: AssistantOutboxIntent['followUpEvaluatedThrough']
   automationAuthority?: AssistantOutboxIntent['automationAuthority']
   automationContextReferences?: AssistantOutboxIntent['automationContextReferences']
   plannedOccurrenceAt?: string | null
@@ -1664,14 +1670,14 @@ export async function deliverAssistantOutboxMessage(input: {
       input.answeredMailboxItemIds ?? [],
     )
   const intent = await createAssistantOutboxIntent({
+    followUpRequest: input.followUpRequest,
+    followUpEvaluatedThrough: input.followUpEvaluatedThrough,
     actorId: input.actorId,
     answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
     reviewedAssistantAskCompletionExpiresAt:
       input.reviewedAssistantAskCompletionExpiresAt ?? null,
     automationAuthority: input.automationAuthority ?? null,
-    ...(input.automationContextReferences?.length
-      ? { automationContextReferences: input.automationContextReferences }
-      : {}),
+    automationContextReferences: input.automationContextReferences,
     plannedOccurrenceAt: input.plannedOccurrenceAt ?? null,
     scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
     bindingDelivery: input.bindingDelivery,

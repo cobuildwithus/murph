@@ -54,6 +54,37 @@ test('listFilterSchema surfaces query family loading failures', async () => {
   })
 })
 
+test('batch child errors accept every fixed CLI-specific safe stage', async () => {
+  vi.resetModules()
+  const { vaultCliBatchCommandErrorSchema } = await import(
+    '../src/vault-cli-contracts.ts'
+  )
+
+  for (const stage of [
+    'protocol_family_graph',
+    'protocol_index',
+    'protocol_run_specs',
+    'query_source',
+  ] as const) {
+    const parsed = vaultCliBatchCommandErrorSchema.parse({
+      code: 'safe_failure',
+      message: 'The command returned a safe recoverable failure.',
+      retryable: false,
+      stage,
+    })
+
+    assert.equal(parsed.stage, stage)
+  }
+
+  assert.equal(
+    vaultCliBatchCommandErrorSchema.safeParse({
+      message: 'The command returned an unknown internal stage.',
+      stage: 'private_internal_stage',
+    }).success,
+    false,
+  )
+})
+
 test('workout result contracts retain exercise-owned live tracking facts', async () => {
   vi.resetModules()
   const { workoutAddResultSchema } = await import('../src/vault-cli-contracts.ts')
@@ -83,19 +114,34 @@ test('workout result contracts retain exercise-owned live tracking facts', async
 
   assert.equal(parsed.workout?.exercises[0]?.memberRepsPerSet, 9)
   assert.equal(parsed.workout?.exercises[0]?.setPlanIsFinite, true)
+  assert.equal(parsed.note, 'Eight set workout')
+
+  const noteLess = workoutAddResultSchema.parse({
+    ...parsed,
+    note: null,
+  })
+  assert.equal(noteLess.note, null)
+  assert.throws(() => workoutAddResultSchema.parse({
+    ...parsed,
+    note: undefined,
+  }))
 })
 
-test('journal results retain regex-shaped local date key compatibility', async () => {
+test('journal results require real calendar dates', async () => {
   vi.resetModules()
   const { journalEnsureResultSchema } = await import('../src/vault-cli-contracts.ts')
 
   const parsed = journalEnsureResultSchema.parse({
     created: false,
-    date: '2026-02-30',
-    journalPath: 'journal/2026/02/2026-02-30.md',
-    lookupId: 'journal_day:2026-02-30',
+    date: '2026-02-28',
+    journalPath: 'journal/2026/02/2026-02-28.md',
+    lookupId: 'journal_day:2026-02-28',
     vault: './vault',
   })
 
-  assert.equal(parsed.date, '2026-02-30')
+  assert.equal(parsed.date, '2026-02-28')
+  assert.throws(() => journalEnsureResultSchema.parse({
+    ...parsed,
+    date: '2026-02-30',
+  }))
 })

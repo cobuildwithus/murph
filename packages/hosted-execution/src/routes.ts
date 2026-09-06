@@ -16,8 +16,89 @@ export const HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH =
   "/api/internal/hosted-runtime/health-data-admission";
 export const HOSTED_RUNTIME_OWNER_RELEASED_PATH =
   "/api/internal/hosted-runtime/owner-released";
+export const HOSTED_RUNTIME_OWNER_RELEASE_ATTEMPT_QUERY =
+  "runtimeAttemptId";
 export const HOSTED_RUNTIME_OWNER_RELEASE_IMMEDIATE_RECHECK_QUERY =
   "immediateRecheckRequested";
+
+export interface HostedRuntimeOwnerReleaseQuery {
+  immediateRecheckRequested: boolean;
+  runtimeAttemptId: string | null;
+}
+
+export function buildHostedRuntimeOwnerReleaseSearch(input: {
+  immediateRecheckRequested: boolean;
+  runtimeAttemptId: string;
+}): string {
+  const search = new URLSearchParams();
+  search.set(
+    HOSTED_RUNTIME_OWNER_RELEASE_ATTEMPT_QUERY,
+    requireHostedRuntimeOwnerReleaseAttemptId(input.runtimeAttemptId),
+  );
+  if (input.immediateRecheckRequested) {
+    search.set(HOSTED_RUNTIME_OWNER_RELEASE_IMMEDIATE_RECHECK_QUERY, "1");
+  }
+  return `?${search.toString()}`;
+}
+
+export function parseHostedRuntimeOwnerReleaseSearch(
+  value: string,
+): HostedRuntimeOwnerReleaseQuery {
+  if (value === "") {
+    return {
+      immediateRecheckRequested: false,
+      runtimeAttemptId: null,
+    };
+  }
+
+  const search = new URLSearchParams(value);
+  const runtimeAttemptIds = search.getAll(
+    HOSTED_RUNTIME_OWNER_RELEASE_ATTEMPT_QUERY,
+  );
+  const immediateRecheckValues = search.getAll(
+    HOSTED_RUNTIME_OWNER_RELEASE_IMMEDIATE_RECHECK_QUERY,
+  );
+  const runtimeAttemptId = runtimeAttemptIds[0] ?? null;
+  const immediateRecheckRequested = immediateRecheckValues[0] === "1";
+  if (
+    runtimeAttemptIds.length > 1
+    || immediateRecheckValues.length > 1
+    || (
+      immediateRecheckValues.length === 1
+      && !immediateRecheckRequested
+    )
+  ) {
+    throw new TypeError("Hosted runtime owner-release query is invalid.");
+  }
+
+  const canonical = runtimeAttemptId === null
+    ? `?${HOSTED_RUNTIME_OWNER_RELEASE_IMMEDIATE_RECHECK_QUERY}=1`
+    : buildHostedRuntimeOwnerReleaseSearch({
+        immediateRecheckRequested,
+        runtimeAttemptId,
+      });
+  if (value !== canonical) {
+    throw new TypeError("Hosted runtime owner-release query is invalid.");
+  }
+
+  return {
+    immediateRecheckRequested,
+    runtimeAttemptId,
+  };
+}
+
+function requireHostedRuntimeOwnerReleaseAttemptId(value: string): string {
+  if (
+    value.length === 0
+    || value.length > 192
+    || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(value)
+  ) {
+    throw new TypeError(
+      "Hosted runtime owner-release runtimeAttemptId must be a bounded opaque identifier.",
+    );
+  }
+  return value;
+}
 export const HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH =
   "/api/internal/hosted-runtime/crypto-context";
 export const HOSTED_RUNTIME_CRYPTO_ROOT_PATH =
@@ -50,6 +131,17 @@ export const HOSTED_RUNTIME_CODEX_AUTH_PATH =
   "/api/internal/hosted-runtime/codex-auth";
 export const HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH =
   "/api/internal/hosted-runtime/vault-share/deliver";
+export const HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD =
+  "continuation";
+export const HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_MAX_LENGTH = 128;
+export function isHostedRuntimeVaultShareDeliverContinuation(
+  value: unknown,
+): value is string {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_MAX_LENGTH
+    && /^[A-Za-z0-9_-]+$/u.test(value);
+}
 export const HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH =
   "/api/internal/hosted-runtime/vault-share/active-kinds";
 export const HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH =

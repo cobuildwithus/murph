@@ -98,7 +98,6 @@ describe('GitHub Actions cache trust-boundary guards', () => {
         if (pattern.test(workflow)) {
           if (
             isAllowedHostSupportTypeScriptCache(file, workflow, description)
-            || isAllowedNativeHostedE2eHandoff(file, workflow, description)
             || isAllowedPrHeadDraftResetHandoff(file, workflow, description)
             || isAllowedTemporalCompatibilityHandoff(file, workflow, description)
           ) {
@@ -110,117 +109,6 @@ describe('GitHub Actions cache trust-boundary guards', () => {
     }
 
     expect(findings).toEqual([])
-  })
-
-  it('allows only native E2E handoffs that keep PR code outside the secret runner', () => {
-    const iosWorkflow = readFileSync(
-      path.join(workflowsDir, 'native-ios-hosted-e2e.yml'),
-      'utf8',
-    )
-    const androidWorkflow = readFileSync(
-      path.join(workflowsDir, 'native-android-hosted-e2e.yml'),
-      'utf8',
-    )
-
-    expect(
-      isAllowedNativeHostedE2eHandoff(
-        'native-ios-hosted-e2e.yml',
-        iosWorkflow,
-        'workflow_run handoff trigger',
-      ),
-    ).toBe(true)
-
-    expect(
-      isAllowedNativeHostedE2eHandoff(
-        'native-android-hosted-e2e.yml',
-        androidWorkflow,
-        'workflow_run handoff trigger',
-      ),
-    ).toBe(true)
-
-    expect(
-      isAllowedNativeHostedE2eHandoff(
-        'release.yml',
-        iosWorkflow,
-        'workflow_run handoff trigger',
-      ),
-    ).toBe(false)
-
-    expect(
-      isAllowedNativeHostedE2eHandoff(
-        'native-ios-hosted-e2e.yml',
-        iosWorkflow.replace('- Repo Hygiene', '- Release'),
-        'workflow_run handoff trigger',
-      ),
-    ).toBe(false)
-
-    expect(
-      isAllowedNativeHostedE2eHandoff(
-        'native-ios-hosted-e2e.yml',
-        iosWorkflow.replace(
-          " && needs.select-pr.outputs.trusted == 'true'",
-          '',
-        ),
-        'workflow_run handoff trigger',
-      ),
-    ).toBe(false)
-
-    expect(
-      isAllowedNativeHostedE2eHandoff(
-        'native-ios-hosted-e2e.yml',
-        removeWorkflowStep(iosWorkflow, 'Revalidate exact PR head before runner setup'),
-        'workflow_run handoff trigger',
-      ),
-    ).toBe(false)
-
-    expect(
-      isAllowedNativeHostedE2eHandoff(
-        'native-ios-hosted-e2e.yml',
-        iosWorkflow.replace(
-          '      pull-requests: read\n',
-          '      pull-requests: read\n      statuses: write\n',
-        ),
-        'workflow_run handoff trigger',
-      ),
-    ).toBe(false)
-
-    expect(
-      isAllowedNativeHostedE2eHandoff(
-        'native-ios-hosted-e2e.yml',
-        iosWorkflow.replace('      contents: read\n', '      contents: write\n'),
-        'workflow_run handoff trigger',
-      ),
-    ).toBe(false)
-
-    expect(
-      isAllowedNativeHostedE2eHandoff(
-        'native-ios-hosted-e2e.yml',
-        iosWorkflow.replace(
-          'ref: ${{ github.event.repository.default_branch }}',
-          () => 'ref: ${{ needs.select-pr.outputs.head_ref }}',
-        ),
-        'workflow_run handoff trigger',
-      ),
-    ).toBe(false)
-
-    expect(
-      isAllowedNativeHostedE2eHandoff(
-        'native-ios-hosted-e2e.yml',
-        iosWorkflow.replace('persist-credentials: false', 'persist-credentials: true'),
-        'workflow_run handoff trigger',
-      ),
-    ).toBe(false)
-
-    expect(
-      isAllowedNativeHostedE2eHandoff(
-        'native-android-hosted-e2e.yml',
-        androidWorkflow.replace(
-          'NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY: ${{ secrets.NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY }}',
-          'NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY: untrusted',
-        ),
-        'workflow_run handoff trigger',
-      ),
-    ).toBe(false)
   })
 
   it('allows only the exact-head trusted pull-request draft-reset handoff', () => {
@@ -495,7 +383,7 @@ function isAllowedHostSupportTypeScriptCache(
   if (description === 'actions/cache') {
     const cacheUses = workflow.match(/uses:\s+actions\/cache@[^\s]+/gu) ?? []
     return (
-      cacheUses.length === 2 &&
+      cacheUses.length === 1 &&
       cacheUses.every(
         (entry) =>
           entry ===
@@ -505,77 +393,12 @@ function isAllowedHostSupportTypeScriptCache(
   }
 
   if (description === 'cache restore keys') {
-    return (workflow.match(/^\s+restore-keys:/gmu) ?? []).length === 2
+    return (workflow.match(/^\s+restore-keys:/gmu) ?? []).length === 1
   }
 
   return false
 }
 
-function isAllowedNativeHostedE2eHandoff(
-  file: string,
-  workflow: string,
-  description: string,
-): boolean {
-  const contract = file === 'native-ios-hosted-e2e.yml'
-    ? {
-        checkoutStep: 'Checkout trusted control plane',
-        databaseSecret: 'NATIVE_IOS_E2E_DATABASE_URL: ${{ secrets.NATIVE_IOS_E2E_DATABASE_URL }}',
-        dispatchCommand: 'node scripts/native-ios-hosted-e2e.mjs pr',
-      }
-    : file === 'native-android-hosted-e2e.yml'
-      ? {
-          checkoutStep: 'Checkout trusted default-branch control code',
-          databaseSecret: 'NATIVE_IOS_E2E_DATABASE_URL: ${{ secrets.NATIVE_IOS_E2E_DATABASE_URL }}',
-          dispatchCommand: 'node scripts/native-android-hosted-e2e.mjs pr',
-        }
-      : null
-  if (!contract || description !== 'workflow_run handoff trigger') {
-    return false
-  }
-
-  const parsedWorkflow: unknown = parse(workflow)
-  if (!isRecord(parsedWorkflow)) {
-    return false
-  }
-
-  const triggers = parsedWorkflow.on
-  if (!isRecord(triggers)) {
-    return false
-  }
-
-  const workflowRun = triggers.workflow_run
-  if (!isRecord(workflowRun)) {
-    return false
-  }
-
-  const jobs = parsedWorkflow.jobs
-  if (!isRecord(jobs)) {
-    return false
-  }
-
-  const prLive = jobs['pr-live']
-  if (
-    !isRecord(prLive)
-    || !hasTrustedPrLiveAdmission(prLive)
-    || !hasExactReadOnlyPrLivePermissions(prLive.permissions)
-    || !hasEarlyExactPrHeadRevalidation(prLive.steps, contract.checkoutStep)
-    || !hasTrustedControlPlaneCheckout(prLive.steps, contract.checkoutStep)
-  ) {
-    return false
-  }
-
-  return (
-    isStringArray(workflowRun.workflows, ['Repo Hygiene'])
-    && isStringArray(workflowRun.types, ['completed'])
-    && workflow.includes(contract.dispatchCommand)
-    && workflow.includes('PR_HEAD_SHA: ${{ needs.select-pr.outputs.head_sha }}')
-    && workflow.includes(contract.databaseSecret)
-    && (
-      file !== 'native-android-hosted-e2e.yml'
-      || hasAndroidAppCredentials(prLive.steps)
-    )
-  )
-}
 
 function isAllowedPrHeadDraftResetHandoff(
   file: string,
@@ -791,29 +614,6 @@ function hasTemporalCompatibilityAppToken(value: unknown): boolean {
     && token.with['permission-contents'] === 'read'
 }
 
-function hasAndroidAppCredentials(value: unknown): boolean {
-  if (!Array.isArray(value)) {
-    return false
-  }
-  const controller = value.find((step) =>
-    isRecord(step) && step.name === 'Run exact candidate lifecycle and private Android journey'
-  )
-  return isRecord(controller)
-    && isRecord(controller.env)
-    && controller.env.NATIVE_ANDROID_E2E_GITHUB_APP_ID === '${{ vars.NATIVE_ANDROID_E2E_GITHUB_APP_ID }}'
-    && controller.env.NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY === '${{ secrets.NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY }}'
-}
-
-function hasExactReadOnlyPrLivePermissions(value: unknown): boolean {
-  if (!isRecord(value)) {
-    return false
-  }
-
-  return Object.keys(value).sort().join(',') === 'contents,pull-requests'
-    && value.contents === 'read'
-    && value['pull-requests'] === 'read'
-}
-
 function hasTemporalCompatibilityPermissions(value: unknown): boolean {
   if (!isRecord(value)) {
     return false
@@ -823,10 +623,6 @@ function hasTemporalCompatibilityPermissions(value: unknown): boolean {
     && value.actions === 'read'
     && value.contents === 'read'
     && value['pull-requests'] === 'read'
-}
-
-function hasTrustedPrLiveAdmission(prLive: Record<string, unknown>): boolean {
-  return prLive.if === "${{ github.run_attempt == 1 && github.event.workflow_run.conclusion == 'success' && needs.select-pr.outputs.selected == 'true' && needs.select-pr.outputs.trusted == 'true' }}"
 }
 
 function hasEarlyExactPrHeadRevalidation(value: unknown, checkoutStepName: string): boolean {

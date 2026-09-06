@@ -68,6 +68,38 @@ function staticBootClosureBytesMetafile(staticClosureBytes: number): Metafile {
   };
 }
 
+function staticBootChunkCountMetafile(staticChunkCount: number): Metafile {
+  if (staticChunkCount < 1) {
+    throw new Error("static chunk count must include the entry chunk");
+  }
+
+  const outputs: Metafile["outputs"] = {};
+  for (let index = 0; index < staticChunkCount; index += 1) {
+    const outputPath = index === 0
+      ? "dist-bundled/container-entrypoint.js"
+      : `dist-bundled/static-${index}.js`;
+    const nextOutputPath = index + 1 < staticChunkCount
+      ? `./static-${index + 1}.js`
+      : null;
+    outputs[outputPath] = {
+      bytes: 1,
+      entryPoint: index === 0 ? "dist/container-entrypoint.js" : undefined,
+      exports: [],
+      imports: nextOutputPath
+        ? [{ kind: "import-statement", path: nextOutputPath }]
+        : [],
+      inputs: {},
+    };
+  }
+
+  return {
+    inputs: {
+      "dist/container-entrypoint.js": { bytes: 1, imports: [] },
+    },
+    outputs,
+  };
+}
+
 function staticBootClosureMetafile(inputPath: string): Metafile {
   return {
     inputs: {
@@ -159,7 +191,7 @@ const temporaryDirectories: string[] = [];
 const ROOMY_TEST_BUDGETS = {
   entryBytes: 10_000,
   staticClosureBytes: 10_000,
-  totalBytes: 10_000,
+  staticChunkCount: 10,
 };
 const RUNNER_TREE_SHAKE_REQUIRED_PACKAGE_MANIFESTS = [
   ["@murphai/contracts", "packages/contracts/package.json"],
@@ -303,10 +335,10 @@ describe("runner bundle container-entrypoint esbuild step", () => {
       assertRunnerEntrypointBundleWithinBudgets(metafile, {
         entryBytes: 1_000,
         staticClosureBytes: 10_000,
-        totalBytes: 3_000,
+        staticChunkCount: 10,
       }),
     ).toThrow(
-      /total output 6000B exceeds budget 3000B; entry chunk dist-bundled\/container-entrypoint\.js 2000B exceeds budget 1000B[\s\S]*5000B node_modules\/heavy\/index\.js/,
+      /entry chunk dist-bundled\/container-entrypoint\.js 2000B exceeds budget 1000B[\s\S]*5000B node_modules\/heavy\/index\.js/,
     );
 
     expect(
@@ -314,6 +346,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ).toEqual({
       entryBytes: 2_000,
       staticClosureBytes: 2_000,
+      staticChunkCount: 1,
       totalBytes: 6_000,
     });
   });
@@ -512,6 +545,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ).toEqual({
       entryBytes: 2_000,
       staticClosureBytes: 2_000,
+      staticChunkCount: 1,
       totalBytes: 6_000,
     });
   });
@@ -529,6 +563,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ).toEqual({
       entryBytes: 2_000,
       staticClosureBytes: 2_000,
+      staticChunkCount: 1,
       totalBytes: 6_000,
     });
   });
@@ -607,9 +642,9 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     // Mirror the production baselines plus their variance allowances so
     // budget-policy changes remain explicit and reviewed.
     expect(budgets).toEqual({
-      entryBytes: 1_739_005 + 48_000,
-      staticClosureBytes: 8_683_649 + 96_000,
-      totalBytes: 11_409_047 + 32_768,
+      entryBytes: 64_257 + 12_000,
+      staticClosureBytes: 1_950_662 + 96_000,
+      staticChunkCount: 24,
     });
   });
 
@@ -622,6 +657,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ).toEqual({
       entryBytes,
       staticClosureBytes: entryBytes,
+      staticChunkCount: 1,
       totalBytes: entryBytes,
     });
 
@@ -643,6 +679,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ).toEqual({
       entryBytes: 1_000,
       staticClosureBytes,
+      staticChunkCount: 2,
       totalBytes: staticClosureBytes,
     });
 
@@ -653,31 +690,24 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ).toThrow(/static boot closure .* exceeds budget/);
   });
 
-  it("gates total output at the production ratchet boundary", () => {
-    const { totalBytes } = resolveRunnerEntrypointBundleBudgets();
-    const dynamicChunkBytesAtBudget = totalBytes - 1_000;
+  it("gates the static boot chunk count at the production ratchet boundary", () => {
+    const { staticChunkCount } = resolveRunnerEntrypointBundleBudgets();
 
     expect(
       assertRunnerEntrypointBundleWithinBudgets(
-        dynamicOnlyChunkMetafile(dynamicChunkBytesAtBudget),
+        staticBootChunkCountMetafile(staticChunkCount),
       ),
-    ).toEqual({
-      entryBytes: 1_000,
-      staticClosureBytes: 1_000,
-      totalBytes,
-    });
+    ).toMatchObject({ staticChunkCount });
 
     expect(() =>
       assertRunnerEntrypointBundleWithinBudgets(
-        dynamicOnlyChunkMetafile(dynamicChunkBytesAtBudget + 1),
+        staticBootChunkCountMetafile(staticChunkCount + 1),
       ),
-    ).toThrow(/total output .* exceeds budget/);
+    ).toThrow(/static boot closure chunk count .* exceeds budget/);
   });
 
-  it("does not count dynamic-only chunks toward the static boot closure budget", () => {
-    const { staticClosureBytes, totalBytes } = resolveRunnerEntrypointBundleBudgets();
-    const dynamicChunkBytes = staticClosureBytes + 500_000;
-    expect(dynamicChunkBytes + 1_000).toBeLessThan(totalBytes);
+  it("leaves lazy-only total growth to the exact-base CI comparison", () => {
+    const dynamicChunkBytes = 20_000_000;
 
     expect(
       assertRunnerEntrypointBundleWithinBudgets(
@@ -686,6 +716,23 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ).toEqual({
       entryBytes: 1_000,
       staticClosureBytes: 1_000,
+      staticChunkCount: 1,
+      totalBytes: dynamicChunkBytes + 1_000,
+    });
+  });
+
+  it("does not count dynamic-only chunks toward the static boot closure budget", () => {
+    const { staticClosureBytes } = resolveRunnerEntrypointBundleBudgets();
+    const dynamicChunkBytes = staticClosureBytes + 500_000;
+
+    expect(
+      assertRunnerEntrypointBundleWithinBudgets(
+        dynamicOnlyChunkMetafile(dynamicChunkBytes),
+      ),
+    ).toEqual({
+      entryBytes: 1_000,
+      staticClosureBytes: 1_000,
+      staticChunkCount: 1,
       totalBytes: dynamicChunkBytes + 1_000,
     });
   });

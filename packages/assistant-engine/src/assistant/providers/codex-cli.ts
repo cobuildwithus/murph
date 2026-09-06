@@ -16,9 +16,6 @@ import {
   createAnalyzeVideoToolRuntimeFromEnv,
 } from '../../assistant-codex/analyze-video-tool.js'
 import {
-  resolveSupportedCodexAppServerApprovalPolicy,
-} from '../../assistant-codex/app-server-requests.js'
-import {
   resolveStrictAssistantCodexModelProvider,
 } from '@murphai/operator-config/assistant/target-runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -33,9 +30,9 @@ import {
 } from '../bindings.js'
 import {
   extractCodexAssistantProviderUsage,
-  mergeCodexConfigOverrides,
   resolveAssistantProviderFlatPromptConversationHistorySection,
   resolveAssistantProviderPrompt,
+  resolveCodexModelProviderConfigOverrides,
 } from './helpers.js'
 import {
   supportsAnyAssistantRichUserMessageContent,
@@ -161,10 +158,8 @@ export const CODEX_ASSISTANT_CAPABILITIES: AssistantProviderCapabilities = {
 
 type CodexAssistantProcessPreparationInput = Pick<
   AssistantProviderTurnExecutionInput,
-  | 'codexConfigOverrides'
   | 'env'
   | 'providerConfig'
-  | 'showThinkingTraces'
   | 'workingDirectory'
 >
 
@@ -208,9 +203,6 @@ export async function executeCodexAssistantTurnAttempt(
             process.env[modelProviderConfig.envKey],
         )
       : null
-  const approvalPolicy = resolveSupportedCodexAppServerApprovalPolicy(
-    providerConfig.policy.approvalPolicy,
-  )
   const developerInstructions = normalizeNullableString(input.developerInstructions)
 
   const voiceMemoRuntime = createVoiceMemoToolRuntimeFromEnv({
@@ -242,7 +234,7 @@ export async function executeCodexAssistantTurnAttempt(
       input.automationRelativeDateReferenceWindow ?? null,
     authorizeAcceptedMessageTarget:
       input.authorizeAcceptedMessageTarget ?? null,
-    approvalPolicy,
+    approvalPolicy: providerConfig.policy.approvalPolicy,
     baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
     developerInstructions,
     dynamicTools: input.dynamicTools,
@@ -252,6 +244,7 @@ export async function executeCodexAssistantTurnAttempt(
     ...(input.generateSongPolicy
       ? { generateSongPolicy: input.generateSongPolicy }
       : {}),
+    followUpAttachmentAllowed: input.followUpAttachmentAllowed === true,
     groupConversation: input.groupConversation === true,
     groupRoomModelMaintenanceAuthorized:
       input.groupRoomModelMaintenanceAuthorized === true,
@@ -267,7 +260,7 @@ export async function executeCodexAssistantTurnAttempt(
     onboardingFirstReadCompletionTransitionAvailable:
       input.onboardingFirstReadCompletionTransitionAvailable ?? false,
     publicInternetFetch: input.publicInternetFetch ?? null,
-    threadConfig: input.codexThreadConfig ?? null,
+    threadConfig: resolveCodexAssistantThreadConfig(input),
     trustedContextReferences: input.trustedContextReferences ?? null,
     onFirstAssistantResponseCompleted:
       input.activeTurnSteering
@@ -484,6 +477,7 @@ export async function executeCodexAssistantTurnAttempt(
           ? {}
           : { contextReferences: segment.contextReferences }),
         deliveryContextOrdinal: segment.deliveryContextOrdinal,
+        followUpRequest: segment.followUpRequest,
         media: segment.media,
         response: segment.response,
         ...(segment.transcriptResponse === undefined
@@ -498,6 +492,7 @@ export async function executeCodexAssistantTurnAttempt(
             productFeedbackCandidate,
           }
         : {}),
+      followUpRequest: result.followUpRequest,
       responseMedia: result.responseMedia,
       ...(result.responseCard === undefined
         ? {}
@@ -585,23 +580,37 @@ function resolveCodexAssistantProcessLaunchInput(
   input: CodexAssistantProcessPreparationInput,
 ): CodexAssistantProcessLaunchInput {
   const providerConfig = input.providerConfig
-  const configOverrides = [
-    ...(mergeCodexConfigOverrides({
-      modelProvider: providerConfig.target.modelProvider,
-      showThinkingTraces: input.showThinkingTraces ?? false,
-    }) ?? []),
-    ...(input.codexConfigOverrides ?? []),
-  ]
+  const configOverrides = resolveCodexModelProviderConfigOverrides(
+    providerConfig.target.modelProvider,
+  )
 
   return {
     codexCommand: providerConfig.target.codexCommand ?? undefined,
     codexHome: providerConfig.target.codexHome ?? undefined,
-    configOverrides: configOverrides.length > 0 ? configOverrides : undefined,
+    configOverrides,
     env: prepareCodexProcessEnv(input.env ?? process.env),
     oss: providerConfig.target.oss,
     profile: providerConfig.target.profile ?? undefined,
     workingDirectory: input.workingDirectory,
   }
+}
+
+function resolveCodexAssistantThreadConfig(
+  input: Pick<
+    AssistantProviderTurnExecutionInput,
+    'codexThreadConfig' | 'showThinkingTraces'
+  >,
+): Readonly<Record<string, unknown>> | null {
+  const config = {
+    ...(input.codexThreadConfig ?? {}),
+    ...(input.showThinkingTraces
+      ? {
+          hide_agent_reasoning: false,
+          model_reasoning_summary: 'auto',
+        }
+      : {}),
+  }
+  return Object.keys(config).length > 0 ? config : null
 }
 
 function prepareCodexProcessEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {

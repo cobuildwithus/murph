@@ -2,8 +2,6 @@ import type {
   HostedRuntimePlatform,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
-  HOSTED_PHYSICAL_NOTE_RECOVERY_PATH,
-  HOSTED_PHYSICAL_NOTES_PATH,
   HOSTED_PHYSICAL_NOTE_SEND_TRANSPORT_TIMEOUT_MS,
   hostedPhysicalNoteRecoveryResponseSchema,
   hostedPhysicalNoteSendResponseSchema,
@@ -11,6 +9,7 @@ import {
 
 import {
   fetchHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   HostedWebControlPlaneResponseError,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
@@ -29,8 +28,7 @@ export function createHostedWebPhysicalNotePort(input: {
           boundUserId: input.boundUserId,
           description: "Hosted physical-note recovery",
           fetchImpl: input.fetchImpl,
-          method: "POST",
-          path: HOSTED_PHYSICAL_NOTE_RECOVERY_PATH,
+          route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.physicalNoteRecovery,
           signal: options?.signal ?? null,
           timeoutMs: input.timeoutMs,
           transport: input.transport,
@@ -62,8 +60,7 @@ export function createHostedWebPhysicalNotePort(input: {
           boundUserId: input.boundUserId,
           description: "Hosted physical note",
           fetchImpl: input.fetchImpl,
-          method: "POST",
-          path: HOSTED_PHYSICAL_NOTES_PATH,
+          route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.physicalNoteSend,
           preserveInitialFailureOnReplayFailure: true,
           replayOnceOnRetryableFailure: true,
           signal: options?.signal ?? null,

@@ -18,6 +18,9 @@ import {
   type HostedExecutionContainerNamespaceLike,
   type HostedExecutionContainerStubLike,
 } from "../src/runner-container.js";
+import type {
+  HostedStandbySlotBinding,
+} from "../src/standby-runner-contract.js";
 import {
   hostedBundleUserPrefix,
   hostedBrowserVaultReplicaUserPrefix,
@@ -205,6 +208,94 @@ describe("hosted runner user data cleanup", () => {
     ]);
     expect(priorDestroyInstance).toHaveBeenCalledTimes(2);
     expect(rollbackDestroyInstance).not.toHaveBeenCalled();
+    expect(stateStore.runnerContainerName).toBeNull();
+    expect(stateStore.deleteStateCallCount).toBe(1);
+    expect(durable.deleteAllCount).toBe(1);
+  });
+
+  it("retries the exact claimed standby retirement before deleting user data", async () => {
+    const slotName = `standby--v-release_1--${"a".repeat(32)}`;
+    const claimId = "claim_cleanup_test";
+    const durable = createDurableObjectHarness();
+    const stateStore = createDeletionStateStore({
+      activeAttemptId: "attempt_active",
+      runnerContainerName: slotName,
+    });
+    const bucket = new ListableMemoryEncryptedR2Bucket();
+    const requestedRunnerContainerNames: string[] = [];
+    const destroyInstance = vi.fn(async () => {
+      throw new Error("Claimed standby cleanup must use retirement.");
+    });
+    let bindingState: "bound" | "retired" | "retiring" = "bound";
+    const readStandbySlotBinding = vi.fn(async (): Promise<HostedStandbySlotBinding> =>
+      bindingState === "retired"
+        ? {
+            claimId: null,
+            releaseId: "release_1",
+            region: "ENAM",
+            slotName,
+            state: "retired",
+            userId: null,
+          }
+        : {
+            claimId,
+            releaseId: "release_1",
+            region: "ENAM",
+            slotName,
+            state: bindingState,
+            userId: USER_ID,
+          });
+    const retireStandbySlot = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["retireStandbySlot"]>
+    >(async (input) => {
+      expect(input).toEqual({ target: { slotName, userId: USER_ID } });
+      expect(stateStore.runnerContainerName).toBe(slotName);
+      if (retireStandbySlot.mock.calls.length === 1) {
+        bindingState = "retiring";
+        throw new Error("standby retirement did not settle");
+      }
+      bindingState = "retired";
+      return { retired: true as const };
+    });
+    const runnerContainerNamespace: HostedExecutionContainerNamespaceLike = {
+      getByName(name) {
+        requestedRunnerContainerNames.push(name);
+        return {
+          ...createDestroyOnlyRunnerContainerStub(destroyInstance),
+          readStandbySlotBinding,
+          retireStandbySlot,
+        };
+      },
+    };
+    const request = {
+      bucket,
+      runnerContainerNamespace,
+      runnerRuntimeEnvSource: {
+        CF_VERSION_METADATA: { id: "release_1" },
+      },
+      state: durable.state,
+      stateStore,
+      userId: USER_ID,
+    };
+
+    await expect(deleteHostedRunnerUserData(request)).rejects.toThrow(
+      "container cleanup failed before user data deletion",
+    );
+    expect(stateStore.runnerContainerName).toBe(slotName);
+    expect(stateStore.deleteStateCallCount).toBe(0);
+    expect(durable.deleteAllCount).toBe(0);
+
+    await expect(deleteHostedRunnerUserData(request)).resolves.toMatchObject({
+      durableObject: {
+        deleteAllCompleted: true,
+        stateDeleted: true,
+      },
+      ok: true,
+    });
+    expect(requestedRunnerContainerNames).toEqual([slotName, slotName]);
+    expect(readStandbySlotBinding).toHaveBeenCalledOnce();
+    expect(retireStandbySlot).toHaveBeenCalledTimes(2);
+    expect(destroyInstance).not.toHaveBeenCalled();
     expect(stateStore.runnerContainerName).toBeNull();
     expect(stateStore.deleteStateCallCount).toBe(1);
     expect(durable.deleteAllCount).toBe(1);
@@ -644,15 +735,19 @@ describe("hosted runner user data cleanup", () => {
       userId: USER_ID,
     });
     await bucket.put(validObjectKey, "encrypted-snapshot");
+    const readHostedWorkspaceFromWeb = vi.fn(async (userId: string) => {
+      expect(bucket.deleted).toEqual([]);
+      return {
+        fetchedAt: NOW,
+        workspace: createWorkspaceState(userId),
+      };
+    });
     const service = createWorkspaceSnapshotSessionService({
       bucket,
       runnerStoreCache: createUnusedRunnerStoreCache(),
       state: durable.state,
       stateStore,
-      readHostedWorkspaceFromWeb: async (userId) => ({
-        fetchedAt: NOW,
-        workspace: createWorkspaceState(userId),
-      }),
+      readHostedWorkspaceFromWeb,
       assertWorkspaceBelongsToRunnerUser(workspace, userId) {
         if (workspace?.userId !== userId) {
           throw new Error("Workspace user mismatch.");
@@ -667,6 +762,7 @@ describe("hosted runner user data cleanup", () => {
     expect(durable.storageValues.has(malformedCandidateKey)).toBe(false);
     expect(durable.storageValues.has(validCandidateKey)).toBe(false);
     expect(stateStore.boundUsers).toEqual([USER_ID]);
+    expect(readHostedWorkspaceFromWeb).toHaveBeenCalledExactlyOnceWith(USER_ID);
   });
 
   it("protects every live browser-vault shard while deleting replaced replica objects", async () => {

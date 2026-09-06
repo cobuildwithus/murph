@@ -59,7 +59,7 @@ export function HostedTelegramCardSettings(props: {
   const isBusy = isLinkingTelegram || (isSyncingTelegram && !isQuietSyncingTelegram);
   const canUsePrivyTelegramLink = authenticated && privyReady && privyAuthenticated;
 
-  const { linkTelegram } = useLinkAccount({
+  const { linkOAuth } = useLinkAccount({
     onError: (error, details) => {
       if (!details || details.linkMethod === "telegram") {
         setIsLinkingTelegram(false);
@@ -171,7 +171,7 @@ export function HostedTelegramCardSettings(props: {
       return;
     }
 
-    if (typeof linkTelegram !== "function") {
+    if (typeof linkOAuth !== "function") {
       setErrorMessage("Telegram linking is not available yet.");
       return;
     }
@@ -184,7 +184,7 @@ export function HostedTelegramCardSettings(props: {
     setIsLinkingTelegram(true);
 
     try {
-      linkTelegram();
+      linkOAuth({ provider: "telegram" });
     } catch (error) {
       setIsLinkingTelegram(false);
       setErrorMessage(toHostedTelegramLinkErrorMessage(error));
@@ -192,7 +192,7 @@ export function HostedTelegramCardSettings(props: {
   }, [
     authenticated,
     currentTelegramUserId,
-    linkTelegram,
+    linkOAuth,
     privyAuthenticated,
     privyReady,
     privyTelegramUserId,

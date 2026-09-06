@@ -1,6 +1,7 @@
 import {
   deriveHostedExecutionErrorCode,
 } from "@murphai/hosted-execution";
+import { isHostedRunnerTargetName } from "../standby-runner-contract.js";
 
 import { ensureRunnerStateSchema } from "./runner-state-schema.js";
 import {
@@ -21,10 +22,8 @@ import {
 
 export interface RunnerWriteFenceToken {
   attemptId: string;
-  expiresAt: string | null;
   generation: string;
   kind: RunnerWriteFenceKind;
-  leaseGeneration: string;
   processingMode: RunnerRuntimeProcessingMode;
   providerEgressToken: string | null;
   runnerContainerName: string | null;
@@ -59,6 +58,13 @@ export class RunnerWriteFenceAlreadyActiveError extends Error {
     super("Hosted runner write fence is already active.");
     this.name = "RunnerWriteFenceAlreadyActiveError";
     this.record = record;
+  }
+}
+
+export class RunnerContainerReservationLostError extends Error {
+  constructor() {
+    super("Hosted runner container reservation changed before write-fence admission.");
+    this.name = "RunnerContainerReservationLostError";
   }
 }
 
@@ -180,7 +186,7 @@ export class RunnerStateStore {
     }
   }
 
-  async reserveRunnerContainerStopTargetForShellPrewarm(input: {
+  async reserveRunnerContainerStopTarget(input: {
     runnerContainerName: string;
     userId: string;
   }): Promise<boolean> {
@@ -226,6 +232,15 @@ export class RunnerStateStore {
       throw new RunnerWriteFenceAlreadyActiveError(this.readStateFromMetaSync(meta));
     }
 
+    const requestedContainerName = requireRunnerContainerName(input.runnerContainerName);
+    const reservedContainerName = normalizeRunnerContainerNameOrNull(meta.active_runner_container_name);
+    if (
+      (reservedContainerName !== null && reservedContainerName !== requestedContainerName)
+      || (isHostedRunnerTargetName(requestedContainerName) && reservedContainerName !== requestedContainerName)
+    ) {
+      throw new RunnerContainerReservationLostError();
+    }
+
     const nextGeneration = normalizeNonNegativeInteger(meta.active_generation) + 1;
     const startedAt = new Date().toISOString();
     const attemptId = createRuntimeWriteAttemptId();
@@ -239,17 +254,15 @@ export class RunnerStateStore {
     meta.active_custom_inference_envelope = null;
     meta.active_platform_ai_allowed = null;
     meta.active_reason = processingMode;
-    meta.active_runner_container_name = requireRunnerContainerName(input.runnerContainerName);
+    meta.active_runner_container_name = requestedContainerName;
     meta.active_started_at = startedAt;
     meta.active_workspace_version = null;
     this.writeMetaRowSync(meta);
 
     return {
       attemptId,
-      expiresAt: null,
       generation: nextGeneration.toString(),
       kind,
-      leaseGeneration: nextGeneration.toString(),
       processingMode,
       providerEgressToken,
       runnerContainerName: meta.active_runner_container_name,
@@ -596,7 +609,7 @@ export class RunnerStateStore {
       ...(meta.active_custom_inference_envelope
         ? { customInferenceEnvelope: meta.active_custom_inference_envelope }
         : {}),
-      leaseGeneration: token.leaseGeneration,
+      leaseGeneration: token.generation,
       owns: true,
       ...(meta.active_platform_ai_allowed === null
         ? {}
@@ -665,7 +678,7 @@ export class RunnerStateStore {
 
     return {
       attemptId: token.attemptId,
-      leaseGeneration: token.leaseGeneration,
+      leaseGeneration: token.generation,
       owns: true,
       ...(meta.active_platform_ai_allowed === null
         ? {}
@@ -808,7 +821,9 @@ export class RunnerStateStore {
     meta.active_custom_inference_envelope = null;
     meta.active_platform_ai_allowed = null;
     meta.active_reason = null;
-    meta.active_runner_container_name = null;
+    if (!isHostedRunnerTargetName(meta.active_runner_container_name)) {
+      meta.active_runner_container_name = null;
+    }
     meta.active_started_at = null;
     meta.active_workspace_version = null;
   }
@@ -820,6 +835,8 @@ export class RunnerStateStore {
     return meta.active_attempt_id === token.attemptId
       && normalizeNonNegativeInteger(meta.active_generation).toString() === token.generation
       && readWriteFenceKind(meta.active_kind) === token.kind
+      && normalizeRunnerContainerNameOrNull(meta.active_runner_container_name)
+        === normalizeRunnerContainerNameOrNull(token.runnerContainerName)
       && meta.user_id === token.userId;
   }
 
@@ -835,10 +852,8 @@ export class RunnerStateStore {
 
     return {
       attemptId: meta.active_attempt_id,
-      expiresAt: null,
       generation: normalizeNonNegativeInteger(meta.active_generation).toString(),
       kind,
-      leaseGeneration: normalizeNonNegativeInteger(meta.active_generation).toString(),
       processingMode: readRunnerRuntimeProcessingMode(meta.active_reason),
       providerEgressToken: null,
       runnerContainerName: normalizeRunnerContainerNameOrNull(meta.active_runner_container_name),

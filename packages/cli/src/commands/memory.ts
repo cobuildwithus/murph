@@ -24,11 +24,17 @@ const vaultOptionSchema = z.object({
   vault: z.string().min(1).describe("Vault root."),
 });
 
-const memoryUpsertOptionsSchema = vaultOptionSchema.extend({
+const memoryMutationOptionsSchema = vaultOptionSchema.extend({
+  compact: z.boolean().optional().describe(
+    "Return the mutation outcome and exact affected record without the full memory document.",
+  ),
+});
+
+const memoryUpsertOptionsSchema = memoryMutationOptionsSchema.extend({
   section: memorySectionSchema.describe("Memory section to write into."),
 });
 
-const memoryUpdateOptionsSchema = vaultOptionSchema.extend({
+const memoryUpdateOptionsSchema = memoryMutationOptionsSchema.extend({
   section: memorySectionSchema.optional().describe(
     "Optional replacement memory section. Defaults to the current section.",
   ),
@@ -50,25 +56,70 @@ const memoryDisplayNameArgSchema = z
   .max(MEMORY_DISPLAY_NAME_MAX_LENGTH)
   .describe("Preferred display name to store in canonical memory.");
 
-const memoryShowResultSchema = z.object({
+const compactMemoryRecordSchema = memoryRecordSchema.pick({
+  id: true,
+  section: true,
+  text: true,
+});
+
+const compactMemoryDocumentSchema = z.object({
+  exists: z.boolean(),
+  records: z.array(compactMemoryRecordSchema),
+});
+
+const fullMemoryShowResultSchema = z.object({
   vault: z.string().min(1),
   document: memoryDocumentSnapshotSchema,
   memory: memoryRecordSchema.nullable(),
 });
 
-const memoryUpsertResultSchema = z.object({
+const compactMemoryShowResultSchema = z.object({
+  document: compactMemoryDocumentSchema,
+  memory: compactMemoryRecordSchema.nullable(),
+});
+
+const memoryRecordOnlyResultSchema = z.object({
+  memory: memoryRecordSchema,
+});
+
+const memoryShowResultSchema = z.union([
+  fullMemoryShowResultSchema,
+  compactMemoryShowResultSchema,
+  memoryRecordOnlyResultSchema,
+]);
+
+const memoryShowOptionsSchema = vaultOptionSchema.extend({
+  recordOnly: z.boolean().optional().describe(
+    "Return only the exact requested record, including its verification metadata. Requires a memory id; omit for complete memory context.",
+  ),
+  compact: z.boolean().optional().describe(
+    "Return only document existence plus each record's id, section, and text.",
+  ),
+});
+
+const fullMemoryUpsertResultSchema = z.object({
   vault: z.string().min(1),
   created: z.boolean(),
   document: memoryDocumentSnapshotSchema,
   memory: memoryRecordSchema,
 });
 
-const memoryForgetResultSchema = z.object({
+const memoryUpsertResultSchema = z.union([
+  fullMemoryUpsertResultSchema,
+  fullMemoryUpsertResultSchema.omit({ vault: true, document: true }),
+]);
+
+const fullMemoryForgetResultSchema = z.object({
   vault: z.string().min(1),
   existed: z.boolean(),
   document: memoryDocumentSnapshotSchema,
   memory: memoryRecordSchema.nullable(),
 });
+
+const memoryForgetResultSchema = z.union([
+  fullMemoryForgetResultSchema,
+  fullMemoryForgetResultSchema.omit({ vault: true, document: true }),
+]);
 
 export function registerMemoryCommands(cli: Cli.Cli) {
   const memory = Cli.create("memory", {
@@ -82,14 +133,43 @@ export function registerMemoryCommands(cli: Cli.Cli) {
         .optional()
         .describe("Optional canonical memory record id to show; omit to return the whole memory document."),
     }),
-    options: vaultOptionSchema,
+    options: memoryShowOptionsSchema,
     output: memoryShowResultSchema,
     async run({ args, options }) {
       return runMemoryCommand(async () => {
-        const document = await readMemoryDocument(options.vault);
+        if (options.recordOnly && !args.memoryId) {
+          throw new VaultCliError("invalid_option", "--record-only requires a memory id.", {
+            retryable: false,
+            stage: "validation",
+          });
+        }
         const memory = args.memoryId ? await getMemoryRecord(options.vault, args.memoryId) : null;
         if (args.memoryId && !memory) {
           throw new MemoryRecordNotFoundError();
+        }
+
+        if (options.recordOnly && memory) {
+          return { memory };
+        }
+        const document = await readMemoryDocument(options.vault);
+        if (options.compact) {
+          return {
+            document: {
+              exists: document.exists,
+              records: document.records.map(({ id, section, text }) => ({
+                id,
+                section,
+                text,
+              })),
+            },
+            memory: memory
+              ? {
+                  id: memory.id,
+                  section: memory.section,
+                  text: memory.text,
+                }
+              : null,
+          };
         }
 
         return {
@@ -106,7 +186,7 @@ export function registerMemoryCommands(cli: Cli.Cli) {
     args: z.object({
       displayName: memoryDisplayNameArgSchema,
     }),
-    options: vaultOptionSchema,
+    options: memoryMutationOptionsSchema,
     output: memoryUpsertResultSchema,
     async run({ args, options }) {
       return runMemoryCommand(async () => {
@@ -114,9 +194,8 @@ export function registerMemoryCommands(cli: Cli.Cli) {
           displayName: args.displayName,
         });
         return {
-          vault: options.vault,
+          ...(options.compact ? {} : { vault: options.vault, document: result.document }),
           created: result.created,
-          document: result.document,
           memory: result.record,
         };
       });
@@ -137,9 +216,8 @@ export function registerMemoryCommands(cli: Cli.Cli) {
           text: args.text,
         });
         return {
-          vault: options.vault,
+          ...(options.compact ? {} : { vault: options.vault, document: result.document }),
           created: result.created,
-          document: result.document,
           memory: result.record,
         };
       });
@@ -162,9 +240,8 @@ export function registerMemoryCommands(cli: Cli.Cli) {
           text: args.text,
         });
         return {
-          vault: options.vault,
+          ...(options.compact ? {} : { vault: options.vault, document: result.document }),
           created: false,
-          document: result.document,
           memory: result.record,
         };
       });
@@ -176,7 +253,7 @@ export function registerMemoryCommands(cli: Cli.Cli) {
     args: z.object({
       memoryId: memoryIdArgSchema,
     }),
-    options: vaultOptionSchema,
+    options: memoryMutationOptionsSchema,
     output: memoryForgetResultSchema,
     async run({ args, options }) {
       return runMemoryCommand(async () => {
@@ -184,9 +261,8 @@ export function registerMemoryCommands(cli: Cli.Cli) {
           recordId: args.memoryId,
         });
         return {
-          vault: options.vault,
+          ...(options.compact ? {} : { vault: options.vault, document: result.document }),
           existed: result.existed,
-          document: result.document,
           memory: result.record,
         };
       });

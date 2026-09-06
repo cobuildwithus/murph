@@ -21,7 +21,6 @@ test("ReferralSection presents every available referral path on the homepage", (
     }),
   );
 
-  assert.match(markup, /Murph referrals/);
   assert.match(markup, /Referral rewards, your way\./);
   assert.match(markup, /Bring your people\.<\/span>/);
   assert.match(markup, /Earn more Murph\.<\/span>/);

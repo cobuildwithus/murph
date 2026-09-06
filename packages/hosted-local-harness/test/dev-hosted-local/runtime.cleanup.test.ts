@@ -156,6 +156,7 @@ describe("cleanupHostedRunnerContainers", () => {
     expect(spawn.mock.calls[2]?.[1]).toEqual([
       "rm",
       "-f",
+      "-v",
       "runner456",
       "proxy456",
     ]);
@@ -194,7 +195,52 @@ describe("cleanupHostedRunnerContainers", () => {
       "--filter",
       "name=workerd-murph-hosted-RunnerContainer-old-proxy",
     ]);
-    expect(spawn.mock.calls[2]?.[1]).toEqual(["rm", "-f", "abc123", "proxy123"]);
+    expect(spawn.mock.calls[2]?.[1]).toEqual(["rm", "-f", "-v", "abc123", "proxy123"]);
+  });
+
+  it("limits startup cleanup to stopped runner containers and their anonymous volumes", async () => {
+    const { cleanupHostedRunnerContainers, spawn } = await importRuntimeWithSpawnSequence([
+      { exitCode: 0, stdout: "abc123 workerd-murph-hosted-RunnerContainer-old\n" },
+      { exitCode: 0, stdout: "proxy123\n" },
+      { exitCode: 0, stdout: "" },
+    ]);
+
+    await expect(cleanupHostedRunnerContainers({
+      cwd: "/tmp",
+      scope: "all-builds",
+      stoppedOnly: true,
+      timeoutMs: 200,
+    })).resolves.toBeUndefined();
+
+    expect(spawn.mock.calls[0]?.[1]).toEqual([
+      "ps",
+      "-a",
+      "--format",
+      "{{.ID}} {{.Names}}",
+      "--filter",
+      "name=workerd-murph-hosted-",
+      "--filter",
+      "label=murph.hosted.local-build-id",
+      "--filter",
+      "status=created",
+      "--filter",
+      "status=exited",
+      "--filter",
+      "status=dead",
+    ]);
+    expect(spawn.mock.calls[1]?.[1]).toEqual([
+      "ps",
+      "-aq",
+      "--filter",
+      "name=workerd-murph-hosted-RunnerContainer-old-proxy",
+      "--filter",
+      "status=created",
+      "--filter",
+      "status=exited",
+      "--filter",
+      "status=dead",
+    ]);
+    expect(spawn.mock.calls[2]?.[1]).toEqual(["rm", "-f", "-v", "abc123", "proxy123"]);
   });
 
   it("keeps all-builds scope while checking whether failed removals disappeared", async () => {
@@ -298,6 +344,7 @@ describe("cleanupHostedRunnerContainers", () => {
     expect(spawn.mock.calls[2]?.[1]).toEqual([
       "rm",
       "-f",
+      "-v",
       "proxy123",
     ]);
   });
@@ -336,6 +383,7 @@ describe("cleanupHostedRunnerContainers", () => {
     expect(spawn.mock.calls[2]?.[1]).toEqual([
       "rm",
       "-f",
+      "-v",
       "proxy123",
     ]);
   });
@@ -347,15 +395,19 @@ describe("cleanupHostedRunnerContainers", () => {
         stdout: [
           "runner123 workerd-murph-hosted-e2e-deadbeefdeadbeefdeadbeef-RunnerContainer-alpha",
           "smoke456 workerd-murph-hosted-e2e-deadbeefdeadbeefdeadbeef-DeploySmokeRunnerContainer-beta",
+          "standby789 workerd-murph-hosted-e2e-deadbeefdeadbeefdeadbeef-StandbyRunnerContainer-gamma",
         ].join("\n"),
       },
       {
         exitCode: 0,
-        stdout:
-          "proxy789 workerd-murph-hosted-e2e-deadbeefdeadbeefdeadbeef-RunnerContainer-alpha-proxy\n",
+        stdout: [
+          "proxy789 workerd-murph-hosted-e2e-deadbeefdeadbeefdeadbeef-RunnerContainer-alpha-proxy",
+          "standbyProxy012 workerd-murph-hosted-e2e-deadbeefdeadbeefdeadbeef-StandbyRunnerContainer-gamma-proxy",
+        ].join("\n"),
       },
       { exitCode: 0, stdout: "proxy789\n" },
       { exitCode: 0, stdout: "" },
+      { exitCode: 0, stdout: "standbyProxy012\n" },
       { exitCode: 0, stdout: "" },
     ]);
 
@@ -396,11 +448,20 @@ describe("cleanupHostedRunnerContainers", () => {
       "name=workerd-murph-hosted-e2e-deadbeefdeadbeefdeadbeef-DeploySmokeRunnerContainer-beta-proxy",
     ]);
     expect(spawn.mock.calls[4]?.[1]).toEqual([
+      "ps",
+      "-aq",
+      "--filter",
+      "name=workerd-murph-hosted-e2e-deadbeefdeadbeefdeadbeef-StandbyRunnerContainer-gamma-proxy",
+    ]);
+    expect(spawn.mock.calls[5]?.[1]).toEqual([
       "rm",
       "-f",
+      "-v",
       "runner123",
       "smoke456",
+      "standby789",
       "proxy789",
+      "standbyProxy012",
     ]);
   });
 
@@ -411,6 +472,7 @@ describe("cleanupHostedRunnerContainers", () => {
         exitCode: 0,
         stdout: [
           "proxy123 workerd-murph-hosted-e2e-deadbeefdeadbeefdeadbeef-RunnerContainer-alpha-proxy",
+          "proxy789 workerd-murph-hosted-e2e-deadbeefdeadbeefdeadbeef-StandbyRunnerContainer-beta-proxy",
           "noise456 workerd-murph-hosted-e2e-deadbeefdeadbeefdeadbeef-OtherContainer-alpha-proxy",
         ].join("\n"),
       },
@@ -444,7 +506,9 @@ describe("cleanupHostedRunnerContainers", () => {
     expect(spawn.mock.calls[2]?.[1]).toEqual([
       "rm",
       "-f",
+      "-v",
       "proxy123",
+      "proxy789",
     ]);
   });
 
@@ -454,12 +518,14 @@ describe("cleanupHostedRunnerContainers", () => {
     const persistDir = path.join(root, "state");
     const runnerStateDir = path.join(persistDir, "v3", "do", "murph-hosted-RunnerContainer");
     const smokeStateDir = path.join(persistDir, "v3", "do", "murph-hosted-DeploySmokeRunnerContainer");
+    const standbyStateDir = path.join(persistDir, "v3", "do", "murph-hosted-StandbyRunnerContainer");
     const userRunnerStateDir = path.join(persistDir, "v3", "do", "murph-hosted-UserRunnerDurableObject");
     const unrelatedStateDir = path.join(persistDir, "v3", "do", "murph-hosted-OtherDurableObject");
 
     try {
       await mkdir(runnerStateDir, { recursive: true });
       await mkdir(smokeStateDir, { recursive: true });
+      await mkdir(standbyStateDir, { recursive: true });
       await mkdir(userRunnerStateDir, { recursive: true });
       await mkdir(unrelatedStateDir, { recursive: true });
 
@@ -469,6 +535,7 @@ describe("cleanupHostedRunnerContainers", () => {
 
       await expect(access(runnerStateDir)).rejects.toThrow();
       await expect(access(smokeStateDir)).rejects.toThrow();
+      await expect(access(standbyStateDir)).rejects.toThrow();
       await expect(access(userRunnerStateDir)).rejects.toThrow();
       await expect(access(unrelatedStateDir)).resolves.toBeUndefined();
     } finally {
@@ -564,6 +631,7 @@ describe("cleanupHostedRunnerImages", () => {
         stdout: [
           "cloudflare-dev/runnercontainer:abc123\timg-runner",
           "cloudflare-dev/deploysmokerunnercontainer:abc123\timg-smoke",
+          "cloudflare-dev/standbyrunnercontainer:abc123\timg-standby",
           "murph-cloudflare-runner:latest\timg-final",
           "postgres:15\timg-postgres",
           "cloudflare-dev/runnercontainer:<none>\timg-dangling",
@@ -602,6 +670,7 @@ describe("cleanupHostedRunnerImages", () => {
       "-f",
       "cloudflare-dev/runnercontainer:abc123",
       "cloudflare-dev/deploysmokerunnercontainer:abc123",
+      "cloudflare-dev/standbyrunnercontainer:abc123",
       "murph-cloudflare-runner:latest",
     ]);
   });
@@ -616,6 +685,7 @@ describe("cleanupHostedRunnerImages", () => {
           "cloudflare-dev/runnercontainer:old\timg-old",
           "murph-hosted-e2e-build-runnercontainer:old\timg-e2e",
           "murph-hosted-e2e-build-deploysmokerunnercontainer:old\timg-e2e-smoke",
+          "murph-hosted-e2e-build-standbyrunnercontainer:old\timg-e2e-standby",
         ].join("\n"),
       },
       { exitCode: 0, stdout: "cloudflare-dev/runnercontainer:active\n" },
@@ -638,6 +708,7 @@ describe("cleanupHostedRunnerImages", () => {
       "cloudflare-dev/runnercontainer:old",
       "murph-hosted-e2e-build-runnercontainer:old",
       "murph-hosted-e2e-build-deploysmokerunnercontainer:old",
+      "murph-hosted-e2e-build-standbyrunnercontainer:old",
     ]);
   });
 
@@ -686,6 +757,8 @@ describe("cleanupHostedRunnerImages", () => {
       "{{.Repository}}:{{.Tag}}\t{{.ID}}",
       "--filter",
       "label=murph.hosted.local-build-id",
+      "--filter",
+      "label=murph.hosted.local-worker-name=murph-hosted",
     ]);
     expect(spawn.mock.calls[1]?.[1]).toEqual([
       "ps",
@@ -698,6 +771,74 @@ describe("cleanupHostedRunnerImages", () => {
       "-f",
       "cloudflare-dev/runnercontainer:old",
       "murph-cloudflare-runner:latest",
+    ]);
+  });
+
+  it("scopes all-build image cleanup to the current worktree worker namespace", async () => {
+    const { cleanupHostedRunnerImages, spawn } = await importRuntimeWithSpawnSequence([
+      { exitCode: 0, stdout: "" },
+    ]);
+
+    await expect(cleanupHostedRunnerImages({
+      cwd: "/tmp",
+      env: {
+        MURPH_DEV_WORKTREE_SCOPE: "feature-a",
+        MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "worktree-feature-a",
+      },
+      scope: "all-builds",
+      timeoutMs: 200,
+    })).resolves.toBeUndefined();
+
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(spawn.mock.calls[0]?.[1]).toEqual([
+      "images",
+      "--format",
+      "{{.Repository}}:{{.Tag}}\t{{.ID}}",
+      "--filter",
+      "label=murph.hosted.local-build-id",
+      "--filter",
+      expect.stringMatching(
+        /^label=murph\.hosted\.local-worker-name=murph-worktree-[a-f0-9]{24}$/u,
+      ),
+    ]);
+  });
+
+  it("keeps the current build image and avoids forcing startup image cleanup", async () => {
+    const { cleanupHostedRunnerImages, spawn } = await importRuntimeWithSpawnSequence([
+      {
+        exitCode: 0,
+        stdout: [
+          "cloudflare-dev/runnercontainer:current\timg-current",
+          "cloudflare-dev/runnercontainer:old\timg-old",
+        ].join("\n"),
+      },
+      { exitCode: 0, stdout: "" },
+      { exitCode: 0, stdout: "img-current\n" },
+      { exitCode: 0, stdout: "" },
+    ]);
+
+    await expect(cleanupHostedRunnerImages({
+      cwd: "/tmp",
+      env: { MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "current-build" },
+      force: false,
+      preserveCurrentBuild: true,
+      scope: "all-builds",
+      timeoutMs: 200,
+    })).resolves.toBeUndefined();
+
+    expect(spawn.mock.calls[2]?.[1]).toEqual([
+      "images",
+      "--format",
+      "{{.ID}}",
+      "--filter",
+      expect.stringMatching(
+        /^label=murph\.hosted\.local-build-id=sha256-[a-f0-9]{24}$/u,
+      ),
+    ]);
+    expect(spawn.mock.calls[3]?.[1]).toEqual([
+      "image",
+      "rm",
+      "cloudflare-dev/runnercontainer:old",
     ]);
   });
 });

@@ -1,17 +1,68 @@
-import { randomInt, randomUUID } from "node:crypto";
+import { generateKeyPairSync, randomInt, randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 
 import { HostedBillingStatus, type Prisma, type PrismaClient } from "@prisma/client";
-import { describe, expect, it, vi } from "vitest";
+import Stripe from "stripe";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const providerMocks = vi.hoisted(() => ({
+  answerHostedTelegramCallbackQueryBestEffort: vi.fn(),
   createHostedLinqChat: vi.fn(),
+  ensureHostedMemberStripeCustomer: vi.fn(),
   getHostedLinqChatSummary: vi.fn().mockResolvedValue({
     handles: [],
     isGroup: false,
   }),
   sendHostedLinqChatMessage: vi.fn(),
 }));
+const stripeRuntimeMocks = vi.hoisted(() => ({
+  apiMode: null as { stripe: Stripe; stripeLiveMode: boolean } | null,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-stripe-customer", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/hosted-member-stripe-customer")
+  >("@/src/lib/hosted-onboarding/hosted-member-stripe-customer");
+  return {
+    ...actual,
+    ensureHostedMemberStripeCustomer:
+      providerMocks.ensureHostedMemberStripeCustomer,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/runtime")
+  >("@/src/lib/hosted-onboarding/runtime");
+  return {
+    ...actual,
+    requireHostedStripeApiMode: () =>
+      stripeRuntimeMocks.apiMode ?? actual.requireHostedStripeApiMode(),
+    requireHostedStripeUsageCreditCheckoutConfig: (
+      input: Parameters<
+        typeof actual.requireHostedStripeUsageCreditCheckoutConfig
+      >[0],
+    ) =>
+      stripeRuntimeMocks.apiMode
+        ? {
+            ...stripeRuntimeMocks.apiMode,
+            offerCode: input.offerCode,
+            priceId: "price_group_funding_lock",
+          }
+        : actual.requireHostedStripeUsageCreditCheckoutConfig(input),
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/telegram-client", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/telegram-client")
+  >("@/src/lib/hosted-onboarding/telegram-client");
+  return {
+    ...actual,
+    answerHostedTelegramCallbackQueryBestEffort:
+      providerMocks.answerHostedTelegramCallbackQueryBestEffort,
+  };
+});
 const accountDeletionMocks = vi.hoisted(() => ({
   assertHostedPhoneCallsReadyForAccountDeletionTx:
     vi.fn().mockResolvedValue(undefined),
@@ -110,6 +161,71 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", async () => {
     ...actual,
     createHostedLinqChat: providerMocks.createHostedLinqChat,
     getHostedLinqChatSummary: providerMocks.getHostedLinqChatSummary,
+  };
+});
+
+vi.mock("@/src/lib/hosted-crypto/env", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-crypto/env")
+  >();
+  const {
+    createHostedAuthorityVerifyKeyring,
+    createHostedRecipientPublicKeyring,
+  } = await vi.importActual<typeof import("@murphai/runtime-state")>(
+    "@murphai/runtime-state",
+  );
+  const { createHostedGcpKmsClientFromEnv } = await vi.importActual<
+    typeof import("@/src/lib/hosted-crypto/gcp-kms")
+  >("@/src/lib/hosted-crypto/gcp-kms");
+  const authoritySignKeyVersionName =
+    "projects/example/locations/global/keyRings/hosted/cryptoKeys/authority/cryptoKeyVersions/1";
+  const authorityKey = generateKeyPairSync("ec", {
+    namedCurve: "prime256v1",
+    privateKeyEncoding: { format: "jwk" },
+    publicKeyEncoding: { format: "pem", type: "spki" },
+  });
+  const automationKey = generateKeyPairSync("ec", {
+    namedCurve: "prime256v1",
+    privateKeyEncoding: { format: "jwk" },
+    publicKeyEncoding: { format: "jwk" },
+  });
+  const cloudflareAutomationRecipientKeyId = "test-automation-key";
+  const cloudflareAutomationPublicKeyring = createHostedRecipientPublicKeyring({
+    activePublicJwk: automationKey.publicKey,
+    activeRecipient: "cloudflare-automation-secret",
+    activeRecipientKeyId: cloudflareAutomationRecipientKeyId,
+  });
+  const gcpKms = createHostedGcpKmsClientFromEnv({
+    HOSTED_CRYPTO_ENV: "test",
+    HOSTED_CRYPTO_GCP_KMS_API_ROOT: "local://murph-hosted-kms",
+    HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK:
+      JSON.stringify(authorityKey.privateKey),
+    HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: Buffer.alloc(32, 7).toString("base64"),
+    NODE_ENV: "test",
+  });
+
+  return {
+    ...actual,
+    getHostedWebCryptoConfig: () => ({
+      authoritySignKeyVersionName,
+      authoritySignPublicKeyPem: authorityKey.publicKey,
+      authorityVerifyKeyring: createHostedAuthorityVerifyKeyring({
+        activeKeyVersionName: authoritySignKeyVersionName,
+        activePublicKeyPem: authorityKey.publicKey,
+      }),
+      cloudflareAutomationPublicJwk: automationKey.publicKey,
+      cloudflareAutomationPublicKeyring,
+      cloudflareAutomationRecipientKeyId,
+      env: "test",
+      gcpKms,
+      recoveryPublicJwk: null,
+      recoveryRecipientKeyId: null,
+      teeRuntimeAttestedPolicyId: null,
+      teeRuntimePublicJwk: null,
+      teeRuntimeRecipientKeyId: null,
+      webWrapKmsKeyName:
+        "projects/example/locations/global/keyRings/hosted/cryptoKeys/group-reply-recovery",
+    }),
   };
 });
 
@@ -224,8 +340,12 @@ import {
   handleHostedGroupJoinOfferReaction,
 } from "@/src/lib/hosted-groups/join-offer-reaction";
 import {
+  leaveHostedGroupMemberTx,
   readHostedGroupJoinOfferTargetTx,
 } from "@/src/lib/hosted-groups/group-store";
+import {
+  handleHostedTelegramGroupOfferCallback,
+} from "@/src/lib/hosted-groups/telegram-offer-callback";
 import {
   HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
   HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE,
@@ -241,6 +361,8 @@ import {
   createHostedLinqChatLookupKeyReadCandidates,
   createHostedLinqMessageLookupKey,
   createHostedPhoneLookupKey,
+  createHostedTelegramMessageLookupKey,
+  createHostedTelegramUserLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
@@ -271,7 +393,12 @@ import { ingestHostedLinqProviderEventTx } from "@/src/lib/hosted-onboarding/lin
 import { parseHostedLinqProviderEvent } from "@/src/lib/hosted-onboarding/linq-provider-events";
 import {
   buildHostedMemberIdentityPrivateColumns,
+  buildHostedMemberRoutingPrivateColumns,
 } from "@/src/lib/hosted-onboarding/member-private-codecs";
+import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
+import {
+  HOSTED_TELEGRAM_GROUP_JOIN_CALLBACK_DATA,
+} from "@/src/lib/hosted-onboarding/telegram-client";
 import {
   acquireHostedLinqParticipantPhoneLockTx,
   createHostedLinqParticipantContact,
@@ -294,11 +421,16 @@ import { deleteHostedAccountData } from "@/src/lib/hosted-privacy/account-data-s
 import {
   setHostedSecureBoxStringTestCodecForTests,
 } from "@/src/lib/hosted-crypto/secure-box";
+import { hasHostedRuntimeActiveAccess } from "@/src/lib/hosted-mailbox/runtime-access";
+import {
+  createHostedGroupUsageCreditCheckout,
+} from "@/src/lib/hosted-onboarding/usage-credit-purchase-service";
 import {
   replaceHostedVaultShareProjectionSnapshot,
 } from "@/src/lib/hosted-vault-share/projection-store";
 import { createPrismaClient } from "@/src/lib/prisma";
 import { sha256Hex } from "@/src/lib/primitives";
+import { buildTelegramThreadId } from "@murphai/messaging-ingress/telegram-webhook";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const runPostgresProof =
@@ -313,6 +445,45 @@ if (runPostgresProof && (!databaseUrl || !isClearlyLocalPostgresUrl(databaseUrl)
 describe.skipIf(!runPostgresProof)(
   "hosted group join reply recovery with PostgreSQL",
   () => {
+    beforeEach(() => {
+      setHostedSecureBoxStringTestCodecForTests({
+        decrypt(input) {
+          const decoded = JSON.parse(
+            Buffer.from(
+              input.value.replace(/^hsb-test:/u, ""),
+              "base64url",
+            ).toString("utf8"),
+          ) as {
+            lane?: string;
+            scope?: string;
+            userId?: string;
+            value?: string;
+          };
+          if (
+            decoded.lane !== input.lane
+            || decoded.scope !== input.scope
+            || decoded.userId !== input.userId
+            || typeof decoded.value !== "string"
+          ) {
+            throw new Error("Hosted secure-box test codec metadata mismatch.");
+          }
+          return decoded.value;
+        },
+        encrypt(input) {
+          return `hsb-test:${Buffer.from(JSON.stringify({
+            lane: input.lane,
+            scope: input.scope,
+            userId: input.userId,
+            value: input.value,
+          }), "utf8").toString("base64url")}`;
+        },
+      });
+    });
+
+    afterEach(() => {
+      setHostedSecureBoxStringTestCodecForTests(null);
+    });
+
     it("preserves a blocked reply and consumes it exactly once after accepted delivery", async () => {
       vi.stubEnv(
         "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
@@ -2676,6 +2847,793 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
+    it("serializes account deletion after a canonical group-member lock without deadlock", async () => {
+      const suffix = randomUUID().replaceAll("-", "").slice(0, 16);
+      const deletionApplicationName = `delete_group_first_${suffix}`;
+      const fixture = await createDeletionReplyRaceFixture({
+        deletionApplicationName,
+      });
+      const groupLockBarrier = createSqlLockBarrier();
+      let groupPromise: Promise<unknown> | null = null;
+      let deletionPromise: ReturnType<typeof deleteHostedAccountData> | null = null;
+
+      try {
+        groupPromise = fixture.replyPrisma.$transaction((tx) =>
+          leaveHostedGroupMemberTx({
+            joinCode: fixture.joinCode,
+            memberId: fixture.ownerMemberId,
+            now: new Date("2026-07-27T16:00:00.000Z"),
+            tx: withSqlLockBarrierTx({
+              barrier: groupLockBarrier,
+              matches: isHostedGroupRowLockQuery,
+              tx,
+            }),
+          })
+        );
+        await withTimeout(groupLockBarrier.locked, 5_000);
+
+        deletionPromise = deleteHostedAccountData({
+          memberId: fixture.ownerMemberId,
+          prisma: fixture.deletionPrisma,
+          request: new Request("https://join.example.test/settings"),
+        });
+        await waitForPostgresApplicationLock({
+          applicationName: deletionApplicationName,
+          observer: fixture.replyPrisma,
+        });
+
+        groupLockBarrier.release();
+        const settled = await withTimeout(
+          Promise.allSettled([groupPromise, deletionPromise] as const),
+          10_000,
+        );
+        assertNoPostgresDeadlock(settled);
+        expect(settled[0]).toEqual({
+          status: "fulfilled",
+          value: { kind: "owner_cannot_leave" },
+        });
+        expect(settled[1].status).toBe("fulfilled");
+        await expectDeletionReplyRaceConverged(fixture);
+      } finally {
+        groupLockBarrier.release();
+        await Promise.allSettled([
+          ...(groupPromise ? [groupPromise] : []),
+          ...(deletionPromise ? [deletionPromise] : []),
+        ]);
+        await cleanupDeletionReplyRaceFixture(fixture);
+      }
+    });
+
+    it("serializes a canonical group-member lock after account deletion without deadlock", async () => {
+      const suffix = randomUUID().replaceAll("-", "").slice(0, 16);
+      const groupApplicationName = `group_after_delete_${suffix}`;
+      const fixture = await createDeletionReplyRaceFixture({
+        replyApplicationName: groupApplicationName,
+      });
+      const deletionGroupLockBarrier = createSqlLockBarrier();
+      const deletionPrisma = withAccountDeletionGroupLockBarrier(
+        fixture.deletionPrisma,
+        deletionGroupLockBarrier,
+      );
+      let groupPromise: Promise<unknown> | null = null;
+      let deletionPromise: ReturnType<typeof deleteHostedAccountData> | null = null;
+
+      try {
+        deletionPromise = deleteHostedAccountData({
+          memberId: fixture.ownerMemberId,
+          prisma: deletionPrisma,
+          request: new Request("https://join.example.test/settings"),
+        });
+        await withTimeout(deletionGroupLockBarrier.locked, 5_000);
+
+        groupPromise = fixture.replyPrisma.$transaction((tx) =>
+          leaveHostedGroupMemberTx({
+            joinCode: fixture.joinCode,
+            memberId: fixture.ownerMemberId,
+            now: new Date("2026-07-27T16:00:00.000Z"),
+            tx,
+          })
+        );
+        await waitForPostgresApplicationLock({
+          applicationName: groupApplicationName,
+          observer: fixture.deletionPrisma,
+        });
+
+        deletionGroupLockBarrier.release();
+        const settled = await withTimeout(
+          Promise.allSettled([deletionPromise, groupPromise] as const),
+          10_000,
+        );
+        assertNoPostgresDeadlock(settled);
+        expect(settled[0].status).toBe("fulfilled");
+        expect(settled[1]).toEqual({
+          status: "fulfilled",
+          value: { kind: "group_not_found" },
+        });
+        await expectDeletionReplyRaceConverged(fixture);
+      } finally {
+        deletionGroupLockBarrier.release();
+        await Promise.allSettled([
+          ...(groupPromise ? [groupPromise] : []),
+          ...(deletionPromise ? [deletionPromise] : []),
+        ]);
+        await cleanupDeletionReplyRaceFixture(fixture);
+      }
+    });
+
+    it("serializes first-time owner-code funding before account deletion without deadlock", async () => {
+      const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+      const deletionApplicationName = `delete_after_fund_${suffix}`;
+      const fixture = await createDeletionReplyRaceFixture({
+        deletionApplicationName,
+      });
+      const payerMemberId = `hbm_group_funder_${randomUUID()}`;
+      const fundingGroupLockBarrier = createSqlLockBarrier();
+      let fundingLockCount = 0;
+      const checkoutPrisma = withPrismaTransactionSqlLockBarrier({
+        barrier: fundingGroupLockBarrier,
+        matches: (sql) => {
+          if (!isOwnerCreatedGroupFundingLockQuery(sql)) {
+            return false;
+          }
+          fundingLockCount += 1;
+          return fundingLockCount === 2;
+        },
+        prisma: fixture.replyPrisma,
+      });
+      let checkoutPromise: ReturnType<typeof createHostedGroupUsageCreditCheckout> | null = null;
+      let deletionPromise: ReturnType<typeof deleteHostedAccountData> | null = null;
+
+      configureGroupFundingCheckoutProviderMocks();
+
+      try {
+        await fixture.replyPrisma.hostedMember.create({
+          data: { billingStatus: HostedBillingStatus.active, id: payerMemberId },
+        });
+        checkoutPromise = createHostedGroupUsageCreditCheckout({
+          clientRequestKey: `group_funding_lock_${suffix}`,
+          joinCode: fixture.joinCode,
+          now: new Date("2026-08-27T12:00:00.000Z"),
+          offerCode: "usage_10_usd",
+          payerMemberId,
+          prisma: checkoutPrisma,
+        });
+        const checkoutOutcome = checkoutPromise.then(
+          (value) => ({ status: "fulfilled" as const, value }),
+          (reason: unknown) => ({ reason, status: "rejected" as const }),
+        );
+        const barrierOrOutcome = await withTimeout(Promise.race([
+          fundingGroupLockBarrier.locked.then(() => ({ kind: "barrier" as const })),
+          checkoutOutcome.then((outcome) => ({ kind: "outcome" as const, outcome })),
+        ]), 5_000);
+        if (barrierOrOutcome.kind === "outcome") {
+          throw barrierOrOutcome.outcome.status === "rejected"
+            ? barrierOrOutcome.outcome.reason
+            : new Error("Checkout completed before its second funding lock.");
+        }
+        expect(providerMocks.ensureHostedMemberStripeCustomer).toHaveBeenCalledOnce();
+
+        deletionPromise = deleteHostedAccountData({
+          memberId: fixture.ownerMemberId,
+          prisma: fixture.deletionPrisma,
+          request: new Request("https://join.example.test/settings"),
+        });
+        await waitForPostgresApplicationLock({
+          applicationName: deletionApplicationName,
+          observer: fixture.replyPrisma,
+        });
+
+        fundingGroupLockBarrier.release();
+        const settled = await withTimeout(
+          Promise.allSettled([checkoutPromise, deletionPromise] as const),
+          10_000,
+        );
+        for (const result of settled) {
+          if (result.status === "rejected") {
+            expect(errorContainsText(result.reason, "40P01")).toBe(false);
+          }
+        }
+        expect(settled[0].status).toBe("rejected");
+        if (settled[0].status === "rejected") {
+          expect(settled[0].reason).toMatchObject({
+            code: "HOSTED_USAGE_CREDIT_NOT_ELIGIBLE",
+          });
+        }
+        expect(settled[1].status).toBe("fulfilled");
+        await expect(fixture.replyPrisma.hostedUsageCreditPurchase.count({
+          where: { payerMemberId },
+        })).resolves.toBe(0);
+        await expectDeletionReplyRaceConverged(fixture);
+      } finally {
+        fundingGroupLockBarrier.release();
+        await Promise.allSettled([
+          ...(checkoutPromise ? [checkoutPromise] : []),
+          ...(deletionPromise ? [deletionPromise] : []),
+        ]);
+        await cleanupGroupFundingPayer({
+          payerMemberId,
+          prisma: fixture.replyPrisma,
+        });
+        resetGroupFundingCheckoutProviderMocks();
+        await cleanupDeletionReplyRaceFixture(fixture);
+      }
+    });
+
+    it("rejects owner-code funding after account deletion wins without billing effects", async () => {
+      const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+      const fixture = await createDeletionReplyRaceFixture();
+      const payerMemberId = `hbm_group_funder_${randomUUID()}`;
+      const deletionGroupLockBarrier = createSqlLockBarrier();
+      const deletionPrisma = withAccountDeletionGroupLockBarrier(
+        fixture.deletionPrisma,
+        deletionGroupLockBarrier,
+      );
+      let checkoutPromise: ReturnType<typeof createHostedGroupUsageCreditCheckout> | null = null;
+      let deletionPromise: ReturnType<typeof deleteHostedAccountData> | null = null;
+
+      configureGroupFundingCheckoutProviderMocks();
+
+      try {
+        await fixture.replyPrisma.hostedMember.create({
+          data: { billingStatus: HostedBillingStatus.active, id: payerMemberId },
+        });
+        deletionPromise = deleteHostedAccountData({
+          memberId: fixture.ownerMemberId,
+          prisma: deletionPrisma,
+          request: new Request("https://join.example.test/settings"),
+        });
+        await withTimeout(deletionGroupLockBarrier.locked, 5_000);
+
+        checkoutPromise = createHostedGroupUsageCreditCheckout({
+          clientRequestKey: `group_funding_deleted_${suffix}`,
+          joinCode: fixture.joinCode,
+          now: new Date("2026-08-27T12:00:00.000Z"),
+          offerCode: "usage_10_usd",
+          payerMemberId,
+          prisma: fixture.replyPrisma,
+        });
+        const [checkoutResult] = await Promise.allSettled([checkoutPromise]);
+        expect(checkoutResult.status).toBe("rejected");
+        if (checkoutResult.status === "rejected") {
+          expect(checkoutResult.reason).toMatchObject({
+            code: "HOSTED_USAGE_CREDIT_NOT_ELIGIBLE",
+          });
+        }
+        expect(providerMocks.ensureHostedMemberStripeCustomer).not.toHaveBeenCalled();
+
+        deletionGroupLockBarrier.release();
+        const settled = await withTimeout(
+          Promise.allSettled([deletionPromise, checkoutPromise] as const),
+          10_000,
+        );
+        for (const result of settled) {
+          if (result.status === "rejected") {
+            expect(errorContainsText(result.reason, "40P01")).toBe(false);
+          }
+        }
+        expect(settled[0].status).toBe("fulfilled");
+        expect(settled[1].status).toBe("rejected");
+        await expect(fixture.replyPrisma.hostedUsageCreditPurchase.count({
+          where: { payerMemberId },
+        })).resolves.toBe(0);
+        await expect(fixture.replyPrisma.hostedGroupSponsorshipAuthorization.count({
+          where: { payerMemberId },
+        })).resolves.toBe(0);
+        await expect(fixture.replyPrisma.hostedGroupSponsorshipMoment.count({
+          where: { creatorMemberId: payerMemberId },
+        })).resolves.toBe(0);
+        await expectDeletionReplyRaceConverged(fixture);
+      } finally {
+        deletionGroupLockBarrier.release();
+        await Promise.allSettled([
+          ...(deletionPromise ? [deletionPromise] : []),
+          ...(checkoutPromise ? [checkoutPromise] : []),
+        ]);
+        await cleanupGroupFundingPayer({
+          payerMemberId,
+          prisma: fixture.replyPrisma,
+        });
+        resetGroupFundingCheckoutProviderMocks();
+        await cleanupDeletionReplyRaceFixture(fixture);
+      }
+    });
+
+    it.each([
+      ["already-prepared customers", false],
+      ["first-time customer preparation", true],
+    ] as const)(
+      "serializes two owner-code funders with %s",
+      async (_customerState, preparesCustomers) => {
+        const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+        const fixture = await createDeletionReplyRaceFixture();
+        const payerMemberIds = [
+          `hbm_group_funder_a_${randomUUID()}`,
+          `hbm_group_funder_b_${randomUUID()}`,
+        ];
+        const fundingGroupLockBarrier = createSqlLockBarrier(2);
+        let fundingContainerLockCount = 0;
+        let fundingGroupLockCount = 0;
+        const checkoutPrisma = withPrismaTransactionSqlLockBarrier({
+          barrier: fundingGroupLockBarrier,
+          matches: isOwnerCreatedGroupFundingLockQuery,
+          observe: (sql) => {
+            if (isFundingContainerShareQuery(sql)) {
+              fundingContainerLockCount += 1;
+            }
+            if (isOwnerCreatedGroupFundingLockQuery(sql)) {
+              fundingGroupLockCount += 1;
+            }
+          },
+          prisma: fixture.replyPrisma,
+        });
+        const createdCustomerMemberIds: string[] = [];
+        let checkoutPromises: Array<
+          ReturnType<typeof createHostedGroupUsageCreditCheckout>
+        > = [];
+
+        configureGroupFundingCheckoutProviderMocks();
+        const stripeCheckoutCreate = configureGroupFundingStripeRuntimeMock();
+        setHostedSecureBoxStringTestCodecForTests({
+          decrypt: ({ value }) => value,
+          encrypt: ({ value }) => value,
+        });
+        providerMocks.ensureHostedMemberStripeCustomer.mockImplementation(
+          async (input: { memberId: string }) => {
+            if (preparesCustomers) {
+              createdCustomerMemberIds.push(input.memberId);
+            }
+            return input.memberId === payerMemberIds[0]
+              ? "cus_group_funding_a"
+              : "cus_group_funding_b";
+          },
+        );
+
+        try {
+          await fixture.replyPrisma.hostedMember.createMany({
+            data: payerMemberIds.map((id) => ({
+              billingStatus: HostedBillingStatus.active,
+              id,
+            })),
+          });
+          await expect(hasHostedRuntimeActiveAccess(fixture.runtimeMemberId, {
+            prisma: fixture.replyPrisma,
+          })).resolves.toBe(true);
+          checkoutPromises = payerMemberIds.map((payerMemberId, index) =>
+            createHostedGroupUsageCreditCheckout({
+              clientRequestKey: `group_funding_pair_${index}_${suffix}`,
+              joinCode: fixture.joinCode,
+              now: new Date("2026-08-27T12:00:00.000Z"),
+              offerCode: "usage_10_usd",
+              payerMemberId,
+              prisma: checkoutPrisma,
+            })
+          );
+          const checkoutOutcomes = Promise.allSettled(checkoutPromises);
+          const barrierOrOutcome = await withTimeout(Promise.race([
+            fundingGroupLockBarrier.locked.then(() => ({
+              kind: "barrier" as const,
+            })),
+            checkoutOutcomes.then((outcome) => ({
+              kind: "outcome" as const,
+              outcome,
+            })),
+          ]), 5_000);
+          if (barrierOrOutcome.kind === "outcome") {
+            throw new Error(
+              "A checkout completed before both group locks were acquired.",
+            );
+          }
+          expect(providerMocks.ensureHostedMemberStripeCustomer)
+            .not.toHaveBeenCalled();
+          expect(stripeCheckoutCreate).not.toHaveBeenCalled();
+
+          fundingGroupLockBarrier.release();
+          const settled = await withTimeout(checkoutOutcomes, 10_000);
+          expect({
+            customerPreparationCount:
+              providerMocks.ensureHostedMemberStripeCustomer.mock.calls.length,
+            fundingContainerLockCount,
+            fundingGroupLockCount,
+          }).toEqual({
+            customerPreparationCount: 2,
+            fundingContainerLockCount: 4,
+            fundingGroupLockCount: 4,
+          });
+          for (const result of settled) {
+            expect(result.status).toBe("fulfilled");
+            if (result.status === "rejected") {
+              expect(errorContainsText(result.reason, "40P01")).toBe(false);
+              throw result.reason;
+            }
+            expect(result.value).toMatchObject({ status: "checkout_open" });
+          }
+          expect(stripeCheckoutCreate).toHaveBeenCalledTimes(2);
+          expect(new Set(createdCustomerMemberIds)).toEqual(
+            preparesCustomers ? new Set(payerMemberIds) : new Set(),
+          );
+          await expect(fixture.replyPrisma.hostedUsageCreditPurchase.count({
+            where: { payerMemberId: { in: payerMemberIds } },
+          })).resolves.toBe(2);
+          await expect(
+            fixture.replyPrisma.hostedGroupSponsorshipAuthorization.count({
+              where: { payerMemberId: { in: payerMemberIds } },
+            }),
+          ).resolves.toBe(0);
+          await expect(fixture.replyPrisma.hostedGroupSponsorshipMoment.count({
+            where: { creatorMemberId: { in: payerMemberIds } },
+          })).resolves.toBe(2);
+        } finally {
+          fundingGroupLockBarrier.release();
+          await Promise.allSettled(checkoutPromises);
+          await Promise.all(payerMemberIds.map((payerMemberId) =>
+            cleanupGroupFundingPayer({
+              payerMemberId,
+              prisma: fixture.replyPrisma,
+            })
+          ));
+          setHostedSecureBoxStringTestCodecForTests(null);
+          resetGroupFundingCheckoutProviderMocks();
+          await cleanupDeletionReplyRaceFixture(fixture);
+        }
+      },
+    );
+
+    it("serializes a Telegram group-offer tap before account deletion without deadlock", async () => {
+      const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+      const deletionApplicationName = `delete_after_tg_${suffix}`;
+      const fixture = await createDeletionReplyRaceFixture({
+        deletionApplicationName,
+      });
+      const callbackGroupLockBarrier = createSqlLockBarrier();
+      let memberLockCount = 0;
+      const callbackPrisma = withPrismaTransactionSqlLockBarrier({
+        barrier: callbackGroupLockBarrier,
+        matches: (sql) => {
+          if (!isHostedMemberRowLockQuery(sql)) {
+            return false;
+          }
+          memberLockCount += 1;
+          return memberLockCount === 2;
+        },
+        prisma: fixture.replyPrisma,
+      });
+      let callbackPromise: ReturnType<typeof handleHostedTelegramGroupOfferCallback> | null = null;
+      let deletionPromise: ReturnType<typeof deleteHostedAccountData> | null = null;
+      let telegramFixture: TelegramDeletionOfferRaceFixture | null = null;
+
+      vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://join.example.test");
+      clearHostedOnboardingEnvCache();
+      setHostedSecureBoxStringTestCodecForTests({
+        decrypt: ({ value }) => value,
+        encrypt: ({ value }) => value,
+      });
+      providerMocks.answerHostedTelegramCallbackQueryBestEffort
+        .mockReset()
+        .mockResolvedValue(undefined);
+
+      try {
+        telegramFixture = await prepareTelegramDeletionOfferRaceFixture(fixture);
+        const preparedTelegramFixture = telegramFixture;
+        callbackPromise = handleHostedTelegramGroupOfferCallback({
+          callbackQuery: preparedTelegramFixture.callbackQuery,
+          prisma: callbackPrisma,
+          scheduleAfterResponse: () => undefined,
+        });
+        await withTimeout(callbackGroupLockBarrier.locked, 5_000);
+
+        deletionPromise = deleteHostedAccountData({
+          memberId: fixture.ownerMemberId,
+          prisma: fixture.deletionPrisma,
+          request: new Request("https://join.example.test/settings"),
+        });
+        await waitForPostgresApplicationLock({
+          applicationName: deletionApplicationName,
+          observer: fixture.replyPrisma,
+        });
+
+        callbackGroupLockBarrier.release();
+        const settled = await withTimeout(
+          Promise.allSettled([callbackPromise, deletionPromise] as const),
+          10_000,
+        );
+        assertNoPostgresDeadlock(settled);
+        expect(settled[0]).toEqual({
+          status: "fulfilled",
+          value: {
+            handled: true,
+            reason: "accepted-telegram-group-join",
+          },
+        });
+        expect(settled[1].status).toBe("fulfilled");
+        await expectDeletionReplyRaceConverged(fixture);
+      } finally {
+        callbackGroupLockBarrier.release();
+        await Promise.allSettled([
+          ...(callbackPromise ? [callbackPromise] : []),
+          ...(deletionPromise ? [deletionPromise] : []),
+        ]);
+        if (telegramFixture) {
+          await cleanupTelegramDeletionOfferRaceFixture({
+            fixture,
+            telegramFixture,
+          });
+        }
+        providerMocks.answerHostedTelegramCallbackQueryBestEffort.mockReset();
+        setHostedSecureBoxStringTestCodecForTests(null);
+        vi.unstubAllEnvs();
+        clearHostedOnboardingEnvCache();
+        await cleanupDeletionReplyRaceFixture(fixture);
+      }
+    });
+
+    it("serializes account deletion before a Telegram group-offer tap without deadlock", async () => {
+      const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+      const callbackApplicationName = `tg_after_delete_${suffix}`;
+      const fixture = await createDeletionReplyRaceFixture({
+        replyApplicationName: callbackApplicationName,
+      });
+      const deletionGroupLockBarrier = createSqlLockBarrier();
+      const deletionPrisma = withAccountDeletionGroupLockBarrier(
+        fixture.deletionPrisma,
+        deletionGroupLockBarrier,
+      );
+      let callbackPromise: ReturnType<typeof handleHostedTelegramGroupOfferCallback> | null = null;
+      let deletionPromise: ReturnType<typeof deleteHostedAccountData> | null = null;
+      let telegramFixture: TelegramDeletionOfferRaceFixture | null = null;
+
+      vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://join.example.test");
+      clearHostedOnboardingEnvCache();
+      setHostedSecureBoxStringTestCodecForTests({
+        decrypt: ({ value }) => value,
+        encrypt: ({ value }) => value,
+      });
+      providerMocks.answerHostedTelegramCallbackQueryBestEffort
+        .mockReset()
+        .mockResolvedValue(undefined);
+
+      try {
+        telegramFixture = await prepareTelegramDeletionOfferRaceFixture(fixture);
+        deletionPromise = deleteHostedAccountData({
+          memberId: fixture.ownerMemberId,
+          prisma: deletionPrisma,
+          request: new Request("https://join.example.test/settings"),
+        });
+        await withTimeout(deletionGroupLockBarrier.locked, 5_000);
+
+        callbackPromise = handleHostedTelegramGroupOfferCallback({
+          callbackQuery: telegramFixture.callbackQuery,
+          prisma: fixture.replyPrisma,
+          scheduleAfterResponse: () => undefined,
+        });
+        await waitForPostgresApplicationLock({
+          applicationName: callbackApplicationName,
+          observer: fixture.deletionPrisma,
+        });
+
+        deletionGroupLockBarrier.release();
+        const settled = await withTimeout(
+          Promise.allSettled([deletionPromise, callbackPromise] as const),
+          10_000,
+        );
+        assertNoPostgresDeadlock(settled);
+        expect(settled[0].status).toBe("fulfilled");
+        expect(settled[1]).toEqual({
+          status: "fulfilled",
+          value: {
+            handled: false,
+            reason: "skipped-telegram-group-offer:offer_revoked",
+          },
+        });
+        await expectDeletionReplyRaceConverged(fixture);
+      } finally {
+        deletionGroupLockBarrier.release();
+        await Promise.allSettled([
+          ...(deletionPromise ? [deletionPromise] : []),
+          ...(callbackPromise ? [callbackPromise] : []),
+        ]);
+        if (telegramFixture) {
+          await cleanupTelegramDeletionOfferRaceFixture({
+            fixture,
+            telegramFixture,
+          });
+        }
+        providerMocks.answerHostedTelegramCallbackQueryBestEffort.mockReset();
+        setHostedSecureBoxStringTestCodecForTests(null);
+        vi.unstubAllEnvs();
+        clearHostedOnboardingEnvCache();
+        await cleanupDeletionReplyRaceFixture(fixture);
+      }
+    });
+
+    it("rolls back a Telegram offer grant when the binding relinks before its locked recheck", async () => {
+      const fixture = await createDeletionReplyRaceFixture();
+      const callbackGroupLockBarrier = createSqlLockBarrier();
+      const callbackPrisma = withPrismaTransactionSqlLockBarrier({
+        barrier: callbackGroupLockBarrier,
+        matches: isHostedGroupRowLockQuery,
+        prisma: fixture.replyPrisma,
+      });
+      let callbackPromise: ReturnType<typeof handleHostedTelegramGroupOfferCallback> | null = null;
+      let telegramFixture: TelegramDeletionOfferRaceFixture | null = null;
+
+      vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://join.example.test");
+      clearHostedOnboardingEnvCache();
+      setHostedSecureBoxStringTestCodecForTests({
+        decrypt: ({ value }) => value,
+        encrypt: ({ value }) => value,
+      });
+      providerMocks.answerHostedTelegramCallbackQueryBestEffort
+        .mockReset()
+        .mockResolvedValue(undefined);
+
+      try {
+        telegramFixture = await prepareTelegramDeletionOfferRaceFixture(fixture);
+        const preparedTelegramFixture = telegramFixture;
+        callbackPromise = handleHostedTelegramGroupOfferCallback({
+          callbackQuery: preparedTelegramFixture.callbackQuery,
+          prisma: callbackPrisma,
+          scheduleAfterResponse: () => undefined,
+        });
+        await withTimeout(callbackGroupLockBarrier.locked, 5_000);
+
+        const replacementPrivateColumns =
+          await buildHostedMemberRoutingPrivateColumns({
+            linqChatId: null,
+            linqRecipientPhone: null,
+            memberId: preparedTelegramFixture.replacementMemberId,
+            pendingLinqChatId: null,
+            pendingLinqRecipientPhone: null,
+            prisma: fixture.deletionPrisma,
+            telegramThreadId: null,
+            telegramUserId: preparedTelegramFixture.telegramUserId,
+          });
+        await fixture.deletionPrisma.$transaction(async (tx) => {
+          for (const memberId of [
+            fixture.participantMemberId,
+            preparedTelegramFixture.replacementMemberId,
+          ].sort()) {
+            await lockHostedMemberRow(tx, memberId);
+          }
+          await tx.hostedMemberRouting.update({
+            data: {
+              telegramUserIdEncrypted: null,
+              telegramUserLookupKey: null,
+            },
+            where: { memberId: fixture.participantMemberId },
+          });
+          await tx.hostedMemberRouting.create({
+            data: {
+              ...replacementPrivateColumns,
+              memberId: preparedTelegramFixture.replacementMemberId,
+              telegramUserLookupKey:
+                preparedTelegramFixture.telegramUserLookupKey,
+            },
+          });
+        });
+
+        callbackGroupLockBarrier.release();
+        await expect(withTimeout(callbackPromise, 10_000)).resolves.toEqual({
+          handled: false,
+          reason: "skipped-telegram-group-offer:no_offer_match",
+        });
+        await expect(fixture.deletionPrisma.hostedGroupMember.findUnique({
+          select: { id: true },
+          where: {
+            groupId_memberId: {
+              groupId: fixture.groupId,
+              memberId: fixture.participantMemberId,
+            },
+          },
+        })).resolves.toBeNull();
+        await expect(fixture.deletionPrisma.hostedMemberRouting.findUnique({
+          select: { telegramUserLookupKey: true },
+          where: { memberId: preparedTelegramFixture.replacementMemberId },
+        })).resolves.toEqual({
+          telegramUserLookupKey: preparedTelegramFixture.telegramUserLookupKey,
+        });
+      } finally {
+        callbackGroupLockBarrier.release();
+        await Promise.allSettled([
+          ...(callbackPromise ? [callbackPromise] : []),
+        ]);
+        if (telegramFixture) {
+          await cleanupTelegramDeletionOfferRaceFixture({
+            fixture,
+            telegramFixture,
+          });
+        }
+        providerMocks.answerHostedTelegramCallbackQueryBestEffort.mockReset();
+        setHostedSecureBoxStringTestCodecForTests(null);
+        vi.unstubAllEnvs();
+        clearHostedOnboardingEnvCache();
+        await cleanupDeletionReplyRaceFixture(fixture);
+      }
+    });
+
+    it("revalidates the exact deletion group set before destructive database deletion", async () => {
+      const fixture = await createDeletionReplyRaceFixture();
+      const deletionGroupLockBarrier = createSqlLockBarrier();
+      const deletionPrisma = withAccountDeletionGroupLockBarrier(
+        fixture.deletionPrisma,
+        deletionGroupLockBarrier,
+      );
+      const addedGroupId = `hgrp_delete_set_change_${randomUUID()}`;
+      let deletionPromise: ReturnType<typeof deleteHostedAccountData> | null = null;
+
+      try {
+        deletionPromise = deleteHostedAccountData({
+          memberId: fixture.ownerMemberId,
+          prisma: deletionPrisma,
+          request: new Request("https://join.example.test/settings"),
+        });
+        await withTimeout(deletionGroupLockBarrier.locked, 5_000);
+        await fixture.replyPrisma.hostedGroup.create({
+          data: {
+            displayName: "Deletion Set Change Group",
+            id: addedGroupId,
+            joinCode: `join-delete-set-change-${randomUUID()}`,
+            joinCodeCreatedAt: new Date("2026-07-27T16:00:00.000Z"),
+            ownerMemberId: fixture.ownerMemberId,
+          },
+        });
+        deletionGroupLockBarrier.release();
+
+        const deletionError = await withTimeout(
+          deletionPromise.then(
+            () => null,
+            (error: unknown) => error,
+          ),
+          10_000,
+        );
+        expect(deletionError).toMatchObject({
+          code: "ACCOUNT_DELETION_GROUP_SET_CHANGED",
+        });
+        await expect(fixture.deletionPrisma.hostedGroup.findMany({
+          orderBy: { id: "asc" },
+          select: { id: true },
+          where: { id: { in: [fixture.groupId, addedGroupId] } },
+        })).resolves.toEqual([
+          { id: addedGroupId },
+          { id: fixture.groupId },
+        ].sort((left, right) => left.id.localeCompare(right.id)));
+        await expect(fixture.deletionPrisma.hostedMember.findMany({
+          orderBy: { id: "asc" },
+          select: { id: true },
+          where: {
+            id: { in: [fixture.ownerMemberId, fixture.runtimeMemberId] },
+          },
+        })).resolves.toHaveLength(2);
+        await expect(fixture.deletionPrisma.hostedThreadContainer.findUnique({
+          select: { memberId: true },
+          where: { memberId: fixture.runtimeMemberId },
+        })).resolves.toEqual({ memberId: fixture.runtimeMemberId });
+        await expect(fixture.deletionPrisma.hostedGroupJoinOutreach.findUnique({
+          select: { id: true },
+          where: { id: fixture.outreachId },
+        })).resolves.toEqual({ id: fixture.outreachId });
+
+        await expect(deleteHostedAccountData({
+          memberId: fixture.ownerMemberId,
+          prisma: fixture.deletionPrisma,
+          request: new Request("https://join.example.test/settings"),
+        })).resolves.toBeDefined();
+        await expectDeletionReplyRaceConverged(fixture);
+        await expect(fixture.deletionPrisma.hostedGroup.findUnique({
+          select: { id: true },
+          where: { id: addedGroupId },
+        })).resolves.toBeNull();
+      } finally {
+        deletionGroupLockBarrier.release();
+        await Promise.allSettled([
+          ...(deletionPromise ? [deletionPromise] : []),
+        ]);
+        await fixture.deletionPrisma.hostedGroup.deleteMany({
+          where: { id: addedGroupId },
+        });
+        await cleanupDeletionReplyRaceFixture(fixture);
+      }
+    });
+
     it("lets a reply already holding the drain finish before the same deletion request", async () => {
       vi.stubEnv(
         "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
@@ -2931,6 +3889,12 @@ describe.skipIf(!runPostgresProof)(
         "https://join.example.test",
       );
       const fixture = await createDeletionReplyRaceFixture();
+      // This case owns the first-contact fallback path. Keep it independent
+      // from the active-member direct-route behavior covered earlier.
+      await fixture.deletionPrisma.hostedMember.update({
+        data: { billingStatus: HostedBillingStatus.not_started },
+        where: { id: fixture.participantMemberId },
+      });
       const recipientPhone = createUniqueTestPhone("+1303");
       const recoveryLinePhone = createUniqueTestPhone("+1303");
       const participantPhoneLookupKey =
@@ -4354,6 +5318,16 @@ type DeletionReplyRaceFixture = {
   runtimeMemberId: string;
 };
 
+type TelegramDeletionOfferRaceFixture = {
+  accountGroupId: string;
+  callbackQuery: Parameters<
+    typeof handleHostedTelegramGroupOfferCallback
+  >[0]["callbackQuery"];
+  replacementMemberId: string;
+  telegramUserId: string;
+  telegramUserLookupKey: string;
+};
+
 function makePreparedDeletionCleanup(input: {
   now: Date;
   runtimeMemberIds: readonly string[];
@@ -4404,9 +5378,132 @@ function makePendingDeletionCleanupResult() {
   };
 }
 
+function configureGroupFundingCheckoutProviderMocks(): void {
+  vi.stubEnv(
+    "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
+    "https://join.example.test",
+  );
+  vi.stubEnv(
+    "HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_10_USD",
+    "price_group_funding_lock",
+  );
+  clearHostedOnboardingEnvCache();
+  providerMocks.ensureHostedMemberStripeCustomer
+    .mockReset()
+    .mockResolvedValue("cus_group_funding_lock");
+}
+
+function configureGroupFundingStripeRuntimeMock() {
+  const stripe = new Stripe("sk_test_group_funding_lock");
+  vi.spyOn(stripe.prices, "retrieve").mockImplementation(async (priceId) =>
+    stripeTestResponse({
+      active: true,
+      billing_scheme: "per_unit",
+      created: 0,
+      currency: "usd",
+      custom_unit_amount: null,
+      id: priceId,
+      livemode: false,
+      lookup_key: null,
+      metadata: {},
+      nickname: null,
+      object: "price",
+      product: "prod_group_funding_lock",
+      recurring: null,
+      tax_behavior: null,
+      tiers_mode: null,
+      transform_quantity: null,
+      type: "one_time",
+      unit_amount: 1_000,
+      unit_amount_decimal: null,
+    } satisfies Stripe.Price)
+  );
+  vi.spyOn(stripe.customers, "retrieve").mockImplementation(
+    async (customerId) => stripeTestResponse({
+      default_source: null,
+      id: customerId,
+      invoice_settings: { default_payment_method: null },
+      livemode: false,
+      object: "customer",
+    } as Stripe.Customer),
+  );
+  vi.spyOn(stripe.paymentMethods, "list").mockResolvedValue(stripeTestResponse({
+    data: [],
+    has_more: false,
+    object: "list",
+    url: "/v1/payment_methods",
+  } satisfies Stripe.ApiList<Stripe.PaymentMethod>));
+  vi.spyOn(stripe.subscriptions, "list").mockResolvedValue(stripeTestResponse({
+    data: [],
+    has_more: false,
+    object: "list",
+    url: "/v1/subscriptions",
+  } satisfies Stripe.ApiList<Stripe.Subscription>));
+  let sessionIndex = 0;
+  const checkoutCreate = vi.spyOn(stripe.checkout.sessions, "create")
+    .mockImplementation(async (request) => {
+      if (!request) {
+        throw new Error("Expected Stripe checkout parameters.");
+      }
+      sessionIndex += 1;
+      return stripeTestResponse({
+        adaptive_pricing: request.adaptive_pricing,
+        client_reference_id: request.client_reference_id,
+        customer: request.customer,
+        expires_at: request.expires_at,
+        id: `cs_test_group_funding_${sessionIndex}`,
+        livemode: false,
+        metadata: request.metadata,
+        mode: "payment",
+        payment_method_types: request.payment_method_types,
+        payment_status: "unpaid",
+        status: "open",
+        url: `https://checkout.stripe.test/group-funding-${sessionIndex}`,
+      } as Stripe.Checkout.Session);
+    });
+  stripeRuntimeMocks.apiMode = { stripe, stripeLiveMode: false };
+  return checkoutCreate;
+}
+
+function stripeTestResponse<T extends object>(value: T): Stripe.Response<T> {
+  return Object.assign(value, {
+    lastResponse: {
+      headers: {},
+      requestId: "req_group_funding_lock",
+      statusCode: 200,
+    },
+  });
+}
+
+function resetGroupFundingCheckoutProviderMocks(): void {
+  vi.unstubAllEnvs();
+  clearHostedOnboardingEnvCache();
+  providerMocks.ensureHostedMemberStripeCustomer.mockReset();
+  stripeRuntimeMocks.apiMode = null;
+}
+
+async function cleanupGroupFundingPayer(input: {
+  payerMemberId: string;
+  prisma: PrismaClient;
+}): Promise<void> {
+  await input.prisma.hostedGroupSponsorshipMoment.deleteMany({
+    where: { creatorMemberId: input.payerMemberId },
+  });
+  await input.prisma.hostedUsageCreditPurchase.deleteMany({
+    where: { payerMemberId: input.payerMemberId },
+  });
+  await input.prisma.hostedGroupSponsorshipAuthorization.deleteMany({
+    where: { payerMemberId: input.payerMemberId },
+  });
+  await input.prisma.hostedMember.deleteMany({
+    where: { id: input.payerMemberId },
+  });
+}
+
 async function createDeletionReplyRaceFixture(input: {
   deletionApplicationName?: string;
   externalParticipantSortsBeforeOwner?: boolean;
+  replyApplicationName?: string;
 } = {}):
   Promise<DeletionReplyRaceFixture> {
   const deletionPrisma = createPrismaClient({
@@ -4415,7 +5512,12 @@ async function createDeletionReplyRaceFixture(input: {
       : databaseUrl,
     poolMax: 2,
   });
-  const replyPrisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+  const replyPrisma = createPrismaClient({
+    databaseUrl: input.replyApplicationName
+      ? withPostgresApplicationName(databaseUrl, input.replyApplicationName)
+      : databaseUrl,
+    poolMax: 2,
+  });
   const ownerMemberId = input.externalParticipantSortsBeforeOwner
     ? `hbm_delete_z_owner_${randomUUID()}`
     : `hbm_delete_owner_${randomUUID()}`;
@@ -4530,6 +5632,145 @@ async function createDeletionReplyRaceFixture(input: {
   };
 }
 
+async function prepareTelegramDeletionOfferRaceFixture(
+  fixture: DeletionReplyRaceFixture,
+): Promise<TelegramDeletionOfferRaceFixture> {
+  const suffix = randomUUID().replaceAll("-", "");
+  const accountGroupId = `hag_tg_delete_${suffix}`;
+  const replacementMemberId = `hbm_tg_relinked_${suffix}`;
+  const telegramOfferId = `hgrpjo_tg_delete_${suffix}`;
+  const telegramUserId = String(randomInt(1_000_000, 9_000_000));
+  const telegramChatId = -randomInt(1_000_000_000, 2_000_000_000);
+  const telegramMessageId = randomInt(1_000_000, 9_000_000);
+  const message = {
+    chat: { id: telegramChatId, type: "supergroup" },
+    message_id: telegramMessageId,
+  } as const;
+  const telegramThreadId = buildTelegramThreadId(message);
+  const messageLookupKey = createHostedTelegramMessageLookupKey({
+    chatId: telegramChatId,
+    messageId: telegramMessageId,
+  });
+  const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+    channel: "telegram",
+    threadId: telegramThreadId,
+  });
+  const telegramUserLookupKey =
+    createHostedTelegramUserLookupKey(telegramUserId);
+  if (
+    !messageLookupKey
+    || !threadIdentityLookupKey
+    || !telegramUserLookupKey
+  ) {
+    throw new Error("Expected Telegram deletion-race lookup keys.");
+  }
+  const routingPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
+    linqChatId: null,
+    linqRecipientPhone: null,
+    memberId: fixture.participantMemberId,
+    pendingLinqChatId: null,
+    pendingLinqRecipientPhone: null,
+    prisma: fixture.deletionPrisma,
+    telegramThreadId: null,
+    telegramUserId,
+  });
+
+  await fixture.deletionPrisma.$transaction(async (tx) => {
+    await tx.hostedMember.create({
+      data: {
+        billingStatus: HostedBillingStatus.active,
+        id: replacementMemberId,
+      },
+    });
+    await tx.hostedAccountGroup.create({
+      data: {
+        billingStatus: HostedBillingStatus.active,
+        id: accountGroupId,
+        ownerMemberId: fixture.participantMemberId,
+      },
+    });
+    await tx.hostedAccountGroupMembership.create({
+      data: {
+        groupId: accountGroupId,
+        id: `hagm_tg_delete_${suffix}`,
+        memberId: fixture.ownerMemberId,
+        role: "member",
+        status: "active",
+      },
+    });
+    await tx.hostedConsentGrant.createMany({
+      data: ["launch.legal", "launch.health-data"].map((scope) => ({
+        documentVersionsJson: {},
+        grantedAt: new Date("2026-08-26T12:00:00.000Z"),
+        memberId: fixture.participantMemberId,
+        scope,
+        source: "test",
+        status: "granted",
+      })),
+    });
+    await tx.hostedMemberRouting.create({
+      data: {
+        ...routingPrivateColumns,
+        memberId: fixture.participantMemberId,
+        telegramUserLookupKey,
+      },
+    });
+    await tx.hostedThreadRoute.create({
+      data: {
+        channel: "telegram",
+        containerMemberId: fixture.runtimeMemberId,
+        pendingParticipantAddition: false,
+        threadIdentityLookupKey,
+        threadLookupKey: `tg-delete-thread-${suffix}`,
+      },
+    });
+    await tx.hostedGroupJoinOffer.create({
+      data: {
+        groupId: fixture.groupId,
+        id: telegramOfferId,
+        messageLookupKey,
+        postedAt: new Date("2026-08-26T12:00:00.000Z"),
+        projectionKindsJson: [],
+      },
+    });
+  });
+
+  return {
+    accountGroupId,
+    callbackQuery: {
+      data: HOSTED_TELEGRAM_GROUP_JOIN_CALLBACK_DATA,
+      from: { id: Number(telegramUserId), is_bot: false },
+      id: `tg-delete-callback-${suffix}`,
+      message,
+    },
+    replacementMemberId,
+    telegramUserId,
+    telegramUserLookupKey,
+  };
+}
+
+async function cleanupTelegramDeletionOfferRaceFixture(input: {
+  fixture: DeletionReplyRaceFixture;
+  telegramFixture: TelegramDeletionOfferRaceFixture;
+}): Promise<void> {
+  await input.fixture.deletionPrisma.hostedAccountGroup.deleteMany({
+    where: { id: input.telegramFixture.accountGroupId },
+  });
+  await input.fixture.deletionPrisma.hostedMemberRouting.deleteMany({
+    where: {
+      memberId: {
+        in: [
+          input.fixture.participantMemberId,
+          input.telegramFixture.replacementMemberId,
+        ],
+      },
+    },
+  });
+  await input.fixture.deletionPrisma.hostedMember.deleteMany({
+    where: { id: input.telegramFixture.replacementMemberId },
+  });
+}
+
 async function drainDeletionReplyEffect(input: {
   effect: DeletionReplyRaceFixture["effect"];
   prisma: Prisma.TransactionClient | PrismaClient;
@@ -4579,6 +5820,10 @@ async function expectDeletionReplyRaceConverged(
   await expect(fixture.deletionPrisma.hostedGroupJoinOutreach.findUnique({
     select: { id: true },
     where: { id: fixture.outreachId },
+  })).resolves.toBeNull();
+  await expect(fixture.deletionPrisma.hostedThreadContainer.findUnique({
+    select: { memberId: true },
+    where: { memberId: fixture.runtimeMemberId },
   })).resolves.toBeNull();
   await expect(fixture.deletionPrisma.hostedMember.findMany({
     select: { id: true },
@@ -4880,6 +6125,169 @@ async function closeTestServer(server: Server): Promise<void> {
       resolve();
     });
   });
+}
+
+type SqlLockBarrier = {
+  locked: Promise<void>;
+  release: () => void;
+  reportLocked: () => void;
+  waitUntilReleased: Promise<void>;
+};
+
+function createSqlLockBarrier(expectedLockCount = 1): SqlLockBarrier {
+  let reportLocked = (): void => undefined;
+  let release = (): void => undefined;
+  let reportedLockCount = 0;
+  const locked = new Promise<void>((resolve) => {
+    reportLocked = () => {
+      reportedLockCount += 1;
+      if (reportedLockCount >= expectedLockCount) {
+        resolve();
+      }
+    };
+  });
+  const waitUntilReleased = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return {
+    locked,
+    release,
+    reportLocked,
+    waitUntilReleased,
+  };
+}
+
+function withSqlLockBarrierTx(input: {
+  barrier: SqlLockBarrier;
+  matches: (sql: string) => boolean;
+  observe?: (sql: string) => void;
+  tx: Prisma.TransactionClient;
+}): Prisma.TransactionClient {
+  let paused = false;
+  return new Proxy(input.tx, {
+    get(target, property) {
+      const value = Reflect.get(target, property, target);
+      if (property !== "$queryRaw" || typeof value !== "function") {
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+      return async (...args: unknown[]) => {
+        const result = await Reflect.apply(value, target, args);
+        const sql = readTaggedSql(args[0]);
+        input.observe?.(sql);
+        if (!paused && input.matches(sql)) {
+          paused = true;
+          input.barrier.reportLocked();
+          await input.barrier.waitUntilReleased;
+        }
+        return result;
+      };
+    },
+  });
+}
+
+function withAccountDeletionGroupLockBarrier(
+  prisma: PrismaClient,
+  barrier: SqlLockBarrier,
+): PrismaClient {
+  return withPrismaTransactionSqlLockBarrier({
+    barrier,
+    matches: (sql) =>
+      sql.includes("hosted-account-deletion-target-group-lock"),
+    prisma,
+  });
+}
+
+function withPrismaTransactionSqlLockBarrier(input: {
+  barrier: SqlLockBarrier;
+  matches: (sql: string) => boolean;
+  observe?: (sql: string) => void;
+  prisma: PrismaClient;
+}): PrismaClient {
+  return new Proxy(input.prisma, {
+    get(target, property) {
+      const value = Reflect.get(target, property, target);
+      if (property !== "$transaction" || typeof value !== "function") {
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+      return (...args: unknown[]) => {
+        const [transactionInput, ...rest] = args;
+        if (typeof transactionInput !== "function") {
+          return Reflect.apply(value, target, args);
+        }
+        const callback = transactionInput as (
+          tx: Prisma.TransactionClient,
+        ) => unknown;
+        return Reflect.apply(value, target, [
+          (tx: Prisma.TransactionClient) => callback(withSqlLockBarrierTx({
+            barrier: input.barrier,
+            matches: input.matches,
+            observe: input.observe,
+            tx,
+          })),
+          ...rest,
+        ]);
+      };
+    },
+  });
+}
+
+function isHostedGroupRowLockQuery(sql: string): boolean {
+  const normalized = sql.toLowerCase();
+  return normalized.includes('from "hosted_group"')
+    && normalized.includes("for update");
+}
+
+function isOwnerCreatedGroupFundingLockQuery(sql: string): boolean {
+  const normalized = sql.toLowerCase();
+  return normalized.includes('from "hosted_group" as "group"')
+    && normalized.includes('inner join "hosted_thread_container" as "container"')
+    && normalized.includes('for share of "group"')
+    && !normalized.includes('for share of "group", "container"');
+}
+
+function isFundingContainerShareQuery(sql: string): boolean {
+  const normalized = sql.toLowerCase();
+  return normalized.includes('from "hosted_thread_container" as "container"')
+    && normalized.includes('for share of "container"');
+}
+
+function isHostedMemberRowLockQuery(sql: string): boolean {
+  const normalized = sql.toLowerCase();
+  return normalized.includes('from "hosted_member"')
+    && normalized.includes("for update");
+}
+
+function readTaggedSql(value: unknown): string {
+  if (!Array.isArray(value)) {
+    return "";
+  }
+  return value.filter((part): part is string => typeof part === "string").join(" ");
+}
+
+function assertNoPostgresDeadlock(
+  results: readonly PromiseSettledResult<unknown>[],
+): void {
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      continue;
+    }
+    expect(errorContainsText(result.reason, "40P01")).toBe(false);
+    throw result.reason;
+  }
+}
+
+function errorContainsText(error: unknown, needle: string): boolean {
+  if (typeof error === "string") {
+    return error.includes(needle);
+  }
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  if (error instanceof Error && error.message.includes(needle)) {
+    return true;
+  }
+  return Object.values(error as Record<string, unknown>)
+    .some((value) => errorContainsText(value, needle));
 }
 
 async function waitForPostgresApplicationLock(input: {

@@ -7,6 +7,15 @@ This package exists so hosted runtimes such as `apps/cloudflare` do not need to 
 Current responsibilities:
 
 - run bounded hosted workspace invocations for assistant, inbox, and device-sync work behind an explicit runtime context object
+- publish a device-sync completion record's retained provider cadence and
+  checkpoint mailbox removal inside the same runtime admission after the exact
+  completion record is durable, without another provider-free completion wake
+  on the normal path; direct completion requires an accepted full
+  reconciliation in that admission, zero retained jobs, and an exact active
+  connection epoch; one version conflict rehydrates without re-admitting work,
+  carries same-epoch provider cadence and dirty terminal evidence, and retries
+  that reconciliation, while restored records repeat the full path and
+  authorityless legacy or terminal records drain without a cadence write
 - drain each hosted device-sync pass through one bounded worker call so
   canonical imports can safely reuse a pass-local event identity index, while
   cumulative progress remains observable and the service-owned foreground
@@ -26,7 +35,7 @@ Current responsibilities:
   blocking independent direct files, and unsafe direct structural uncertainty
   fails closed with a bounded error code; checkpoint logs report counts and byte
   totals without paths or names
-- admit only joined-group Assistant Ask requests and legacy joined-group completions through the pre-checkpoint-safe system prefix; keep consented requests and reviewed completions checkpoint-gated, order a legacy completion against older personal input through the read-only pending index, and deliver typed `cannot_answer` with fixed exact copy instead of another provider turn
+- admit only joined-group Assistant Ask requests and legacy joined-group completions through the pre-checkpoint-safe system prefix; keep consented-member requests, authenticated operator tasks, and reviewed completions checkpoint-gated, dispatch an operator task through one direct `executeOperatorDiagnostic` turn instead of the consent/reviewer composition, order a legacy completion against older personal input through the read-only pending index, and deliver typed `cannot_answer` with fixed exact copy instead of another provider turn
 - before provider execution for a direct user-action turn, compare the resident session with the session ids restored from the published snapshot; when absent, including a session created earlier in the same invocation by deterministic welcome output, stop foreground mailbox watching and pause detached work while the existing full `idle_shutdown` checkpoint makes the origin durable
 - accept a committed valid checkpoint's optional `conversationInputAhead` observation, import that durable conversation input immediately while the invocation remains live, and avoid post-upload snapshot discard or metadata-only shutdown resnapshot
 - collect and deliver due hosted side effects from live container state without waiting for foreground hosted workspace checkpointing
@@ -35,9 +44,11 @@ Current responsibilities:
 - keep foreground pending-input checks read-only; incomplete indexes schedule bounded maintenance while compaction and legacy backfill remain maintenance-owned
 - apply every Web-approved sparse `member.preferences.updated` delta with that event's own cross-lane mailbox sequence, so the canonical preference owner preserves approved event order while stale-no-oping only affected fields; bounded per-field watermarks in `bank/assistant-preference-mutations.json` make replay idempotent without reservation or receipt retention
 - admit one bounded, cursor-ordered batch of same-conversation, same-reply-anchor mailbox inputs only when their positive causal sequences are exact successors; pass the terminal accepted input id to hosted personality commands so Web derives the compound turn frontier from its member-bound mailbox row, and leave gaps, legacy input, overflow, and later arrivals pending
+- recover late foreground input from the current invocation's exact imported-ID snapshot when best-effort active-turn notifications are early or missed; at admission, compose that recovered cursor-ordered prefix with any notified exact IDs, admit every valid same-room successor up to the existing cumulative cap, and reuse the same replyability, route, and capacity checks without scanning or mutating the broad pending index
 - re-read Web's effective core-provider choice immediately before every
   target-owned provider entry: resident accepted input, joined-group Assistant
-  Ask, consented private candidate, and private disclosure review; a missing or
+  Ask, consented private candidate, authenticated operator diagnostic, and
+  private disclosure review; a missing or
   invalid owner response uses the existing typed retry, while a mismatch closes
   detached work in the stale invocation, requeues any claimed ask through its
   existing encrypted mailbox with no delay, suppresses provider-backed idle
@@ -96,9 +107,17 @@ with link parts retains the existing projection path. Email retains raw-message
 projection for direct messages because its staged preview is bounded;
 group-routed email remains intentionally raw-free. Attachment-bearing non-email
 input makes one best-effort inbox projection attempt while the decoded wake is
-still in memory so raw attachment paths remain inspectable and audio/video
-transcription jobs can drain before prompt construction when parser output is
-available. Ordinary video bytes remain warm-container-only: accepted input may
+still in memory. Staging and foreground-activity signals remain immediate.
+Projection-required attachment input waits for durable available, partial, or
+failed evidence before pending-index visibility and active-turn notification.
+Attachment-free text and privacy-preserving group email whose raw projection is
+intentionally omitted keep their immediate admission paths. Parser retries
+leave projection pending, intentional cancellation leaves the mailbox watermark
+unchanged, and evidence-write
+failures remain retryable unless a durable read proves terminal evidence was
+already preserved. This keeps raw attachment paths inspectable and available
+audio/video transcripts in the input snapshot used for prompt construction.
+Ordinary video bytes remain warm-container-only: accepted input may
 protect them locally while active, but snapshot planning excludes their
 validated canonical paths and idle maintenance deletes them atomically as soon
 as protection ends. Explicit canonical durable raw references remain outside
@@ -122,6 +141,12 @@ The checkpoint response's `conversationInputAhead` field is transient
 coordination, not durable runtime state. Web has already committed the valid
 workspace snapshot, redacted watermarks, and requested wake projection as one
 workspace-version CAS prefix.
+After device-sync provider work stages an exact single or batch dirty-processed
+record, a coalesced runtime wake is revalidated against canonical conversation
+and system-mailbox high waters before it can defer that record. A complete,
+caught-up prefetch lets the staged record finish; newer conversation or system
+work, an incomplete or failed prefetch, and a wake during exact dirty
+acknowledgement retain their existing preemption behavior.
 If shutdown has begun, this package leaves the newer mailbox row to the durable
 web/Temporal reconciliation path instead of consuming a local wake and creating
 a second metadata-only snapshot. If input was already imported and staged before
@@ -177,7 +202,10 @@ Hosted runtime env/config helpers that Cloudflare needs at the app boundary expo
 membership is owned by `@murphai/hosted-execution/assistant-capabilities`, so
 runtime launch/profile contracts do not re-export lower owner packages through
 legacy shims. Concrete Codex app-server process lifecycle hooks remain owned by
-`@murphai/assistant-engine/codex-lifecycle`.
+`@murphai/assistant-engine/codex-lifecycle`. The Cloudflare container invokes
+that owner before delegating to production workspace restore, so its restore
+cannot validate, replace, clear, or sanitize Codex home while the prior process
+is alive.
 Hosted Codex keeps WebSockets enabled for the first provider attempt and sets
 `stream_max_retries = 0`, so a retryable stream failure activates Codex's native
 HTTPS fallback instead of spending another full stream-idle window on the same

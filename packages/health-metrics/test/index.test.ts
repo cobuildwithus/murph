@@ -5,6 +5,7 @@ import { test } from "vitest";
 import {
   METRIC_POINT_SCHEMA_VERSION,
   canonicalizeWearableProviderSlug,
+  normalizeWearableQueryProviderSlug,
   assessExperimentPrimaryMetricCapture,
   buildMetricSeries,
   createCustomMetricDefinition,
@@ -152,6 +153,46 @@ test("keeps Google Health as a distinct wearable origin with a readable label", 
   assert.equal(canonicalizeWearableProviderSlug("google_health"), "google-health");
   assert.equal(resolveWearableProviderDescriptor("google-health")?.displayName, "Google Health");
   assert.notEqual(canonicalizeWearableProviderSlug("google_health"), "fitbit");
+});
+
+test("normalizes public wearable query providers without a connector allowlist", () => {
+  assert.deepEqual(
+    [
+      "fitbit",
+      "withings",
+      "polar",
+      "google_health",
+      "apple_health",
+      "apple_health_kit",
+      "apple_healthkit",
+      "whoop_v2",
+      " future-ring ",
+    ].map(normalizeWearableQueryProviderSlug),
+    [
+      "fitbit",
+      "withings",
+      "polar",
+      "google-health",
+      "apple-health",
+      "apple-health-kit",
+      "apple-health-kit",
+      "whoop",
+      "future-ring",
+    ],
+  );
+
+  for (const invalid of [
+    "",
+    "   ",
+    "junction",
+    "bad provider",
+    "bad/provider",
+    "bad--provider",
+    "bad\u0000provider",
+    "a".repeat(81),
+  ]) {
+    assert.equal(normalizeWearableQueryProviderSlug(invalid), null, invalid);
+  }
 });
 
 test("resolves metric aliases, biomarker primary metrics, and normalized metric keys", () => {
@@ -4587,39 +4628,43 @@ test("validates aggregate wearable shadow result cards as blocked research evide
       aggregateMetricDeltas: {
         brierDelta: -0.0012,
         logLossDelta: "bad-delta",
+        unexpectedDelta: 1,
       },
       aggregateSample: {
         evaluatedRowCount: 12.5,
         eventCount: -1,
         minimumCellCount: Number.POSITIVE_INFINITY,
+        unexpectedSample: 1,
       },
     },
   });
   assert.equal(malformedValueValidation.status, "invalid");
-  assert.equal(
-    malformedValueValidation.warnings.some((warning) =>
-      warning.message.includes("logLossDelta must be a finite number")
-    ),
-    true,
-  );
-  assert.equal(
-    malformedValueValidation.warnings.some((warning) =>
-      warning.message.includes("evaluatedRowCount must be a nonnegative integer")
-    ),
-    true,
-  );
-  assert.equal(
-    malformedValueValidation.warnings.some((warning) =>
-      warning.message.includes("eventCount must be a nonnegative integer")
-    ),
-    true,
-  );
-  assert.equal(
-    malformedValueValidation.warnings.some((warning) =>
-      warning.message.includes("minimumCellCount must be a nonnegative integer")
-    ),
-    true,
-  );
+  assert.deepEqual(malformedValueValidation.warnings, [
+    {
+      code: "MODEL_CARD_POLICY_VIOLATION",
+      message: "Wearable shadow result card aggregate metric deltas contains unsupported field unexpectedDelta.",
+    },
+    {
+      code: "INVALID_INPUT",
+      message: "Wearable shadow result card aggregate metric delta logLossDelta must be a finite number.",
+    },
+    {
+      code: "MODEL_CARD_POLICY_VIOLATION",
+      message: "Wearable shadow result card aggregate sample contains unsupported field unexpectedSample.",
+    },
+    {
+      code: "INVALID_INPUT",
+      message: "Wearable shadow result card aggregate sample evaluatedRowCount must be a nonnegative integer.",
+    },
+    {
+      code: "INVALID_INPUT",
+      message: "Wearable shadow result card aggregate sample eventCount must be a nonnegative integer.",
+    },
+    {
+      code: "INVALID_INPUT",
+      message: "Wearable shadow result card aggregate sample minimumCellCount must be a nonnegative integer.",
+    },
+  ]);
 });
 
 test("validates aggregate increment evaluation cards across biomarker routes", () => {
@@ -4687,6 +4732,28 @@ test("validates aggregate increment evaluation cards across biomarker routes", (
   const validation = validateMurphAgeIncrementEvaluationCard(evidenceCard);
   assert.equal(validation.status, "valid");
   assert.deepEqual(validation.warnings, []);
+
+  const malformedMetrics = validateMurphAgeIncrementEvaluationCard({
+    ...evidenceCard,
+    evaluation: {
+      ...evidenceCard.evaluation,
+      aggregateMetricDeltas: { brierDelta: -0.001, aucDelta: null, unexpectedDelta: 1 },
+      aggregateSample: { eventCount: -1, unexpectedSample: 1 },
+      anchorMetrics: { auc: null, cIndex: null, brier: null, unexpectedAnchor: 1 },
+      candidateMetrics: { auc: null, cIndex: null, logLoss: Number.NaN, unexpectedCandidate: 1 },
+    },
+  });
+  assert.equal(malformedMetrics.status, "invalid");
+  assert.deepEqual(malformedMetrics.warnings.map((warning) => warning.message), [
+    "Increment evaluation card aggregate metric deltas contains unsupported field unexpectedDelta.",
+    "Increment evaluation card aggregate metric delta aucDelta must be a finite number.",
+    "Increment evaluation card aggregate sample contains unsupported field unexpectedSample.",
+    "Increment evaluation card aggregate sample eventCount must be a nonnegative integer.",
+    "Increment evaluation card anchor metrics contains unsupported field unexpectedAnchor.",
+    "Increment evaluation card aggregate metric brier must be a finite number.",
+    "Increment evaluation card candidate metrics contains unsupported field unexpectedCandidate.",
+    "Increment evaluation card aggregate metric logLoss must be a finite number.",
+  ]);
 
   const ordinaryRoutes = listMurphAgeOrdinaryLabWearableSourceRoutes().slice(0, 2);
   assert.deepEqual(ordinaryRoutes.map((route) => route.routeId), [

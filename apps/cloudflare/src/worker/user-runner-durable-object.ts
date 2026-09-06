@@ -23,21 +23,34 @@ import type {
 import {
   asWorkerStringEnvironment,
 } from "../worker-contracts.ts";
+import {
+  createHostedRunnerContainerNamespaceRouter,
+} from "../standby-runner-contract.ts";
 import type {
   UserRunnerDurableObjectStubLike,
   WorkerEnvironmentSource,
 } from "../worker-routes/shared.ts";
 
 export class UserRunnerDurableObject extends DurableObject implements UserRunnerDurableObjectStubLike {
+  private readonly activationTiming: {
+    userRunnerConstructorStartedAtEpochMs: number;
+    userRunnerConstructorFinishedAtEpochMs: number;
+  };
+  private userRunnerFirstEnsureRuntimeProcessingAtEpochMs: number | null = null;
   private readonly runner: HostedUserRunner;
 
   constructor(
     state: DurableObjectStateLike,
     env: WorkerEnvironmentSource,
-    runner: HostedUserRunner = createHostedUserRunner(state, env),
+    runner?: HostedUserRunner,
   ) {
+    const userRunnerConstructorStartedAtEpochMs = Date.now();
     super(state as never, env as never);
-    this.runner = runner;
+    this.runner = runner ?? createHostedUserRunner(state, env);
+    this.activationTiming = {
+      userRunnerConstructorStartedAtEpochMs,
+      userRunnerConstructorFinishedAtEpochMs: Date.now(),
+    };
   }
 
   async bindUser(userId: string): Promise<{ userId: string }> {
@@ -57,8 +70,16 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
   async prewarmRuntimeShellForUser(
     userId: string,
     source?: Parameters<HostedUserRunner["prewarmRuntimeShellForUser"]>[1],
+    orchestration?: Parameters<HostedUserRunner["prewarmRuntimeShellForUser"]>[2],
   ): ReturnType<HostedUserRunner["prewarmRuntimeShellForUser"]> {
-    return this.runner.prewarmRuntimeShellForUser(userId, source);
+    return this.runner.prewarmRuntimeShellForUser(userId, source, {
+      ...(orchestration ?? {}),
+      shellPrewarmUserRunnerConstructorFinishedAtEpochMs:
+        this.activationTiming.userRunnerConstructorFinishedAtEpochMs,
+      shellPrewarmUserRunnerConstructorStartedAtEpochMs:
+        this.activationTiming.userRunnerConstructorStartedAtEpochMs,
+      shellPrewarmUserRunnerRpcStartedAtEpochMs: Date.now(),
+    });
   }
 
   async publishHostedPrivateMedia(
@@ -79,11 +100,18 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
       userId: string;
     },
   ): Promise<HostedRuntimeEnsureProcessingResponse> {
+    const userRunnerRpcStartedAtEpochMs = Date.now();
+    this.userRunnerFirstEnsureRuntimeProcessingAtEpochMs ??=
+      userRunnerRpcStartedAtEpochMs;
+
     return this.runner.ensureRuntimeProcessingForUser({
       ...input,
       orchestration: {
         ...(input.orchestration ?? {}),
-        userRunnerRpcStartedAtEpochMs: Date.now(),
+        ...this.activationTiming,
+        userRunnerFirstEnsureRuntimeProcessingAtEpochMs:
+          this.userRunnerFirstEnsureRuntimeProcessingAtEpochMs,
+        userRunnerRpcStartedAtEpochMs,
       },
     });
   }
@@ -94,6 +122,24 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     userId: string;
   }): Promise<boolean> {
     return this.runner.validateRuntimeWriteFence(input);
+  }
+
+  async admitHostedMediaRead(
+    input: Parameters<HostedUserRunner["admitHostedMediaRead"]>[0],
+  ): ReturnType<HostedUserRunner["admitHostedMediaRead"]> {
+    return this.runner.admitHostedMediaRead(input);
+  }
+
+  async recordHostedMediaAsset(
+    input: Parameters<HostedUserRunner["recordHostedMediaAsset"]>[0],
+  ): ReturnType<HostedUserRunner["recordHostedMediaAsset"]> {
+    return this.runner.recordHostedMediaAsset(input);
+  }
+
+  async forgetHostedMediaAsset(
+    input: Parameters<HostedUserRunner["forgetHostedMediaAsset"]>[0],
+  ): ReturnType<HostedUserRunner["forgetHostedMediaAsset"]> {
+    return this.runner.forgetHostedMediaAsset(input);
   }
 
   async revokeActiveRuntimePlatformAiUsage(
@@ -202,12 +248,17 @@ function createHostedUserRunner(
   state: DurableObjectStateLike,
   env: WorkerEnvironmentSource,
 ): HostedUserRunner {
+  const runnerContainerNamespace = createHostedRunnerContainerNamespaceRouter({
+    exactUser: env.RUNNER_CONTAINER,
+    standby: env.STANDBY_RUNNER_CONTAINER ?? null,
+  });
   return new HostedUserRunner(
     state,
     readHostedExecutionEnvironment(asWorkerStringEnvironment(env)),
     env.BUNDLES,
     env,
-    env.RUNNER_CONTAINER,
+    runnerContainerNamespace,
     env.HOSTED_RUNTIME_RETRY_ANALYTICS ?? null,
+    env.STANDBY_COORDINATOR ?? null,
   );
 }

@@ -13,6 +13,7 @@ import {
 import type { LinqAPIV3 } from "@linqapp/sdk";
 import type { TextPart } from "@linqapp/sdk/resources";
 import type { SupportedContentType } from "@linqapp/sdk/resources/attachments";
+import type { Message } from "@linqapp/sdk/resources/messages";
 import type {
   Chat,
   ChatCreateParams,
@@ -72,6 +73,31 @@ export type HostedLinqSendResult = {
   messageId: string | null;
   providerMessageIds?: string[];
 };
+
+/** Content stays request-local; retrieval never creates a new send target. */
+export async function readHostedLinqFailedMessage(messageId: string): Promise<Message> {
+  return requestHostedLinqSdkOrThrow({
+    operation: "failed message retrieve",
+    request: (client) => client.messages.retrieve(messageId),
+    timeoutMessage: "Linq failed message retrieval timed out.",
+    timeoutMs: 3_000,
+  });
+}
+
+export async function resendHostedLinqMessage(input: {
+  chatId: string;
+  message: MessageSendParams["message"];
+}): Promise<HostedLinqSendResult> {
+  const response = await requestHostedLinqSdkOrThrow({
+    operation: "terminal message retry",
+    request: (client) => client.chats.messages.send(input.chatId, {
+      message: input.message,
+    }),
+    timeoutMessage: "Linq terminal message retry timed out.",
+    timeoutMs: 5_000,
+  });
+  return { chatId: response.chat_id, messageId: response.message.id };
+}
 
 export async function createHostedLinqChat(input: {
   from: string;
@@ -570,9 +596,71 @@ export type HostedLinqChatHandleSummary = {
 
 export type HostedLinqChatSummary = {
   displayName?: string | null;
+  handleCount?: number;
+  handlesComplete?: boolean;
   handles: HostedLinqChatHandleSummary[];
   isGroup: boolean | null;
 };
+
+const HOSTED_LINQ_GROUP_TITLE_EMAIL_PATTERN =
+  /\b[^\s@]+@[^\s@]+\.[^\s@]+\b/u;
+const HOSTED_LINQ_GROUP_TITLE_PHONE_PATTERN =
+  /(?:^|\D)\+?\d[\d\s().-]{6,}\d(?:\D|$)/u;
+const HOSTED_LINQ_GROUP_TITLE_UNSAFE_PATTERN =
+  /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}]/gu;
+
+export function readHostedLinqExplicitGroupDisplayName(
+  chat: HostedLinqChatSummary,
+): string | null {
+  if (chat.isGroup !== true || chat.handlesComplete === false) {
+    return null;
+  }
+  const displayName = normalizeNullableString(chat.displayName)
+    ?.normalize("NFC")
+    .replace(HOSTED_LINQ_GROUP_TITLE_UNSAFE_PATTERN, "")
+    .replace(/\s+/gu, " ")
+    .trim() || null;
+  if (
+    !displayName
+    || HOSTED_LINQ_GROUP_TITLE_EMAIL_PATTERN.test(displayName)
+    || HOSTED_LINQ_GROUP_TITLE_PHONE_PATTERN.test(displayName)
+  ) {
+    return null;
+  }
+
+  // Linq synthesizes display_name from a comma-separated handle roster when
+  // the provider room has no explicit title. Suppress every current SDK
+  // variant so phone numbers and email addresses never become group metadata.
+  const normalizeHandles = (handles: readonly string[]) =>
+    handles
+      .map((handle) => handle.trim().toLowerCase())
+      .filter(Boolean)
+      .sort()
+      .join("\0");
+  const displayNameKey = normalizeHandles(displayName.split(","));
+  const activeHandles = chat.handles.filter(isActiveHostedLinqChatHandle);
+  const candidateHandleSets = [
+    chat.handles,
+    activeHandles,
+    chat.handles.filter(({ isMe }) => !isMe),
+    activeHandles.filter(({ isMe }) => !isMe),
+  ];
+
+  return displayNameKey
+      && candidateHandleSets.some((handles) =>
+        handles.length > 0
+        && normalizeHandles(handles.map(({ handle }) => handle)) === displayNameKey
+      )
+    ? null
+    : displayName;
+}
+
+function isActiveHostedLinqChatHandle(
+  handle: HostedLinqChatHandleSummary,
+): boolean {
+  const status = handle.status?.trim().toLowerCase() ?? null;
+  return status === null || status === "active";
+}
 
 export type HostedLinqReactionTargetMessage = {
   chatId: string;
@@ -606,11 +694,14 @@ export async function getHostedLinqChatSummary(input: {
   const handles: Chat["handles"] = canonical?.handles ?? [];
   const isGroup: Chat["is_group"] | null = canonical?.is_group ?? null;
 
+  const parsedHandles = handles
+    .map(parseHostedLinqChatHandleSummary)
+    .filter((handle): handle is HostedLinqChatHandleSummary => handle !== null);
   return {
     displayName,
-    handles: handles
-      .map(parseHostedLinqChatHandleSummary)
-      .filter((handle): handle is HostedLinqChatHandleSummary => handle !== null),
+    handleCount: handles.length,
+    handles: parsedHandles,
+    handlesComplete: canonical !== null && parsedHandles.length === handles.length,
     isGroup,
   };
 }

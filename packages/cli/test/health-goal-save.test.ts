@@ -1,17 +1,24 @@
 import assert from "node:assert/strict";
-import { readFile, rm } from "node:fs/promises";
+import { readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { Cli } from "incur";
 import { test } from "vitest";
 
-import { initializeVault, parseFrontmatterDocument } from "@murphai/core";
-import { createUnwiredVaultServices } from "@murphai/vault-usecases";
+import {
+  initializeVault,
+  listGoals,
+  listWriteOperationMetadataPaths,
+  parseFrontmatterDocument,
+} from "@murphai/core";
+import { getGeneratedHealthCommonsWebGoalIndex } from "@murphai/health-commons/runtime";
+import { createIntegratedVaultServices } from "@murphai/vault-usecases";
 
 import { registerGoalCommands } from "../src/commands/health-goal-save.js";
 import { incurErrorBridge } from "../src/incur-error-bridge.js";
 import {
   createTempVaultContext,
+  type InProcessCliJsonResult,
   requireData,
   runInProcessJsonCli,
 } from "./cli-test-helpers.js";
@@ -35,9 +42,50 @@ interface GoalSaveResult {
   created: boolean;
 }
 
+interface GoalShowResult {
+  entity: {
+    data: {
+      title: string;
+      status: string;
+      commonsGoalRef?: {
+        key: string;
+        pageRevisionId: string;
+        workflowSpecRevisionId: string;
+      };
+    };
+  };
+}
+
+interface GoalListResult {
+  count: number;
+  items: Array<{
+    id: string;
+    data: {
+      commonsGoalRef?: {
+        key: string;
+        pageRevisionId: string;
+        workflowSpecRevisionId: string;
+      };
+    };
+  }>;
+}
+
 interface RawCliResult {
   exitCode: number | null;
   output: string;
+}
+
+const commonsGoal = getGeneratedHealthCommonsWebGoalIndex().goals.find(
+  (goal) => goal.key === "goal_template:sleep-better",
+);
+if (!commonsGoal) {
+  throw new Error("Expected the packaged sleep-better Goal guide.");
+}
+const commonsPageRevisionId = commonsGoal.revision.pageRevisionId;
+const commonsWorkflowRevisionId = commonsGoal.revision.workflowSpecRevisionId;
+
+function changeRevision(revision: string): string {
+  return `${revision.slice(0, -1)}${revision.endsWith("0") ? "1" : "0"}`;
 }
 
 function createGoalCli() {
@@ -47,7 +95,7 @@ function createGoalCli() {
   });
   cli.use(incurErrorBridge);
 
-  const services = createUnwiredVaultServices();
+  const services = createIntegratedVaultServices();
   registerGoalCommands(cli, services);
 
   return cli;
@@ -129,6 +177,20 @@ async function readGoalSaveHelp(cli: Cli.Cli): Promise<string> {
   return result.output;
 }
 
+async function readAuditSnapshot(vaultRoot: string): Promise<string[]> {
+  const auditRoot = path.join(vaultRoot, "audit");
+  const entries = await readdir(auditRoot, { recursive: true });
+  const files = entries
+    .filter((entry) => entry.endsWith(".jsonl"))
+    .sort((left, right) => left.localeCompare(right));
+
+  return Promise.all(
+    files.map((relativePath) =>
+      readFile(path.join(auditRoot, relativePath), "utf8")
+    ),
+  );
+}
+
 function requireSavedPath(result: GoalSaveResult): string {
   if (!result.path) {
     throw new Error("Expected goal save result to include a relative path.");
@@ -141,7 +203,8 @@ test("goal save schema exposes typed fields while goal import-json remains the J
   const cli = createGoalCli();
 
   const goalSave = await readCommandSchema(cli, ["goal", "save"]);
-  assert.deepEqual(goalSave.args.required, ["title"]);
+  assert.deepEqual(goalSave.args.required ?? [], []);
+  assert.equal("title" in goalSave.args.properties, true);
   assert.equal("input" in goalSave.options.properties, false);
   assert.equal(goalSave.options.required?.includes("input") ?? false, false);
 
@@ -156,6 +219,9 @@ test("goal save schema exposes typed fields while goal import-json remains the J
     "parentGoalId",
     "relatedGoalId",
     "relatedExperimentId",
+    "commonsGoalKey",
+    "commonsPageRevisionId",
+    "commonsWorkflowRevisionId",
     "domain",
   ]) {
     assert.equal(field in goalSave.options.properties, true, field);
@@ -167,6 +233,88 @@ test("goal save schema exposes typed fields while goal import-json remains the J
   const help = await readGoalSaveHelp(cli);
   assert.match(help, /goal import-json/u);
   assert.doesNotMatch(help, /goal upsert/u);
+});
+
+test("goal save with a missing id fails closed with or without a title", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-goal-save-missing-id-",
+  );
+
+  try {
+    const cli = createGoalCli();
+    await initializeVault({ vaultRoot });
+
+    const created = await runInProcessJsonCli<GoalSaveResult>(cli, [
+      "goal",
+      "save",
+      "Keep this goal",
+      "--slug",
+      "keep-this-goal",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(created.exitCode, null);
+    const createdGoal = requireData(created.envelope);
+    assert.equal(createdGoal.created, true);
+
+    const replacementSuffix = createdGoal.goalId.endsWith("A") ? "B" : "A";
+    const missingGoalId = `${createdGoal.goalId.slice(0, -1)}${replacementSuffix}`;
+    const goalsBefore = await listGoals(vaultRoot);
+    const operationsBefore = await listWriteOperationMetadataPaths(vaultRoot);
+    const commands = [
+      [
+        "goal",
+        "save",
+        "Must not replace",
+        "--id",
+        missingGoalId,
+        "--slug",
+        "keep-this-goal",
+        "--vault",
+        vaultRoot,
+      ],
+      [
+        "goal",
+        "save",
+        "--id",
+        missingGoalId,
+        "--status",
+        "paused",
+        "--vault",
+        vaultRoot,
+      ],
+    ];
+
+    for (const command of commands) {
+      const missing = await runInProcessJsonCli<GoalSaveResult>(cli, command);
+
+      assert.equal(missing.exitCode, 1);
+      assert.equal(missing.envelope.ok, false);
+      if (!missing.envelope.ok) {
+        assert.equal(missing.envelope.error.code, "not_found");
+        assert.equal(missing.envelope.error.message, "Goal was not found.");
+        assert.equal(missing.envelope.error.retryable, false);
+        assert.equal(missing.envelope.error.stage, "read");
+        assert.equal(
+          missing.envelope.error.hint,
+          "After this error, run only goal list once. Do not write again this turn. If a listed goal matches, end with one question naming its exact goal id and the requested change; retry only after the user confirms. If none is intended, stop and ask for a separate follow-up. Never offer creation here.",
+        );
+      }
+    }
+
+    const goalsAfter = await listGoals(vaultRoot);
+    assert.deepEqual(goalsAfter, goalsBefore);
+    assert.equal(goalsAfter[0]?.entity.title, "Keep this goal");
+    assert.deepEqual(
+      await listWriteOperationMetadataPaths(vaultRoot),
+      operationsBefore,
+    );
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
 });
 
 test("goal save persists typed fields and repeated relationships", async () => {
@@ -222,6 +370,12 @@ test("goal save persists typed fields and repeated relationships", async () => {
       requireData(relatedGoal.envelope).goalId,
       "--related-experiment-id",
       "exp_01JNY0B2W4VG5C2A0G9S8M7R6S",
+      "--commons-goal-key",
+      "goal_template:sleep-better",
+      "--commons-page-revision-id",
+      commonsPageRevisionId,
+      "--commons-workflow-revision-id",
+      commonsWorkflowRevisionId,
       "--domain",
       "sleep",
       "--domain",
@@ -234,6 +388,38 @@ test("goal save persists typed fields and repeated relationships", async () => {
     const saved = requireData(savedChild.envelope);
     assert.equal(saved.created, true);
     assert.equal(saved.lookupId, saved.goalId);
+    const expectedCommonsGoalRef = {
+      key: "goal_template:sleep-better",
+      pageRevisionId: commonsPageRevisionId,
+      workflowSpecRevisionId: commonsWorkflowRevisionId,
+    };
+
+    const shownChild = await runInProcessJsonCli<GoalShowResult>(cli, [
+      "goal",
+      "show",
+      saved.goalId,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shownChild.exitCode, null, JSON.stringify(shownChild.envelope));
+    assert.deepEqual(
+      requireData(shownChild.envelope).entity.data.commonsGoalRef,
+      expectedCommonsGoalRef,
+    );
+
+    const listedGoals = await runInProcessJsonCli<GoalListResult>(cli, [
+      "goal",
+      "list",
+      "--limit",
+      "200",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(listedGoals.exitCode, null, JSON.stringify(listedGoals.envelope));
+    const listedChild = requireData(listedGoals.envelope).items.find(
+      (item) => item.id === saved.goalId,
+    );
+    assert.deepEqual(listedChild?.data.commonsGoalRef, expectedCommonsGoalRef);
 
     const markdown = await readFile(
       path.join(vaultRoot, requireSavedPath(saved)),
@@ -258,6 +444,11 @@ test("goal save persists typed fields and repeated relationships", async () => {
     assert.deepEqual(document.attributes.relatedExperimentIds, [
       "exp_01JNY0B2W4VG5C2A0G9S8M7R6S",
     ]);
+    assert.deepEqual(document.attributes.commonsGoalRef, {
+      key: "goal_template:sleep-better",
+      pageRevisionId: commonsPageRevisionId,
+      workflowSpecRevisionId: commonsWorkflowRevisionId,
+    });
     assert.deepEqual(document.attributes.domains, ["recovery", "sleep"]);
 
     const updated = await runInProcessJsonCli<GoalSaveResult>(cli, [
@@ -319,6 +510,296 @@ test("goal save rejects comma-delimited repeatable fields", async () => {
       assert.equal(result.envelope.error.code, "invalid_option");
       assert.match(result.envelope.error.message ?? "", /--domain/u);
     }
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("goal save requires a complete Health Commons lineage tuple", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-goal-lineage-",
+  );
+
+  try {
+    const cli = createGoalCli();
+    await initializeVault({ vaultRoot });
+
+    const result = await runInProcessJsonCli<GoalSaveResult>(cli, [
+      "goal",
+      "save",
+      "Sleep better",
+      "--commons-goal-key",
+      "goal_template:sleep-better",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.envelope.ok, false);
+    if (!result.envelope.ok) {
+      assert.equal(result.envelope.error.code, "invalid_option");
+      assert.match(result.envelope.error.message ?? "", /must be provided together/u);
+    }
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("goal save rejects missing and stale Health Commons lineage before writing", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-goal-lineage-cas-",
+  );
+
+  try {
+    const cli = createGoalCli();
+    await initializeVault({ vaultRoot });
+    const auditBefore = await readAuditSnapshot(vaultRoot);
+
+    const missing = await runInProcessJsonCli<GoalSaveResult>(cli, [
+      "goal",
+      "save",
+      "Missing public goal",
+      "--commons-goal-key",
+      "goal_template:missing-public-goal",
+      "--commons-page-revision-id",
+      commonsPageRevisionId,
+      "--commons-workflow-revision-id",
+      commonsWorkflowRevisionId,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(missing.exitCode, 1);
+    assert.equal(missing.envelope.ok, false);
+    if (!missing.envelope.ok) {
+      assert.equal(missing.envelope.error.code, "commons_goal_not_found");
+      assert.match(missing.envelope.error.message ?? "", /Show the goal again/u);
+    }
+
+    for (const [pageRevisionId, workflowRevisionId] of [
+      [changeRevision(commonsPageRevisionId), commonsWorkflowRevisionId],
+      [commonsPageRevisionId, changeRevision(commonsWorkflowRevisionId)],
+    ]) {
+      const staleResult: InProcessCliJsonResult<GoalSaveResult> =
+        await runInProcessJsonCli<GoalSaveResult>(cli, [
+          "goal",
+          "save",
+          "Sleep better",
+          "--commons-goal-key",
+          commonsGoal.key,
+          "--commons-page-revision-id",
+          pageRevisionId,
+          "--commons-workflow-revision-id",
+          workflowRevisionId,
+          "--vault",
+          vaultRoot,
+        ]);
+      assert.equal(staleResult.exitCode, 1);
+      assert.equal(staleResult.envelope.ok, false);
+      if (!staleResult.envelope.ok) {
+        assert.equal(staleResult.envelope.error.code, "invalid_option");
+        assert.match(
+          staleResult.envelope.error.message ?? "",
+          /changed after this setup was prepared/u,
+        );
+      }
+    }
+
+    const listed = await runInProcessJsonCli<GoalListResult>(cli, [
+      "goal",
+      "list",
+      "--limit",
+      "200",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(listed.exitCode, null);
+    assert.equal(requireData(listed.envelope).count, 0);
+    assert.deepEqual(await readAuditSnapshot(vaultRoot), auditBefore);
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("goal import-json cannot create public Goal lineage", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-goal-import-lineage-",
+  );
+
+  try {
+    const cli = createGoalCli();
+    await initializeVault({ vaultRoot });
+    const auditBefore = await readAuditSnapshot(vaultRoot);
+    const payloadPath = path.join(parentRoot, "goal-with-public-lineage.json");
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        title: "Forged public goal",
+        commonsGoalRef: {
+          key: commonsGoal.key,
+          pageRevisionId: commonsPageRevisionId,
+          workflowSpecRevisionId: commonsWorkflowRevisionId,
+        },
+      }),
+      "utf8",
+    );
+
+    const imported = await runInProcessJsonCli<GoalSaveResult>(cli, [
+      "goal",
+      "import-json",
+      "--input",
+      `@${payloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(imported.exitCode, 1);
+    assert.equal(imported.envelope.ok, false);
+    if (!imported.envelope.ok) {
+      assert.equal(imported.envelope.error.code, "invalid_payload");
+    }
+
+    const listed = await runInProcessJsonCli<GoalListResult>(cli, [
+      "goal",
+      "list",
+      "--limit",
+      "200",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(listed.exitCode, null);
+    assert.equal(requireData(listed.envelope).count, 0);
+    assert.deepEqual(await readAuditSnapshot(vaultRoot), auditBefore);
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("goal save executes the documented titleless pause and resume commands without overwriting the latest title", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-goal-lifecycle-",
+  );
+
+  try {
+    const cli = createGoalCli();
+    await initializeVault({ vaultRoot });
+
+    const missingTitle = await runInProcessJsonCli<GoalSaveResult>(cli, [
+      "goal",
+      "save",
+      "--status",
+      "active",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(missingTitle.exitCode, 1);
+    assert.equal(missingTitle.envelope.ok, false);
+    if (!missingTitle.envelope.ok) {
+      assert.equal(missingTitle.envelope.error.code, "invalid_option");
+      assert.match(missingTitle.envelope.error.message ?? "", /title is required/u);
+    }
+    const emptyList = await runInProcessJsonCli<GoalListResult>(cli, [
+      "goal",
+      "list",
+      "--limit",
+      "200",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(emptyList.exitCode, null);
+    assert.equal(requireData(emptyList.envelope).count, 0);
+
+    const created = await runInProcessJsonCli<GoalSaveResult>(cli, [
+      "goal",
+      "save",
+      "Improve my deep sleep",
+      "--status",
+      "active",
+      "--commons-goal-key",
+      commonsGoal.key,
+      "--commons-page-revision-id",
+      commonsPageRevisionId,
+      "--commons-workflow-revision-id",
+      commonsWorkflowRevisionId,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(created.exitCode, null);
+    const goalId = requireData(created.envelope).goalId;
+
+    const renamed = await runInProcessJsonCli<GoalSaveResult>(cli, [
+      "goal",
+      "save",
+      "Improve sleep depth",
+      "--id",
+      goalId,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(renamed.exitCode, null);
+
+    for (const status of ["paused", "active"] as const) {
+      const saved = await runInProcessJsonCli<GoalSaveResult>(cli, [
+        "goal",
+        "save",
+        "--id",
+        goalId,
+        "--status",
+        status,
+        "--vault",
+        vaultRoot,
+      ]);
+      assert.equal(saved.exitCode, null);
+      assert.equal(requireData(saved.envelope).created, false);
+      assert.equal(requireData(saved.envelope).goalId, goalId);
+
+      const shown = await runInProcessJsonCli<GoalShowResult>(cli, [
+        "goal",
+        "show",
+        goalId,
+        "--vault",
+        vaultRoot,
+      ]);
+      assert.equal(shown.exitCode, null, JSON.stringify(shown.envelope));
+      assert.equal(requireData(shown.envelope).entity.data.status, status);
+      assert.equal(
+        requireData(shown.envelope).entity.data.title,
+        "Improve sleep depth",
+      );
+      assert.deepEqual(
+        requireData(shown.envelope).entity.data.commonsGoalRef,
+        {
+          key: commonsGoal.key,
+          pageRevisionId: commonsPageRevisionId,
+          workflowSpecRevisionId: commonsWorkflowRevisionId,
+        },
+      );
+    }
+
+    const listed = await runInProcessJsonCli<GoalListResult>(cli, [
+      "goal",
+      "list",
+      "--limit",
+      "200",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(listed.exitCode, null);
+    assert.equal(requireData(listed.envelope).count, 1);
+    assert.deepEqual(
+      requireData(listed.envelope).items.map(({ id }) => id),
+      [goalId],
+    );
   } finally {
     await rm(parentRoot, {
       force: true,

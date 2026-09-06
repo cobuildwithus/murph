@@ -3,15 +3,13 @@ import {
   parseHostedRuntimeProductFeedbackRecordResponse,
 } from "@murphai/hosted-execution/parsers";
 import {
-  HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
-} from "@murphai/hosted-execution/routes";
-import {
   isHostedProductSupportEscalationFeedback,
   type HostedRuntimeProductFeedbackRecord,
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
   fetchHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
 
@@ -36,7 +34,7 @@ export function createHostedRuntimeProductFeedbackPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted product feedback recording",
         fetchImpl: input.fetchImpl,
-        path: HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.productFeedbackRecording,
         sensitiveResponseBody: {
           maxBytes: HOSTED_PRODUCT_FEEDBACK_RESPONSE_MAX_BYTES,
         },

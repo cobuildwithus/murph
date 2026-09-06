@@ -63,6 +63,7 @@ export function createTestSqlStorage(input: {
       database.exec(`
         DROP TABLE IF EXISTS runner_meta;
         DROP TABLE IF EXISTS runner_bundle_slots;
+        DROP TABLE IF EXISTS runner_hosted_media_asset;
       `);
       initializeSchema(database);
     },

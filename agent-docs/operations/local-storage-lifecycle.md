@@ -77,6 +77,19 @@ Use `scripts/create-worktree`; use `--data-research <reason>` only for genuinely
 large data or research work. Registered worktrees remain visible to the normal
 open-PR, plan, cleanliness, process-CWD, and retirement gates.
 
+When a task needs the standard Codex-managed destination, pass
+`--codex-worktree <safe-leaf>` instead of assembling an absolute path in the
+caller. The helper selects the explicit `CODEX_HOME` when present and otherwise
+uses the current user's standard Codex home. Before branch creation, it requires
+that home to be absolute, current-user-owned, and writable; creates and
+canonicalizes the `worktrees/<repository>` owner directories from the stable
+primary checkout identity; and rejects symlink redirection or any pre-existing
+final target. The existing explicit-path form remains available when an
+established alternate destination has already passed the caller's
+repository-policy preflight. Value-taking options never consume another
+recognized option token, so malformed combined invocations fail through the
+usage boundary before mode selection, storage admission, or branch handling.
+
 The creation helper prepares the shared local exclude rule before registration,
 registers each worktree with checkout materialization suppressed, and writes
 `.metadata_never_index` at the worktree root before tracked files exist. It then
@@ -157,6 +170,13 @@ Retire a clean registered checkout with `scripts/retire-worktree` after its
 terminal gate is satisfied. A standalone legacy clone needs explicit operator
 authorization plus immediate Git, PR, active-work, and process-CWD proof before
 exact-path removal.
+
+If non-force removal fails after deleting tracked files, the helper attempts
+immediate missing-only restoration from the unchanged original Git index and
+HEAD. Existing files, replacement symlink parents, and changed or missing Git
+metadata are never overwritten or rebuilt. The command still fails and reports
+the bounded removal error; a clean quarantine can be retried through the same
+helper. Unproved or incomplete recovery remains a manual inspection blocker.
 
 ## Package stores
 

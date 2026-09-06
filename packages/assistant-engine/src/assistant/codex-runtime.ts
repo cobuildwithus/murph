@@ -61,10 +61,8 @@ export async function prepareHostedCodexAssistantProcess(
     assistantModelTargetToProviderConfigInput(input.target),
   )
   return await preinitializeCodexAssistantProcessUnchecked({
-    codexConfigOverrides: null,
     env: input.env,
     providerConfig,
-    showThinkingTraces: false,
     signal: input.signal ?? undefined,
     workingDirectory: input.workingDirectory,
   })

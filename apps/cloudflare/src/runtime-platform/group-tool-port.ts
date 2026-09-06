@@ -8,6 +8,8 @@ import {
 import {
   HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER,
   HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE,
+  HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_PARAM,
+  HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_VALUE,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   buildHostedVaultShareProjectionScopeKey,
@@ -15,7 +17,9 @@ import {
 } from "@murphai/hosted-execution/vault-share";
 
 import {
+  bindHostedRunnerWebControlRoutePath,
   fetchHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
 
@@ -64,7 +68,10 @@ export function createHostedRuntimeGroupToolPort(input: {
         boundUserId: input.boundUserId,
         description: "Hosted group tool",
         fetchImpl: input.fetchImpl,
-        path: buildHostedRuntimeGroupToolPath(),
+        route: bindHostedRunnerWebControlRoutePath(
+          HOSTED_RUNNER_WEB_CONTROL_ROUTES.groupTool,
+          buildHostedRuntimeGroupToolPath(),
+        ),
         replayOnceOnRetryableFailure: isHostedReplaySafeGroupToolRequest(request),
         ...(isParticipantDisplayNameRead
           ? {
@@ -116,6 +123,10 @@ function isHostedReplaySafeGroupToolRequest(
 
 function buildHostedRuntimeGroupToolPath(): string {
   const params = new URLSearchParams();
+  params.set(
+    HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_PARAM,
+    HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_VALUE,
+  );
   for (const projectionScope of HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES) {
     params.append(
       HOSTED_VAULT_SHARE_SUPPORTED_PROJECTION_SCOPE_PARAM,

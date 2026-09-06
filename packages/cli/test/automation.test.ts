@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { Buffer } from "node:buffer";
 import { rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -6,15 +7,24 @@ import { Cli } from "incur";
 import { afterEach, test, vi } from "vitest";
 
 import {
+  AUTOMATION_DOC_TYPE,
+  AUTOMATION_SCHEMA_VERSION,
   AUTOMATION_SUPPORT_SERIES_RECONCILED_ARCHIVE_TAG,
   automationAssistantTargetOverrideSchema,
   automationContextReferencesSchema,
+  automationDeviceActivitySourceValues,
   automationRouteSchema,
   automationScaffoldPayloadSchema,
   automationScheduleSchema,
   buildAutomationSupportSeriesTag,
 } from "@murphai/contracts";
-import { upsertAutomation } from "@murphai/core";
+import { advanceAutomationDeviceActivityCursor, upsertAutomation } from "@murphai/core";
+import {
+  listAutomations,
+  showAutomation,
+  type AutomationListPageOptions,
+  type AutomationQueryRecord,
+} from "@murphai/query";
 import {
   automationRecordSchema,
   automationScaffoldResultSchema,
@@ -364,6 +374,13 @@ test("automation save and edit schemas expose typed fields while automation impo
     assert.equal(field in editSchema.options.properties, true, field);
   }
 
+  for (const schema of [saveSchema, editSchema]) {
+    assert.deepEqual(
+      (schema.options.properties.deviceSource as { enum: string[] }).enum,
+      [...automationDeviceActivitySourceValues],
+    );
+  }
+
   const importJsonSchema = await readCommandSchema(cli, ["automation", "import-json"]);
   assert.equal("input" in importJsonSchema.options.properties, true);
   assert.equal(importJsonSchema.options.required?.includes("input") ?? false, true);
@@ -378,6 +395,8 @@ test("automation save and edit schemas expose typed fields while automation impo
   assert.equal("includeBody" in listSchema.options.properties, false);
   assert.equal("supportSeriesId" in listSchema.options.properties, true);
   assert.equal("cursor" in listSchema.options.properties, true);
+  assert.equal("compact" in listSchema.options.properties, true);
+  assert.match(optionDescription(listSchema, "compact"), /automation show/u);
 });
 
 interface AutomationPublicPathCase {
@@ -893,12 +912,29 @@ test("automation save and edit manage assistant target overrides from typed fiel
     ]);
     assert.equal(invalidReasoningEffort.exitCode, 1);
     assert.equal(invalidReasoningEffort.envelope.ok, false);
-    assert.match(
-      invalidReasoningEffort.envelope.ok
-        ? ""
-        : invalidReasoningEffort.envelope.error.message ?? "",
-      /assistantTargetOverrideReasoningEffort|reasoning effort|low|medium|high|xhigh/u,
-    );
+    if (!invalidReasoningEffort.envelope.ok) {
+      assert.deepEqual(invalidReasoningEffort.envelope.error, {
+        code: "VALIDATION_ERROR",
+        message: "The command input is invalid.",
+        retryable: false,
+        hint: "Check the command schema and correct the invalid input.",
+        stage: "validation",
+        fieldErrors: [
+          {
+            code: "invalid_value",
+            missing: false,
+            path: "assistantTargetOverrideReasoningEffort",
+            expected: "",
+            received: "invalid",
+            message: "This field is invalid.",
+          },
+        ],
+      });
+      assert.equal(
+        JSON.stringify(invalidReasoningEffort.envelope.error).includes("hihg"),
+        false,
+      );
+    }
 
     const saved = await runInProcessJsonCli<{
       automationId: string;
@@ -1535,6 +1571,368 @@ test("automation save, import-json, and reactivation hard-cut local email delive
   } finally {
     await rm(parentRoot, { recursive: true, force: true });
   }
+});
+
+test("automation compact list preserves empty page semantics", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-compact-empty-",
+  );
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation compact empty test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+
+    const listed = await runInProcessJsonCli<{
+      compact: true;
+      count: number;
+      items: unknown[];
+      nextCursor: string | null;
+      totalCount: number;
+    }>(cli, [
+      "automation",
+      "list",
+      "--compact",
+      "--limit",
+      "25",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(listed.exitCode, null);
+    assert.equal(listed.envelope.ok, true);
+    assert.equal(listed.envelope.data?.compact, true);
+    assert.equal(listed.envelope.data?.count, 0);
+    assert.equal(listed.envelope.data?.totalCount, 0);
+    assert.equal(listed.envelope.data?.nextCursor, null);
+    assert.deepEqual(listed.envelope.data?.items, []);
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});
+
+test("automation compact list retains enumeration state and materially reduces a 25-item page", async () => {
+  const cli = Cli.create("vault-cli", {
+    description: "automation compact fixture test cli",
+    version: "0.0.0-test",
+  });
+  const vaultRoot = "/synthetic/automation-compact-vault";
+  const seriesId = "experiment:exp_compact_fixture";
+  const supportSeriesTag = buildAutomationSupportSeriesTag(seriesId);
+  const foreignSupportSeriesTag = buildAutomationSupportSeriesTag(
+    "experiment:exp_foreign_fixture",
+  );
+  const idAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+  const fixtureRecords: AutomationQueryRecord[] = Array.from({ length: 25 }, (_, index) => {
+    const suffix = idAlphabet[index];
+    if (suffix === undefined) {
+      throw new Error("Expected a deterministic automation id suffix.");
+    }
+    const fixtureIndex = String(index).padStart(2, "0");
+    const record = automationRecordSchema.parse({
+      activeUntil: "2026-12-31T23:59:59.000Z",
+      assistantTargetOverride: {
+        model: "gpt-5.6-terra",
+        modelProvider: "vercel-ai-gateway",
+        reasoningEffort: "low",
+      },
+      automationId: `automation_01ARZ3NDEKTSV4RRFFQ69G5FA${suffix}`,
+      contextReferences: [{
+        entityId: "exp_compact_fixture",
+        entityKind: "experiment",
+      }],
+      continuityPolicy: "preserve",
+      createdAt: "2026-08-29T12:00:00.000Z",
+      instructions: `Synthetic scheduled assistant instructions ${fixtureIndex}.`,
+      markdown: `# Synthetic support inventory ${fixtureIndex}`,
+      plannedOccurrenceOffsetMs: index * 60_000,
+      relativePath: `bank/automations/compact-fixture-${fixtureIndex}.md`,
+      route: {
+        channel: "telegram",
+        deliveryTarget: `telegram:compact-fixture-${fixtureIndex}`,
+        identityId: `identity_compact_fixture_${fixtureIndex}`,
+        participantId: `participant_compact_fixture_${fixtureIndex}`,
+        threadId: `thread_compact_fixture_${fixtureIndex}`,
+      },
+      schedule: {
+        expression: `${index % 60} 9 * * 1`,
+        kind: "cron",
+        timeZone: "America/New_York",
+      },
+      scheduleAnchorAt: "2026-08-29T12:00:00.000Z",
+      slug: `compact-fixture-${fixtureIndex}`,
+      status: index % 3 === 0 ? "paused" : "active",
+      summary: `Synthetic support inventory summary ${fixtureIndex} with enough bounded context to distinguish its purpose.`,
+      supportKind: index % 2 === 0 ? "reminder" : "review",
+      tags: [
+        "assistant",
+        "scheduled",
+        "compact-inventory-fixture",
+        `compact-inventory-segment-${fixtureIndex}`,
+        supportSeriesTag,
+      ],
+      title: `Synthetic support inventory ${fixtureIndex}`,
+      updatedAt: `2026-08-29T12:${fixtureIndex}:00.000Z`,
+    });
+    return {
+      schemaVersion: AUTOMATION_SCHEMA_VERSION,
+      docType: AUTOMATION_DOC_TYPE,
+      ...record,
+    };
+  });
+  const firstFixtureRecord = fixtureRecords[0];
+  if (firstFixtureRecord === undefined) {
+    throw new Error("Expected at least one compact automation fixture.");
+  }
+  const foreignRecord: AutomationQueryRecord = {
+    ...firstFixtureRecord,
+    automationId: "automation_01ARZ3NDEKTSV4RRFFQ69G5FB0",
+    contextReferences: [{
+      entityId: "exp_foreign_fixture",
+      entityKind: "experiment",
+    }],
+    relativePath: "bank/automations/compact-fixture-foreign.md",
+    slug: "compact-fixture-foreign",
+    tags: [
+      "assistant",
+      "scheduled",
+      "compact-inventory-fixture",
+      foreignSupportSeriesTag,
+    ],
+    title: "Synthetic support inventory foreign owner",
+  };
+  const records = [...fixtureRecords, foreignRecord];
+  const listQueries: AutomationListPageOptions[] = [];
+
+  registerAutomationCommands(cli, {
+    async listAutomationPage(_fixtureVaultRoot, options = {}) {
+      listQueries.push(options);
+      const normalizedText = options.text?.toLocaleLowerCase("en-US");
+      const matches = records
+        .filter((record) =>
+          options.exactTag === undefined || record.tags.includes(options.exactTag)
+        )
+        .filter((record) =>
+          options.status === undefined || options.status.includes(record.status)
+        )
+        .filter((record) =>
+          normalizedText === undefined
+          || JSON.stringify(record).toLocaleLowerCase("en-US").includes(normalizedText)
+        )
+        .sort((left, right) => left.automationId.localeCompare(right.automationId));
+      const afterCursor = options.cursor === undefined
+        ? matches
+        : matches.filter((record) =>
+          record.automationId.localeCompare(options.cursor ?? "") > 0
+        );
+      const limit = options.limit ?? afterCursor.length;
+      const items = afterCursor.slice(0, limit);
+      return {
+        items,
+        nextCursor: afterCursor.length > limit
+          ? items.at(-1)?.automationId ?? null
+          : null,
+        totalCount: matches.length,
+      };
+    },
+    async showAutomation(_fixtureVaultRoot, lookup) {
+      return records.find((record) =>
+        record.automationId === lookup || record.slug === lookup
+      ) ?? null;
+    },
+  });
+
+  type ListEnvelope = {
+    compact?: true;
+    count: number;
+    filters: {
+      cursor: string | null;
+      limit: number;
+      status: string[] | null;
+      supportSeriesId: string | null;
+      text: string | null;
+    };
+    items: Array<Record<string, unknown> & {
+      automationId: string;
+    }>;
+    nextCursor: string | null;
+    totalCount: number;
+  };
+  const runList = async (input: {
+    compact: boolean;
+    cursor?: string;
+    limit: number;
+  }): Promise<ListEnvelope> => {
+    const args = [
+      "automation",
+      "list",
+      ...(input.compact ? ["--compact"] : []),
+      "--support-series-id",
+      seriesId,
+      ...(input.cursor === undefined ? [] : ["--cursor", input.cursor]),
+      "--limit",
+      String(input.limit),
+      "--vault",
+      vaultRoot,
+    ];
+    const listed = await runInProcessJsonCli<ListEnvelope>(cli, args);
+    assert.equal(listed.exitCode, null);
+    assert.equal(listed.envelope.ok, true);
+    if (listed.envelope.data === undefined) {
+      throw new Error("Expected automation list data.");
+    }
+    return listed.envelope.data;
+  };
+  const assertPageParity = (
+    full: ListEnvelope,
+    compact: ListEnvelope,
+  ): void => {
+    assert.equal("compact" in full, false);
+    assert.equal(compact.compact, true);
+    assert.equal(compact.count, full.count);
+    assert.equal(compact.totalCount, full.totalCount);
+    assert.equal(compact.nextCursor, full.nextCursor);
+    assert.deepEqual(compact.filters, full.filters);
+    assert.deepEqual(
+      compact.items.map((item) => item.automationId),
+      full.items.map((item) => item.automationId),
+    );
+  };
+
+  const [full, compact] = await Promise.all([
+    runList({ compact: false, limit: 25 }),
+    runList({ compact: true, limit: 25 }),
+  ]);
+  assertPageParity(full, compact);
+  assert.equal(full.count, 25);
+  assert.equal(full.totalCount, 25);
+  assert.equal(full.nextCursor, null);
+  assert.deepEqual(
+    full.items.map((item) => item.automationId),
+    fixtureRecords.map((record) => record.automationId),
+  );
+  assert.equal(
+    full.items.some((item) => item.automationId === foreignRecord.automationId),
+    false,
+  );
+
+  const compactItem = compact.items[0];
+  const fullItem = full.items[0];
+  assert.ok(compactItem);
+  assert.ok(fullItem);
+  assert.deepEqual(Object.keys(compactItem).sort(), [
+    "activeUntil",
+    "automationId",
+    "schedule",
+    "slug",
+    "status",
+    "summary",
+    "supportKind",
+    "title",
+  ]);
+  for (const retainedField of [
+    "automationId",
+    "slug",
+    "title",
+    "status",
+    "summary",
+    "activeUntil",
+    "schedule",
+    "supportKind",
+  ]) {
+    assert.deepEqual(compactItem[retainedField], fullItem[retainedField]);
+  }
+  for (const omittedField of [
+    "route",
+    "assistantTargetOverride",
+    "plannedOccurrenceOffsetMs",
+    "contextReferences",
+    "continuityPolicy",
+    "tags",
+    "createdAt",
+    "scheduleAnchorAt",
+    "updatedAt",
+    "relativePath",
+    "instructions",
+    "markdown",
+  ]) {
+    assert.equal(omittedField in compactItem, false, omittedField);
+  }
+
+  const fullBytes = Buffer.byteLength(JSON.stringify(full.items), "utf8");
+  const compactBytes = Buffer.byteLength(JSON.stringify(compact.items), "utf8");
+  assert.ok(
+    compactBytes <= fullBytes * 0.55,
+    `compact automation list emitted ${compactBytes} bytes versus ${fullBytes} full bytes`,
+  );
+
+  const paginatedFullItems: ListEnvelope["items"] = [];
+  const paginatedCompactItems: ListEnvelope["items"] = [];
+  let cursor: string | undefined;
+  do {
+    const cursorOptions = cursor === undefined ? {} : { cursor };
+    const [fullPage, compactPage] = await Promise.all([
+      runList({ compact: false, ...cursorOptions, limit: 10 }),
+      runList({ compact: true, ...cursorOptions, limit: 10 }),
+    ]);
+    assertPageParity(fullPage, compactPage);
+    assert.equal(fullPage.totalCount, 25);
+    paginatedFullItems.push(...fullPage.items);
+    paginatedCompactItems.push(...compactPage.items);
+    cursor = fullPage.nextCursor ?? undefined;
+  } while (cursor !== undefined);
+  assert.deepEqual(
+    paginatedFullItems.map((item) => item.automationId),
+    full.items.map((item) => item.automationId),
+  );
+  assert.deepEqual(
+    paginatedCompactItems.map((item) => item.automationId),
+    compact.items.map((item) => item.automationId),
+  );
+  assert.equal(
+    listQueries.every((query) => query.exactTag === supportSeriesTag),
+    true,
+  );
+
+  const shown = await runInProcessJsonCli<{
+    automation: {
+      automationId: string;
+      instructions: string;
+      route: { deliveryTarget: string | null };
+      tags: string[];
+      updatedAt: string;
+    } | null;
+  }>(cli, [
+    "automation",
+    "show",
+    compactItem.automationId,
+    "--vault",
+    vaultRoot,
+  ]);
+  assert.equal(shown.exitCode, null);
+  assert.equal(shown.envelope.ok, true);
+  assert.equal(
+    shown.envelope.data?.automation?.automationId,
+    compactItem.automationId,
+  );
+  assert.match(
+    shown.envelope.data?.automation?.instructions ?? "",
+    /scheduled assistant instructions/u,
+  );
+  assert.match(
+    shown.envelope.data?.automation?.route.deliveryTarget ?? "",
+    /^telegram:compact-fixture-/u,
+  );
+  assert.equal(
+    shown.envelope.data?.automation?.tags.includes(supportSeriesTag),
+    true,
+  );
+  assert.equal(
+    shown.envelope.data?.automation?.updatedAt,
+    firstFixtureRecord.updatedAt,
+  );
 });
 
 test("automation commands round-trip save, import-json, show, and list through the registered CLI", async () => {
@@ -2262,6 +2660,7 @@ test("automation save maps trigger flags and keeps legacy schedule flags working
       description: "automation test cli",
       version: "0.0.0-test",
     });
+    cli.use(incurErrorBridge);
     registerAutomationCommands(cli);
 
     const schedules = [
@@ -2381,7 +2780,11 @@ test("automation save maps trigger flags and keeps legacy schedule flags working
     assert.equal(rejectedDeviceFlag.envelope.ok, false);
     assert.match(
       rejectedDeviceFlag.envelope.error.message ?? "",
-      /--device-source and --activity-kind/u,
+      /--device-source/u,
+    );
+    assert.equal(
+      rejectedDeviceFlag.envelope.error.fieldErrors?.[0]?.path,
+      "schedule.source",
     );
 
     const rejectedLegacyScheduleKindDeviceActivity = await runInProcessJsonCli(cli, [
@@ -2404,6 +2807,315 @@ test("automation save maps trigger flags and keeps legacy schedule flags working
 
     assert.equal(rejectedLegacyScheduleKindDeviceActivity.exitCode, 1);
     assert.equal(rejectedLegacyScheduleKindDeviceActivity.envelope.ok, false);
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});
+
+test.each([
+  ["garmin", "oura"],
+  ["oura", "fitbit"],
+  ["fitbit", "garmin"],
+] as const)("automation saves %s and retargets the same owner to %s", async (source, nextSource) => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext("murph-automation-source-");
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-06-07T11:00:00.000Z"));
+  try {
+    const cli = Cli.create("vault-cli", { version: "0.0.0-test" });
+    cli.use(incurErrorBridge);
+    registerAutomationCommands(cli);
+    const saved = await runInProcessJsonCli<{ automationId: string }>(cli, [
+      "automation", "save", "Activity check-in", "--slug", "activity-check-in",
+      "--instructions", "Ask how the activity felt.",
+      "--trigger-kind", "deviceActivity", "--device-source", source,
+      "--activity-kind", "running", "--channel", "telegram",
+      "--delivery-target", "test-activity-thread", "--vault", vaultRoot,
+    ]);
+    assert.equal(saved.exitCode, null);
+    assert.equal(saved.envelope.ok, true);
+    const automationId = saved.envelope.data?.automationId;
+    assert.ok(automationId);
+    const initial = await showAutomation(vaultRoot, automationId);
+    assert.ok(initial);
+    assert.deepEqual(initial.schedule, {
+      kind: "deviceActivity", after: "2026-06-07T11:00:00.000Z", activityKind: "running", source,
+    });
+    const cursorInput = {
+      lookup: automationId,
+      vaultRoot,
+      expectedActivityKind: "running",
+      expectedContinuityPolicy: initial.continuityPolicy,
+      expectedInstructions: initial.instructions,
+      expectedRoute: initial.route,
+      expectedSource: source,
+      after: "2026-06-07T11:30:00.000Z",
+      afterOccurredAt: "2026-06-07T11:25:00.000Z",
+      afterEntityId: "evt_before_source_edit",
+    };
+    vi.setSystemTime(new Date("2026-06-07T11:31:00.000Z"));
+    assert.equal((await advanceAutomationDeviceActivityCursor(cursorInput)).advanced, true);
+
+    vi.setSystemTime(new Date("2026-06-07T12:00:00.000Z"));
+    const edited = await runInProcessJsonCli<{ automationId: string; created: boolean }>(cli, [
+      "automation", "edit", automationId, "--trigger-kind", "deviceActivity",
+      "--device-source", nextSource, "--activity-kind", "running", "--vault", vaultRoot,
+    ]);
+    assert.equal(edited.exitCode, null);
+    assert.equal(edited.envelope.ok, true);
+    assert.equal(edited.envelope.data?.automationId, automationId);
+    assert.equal(edited.envelope.data?.created, false);
+    const updated = await showAutomation(vaultRoot, automationId);
+    assert.ok(updated);
+    assert.deepEqual(updated.schedule, {
+      kind: "deviceActivity", after: "2026-06-07T12:00:00.000Z", activityKind: "running", source: nextSource,
+    });
+    assert.deepEqual(updated.route, initial.route);
+    assert.equal(updated.instructions, initial.instructions);
+    assert.equal(updated.continuityPolicy, initial.continuityPolicy);
+    assert.equal((await listAutomations(vaultRoot)).length, 1);
+
+    // The existing cursor owner fences an in-flight scan of the old selected source.
+    const nextCursorInput = {
+      ...cursorInput,
+      after: "2026-06-07T12:30:00.000Z",
+      afterOccurredAt: "2026-06-07T12:25:00.000Z",
+      afterEntityId: "evt_after_source_edit",
+    };
+    vi.setSystemTime(new Date("2026-06-07T12:31:00.000Z"));
+    assert.equal((await advanceAutomationDeviceActivityCursor(nextCursorInput)).advanced, false);
+    assert.deepEqual((await showAutomation(vaultRoot, automationId))?.schedule, updated.schedule);
+    const currentCursorInput = { ...nextCursorInput, expectedSource: nextSource };
+    assert.equal((await advanceAutomationDeviceActivityCursor(currentCursorInput)).advanced, true);
+    assert.equal((await advanceAutomationDeviceActivityCursor(currentCursorInput)).advanced, false);
+
+    const beforeRejectedEdit = await showAutomation(vaultRoot, automationId);
+    for (const unsupported of ["google_health", "google-health", "unknown-provider"]) {
+      const rejected = await runInProcessJsonCli(cli, [
+        "automation", "edit", automationId, "--trigger-kind", "deviceActivity",
+        "--device-source", unsupported, "--vault", vaultRoot,
+      ]);
+      assert.equal(rejected.exitCode, 1);
+      assert.equal(rejected.envelope.ok, false);
+    }
+    assert.deepEqual(await showAutomation(vaultRoot, automationId), beforeRejectedEdit);
+  } finally {
+    vi.useRealTimers();
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});
+
+test("automation rejects conflicting and irrelevant schedule flags before mutation", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-schedule-flag-conflicts-",
+  );
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation schedule flag validation test cli",
+      version: "0.0.0-test",
+    });
+    cli.use(incurErrorBridge);
+    registerAutomationCommands(cli);
+
+    const rejectedSchedules: Array<{
+      expectedPath: string;
+      privateValues: string[];
+      scheduleArgs: string[];
+      slug: string;
+    }> = [
+      {
+        expectedPath: "schedule.kind",
+        privateValues: ["private-kind-conflict-instructions"],
+        scheduleArgs: [
+          "--trigger-kind",
+          "at",
+          "--schedule-kind",
+          "every",
+          "--trigger-at",
+          "2099-01-01T00:00:00.000Z",
+          "--schedule-every-ms",
+          "3600000",
+        ],
+        slug: "kind-conflict",
+      },
+      {
+        expectedPath: "schedule.at",
+        privateValues: [
+          "private-at-conflict-instructions",
+          "2099-01-01T00:00:00.000Z",
+          "2099-02-01T00:00:00.000Z",
+        ],
+        scheduleArgs: [
+          "--trigger-kind",
+          "at",
+          "--schedule-kind",
+          "at",
+          "--trigger-at",
+          "2099-01-01T00:00:00.000Z",
+          "--schedule-at",
+          "2099-02-01T00:00:00.000Z",
+        ],
+        slug: "at-alias-conflict",
+      },
+      {
+        expectedPath: "schedule.expression",
+        privateValues: [
+          "private-irrelevant-cron-instructions",
+          "private-irrelevant-cron-expression",
+        ],
+        scheduleArgs: [
+          "--trigger-kind",
+          "at",
+          "--trigger-at",
+          "2099-03-01T00:00:00.000Z",
+          "--trigger-cron",
+          "private-irrelevant-cron-expression",
+        ],
+        slug: "irrelevant-cron",
+      },
+    ];
+
+    for (const rejectedSchedule of rejectedSchedules) {
+      const result = await runInProcessJsonCli(cli, [
+        "automation",
+        "save",
+        rejectedSchedule.slug,
+        "--slug",
+        rejectedSchedule.slug,
+        "--instructions",
+        rejectedSchedule.privateValues[0] ?? "private-schedule-instructions",
+        "--status",
+        "paused",
+        ...rejectedSchedule.scheduleArgs,
+        "--channel",
+        "telegram",
+        "--delivery-target",
+        `telegram-thread-${rejectedSchedule.slug}`,
+        "--vault",
+        vaultRoot,
+      ]);
+
+      assert.equal(result.exitCode, 1);
+      assert.equal(result.envelope.ok, false);
+      if (result.envelope.ok) assert.fail("invalid schedule flags must fail");
+      assert.equal(result.envelope.error.code, "invalid_option");
+      assert.equal(result.envelope.error.retryable, false);
+      assert.equal(result.envelope.error.stage, "validation");
+      assert.equal(
+        result.envelope.error.fieldErrors?.[0]?.path,
+        rejectedSchedule.expectedPath,
+      );
+      for (const privateValue of rejectedSchedule.privateValues) {
+        assert.equal(JSON.stringify(result.envelope).includes(privateValue), false);
+      }
+    }
+
+    const listedAfterRejectedSaves = await runInProcessJsonCli<{
+      count: number;
+      items: unknown[];
+      totalCount: number;
+    }>(cli, [
+      "automation",
+      "list",
+      "--compact",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(listedAfterRejectedSaves.exitCode, null);
+    assert.equal(listedAfterRejectedSaves.envelope.ok, true);
+    assert.equal(listedAfterRejectedSaves.envelope.data?.count, 0);
+    assert.equal(listedAfterRejectedSaves.envelope.data?.totalCount, 0);
+    assert.deepEqual(listedAfterRejectedSaves.envelope.data?.items, []);
+
+    const cronExpression = "0 9 * * 1";
+    const saved = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Matching aliases",
+      "--slug",
+      "matching-aliases",
+      "--instructions",
+      "Keep the original instructions.",
+      "--status",
+      "paused",
+      "--trigger-kind",
+      "cron",
+      "--schedule-kind",
+      "cron",
+      "--trigger-cron",
+      cronExpression,
+      "--schedule-cron",
+      cronExpression,
+      "--trigger-time-zone",
+      "America/New_York",
+      "--schedule-time-zone",
+      "America/New_York",
+      "--channel",
+      "telegram",
+      "--delivery-target",
+      "telegram-thread-matching-aliases",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(saved.exitCode, null);
+    assert.equal(saved.envelope.ok, true);
+
+    const rejectedEdit = await runInProcessJsonCli(cli, [
+      "automation",
+      "edit",
+      "matching-aliases",
+      "--instructions",
+      "private-edit-replacement",
+      "--trigger-kind",
+      "cron",
+      "--trigger-cron",
+      "0 10 * * 2",
+      "--trigger-at",
+      "private-irrelevant-at",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(rejectedEdit.exitCode, 1);
+    assert.equal(rejectedEdit.envelope.ok, false);
+    if (rejectedEdit.envelope.ok) assert.fail("irrelevant edit flags must fail");
+    assert.equal(rejectedEdit.envelope.error.code, "invalid_option");
+    assert.equal(rejectedEdit.envelope.error.stage, "validation");
+    assert.equal(
+      rejectedEdit.envelope.error.fieldErrors?.[0]?.path,
+      "schedule.at",
+    );
+    assert.equal(
+      JSON.stringify(rejectedEdit.envelope).includes("private-edit-replacement"),
+      false,
+    );
+    assert.equal(
+      JSON.stringify(rejectedEdit.envelope).includes("private-irrelevant-at"),
+      false,
+    );
+
+    const shown = await runInProcessJsonCli<{
+      automation: {
+        instructions: string;
+        schedule: unknown;
+      } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      "matching-aliases",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.exitCode, null);
+    assert.equal(shown.envelope.ok, true);
+    assert.equal(
+      shown.envelope.data?.automation?.instructions,
+      "Keep the original instructions.",
+    );
+    assert.deepEqual(shown.envelope.data?.automation?.schedule, {
+      expression: cronExpression,
+      kind: "cron",
+      timeZone: "America/New_York",
+    });
   } finally {
     await rm(parentRoot, { force: true, recursive: true });
   }

@@ -27,6 +27,7 @@ import {
   buildHostedWebTurbopackConfig,
   buildHostedWebContentSecurityPolicy,
   buildHostedWebSecurityHeaders,
+  configureHostedWebWebpack,
   configureHostedWebWorkflowLocalDataDir,
   resolveHostedPrivyOrigin,
   resolveHostedPrivyOrigins,
@@ -150,6 +151,33 @@ test("hosted web tsconfig resolves Temporal orchestration-control from source", 
     tsconfig.compilerOptions?.paths?.["@murphai/device-syncd/providers/junction-config"],
     ["../../packages/device-syncd/src/providers/junction-config.ts"],
   );
+});
+
+test("hosted web resolves both CLI timing imports directly from source", () => {
+  // Use Web's TypeScript version/config, not the root paths map or built dist.
+  const ts: typeof import("typescript") = createRequire(
+    path.join(repoRoot, "apps/web/package.json"),
+  )("typescript");
+  const parsed = ts.getParsedCommandLineOfConfigFile(
+    path.join(repoRoot, "apps/web/tsconfig.json"),
+    {},
+    { ...ts.sys, onUnRecoverableConfigFileDiagnostic: (diagnostic) => {
+      assert.fail(ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"));
+    } },
+  );
+  assert.ok(parsed);
+  assert.deepEqual(parsed.errors, []);
+  for (const [specifier, importer, source] of [
+    ["@murphai/runtime-state/cli-timing", "packages/hosted-execution/src/assistant-usage.ts",
+      "packages/runtime-state/src/cli-timing.ts"],
+    ["@murphai/runtime-state/node/cli-timing", "packages/query/src/query-projection.ts",
+      "packages/runtime-state/src/node/cli-timing.ts"],
+  ] as const) {
+    const resolved: import("typescript").ResolvedModuleFull | undefined = ts.resolveModuleName(
+      specifier, path.join(repoRoot, importer), parsed.options, ts.sys,
+    ).resolvedModule;
+    assert.equal(resolved?.resolvedFileName, path.join(repoRoot, source));
+  }
 });
 
 test("hosted web build tsconfig keeps tests out of Next production checks", () => {
@@ -358,9 +386,9 @@ test("hosted web dev filesystem cache defaults off and allows explicit opt-in", 
   );
 });
 
-test("next.config keeps Turbopack focused on the repo root without custom workspace rewrite rules", () => {
+test("next.config keeps both bundlers focused without custom workspace rewrite rules", () => {
   assert.equal(productionNextConfig.turbopack?.root, process.cwd());
-  assert.equal(productionNextConfig.webpack, undefined);
+  assert.equal(typeof productionNextConfig.webpack, "function");
   assert.deepEqual(productionNextConfig.typescript, {
     ignoreBuildErrors: false,
     tsconfigPath: HOSTED_WEB_NEXT_TSCONFIG_PATH,
@@ -397,10 +425,10 @@ test("next.config leaves agent guidance under repository ownership", () => {
   assert.equal(productionNextConfig.agentRules, false);
 });
 
-test("production build config keeps Webpack compilation in the Next process", () => {
+test("production build config isolates Webpack compilation from static generation", () => {
   assert.equal(productionNextConfig.experimental?.turbopackFileSystemCacheForBuild, false);
   assert.equal(productionNextConfig.experimental?.turbopackSourceMaps, false);
-  assert.equal(productionNextConfig.experimental?.webpackBuildWorker, undefined);
+  assert.equal(productionNextConfig.experimental?.webpackBuildWorker, true);
   assert.equal(productionNextConfig.experimental?.webpackMemoryOptimizations, true);
 });
 
@@ -455,6 +483,78 @@ test("next.config uses Workflow lazy discovery to avoid eager dev rebuild loops"
 
 test("next.config traces generated Health Commons route files without the monolithic catalog", () => {
   assert.deepEqual(
+    productionNextConfig.outputFileTracingIncludes?.["/goals"],
+    [
+      "../../packages/health-commons/generated/web/browse/goals.json",
+    ],
+  );
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingIncludes?.["/goals/[goalId]"],
+    [
+      "../../packages/health-commons/generated/web/browse/goals.json",
+      "../../packages/health-commons/generated/web/routes/index.json",
+      "../../packages/health-commons/generated/web/pages/goals/**/*.json",
+    ],
+  );
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingIncludes?.["/api/goals/contact"],
+    [
+      "../../packages/health-commons/generated/web/browse/goals.json",
+    ],
+  );
+  for (const route of [
+    "/api/hosted-onboarding/linq/webhook",
+    "/api/hosted-onboarding/telegram/webhook",
+  ]) {
+    assert.deepEqual(
+      productionNextConfig.outputFileTracingIncludes?.[route],
+      ["../../packages/health-commons/generated/web/browse/goals.json"],
+    );
+  }
+  const expectedGoalTraceExcludes = [
+    "../../packages/health-commons/generated/web/browse/biomarkers.json",
+    "../../packages/health-commons/generated/web/browse/experiments.json",
+    "../../packages/health-commons/generated/web/bundles/**/*.json",
+    "../../packages/health-commons/generated/web/pages/biomarkers/**/*.json",
+    "../../packages/health-commons/generated/web/shell/**/*.json",
+    "../../packages/health-commons/generated/web/tabs/**/*.json",
+  ];
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingExcludes?.["/goals"],
+    expectedGoalTraceExcludes,
+  );
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingExcludes?.["/goals/[goalId]"],
+    expectedGoalTraceExcludes,
+  );
+  const expectedGoalIndexOnlyTraceExcludes = [
+    "../../packages/health-commons/generated/web/pages/goals/**/*.json",
+    "../../packages/health-commons/generated/web/routes/index.json",
+  ];
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingExcludes?.["/goals!(/**)"],
+    expectedGoalIndexOnlyTraceExcludes,
+  );
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingExcludes?.["/api/goals/contact"],
+    [
+      ...expectedGoalTraceExcludes,
+      ...expectedGoalIndexOnlyTraceExcludes,
+    ],
+  );
+  for (const route of [
+    "/api/hosted-onboarding/linq/webhook",
+    "/api/hosted-onboarding/telegram/webhook",
+  ]) {
+    assert.deepEqual(
+      productionNextConfig.outputFileTracingExcludes?.[route],
+      [
+        ...expectedGoalTraceExcludes,
+        ...expectedGoalIndexOnlyTraceExcludes,
+      ],
+    );
+  }
+  assert.deepEqual(
     productionNextConfig.outputFileTracingIncludes?.["/measurement-methods/[measurementMethodId]"],
     [
       "../../packages/health-commons/generated/web/routes/index.json",
@@ -497,6 +597,16 @@ test("next.config traces bundled image assets for the iMessage nutrition route",
   );
 });
 
+test("next.config traces every selectable contact-card avatar into its route", () => {
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingIncludes?.["/api/murph-contact-card"],
+    [
+      "public/brand-logos/murph-logo-avatar-*.png",
+      "public/murph-headshots/*-sm.png",
+    ],
+  );
+});
+
 test("next.config disables the Turbopack dev filesystem cache by default and honors explicit opt-in", () => {
   const previousValue = process.env.MURPH_NEXT_DEV_FILESYSTEM_CACHE;
 
@@ -536,6 +646,70 @@ test("buildHostedWebTurbopackConfig always points Turbopack at the repo root", (
       "@farcaster/mini-app-solana": "./src/lib/empty-module.ts",
     });
   }
+});
+
+test("configureHostedWebWebpack disables the production cache and aliases Privy's missing optional Farcaster peer", () => {
+  const webpackConfig = {
+    cache: { type: "filesystem" },
+    resolve: {
+      alias: {
+        existing: "/existing-module.ts",
+      },
+    },
+  };
+  const configured = configureHostedWebWebpack(webpackConfig, { dev: false });
+  const hasOptionalModule = resolveHostedOptionalModule();
+
+  assert.equal(configured, webpackConfig);
+  assert.equal(configured.cache, false);
+  if (hasOptionalModule) {
+    assert.deepEqual(configured.resolve.alias, {
+      existing: "/existing-module.ts",
+    });
+  } else {
+    assert.deepEqual(configured.resolve.alias, {
+      existing: "/existing-module.ts",
+      "@farcaster/mini-app-solana": path.join(
+        repoRoot,
+        "apps/web/src/lib/empty-module.ts",
+      ),
+    });
+  }
+});
+
+test("the Webpack callback retains Next compiler caching only for explicit CI opt-in", () => {
+  const cache = {
+    type: "filesystem",
+    version: "next-owned",
+    maxMemoryGenerations: Infinity,
+    buildDependencies: { config: ["next.config.ts"] },
+  };
+  for (const value of [undefined, "0", "true", "1"]) {
+    const config = { cache, resolve: {} };
+    const environment = createProcessEnv(
+      value === undefined ? {} : { MURPH_HOSTED_WEB_WEBPACK_CACHE: value },
+    );
+    const { webpack } = buildHostedWebNextConfig(PHASE_PRODUCTION_BUILD, environment);
+    assert(webpack);
+    webpack(config, { dev: false } as Parameters<typeof webpack>[1]);
+    assert.equal(config.cache, value === "1" ? cache : false);
+    assert.equal(cache.maxMemoryGenerations, value === "1" ? 0 : Infinity);
+    assert.equal(cache.version, "next-owned");
+    assert.deepEqual(cache.buildDependencies, { config: ["next.config.ts"] });
+  }
+});
+
+test("configureHostedWebWebpack preserves development caching", () => {
+  const cache = { type: "filesystem", maxMemoryGenerations: Infinity };
+  const webpackConfig = {
+    cache,
+    resolve: {},
+  };
+
+  configureHostedWebWebpack(webpackConfig, { dev: true });
+
+  assert.equal(webpackConfig.cache, cache);
+  assert.equal(cache.maxMemoryGenerations, Infinity);
 });
 
 test("resolvePrivyBaseDomainOrigin normalizes base-domain inputs into a Privy origin", () => {
@@ -685,6 +859,7 @@ test("buildHostedWebContentSecurityPolicy includes Privy, WalletConnect, and hos
   assert.match(csp, /script-src [^;]*https:\/\/challenges\.cloudflare\.com/);
   assert.match(csp, /script-src-attr 'none'/);
   assert.match(csp, /style-src 'self' 'unsafe-inline'/);
+  assert.match(csp, /img-src [^;]*https:\/\/cdn\.brandfetch\.io/);
   assert.match(csp, /manifest-src 'self'/);
   assert.match(csp, /media-src 'self' blob:/);
   assert.match(csp, /object-src 'none'/);
@@ -705,8 +880,20 @@ test("buildHostedWebContentSecurityPolicy includes Privy, WalletConnect, and hos
   assert.match(csp, /connect-src [^;]*https:\/\/\*\.rpc\.privy\.systems/);
   assert.match(csp, /connect-src [^;]*https:\/\/explorer-api\.walletconnect\.com/);
   assert.match(csp, /connect-src [^;]*https:\/\/status\.withmurph\.ai/);
+  assert.match(csp, /connect-src [^;]*https:\/\/api\.brandfetch\.io/);
+  assert.match(csp, /img-src [^;]*https:\/\/cdn\.brandfetch\.io/);
   assert.match(csp, /upgrade-insecure-requests/);
   assert.doesNotMatch(csp, /'unsafe-eval'/);
+});
+
+test("next.config permits only the Brandfetch CDN for remote brand images", () => {
+  assert.deepEqual(productionNextConfig.images?.remotePatterns, [
+    {
+      protocol: "https",
+      hostname: "cdn.brandfetch.io",
+      pathname: "/**",
+    },
+  ]);
 });
 
 test("buildHostedWebContentSecurityPolicy keeps production script origins on a tight allowlist", () => {

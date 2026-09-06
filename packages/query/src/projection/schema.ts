@@ -22,7 +22,9 @@ export const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
 // 22: Rebuild activity summaries with independent intensity and daily heart-rate facts.
 // 23: Rebuild body summaries and MetricPoints after sparse-body selection semantics.
 // 24: Store bounded per-workout stream features in wearable activity summaries.
-export const QUERY_PROJECTION_SQLITE_VERSION = 24;
+// 25: Omit audit rows and unused indexes from rebuilt query stores.
+// 26: Rebuild wearable provider rows after public query slug canonicalization.
+export const QUERY_PROJECTION_SQLITE_VERSION = 26;
 
 export interface QueryProjectionLocation {
   absolutePath: string;
@@ -173,10 +175,7 @@ export function ensureQueryProjectionSchema(database: DatabaseSync): void {
     );
 
     CREATE INDEX IF NOT EXISTS query_entities_family_idx ON query_entities(family);
-    CREATE INDEX IF NOT EXISTS query_entities_record_class_idx ON query_entities(record_class);
     CREATE INDEX IF NOT EXISTS query_entities_kind_idx ON query_entities(kind);
-    CREATE INDEX IF NOT EXISTS query_entities_stream_idx ON query_entities(stream);
-    CREATE INDEX IF NOT EXISTS query_entities_experiment_idx ON query_entities(experiment_slug);
     CREATE INDEX IF NOT EXISTS query_entities_date_idx ON query_entities(date);
     CREATE INDEX IF NOT EXISTS query_entities_occurred_at_idx ON query_entities(occurred_at);
 
@@ -208,7 +207,6 @@ export function ensureQueryProjectionSchema(database: DatabaseSync): void {
 
     CREATE INDEX IF NOT EXISTS query_metric_points_metric_latest_idx ON query_metric_points(metric_key, effective_date DESC, observed_at DESC);
     CREATE INDEX IF NOT EXISTS query_metric_points_biomarker_latest_idx ON query_metric_points(biomarker_key, effective_date DESC, observed_at DESC);
-    CREATE INDEX IF NOT EXISTS query_metric_points_source_idx ON query_metric_points(source_record_id);
 
     CREATE TABLE IF NOT EXISTS query_metric_targets (
       id TEXT PRIMARY KEY,

@@ -152,7 +152,7 @@ import {
   type HostedRuntimeWorkspaceSnapshotPort,
 } from "../src/hosted-runtime-contracts.ts";
 
-describe("hosted workspace runtime entrypoint", () => {test("late foreground input during system work runs before idle checkpointing", async () => {
+describe("hosted workspace runtime entrypoint", () => {test("late foreground input outranks a due mailbox owner handoff before idle checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-foreground-preempt-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -160,7 +160,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
     const runtimeAbortController = new AbortController();
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const idleCheckpointDelayMs = 25;
-    const systemFollowUpWakeAt = "2099-04-27T00:10:00.000Z";
+    const systemFollowUpWakeAt = TEST_NOW;
     const mailboxItems = [
       createMailboxItem({
         id: "mailbox_item_entrypoint_foreground_preempt_system",
@@ -302,14 +302,14 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
                   return {
                     checkpointReason: "system_mailbox_receipt" as const,
                     nextWakeAt: systemFollowUpWakeAt,
-                    nextWakeReason: "device-sync.reconcile",
+                    nextWakeReason: "mailbox",
                     redactedStatus: systemRedactedStatus,
                   };
                 },
                 afterCheckpointKeepsForegroundImportLoop: true,
                 checkpointReason: "system_mailbox_receipt" as const,
                 nextWakeAt: systemFollowUpWakeAt,
-                nextWakeReason: "device-sync.reconcile",
+                nextWakeReason: "mailbox",
                 progressed: true,
                 redactedStatus: systemRedactedStatus,
               };
@@ -1591,6 +1591,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const exportedIssues: unknown[] = [];
+    const providerStartMetadataPresent: boolean[] = [];
     const releaseSha = "0123456789abcdef0123456789abcdef01234567";
     const runtimeAttemptId =
       "runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda";
@@ -1877,6 +1878,10 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
               workspace: createWorkspaceState({ version: "0" }),
             }),
           }),
+          async runAssistantPhase(input) {
+            providerStartMetadataPresent.push(input.providerStartCriticalPath != null);
+            return await runHostedWorkspaceAssistantPhase(input);
+          },
           runtimeIssueProvenance: {
             releaseSha,
             runtimeName,
@@ -1894,6 +1899,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
       );
       await withRealTimeout(resultPromise, 15_000, () => events.join(","));
       assert.equal(assistantPhaseCalls, 2);
+      assert.deepEqual(providerStartMetadataPresent, [true, false]);
       assert.equal(completionInputIds.length, 2);
       expect(exportedIssues).toEqual([
         expect.objectContaining({
@@ -1914,10 +1920,12 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
     }
   });
 
-  test("retains queued image state until its committed delivery intent is terminal", async () => {
+  test("records live and background acceptance without coupling trace failure", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-image-evidence-retry-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const latencyTraceRequests: HostedRuntimeLatencyTraceRequest[] = [];
+    const missingAcceptedInputId = "ain_00000000000000000000000000000000";
     const mailboxItems = [createMailboxItem({
       id: "mailbox_item_image_evidence_retry_origin",
       laneSeq: "1",
@@ -2034,17 +2042,25 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
                 status: "imported",
               };
             },
-            platform: createPlatform({
-              mailboxPort: createMailboxPort({
-                events,
-                items: mailboxItems,
+            platform: {
+              ...createPlatform({
+                mailboxPort: createMailboxPort({
+                  events,
+                  items: mailboxItems,
+                }),
+                workspacePort: createWorkspacePort({
+                  checkpointRequests,
+                  events,
+                  workspace: createWorkspaceState({ version: "0" }),
+                }),
               }),
-              workspacePort: createWorkspacePort({
-                checkpointRequests,
-                events,
-                workspace: createWorkspaceState({ version: "0" }),
-              }),
-            }),
+              latencyTracePort: {
+                async record(request) {
+                  latencyTraceRequests.push(request);
+                  throw new Error("Synthetic latency trace write failure.");
+                },
+              },
+            },
             runtimeWakeSignal,
             async runAssistantPhase(phaseInput) {
               const initialBatchInputIds =
@@ -2076,6 +2092,15 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
                 });
 
               if (assistantPhaseCalls === 1) {
+                const releaseMissingInput =
+                  await phaseInput.beforeProviderAcceptedInputs?.({
+                    turnId: "turn_hosted_runtime_test",
+                    acceptedInputs: [{
+                      id: missingAcceptedInputId,
+                      source: "assistant-input",
+                    }],
+                  });
+                await releaseMissingInput?.();
                 originInputId = assistantInputId;
                 imageGenerationLauncherRef.current =
                   phaseInput.imageGenerationLauncher ?? null;
@@ -2281,6 +2306,31 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
       assert.equal(imageProviderInvocationCount, 2);
       assert.ok(firstCompletionInputId);
       assert.ok(secondCompletionInputId);
+      await waitUntil(() => {
+        assert.equal(
+          latencyTraceRequests.filter(({ event }) =>
+            event.type === "assistant_milestone"
+            && event.milestone === "assistant_input_accepted_for_execution"
+          ).length,
+          assistantPhaseCalls + 1,
+        );
+      });
+      const acceptedForExecutionInputIds = latencyTraceRequests.flatMap(
+        ({ event }) =>
+          event.type === "assistant_milestone"
+            && event.milestone === "assistant_input_accepted_for_execution"
+            ? event.assistantInputIds
+            : [],
+      );
+      assert.ok(originInputId);
+      assert.equal(
+        acceptedForExecutionInputIds.filter((inputId) => inputId === originInputId)
+          .length,
+        2,
+      );
+      assert.ok(acceptedForExecutionInputIds.includes(firstCompletionInputId));
+      assert.ok(acceptedForExecutionInputIds.includes(secondCompletionInputId));
+      assert.equal(acceptedForExecutionInputIds.includes(missingAcceptedInputId), false);
       const completion = await readAssistantInputEvent({
         inputId: firstCompletionInputId,
         vault: vaultRoot,
@@ -4023,6 +4073,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
     let checkpointCount = 0;
     let classifierFailures = 0;
     let pendingConversationInputId: string | null = null;
+    let conversationImportedAtMonotonicMs: number | null = null;
 
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
@@ -4079,6 +4130,7 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
               item: item.item,
               vaultRoot,
             });
+            conversationImportedAtMonotonicMs = Math.floor(performance.now());
             return {
               assistantInputId: pendingConversationInputId,
               status: "imported",
@@ -4128,8 +4180,25 @@ describe("hosted workspace runtime entrypoint", () => {test("late foreground inp
             }),
           }),
           runtimeWakeSignal,
-          async runAssistantPhase() {
+          async runAssistantPhase(phaseInput) {
             if (pendingConversationInputId) {
+              const timing = phaseInput.providerStartCriticalPath;
+              assert.ok(timing, "a hot imported input must receive detailed admission timing");
+              assert.notEqual(conversationImportedAtMonotonicMs, null);
+              const boundaries = [
+                conversationImportedAtMonotonicMs,
+                timing.mailboxImportDoneAtMonotonicMs,
+                timing.foregroundPassStartedAtMonotonicMs,
+                timing.workspaceForegroundPassStartedAtMonotonicMs,
+                timing.assistantPhaseCallbackStartedAtMonotonicMs,
+              ];
+              for (let index = 1; index < boundaries.length; index += 1) {
+                const previous = boundaries[index - 1];
+                const current = boundaries[index];
+                assert.ok(typeof previous === "number");
+                assert.ok(typeof current === "number");
+                assert.ok(current >= previous, "hot admission boundaries must stay ordered");
+              }
               admittedConversationInputId = pendingConversationInputId;
               pendingConversationInputId = null;
               await writeSyntheticAssistantAutoReplyTerminalEvidence({

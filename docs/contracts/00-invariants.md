@@ -58,15 +58,18 @@ it has been explicitly elevated to a cross-cutting invariant.
   abort; privacy; canonical writes; provider credential and delivery authority;
   and irreversible effects. Warm reuse is an optimization, never authority.
 - One Codex App Server belongs to the warm container or Node process and stays
-  warm across ordinary turns for that owner's lifetime. Starting or completing
-  an ordinary turn, closing an ordinary invocation, rotating
-  invocation-scoped credentials, or starting a later turn must not replace it.
-  Process replacement is limited to owner shutdown, App Server exit or proven
-  unhealthy/poisoned state, explicit operator shutdown, explicit workspace
-  invocation abort/preemption, or a genuine process-level configuration change
-  that Codex cannot accept through thread or turn RPC. Workspace invocation
-  abort/preemption must synchronously stop the exact owned App Server before
-  the invocation slot can be reused.
+  warm across ordinary turns while the same restored workspace remains active.
+  Starting or completing an ordinary turn, closing an ordinary invocation, or
+  rotating invocation-scoped credentials does not itself replace it. Before a
+  hosted workspace restore validates, replaces, clears, or sanitizes Codex
+  home, the restore owner must synchronously stop the exact App Server; a fresh
+  process then owns the restored home and rebuilds its process-local indexes.
+  Other process replacement is limited to owner shutdown, App Server exit or
+  proven unhealthy/poisoned state, explicit operator shutdown, explicit
+  workspace invocation abort/preemption, or a genuine process-level
+  configuration change that Codex cannot accept through thread or turn RPC.
+  Workspace invocation abort/preemption must synchronously stop the exact owned
+  App Server before the invocation slot can be reused.
 - `packages/assistant-engine` is the sole resident App Server process owner.
   Process readiness is a memoized property of that exact process and is
   separate from turn reservation: after the first fresh auto-reply-enabled
@@ -90,9 +93,11 @@ it has been explicitly elevated to a cross-cutting invariant.
   publish, clear, reserve, or replace a newer process.
   Speculative preparation never evicts a healthy claimable resident with another
   launch identity; only authoritative foreground acquisition may replace it.
-- Prompts, session/thread/turn ids, delivery routes, and invocation-scoped
-  automation or device authority are request facts, not App Server launch
-  identity or ambient child-process authority. Expose invocation-scoped
+- Prompts, session/thread/turn ids, working directories, thread capability
+  configuration, delivery routes, and invocation-scoped automation or device
+  authority are request facts, not App Server launch identity or ambient
+  child-process authority. Apply thread capability configuration on both start
+  and resume. Expose invocation-scoped
   authority only through narrow typed tools on the current root turn; keep it
   out of the App Server and descendant shell environments.
 - No user-promised work may be owned only by App Server or descendant process
@@ -484,7 +489,12 @@ it has been explicitly elevated to a cross-cutting invariant.
   Resolve mutable target and effect authority from durable owner facts only at
   the irreversible-effect boundary. Later authority loss takes a typed durable
   disposition rather than retroactively erasing accepted work or spawning
-  repair machinery.
+  repair machinery. Invocation configuration remains a separate lifecycle
+  responsibility: a warm provider-specific invocation checks the saved provider
+  at provider entry to recover missed settings-change wakes. A mismatch hands
+  accepted work to a fresh invocation without consuming or rejecting it; an
+  unavailable settings read retains the work for retry. This check does not
+  reauthorize the accepted inputs.
 - When provider target identity and audience privacy are coupled, one live
   owner resolves the effective target and audience class atomically before
   model work. Persisted routes, snapshots, and legacy markers are hints, never
@@ -651,6 +661,11 @@ direct-Starter gate is fully exhausted again.
 
 - Cross-plane changes state safe deploy order, warm-old-bundle behavior,
   rollback floor, and whether coordinated deployment is required.
+- A protocol change between independently deployed components is
+  consumer-first. Deploy a consumer that accepts both the current and next
+  shape before any producer emits the next shape. A strict consumer must not
+  receive a new field, value, or message kind until that compatible consumer is
+  live. Remove legacy acceptance only after every old producer has drained.
 - A producer that persists new fail-closed authority becomes a hard rollback
   floor before its first such write when an older producer would ignore that
   authority. A below-floor emergency rollback first disables and drains every
@@ -659,6 +674,9 @@ direct-Starter gate is fully exhausted again.
 - Schema and protocol evolution is additive-first. Compatibility stays
   legacy-facing, includes a removal condition, and is deleted after verified
   production drain.
+- Compatibility proof covers every mixed-version pair that the deployment can
+  create. A current-producer/current-consumer test alone does not prove a safe
+  rolling deployment.
 
 ## Observability And Bounded Growth
 

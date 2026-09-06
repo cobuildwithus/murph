@@ -319,7 +319,7 @@ describe("check-provider-request-boundaries", () => {
     expect(violations(`
       async function executeAnalyzeVideoTool(fetchImpl: typeof fetch) {
         return fetchImpl(
-          "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent",
+          "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
           { method: "POST" },
         );
       }
@@ -328,7 +328,7 @@ describe("check-provider-request-boundaries", () => {
     expect(violations(`
       async function analyzeVideo(fetchImpl: typeof fetch) {
         return fetchImpl(
-          "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent",
+          "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
           { method: "POST" },
         );
       }
@@ -364,7 +364,6 @@ describe("check-provider-request-boundaries", () => {
       "packages/assistant-engine/src/assistant-codex/analyze-video-tool.ts",
       "packages/operator-config/src/linq-runtime.ts",
       "scripts/linq-typing-repro.ts",
-      "scripts/native-ios-hosted-e2e-identity.mjs",
     ]));
   });
 

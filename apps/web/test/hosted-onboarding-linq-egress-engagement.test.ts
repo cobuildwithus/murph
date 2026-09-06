@@ -1382,8 +1382,8 @@ describe("hosted Linq egress authority", () => {
       },
     });
     expect(observedOrder).toEqual([
-      "member-home",
       "chat",
+      "member-home",
       "provider-dispatch",
     ]);
     expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledWith({
@@ -1445,9 +1445,8 @@ describe("hosted Linq egress authority", () => {
         targetKind: "thread",
         threadIsDirect: false,
       },
-      threadIsDirect: false,
     });
-    expect(responseBody).not.toHaveProperty("targetOverride");
+    expect(responseBody).not.toHaveProperty("threadIsDirect");
     expect(
       mocks.assertHostedAssistantAskCompletionDeliveryAuthorityTx,
     ).toHaveBeenCalledWith({
@@ -1665,9 +1664,8 @@ describe("hosted Linq egress authority", () => {
         targetKind: "thread",
         threadIsDirect: true,
       },
-      threadIsDirect: true,
     });
-    expect(responseBody).not.toHaveProperty("targetOverride");
+    expect(responseBody).not.toHaveProperty("threadIsDirect");
     expect(prisma.hostedLinqDelivery.create).not.toHaveBeenCalled();
     expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
     expect(prisma.hostedLinqDelivery.updateMany).not.toHaveBeenCalled();
@@ -1733,12 +1731,6 @@ describe("hosted Linq egress authority", () => {
         targetKind: "thread",
         threadIsDirect: true,
       },
-      targetOverride: {
-        conversationThreadId: expectedRoute.threadId,
-        target: "chat-current-home",
-        targetKind: "thread",
-      },
-      threadIsDirect: true,
     });
     expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberRoutingPrivateState).toHaveBeenCalledTimes(1);
@@ -1881,9 +1873,12 @@ describe("hosted Linq egress authority", () => {
     { expectedStatus: 200, recovered: false, reminderAfterDays: undefined },
     { expectedStatus: 409, recovered: true, reminderAfterDays: undefined },
     { expectedStatus: 409, recovered: false, reminderAfterDays: 30 },
-  ])(
-    "revalidates a queued wearable silence episode at provider entry (recovered=$recovered, wait=$reminderAfterDays)",
-    async ({ expectedStatus, recovered, reminderAfterDays }) => {
+    { expectedStatus: 409, recovered: false, reminderAfterDays: null },
+  ].flatMap((scenario) => ["garmin", "apple_health_kit", "whoop_v2"].map((sourceProviderSlug) => ({
+    ...scenario, sourceProviderSlug,
+  }))))(
+    "revalidates a queued $sourceProviderSlug silence episode at provider entry (recovered=$recovered, wait=$reminderAfterDays)",
+    async ({ expectedStatus, recovered, reminderAfterDays, sourceProviderSlug }) => {
       const sourceId = "dcs_abcdefghijklmnop";
       const originalLastDataAt = new Date(
         Date.now() - 6 * 24 * 60 * 60_000,
@@ -1893,8 +1888,8 @@ describe("hosted Linq egress authority", () => {
         lastDataAt: originalLastDataAt,
         lifecycleEpoch: 1,
         sourceId,
-        sourceInstanceKey: "junction:garmin",
-        sourceProviderSlug: "garmin",
+        sourceInstanceKey: `junction:${sourceProviderSlug}`,
+        sourceProviderSlug,
       });
       const prisma = createPrismaStub({ homeChatId: "chat-home" });
       prisma.$queryRaw.mockResolvedValue([{ id: sourceId }]);
@@ -1906,9 +1901,10 @@ describe("hosted Linq egress authority", () => {
           recovered ? new Date().toISOString() : originalLastDataAt,
         ),
         lifecycleEpoch: 1,
-        sourceInstanceKey: "junction:garmin",
-        sourceProviderSlug: "garmin",
-        status: "connected",
+        sourceInstanceKey: `junction:${sourceProviderSlug}`,
+        sourceProviderSlug,
+        status: sourceProviderSlug === "whoop_v2" ? "error" : "connected",
+        lastErrorCode: sourceProviderSlug === "whoop_v2" ? "TOKEN_REFRESH_FAILED" : null,
       });
       prisma.deviceSourceNoDataOutreachPreference.findUnique.mockResolvedValue(
         reminderAfterDays === undefined ? null : { reminderAfterDays },
@@ -2058,7 +2054,7 @@ describe("hosted Linq egress authority", () => {
     expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
   });
 
-  it("rejects a home-route override when that resolved chat became a group route", async () => {
+  it("revalidates a home-route override when that resolved chat becomes a group route", async () => {
     const prisma = createPrismaStub({
       homeChatId: "chat-current-home",
     });
@@ -2076,7 +2072,7 @@ describe("hosted Linq egress authority", () => {
     });
     mocks.getPrisma.mockReturnValue(prisma);
 
-    const response = await postHostedLinqEgressEngagement(
+    const preflightResponse = await postHostedLinqEgressEngagement(
       new Request("https://internal.example.test/engagement", {
         body: JSON.stringify({
           authorityCheckOnly: true,
@@ -2091,8 +2087,35 @@ describe("hosted Linq egress authority", () => {
       }),
     );
 
-    expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({
+    expect(preflightResponse.status).toBe(200);
+    const preflight = await preflightResponse.json() as {
+      resolvedRoute: Record<string, unknown>;
+    };
+    expect(preflight).toMatchObject({
+      resolvedRoute: {
+        target: "chat-current-home",
+        targetKind: "thread",
+      },
+    });
+
+    const providerEntryResponse = await postHostedLinqEgressEngagement(
+      new Request("https://internal.example.test/engagement", {
+        body: JSON.stringify({
+          authorityCheckOnly: false,
+          expectedResolvedRoute: preflight.resolvedRoute,
+          idempotencyKey: "assistant-outbox:intent-group-takeover",
+          target: "chat-current-home",
+          targetKind: "thread",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(providerEntryResponse.status).toBe(403);
+    await expect(providerEntryResponse.json()).resolves.toMatchObject({
       error: {
         code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
       },
@@ -2248,7 +2271,11 @@ function createPrismaStub(input: {
               ? input.pendingLinePhone ?? null
               : null;
         return phoneNumber
-          ? { phoneNumberEncrypted: encodeTestEncryptedValue(phoneNumber) }
+          ? {
+              phoneNumberEncrypted: encodeTestEncryptedValue(phoneNumber),
+              providerInventoryConfirmedAt: new Date(),
+              providerPhoneNumberId: `provider:${where.phoneNumberLookupKey}`,
+            }
           : null;
       }),
       update: vi.fn(async ({ where }: {

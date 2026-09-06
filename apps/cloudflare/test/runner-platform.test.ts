@@ -28,6 +28,8 @@ import {
 import {
   HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER,
+  HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_PARAM,
+  HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_VALUE,
   type HostedWorkspaceCheckpointRequest,
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
@@ -45,6 +47,7 @@ import {
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
+  HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH,
   HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH,
   HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH,
   HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
@@ -89,7 +92,18 @@ function buildExpectedVaultShareActiveKindsPath(
 }
 
 function buildExpectedGroupToolPath(): string {
-  return buildExpectedSupportedProjectionScopePath(HOSTED_RUNTIME_GROUP_TOOL_PATH);
+  const params = new URLSearchParams();
+  params.set(
+    HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_PARAM,
+    HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_VALUE,
+  );
+  for (const projectionScope of HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES) {
+    params.append(
+      "supportedProjectionScope",
+      buildHostedVaultShareProjectionScopeKey(projectionScope),
+    );
+  }
+  return `${HOSTED_RUNTIME_GROUP_TOOL_PATH}?${params.toString()}`;
 }
 
 vi.mock("@murphai/hosted-execution", async () => {
@@ -108,6 +122,9 @@ import {
   readHostedRuntimeSafeErrorText,
 } from "@murphai/hosted-execution";
 import {
+  parseHostedRuntimeLogRequest,
+} from "@murphai/hosted-execution/parsers";
+import {
   buildHostedExecutionRuntimePlatform,
   createCloudflareHostedProviderFetch,
   createHostedBrowserVaultReplicaWriteHeaders,
@@ -119,8 +136,12 @@ import {
 } from "../src/runtime-platform.ts";
 import {
   fetchHostedWebControlPlaneJson,
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
   HostedWebControlPlaneResponseError,
 } from "../src/runtime-platform/web-control-transport.ts";
+import {
+  createHostedWebControlLoggingTransport,
+} from "../src/runtime-platform/log-port.ts";
 import {
   fetchHostedExecutionWebControlPlaneResponse,
 } from "../src/web-control-plane.ts";
@@ -323,8 +344,7 @@ async function fetchDirectHostedWorkspaceReadWithHeaders(input: {
     description: "Hosted workspace read",
     fetchImpl: input.fetchImpl,
     headers: input.headers,
-    method: "GET",
-    path: "/api/internal/hosted-workspace",
+    route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.workspaceRead,
     ...(input.sensitiveResponseBody
       ? { sensitiveResponseBody: input.sensitiveResponseBody }
       : {}),
@@ -3115,14 +3135,14 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       ref,
     })).rejects.toThrow("Hosted workspace snapshot complete failed with HTTP 409.");
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    const completeRequest = requireFetchRequest(fetchMock.mock.calls[2], "workspace snapshot complete");
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    const completeRequest = requireFetchRequest(fetchMock.mock.calls[3], "workspace snapshot complete");
     expect(completeRequest.method).toBe("POST");
     expect(completeRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(completeRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
     expect(completeRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("4");
     await vi.advanceTimersByTimeAsync(10_000);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
   it("replays one transport-ambiguous snapshot completion with the identical payload and headers", async () => {
@@ -3275,7 +3295,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(responseBodyRead).toBe(false);
   });
 
-  it("does not replay or erase a completion transport failure when a wake follows it", async () => {
+  it("replays an exact completion after transport loss even when a wake follows it", async () => {
+    vi.useFakeTimers();
     const ref = createWorkspaceSnapshotV2Ref({ encryptedByteSize: 4 });
     const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(
       Uint8Array.from({ length: 32 }, (_, index) => index + 1),
@@ -3284,7 +3305,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const abortReason = new Error("foreground wake interrupted snapshot completion");
     const completionStarted = createDeferred<void>();
     const completionFailure = createDeferred<Response>();
+    const completionReplay = createDeferred<Response>();
     let completionCalls = 0;
+    let heartbeatCalls = 0;
     const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
       const request = requireFetchRequest(args, "cancelled workspace snapshot completion");
       if (request.url.endsWith("/workspace-snapshots/start")) {
@@ -3295,6 +3318,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         });
       }
       if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/heartbeat`)) {
+        heartbeatCalls += 1;
         return new Response(JSON.stringify({ alive: true, ok: true }), {
           headers: { "content-type": "application/json; charset=utf-8" },
           status: 200,
@@ -3302,8 +3326,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       }
       if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/complete`)) {
         completionCalls += 1;
-        completionStarted.resolve();
-        return await completionFailure.promise;
+        if (completionCalls === 1) {
+          completionStarted.resolve();
+          return await completionFailure.promise;
+        }
+        return await completionReplay.promise;
       }
       return new Response("unexpected", { status: 500 });
     });
@@ -3312,27 +3339,36 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       fetchImpl: fetchMock as typeof fetch,
     });
 
-    await platform.workspaceSnapshotPort!.startSnapshotSession({
-      expectedWorkspaceVersion: "4",
-      reason: "idle_shutdown",
-      signal: abortController.signal,
-    });
-    const completion = platform.workspaceSnapshotPort!.completeSnapshotSession({
-      checkpointRequest: createWorkspaceSnapshotCheckpointRequest(ref),
-      ref,
-    });
-    await completionStarted.promise;
-    completionFailure.reject(new TypeError("fetch failed"));
-    abortController.abort(abortReason);
+    try {
+      await platform.workspaceSnapshotPort!.startSnapshotSession({
+        expectedWorkspaceVersion: "4",
+        reason: "idle_shutdown",
+        signal: abortController.signal,
+      });
+      await vi.waitFor(() => expect(heartbeatCalls).toBe(1));
+      const completion = platform.workspaceSnapshotPort!.completeSnapshotSession({
+        checkpointRequest: createWorkspaceSnapshotCheckpointRequest(ref),
+        ref,
+      });
+      await completionStarted.promise;
+      completionFailure.reject(new TypeError("fetch failed"));
+      abortController.abort(abortReason);
+      await vi.waitFor(() => expect(completionCalls).toBe(2));
+      const heartbeatCountAfterWake = heartbeatCalls;
+      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.waitFor(() =>
+        expect(heartbeatCalls).toBeGreaterThan(heartbeatCountAfterWake)
+      );
+      completionReplay.resolve(createWorkspaceSnapshotCompleteResponse(ref));
 
-    await expect(completion).rejects.toThrow("Hosted workspace snapshot complete request failed.");
-    await expect(completion).rejects.not.toBe(abortReason);
-    await expect(completion).rejects.toMatchObject({
-      phase: "session_complete_request",
-      timeoutMs: expect.any(Number),
-    });
+      const completed = await completion;
 
-    expect(completionCalls).toBe(1);
+      expect(completed.snapshotRef).toEqual(ref);
+      expect(completionCalls).toBe(2);
+    } finally {
+      completionReplay.resolve(createWorkspaceSnapshotCompleteResponse(ref));
+      vi.useRealTimers();
+    }
   });
 
   it("terminates snapshot completion after a second transport closure", async () => {
@@ -3529,7 +3565,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       });
       await vi.waitFor(() => expect(completionHeaders).toHaveLength(2));
       await vi.advanceTimersByTimeAsync(2_000);
-      await vi.waitFor(() => expect(heartbeatHeaders).toHaveLength(2));
+      await vi.waitFor(() => expect(heartbeatHeaders).toHaveLength(3));
 
       expect(Object.fromEntries(completionHeaders[0] ?? [])).toEqual(expect.objectContaining({
         "x-hosted-runtime-attempt-id": "attempt_1",
@@ -3537,7 +3573,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         "x-hosted-runtime-workspace-version": "4",
       }));
       expect(completionHeaders[1]).toEqual(completionHeaders[0]);
-      expect(Object.fromEntries(heartbeatHeaders[1] ?? [])).toEqual(expect.objectContaining({
+      expect(Object.fromEntries(heartbeatHeaders.at(-1) ?? [])).toEqual(expect.objectContaining({
         "x-hosted-runtime-attempt-id": "attempt_1",
         "x-hosted-runtime-lease-generation": "9",
         "x-hosted-runtime-workspace-version": "4",
@@ -3682,8 +3718,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }));
     expect(completed.snapshotRef).toEqual(ref);
     expect(recordCheckpoint).not.toHaveBeenCalled();
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    const completeRequest = requireFetchRequest(fetchMock.mock.calls[2], "workspace snapshot complete");
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    const completeRequest = requireFetchRequest(fetchMock.mock.calls[3], "workspace snapshot complete");
     expect(completeRequest.method).toBe("POST");
     expect(completeRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(completeRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
@@ -3980,7 +4016,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
-  it("retries v2 workspace snapshot object fetch transport failures once", async () => {
+  it.each(["network", "idle"] as const)("retries v2 workspace snapshot %s failures once", async (failureKind) => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-retry-"));
     const sourceRoot = path.join(tempRoot, "source");
     const durableRoot = path.join(tempRoot, "durable");
@@ -4015,10 +4051,13 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         outputDir: scratchRoot,
       });
       const encryptedBytes = await readFile(encrypted.encryptedFilePath);
-      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.useFakeTimers({ toFake: failureKind === "idle" ? ["Date", "setTimeout", "clearTimeout"] : ["Date"] });
       vi.setSystemTime(new Date("2026-05-20T00:00:00.000Z"));
       const getUrl = `https://r2.example.test/bundles/${objectKey}?X-Amz-Signature=fixture-get`;
       let objectFetchCount = 0;
+      const bodyCanceled = vi.fn();
+      let idleReadStarted!: () => void;
+      const idleRead = new Promise<void>((resolve) => { idleReadStarted = resolve; });
       const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
         const request = requireFetchRequest(args, "workspace snapshot restore retry fetch");
         if (request.url.includes(`/workspace-snapshots/${snapshotId}/data-key/unwrap`)) {
@@ -4046,11 +4085,16 @@ describe("buildHostedExecutionRuntimePlatform", () => {
             vi.setSystemTime(new Date(Date.now() + 80));
             let prefixSent = false;
             return new Response(new ReadableStream<Uint8Array>({
+              cancel: bodyCanceled,
               pull(controller) {
                 if (!prefixSent) {
                   prefixSent = true;
                   vi.setSystemTime(new Date(Date.now() + 70));
                   controller.enqueue(encryptedBytes.subarray(0, 32));
+                  return;
+                }
+                if (failureKind === "idle") {
+                  idleReadStarted();
                   return;
                 }
                 controller.error(new TypeError("connection reset"));
@@ -4090,7 +4134,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         fetchImpl: fetchMock as typeof fetch,
       });
 
-      const restoreTimings = await platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
+      const restorePromise = platform.workspaceSnapshotPort!.restoreWorkspaceSnapshot({
         durableRoot,
         ref: {
           archive: {
@@ -4118,9 +4162,34 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         },
       });
 
+      if (failureKind === "idle") {
+        await idleRead;
+        await vi.advanceTimersByTimeAsync(15_000);
+        await vi.waitFor(() => expect(readWorkspaceSnapshotDiagnosticLogs().some((log) =>
+          log.message === "Hosted workspace snapshot restore read step failed; retrying."
+        )).toBe(true));
+        await vi.advanceTimersByTimeAsync(100);
+      }
+      const restoreTimings = await restorePromise;
       expect(objectFetchCount).toBe(2);
+      if (failureKind === "idle") expect(bodyCanceled).toHaveBeenCalledOnce();
       expect(restoreTimings?.objectFetchResponseHeadersMs).toBe(7);
       expect(restoreTimings?.objectFetchBodyReadMs).toBe(11);
+      const bodyLogs = readWorkspaceSnapshotDiagnosticLogs().filter((log) =>
+        log.message === "Hosted workspace snapshot body read settled."
+      );
+      expect(bodyLogs).toHaveLength(2);
+      expect(bodyLogs[1]?.details).toMatchObject({
+        complete: true,
+        bytesRead: encrypted.encryptedByteSize,
+        readIdleTimeoutMs: 15_000,
+      });
+      if (failureKind === "idle") {
+        expect(bodyLogs[0]?.details).toMatchObject({
+          complete: false,
+          maxReadWaitMs: 15_000,
+        });
+      }
       await expect(access(path.join(durableRoot, "note.md"))).resolves.toBeUndefined();
       await expect(
         readdir(tempRoot).then((entries) =>
@@ -4133,7 +4202,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         );
       expect(retryLogs).toHaveLength(1);
       expect(retryLogs[0]?.details).toEqual(expect.objectContaining({
-        fetchCauseKind: "network",
+        fetchCauseKind: failureKind === "idle" ? "timeout" : "network",
         retrying: true,
         workspaceSnapshotRestoreAttempt: 1,
         workspaceSnapshotRestoreStep: "object_fetch",
@@ -4162,7 +4231,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(serializedLogs).not.toContain(objectKey);
       expect(serializedLogs).not.toContain(snapshotId);
       expect(serializedLogs).not.toContain(getUrl);
-      expect(serializedLogs).toContain("connection reset");
+      if (failureKind === "network") expect(serializedLogs).toContain("connection reset");
       expect(serializedLogs).not.toContain(dataKeyBase64);
       expect(serializedLogs).not.toContain(tempRoot);
     } finally {
@@ -4175,7 +4244,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
-  it("aborts and cancels stalled v2 workspace snapshot object body reads", async () => {
+  it.each(["caller", "idle"] as const)("preserves the workspace after %s cancellation of stalled snapshot reads", async (interruption) => {
     const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-platform-r2-body-abort-"));
     const durableRoot = path.join(tempRoot, "durable");
     const dataKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
@@ -4193,6 +4262,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     try {
+      await mkdir(durableRoot, { recursive: true });
+      await writeFile(path.join(durableRoot, "existing.md"), "keep the prior workspace");
+      if (interruption === "idle") {
+        vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+      }
       const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
         const request = requireFetchRequest(args, "workspace snapshot stalled body fetch");
         if (request.url.includes(`/workspace-snapshots/${ref.snapshotId}/data-key/unwrap`)) {
@@ -4243,18 +4317,32 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         durableRoot,
         ref,
         signal: abortController.signal,
-      });
+      }).catch((error: unknown) => error);
       await objectBodyOpened;
-      abortController.abort(new Error("restore aborted while reading snapshot body"));
-
-      await expect(restore).rejects.toThrow("restore aborted while reading snapshot body");
-      expect(objectFetchCount).toBe(1);
-      expect(objectBodyCancelCount).toBe(1);
-      await expect(access(durableRoot)).rejects.toThrow();
+      if (interruption === "caller") {
+        abortController.abort(new Error("restore aborted while reading snapshot body"));
+        expect(await restore).toMatchObject({ message: "restore aborted while reading snapshot body" });
+      } else {
+        await vi.advanceTimersByTimeAsync(15_000);
+        await vi.waitFor(() => expect(readWorkspaceSnapshotDiagnosticLogs().some((log) =>
+          log.message === "Hosted workspace snapshot restore read step failed; retrying."
+        )).toBe(true));
+        await vi.advanceTimersByTimeAsync(100);
+        await vi.waitFor(() => expect(objectFetchCount).toBe(2));
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(await restore).toMatchObject({ code: "timeout" });
+      }
+      const expectedAttempts = interruption === "idle" ? 2 : 1;
+      expect(objectFetchCount).toBe(expectedAttempts);
+      expect(objectBodyCancelCount).toBe(expectedAttempts);
+      await expect(readFile(path.join(durableRoot, "existing.md"), "utf8"))
+        .resolves.toBe("keep the prior workspace");
       expect(readWorkspaceSnapshotDiagnosticLogs().filter((log) =>
         log.message === "Hosted workspace snapshot restore read step failed; retrying."
-      )).toHaveLength(0);
+      )).toHaveLength(expectedAttempts - 1);
+
     } finally {
+      vi.useRealTimers();
       dataKey.fill(0);
       await rm(tempRoot, {
         force: true,
@@ -5205,6 +5293,115 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     );
   });
 
+  it("persists registered-route contract rejections without target egress", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      loggedCount: 1,
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    const privateMemberMaterial = "private-member-material";
+    const { transport } = createHostedWebControlLoggingTransport({
+      boundUserId: privateMemberMaterial,
+      fetchImpl: fetchMock as typeof fetch,
+      timeoutMs: 1_000,
+      transport: { mode: "proxy" },
+    });
+    if (!transport) {
+      throw new Error("Expected a reporting web-control transport.");
+    }
+    const blockedRoute = {
+      ...HOSTED_RUNNER_WEB_CONTROL_ROUTES.runtimeLogWrite,
+      path: "/api/internal/hosted-execution/synthetic-blocked-control",
+    };
+
+    await expect(fetchHostedWebControlPlaneJson({
+      boundUserId: privateMemberMaterial,
+      description: "Hosted synthetic blocked control",
+      fetchImpl: fetchMock as typeof fetch,
+      route: blockedRoute,
+      timeoutMs: 1_000,
+      transport,
+    })).rejects.toMatchObject({
+      code: "HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED",
+      message:
+        "Hosted runtime web-control route is not allowlisted for proxy transport: POST /api/internal/hosted-execution/synthetic-blocked-control",
+      name: "HostedWebControlRouteNotAllowlistedError",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const logRequest = requireFetchRequest(
+      fetchMock.mock.calls[0],
+      "web-control preflight rejection log",
+    );
+    expect(logRequest.url).toBe(
+      "http://web-control.worker/api/internal/hosted-runtime/log",
+    );
+    expect(logRequest.method).toBe("POST");
+    const serializedLog = await logRequest.text();
+    expect(parseHostedRuntimeLogRequest(JSON.parse(serializedLog))).toEqual({
+      entries: [{
+        at: expect.any(String),
+        component: "runner",
+        errorCode: "HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED",
+        eventCode: "runner.web_control_preflight_rejected",
+        level: "warn",
+        phase: "invoke",
+        redactedJson: {
+          method: "POST",
+          operation: "web_control_blocked",
+          reason: "not_allowlisted",
+          transport: "proxy",
+        },
+      }],
+    });
+    expect(serializedLog).not.toContain(privateMemberMaterial);
+    expect(serializedLog).not.toContain("synthetic-blocked-control");
+    expect(mocks.emitHostedExecutionStructuredLog).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          eventCode: "runner.web_control_preflight_rejected",
+        }),
+      }),
+    );
+  });
+
+  it("preserves the policy error when the preflight log write fails", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const reportPreflightRejection = vi.fn(async () => {
+      throw new Error("Synthetic runtime-log transport failure.");
+    });
+    const blockedRoute = {
+      ...HOSTED_RUNNER_WEB_CONTROL_ROUTES.runtimeLogWrite,
+      path: "/api/internal/hosted-execution/synthetic-blocked-control",
+    };
+
+    await expect(fetchHostedWebControlPlaneJson({
+      boundUserId: "member_123",
+      description: "Hosted synthetic blocked control",
+      fetchImpl: fetchMock as typeof fetch,
+      route: blockedRoute,
+      timeoutMs: 1_000,
+      transport: {
+        mode: "proxy",
+        reportPreflightRejection,
+      },
+    })).rejects.toMatchObject({
+      code: "HOSTED_WEB_CONTROL_ROUTE_NOT_ALLOWLISTED",
+      name: "HostedWebControlRouteNotAllowlistedError",
+    });
+
+    expect(reportPreflightRejection).toHaveBeenCalledOnce();
+    expect(reportPreflightRejection).toHaveBeenCalledWith({
+      method: "POST",
+      operation: "web_control_blocked",
+      transport: "proxy",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("preserves structured non-retryable web-control errors without raw JSON in the message", async () => {
     const requestId = `aask_req_${"a".repeat(64)}`;
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
@@ -5963,7 +6160,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     );
 
     const response = await hostedFetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent",
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
       { body: "{}", method: "POST" },
     );
 
@@ -6479,6 +6676,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           status: 200,
         });
       }
+      if (url.pathname.endsWith(HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH)) {
+        return new Response(JSON.stringify({ status: "authorized" }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
       if (url.pathname.endsWith(HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH)) {
         const body = await request.clone().json() as { action?: unknown };
         if (body.action === HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION) {
@@ -6573,6 +6776,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(platform.issueExportPort).toBeDefined();
     expect(platform.usageRecordPort).toBeDefined();
     expect(platform.productFeedbackPort).toBeDefined();
+    expect(platform.effectsPort.controlOperatorTask).toBeDefined();
     expect(platform.assistantAskPort).toBeDefined();
     expect(platform.assistantPersonalizationToolPort).toBeDefined();
     expect(platform.groupToolPort).toBeDefined();
@@ -6624,6 +6828,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       relatedChangelogItemIds: ["native-message-formatting"],
       summary: "Interested in native message formatting.",
     });
+    await expect(platform.effectsPort.controlOperatorTask!({
+      action: "authorize",
+      expiresAt: "2026-04-26T00:05:00.000Z",
+      requestId: "operator_request_123",
+      taskId: "operator_task_123",
+    })).resolves.toEqual({ status: "authorized" });
     await expect(platform.assistantPersonalizationToolPort!.request({ action: "read" }))
       .resolves.toEqual({
         action: "read",
@@ -6686,7 +6896,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       connectionId: "conn_123",
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(15);
+    expect(fetchMock).toHaveBeenCalledTimes(16);
     const requests = fetchMock.mock.calls.map((call, index) =>
       requireFetchRequest(call, `callback web-control request ${index}`)
     );
@@ -6699,6 +6909,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       "http://web-control.worker/api/internal/hosted-execution/issues/record",
       "http://web-control.worker/api/internal/hosted-execution/usage/record",
       "http://web-control.worker/api/internal/hosted-execution/product-feedback/record",
+      `http://web-control.worker${HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH}`,
       `http://web-control.worker${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}`,
       `http://web-control.worker${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}?assistantInputId=ain_0123456789abcdef0123456789abcdef`,
       `http://web-control.worker${HOSTED_RUNTIME_ASSISTANT_PERSONALIZATION_TOOL_PATH}?assistantInputId=ain_0123456789abcdef0123456789abcdef`,
@@ -6713,7 +6924,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(request.headers.get("x-hosted-runtime-workspace-version")).toBe("6");
       expect(request.headers.has("x-hosted-execution-runner-proxy-token")).toBe(false);
     }
-    await expect(requests[10]?.clone().json()).resolves.toEqual({
+    await expect(requests[11]?.clone().json()).resolves.toEqual({
       action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
       personality: {
         detail: null,
@@ -7191,6 +7402,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
               targetKind: "thread",
               threadIsDirect: true,
             },
+        targetOverride: {
+          conversationThreadId: "hid_legacy_conflict",
+          target: "chat_legacy_conflict",
+          targetKind: "thread",
+        },
+        threadIsDirect: responseCount === 1,
       }), {
         headers: { "content-type": "application/json; charset=utf-8" },
         status: 200,
@@ -7256,7 +7473,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
-  it("does not synthesize a canonical Linq route from a legacy Web response", async () => {
+  it("does not synthesize a Linq route from legacy response fields", async () => {
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({
         ok: true,
@@ -8871,7 +9088,22 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(artifactRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
   });
 
-  it("reconciles a canonical checkpoint whose committed response is lost", async () => {
+  it.each([
+    {
+      label: "legacy",
+      progressProjection: {},
+    },
+    {
+      label: "system-progress-capable",
+      progressProjection: {
+        nextDefaultProcessingWakeAt: "2026-04-27T00:05:00.000Z",
+        nextDefaultProcessingWakeReason: "assistant",
+        systemMailboxProgressGeneration: "7",
+      },
+    },
+  ])("reconciles a $label canonical checkpoint whose committed response is lost", async ({
+    progressProjection,
+  }) => {
     const redactedStatus = {
       hostedCanonicalWriteReceiptLogByteSize: 512,
       hostedCanonicalWriteReceiptLogSha256: "b".repeat(64),
@@ -8880,6 +9112,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       checkpointedAt: "2026-04-26T00:00:04.000Z",
       createdAt: "2026-04-26T00:00:00.000Z",
       inboxMediaRetentionWakeAt: "2026-04-30T00:00:00.000Z",
+      ...progressProjection,
       nextWakeAt: "2026-04-27T00:10:00.000Z",
       nextWakeReason: "assistant",
       redactedStatus,
@@ -8934,6 +9167,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expectedWorkspaceVersion: "4",
       inboxMediaRetentionWakeAt: committedWorkspace.inboxMediaRetentionWakeAt,
       leaseGeneration: "9",
+      ...progressProjection,
       nextWakeAt: committedWorkspace.nextWakeAt,
       nextWakeReason: committedWorkspace.nextWakeReason,
       reason: "canonical_runtime_commit" as const,
@@ -8994,6 +9228,33 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         label: "implicit retention wake",
         mutate({ request }) {
           delete request.inboxMediaRetentionWakeAt;
+        },
+      },
+      {
+        label: "system progress generation mismatch",
+        mutate({ request, workspace }) {
+          Object.assign(request, {
+            nextDefaultProcessingWakeAt: "2026-04-27T00:05:00.000Z",
+            nextDefaultProcessingWakeReason: "assistant",
+            systemMailboxProgressGeneration: "7",
+          });
+          Object.assign(workspace, {
+            nextDefaultProcessingWakeAt: "2026-04-27T00:05:00.000Z",
+            nextDefaultProcessingWakeReason: "assistant",
+            systemMailboxProgressGeneration: "8",
+          });
+        },
+      },
+      {
+        label: "system progress null witness omitted",
+        mutate({ request, workspace }) {
+          Object.assign(request, {
+            nextDefaultProcessingWakeAt: null,
+            nextDefaultProcessingWakeReason: null,
+            systemMailboxProgressGeneration: "7",
+          });
+          workspace.systemMailboxProgressGeneration = "7";
+          workspace.nextDefaultProcessingWakeAt = null;
         },
       },
     ];
@@ -9571,7 +9832,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       ref,
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
     const startRequest = requireFetchRequest(fetchMock.mock.calls[1], "advanced snapshot start");
     expect(startRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(startRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
@@ -9580,7 +9841,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expectedWorkspaceVersion: "5",
       reason: "idle_shutdown",
     }));
-    const completeRequest = requireFetchRequest(fetchMock.mock.calls[3], "advanced snapshot complete");
+    const completeRequest = requireFetchRequest(fetchMock.mock.calls[4], "advanced snapshot complete");
     expect(completeRequest.headers.get("x-hosted-runtime-attempt-id")).toBe("attempt_1");
     expect(completeRequest.headers.get("x-hosted-runtime-lease-generation")).toBe("9");
     expect(completeRequest.headers.get("x-hosted-runtime-workspace-version")).toBe("5");
@@ -10095,28 +10356,88 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(rejectedError).toMatchObject({ retryable });
   });
 
-  it("classifies artifact upload transport failures as retryable", async () => {
-    const fetchMock = vi.fn(async () => {
-      throw new Error("fetch failed");
-    });
-    const platform = buildTestHostedExecutionRuntimePlatform({
-      boundUserId: "member_123",
-      fetchImpl: fetchMock as typeof fetch,
-    });
-
-    let rejectedError: unknown;
-    try {
-      await platform.artifactStore.put({
-        bytes: new Uint8Array([1, 2, 3]),
-        sha256: "a".repeat(64),
+  it.each([undefined, "ECONNRESET", "UND_ERR_SOCKET"])(
+    "keeps artifact upload behavior and existing logs with network code %s",
+    async (code) => {
+      const cause = {
+        code,
+        address: "192.0.2.10",
+        port: 43210,
+        socket: { remoteAddress: "192.0.2.11" },
+        url: "https://example.invalid/private",
+        headers: { authorization: "synthetic-private-credential" },
+        payload: "synthetic-private-payload",
+      };
+      const failure = code
+        ? new TypeError("fetch failed", { cause })
+        : new Error("fetch failed");
+      let fail = true;
+      const fetchMock = vi.fn(async () => {
+        if (fail) {
+          throw failure;
+        }
+        return new Response(null, { status: 204 });
       });
-    } catch (error) {
-      rejectedError = error;
-    }
+      const platform = buildTestHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+      });
+      const artifact = { bytes: new Uint8Array([1, 2, 3]), sha256: "a".repeat(64) };
 
-    expect(rejectedError).toBeInstanceOf(HostedRuntimeArtifactWriteError);
-    expect(rejectedError).toMatchObject({ retryable: true });
-  });
+      let rejectedError: unknown;
+      try {
+        await platform.artifactStore.put(artifact);
+      } catch (error) {
+        rejectedError = error;
+      }
+      expect(rejectedError).toBeInstanceOf(HostedRuntimeArtifactWriteError);
+      expect(rejectedError).toMatchObject({ retryable: true, cause: { cause: failure } });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const logs = mocks.emitHostedExecutionStructuredLog.mock.calls.map(([input]) => input);
+      expect(logs.map((input) => input.message)).toEqual([
+        "Hosted runtime artifact upload started.",
+        "Hosted runtime artifact upload authority headers prepared.",
+        "Hosted runtime internal request started.",
+        "Hosted runtime internal request failed.",
+        "Hosted runtime upstream request failed.",
+        "Hosted runtime artifact upload failed before response.",
+      ]);
+      expect(logs[5]).toMatchObject({
+        component: "hosted.runtime.artifact-store",
+        level: "warn",
+        phase: "checkpoint",
+        details: {
+          errorCode: code ? "type_error" : "runtime_error",
+          fetchCauseCode: code ? "type_error" : "runtime_error",
+          fetchCauseKind: "fetch_failed",
+          fetchCauseName: code ? "TypeError" : "Error",
+          fetchCallerSignalAborted: false,
+          fetchRequestSignalAborted: false,
+          fetchTimeoutSignalAborted: false,
+          ...(code ? { fetchNetworkErrorCode: code } : {}),
+        },
+      });
+      if (!code) {
+        expect(logs[5].details).not.toHaveProperty("fetchNetworkErrorCode");
+      }
+      const serialized = JSON.stringify(logs);
+      for (const hidden of [
+        "192.0.2.10", "43210", "192.0.2.11", "example.invalid",
+        "synthetic-private-credential", "synthetic-private-payload", artifact.sha256,
+      ]) {
+        expect(serialized).not.toContain(hidden);
+      }
+
+      fail = false;
+      await platform.artifactStore.put(artifact);
+      await platform.artifactStore.put(artifact);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledTimes(12);
+      for (const [input] of mocks.emitHostedExecutionStructuredLog.mock.calls.slice(6)) {
+        expect(input.details).not.toHaveProperty("fetchNetworkErrorCode");
+      }
+    },
+  );
 
   it("validates the workspace lease immediately before web checkpoint callbacks", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({

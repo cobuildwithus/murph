@@ -101,9 +101,10 @@ generic-table balloon. Provider chrome is intentionally bounded to the title
 plus derived progress for structured workouts; it does not repeat the image's
 sets below the balloon. Generic-table provider chrome likewise retains only the
 title instead of repeating the image's subtitle, rows, or footer. The complete
-semantic text renderer remains the recovery owner, and the value-free fallback
-identifies the message as the member's workout or summary before telling them
-how to request that complete text without exposing its values outside the card.
+semantic text renderer remains the recovery owner. The value-free fallback only
+identifies the message as the member's workout or summary without exposing its
+values outside the card; capability failure or definitive pre-acceptance
+rejection still uses the existing automatic text-only recovery.
 
 The bitmap remains rectangular because Messages owns the outer mask and
 caption. Because the provider request omits an App Store id, the app-absent
@@ -182,9 +183,10 @@ exact `activity_session` id to that assistant delivery through the existing
 outbox context-reference field. A later reply carries it forward only when a
 successful exact read or mutation returns the same id. The relationship is
 runtime-owned and absent from member-facing text. An unrelated assistant
-delivery, invalid result, multiple ids, or conflict clears implicit continuity.
-This creates no active-workout selector, focused-workout state, timeout, or
-recency fallback.
+delivery that makes no workout-context decision is transparent. An explicit
+clear, invalid result, multiple ids, mismatch, or conflict ends implicit
+continuity. This creates no active-workout selector, focused-workout state,
+timeout, or recency fallback.
 
 Starting or logging a new workout is independent of older unfinished workouts.
 Every mutation carries the exact canonical workout id and uses that workout's
@@ -205,6 +207,14 @@ repeated compact exercise values. The canonical event is valid before its one
 creation write; Murph never starts an empty event and appends the initial
 exercises. Exact member-stated repetitions for every set of an exercise are
 stored on that exercise in that creation write.
+
+Every newly authored ad-hoc exercise also carries one explicit result family.
+Resistance exercises carry `weight_reps` plus an lb/kg editor hint from the
+member's current request or saved strength-unit preference, even when the load
+itself is still unknown; the unknown load remains empty. Unloaded bodyweight
+work carries `bodyweight` and no resistance-unit hint. The targeted start and
+exercise-add commands reject missing result metadata before canonical
+persistence instead of emitting an ambiguous native result field.
 
 Murph verifies the successful creation result before issuing the exact old
 workout delete with the proposal-time lifecycle revision. It never deletes
@@ -288,6 +298,18 @@ a set from that format, Murph reads the exact format, starts a new workout from
 it, preserves the returned workout event id, and logs only the stated coordinate
 on that new record. An older unfinished workout neither blocks this work nor
 needs to be closed first.
+
+Legacy reminders can lack a canonical workout reference. When the delivered
+reminder has an exact host-preserved automation id, the private reply may inspect
+that saved automation's title and instructions before requesting clarification.
+Inspection is read-only and does not establish that a workout or completed set
+exists. A complete standalone workout definition and the member's explicit set
+completion can start one ad-hoc workout through the ordinary canonical owner.
+Only reported sets receive actual values; numbering a reminder never backfills
+earlier sets. Named formats, regimens, and experiments retain their existing
+exact-record paths. Missing or ambiguous definitions and explicit cleared or
+mismatched event references require clarification without a write. Recovery
+does not patch the reminder or select an older workout by recency.
 
 When immediate causal context instead identifies an existing exact workout event
 id, Murph reads and mutates only that record. A reminder reference alone never

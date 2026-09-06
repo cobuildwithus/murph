@@ -121,7 +121,10 @@ import {
 } from "./experiment-journal-vault.js"
 import { addCaptureRecord } from "./capture.js"
 import {
+  toAssessmentProjectVaultCliError,
+  toImporterInputFileVaultCliError,
   toVaultCliError,
+  toVaultCliFilesystemError,
   toVaultInitializationCliError,
   toVaultMetadataCliError,
 } from "./vault-usecase-helpers.js"
@@ -907,18 +910,22 @@ function createIntegratedCoreServices(): CoreWriteServices {
     async projectAssessment(input: ProjectAssessmentInput) {
       const { vault, assessmentId } = input
       const core = await loadCoreRuntime()
-      const assessment = await core.readAssessmentResponse({
-        vaultRoot: vault,
-        assessmentId,
-      })
-      const proposal = await core.projectAssessmentResponse({
-        assessmentResponse: assessment,
-      })
+      try {
+        const assessment = await core.readAssessmentResponse({
+          vaultRoot: vault,
+          assessmentId,
+        })
+        const proposal = await core.projectAssessmentResponse({
+          assessmentResponse: assessment,
+        })
 
-      return {
-        vault,
-        assessmentId,
-        proposal,
+        return {
+          vault,
+          assessmentId,
+          proposal,
+        }
+      } catch (error) {
+        throw toAssessmentProjectVaultCliError(error)
       }
     },
     ...createExplicitHealthCoreServices(async () => {
@@ -945,6 +952,10 @@ function createIntegratedImporterServices(): ImporterServices {
           reuseExact,
         })
       } catch (error) {
+        const inputFileError = toImporterInputFileVaultCliError(error, file)
+        if (inputFileError !== error) {
+          throw inputFileError
+        }
         throw toVaultCliError(error, {
           DOCUMENT_EXACT_SOURCE_DELETED: { code: 'conflict' },
           RAW_MANIFEST_INVALID: { code: 'conflict' },
@@ -1118,16 +1129,19 @@ function createIntegratedQueryServices(): QueryServices {
       return listFoodRecords(input)
     },
     async showMealNutritionTotals(input: CommandContext & {
+      resolveGoals?: boolean
       from?: string
       to?: string
     }) {
       const query = await loadQueryRuntime()
       const result = await query.readMealNutritionTotals(input.vault, {
+        resolveGoals: input.resolveGoals,
         from: input.from,
         to: input.to,
       })
 
       return {
+        ...(result.goalContext ? { goalContext: result.goalContext } : {}),
         vault: input.vault,
         filters: {
           from: result.from,
@@ -1466,6 +1480,8 @@ function createIntegratedQueryServices(): QueryServices {
       to?: string
       providers?: string[]
       limit: number
+      includeWorkoutDetails?: boolean
+      includeWorkoutSummaries?: boolean
     }) {
       const normalized = normalizeWearableSummaryInput(input)
       const query = await loadQueryRuntime()
@@ -1473,7 +1489,24 @@ function createIntegratedQueryServices(): QueryServices {
         input.vault,
         normalized.queryFilters,
       )
-      const items = limitedCompactWearableCommandSummaryArray(rawItems, normalized.filters.limit)
+      const outputItems = input.includeWorkoutDetails
+        ? rawItems
+        : rawItems.map((item) => {
+            const summary: Record<string, unknown> = { ...item }
+            if (input.includeWorkoutSummaries) {
+              summary.workoutFeatures = item.workoutFeatures.map(({ splits: _splits, ...workout }) => ({
+                ...workout,
+                splitsOmitted: true,
+              }))
+            } else {
+              delete summary.workoutFeatures
+            }
+            return summary
+          })
+      const items = limitedCompactWearableCommandSummaryArray(
+        outputItems,
+        normalized.filters.limit,
+      )
 
       return {
         filters: normalized.filters,
@@ -1543,17 +1576,37 @@ function createIntegratedQueryServices(): QueryServices {
     }) {
       const { vault, from, to, experiment, out } = input
       const query = await loadQueryRuntime()
-      const readModel = await query.readVaultTolerant(vault)
+      const [readModel, audits] = await Promise.all([
+        query.readVaultTolerant(vault),
+        query.readCanonicalEntityFamilySource(vault, 'audit'),
+      ])
+      readModel.entities = [...readModel.entities, ...audits].sort(
+        query.compareCanonicalEntities,
+      )
       const pack = query.buildExportPack(readModel, {
         from,
         to,
         experimentSlug: experiment,
       })
 
-      await materializeExportPack(vault, pack.files)
+      try {
+        await materializeExportPack(vault, pack.files)
+      } catch (error) {
+        throw toVaultCliFilesystemError(error, {
+          message: 'The export pack could not be stored in the vault.',
+          fieldPath: 'vault',
+        })
+      }
 
       if (out) {
-        await materializeExportPack(out, pack.files)
+        try {
+          await materializeExportPack(out, pack.files)
+        } catch (error) {
+          throw toVaultCliFilesystemError(error, {
+            message: 'The export pack could not be written to the output directory.',
+            fieldPath: 'out',
+          })
+        }
       }
 
       return {

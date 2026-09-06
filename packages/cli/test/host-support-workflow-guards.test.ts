@@ -51,7 +51,6 @@ describe('host support workflow guards', () => {
 
     expect(workflow).toContain('name: Release build/typecheck (ubuntu)')
     expect(workflow).toContain('name: Release package coverage (${{ matrix.shard }})')
-    expect(workflow).toContain('name: Release app verification (ubuntu)')
     expect(workflow).toContain('name: Release fixture coverage (ubuntu)')
     expect(workflow).toContain('name: Release checks (ubuntu)')
     expect(workflow).toContain('pnpm build:workspace:clean')
@@ -67,8 +66,6 @@ describe('host support workflow guards', () => {
     )
     expect(workflow).toContain('pnpm no-js')
     expect(workflow).toContain('bash scripts/doc-gardening.sh --fail-on-issues')
-    expect(workflow).toContain('pnpm test:apps')
-    expect(workflow).toContain('MURPH_APP_VERIFY_PARALLEL: "1"')
     expect(workflow).toContain(
       'MURPH_SUPPLEMENT_SEARCH_TEST_DB_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_search_test',
     )
@@ -86,56 +83,12 @@ describe('host support workflow guards', () => {
     expect(workflow).not.toContain('run: pnpm release:check')
   })
 
-  it('keeps every package coverage owner assigned to a release shard', () => {
-    const workflow = readFileSync(hostSupportWorkflowPath, 'utf8')
-    const packageCoverageJob = getJob(
-      workflow,
-      'release-package-coverage-linux',
-      'release-app-verification-linux',
-    )
-    const packageDirs = [
-      'packages/assistant-cli',
-      'packages/assistant-engine',
-      'packages/assistant-runtime',
-      'packages/assistantd',
-      'packages/cloudflare-hosted-control',
-      'packages/contracts',
-      'packages/core',
-      'packages/device-syncd',
-      'packages/exercise-library',
-      'packages/health-metrics',
-      'packages/cli',
-      'packages/gateway-core',
-      'packages/hosted-execution',
-      'packages/importers',
-      'packages/inbox-services',
-      'packages/inboxd',
-      'packages/messaging-ingress',
-      'packages/openclaw-plugin',
-      'packages/operator-config',
-      'packages/parsers',
-      'packages/query',
-      'packages/runtime-state',
-      'packages/setup-cli',
-      'packages/vault-usecases',
-    ]
-
-    for (const packageDir of packageDirs) {
-      expect(packageCoverageJob).toContain(packageDir)
-    }
-  })
-
-  it('restores only narrow TypeScript build-info caches in the release jobs', () => {
+  it('restores only the narrow TypeScript build-info cache in the release build job', () => {
     const workflow = readFileSync(hostSupportWorkflowPath, 'utf8')
     const buildTypecheckJob = getJob(
       workflow,
       'release-build-typecheck-linux',
       'release-package-coverage-linux',
-    )
-    const appVerificationJob = getJob(
-      workflow,
-      'release-app-verification-linux',
-      'release-fixture-coverage-linux',
     )
     const cacheInputHash =
       "${{ hashFiles('.nvmrc', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'packages/*/package.json', 'apps/*/package.json', 'tsconfig*.json', 'packages/*/tsconfig*.json', 'apps/*/tsconfig*.json') }}"
@@ -165,32 +118,8 @@ describe('host support workflow guards', () => {
     expect(cacheRestoreIndex).toBeGreaterThan(cleanBuildIndex)
     expect(typecheckIndex).toBeGreaterThan(cacheRestoreIndex)
 
-    expect(appVerificationJob.match(new RegExp(actionsCacheV5, 'gu')) ?? []).toHaveLength(1)
-    expect(appVerificationJob).toContain(`- name: Restore release app verification build info
-        if: github.event_name == 'push'
-        uses: ${actionsCacheV5}`)
-    expect(appVerificationJob).toContain(`path: |
-            apps/cloudflare/typecheck.tsbuildinfo
-            apps/web/.next/cache/tsconfig.tsbuildinfo
-            apps/web/.next/cache/tsconfig.next.tsbuildinfo`)
-    expect(appVerificationJob).toContain(
-      `key: tsbuildinfo-release-app-verification-\${{ runner.os }}-\${{ runner.arch }}-${cacheInputHash}-\${{ github.sha }}`,
-    )
-    expect(appVerificationJob).toContain(`restore-keys: |
-            tsbuildinfo-release-app-verification-\${{ runner.os }}-\${{ runner.arch }}-${cacheInputHash}-`)
-    expect(appVerificationJob).not.toContain(
-      `tsbuildinfo-release-app-verification-\${{ runner.os }}-\${{ runner.arch }}-\n`,
-    )
-
-    const installIndex = appVerificationJob.indexOf('run: pnpm install --frozen-lockfile')
-    const appCacheRestoreIndex = appVerificationJob.indexOf(`uses: ${actionsCacheV5}`)
-    const appVerificationIndex = appVerificationJob.indexOf('run: pnpm test:apps')
-    expect(installIndex).toBeGreaterThanOrEqual(0)
-    expect(appCacheRestoreIndex).toBeGreaterThan(installIndex)
-    expect(appVerificationIndex).toBeGreaterThan(appCacheRestoreIndex)
-
-    expect(workflow.match(/uses:\s+actions\/cache@/gu) ?? []).toHaveLength(2)
-    expect(workflow.match(/^\s+restore-keys:/gmu) ?? []).toHaveLength(2)
+    expect(workflow.match(/uses:\s+actions\/cache@/gu) ?? []).toHaveLength(1)
+    expect(workflow.match(/^\s+restore-keys:/gmu) ?? []).toHaveLength(1)
     expect(workflow).not.toContain('actions/cache/restore@')
     expect(workflow).not.toContain('actions/cache/save@')
     expect(workflow).not.toContain('**/*.tsbuildinfo')

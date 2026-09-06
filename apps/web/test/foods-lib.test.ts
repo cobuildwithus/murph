@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   createFoodsQueries,
@@ -9,8 +9,12 @@ import {
 } from "../src/lib/foods";
 import {
   createProductLabelsQueries,
+  isProductContaminantSchemaMissingError,
   normalizeProductLabelsConnectionString,
 } from "../src/lib/product-labels";
+import {
+  createProductLabelsRouteHandlers,
+} from "../src/lib/product-labels-route";
 
 const emptyContaminants = {
   status: "no_known_product_tests",
@@ -25,6 +29,25 @@ const productTestSourceDataOriginFilter =
 
 function isProductTestsQuery(text: string): boolean {
   return text.includes('product_tests.id AS "productTestId"');
+}
+
+function createFoodsTestRouteHandlers(
+  queries: ReturnType<typeof createFoodsQueries>,
+) {
+  return createProductLabelsRouteHandlers({
+    bareGtinQueryPriority: "upc",
+    getById: queries.getFoodById,
+    getByUpc: queries.getFoodByUpc,
+    numericExactIdPrefix: "fdc:",
+    projectNutritionItem: toFoodNutritionSearchItem,
+    search: queries.searchFoods,
+    errorCodes: {
+      failed: "foods_api_failed",
+      unconfigured: "foods_api_unconfigured",
+    },
+    isUnconfiguredError: isProductContaminantSchemaMissingError,
+    supportsGenericOnly: true,
+  });
 }
 
 describe("foods query helpers", () => {
@@ -267,6 +290,244 @@ describe("foods query helpers", () => {
     expect(calls[1]!.values).toEqual([["fdc:123"]]);
   });
 
+  it.each([
+    {
+      lookup: "ranked search",
+      routeQuery: "private-search-value",
+      primarySql: "fts_candidates AS MATERIALIZED",
+      failureStage: "search_rows" as const,
+      failingQuery: 1,
+    },
+    {
+      lookup: "ranked search",
+      routeQuery: "private-search-value",
+      primarySql: "fts_candidates AS MATERIALIZED",
+      failureStage: "contaminant_summary" as const,
+      failingQuery: 2,
+    },
+    {
+      lookup: "qualified food ID",
+      routeQuery: "fdc:private-exact-id",
+      primarySql: "id = $1",
+      failureStage: "search_rows" as const,
+      failingQuery: 1,
+    },
+    {
+      lookup: "qualified food ID",
+      routeQuery: "fdc:private-exact-id",
+      primarySql: "id = $1",
+      failureStage: "contaminant_summary" as const,
+      failingQuery: 2,
+    },
+    {
+      lookup: "bare GTIN",
+      routeQuery: "123456789012",
+      primarySql: "upc = ANY($1::text[])",
+      failureStage: "search_rows" as const,
+      failingQuery: 1,
+    },
+    {
+      lookup: "bare GTIN",
+      routeQuery: "123456789012",
+      primarySql: "upc = ANY($1::text[])",
+      failureStage: "contaminant_summary" as const,
+      failingQuery: 2,
+    },
+  ])(
+    "classifies $lookup $failureStage cancellations through real q dispatch",
+    async ({
+      failureStage,
+      failingQuery,
+      lookup,
+      primarySql,
+      routeQuery,
+    }) => {
+      class DatabaseError extends Error {
+        readonly code = "57014";
+      }
+
+      const privateProductId = lookup === "qualified food ID"
+        ? routeQuery
+        : "fdc:private-result-id";
+      const privateProductUpc = lookup === "bare GTIN"
+        ? routeQuery
+        : "00012345678905";
+      const privateProductName = "private product fact";
+      const privateSqlText = "SELECT private_product_payload";
+      const databaseError = new DatabaseError(
+        `database canceled ${routeQuery} for ${privateProductId}: ${privateSqlText}`,
+      );
+      const queryTexts: string[] = [];
+      const queries = createFoodsQueries({
+        async query<T>(text: string) {
+          queryTexts.push(text);
+          if (queryTexts.length === failingQuery) {
+            throw databaseError;
+          }
+          return {
+            rows: [
+              {
+                id: privateProductId,
+                dataOrigin: "usda_foundation",
+                dataOriginId: "private-data-origin-id",
+                name: privateProductName,
+                brand: "private brand fact",
+                upc: privateProductUpc,
+                offMarket: false,
+                label: { privateLabelFact: true },
+              },
+            ] as T[],
+          };
+        },
+      });
+      const handlers = createFoodsTestRouteHandlers(queries);
+      const previousDataApiKey = process.env.MURPH_DATA_API_KEY;
+      process.env.MURPH_DATA_API_KEY = "test-data-api-key";
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+
+      try {
+        const response = await handlers.GET(
+          new Request(
+            `https://web.example.test/api/foods?q=${encodeURIComponent(routeQuery)}`,
+            {
+              headers: {
+                authorization: "Bearer test-data-api-key",
+              },
+            },
+          ),
+        );
+
+        expect(queryTexts).toHaveLength(failingQuery);
+        expect(queryTexts[0]).toContain(primarySql);
+        if (failureStage === "contaminant_summary") {
+          expect(isProductTestsQuery(queryTexts[1] ?? "")).toBe(true);
+        }
+        expect(response.status).toBe(500);
+        await expect(response.json()).resolves.toEqual({
+          error: "foods_api_failed",
+        });
+        expect(consoleError).toHaveBeenCalledTimes(1);
+        expect(consoleError.mock.calls[0]?.[0]).toBe("foods_api_failed");
+        expect(consoleError.mock.calls[0]?.[1]).toEqual({
+          databaseErrorCode: "57014",
+          durationMs: expect.any(Number),
+          errorCode: "foods_api_failed",
+          errorType: "DatabaseError",
+          failureStage,
+          genericOnly: false,
+          includeOffMarket: false,
+          limit: 1,
+          method: "GET",
+          nutritionOnly: false,
+          operation: "search",
+          queryLength: routeQuery.length,
+        });
+        const logDetails = consoleError.mock.calls[0]?.[1];
+        expect(logDetails).not.toHaveProperty("causeDatabaseErrorCode");
+        const serializedLog = JSON.stringify(consoleError.mock.calls);
+        expect(serializedLog).not.toContain(routeQuery);
+        expect(serializedLog).not.toContain(privateProductId);
+        expect(serializedLog).not.toContain(privateProductName);
+        expect(serializedLog).not.toContain(privateProductUpc);
+        expect(serializedLog).not.toContain(privateSqlText);
+        expect(serializedLog).not.toContain("private-data-origin-id");
+        expect(serializedLog).not.toContain("private brand fact");
+        expect(serializedLog).not.toContain("privateLabelFact");
+        expect(serializedLog).not.toContain(databaseError.message);
+        expect(serializedLog).not.toContain("stack");
+      } finally {
+        consoleError.mockRestore();
+        if (previousDataApiKey === undefined) {
+          delete process.env.MURPH_DATA_API_KEY;
+        } else {
+          process.env.MURPH_DATA_API_KEY = previousDataApiKey;
+        }
+      }
+    },
+  );
+
+  it("preserves contaminant schema-missing classification through exact food lookup", async () => {
+    const privateRouteQuery = "fdc:private-schema-id";
+    const privateSchemaMessage = "missing private product_tests relation";
+    const queryTexts: string[] = [];
+    const queries = createFoodsQueries({
+      async query<T>(text: string) {
+        queryTexts.push(text);
+        if (isProductTestsQuery(text)) {
+          throw Object.assign(new Error(privateSchemaMessage), {
+            code: "42P01",
+          });
+        }
+        return {
+          rows: [
+            {
+              id: privateRouteQuery,
+              dataOrigin: "usda_foundation",
+              dataOriginId: "private-schema-origin",
+              name: "private schema product",
+              brand: null,
+              upc: null,
+              offMarket: false,
+              label: { privateSchemaFact: true },
+            },
+          ] as T[],
+        };
+      },
+    });
+    const handlers = createFoodsTestRouteHandlers(queries);
+    const previousDataApiKey = process.env.MURPH_DATA_API_KEY;
+    process.env.MURPH_DATA_API_KEY = "test-data-api-key";
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    try {
+      const response = await handlers.GET(
+        new Request(
+          `https://web.example.test/api/foods?q=${encodeURIComponent(privateRouteQuery)}`,
+          {
+            headers: {
+              authorization: "Bearer test-data-api-key",
+            },
+          },
+        ),
+      );
+
+      expect(queryTexts).toHaveLength(2);
+      expect(queryTexts[0]).toContain("id = $1");
+      expect(isProductTestsQuery(queryTexts[1] ?? "")).toBe(true);
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toEqual({
+        error: "foods_api_unconfigured",
+      });
+      expect(consoleError).toHaveBeenCalledTimes(1);
+      expect(consoleError.mock.calls[0]?.[0]).toBe(
+        "foods_api_unconfigured",
+      );
+      expect(consoleError.mock.calls[0]?.[1]).toEqual({
+        errorName: "ProductContaminantSchemaMissingError",
+      });
+      const logDetails = consoleError.mock.calls[0]?.[1];
+      expect(logDetails).not.toHaveProperty("failureStage");
+      const serializedLog = JSON.stringify(consoleError.mock.calls);
+      expect(serializedLog).not.toContain(privateRouteQuery);
+      expect(serializedLog).not.toContain(privateSchemaMessage);
+      expect(serializedLog).not.toContain("private-schema-origin");
+      expect(serializedLog).not.toContain("private schema product");
+      expect(serializedLog).not.toContain("privateSchemaFact");
+      expect(serializedLog).not.toContain("stack");
+    } finally {
+      consoleError.mockRestore();
+      if (previousDataApiKey === undefined) {
+        delete process.env.MURPH_DATA_API_KEY;
+      } else {
+        process.env.MURPH_DATA_API_KEY = previousDataApiKey;
+      }
+    }
+  });
+
   it("normalizes shared labels database connection strings for pg", () => {
     expect(
       normalizeProductLabelsConnectionString(
@@ -363,17 +624,18 @@ describe("foods query helpers", () => {
     expect(ftsIndexSql).toContain("to_tsvector");
     expect(ftsIndexSql).not.toContain("ORDER BY");
     expect(nameNearestSql).not.toContain("to_tsvector");
+    expect(nameNearestSql).toContain(
+      "(SELECT count(*) FROM fts_index_matches) = 10000",
+    );
     expect(nameNearestSql).toContain("ORDER BY name <->>> $1::text");
     expect(ftsNearestSql).toContain("FROM name_nearest_matches");
-    expect(ftsNearestSql).toContain(
-      "EXISTS (SELECT 1 FROM fts_index_matches)",
-    );
+    expect(ftsNearestSql).not.toContain("EXISTS");
     expect(ftsNearestSql).not.toContain("FROM foods");
     expect(searchCall?.text).toMatch(
       /fts_index_matches AS MATERIALIZED \([\s\S]*?FROM foods[\s\S]*?LIMIT 10000\s*\),\s*name_nearest_matches AS MATERIALIZED/u,
     );
     expect(searchCall?.text).toMatch(
-      /name_nearest_matches AS MATERIALIZED \([\s\S]*?FROM foods[\s\S]*?ORDER BY name <->>> \$1::text\s*LIMIT 10000/u,
+      /name_nearest_matches AS MATERIALIZED \([\s\S]*?FROM foods[\s\S]*?count\(\*\) FROM fts_index_matches\) = 10000[\s\S]*?ORDER BY name <->>> \$1::text\s*LIMIT 10000/u,
     );
     expect(searchCall?.text).toMatch(
       /fts_nearest_matches AS MATERIALIZED \([\s\S]*?FROM name_nearest_matches[\s\S]*?to_tsvector/u,
@@ -421,7 +683,7 @@ describe("foods query helpers", () => {
     expect(searchCall?.text).not.toMatch(
       /SELECT\s+brand[\s\S]*FROM foods[\s\S]*GROUP BY brand/u,
     );
-    expect(searchCall?.values).toEqual(["greek yogurt", false, 5, null]);
+    expect(searchCall?.values).toEqual(["greek yogurt", false, 5, null, 0]);
 
     const contaminantsCall = calls[1];
     expect(contaminantsCall?.text).toContain("FROM product_tests");
@@ -530,6 +792,7 @@ describe("foods query helpers", () => {
       false,
       1,
       ["usda_foundation", "usda_sr_legacy", "usda_fndds"],
+      0,
     ]);
   });
 
@@ -627,6 +890,7 @@ describe("foods query helpers", () => {
       false,
       5,
       null,
+      0,
     ]);
   });
 
@@ -1556,12 +1820,21 @@ describe("foods query helpers", () => {
     ]);
 
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.values).toEqual(["Greek Yogurt", false, 5, null]);
+    expect(calls[0]?.values).toEqual(["Greek Yogurt", false, 5, null, 0]);
     expect(calls[0]?.text).toContain("'usda_foundation'");
     expect(calls[0]?.text).toContain("'usda_sr_legacy'");
     expect(calls[0]?.text).toContain("'usda_fndds'");
     expect(calls[0]?.text).toContain("COUNT(DISTINCT product_tests.id)");
-    expect(calls[0]?.text).not.toContain("labels.label");
+    expect(calls[0]?.text).not.toMatch(
+      /(?:^|[^A-Za-z0-9_])labels\.label/u,
+    );
+    expect(calls[0]?.text).toContain("FROM foods identity_labels");
+    expect(calls[0]?.text).toContain(
+      "identity_labels.label->>'brandName'",
+    );
+    expect(calls[0]?.text).toContain(
+      "identity_labels.label->>'category'",
+    );
   });
 
   it("resolves a bare public food GTIN exactly before ranked search", async () => {
@@ -1623,6 +1896,10 @@ describe("foods query helpers", () => {
     expect(calls[0]?.text).toContain("labels.data_origin NOT IN");
     expect(calls[0]?.text).toContain("fdc_release_date::text AS \"releaseDate\"");
     expect(calls[0]?.text).toContain("last_seen_at");
+    expect(calls[0]?.text).toContain("FROM foods identity_labels");
+    expect(calls[0]?.text).toContain(
+      "identity_labels.id = labels.id",
+    );
     expect(calls[0]?.values).toEqual(["fdc:123"]);
   });
 

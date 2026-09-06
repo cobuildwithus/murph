@@ -155,54 +155,33 @@ const ASSISTANT_TOOL_ONLY_MAINTENANCE_THREAD_CONFIG = {
   ...ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG,
   ...ASSISTANT_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
 } as const
-const ASSISTANT_SHELL_PRESERVING_RESTRICTED_CODEX_CONFIG_OVERRIDES = [
-  'memories.generate_memories=false',
-  'web_search="disabled"',
-  'features.web_search_request=false',
-  'features.standalone_web_search=false',
-  'features.apps=false',
-  'features.enable_mcp_apps=false',
-  'features.browser_use=false',
-  'features.plugins=false',
-  'features.multi_agent=false',
-  'features.multi_agent_v2=false',
-  'features.tool_suggest=false',
-] as const
-const ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_CODEX_CONFIG_OVERRIDES = [
-  ...ASSISTANT_SHELL_PRESERVING_RESTRICTED_CODEX_CONFIG_OVERRIDES,
-  'memories.use_memories=false',
-  'features.shell_tool=false',
-] as const
-const ASSISTANT_FILESYSTEM_DISABLED_CODEX_CONFIG_OVERRIDES = [
-  'features.shell_tool=false',
-  'features.multi_agent=false',
-  'features.multi_agent_v2=false',
-  'features.tool_suggest=false',
-] as const
-
-function resolveAssistantCodexConfigOverrides(input: {
-  filesystemDisabledTurn: boolean
-  nativeCapabilitiesRestrictedTurn: boolean
-  shellPreservingCapabilitiesRestrictedTurn: boolean
-  requested: readonly string[] | null
-}): readonly string[] | null {
-  if (input.nativeCapabilitiesRestrictedTurn) {
-    return [
-      ...(input.requested ?? []),
-      ...ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_CODEX_CONFIG_OVERRIDES,
-    ]
-  }
-  if (input.shellPreservingCapabilitiesRestrictedTurn) {
-    return ASSISTANT_SHELL_PRESERVING_RESTRICTED_CODEX_CONFIG_OVERRIDES
-  }
-  if (!input.filesystemDisabledTurn) {
-    return input.requested
-  }
-  return [
-    ...(input.requested ?? []),
-    ...ASSISTANT_FILESYSTEM_DISABLED_CODEX_CONFIG_OVERRIDES,
-  ]
-}
+const ASSISTANT_SHELL_PRESERVING_RESTRICTED_THREAD_CONFIG = {
+  'features.apps': false,
+  'features.browser_use': false,
+  'features.enable_mcp_apps': false,
+  'features.multi_agent': false,
+  'features.multi_agent_v2': false,
+  'features.plugins': false,
+  'features.standalone_web_search': false,
+  'features.tool_suggest': false,
+  'features.web_search_request': false,
+  'memories.generate_memories': false,
+  web_search: 'disabled',
+} as const
+const ASSISTANT_READ_ONLY_AUTOMATION_THREAD_CONFIG = {
+  ...ASSISTANT_SHELL_PRESERVING_RESTRICTED_THREAD_CONFIG,
+  ...ASSISTANT_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
+} as const
+const ASSISTANT_GROUP_EMAIL_THREAD_CONFIG = {
+  'features.multi_agent': false,
+  'features.multi_agent_v2': false,
+  'features.shell_tool': false,
+  'features.tool_suggest': false,
+} as const
+const ASSISTANT_HABITAT_MAINTENANCE_THREAD_CONFIG = {
+  'memories.generate_memories': false,
+  'memories.use_memories': false,
+} as const
 
 export {
   resolveAssistantCodexThreadScope,
@@ -542,24 +521,14 @@ async function executeAssistantCodexAttempt(input: {
       attemptPlan.routePlan.assistantPreferredElevenLabsVoiceId ?? null
     const outputOnlyTurn =
       executionPlan.profile.toolProfile === 'output-only-turn'
-    const readOnlyAutomationTurn =
-      executionPlan.input.scheduledInvocationAuthority?.automationId ===
-        MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID
+    const readOnlyAutomationTurn = isReadOnlyScheduledTurn(
+      executionPlan.input, attemptPlan.routePlan.followUpInvocation,
+    )
     const hostedRuntimeCapabilitiesRestrictedTurn =
       outputOnlyTurn ||
       executionPlan.profile.promptProfile === 'creative-notification'
-    const readCurrentHostedImageCompletionEffectScope =
-      executionPlan.hostedToolContext
-        ?.currentHostedImageCompletionEffectScope
-    const hostedImageCompletionNativeCapabilitiesRestrictedTurn =
-      executionPlan.input.hostedImageCompletionEffectRestriction != null &&
-      (
-        readCurrentHostedImageCompletionEffectScope == null ||
-        readCurrentHostedImageCompletionEffectScope() !== null
-      )
     const nativeCapabilitiesRestrictedTurn =
-      hostedRuntimeCapabilitiesRestrictedTurn ||
-      hostedImageCompletionNativeCapabilitiesRestrictedTurn
+      hostedRuntimeCapabilitiesRestrictedTurn
     const creativeNotificationSongTurn =
       executionPlan.profile.promptProfile === 'creative-notification' &&
       executionPlan.profile.toolProfile === 'provider-turn'
@@ -578,6 +547,9 @@ async function executeAssistantCodexAttempt(input: {
         MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID
     const toolOnlyMaintenanceTurn =
       groupRoomModelMaintenanceTurn || memberMemoryMaintenanceTurn
+    const habitatVoiceMaintenanceTurn =
+      executionPlan.profile.toolProfile === 'maintenance-turn' &&
+      executionPlan.input.maintenanceProfile === 'habitat-voice'
     const restrictedOneShotTurn =
       groupRoomModelMaintenanceTurn ||
       memberMemoryMaintenanceTurn ||
@@ -616,11 +588,13 @@ async function executeAssistantCodexAttempt(input: {
         provider: attemptPlan.route.provider,
         reasoningEffort,
         sandbox:
-          nativeCapabilitiesRestrictedTurn ||
-          readOnlyAutomationTurn ||
-          groupEmailTurn
-          ? 'read-only'
-          : attemptPlan.route.providerOptions.sandbox,
+          outputOnlyTurn
+            ? null
+            : creativeNotificationSongTurn ||
+                readOnlyAutomationTurn ||
+                groupEmailTurn
+              ? 'read-only'
+              : attemptPlan.route.providerOptions.sandbox,
       },
       turn: {
         abortSignal: serviceTier
@@ -628,10 +602,7 @@ async function executeAssistantCodexAttempt(input: {
           : executionPlan.input.abortSignal,
         analyzeVideoTurnState: input.analyzeVideoTurnState ?? null,
         activeTurnId: executionPlan.turnId,
-        activeTurnSteering:
-          hostedImageCompletionNativeCapabilitiesRestrictedTurn
-          ? null
-          : executionPlan.activeTurnSteering,
+        activeTurnSteering: executionPlan.activeTurnSteering,
         activeTurnSessionId: attemptPlan.session.sessionId,
         allowFinishWithoutReply: executionPlan.allowFinishWithoutReply,
         automationRelativeDateReferenceWindow:
@@ -640,22 +611,18 @@ async function executeAssistantCodexAttempt(input: {
           ),
         authorizeAcceptedMessageTarget:
           executionPlan.authorizeAcceptedMessageTarget ?? null,
-        codexConfigOverrides: resolveAssistantCodexConfigOverrides({
-          filesystemDisabledTurn: groupEmailTurn,
-          nativeCapabilitiesRestrictedTurn:
-            hostedImageCompletionNativeCapabilitiesRestrictedTurn,
-          shellPreservingCapabilitiesRestrictedTurn:
-            readOnlyAutomationTurn,
-          requested: executionPlan.input.codexConfigOverrides ?? null,
-        }),
         codexThreadConfig:
           nativeCapabilitiesRestrictedTurn
             ? ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG
             : toolOnlyMaintenanceTurn
               ? ASSISTANT_TOOL_ONLY_MAINTENANCE_THREAD_CONFIG
               : readOnlyAutomationTurn
-                ? ASSISTANT_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG
-                : null,
+                ? ASSISTANT_READ_ONLY_AUTOMATION_THREAD_CONFIG
+                : habitatVoiceMaintenanceTurn
+                  ? ASSISTANT_HABITAT_MAINTENANCE_THREAD_CONFIG
+                  : groupEmailTurn
+                    ? ASSISTANT_GROUP_EMAIL_THREAD_CONFIG
+                    : null,
         conversationHistoryMessages:
           attemptPlan.routePlan.conversationHistoryMessages,
         developerInstructions: attemptPlan.routePlan.developerInstructions,
@@ -675,6 +642,7 @@ async function executeAssistantCodexAttempt(input: {
                 ASSISTANT_CREATIVE_NOTIFICATION_SONG_POLICY,
             }
           : {}),
+        followUpAttachmentAllowed: attemptPlan.routePlan.followUpAttachmentAllowed,
         groupConversation,
         groupRoomModelMaintenanceAuthorized: groupRoomModelMaintenanceTurn,
         memberMemoryMaintenanceAuthorized: memberMemoryMaintenanceTurn,
@@ -764,8 +732,7 @@ async function executeAssistantCodexAttempt(input: {
           : {}),
         providerFetch:
           outputOnlyTurn ||
-          readOnlyAutomationTurn ||
-          hostedImageCompletionNativeCapabilitiesRestrictedTurn
+          readOnlyAutomationTurn
           ? null
           : executionPlan.executionContext?.hosted?.providerFetch ?? null,
         providerRequestOrdinal: input.providerRequestOrdinal ?? null,
@@ -775,8 +742,7 @@ async function executeAssistantCodexAttempt(input: {
         publicInternetFetch:
           outputOnlyTurn ||
           readOnlyAutomationTurn ||
-          toolOnlyMaintenanceTurn ||
-          hostedImageCompletionNativeCapabilitiesRestrictedTurn
+          toolOnlyMaintenanceTurn
           ? null
           : executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
         requireHostedPrivateImageDelivery:
@@ -1122,4 +1088,10 @@ function hasAssistantRichUserMessageContent(
   userMessageContent: readonly AssistantUserMessageContentPart[],
 ): boolean {
   return userMessageContent.some((part) => part.type !== 'text')
+}
+
+function isReadOnlyScheduledTurn(input: {
+  scheduledInvocationAuthority?: { automationId: string } | null
+}, followUpInvocation?: boolean): boolean {
+  return followUpInvocation === true || input.scheduledInvocationAuthority?.automationId === MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID
 }

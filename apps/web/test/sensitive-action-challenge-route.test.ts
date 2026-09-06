@@ -78,7 +78,7 @@ describe("settings sensitive-action challenge route", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
   });
 
-  it("creates an account-delete challenge when the retired maintenance value is still present", async () => {
+  it("keeps the legacy account-delete challenge available to already-loaded clients", async () => {
     vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "1");
 
     const response = await route.POST(new Request(

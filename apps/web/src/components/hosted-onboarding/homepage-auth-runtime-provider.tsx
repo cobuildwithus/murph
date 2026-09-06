@@ -2,7 +2,7 @@
 
 import {
   useCallback,
-  useEffect,
+  useContext,
   useMemo,
   useRef,
   useState,
@@ -20,14 +20,6 @@ import {
   type HomepageAuthRuntimeComponent,
 } from "./homepage-auth-runtime-loader";
 import { navigateHostedAuthRedirect } from "./hosted-auth-navigation";
-
-type WindowWithIdleCallback = typeof window & {
-  cancelIdleCallback?: (handle: number) => void;
-  requestIdleCallback?: (
-    callback: () => void,
-    options?: { timeout?: number },
-  ) => number;
-};
 
 export function HomepageAuthRuntimeProvider({
   authenticated,
@@ -58,6 +50,9 @@ function UnauthenticatedHomepageAuthRuntimeProvider({
   authenticatedDestination?: string;
   children?: ReactNode;
 }) {
+  // The root layout knows whether the session store answered; keep that
+  // signal so public CTAs never treat an unverifiable member as anonymous.
+  const { authenticationStatus } = useContext(AuthContext);
   const [open, setOpen] = useState(false);
   const [loadedRuntime, setLoadedRuntime] =
     useState<HomepageAuthRuntimeComponent | null>(null);
@@ -92,32 +87,6 @@ function UnauthenticatedHomepageAuthRuntimeProvider({
     setOpen(true);
   }, [prepareAuth]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const prepare = () => {
-      if (!cancelled) {
-        prepareAuth();
-      }
-    };
-    const idleWindow = window as WindowWithIdleCallback;
-
-    if (idleWindow.requestIdleCallback) {
-      const handle = idleWindow.requestIdleCallback(prepare, { timeout: 2500 });
-
-      return () => {
-        cancelled = true;
-        idleWindow.cancelIdleCallback?.(handle);
-      };
-    }
-
-    const handle = window.setTimeout(prepare, 1200);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(handle);
-    };
-  }, [prepareAuth]);
-
   const handleOpenChange = useCallback((nextOpen: boolean) => {
     setOpen(nextOpen);
     if (!nextOpen) {
@@ -141,11 +110,12 @@ function UnauthenticatedHomepageAuthRuntimeProvider({
   const value = useMemo(
     () => ({
       authenticated: false,
+      authenticationStatus,
       openAuthDialog,
       prepareAuth,
       shared: true,
     }),
-    [openAuthDialog, prepareAuth],
+    [authenticationStatus, openAuthDialog, prepareAuth],
   );
   const dialogProps = {
     autoSendPastedPhoneNumber: true,

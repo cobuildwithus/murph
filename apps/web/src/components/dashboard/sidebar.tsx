@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Activity,
+  BookOpen,
+  ChartSpline,
   ChevronsUpDown,
   FlaskConical,
   Home,
@@ -20,7 +22,7 @@ import {
 import { BrandMark } from "@/src/components/ui/brand-mark";
 
 import { logoutHostedAppSession } from "@/src/components/hosted-onboarding/hosted-app-session-client";
-import { HostedPrivyLogout } from "@/src/components/hosted-onboarding/hosted-privy-logout";
+import type { HostedPrivyLogout } from "@/src/components/hosted-onboarding/hosted-privy-logout";
 import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 import { Avatar, AvatarFallback } from "@/src/components/ui/avatar";
@@ -65,6 +67,18 @@ const navItems: {
   icon?: ElementType;
 }[] = [
   { label: "Home", href: "/home", icon: Home },
+  {
+    label: "Journal",
+    href: "/journal",
+    matchPrefix: "/journal",
+    icon: BookOpen,
+  },
+  {
+    label: "Patterns",
+    href: "/patterns",
+    matchPrefix: "/patterns",
+    icon: ChartSpline,
+  },
   {
     label: "Environment",
     href: "/environment",
@@ -125,7 +139,7 @@ function AccountMenu({
     useState<{ status: SidebarAccountStatus | null; userKey: string } | null>(null);
   const [signOutPending, setSignOutPending] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
-  const [privyLogoutPending, setPrivyLogoutPending] = useState(false);
+  const [PrivyLogout, setPrivyLogout] = useState<typeof HostedPrivyLogout | null>(null);
   const hasAccount = initialAuth.authenticated;
   const userKey = hasAccount ? "app-session" : null;
 
@@ -180,11 +194,13 @@ function AccountMenu({
     setSignOutPending(true);
 
     try {
+      // Resolve the cleanup code before clearing the app session so a failed
+      // chunk download leaves the existing sign-out retry available.
+      const { HostedPrivyLogout } = await import(
+        "@/src/components/hosted-onboarding/hosted-privy-logout"
+      );
       await logoutHostedAppSession();
-      // The sidebar lives outside the Privy provider, so mount a one-shot
-      // Privy logout island to clear the Privy client session before the
-      // refresh; otherwise sign-out leaves a stale Privy session behind.
-      setPrivyLogoutPending(true);
+      setPrivyLogout(() => HostedPrivyLogout);
     } catch {
       setSignOutError("Sign out did not finish. Try again.");
       setSignOutPending(false);
@@ -192,7 +208,7 @@ function AccountMenu({
   }
 
   function handlePrivyLogoutDone() {
-    setPrivyLogoutPending(false);
+    setPrivyLogout(null);
     setSignOutPending(false);
     router.refresh();
   }
@@ -253,7 +269,7 @@ function AccountMenu({
           </DropdownMenu>
         </SidebarMenuItem>
       </SidebarMenu>
-      {privyLogoutPending ? <HostedPrivyLogout onDone={handlePrivyLogoutDone} /> : null}
+      {PrivyLogout ? <PrivyLogout onDone={handlePrivyLogoutDone} /> : null}
       {signOutError ? (
         <p
           className="mt-2 px-2 text-[0.6875rem] leading-snug text-[#f0c6b0]"

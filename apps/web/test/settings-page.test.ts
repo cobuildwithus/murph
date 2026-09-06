@@ -122,6 +122,7 @@ const mocks = vi.hoisted(() => ({
     )),
   HostedDataPrivacySettings: vi.fn((props: {
     authenticated: boolean;
+    authorizationEnabled?: boolean;
   }) =>
     React.createElement("div", null, `Hosted data privacy settings ${String(props.authenticated)}`)),
   HostedHealthDataConsentSettings: vi.fn((props: {
@@ -171,7 +172,7 @@ const mocks = vi.hoisted(() => ({
   readHostedUsageCreditPurchaseTargetForPayer: vi.fn(),
   readHostedSecureApprovalStatus: vi.fn(),
   withServerApprovedPrivyAccountHints: vi.fn((input: {
-    serverApprovedPrivyLinkedAccounts?: unknown;
+    serverApprovedPrivyUser?: unknown;
     snapshot: unknown;
   }) => input.snapshot),
 }));
@@ -605,28 +606,43 @@ test("SettingsPage suppresses a personal plan return for a sponsored member", as
 test.each(["active", "checkout"])(
   "SettingsDataPrivacyPage exposes the existing deletion owner for a %s member",
   async (stage) => {
-    mocks.getHostedPageAuthSnapshot.mockResolvedValue({
-      authenticated: true,
-      authenticatedMember: {
-        billingStatus: stage === "active" ? "active" : "not_started",
-        id: "member_123",
-        suspendedAt: null,
-      },
-      session: {
-        privyUserId: "did:privy:user_123",
-      },
-    });
+    const originalPrivyAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+    delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
 
-    const { default: SettingsDataPrivacyPage } =
-      await import("../app/settings/data-privacy/page");
+    try {
+      mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+        authenticated: true,
+        authenticatedMember: {
+          billingStatus: stage === "active" ? "active" : "not_started",
+          id: "member_123",
+          suspendedAt: null,
+        },
+        session: {
+          privyUserId: "did:privy:user_123",
+        },
+      });
 
-    const markup = renderToStaticMarkup(await SettingsDataPrivacyPage());
+      const { default: SettingsDataPrivacyPage } =
+        await import("../app/settings/data-privacy/page");
 
-    assert.match(markup, /Data &amp; privacy/);
-    assert.match(markup, /Hosted data privacy settings true/);
-    assert.match(markup, /without an active subscription or health-data consent/);
-    expect(mocks.readHostedConsentStatus).not.toHaveBeenCalled();
-    expect(mocks.readHostedAccountSettingsPageSnapshot).not.toHaveBeenCalled();
+      const markup = renderToStaticMarkup(await SettingsDataPrivacyPage());
+
+      assert.match(markup, /Data &amp; privacy/);
+      assert.match(markup, /Hosted data privacy settings true/);
+      assert.match(markup, /without an active subscription or health-data consent/);
+      expect(mocks.readHostedConsentStatus).not.toHaveBeenCalled();
+      expect(mocks.readHostedAccountSettingsPageSnapshot).not.toHaveBeenCalled();
+      expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith({
+        authenticated: true,
+        authorizationEnabled: false,
+      }, undefined);
+    } finally {
+      if (originalPrivyAppId === undefined) {
+        delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+      } else {
+        process.env.NEXT_PUBLIC_PRIVY_APP_ID = originalPrivyAppId;
+      }
+    }
   },
 );
 
@@ -912,6 +928,16 @@ test("SettingsPage reads the app session and persisted account settings into the
         username: "sample_user",
       },
     ],
+    verifiedPrivyUser: {
+      id: "did:privy:user_123",
+      linkedAccounts: [
+        {
+          id: 456,
+          type: "telegram",
+          username: "sample_user",
+        },
+      ],
+    },
   });
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
@@ -1135,13 +1161,16 @@ test("SettingsPage reads the app session and persisted account settings into the
     expect(mocks.getHostedPrivySession).toHaveBeenCalledTimes(1);
     expect(mocks.withServerApprovedPrivyAccountHints).toHaveBeenCalledWith({
       snapshot: accountSnapshot,
-      serverApprovedPrivyLinkedAccounts: [
-        {
-          id: 456,
-          type: "telegram",
-          username: "sample_user",
-        },
-      ],
+      serverApprovedPrivyUser: {
+        id: "did:privy:user_123",
+        linkedAccounts: [
+          {
+            id: 456,
+            type: "telegram",
+            username: "sample_user",
+          },
+        ],
+      },
     });
     expect(mocks.HostedAccountSettingsCards).toHaveBeenCalledWith(expect.objectContaining({
       account: accountSnapshot,
@@ -1221,6 +1250,15 @@ test("SettingsPage reads the app session and persisted account settings into the
     expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith({
       authenticated: true,
       authorizationEnabled: true,
+    }, undefined);
+
+    delete process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+    mocks.HostedDataPrivacySettings.mockClear();
+    renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
+
+    expect(mocks.HostedDataPrivacySettings).toHaveBeenCalledWith({
+      authenticated: true,
+      authorizationEnabled: false,
     }, undefined);
   } finally {
     if (originalPrivyAppId === undefined) {
@@ -2957,7 +2995,7 @@ test("SettingsPage preserves billing when optional usage and Privy reads fail", 
   );
   expect(mocks.withServerApprovedPrivyAccountHints).toHaveBeenCalledWith({
     snapshot: EMPTY_ACCOUNT_SETTINGS,
-    serverApprovedPrivyLinkedAccounts: null,
+    serverApprovedPrivyUser: null,
   });
   expect(mocks.HostedAiUsageActivity).not.toHaveBeenCalled();
 });
@@ -3060,7 +3098,7 @@ test("SettingsPage ignores Privy Telegram display hints from a stale Privy sessi
 
   expect(mocks.withServerApprovedPrivyAccountHints).toHaveBeenCalledWith({
     snapshot: accountSnapshot,
-    serverApprovedPrivyLinkedAccounts: null,
+    serverApprovedPrivyUser: null,
   });
 });
 

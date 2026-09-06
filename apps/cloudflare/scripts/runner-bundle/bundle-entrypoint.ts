@@ -31,9 +31,11 @@ import {
 // (e.g. vault-cli PATH candidates) keeps landing on `<bundle>/node_modules`.
 export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 
-// Byte budgets over the esbuild metafile make import-graph growth fail the
+// Startup budgets over the esbuild metafile make eager import-graph growth fail
 // assembly instead of silently regressing cold start. Entry and static-closure
-// caps retain their platform-jitter tolerances.
+// caps retain their platform-jitter tolerances. Historical total measurements
+// below are provenance only: exact-base CI owns total-output growth so ordinary
+// local and hosted-local assembly cannot be blocked by a stale fixed ceiling.
 //
 // Static-closure baseline raised 2026-07-25 on main. The previous baseline left
 // the packaged boot closure 735B under its cap, so the next small reviewed
@@ -297,19 +299,32 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // macOS production assembly measured an 8,397,990B static closure on
 // 2026-08-19. The resolved combined graph measured an 8,442,444B static closure;
 // ratchet that integrated baseline and retain the same tolerance.
-// Current main's batched-workout and direct-video graph combined with the
-// reviewed Junction daily-alias repair measured a 1,739,005B entry and an
-// 8,571,156B static closure in exact macOS production assembly on 2026-08-21.
-// Ratchet both integrated baselines and retain the same platform tolerances.
-// The Web-owned first-turn delivery handoff extends the existing Assistant
-// Engine and pending-input paths without adding a forbidden boot input. Exact
-// macOS production assembly measured an 8,683,649B static closure and
-// 11,409,047B total on 2026-08-26. Ratchet those integrated baselines and
-// retain the fixed 96KB static and 32KB total cross-platform allowances.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 11_409_047 + 32_768;
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_739_005;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_683_649;
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
+// The thin boot kernel measured a 64,257B entry and a 1,950,662B static
+// closure across 22 chunks in exact macOS production assembly on 2026-08-27.
+// Ratchet bytes and chunk count together so a future eager import cannot hide
+// behind code-splitting jitter. Keep a small entry allowance and the
+// established cross-platform static-closure allowance.
+// Poisoning failed hydration and bounding shutdown while hydration is unsettled
+// add 1,186B to the entry/static closure and total while leaving the static
+// chunk count unchanged; existing startup tolerances cover that bounded growth.
+// Clean exact-preemption handoff adds 586B to total output while remaining
+// inside the fixed entry, static-closure, and chunk-count startup budgets.
+// Current main's event-ledger and other lazy graph changes combined with the
+// thin boot kernel measured 11,552,732B total in exact macOS production
+// assembly on 2026-08-28. Ratchet that integrated baseline and retain the fixed
+// 32KB total cross-platform allowance; the startup-specific gates stay fixed.
+// Recorded device-sync wake revalidation extends the existing lazy runtime
+// graph without adding a forbidden boot input. Exact macOS production assembly
+// measured 11,592,493B total on 2026-08-30; ratchet only the total baseline and
+// retain the fixed cross-platform allowance and all startup-specific gates.
+// Progress-fuse projection extends that same lazy graph without adding a boot
+// input. Exact macOS production assembly measured 11,678,063B total on
+// 2026-08-31; ratchet only the total baseline and retain the fixed
+// cross-platform allowance and all startup-specific gates.
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 64_257;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 1_950_662;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CHUNK_COUNT_BUDGET = 24;
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 12_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
 // workspace package inputs appear as `node_modules/@murphai/*/dist/...` in
@@ -382,7 +397,7 @@ export async function bundleRunnerContainerEntrypoint(
     buildResult.metafile,
   );
   console.log(
-    `runner entrypoint bundle size: entry ${bundleBytes.entryBytes}B (baseline ${RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES}B + ${RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES}B tolerance), static boot closure ${bundleBytes.staticClosureBytes}B (baseline ${RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES}B + ${RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES}B tolerance), total ${bundleBytes.totalBytes}B of ${RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET}B budget`,
+    `runner entrypoint bundle size: entry ${bundleBytes.entryBytes}B (baseline ${RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES}B + ${RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES}B tolerance), static boot closure ${bundleBytes.staticClosureBytes}B (baseline ${RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES}B + ${RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES}B tolerance) across ${bundleBytes.staticChunkCount} chunks of ${RUNNER_ENTRYPOINT_BUNDLE_STATIC_CHUNK_COUNT_BUDGET} budget, total ${bundleBytes.totalBytes}B (exact-base CI relative guard)`,
   );
   assertRunnerEntrypointBundleBoots({
     bundleDir,
@@ -394,15 +409,14 @@ export async function bundleRunnerContainerEntrypoint(
   });
 }
 
-// Single source of truth for the production budgets: both boot-path caps use
-// their measured baseline plus emit-jitter tolerance; the total remains a
-// fixed ceiling.
+// Single source of truth for the production startup budgets: both boot-path
+// caps use their measured baseline plus emit-jitter tolerance.
 // Exported so a unit test can lock these values (the assembly path calls
 // assertRunnerEntrypointBundleWithinBudgets with this as the default).
 export function resolveRunnerEntrypointBundleBudgets(): {
   entryBytes: number;
   staticClosureBytes: number;
-  totalBytes: number;
+  staticChunkCount: number;
 } {
   return {
     entryBytes:
@@ -411,7 +425,7 @@ export function resolveRunnerEntrypointBundleBudgets(): {
     staticClosureBytes:
       RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES
       + RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES,
-    totalBytes: RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET,
+    staticChunkCount: RUNNER_ENTRYPOINT_BUNDLE_STATIC_CHUNK_COUNT_BUDGET,
   };
 }
 
@@ -433,9 +447,18 @@ function assertRunnerEntrypointBundleInputsStayExternal(
 // call site always uses the default budgets above.
 export function assertRunnerEntrypointBundleWithinBudgets(
   metafile: Metafile,
-  budgets: { entryBytes: number; staticClosureBytes: number; totalBytes: number }
+  budgets: {
+    entryBytes: number;
+    staticClosureBytes: number;
+    staticChunkCount: number;
+  }
     = resolveRunnerEntrypointBundleBudgets(),
-): { entryBytes: number; staticClosureBytes: number; totalBytes: number } {
+): {
+  entryBytes: number;
+  staticClosureBytes: number;
+  staticChunkCount: number;
+  totalBytes: number;
+} {
   const outputs = Object.entries(metafile.outputs);
   const totalBytes = outputs.reduce((sum, [, output]) => sum + output.bytes, 0);
 
@@ -454,17 +477,13 @@ export function assertRunnerEntrypointBundleWithinBudgets(
     (sum, outputPath) => sum + (metafile.outputs[outputPath]?.bytes ?? 0),
     0,
   );
+  const staticChunkCount = staticBootOutputPaths.size;
   assertRunnerEntrypointBundleBootInputsAllowed(
     metafile,
     staticBootOutputPaths,
   );
 
   const violations: string[] = [];
-  if (totalBytes > budgets.totalBytes) {
-    violations.push(
-      `total output ${totalBytes}B exceeds budget ${budgets.totalBytes}B`,
-    );
-  }
   if (entryBytes > budgets.entryBytes) {
     violations.push(
       `entry chunk ${entryPath} ${entryBytes}B exceeds budget ${budgets.entryBytes}B`,
@@ -475,8 +494,13 @@ export function assertRunnerEntrypointBundleWithinBudgets(
       `static boot closure ${staticClosureBytes}B exceeds budget ${budgets.staticClosureBytes}B`,
     );
   }
+  if (staticChunkCount > budgets.staticChunkCount) {
+    violations.push(
+      `static boot closure chunk count ${staticChunkCount} exceeds budget ${budgets.staticChunkCount}`,
+    );
+  }
   if (violations.length === 0) {
-    return { entryBytes, staticClosureBytes, totalBytes };
+    return { entryBytes, staticClosureBytes, staticChunkCount, totalBytes };
   }
 
   const largestInputs = Object.entries(metafile.inputs)

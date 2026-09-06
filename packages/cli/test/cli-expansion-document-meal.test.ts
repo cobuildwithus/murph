@@ -1,14 +1,24 @@
 import assert from 'node:assert/strict'
-import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Cli } from 'incur'
 import { test } from 'vitest'
+import {
+  initializeVault,
+  listInboxDocumentDefaultPromotionCorrelations,
+} from '@murphai/core'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
+import { createIntegratedInboxServices } from '@murphai/inbox-services'
+import {
+  persistCanonicalInboxCapture,
+  runInboxTextRetention,
+} from '@murphai/inboxd'
 import { registerDocumentCommands } from '../src/commands/document.js'
 import { registerMealCommands } from '../src/commands/meal.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
+import { createVaultCliWithOptions } from '../src/vault-cli.js'
 import {
   createVaultCliVaultContext,
   installVaultCliVaultContext,
@@ -232,7 +242,7 @@ function createDocumentMealSchemaCli(): Cli.Cli {
 
   const services = createIntegratedVaultServices()
   registerVaultCommands(cli, services)
-  registerDocumentCommands(cli, services)
+  registerDocumentCommands(cli, services, createIntegratedInboxServices())
   registerMealCommands(cli, services)
   installVaultCliVaultContext(cli, createVaultCliVaultContext())
 
@@ -268,22 +278,258 @@ async function createVault(): Promise<string> {
   return vaultRoot
 }
 
+test.sequential('document import preserves the exact current inbox attachment through the registered command', async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-inbox-document-'))
+  const vaultName = 'member-vault'
+  const vaultRoot = path.join(workspaceRoot, vaultName)
+  const previousWorkingDirectory = process.cwd()
+  const inboxServices = createIntegratedInboxServices()
+
+  try {
+    await mkdir(vaultRoot, { recursive: true })
+    process.chdir(workspaceRoot)
+    await initializeVault({
+      vaultRoot,
+      createdAt: '2026-08-30T12:00:00.000Z',
+    })
+    const persisted = await persistCanonicalInboxCapture({
+      vaultRoot,
+      captureId: 'cap_cli_exact_document_save',
+      eventId: 'evt_01JQ8PWXP5A68SQM1W0GYM41V2',
+      storedAt: '2026-08-30T12:00:00.000Z',
+      input: {
+        source: 'telegram',
+        accountId: 'attachments',
+        externalId: 'msg-cli-exact-document-save',
+        thread: {
+          id: 'thread-cli-exact-document-save',
+          isDirect: true,
+        },
+        actor: { isSelf: false },
+        occurredAt: '2026-08-29T15:00:00.000Z',
+        receivedAt: '2026-08-29T15:00:01.000Z',
+        text: 'Two reports arrived together.',
+        attachments: [
+          {
+            kind: 'document',
+            mime: 'application/pdf',
+            fileName: 'first.pdf',
+            data: Buffer.from('%PDF first report'),
+          },
+          {
+            kind: 'document',
+            mime: 'application/pdf',
+            fileName: 'second.pdf',
+            data: Buffer.from('%PDF second report'),
+          },
+        ],
+        raw: {},
+      },
+    })
+    await inboxServices.init({
+      vault: vaultRoot,
+      requestId: null,
+      rebuild: true,
+      rebuildParserJobs: false,
+    })
+
+    const cli = createVaultCliWithOptions({
+      inboxServices,
+      services: createIntegratedVaultServices(),
+    })
+
+    const secondAttachment = persisted.stored.attachments[1]
+    assert.ok(secondAttachment?.storedPath)
+    assert.ok(secondAttachment.attachmentId)
+    const secondAttachmentSource = path.join(
+      vaultName,
+      secondAttachment.storedPath,
+    )
+    const first = await runInProcessJsonCli<{
+      created: boolean
+      documentId: string
+      rawFile: string
+      sourceFile: string
+    }>(cli, [
+      'document',
+      'import',
+      secondAttachmentSource,
+      '--vault',
+      vaultName,
+    ])
+    assert.equal(first.exitCode, null)
+    const firstResult = requireData(first.envelope)
+    assert.equal(firstResult.created, true)
+    assert.equal(
+      firstResult.sourceFile,
+      secondAttachmentSource,
+    )
+    assert.match(firstResult.rawFile, /^raw\/documents\//u)
+
+    const retry = await runInProcessJsonCli<{
+      created: boolean
+      documentId: string
+    }>(cli, [
+      'document',
+      'import',
+      secondAttachmentSource,
+      '--vault',
+      vaultName,
+    ])
+    assert.equal(retry.exitCode, null, JSON.stringify(retry.envelope))
+    const retryResult = requireData(retry.envelope)
+    assert.equal(retryResult.created, false)
+    assert.equal(retryResult.documentId, firstResult.documentId)
+
+    const manifestsBeforeRetentionRetry = (
+      await readdir(path.join(vaultRoot, 'raw/documents'), { recursive: true })
+    ).filter((entry) => /^manifest(?:\.[^.]+)?\.json$/u.test(path.basename(entry)))
+    const textRetention = await runInboxTextRetention({
+      now: '2026-09-20T12:00:00.000Z',
+      vaultRoot,
+    })
+    assert.equal(textRetention.expiredCaptures, 1)
+    const retainedTextRetry = await runInProcessJsonCli<{
+      created: boolean
+      documentId: string
+    }>(cli, [
+      'document',
+      'import',
+      secondAttachmentSource,
+      '--vault',
+      vaultName,
+    ])
+    assert.equal(
+      retainedTextRetry.exitCode,
+      null,
+      JSON.stringify(retainedTextRetry.envelope),
+    )
+    const retainedTextRetryResult = requireData(retainedTextRetry.envelope)
+    assert.equal(retainedTextRetryResult.created, false)
+    assert.equal(retainedTextRetryResult.documentId, firstResult.documentId)
+    assert.deepEqual(
+      (
+        await readdir(path.join(vaultRoot, 'raw/documents'), { recursive: true })
+      ).filter((entry) => /^manifest(?:\.[^.]+)?\.json$/u.test(path.basename(entry))),
+      manifestsBeforeRetentionRetry,
+    )
+
+    const deleted = await runInProcessJsonCli(cli, [
+      'document',
+      'delete',
+      firstResult.documentId,
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(deleted.exitCode, null, JSON.stringify(deleted.envelope))
+    const deletedOwnerRetry = await runInProcessJsonCli(cli, [
+      'document',
+      'import',
+      path.join(vaultRoot, secondAttachment.storedPath),
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(deletedOwnerRetry.exitCode, 1)
+    assert.equal(
+      deletedOwnerRetry.envelope.ok
+        ? null
+        : deletedOwnerRetry.envelope.error.code,
+      'INBOX_PROMOTION_CANONICAL_MISSING',
+    )
+    assert.deepEqual(
+      (
+        await readdir(path.join(vaultRoot, 'raw/documents'), { recursive: true })
+      ).filter((entry) => /^manifest(?:\.[^.]+)?\.json$/u.test(path.basename(entry))),
+      manifestsBeforeRetentionRetry,
+    )
+
+    const firstAttachment = persisted.stored.attachments[0]
+    assert.ok(firstAttachment?.storedPath)
+    const firstAttachmentAbsolutePath = path.join(
+      vaultRoot,
+      firstAttachment.storedPath,
+    )
+    const overridden = await runInProcessJsonCli<{
+      created: boolean
+      documentId: string
+    }>(cli, [
+      'document',
+      'import',
+      firstAttachmentAbsolutePath,
+      '--title',
+      'Explicit title',
+      '--vault',
+      vaultName,
+    ])
+    assert.equal(overridden.exitCode, null, JSON.stringify(overridden.envelope))
+    const overriddenResult = requireData(overridden.envelope)
+    assert.equal(overriddenResult.created, true)
+
+    const explicitReuse = await runInProcessJsonCli<{
+      created: boolean
+      documentId: string
+    }>(cli, [
+      'document',
+      'import',
+      firstAttachmentAbsolutePath,
+      '--reuse-exact',
+      '--vault',
+      vaultName,
+    ])
+    assert.equal(explicitReuse.exitCode, null)
+    const explicitReuseResult = requireData(explicitReuse.envelope)
+    assert.equal(explicitReuseResult.created, false)
+    assert.equal(explicitReuseResult.documentId, overriddenResult.documentId)
+
+    const staleRelativePath =
+      'raw/inbox/telegram/self/2026/08/cap_missing_document/attachments/stale.pdf'
+    const staleAbsolutePath = path.resolve(vaultName, staleRelativePath)
+    await mkdir(path.dirname(staleAbsolutePath), { recursive: true })
+    await writeFile(staleAbsolutePath, '%PDF stale document', 'utf8')
+    const stale = await runInProcessJsonCli(cli, [
+      'document',
+      'import',
+      staleAbsolutePath,
+      '--vault',
+      vaultName,
+    ])
+    assert.equal(stale.exitCode, 1, JSON.stringify(stale.envelope))
+    assert.equal(
+      stale.envelope.ok ? null : stale.envelope.error.code,
+      'INBOX_CAPTURE_NOT_FOUND',
+    )
+
+    const correlations = await listInboxDocumentDefaultPromotionCorrelations({
+      vaultRoot,
+    })
+    assert.deepEqual(
+      correlations.map(({ attachmentId, captureId, documentId }) => ({
+        attachmentId,
+        captureId,
+        documentId,
+      })),
+      [{
+        attachmentId: secondAttachment.attachmentId,
+        captureId: persisted.stored.captureId,
+        documentId: firstResult.documentId,
+      }],
+    )
+  } finally {
+    process.chdir(previousWorkingDirectory)
+    await rm(workspaceRoot, { recursive: true, force: true })
+  }
+})
+
 test(
   'document and meal command schemas expose the expansion and mutation surfaces',
   async () => {
     const cli = createDocumentMealSchemaCli()
-    const documentImportSchema = JSON.parse(
-      await runRawSourceCli(['document', 'import', '--schema', '--format', 'json']),
-    ) as SchemaEnvelope
+    const documentImportSchema = await readCommandSchema(cli, ['document', 'import'])
     const documentEditSchema = await readCommandSchema(cli, ['document', 'edit'])
     const documentDeleteSchema = await readCommandSchema(cli, ['document', 'delete'])
     const documentListSchema = await readCommandSchema(cli, ['document', 'list'])
-    const mealAddSchema = JSON.parse(
-      await runRawSourceCli(['meal', 'add', '--schema', '--format', 'json']),
-    ) as SchemaEnvelope
-    const mealImportJsonSchema = JSON.parse(
-      await runRawSourceCli(['meal', 'import-json', '--schema', '--format', 'json']),
-    ) as SchemaEnvelope
+    const mealAddSchema = await readCommandSchema(cli, ['meal', 'add'])
+    const mealImportJsonSchema = await readCommandSchema(cli, ['meal', 'import-json'])
     const mealEditSchema = await readCommandSchema(cli, ['meal', 'edit'])
     const mealDeleteSchema = await readCommandSchema(cli, ['meal', 'delete'])
     const mealListSchema = await readCommandSchema(cli, ['meal', 'list'])
@@ -370,11 +616,9 @@ test('meal edit rejects a non-IANA timezone in the final repair envelope', async
   assert.equal(result.exitCode, 1)
   assert.equal(result.envelope.ok, false)
   if (!result.envelope.ok) {
-    assert.equal(
-      result.envelope.error.fieldErrors?.some((field) =>
-        field.path.endsWith('timeZone')),
-      true,
-    )
+    assert.equal(result.envelope.error.code, 'VALIDATION_ERROR')
+    assert.equal(result.envelope.error.message, 'The command input is invalid.')
+    assert.equal(result.envelope.error.fieldErrors?.[0]?.path, 'timeZone')
   }
   assert.doesNotMatch(JSON.stringify(result.envelope), /Private\/TimezoneSentinel/u)
 })
@@ -788,7 +1032,8 @@ test.sequential(
       ])
       assert.equal(whitespaceOnlyMeal.ok, false)
       assert.equal(whitespaceOnlyMeal.error?.code, 'VALIDATION_ERROR')
-      assert.match(whitespaceOnlyMeal.error?.message ?? '', /Too small/u)
+      assert.equal(whitespaceOnlyMeal.error?.message, 'The command input is invalid.')
+      assert.equal(whitespaceOnlyMeal.error?.fieldErrors?.[0]?.path, 'note')
 
       const currentMeal = requireData(
         await runSourceCli<MealAddEnvelope>([
@@ -1238,3 +1483,27 @@ test.sequential(
   },
   60_000,
 )
+
+
+test('meal totals resolves same-date goal context through the canonical query without changing ordinary totals', async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), 'murph-meal-context-'))
+  const vaultRoot = path.join(workspace, 'vault')
+  try {
+    await initializeVault({ vaultRoot, createdAt: '2026-07-30T12:00:00.000Z' })
+    const cli = createDocumentMealSchemaCli()
+    const common = ['meal', 'totals', '--from', '2026-07-30', '--to', '2026-07-30', '--vault', vaultRoot]
+    const ordinary = await runInProcessJsonCli<Record<string, unknown>>(cli, common)
+    const resolved = await runInProcessJsonCli<Record<string, unknown>>(cli, [...common, '--resolve-goals'])
+    assert.equal(ordinary.envelope.ok, true)
+    assert.equal(resolved.envelope.ok, true)
+    const { goalContext, ...totals } = requireData(resolved.envelope)
+    assert.deepEqual(totals, requireData(ordinary.envelope))
+    assert.deepEqual(goalContext, {
+      localDate: '2026-07-30', status: 'missing', activeGoalCount: 0, compatibility: 'canonical',
+      targets: Object.fromEntries(['calories', 'proteinGrams', 'carbsGrams', 'fatGrams', 'fiberGrams'].map((key) =>
+        [key, { status: 'missing', target: null, provenance: [] }])),
+    })
+    const invalid = await runInProcessJsonCli(cli, ['meal', 'totals', '--resolve-goals', '--vault', vaultRoot])
+    assert.equal(invalid.envelope.ok, false)
+  } finally { await rm(workspace, { recursive: true, force: true }) }
+})

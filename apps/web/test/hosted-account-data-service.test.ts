@@ -50,6 +50,7 @@ const serviceMocks = vi.hoisted(() => ({
   prepareHostedMemberIdentityWrite: vi.fn(),
   readHostedMemberIdentity: vi.fn(),
   readHostedMemberSnapshot: vi.fn(),
+  resumeHostedMemberStripeCustomerClaimForAccountDeletion: vi.fn(),
   runHostedAccountDeletionCleanup: vi.fn(),
   runPrismaInteractiveTransaction:
     vi.fn<PrismaModule["runPrismaInteractiveTransaction"]>(),
@@ -167,6 +168,11 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
   readHostedMemberSnapshot: serviceMocks.readHostedMemberSnapshot,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-stripe-customer", () => ({
+  resumeHostedMemberStripeCustomerClaimForAccountDeletion:
+    serviceMocks.resumeHostedMemberStripeCustomerClaimForAccountDeletion,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/privy-phone-transfer-retirement", () => ({
@@ -554,6 +560,10 @@ beforeEach(() => {
   });
   serviceMocks.readHostedMemberSnapshot.mockReset();
   serviceMocks.readHostedMemberSnapshot.mockResolvedValue({ identity: {} });
+  serviceMocks.resumeHostedMemberStripeCustomerClaimForAccountDeletion.mockReset();
+  serviceMocks.resumeHostedMemberStripeCustomerClaimForAccountDeletion.mockResolvedValue(
+    null,
+  );
   serviceMocks.deleteHostedRunnerUserDataBestEffort.mockReset();
   serviceMocks.deleteHostedRunnerUserDataBestEffort.mockResolvedValue(makeCloudflareDeletionResult());
   serviceMocks.getHostedOnboardingStripe.mockReset();
@@ -652,6 +662,20 @@ beforeEach(() => {
 describe("parseHostedAccountDeletionRequest", () => {
   it("requires the exact destructive action phrase", () => {
     expect(parseHostedAccountDeletionRequest({
+      confirmationPhrase: HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
+    })).toEqual({
+      confirmationPhrase: HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
+      exitFeedback: null,
+      providerAccessRemovalConfirmationToken: null,
+    });
+  });
+
+  it("ignores the legacy account-delete authorization payload", () => {
+    expect(parseHostedAccountDeletionRequest({
+      authorization: {
+        signature: `0x${"11".repeat(65)}`,
+        token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+      },
       confirmationPhrase: HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
     })).toEqual({
       confirmationPhrase: HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
@@ -1739,6 +1763,65 @@ describe("deleteHostedAccountData", () => {
     expect(serviceMocks.terminateHostedUserRuntimeWorkflowBestEffort).not.toHaveBeenCalled();
   });
 
+  it("does not suspend while exact Customer claim recovery cannot reach Stripe", async () => {
+    const hostedMemberUpdateCalls: unknown[] = [];
+    serviceMocks.resumeHostedMemberStripeCustomerClaimForAccountDeletion.mockRejectedValue(
+      Object.assign(new Error("stripe unavailable"), { code: "ETIMEDOUT" }),
+    );
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      hostedMemberUpdateCalls,
+      onTransaction: () => undefined,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_STRIPE_EFFECT_PENDING",
+      details: { cause: "Error" },
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(
+      serviceMocks.resumeHostedMemberStripeCustomerClaimForAccountDeletion,
+    ).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma,
+    });
+    expect(hostedMemberUpdateCalls).toEqual([]);
+    expect(serviceMocks.prepareHostedAccountDeletionCleanup).not.toHaveBeenCalled();
+  });
+
+  it("preserves an unrelated Stripe claim rejection before suspension", async () => {
+    const hostedMemberUpdateCalls: unknown[] = [];
+    serviceMocks.resumeHostedMemberStripeCustomerClaimForAccountDeletion.mockRejectedValue(
+      new HostedOnboardingError({
+        code: "HOSTED_STRIPE_EFFECT_PENDING",
+        httpStatus: 409,
+        message: "Billing is already changing. Try again shortly.",
+        retryable: true,
+      }),
+    );
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      hostedMemberUpdateCalls,
+      onTransaction: () => undefined,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_STRIPE_EFFECT_PENDING",
+      retryable: true,
+    });
+
+    expect(hostedMemberUpdateCalls).toEqual([]);
+    expect(serviceMocks.prepareHostedAccountDeletionCleanup).not.toHaveBeenCalled();
+  });
+
   it("does not suspend an owner while a future Family Stripe effect is pending", async () => {
     const hostedMemberUpdateCalls: unknown[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
@@ -2816,8 +2899,8 @@ describe("deleteHostedAccountData", () => {
       );
     };
 
-    expect(await countLockQueriesByTransaction(1)).toEqual([1, 1, 4]);
-    expect(await countLockQueriesByTransaction(128)).toEqual([1, 1, 4]);
+    expect(await countLockQueriesByTransaction(1)).toEqual([1, 1, 5]);
+    expect(await countLockQueriesByTransaction(128)).toEqual([1, 1, 5]);
   });
 
   it("aborts before the receipt when provider ownership changes after preparation", async () => {
@@ -6019,6 +6102,16 @@ function createHostedAccountDeletionPrismaForTest(input: {
         input.deviceAuthorityLockQueries?.push(sql);
         return [];
       }
+      if (sql.includes("hosted-account-deletion-target-group-lock")) {
+        recordTerminalStatement("queryRaw");
+        input.operationOrder?.push("queryRaw");
+        return (input.groupJoinOutreachOwnedGroupIds ?? []).map((id) => ({ id }));
+      }
+      if (sql.includes("hosted-account-deletion-target-groups")) {
+        recordTerminalStatement("queryRaw");
+        input.operationOrder?.push("queryRaw");
+        return (input.groupJoinOutreachOwnedGroupIds ?? []).map((id) => ({ id }));
+      }
       const owner = readHostedAccountDeletionRawOwner(sql);
       if (owner) {
         if (owner === "dependents") {
@@ -6362,6 +6455,13 @@ function createHostedAccountDeletionPrismaForTest(input: {
         input.operationOrder?.push("find:hostedComputerRun");
         return input.hostedComputerRunRows ?? [];
       },
+    },
+    $queryRaw: async (...args: unknown[]) => {
+      const sql = readHostedAccountDeletionRawQueryText(args);
+      if (!sql.includes("hosted-account-deletion-target-groups")) {
+        throw new Error("Unexpected account-deletion root raw query.");
+      }
+      return (input.groupJoinOutreachOwnedGroupIds ?? []).map((id) => ({ id }));
     },
     $transaction: async (
       callback: (prisma: typeof transactionPrisma) => Promise<unknown>,

@@ -48,6 +48,7 @@ interface AssistantCliLauncher {
 }
 
 const assistantCliManifestTimeoutMs = 60_000
+const assistantCliSurfaceAssemblyTimeoutMs = 5 * 60_000
 const assistantCliManifestMaxOutputChars = 80_000
 const assistantCliFullManifestMaxOutputChars = 8_000_000
 
@@ -110,13 +111,52 @@ export async function readAssistantCliLlmsManifest(input: {
 export async function readAssistantCliLlmsFullManifest(input: {
   cliEnv?: NodeJS.ProcessEnv
   executionContext?: AssistantExecutionContext | null
+  timeoutMs?: number
+  workingDirectory?: string | null
+}): Promise<AssistantCliLlmsManifest> {
+  return await readAssistantCliLlmsFullManifestWithLauncher({
+    cliEnv: input.cliEnv,
+    executionContext: input.executionContext,
+    timeoutMs: input.timeoutMs,
+    workingDirectory: input.workingDirectory,
+  })
+}
+
+export async function readAssistantCliLlmsFullManifestFromCliEntry(input: {
+  cliEntryPath: string
+  workingDirectory?: string | null
+}): Promise<AssistantCliLlmsManifest> {
+  if (!(await pathExists(input.cliEntryPath))) {
+    throw new VaultCliError(
+      'ASSISTANT_CLI_COMMAND_FAILED',
+      'Could not assemble the assistant CLI surface because the required built workspace CLI is unavailable. Build `@murphai/murph` first.',
+    )
+  }
+
+  return await readAssistantCliLlmsFullManifestWithLauncher({
+    launcher: {
+      argvPrefix: [input.cliEntryPath],
+      command: process.execPath,
+    },
+    timeoutMs: assistantCliSurfaceAssemblyTimeoutMs,
+    workingDirectory: input.workingDirectory,
+  })
+}
+
+async function readAssistantCliLlmsFullManifestWithLauncher(input: {
+  cliEnv?: NodeJS.ProcessEnv
+  executionContext?: AssistantExecutionContext | null
+  launcher?: AssistantCliLauncher
+  timeoutMs?: number
   workingDirectory?: string | null
 }): Promise<AssistantCliLlmsManifest> {
   const result = await executeAssistantCliManifestCommand({
     args: ['--llms-full', '--format', 'json'],
     cliEnv: input.cliEnv,
     executionContext: input.executionContext,
+    launcher: input.launcher,
     maxOutputChars: assistantCliFullManifestMaxOutputChars,
+    timeoutMs: input.timeoutMs,
     workingDirectory: input.workingDirectory,
   })
 
@@ -154,7 +194,9 @@ async function executeAssistantCliManifestCommand(input: {
   args: readonly string[]
   cliEnv?: NodeJS.ProcessEnv
   executionContext?: AssistantExecutionContext | null
+  launcher?: AssistantCliLauncher
   maxOutputChars?: number
+  timeoutMs?: number
   workingDirectory?: string | null
 }): Promise<{
   argv: string[]
@@ -164,13 +206,19 @@ async function executeAssistantCliManifestCommand(input: {
   stdout: string
 }> {
   const disableConfigAutodiscovery = Boolean(input.executionContext?.hosted?.memberId)
+  const timeoutMs = input.timeoutMs ?? assistantCliManifestTimeoutMs
+
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new TypeError('Assistant CLI manifest timeout must be a positive safe integer.')
+  }
+
   const argv = disableConfigAutodiscovery
     ? ['--no-config', ...input.args]
     : [...input.args]
   const env = buildAssistantCliProcessEnv({
     cliEnv: input.cliEnv,
   })
-  const launcher = await resolveAssistantCliLauncher(env)
+  const launcher = input.launcher ?? await resolveAssistantCliLauncher(env)
 
   return await new Promise((resolve, reject) => {
     const child = spawn(launcher.command, [...launcher.argvPrefix, ...argv], {
@@ -195,12 +243,12 @@ async function executeAssistantCliManifestCommand(input: {
             `vault-cli ${argv.join(' ')} timed out while loading the CLI manifest.`,
             {
               argv,
-              timeoutMs: assistantCliManifestTimeoutMs,
+              timeoutMs,
             },
           ),
         )
       })
-    }, assistantCliManifestTimeoutMs)
+    }, timeoutMs)
 
     const settle = (handler: () => void) => {
       if (settled) {
@@ -322,6 +370,7 @@ function copyAllowedAssistantCliManifestEnvEntries(
 async function resolveAssistantCliLauncher(
   cliProcessEnv: NodeJS.ProcessEnv,
 ): Promise<AssistantCliLauncher> {
+  const localBuiltCliBinPath = resolveLocalBuiltWorkspaceCliBinPath()
   const localWorkspaceCliSourceLauncher =
     await resolveLocalWorkspaceCliSourceLauncher(cliProcessEnv)
   if (localWorkspaceCliSourceLauncher) {
@@ -340,7 +389,6 @@ async function resolveAssistantCliLauncher(
     }
   }
 
-  const localBuiltCliBinPath = resolveLocalBuiltWorkspaceCliBinPath()
   if (localBuiltCliBinPath && await pathExists(localBuiltCliBinPath)) {
     return {
       argvPrefix: [localBuiltCliBinPath],

@@ -55,6 +55,7 @@ import type {
   QueryMealNutritionDayTotal,
   QueryMealNutritionMetricTotal,
   QueryMealNutritionTotals,
+  QueryMealNutritionTotalsResult,
   QueryPersonalPatternReport,
   QueryRuntimeModule as SharedQueryRuntimeModule,
   QueryWearableSleepPatternSummary,
@@ -96,6 +97,7 @@ type RegistryScheduleText = string
 
 export interface RegimenSaveInput extends CommandContext {
   regimenId?: string
+  requireExistingRegimenId?: boolean
   slug?: string
   allowSlugRename?: boolean
   rejectExistingSlug?: boolean
@@ -126,6 +128,7 @@ export interface RegimenSaveInput extends CommandContext {
 
 export interface SupplementSaveInput extends CommandContext {
   regimenId?: string
+  requireExistingRegimenId?: boolean
   slug?: string
   status?: RegimenStatus
   startedOn?: string
@@ -336,6 +339,7 @@ export type MealNutritionTotals = QueryMealNutritionTotals
 export type MealNutritionDayResult = QueryMealNutritionDayTotal
 
 export interface MealNutritionTotalsResult {
+  goalContext?: QueryMealNutritionTotalsResult['goalContext']
   vault: string
   filters: {
     from: string | null
@@ -1360,6 +1364,7 @@ export interface QueryServices extends HealthQueryServiceMethods {
   ): Promise<FoodListResult>
   showMealNutritionTotals(
     input: CommandContext & {
+      resolveGoals?: boolean
       from?: string
       to?: string
     },
@@ -1524,6 +1529,8 @@ export interface QueryServices extends HealthQueryServiceMethods {
       to?: string
       providers?: string[]
       limit: number
+      includeWorkoutDetails?: boolean
+      includeWorkoutSummaries?: boolean
     },
   ): Promise<WearableActivityListResult>
   listWearableBodyState(

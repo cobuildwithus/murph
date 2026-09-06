@@ -4,6 +4,9 @@ import type { CodexNormalizedEvent } from '../assistant-codex-events.js'
 import type {
   AssistantRuntimeIssueInput,
 } from '../assistant/issue-reporting.js'
+import type {
+  CodexCommandFamily,
+} from './command-family.js'
 import {
   resolveCodexCommandFamily,
 } from './command-family.js'
@@ -50,11 +53,9 @@ type BytesBucket =
   | '10_100kb'
   | 'gt_100kb'
 
-type CommandDiagnosticFamily = 'search' | 'unknown'
-
 type TrackedCommandDiagnostic = {
   commandOrdinal: number
-  commandFamily: CommandDiagnosticFamily
+  commandFamily: CodexCommandFamily
 }
 
 type TokenUsageSample = {
@@ -103,11 +104,14 @@ export interface CodexActionDiagnosticsReducer {
   buildTraceEvent(input: {
     codexThreadId: string | null
     providerActionCount: number
+    providerStartedAtMs: number | null
+    turnCorrelation: number | null
     turnId: string | null
   }): Record<string, unknown> | null
   recordEvent(input: {
     activeTurnId: string | null
     normalizedEvent: CodexNormalizedEvent
+    observedAtMs: number
     rawEvent: unknown
   }): void
 }
@@ -138,7 +142,7 @@ export function createCodexActionRuntimeIssueTracker(): CodexActionRuntimeIssueT
     normalizedEvent: CodexNormalizedEvent,
   ): TrackedCommandDiagnostic => ({
     commandOrdinal: nextCommandOrdinal(),
-    commandFamily: resolveDirectSearchCommandFamily(normalizedEvent),
+    commandFamily: resolveDiagnosticCommandFamily(normalizedEvent),
   })
 
   return {
@@ -195,7 +199,7 @@ export function createCodexActionRuntimeIssueTracker(): CodexActionRuntimeIssueT
         ? {
             commandOrdinal:
               startedDiagnostic?.commandOrdinal ?? nextCommandOrdinal(),
-            commandFamily: resolveDirectSearchCommandFamily(
+            commandFamily: resolveDiagnosticCommandFamily(
               input.normalizedEvent,
             ),
           }
@@ -262,6 +266,9 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
   let finalOutputTokens: number | null = null
   let finalReasoningOutputTokens: number | null = null
   let finalTotalTokens: number | null = null
+  let progressUpdateCallCount = 0
+  let progressUpdateFirstCallObservedAtMs: number | null = null
+  let progressUpdateSentCount = 0
 
   const actionCounts = new Map<CodexActionKind, number>()
   const actionKinds: string[] = []
@@ -413,6 +420,16 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
         codexActionOutputBytesTotal: outputBytesTotal,
         codexActionOutputItemCount: outputItemCount,
         codexActionOutputUnitMax: outputTokensMax,
+        codexActionProgressUpdateCallCount: progressUpdateCallCount,
+        codexActionProgressUpdateFirstCallElapsedMs:
+          input.providerStartedAtMs === null
+          || progressUpdateFirstCallObservedAtMs === null
+            ? null
+            : Math.max(
+                0,
+                progressUpdateFirstCallObservedAtMs - input.providerStartedAtMs,
+              ),
+        codexActionProgressUpdateSentCount: progressUpdateSentCount,
         codexActionProviderActionCount: input.providerActionCount,
         codexActionReasoningOutputUnitMax: reasoningOutputTokensMax,
         codexActionSlowDurationMs: slowActions.map((action) => action.durationMs),
@@ -421,6 +438,7 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
         codexActionThreadIdPresent: input.codexThreadId !== null,
         codexActionToolSummaries: topTools.map(toolDiagnosticSummary),
         codexActionTotalUnitMax: totalTokensMax,
+        codexActionTurnCorrelation: input.turnCorrelation,
         codexActionUsageSampleCount: tokenSampleCount,
         codexActionTurnIdPresent: input.turnId !== null,
         codexActionWebSearchCount: actionCounts.get('web.search') ?? 0,
@@ -447,6 +465,10 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
           ? `${kind}:${itemId}`
           : fallbackActionKeyFromNormalized(input.normalizedEvent, kind)
       const item = readEventItem(input.rawEvent)
+      const toolIdentity = resolveToolDiagnosticIdentity(kind, item)
+      const isProgressUpdate =
+        kind === 'dynamic.tool.call'
+        && toolIdentity.tool === 'send_progress_update'
       const counted = registerAction({
         actionKey,
         kind,
@@ -460,6 +482,12 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
           return
         }
         startedCount += 1
+        if (
+          isProgressUpdate
+          && progressUpdateFirstCallObservedAtMs === null
+        ) {
+          progressUpdateFirstCallObservedAtMs = input.observedAtMs
+        }
         const startedAtMs = readTimestampMs(input.rawEvent, 'startedAtMs', 'started_at_ms')
         if (
           actionKey !== null &&
@@ -475,10 +503,11 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
         return
       }
       completedCount += 1
-      if (isCodexActionStructurallyFailed({
+      const structurallyFailed = isCodexActionStructurallyFailed({
         item,
         normalizedExitCode: readNormalizedExitCode(input.normalizedEvent),
-      })) {
+      })
+      if (structurallyFailed) {
         failedCount += 1
       }
 
@@ -492,11 +521,23 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
       if (actionKey !== null) {
         itemStarts.delete(actionKey)
       }
+      if (isProgressUpdate) {
+        progressUpdateCallCount += 1
+        if (!structurallyFailed) {
+          progressUpdateSentCount += 1
+        }
+        if (progressUpdateFirstCallObservedAtMs === null) {
+          progressUpdateFirstCallObservedAtMs = Math.max(
+            0,
+            input.observedAtMs - (durationMs ?? 0),
+          )
+        }
+      }
       recordCompletionMetrics({
         durationMs,
         kind,
         output: measureActionOutput(item),
-        toolIdentity: resolveToolDiagnosticIdentity(kind, item),
+        toolIdentity,
       })
     },
   }
@@ -599,23 +640,32 @@ function buildRuntimeIssueInputForFailedCodexAction(input: {
   }
 }
 
-function resolveDirectSearchCommandFamily(
+function resolveDiagnosticCommandFamily(
   normalizedEvent: CodexNormalizedEvent,
-): CommandDiagnosticFamily {
+): CodexCommandFamily {
   if (
     normalizedEvent.kind !== 'status_item'
     || normalizedEvent.commandLabel === null
   ) {
-    return 'unknown'
+    return 'command'
   }
 
-  const command = normalizedEvent.commandLabel.trim()
-  return resolveCodexCommandFamily({
-    commandLabel: command,
+  const directFamily = resolveCodexCommandFamily({
+    commandLabel: normalizedEvent.commandLabel,
     source: 'display',
-  }) === 'search'
-    ? 'search'
-    : 'unknown'
+  })
+  if (directFamily !== 'command') {
+    return directFamily
+  }
+
+  const wrappedFamily = resolveCodexCommandFamily({
+    allowKnownShellWrapper: true,
+    commandLabel: normalizedEvent.commandLabel,
+    source: 'display',
+  })
+  // Only a bare direct search owns no-match suppression and recovery. The
+  // bounded wrapper pass exists to attribute non-search command failures.
+  return wrappedFamily === 'search' ? 'command' : wrappedFamily
 }
 
 function readCommandExitCode(input: {

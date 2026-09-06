@@ -1,5 +1,7 @@
 import "server-only";
 
+import { reconcileHostedConnectedAppsDiscovery } from "./discovery";
+
 import { createHash, randomBytes } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
@@ -138,11 +140,11 @@ async function runHostedConnectedAppsRequest(input: {
           memberId: input.memberId,
           prisma,
         });
-        return await client.search({
+        return reconcileHostedConnectedAppsDiscovery(await client.search({
           query: input.request.input.query,
           sessionId,
           ...(toolkits ? { toolkits } : {}),
-        });
+        }));
       }
       case "execute": {
         const {
@@ -500,8 +502,16 @@ async function executeConnectedAppsManagement(input: {
         ...(toolkit ? {} : { toolkits: null }),
         userId: input.memberId,
       });
+      const completionTimes = await readConnectedAppCompletionTimes({
+        accountIds: accounts.map((account) => account.id),
+        memberId: input.memberId,
+        prisma: input.prisma,
+      });
       return {
-        accounts: accounts.map((account) => presentConnectedAccount(account, input.config)),
+        accounts: accounts.map((account) => ({
+          ...presentConnectedAccount(account, input.config),
+          connectedAt: completionTimes.get(account.id) ?? null,
+        })),
         toolkits: input.config.toolkits.map((slug) => ({
           label: formatHostedConnectedAppToolkitLabel(slug),
           slug,
@@ -554,6 +564,39 @@ async function executeConnectedAppsManagement(input: {
       };
     }
   }
+}
+
+async function readConnectedAppCompletionTimes(input: {
+  accountIds: readonly string[];
+  memberId: string;
+  prisma: PrismaClient;
+}): Promise<Map<string, string>> {
+  if (input.accountIds.length === 0) {
+    return new Map();
+  }
+  const completions = await input.prisma.hostedConnectedAppConnectIntent.findMany({
+    orderBy: { completedAt: "desc" },
+    select: { completedAt: true, connectedAccountId: true },
+    where: {
+      completedAt: { not: null },
+      connectedAccountId: { in: [...input.accountIds] },
+      memberId: input.memberId,
+    },
+  });
+  const byAccount = new Map<string, string>();
+  for (const completion of completions) {
+    if (
+      completion.connectedAccountId &&
+      completion.completedAt &&
+      !byAccount.has(completion.connectedAccountId)
+    ) {
+      byAccount.set(
+        completion.connectedAccountId,
+        completion.completedAt.toISOString(),
+      );
+    }
+  }
+  return byAccount;
 }
 
 async function ensureHostedConnectedAppsSession(input: {

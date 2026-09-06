@@ -11,7 +11,7 @@ const productionBuildScript = path.join(
   "scripts",
   "run-production-next-build.sh",
 );
-const buildCacheEpoch = "webpack-next-16.3-v4-in-process-cold-webpack";
+const buildCacheEpoch = "webpack-next-16.3-v6-isolated-worker-no-webpack-cache";
 
 async function createRunnerFixture(): Promise<{
   appDir: string;
@@ -123,7 +123,7 @@ function runProductionBuild(input: {
   });
 }
 
-test("production Next runner owns the cold Webpack cache and fail-closed epoch", async () => {
+test("production Next runner owns the cache transition and fail-closed epoch", async () => {
   const fixture = await createRunnerFixture();
   const cacheDir = path.join(fixture.appDir, ".next", "cache");
   const cacheStamp = path.join(cacheDir, "murph-production-build-epoch");
@@ -141,7 +141,7 @@ test("production Next runner owns the cold Webpack cache and fail-closed epoch",
       `Resetting incompatible Next build cache for epoch=${buildCacheEpoch}`,
     );
     expect(coldBuild.stdout).toContain(
-      "compiler=webpack build_old_space_mb=3072 typecheck_old_space_mb=3584 webpack_cache=cold webpack_build_worker=off",
+      "compiler=webpack parent_old_space_mb=1024 build_worker_old_space_mb=3072 typecheck_old_space_mb=6144 webpack_cache=disabled webpack_build_worker=on",
     );
     await expect(readFile(staleCacheEntry, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(cacheStamp, "utf8")).resolves.toBe(`${buildCacheEpoch}\n`);
@@ -149,21 +149,21 @@ test("production Next runner owns the cold Webpack cache and fail-closed epoch",
     await expect(readFile(fixture.buildLog, "utf8")).resolves.toBe([
       "NODE_OPTIONS=--trace-warnings --max-old-space-size=3072",
       "TYPECHECK_GATE=",
-      "--max-old-space-size=3072",
+      "--max-old-space-size=1024",
       "/fixture/next",
       "typegen",
       "NODE_OPTIONS=--trace-warnings --max-old-space-size=3072",
       "TYPECHECK_GATE=complete",
-      "--max-old-space-size=3072",
+      "--max-old-space-size=1024",
       "/fixture/next",
       "build",
       "--webpack",
       "",
     ].join("\n"));
     await expect(readFile(fixture.typecheckLog, "utf8")).resolves.toBe([
-      "NODE_OPTIONS=--trace-warnings --max-old-space-size=3584",
+      "NODE_OPTIONS=--trace-warnings --max-old-space-size=6144",
       "TYPECHECK_GATE=",
-      "--max-old-space-size=3584",
+      "--max-old-space-size=6144",
       "/fixture/tsc",
       "-p",
       "tsconfig.next.json",
@@ -180,15 +180,11 @@ test("production Next runner owns the cold Webpack cache and fail-closed epoch",
     const warmBuild = runProductionBuild(fixture);
     expect(warmBuild.status, warmBuild.stderr).toBe(0);
     expect(warmBuild.stdout).not.toContain("Resetting incompatible Next build cache");
-    expect(warmBuild.stdout).toContain(
-      "Resetting restored Webpack cache before production compile",
-    );
-    await expect(readFile(restoredWebpackEntry, "utf8")).rejects.toMatchObject({
-      code: "ENOENT",
-    });
+    expect(warmBuild.stdout).not.toContain("Resetting restored Webpack cache");
+    await expect(readFile(restoredWebpackEntry, "utf8")).resolves.toBe("restored\n");
     await expect(readFile(retainedSwcEntry, "utf8")).resolves.toBe("retained\n");
     await expect(readFile(cacheStamp, "utf8")).resolves.toBe(`${buildCacheEpoch}\n`);
-    await expect(readFile(fixture.removeLog, "utf8")).resolves.toBe(".next/cache/webpack\n");
+    await expect(readFile(fixture.removeLog, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
 
     await writeFile(cacheStamp, "turbopack-old-epoch\n");
     await writeFile(staleCacheEntry, "stale-again\n");
@@ -205,15 +201,18 @@ test("production Next runner owns the cold Webpack cache and fail-closed epoch",
     expect(recoveredBuild.stdout).toContain("Resetting incompatible Next build cache");
     await expect(readFile(cacheStamp, "utf8")).resolves.toBe(`${buildCacheEpoch}\n`);
 
-    // A failed pre-compile Webpack-cache removal must abort before Next runs:
-    // the pre-compile deletion is the sole cold-cache boundary.
+    // A failed epoch transition must abort before Next runs rather than trust
+    // cache state produced by a different compiler policy.
+    await writeFile(cacheStamp, "webpack-next-16.3-v5-isolated-worker-cold-webpack\n");
     await rm(fixture.removeLog, { force: true });
     await rm(fixture.buildLog, { force: true });
     const removalFailedBuild = runProductionBuild({ ...fixture, removeFail: true });
     expect(removalFailedBuild.status).toBe(31);
     await expect(readFile(fixture.buildLog, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(readFile(fixture.removeLog, "utf8")).resolves.toBe(".next/cache/webpack\n");
-    await expect(readFile(cacheStamp, "utf8")).resolves.toBe(`${buildCacheEpoch}\n`);
+    await expect(readFile(fixture.removeLog, "utf8")).resolves.toBe(".next/cache\n");
+    await expect(readFile(cacheStamp, "utf8")).resolves.toBe(
+      "webpack-next-16.3-v5-isolated-worker-cold-webpack\n",
+    );
 
     const recoveredAfterRemovalFailure = runProductionBuild(fixture);
     expect(recoveredAfterRemovalFailure.status, recoveredAfterRemovalFailure.stderr).toBe(0);
@@ -232,7 +231,7 @@ test("production Next runner fails closed before compilation when the prepared t
     await expect(readFile(fixture.buildLog, "utf8")).resolves.toBe([
       "NODE_OPTIONS=--trace-warnings --max-old-space-size=3072",
       "TYPECHECK_GATE=",
-      "--max-old-space-size=3072",
+      "--max-old-space-size=1024",
       "/fixture/next",
       "typegen",
       "",

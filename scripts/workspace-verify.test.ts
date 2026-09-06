@@ -398,7 +398,7 @@ app_verify_parallel_default="$(resolve_local_parallel_default)"
 app_verify_parallel="$(resolve_profile_controlled_value 1 "$app_verify_parallel_default")"
 acceptance_app_verify_with_coverage="$(resolve_profile_controlled_value 1 "$app_verify_parallel_default")"
 test_lane_parallel="$(resolve_profile_controlled_value 1 "$app_verify_parallel_default")"
-package_coverage_shard="$(resolve_profile_controlled_value owners-a all)"
+package_coverage_shard="$(resolve_profile_controlled_value platform-a all)"
 
 log_acceptance_resource_plan
 `);
@@ -512,29 +512,11 @@ resolve_local_parallel_default
     expect(runTestCoverage).toContain("prepared_runtime_artifacts=1");
   });
 
-  it("holds the parent artifact lock for commands that write or concurrently consume shared outputs", () => {
-    const lockRouting = workspaceVerify.match(
-      /command_requires_workspace_artifact_lock\(\) \{[\s\S]*?^\}/m,
-    )?.[0];
-
-    expect(lockRouting).toContain('"test"');
-    expect(lockRouting).toContain('"test:packages"');
-    expect(lockRouting).toContain('"test:apps"');
-    expect(lockRouting).toContain('"test:diff"');
-    expect(workspaceVerify).toContain("run_test_apps_with_workspace_artifact_lock");
-    expect(workspaceVerify).toContain('pnpm --dir "apps/web" prisma:generate');
-    expect(workspaceVerify).toContain("generate_health_commons_artifacts_with_retry");
-  });
-
   it("keeps scoped diff verification out of the heavyweight host lane", () => {
-    const artifactRouting = extractWorkspaceVerifyFunction(
-      "command_requires_workspace_artifact_lock",
-    );
     const hostRouting = extractWorkspaceVerifyFunction(
       "command_requires_host_verification_slot",
     );
 
-    expect(artifactRouting).toContain('"test:diff"');
     expect(hostRouting).not.toContain('"test:diff"');
     expect(hostRouting).toContain('"verify:acceptance"');
     expect(hostRouting).toContain('"test:apps"');
@@ -633,7 +615,6 @@ exit 0
               MURPH_TYPECHECK_PREFLIGHT_PARALLEL: "1",
               MURPH_TYPECHECK_WORKSPACE_CONCURRENCY: "1",
               MURPH_VERIFY_SHARED_HOST: "0",
-              MURPH_WORKSPACE_ARTIFACT_LOCK_HELD: "1",
             },
           },
         );
@@ -727,7 +708,7 @@ run_test_diff_repo_tools_tests
     ).toHaveLength(2);
   });
 
-  it("acquires checkout artifact locks before shared-host admission", () => {
+  it("preserves shared-host admission for expensive verification", () => {
     const webVerify = readFileSync(
       path.join(repoRoot, "apps", "web", "scripts", "verify-fast.sh"),
       "utf8",
@@ -741,36 +722,30 @@ run_test_diff_repo_tools_tests
       "utf8",
     );
 
-    for (const [label, source, artifactMarker, hostMarker] of [
+    for (const [label, source, hostMarker] of [
       [
         "workspace verification",
         workspaceVerify,
-        'MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}',
         'MURPH_VERIFY_HOST_SLOT_HELD:-0}',
       ],
       [
         "Web verification",
         webVerify,
-        'MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}',
         'MURPH_VERIFY_HOST_SLOT_HELD:-0}',
       ],
       [
         "Cloudflare verification",
         cloudflareVerify,
-        'MURPH_WORKSPACE_ARTIFACT_LOCK_HELD:-0}',
         'MURPH_VERIFY_HOST_SLOT_HELD:-0}',
       ],
       [
         "prepared runtime build",
         preparedRuntimeBuild,
-        'MURPH_WORKSPACE_ARTIFACT_LOCK_HELD !== "1"',
         'MURPH_VERIFY_HOST_SLOT_HELD !== "1"',
       ],
     ] as const) {
-      const artifactIndex = source.indexOf(artifactMarker);
       const hostIndex = source.indexOf(hostMarker);
-      expect(artifactIndex, `${label} artifact lock`).toBeGreaterThanOrEqual(0);
-      expect(hostIndex, `${label} host slot`).toBeGreaterThan(artifactIndex);
+      expect(hostIndex, `${label} host slot`).toBeGreaterThanOrEqual(0);
     }
 
     for (const source of [webVerify, cloudflareVerify]) {
@@ -789,8 +764,7 @@ run_test_diff_repo_tools_tests
       readFileSync(path.join(repoRoot, "package.json"), "utf8"),
     ) as { scripts: Record<string, string> };
     const benchmarkScript = rootPackage.scripts["benchmark:typescript"];
-    expect(benchmarkScript.indexOf("run-with-workspace-artifact-lock.mjs"))
-      .toBeLessThan(benchmarkScript.indexOf("run-with-host-verification-slot.mjs"));
+    expect(benchmarkScript).toContain("run-with-host-verification-slot.mjs");
 
     for (const scriptName of [
       "build:workspace:clean",
@@ -1423,7 +1397,6 @@ fi
             MURPH_VERIFY_RETRY_COUNT: "0",
             MURPH_VERIFY_TEST_EVENT_LOG: eventLogPath,
             MURPH_VERIFY_HOST_SLOT_HELD: "1",
-            MURPH_WORKSPACE_ARTIFACT_LOCK_HELD: "1",
             PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH ?? ""}`,
           },
           timeout: 10_000,
@@ -1459,7 +1432,7 @@ fi
     )?.[0];
 
     expect(typecheckFanout).toBeTruthy();
-    expect(typecheckFanout!.indexOf("run_diff_contracts_build_with_workspace_artifact_lock")).toBeLessThan(
+    expect(typecheckFanout!.indexOf('pnpm --dir "packages/contracts" build:incremental')).toBeLessThan(
       typecheckFanout!.indexOf('pnpm -r --no-sort --workspace-concurrency="$typecheck_workspace_concurrency"'),
     );
     expect(workspaceVerify).toContain(
@@ -1471,8 +1444,34 @@ fi
     expect(workspaceVerify).toContain(
       'MURPH_VITEST_MAX_WORKERS="$test_diff_vitest_max_workers"',
     );
-    expect(workspaceVerify).toContain("run_diff_contracts_test_with_workspace_artifact_lock");
+    expect(workspaceVerify).toContain('run_package_command_with_retry "packages/contracts" test');
     expect(workspaceVerify).toContain("run_diff_package_boundary_verification");
+  });
+
+  it("generates hosted web Prisma before Cloudflare typecheck fanout", () => {
+    const runTypecheckPackages = extractWorkspaceVerifyFunction(
+      "run_typecheck_packages",
+    );
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -euo pipefail
+
+typecheck_workspace_concurrency=2
+run_command_with_retry() { printf '%s\\n' "$*"; }
+
+${runTypecheckPackages}
+
+run_typecheck_packages apps/cloudflare
+printf 'separator\\n'
+run_typecheck_packages packages/cli
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe(
+      "Hosted web Prisma client pnpm --dir apps/web prisma:generate\n" +
+        "Workspace package typecheck pnpm -r --no-sort --workspace-concurrency=2 --filter ./apps/cloudflare typecheck\n" +
+        "separator\n" +
+        "Workspace package typecheck pnpm -r --no-sort --workspace-concurrency=2 --filter ./packages/cli typecheck\n",
+    );
   });
 
   it("propagates affected package fanout failures before boundary checks", () => {
@@ -1490,7 +1489,7 @@ run_command_with_retry() {
   return 23
 }
 
-run_diff_contracts_test_with_workspace_artifact_lock() {
+run_package_command_with_retry() {
   return 0
 }
 
@@ -1557,7 +1556,7 @@ run_command_with_retry() {
   printf '%s | %s\n' "$1" "\${*:2}"
 }
 
-run_diff_contracts_test_with_workspace_artifact_lock() {
+run_package_command_with_retry() {
   return 0
 }
 
@@ -1619,7 +1618,7 @@ run_command_with_retry() {
   return 0
 }
 
-run_diff_contracts_test_with_workspace_artifact_lock() {
+run_package_command_with_retry() {
   return 0
 }
 
@@ -1645,7 +1644,7 @@ run_test_diff_package_tests packages/assistant-engine packages/core
     const result = runShellHarness(`#!/usr/bin/env bash
 set -uo pipefail
 
-run_test_apps_with_workspace_artifact_lock() {
+run_test_apps() {
   printf 'both-apps-called\\n'
   return 29
 }

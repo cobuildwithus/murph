@@ -162,3 +162,103 @@ execute the real sequence before FF-010 was accepted.
   shapes or an installed PostgreSQL proof.
 - No finding was fixed by weakening identity, payment, webhook, or entitlement
   authority.
+
+## Group cardinality audit addendum
+
+### Verified findings and dispositions
+
+- **GC-001 — exact named routing failed before matching.** The named path read
+  one 26-row sentinel page and returned `too_many_groups` before comparing the
+  supplied normalized label. It now resolves exact normalized labels across all
+  slim active memberships; only unnamed clarification is bounded, at 64
+  distinct visible labels. A target after 26 leading memberships is covered.
+- **GC-002 — detailed membership row 26 was unreachable.** Detailed summaries
+  remain bounded to 25 per response, but stable `(createdAt, id)` keyset
+  pagination now exposes `nextCursor`. Malformed, padded, oversized, or
+  non-canonical cursors fail explicitly instead of becoming false exhaustion.
+- **GC-003 — disclosure read bounds became lifetime product admission.** The
+  lifetime permission/grant history counts and active-count refusal are
+  removed. Group and personal active-grant projections independently page 25
+  decrypted summaries at a time while exact grant ids continue to own read and
+  revocation authority.
+- **GC-004 / GC-005 — destination 26 was refused and naive paging could starve.**
+  Vault-share grants no longer have a destination-count admission cap. Delivery
+  remains bounded to 25 sequential replacements per Web request, uses a stable
+  destination continuation, and retains one full-cohort generation token.
+  Each successful replacement atomically stores the exact source workspace
+  version with ciphertext; retry from the beginning skips only rows completed
+  for that version. Revoke, regrant, and recent-date generation backfill clear
+  the marker. A 64-destination cohort, first materialization beyond 25, and a
+  partial-retry progression are covered.
+- **GC-006 — stale-generation backfill could falsely report completion.** The
+  grantor batch reads one 26th sentinel row, processes 25, and propagates inner
+  deferred work to the outer `hasMore` result.
+- **GC-007 — separate token and page reads weakened generation binding.** A
+  revoke/regrant between the full-cohort query and a second page query could
+  pair the caller's old generation token with the regranted row. Delivery now
+  reads the complete active cohort once and derives both the token and bounded
+  page from that same result. A later generation change makes the existing
+  exact-id conditional replacement a no-op and retains retry ownership.
+
+### Preserved work bounds
+
+Join-confirmation draining and first-materialization generation selection were
+verified as resumable work batches, not product cardinality limits, and remain
+bounded. The separate 200-member shared-read snapshot and 100-recipient email
+bounds require immutable authority pagination or recipient batching; changing
+their literals without that architecture would increase load while merely
+moving another failure boundary, so they are outside this patch.
+
+### Verification evidence
+
+- Hosted Web focused suites: membership store 78 tests, group/disclosure 210
+  tests, and vault delivery/storage 71 tests passed.
+- Cloudflare continuation consumer: 4 tests passed.
+- Hosted-execution strict request/response contracts: 91 tests passed.
+- Assistant-engine group schema and prompt ceiling: 172 tests passed.
+- Hosted Web, Cloudflare, assistant runtime, assistant engine, and hosted
+  execution TypeScript checks passed; agent-doc drift and diff checks passed.
+- The focused real-Codex journey queued one exact named group handoff with one
+  `handoff` tool call and no membership-list call.
+
+## Vault CLI error-recovery follow-up - 2026-08-27
+
+### Verified findings and smallest corrections
+
+| IDs | Verdict | Correction |
+| --- | --- | --- |
+| VC-001, VC-002 | Medium | Map known stored event contract and JSONL failures once at the exact-read owner, and validate matching owned rows before reading their ids. |
+| VC-003 | Medium | Reuse `toVaultMetadataCliError` in `vault update`. |
+| VC-004 | Medium | Return the entity already produced by event/intervention writes; retain a read only for the no-op detach path. |
+| VC-005, VC-006 | Medium | Preserve a primary command failure across cleanup and scan all format flags so the final recognized format wins. |
+| VC-007 | Medium | Parse the bounded score schema before scoring, expose only public root paths and fixed invariant guidance, and rethrow unexpected non-TypeErrors. |
+| VC-008, VC-009, VC-010 | Medium | Give each device request a fresh deadline, classify body-read failures, and derive retryability from both method safety and response class without adding retries. |
+| VC-011 | Medium | Reuse the filesystem mapper for `@file` reads and use fixed, cause-free stdin validation/read envelopes. |
+| VC-012 | Low | Project Exa SDK/request failures as transport, request-shape failures as validation, and response failures as response. |
+| VC-013 | Medium | Reuse the filesystem mapper, preserve the primary operation failure, and distinguish saved-but-not-cleaned from unsaved. |
+| VC-014 | Medium | Validate qualifier maps, stored media, source, and string arrays atomically instead of filtering malformed values. |
+| VC-015, VC-016, VC-017 | Medium | Reuse canonical enums, reject non-object sample rows, validate real calendar dates, and apply one ordered-range guard at command boundaries. |
+| VC-018 | Medium | Check the explicit clinical-records foreground-yield fact before the linked abort at synchronous boundaries, while preserving `AbortError` for in-flight cancellation. |
+
+### Safety and architecture dispositions
+
+- Messages and hints are fixed and value-free; raw records, provider bodies,
+  transport causes, absolute paths, tokens, and submitted identifiers are not
+  copied into recovery context.
+- Unknown exceptions retain their existing fallback. Only stable owner codes or
+  proven deterministic TypeErrors receive a specific public classification.
+- Device requests gain a deadline but no automatic retry. Ambiguous write
+  failures are explicitly non-retryable.
+- The patch deletes redundant reads and composes existing schemas and mappers.
+  It introduces no persisted state, dependency, service, compatibility shim, or
+  lifecycle manager.
+
+### Regression proof selected
+
+- Exact and owned event corruption: core owner test plus built CLI show, edit,
+  delete, and import snapshots with privacy non-echo assertions.
+- Wrapper, score input, shared JSON input, device transport/body, and finite
+  option/date behavior: focused package tests and CLI projections.
+- Final proof requires package typechecks, a built CLI run of the recovery
+  suite, exact-head ReviewGPT, required GitHub checks, and current-base
+  mergeability.

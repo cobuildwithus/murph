@@ -166,7 +166,7 @@ describe("changelog registry", () => {
       title: "Clearer iMessage card previews",
     });
     expect(item?.details).toContain("free of card values");
-    expect(item?.details).toContain("ask Murph for the card in text");
+    expect(item?.details).toContain("short preview label");
     expect(item?.tryIt).toBeUndefined();
   });
 
@@ -649,7 +649,11 @@ describe("changelog registry", () => {
 
   it("keeps the August 5 through August 9 copy outcome-oriented", () => {
     const copy = listPublishedChangelogItems()
-      .filter((item) => item.publishedOn >= "2026-08-05")
+      .filter(
+        (item) =>
+          item.publishedOn >= "2026-08-05" &&
+          item.publishedOn <= "2026-08-09",
+      )
       .map((item) => `${item.title} ${item.summary} ${item.details ?? ""}`)
       .join(" ");
 

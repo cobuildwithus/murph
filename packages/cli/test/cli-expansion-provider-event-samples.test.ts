@@ -656,7 +656,7 @@ test('generic read and semantic summary help surfaces explain when to use them',
   )
   assert.match(
     wearablesDayHelp,
-    /Use `wearables day` as the first read for date-specific wearable questions\./u,
+    /Use `wearables day` first for date-specific questions except workouts; use `wearables activity list` for workouts\. Choose the output before the first and only data read: day totals omit both detail options; individual workout facts use --include-workout-summaries; lap\/split facts use --include-workout-details\. Never probe with smaller output and retry\./u,
   )
   assert.match(
     mealManifestHelp,
@@ -2926,10 +2926,8 @@ test.sequential(
       ])
       assert.equal(invalidDayKeyPatch.ok, false)
       assert.equal(invalidDayKeyPatch.error?.code, 'VALIDATION_ERROR')
-      assert.match(
-        invalidDayKeyPatch.error?.message ?? '',
-        /Expected YYYY-MM-DD/u,
-      )
+      assert.equal(invalidDayKeyPatch.error?.message, 'The command input is invalid.')
+      assert.equal(invalidDayKeyPatch.error?.fieldErrors?.[0]?.path, 'dayKey')
 
       const recomputeWithoutExplicitTimeZone = await runSliceCli([
         'event',

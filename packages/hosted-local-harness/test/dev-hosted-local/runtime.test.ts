@@ -36,6 +36,34 @@ describe("waitForHealthyHttpEndpoint", () => {
     server = null;
   });
 
+  it.each([false, true])("cancels readiness while the request or retry delay is pending (respond=%s)", async (respond) => {
+    const abortController = new AbortController();
+    let requestStarted: () => void = () => {};
+    const started = new Promise<void>((resolve) => { requestStarted = resolve; });
+    let requests = 0;
+    server = http.createServer((_request, response) => {
+      requests += 1;
+      if (respond) {
+        response.writeHead(503);
+        response.end();
+      }
+      requestStarted();
+    });
+    await new Promise<void>((resolve) => server?.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Expected TCP listener.");
+    const ready = waitForHealthyHttpEndpoint({
+      host: "127.0.0.1", label: "cancel-test", path: "/health", port: address.port,
+      protocol: "http", signal: abortController.signal,
+    });
+    const outcome = expect(ready).rejects.toMatchObject({ name: "AbortError" });
+    await started;
+    if (respond) await new Promise((resolve) => setTimeout(resolve, 20));
+    abortController.abort();
+    await outcome;
+    expect(requests).toBe(1);
+  });
+
   it("accepts a slow cold-start health response before timing out the individual request", async () => {
     server = http.createServer((_request, response) => {
       setTimeout(() => {
@@ -377,6 +405,33 @@ describe("redactHostedLocalDiagnosticText", () => {
 });
 
 describe("spawnChildProcess diagnostics", () => {
+  it("retains bounded full text separately from the diagnostic tail", async () => {
+    const child = spawnChildProcess(
+      "cloudflare",
+      process.execPath,
+      [
+        "-e",
+        "process.stderr.write('Address already in use.\\n' + 'x'.repeat(4000))",
+      ],
+      process.env,
+      { pipeOutput: false },
+    );
+
+    await new Promise<void>((resolve, reject) => {
+      child.child.once("exit", (code) => {
+        if (code === 0) {
+          resolve();
+          return;
+        }
+
+        reject(new Error(`child exited with ${String(code)}`));
+      });
+    });
+
+    expect(child.stderrTail()).not.toContain("Address already in use");
+    expect(child.stderrText()).toContain("Address already in use");
+  });
+
   it("tails captured child output before running expensive diagnostic redaction", async () => {
     const child = spawnChildProcess(
       "web",

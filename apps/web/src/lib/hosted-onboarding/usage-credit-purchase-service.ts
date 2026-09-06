@@ -65,6 +65,7 @@ import {
 } from "./usage-credit-purchase-status-service";
 import {
   lockHostedUsageCreditPurchaseReservationOwnersTx,
+  readHostedUsageCreditTargetMemberLockOrder,
 } from "./usage-credit-purchase-reservation-lock";
 import {
   assertHostedUsageCreditStripePriceMatchesPurchase,
@@ -505,10 +506,30 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
   const resolution = await prisma.$transaction(async (tx) => {
+    // Owner-code funding locks the group first; the exact container is
+    // revalidated only after beneficiary serialization below.
+    const ownerJoinCodeFundingGroups =
+      input.target.kind === "group" &&
+        readHostedGroupUsageFundingLocatorRuntimeMemberId(
+          input.target.joinCode,
+        ) === null
+        ? await tx.$queryRaw<Array<{ id: string }>>`
+            SELECT "group"."id"
+            FROM "hosted_group" AS "group"
+            INNER JOIN "hosted_thread_container" AS "container"
+              ON "container"."member_id" = "group"."runtime_member_id"
+            WHERE "group"."join_code" = ${input.target.joinCode}
+              AND "group"."runtime_member_id" = ${input.target.beneficiaryMemberId}
+            FOR SHARE OF "group"
+          `
+        : null;
     let lockedBeneficiary: LockedHostedUsageCreditBeneficiary;
     try {
-      lockedBeneficiary = await lockHostedUsageCreditBeneficiaryTx({
+      lockedBeneficiary = await lockHostedUsageCreditPurchaseReservationOwnersTx({
         beneficiaryMemberId: input.target.beneficiaryMemberId,
+        memberLockOrder:
+          readHostedUsageCreditTargetMemberLockOrder(input.target.kind),
+        payerMemberId: input.target.payerMemberId,
         tx,
       });
     } catch (error) {
@@ -520,12 +541,6 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
         throw buildHostedUsageCreditNotEligibleError(input.target.kind);
       }
       throw error;
-    }
-    if (
-      input.target.payerMemberId
-        !== lockedBeneficiary.beneficiaryMemberId
-    ) {
-      await lockHostedMemberRow(tx, input.target.payerMemberId);
     }
     const payer = await tx.hostedMember.findUnique({
       select: {
@@ -776,21 +791,17 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
       }
       stripeCustomerId = billingRef.stripeCustomerId;
     } else if (target.kind === "group") {
-      // The locator is either the owner-created join code or the signed
-      // funding-only locator bound to the exact runtime member.
+      // Both locator forms acquire the exact container only after the
+      // beneficiary lock, so concurrent funders cannot retain it while
+      // waiting to serialize on the beneficiary.
       const locatorRuntimeMemberId =
         readHostedGroupUsageFundingLocatorRuntimeMemberId(target.joinCode);
-      const fundingTargets = locatorRuntimeMemberId === null
-        ? await tx.$queryRaw<Array<{ id: string }>>`
-            SELECT "group"."id"
-            FROM "hosted_group" AS "group"
-            INNER JOIN "hosted_thread_container" AS "container"
-              ON "container"."member_id" = "group"."runtime_member_id"
-            WHERE "group"."join_code" = ${target.joinCode}
-              AND "group"."runtime_member_id" = ${target.beneficiaryMemberId}
-            FOR SHARE OF "group", "container"
-          `
-        : locatorRuntimeMemberId === target.beneficiaryMemberId
+      const fundingTargets =
+        (
+          locatorRuntimeMemberId === null
+            ? ownerJoinCodeFundingGroups?.length === 1
+            : locatorRuntimeMemberId === target.beneficiaryMemberId
+        )
           ? await tx.$queryRaw<Array<{ id: string }>>`
               SELECT "container"."member_id" AS "id"
               FROM "hosted_thread_container" AS "container"
@@ -1600,6 +1611,7 @@ async function bindHostedUsageCreditCheckoutSession(input: {
     if (providerFinalNoPayment) {
       await lockHostedUsageCreditPurchaseReservationOwnersTx({
         beneficiaryMemberId: input.purchase.beneficiaryMemberId,
+        memberLockOrder: readHostedUsageCreditTargetMemberLockOrder(target.kind),
         payerMemberId,
         tx,
       });

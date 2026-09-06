@@ -78,7 +78,7 @@ describe("hosted inference verification", () => {
       request: REQUEST,
       upstreamFetchImpl,
     })).resolves.toEqual({
-      verificationProfile: "murph-codex-0.149.1-portable-responses-v1",
+      verificationProfile: "murph-codex-0.151.0-portable-responses-v1",
       verified: true,
     });
 

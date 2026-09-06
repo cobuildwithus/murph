@@ -86,21 +86,32 @@ const replyText = "Cold-start benchmark reply.";
 const setupReplyText = "Cold-start benchmark setup complete.";
 const productionMedianPayloadBytes = 14_000_000;
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
+const setupTimeoutMs =
+  process.env.MURPH_HOSTED_LOCAL_E2E_EXTENDED_SETUP_TIMEOUT === "1"
+    ? 900_000
+    : 300_000;
 const execFileAsync = promisify(execFile);
 
 interface ColdStartSample {
   acceptedToProviderMs?: number;
   acceptedToRunnerAcceptedMs?: number;
+  assistantPhaseCallbackToAssistantPhaseMs?: number;
   assistantAutoReplyBootstrapMs?: number;
   automationBootstrapMs?: number;
   archiveExtractMs?: number;
   cleanupMs?: number;
+  containerListeningToPortsReadyMs?: number;
+  containerProcessToListeningMs?: number;
+  containerStartToPortsReadyMs?: number;
   dataKeyUnwrapMs?: number;
   decryptMs?: number;
   durableRootReplaceMs?: number;
   encryptedBytes?: number;
   executionTargetHydrateMs?: number;
   extractMs?: number;
+  foregroundPassToWorkspaceForegroundPassMs?: number;
+  mailboxImportDoneToAssistantPhaseMs?: number;
+  mailboxImportDoneToForegroundPassMs?: number;
   nodeStartupMs?: number;
   objectFetchMs?: number;
   preparedRestore?: boolean;
@@ -112,6 +123,7 @@ interface ColdStartSample {
   stagedToProviderMs?: number;
   systemMailboxMaintenanceMs?: number;
   workspaceReadMs?: number;
+  workspaceForegroundPassToAssistantPhaseCallbackMs?: number;
   workspaceAssistantPreAutomationMs?: number;
   workspaceRestoreDoneToStagedMs?: number;
   webhookToDeliveryMs: number;
@@ -165,7 +177,7 @@ describe("hosted local cold-start benchmark e2e", () => {
       resetLocalDatabase: true,
       resetPersistDir: true,
     });
-  }, 300_000);
+  }, setupTimeoutMs);
 
   it("measures independent cold hosted executions", async () => {
     const measuredSamples: ColdStartSample[] = [];
@@ -454,6 +466,7 @@ async function runColdStartTrial(
   const phaseBreakdown = requirePhaseBreakdown(trace.phaseBreakdown);
   const restore = requireRestoreBreakdown(phaseBreakdown);
   const importBreakdown = phaseBreakdown.import;
+  const orchestration = phaseBreakdown.orchestration;
   const preProviderBreakdown = phaseBreakdown.preProvider;
 
   return {
@@ -462,6 +475,10 @@ async function runColdStartTrial(
     acceptedToRunnerAcceptedMs: elapsedIso(
       trace.acceptedAt,
       requireIso(trace.runnerJobAcceptedAt),
+    ),
+    assistantPhaseCallbackToAssistantPhaseMs: requireTiming(
+      preProviderBreakdown?.assistantPhaseCallbackToAssistantPhaseMs,
+      "assistantPhaseCallbackToAssistantPhaseMs",
     ),
     assistantAutoReplyBootstrapMs: elapsedEpochMs(
       requireTiming(importBreakdown?.decodeDoneAtEpochMs, "decodeDoneAtEpochMs"),
@@ -476,6 +493,36 @@ async function runColdStartTrial(
     ),
     archiveExtractMs: requireTiming(restore.archiveExtractMs, "archiveExtractMs"),
     cleanupMs: requireTiming(restore.cleanupMs, "cleanupMs"),
+    containerListeningToPortsReadyMs: elapsedEpochMs(
+      requireTiming(
+        orchestration?.freshStartContainerListeningAtEpochMs,
+        "freshStartContainerListeningAtEpochMs",
+      ),
+      requireTiming(
+        orchestration?.freshStartContainerPortsReadyAtEpochMs,
+        "freshStartContainerPortsReadyAtEpochMs",
+      ),
+    ),
+    containerProcessToListeningMs: elapsedEpochMs(
+      requireTiming(
+        orchestration?.freshStartContainerProcessStartedAtEpochMs,
+        "freshStartContainerProcessStartedAtEpochMs",
+      ),
+      requireTiming(
+        orchestration?.freshStartContainerListeningAtEpochMs,
+        "freshStartContainerListeningAtEpochMs",
+      ),
+    ),
+    containerStartToPortsReadyMs: elapsedEpochMs(
+      requireTiming(
+        orchestration?.freshStartContainerStartIssuedAtEpochMs,
+        "freshStartContainerStartIssuedAtEpochMs",
+      ),
+      requireTiming(
+        orchestration?.freshStartContainerPortsReadyAtEpochMs,
+        "freshStartContainerPortsReadyAtEpochMs",
+      ),
+    ),
     dataKeyUnwrapMs: requireTiming(restore.dataKeyUnwrapMs, "dataKeyUnwrapMs"),
     decryptMs: requireTiming(restore.decryptMs, "decryptMs"),
     durableRootReplaceMs: requireTiming(
@@ -488,6 +535,18 @@ async function runColdStartTrial(
       "executionTargetHydrateMs",
     ),
     extractMs: requireTiming(restore.extractMs, "extractMs"),
+    foregroundPassToWorkspaceForegroundPassMs: requireTiming(
+      preProviderBreakdown?.foregroundPassToWorkspaceForegroundPassMs,
+      "foregroundPassToWorkspaceForegroundPassMs",
+    ),
+    mailboxImportDoneToAssistantPhaseMs: requireTiming(
+      preProviderBreakdown?.mailboxImportDoneToAssistantPhaseMs,
+      "mailboxImportDoneToAssistantPhaseMs",
+    ),
+    mailboxImportDoneToForegroundPassMs: requireTiming(
+      preProviderBreakdown?.mailboxImportDoneToForegroundPassMs,
+      "mailboxImportDoneToForegroundPassMs",
+    ),
     nodeStartupMs: requireTiming(phaseBreakdown.boot?.nodeStartupMs, "nodeStartupMs"),
     objectFetchMs: requireTiming(restore.objectFetchMs, "objectFetchMs"),
     preparedRestore: preparation.preparedSnapshotRestorePresent,
@@ -520,6 +579,10 @@ async function runColdStartTrial(
     workspaceReadMs: requireTiming(
       phaseBreakdown.orchestration?.workspaceReadElapsedMs,
       "workspaceReadElapsedMs",
+    ),
+    workspaceForegroundPassToAssistantPhaseCallbackMs: requireTiming(
+      preProviderBreakdown?.workspaceForegroundPassToAssistantPhaseCallbackMs,
+      "workspaceForegroundPassToAssistantPhaseCallbackMs",
     ),
     workspaceRestoreDoneToStagedMs: elapsedIso(
       requireIso(trace.workspaceRestoreDoneAt),
@@ -945,15 +1008,22 @@ function buildSamplePercentileRecord(
   const fields = [
     "acceptedToProviderMs",
     "acceptedToRunnerAcceptedMs",
+    "assistantPhaseCallbackToAssistantPhaseMs",
     "assistantAutoReplyBootstrapMs",
     "automationBootstrapMs",
     "archiveExtractMs",
     "cleanupMs",
+    "containerListeningToPortsReadyMs",
+    "containerProcessToListeningMs",
+    "containerStartToPortsReadyMs",
     "dataKeyUnwrapMs",
     "decryptMs",
     "durableRootReplaceMs",
     "executionTargetHydrateMs",
     "extractMs",
+    "foregroundPassToWorkspaceForegroundPassMs",
+    "mailboxImportDoneToAssistantPhaseMs",
+    "mailboxImportDoneToForegroundPassMs",
     "nodeStartupMs",
     "objectFetchMs",
     "presignGetMs",
@@ -964,6 +1034,7 @@ function buildSamplePercentileRecord(
     "stagedToProviderMs",
     "systemMailboxMaintenanceMs",
     "workspaceAssistantPreAutomationMs",
+    "workspaceForegroundPassToAssistantPhaseCallbackMs",
     "workspaceReadMs",
     "workspaceRestoreDoneToStagedMs",
   ] as const;

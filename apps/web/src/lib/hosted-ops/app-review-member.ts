@@ -9,20 +9,50 @@ import {
 } from "../legal/consent";
 import { getPrisma } from "../prisma";
 import {
+  runWithFreshHostedDomainRootUnwrapCache,
+  runWithHostedDomainRootProviderCallsDisabled,
+  runWithHostedDomainRootUnwrapCache,
+} from "../hosted-crypto/domain-root-unwrap-cache";
+import {
+  HostedDomainRootPreparationMismatchError,
   prepareHostedCryptoDomainRootCandidates,
+  prepareHostedDomainRootForWeb,
 } from "../hosted-crypto/domain-root-store";
-import { lookupHostedMemberIdentityByPrivyUserId } from "../hosted-onboarding/hosted-member-identity-store";
+import {
+  lookupHostedMemberIdentityByPrivyUserId,
+  readHostedMemberIdentity,
+} from "../hosted-onboarding/hosted-member-identity-store";
+import {
+  createHostedEmailLookupKey,
+  createHostedPhoneLookupKey,
+} from "../hosted-onboarding/contact-privacy";
 import { activateHostedMemberForPositiveSourceTx } from "../hosted-onboarding/member-activation";
 import {
   materializePendingHostedGroupJoinConfirmationsBestEffort,
 } from "../hosted-groups/group-join-confirmation";
-import { ensureHostedMemberForPrivyIdentity } from "../hosted-onboarding/member-identity-service";
+import {
+  assertHostedPrivyAccountDeletionNotPending,
+  ensureHostedMemberForPrivyIdentityResolutionTx,
+  lookupHostedMemberForPrivyAuthAttempt,
+} from "../hosted-onboarding/member-identity-service";
+import {
+  assertHostedPrivyIdentityMatchesExpectedEmail,
+  assertHostedPrivyIdentityMatchesExpectedPhone,
+} from "../hosted-onboarding/member-identity-fields";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { readHostedOnboardingEnvironment } from "../hosted-onboarding/env";
+import type { HostedMemberCoreState } from "../hosted-onboarding/hosted-member-store";
 import {
+  readHostedPrivyUserById,
   resolveHostedPrivyIdentityFromVerifiedUser,
+  type HostedPrivyIdentity,
   type HostedPrivyUser,
 } from "../hosted-onboarding/privy";
+import { resolveHostedPrivyAuthMethodFromIdentity } from "../hosted-onboarding/privy-auth-method";
+import {
+  generateHostedMemberId,
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+} from "../hosted-onboarding/shared";
 
 export type HostedOpsAppReviewMemberMode = "apply" | "dry-run";
 
@@ -45,6 +75,7 @@ export interface HostedOpsAppReviewMemberSummary {
 
 const REQUIRED_CONSENT_SCOPES = ["launch.legal", "launch.health-data"] as const;
 const OPS_SOURCE = "app-store-review-ops";
+const HOSTED_OPS_APP_REVIEW_PRIVY_AUTHORITY_TIMEOUT_MS = 5_000;
 
 export async function prepareHostedOpsAppReviewMember(input: {
   createPrivyUser?: boolean;
@@ -73,15 +104,16 @@ export async function prepareHostedOpsAppReviewMember(input: {
     : await readPrivyUser({ principal: input.principal, privy });
   const identity = resolveHostedPrivyIdentityFromVerifiedUser(user as HostedPrivyUser);
   const prisma = input.prisma ?? getPrisma();
-  const existing = await lookupHostedMemberIdentityByPrivyUserId({
-    prisma,
-    privyUserId: identity.userId,
-  });
-  const existingConsentScopes = existing
-    ? await readGrantedLaunchConsentScopes({ memberId: existing.core.id, prisma })
-    : [];
 
   if (input.mode === "dry-run") {
+    const existing = await lookupHostedMemberIdentityByPrivyUserId({
+      prisma,
+      privyUserId: identity.userId,
+    });
+    const existingConsentScopes = existing
+      ? await readGrantedLaunchConsentScopes({ memberId: existing.core.id, prisma })
+      : [];
+
     return buildSummary({
       action: "dry-run",
       billingStatus: existing?.core.billingStatus ?? null,
@@ -93,14 +125,10 @@ export async function prepareHostedOpsAppReviewMember(input: {
   }
 
   const now = input.now ?? new Date();
-  const member = await ensureHostedMemberForPrivyIdentity({
-    authMethod: input.principal.kind === "email"
-      ? "email"
-      : input.principal.kind === "phone"
-        ? "phone"
-        : undefined,
+  const member = await resolvePreparedHostedOpsAppReviewMember({
     identity,
     now,
+    principal: input.principal,
     prisma,
   });
   const preparedCryptoDomainRoots =
@@ -161,6 +189,99 @@ export async function prepareHostedOpsAppReviewMember(input: {
     privyUserId: identity.userId,
     suspended: Boolean(currentMember.suspendedAt),
   });
+}
+
+async function resolvePreparedHostedOpsAppReviewMember(input: {
+  identity: HostedPrivyIdentity;
+  now: Date;
+  principal: HostedOpsAppReviewMemberPrincipal;
+  prisma: PrismaClient;
+}): Promise<HostedMemberCoreState> {
+  const authMethod = resolveHostedPrivyAuthMethodFromIdentity({
+    authMethod: input.principal.kind === "email"
+      ? "email"
+      : input.principal.kind === "phone"
+        ? "phone"
+        : undefined,
+    identity: input.identity,
+  });
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const runAttempt = async (): Promise<HostedMemberCoreState> => {
+      const existing = await lookupHostedMemberForPrivyAuthAttempt({
+        authMethod,
+        identity: input.identity,
+        prisma: input.prisma,
+      });
+      if (!existing) {
+        await assertHostedPrivyAccountDeletionNotPending({
+          prisma: input.prisma,
+          privyUserId: input.identity.userId,
+        });
+      }
+      const preparedMemberId = existing?.core.id ?? generateHostedMemberId();
+      const preparedControlRoot = await prepareHostedDomainRootForWeb({
+        domain: "control",
+        prisma: input.prisma,
+        reason: "hosted-ops.app-review-member",
+        userId: preparedMemberId,
+      });
+      if (existing) {
+        await readHostedMemberIdentity({
+          memberId: existing.core.id,
+          prisma: input.prisma,
+        });
+      }
+      const preparedLiveIdentity = resolveHostedPrivyIdentityFromVerifiedUser(
+        await readHostedPrivyUserById(input.identity.userId, {
+          maxRetries: 0,
+          timeout: HOSTED_OPS_APP_REVIEW_PRIVY_AUTHORITY_TIMEOUT_MS,
+        }),
+      );
+      if (input.principal.kind === "email") {
+        assertHostedPrivyIdentityMatchesExpectedEmail({
+          expectedEmailLookupKey: createHostedEmailLookupKey(input.principal.value) ?? undefined,
+          identity: preparedLiveIdentity,
+        });
+      } else if (input.principal.kind === "phone") {
+        assertHostedPrivyIdentityMatchesExpectedPhone({
+          expectedPhoneLookupKey: createHostedPhoneLookupKey(input.principal.value) ?? undefined,
+          identity: preparedLiveIdentity,
+        });
+      }
+
+      return input.prisma.$transaction(
+        (tx) => runWithHostedDomainRootProviderCallsDisabled(() =>
+          runWithHostedDomainRootUnwrapCache(async () => (
+            await ensureHostedMemberForPrivyIdentityResolutionTx({
+              authMethod,
+              identity: preparedLiveIdentity,
+              now: input.now,
+              preparedControlRoot,
+              preparedExistingMemberId: existing?.core.id ?? null,
+              preparedLiveIdentity,
+              preparedNewMemberId: preparedMemberId,
+              prisma: tx,
+            })
+          ).member),
+        ),
+        HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+      );
+    };
+
+    try {
+      return await (attempt === 0
+        ? runWithHostedDomainRootUnwrapCache(runAttempt)
+        : runWithFreshHostedDomainRootUnwrapCache(runAttempt));
+    } catch (error) {
+      if (error instanceof HostedDomainRootPreparationMismatchError && attempt === 0) {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw new HostedDomainRootPreparationMismatchError();
 }
 
 async function readPrivyUser(input: {

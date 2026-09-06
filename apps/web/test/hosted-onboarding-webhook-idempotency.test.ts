@@ -1396,7 +1396,9 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
       phoneNumberLookupKey: createHostedPhoneLookupKey("+15550000000"),
     };
-    prisma.hostedLinqDelivery.findMany.mockResolvedValueOnce([outreach]);
+    prisma.hostedLinqDelivery.findMany.mockImplementation(async (query: {
+      where?: { template?: string };
+    }) => query.where?.template === "group_join_outreach" ? [outreach] : []);
     prisma.hostedGroupJoinOutreach.findFirst.mockResolvedValue({
       offer: outreach.groupJoinOutreach.offer,
     });
@@ -1469,7 +1471,9 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
       phoneNumberLookupKey: createHostedPhoneLookupKey("+15550000000"),
     };
-    prisma.hostedLinqDelivery.findMany.mockResolvedValueOnce([outreach]);
+    prisma.hostedLinqDelivery.findMany.mockImplementation(async (query: {
+      where?: { template?: string };
+    }) => query.where?.template === "group_join_outreach" ? [outreach] : []);
     prisma.hostedGroupMember.findUnique.mockResolvedValueOnce({
       id: "hgrpm_web_joined",
     });
@@ -2269,6 +2273,7 @@ function createPrismaStub() {
       }),
     },
     hostedMemberIdentity: {
+      findMany: vi.fn().mockResolvedValue([]),
       findUnique: vi.fn().mockResolvedValue(null),
     },
     hostedMemberRouting: {
@@ -2276,6 +2281,7 @@ function createPrismaStub() {
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     hostedThreadRoute: {
+      deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
       findFirst: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([]),
       groupBy: vi.fn().mockResolvedValue([]),
@@ -2295,6 +2301,7 @@ function buildHostedThreadRouteRow(containerMemberId: string) {
     updatedAt: new Date("2026-03-26T00:00:00.000Z"),
   };
   return {
+    accountLookupKey: createHostedPhoneLookupKey("+15550000000"),
     channel: "linq",
     container: {
       member: memberCore,

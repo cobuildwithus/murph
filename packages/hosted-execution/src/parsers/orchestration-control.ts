@@ -18,7 +18,6 @@ import {
 } from "../orchestration-control.ts";
 import {
   requireArray,
-  requireBoolean,
   requireObject,
   requireString,
   readNullableString,
@@ -66,6 +65,20 @@ export function parseHostedRuntimeSignal(value: unknown): HostedRuntimeSignal {
         kind,
       };
     }
+    case "runtime_owner_released": {
+      assertExactKeys(record, "Hosted runtime owner-release signal", [
+        "kind",
+        "runtimeAttemptId",
+      ]);
+
+      return {
+        kind,
+        runtimeAttemptId: requireOpaqueIdentifier(
+          record.runtimeAttemptId,
+          "Hosted runtime owner-release signal runtimeAttemptId",
+        ),
+      };
+    }
     case "runtime_wake_requested": {
       assertExactKeys(record, "Hosted runtime wake signal", [
         "kind",
@@ -104,7 +117,6 @@ export function parseHostedRuntimeReconciliationFacts(
   const record = requireObject(value, "Hosted runtime reconciliation facts");
   assertExactKeys(record, "Hosted runtime reconciliation facts", [
     "blocked",
-    "environmentInterviewPending",
     "mailboxLag",
     "workspace",
   ]);
@@ -113,12 +125,6 @@ export function parseHostedRuntimeReconciliationFacts(
     blocked: record.blocked === null
       ? null
       : parseHostedRuntimeReconciliationFactsBlocked(record.blocked),
-    environmentInterviewPending: record.environmentInterviewPending === undefined
-      ? false
-      : requireBoolean(
-          record.environmentInterviewPending,
-          "Hosted runtime reconciliation facts environmentInterviewPending",
-        ),
     mailboxLag: parseHostedRuntimeMailboxLaneLagArray(
       record.mailboxLag,
       "Hosted runtime reconciliation facts mailboxLag",
@@ -158,11 +164,31 @@ export function parseHostedRuntimeReconciliationFactsWorkspace(
   assertExactKeys(record, "Hosted runtime reconciliation facts workspace", [
     "hostedMailboxSystemHandledThroughSeq",
     "inboxMediaRetentionWakeAt",
+    "nextDefaultProcessingWakeAt",
+    "nextDefaultProcessingWakeReason",
     "nextWakeAt",
     "nextWakeReason",
+    "systemMailboxProgressGeneration",
     "systemMailboxFrontier",
     "version",
   ]);
+
+  const progressProjectionKeys = [
+    "nextDefaultProcessingWakeAt",
+    "nextDefaultProcessingWakeReason",
+    "systemMailboxProgressGeneration",
+  ] as const;
+  const progressProjectionKeyCount = progressProjectionKeys.filter((key) =>
+    Object.prototype.hasOwnProperty.call(record, key)
+  ).length;
+  if (
+    progressProjectionKeyCount !== 0
+    && progressProjectionKeyCount !== progressProjectionKeys.length
+  ) {
+    throw new TypeError(
+      "Hosted runtime reconciliation facts workspace system progress projection must include generation, wake, and reason together.",
+    );
+  }
 
   return {
     ...(Object.prototype.hasOwnProperty.call(
@@ -181,6 +207,22 @@ export function parseHostedRuntimeReconciliationFactsWorkspace(
       record.inboxMediaRetentionWakeAt,
       "Hosted runtime reconciliation facts workspace inboxMediaRetentionWakeAt",
     ),
+    ...(progressProjectionKeyCount === 0
+      ? {}
+      : {
+          nextDefaultProcessingWakeAt: readRequiredNullableIsoTimestamp(
+            record.nextDefaultProcessingWakeAt,
+            "Hosted runtime reconciliation facts workspace nextDefaultProcessingWakeAt",
+          ),
+          nextDefaultProcessingWakeReason: readRequiredNullableBoundedString(
+            record.nextDefaultProcessingWakeReason,
+            "Hosted runtime reconciliation facts workspace nextDefaultProcessingWakeReason",
+          ),
+          systemMailboxProgressGeneration: requireNonNegativeBigIntString(
+            record.systemMailboxProgressGeneration,
+            "Hosted runtime reconciliation facts workspace systemMailboxProgressGeneration",
+          ),
+        }),
     nextWakeAt: readRequiredNullableIsoTimestamp(
       record.nextWakeAt,
       "Hosted runtime reconciliation facts workspace nextWakeAt",
@@ -211,6 +253,7 @@ export function parseHostedRuntimeEnsureProcessingRequest(
   const record = requireObject(value, "Hosted runtime ensure-processing request");
   assertExactKeys(record, "Hosted runtime ensure-processing request", [
     "assistantExecutionBlocked",
+    "conversationWorkPending",
     "orchestrationAttemptId",
     "processingMode",
   ]);
@@ -233,11 +276,23 @@ export function parseHostedRuntimeEnsureProcessingRequest(
       "Hosted runtime ensure-processing request assistantExecutionBlocked requires system_mailbox processingMode.",
     );
   }
+  const conversationWorkPending = record.conversationWorkPending === undefined
+    ? undefined
+    : requireExactTrue(
+        record.conversationWorkPending,
+        "Hosted runtime ensure-processing request conversationWorkPending",
+      );
+  if (conversationWorkPending && processingMode != null && processingMode !== "default") {
+    throw new TypeError(
+      "Hosted runtime ensure-processing request conversationWorkPending requires default processingMode.",
+    );
+  }
 
   return {
     ...(assistantExecutionBlocked === undefined
       ? {}
       : { assistantExecutionBlocked }),
+    ...(conversationWorkPending === undefined ? {} : { conversationWorkPending }),
     orchestrationAttemptId: requireOpaqueIdentifier(
       record.orchestrationAttemptId,
       "Hosted runtime ensure-processing request orchestrationAttemptId",

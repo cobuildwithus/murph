@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-01",
+  "order": 100,
+  "item": {
+    "id": "background-work-recovers-in-order",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Background work recovers in order",
+    "summary": "Murph now resumes delayed connected-health and routine background work in order instead of repeatedly waking without progress or letting an older retry delay fresh device data.",
+    "details": "Current conversations and approved actions still run first. Existing provider retries keep their recovery timing, while a fresh device update can start a bounded sync pass without needing an unrelated message.",
+    "relevanceTags": ["wearables", "assistant", "reliability"],
+    "sourcePullRequests": [2682, 2693, 2700, 2710, 2723, 2770]
+  }
+}

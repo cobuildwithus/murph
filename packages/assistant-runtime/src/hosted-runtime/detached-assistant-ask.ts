@@ -1,8 +1,11 @@
 import {
   executeConsentedReadOnlyAssistantAsk,
+  executeOperatorDiagnostic,
   executeReadOnlyAssistantAsk,
   type ConsentedReadOnlyAssistantAskInput,
   type ConsentedReadOnlyAssistantAskResult,
+  type OperatorDiagnosticInput,
+  type OperatorDiagnosticResult,
   type ReadOnlyAssistantAskProviderUsageEvent,
   type ReadOnlyAssistantAskInput,
   type ReadOnlyAssistantAskResult,
@@ -51,7 +54,9 @@ type HostedDetachedAssistantAskRunResult = "handoff" | "idle" | "settled";
 export interface HostedDetachedAssistantAskController {
   closeAndRequeue(): Promise<void>;
   kick(): void;
+  kickExact(itemId: string): Promise<void>;
   pauseAndRequeue(): Promise<void>;
+  requestPauseAndRequeue(): void;
   resume(): void;
 }
 
@@ -66,6 +71,9 @@ export interface HostedDetachedAssistantAskControllerInput {
   executeConsentedAsk?: (
     input: ConsentedReadOnlyAssistantAskInput,
   ) => Promise<ConsentedReadOnlyAssistantAskResult>;
+  executeOperatorDiagnostic?: (
+    input: OperatorDiagnosticInput,
+  ) => Promise<OperatorDiagnosticResult>;
   deferUsageUntilAfterDurableCheckpoint?: (
     effect: HostedWorkspaceDurableCheckpointEffect,
   ) => void;
@@ -75,6 +83,7 @@ export interface HostedDetachedAssistantAskControllerInput {
   now?: () => string;
   onStateMutation(): void;
   resolveProviderAuthority?(): Promise<"current" | "handoff">;
+  selectNextExactItemId?(): Promise<string | null>;
   usageRecordPort?: HostedRuntimeUsageRecordPort | null;
   userEnvKeys?: readonly string[];
   vaultRoot: string;
@@ -86,6 +95,8 @@ export function createHostedDetachedAssistantAskController(
   const executeAsk = input.executeAsk ?? executeReadOnlyAssistantAsk;
   const executeConsentedAsk =
     input.executeConsentedAsk ?? executeConsentedReadOnlyAssistantAsk;
+  const executeOperatorTask =
+    input.executeOperatorDiagnostic ?? executeOperatorDiagnostic;
   const now = input.now ?? (() => new Date().toISOString());
   let activeAbortController: AbortController | null = null;
   let activePromise: Promise<HostedDetachedAssistantAskRunResult> | null = null;
@@ -93,42 +104,50 @@ export function createHostedDetachedAssistantAskController(
   let kickRequested = false;
   let paused = false;
 
-  const kick = (): void => {
-    if (closed) {
-      return;
-    }
-    if (paused) {
-      kickRequested = true;
-      return;
-    }
+  const start = (
+    itemId: string | null,
+    selectExactItemId = false,
+  ): Promise<HostedDetachedAssistantAskRunResult> => {
     if (activePromise !== null) {
-      kickRequested = true;
-      return;
+      throw new TypeError("Detached assistant ask controller already owns an active request.");
     }
 
     const abortController = new AbortController();
-    const completion = runOneHostedDetachedAssistantAsk({
-      abortSignal: abortController.signal,
-      assistantAskPort: input.assistantAskPort,
-      codexHome: input.codexHome,
-      ...(input.createGroupSharedReader
-        ? { createGroupSharedReader: input.createGroupSharedReader }
-        : {}),
-      env: input.env,
-      executeAsk,
-      executeConsentedAsk,
-      deferUsageUntilAfterDurableCheckpoint:
-        input.deferUsageUntilAfterDurableCheckpoint ?? null,
-      memberId: input.memberId ?? null,
-      model: input.model ?? null,
-      modelProvider: input.modelProvider ?? null,
-      now,
-      onStateMutation: input.onStateMutation,
-      resolveProviderAuthority: input.resolveProviderAuthority ?? null,
-      usageRecordPort: input.usageRecordPort ?? null,
-      userEnvKeys: input.userEnvKeys ?? [],
-      vaultRoot: input.vaultRoot,
-    });
+    const exactRequest = itemId !== null || selectExactItemId;
+    const run = (selectedItemId: string | null) =>
+      runOneHostedDetachedAssistantAsk({
+        abortSignal: abortController.signal,
+        assistantAskPort: input.assistantAskPort,
+        codexHome: input.codexHome,
+        ...(input.createGroupSharedReader
+          ? { createGroupSharedReader: input.createGroupSharedReader }
+          : {}),
+        env: input.env,
+        executeAsk,
+        executeConsentedAsk,
+        executeOperatorDiagnostic: executeOperatorTask,
+        deferUsageUntilAfterDurableCheckpoint:
+          input.deferUsageUntilAfterDurableCheckpoint ?? null,
+        itemId: selectedItemId,
+        memberId: input.memberId ?? null,
+        model: input.model ?? null,
+        modelProvider: input.modelProvider ?? null,
+        now,
+        onStateMutation: input.onStateMutation,
+        resolveProviderAuthority: input.resolveProviderAuthority ?? null,
+        usageRecordPort: input.usageRecordPort ?? null,
+        userEnvKeys: input.userEnvKeys ?? [],
+        vaultRoot: input.vaultRoot,
+      });
+    const completion = selectExactItemId
+      ? (async () => {
+          const selectedItemId = await input.selectNextExactItemId?.() ?? null;
+          if (abortController.signal.aborted) {
+            return "settled";
+          }
+          return selectedItemId ? await run(selectedItemId) : "idle";
+        })()
+      : run(itemId);
     activeAbortController = abortController;
     activePromise = completion;
 
@@ -142,7 +161,12 @@ export function createHostedDetachedAssistantAskController(
           paused = true;
           kickRequested = false;
         }
-        const shouldKick = kickRequested || result === "settled";
+        const shouldKick = !closed
+          && (
+            kickRequested
+            || (!exactRequest && result === "settled")
+            || (selectExactItemId && result === "settled")
+          );
         kickRequested = false;
         activeAbortController = null;
         activePromise = null;
@@ -160,18 +184,39 @@ export function createHostedDetachedAssistantAskController(
         // after a claim-state mutation could not be made durable locally.
       },
     );
+    return completion;
   };
 
-  const quiesce = async (): Promise<void> => {
-    const completion = activePromise;
-    if (!completion) {
+  const kick = (): void => {
+    if (closed) {
       return;
     }
+    if (paused) {
+      kickRequested = true;
+      return;
+    }
+    if (activePromise !== null) {
+      kickRequested = true;
+      return;
+    }
+    void start(null, input.selectNextExactItemId !== undefined);
+  };
+
+  const requestPauseAndRequeue = (): void => {
+    paused = true;
     const abortController = activeAbortController;
     if (abortController && !abortController.signal.aborted) {
       abortController.abort(
         new DOMException("Detached assistant ask paused at a workspace boundary.", "AbortError"),
       );
+    }
+  };
+
+  const quiesce = async (): Promise<void> => {
+    requestPauseAndRequeue();
+    const completion = activePromise;
+    if (!completion) {
+      return;
     }
     await completion;
     if (activePromise === completion) {
@@ -188,13 +233,19 @@ export function createHostedDetachedAssistantAskController(
       await quiesce();
     },
     kick,
+    async kickExact(itemId) {
+      if (closed || paused) {
+        throw new TypeError("Detached assistant ask controller cannot start an exact request.");
+      }
+      await start(itemId);
+    },
     async pauseAndRequeue() {
       if (closed) {
         return;
       }
-      paused = true;
       await quiesce();
     },
+    requestPauseAndRequeue,
     resume() {
       if (closed || !paused) {
         return;
@@ -221,9 +272,13 @@ async function runOneHostedDetachedAssistantAsk(input: {
   executeConsentedAsk: (
     input: ConsentedReadOnlyAssistantAskInput,
   ) => Promise<ConsentedReadOnlyAssistantAskResult>;
+  executeOperatorDiagnostic: (
+    input: OperatorDiagnosticInput,
+  ) => Promise<OperatorDiagnosticResult>;
   deferUsageUntilAfterDurableCheckpoint: ((
     effect: HostedWorkspaceDurableCheckpointEffect,
   ) => void) | null;
+  itemId: string | null;
   memberId: string | null;
   model: string | null;
   modelProvider: string | null;
@@ -240,6 +295,7 @@ async function runOneHostedDetachedAssistantAsk(input: {
   try {
     claimed = await claimHostedSystemMailboxItem({
       allowedRouteActions: HOSTED_DETACHED_ASSISTANT_ASK_ROUTE_ACTIONS,
+      itemId: input.itemId,
       now: input.now,
       vaultRoot: input.vaultRoot,
     });
@@ -280,9 +336,12 @@ async function runOneHostedDetachedAssistantAsk(input: {
       return "settled";
     }
     if (prepared.status === "terminal") {
-      if (isHostedExecutionAssistantAskCurrentSenderTarget(
-        claimed.wake.ask.target,
-      )) {
+      if (
+        prepared.terminalReason !== "content_expired"
+        && isHostedExecutionAssistantAskCurrentSenderTarget(
+          claimed.wake.ask.target,
+        )
+      ) {
         throw new TypeError(
           "Current-sender assistant ask has no persisted terminal completion.",
         );
@@ -329,10 +388,10 @@ async function runOneHostedDetachedAssistantAsk(input: {
       question: prepared.question,
       workspaceRoot: input.vaultRoot,
     };
-    const reviewedPersonalAsk =
-      claimed.wake.ask.target.kind !== "joined_group";
-    let answer: ConsentedReadOnlyAssistantAskResult | ReadOnlyAssistantAskResult;
-    if (claimed.wake.ask.target.kind !== "joined_group") {
+    let answer: ReadOnlyAssistantAskResult;
+    if (claimed.wake.ask.target.kind === "operator_task") {
+      answer = await input.executeOperatorDiagnostic(executionInput);
+    } else if (claimed.wake.ask.target.kind !== "joined_group") {
       if (prepared.disclosure === undefined) {
         throw new TypeError(
           "Reviewed personal ask prepare omitted its disclosure context.",
@@ -371,9 +430,7 @@ async function runOneHostedDetachedAssistantAsk(input: {
         requesterParticipantId: claimed.wake.ask.target.membershipId,
       });
     }
-    const result = reviewedPersonalAsk && answer.outcome === "cannot_answer"
-      ? { answer: null, outcome: "cannot_answer" as const }
-      : normalizeHostedDetachedAssistantAskResult(answer);
+    const result = normalizeHostedDetachedAssistantAskResult(answer);
     const completed = await input.assistantAskPort.request(
       {
         action: "complete",
@@ -387,6 +444,7 @@ async function runOneHostedDetachedAssistantAsk(input: {
     }
     if (
       completed.status === "terminal"
+      && completed.terminalReason !== "content_expired"
       && isHostedExecutionAssistantAskCurrentSenderTarget(
         claimed.wake.ask.target,
       )

@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { MURPH_PRODUCT_ORIGIN } from '@murphai/contracts'
 
 import { resolveAssistantSkillsRoot } from '../src/assistant-skill-assets.js'
+import { resolveMurphDynamicTools } from '../src/assistant-codex/dynamic-tool-catalog.js'
 import {
   buildAssistantSystemPromptLayers,
   type AssistantSystemPromptInput,
@@ -28,6 +29,87 @@ const baseConversationInput: AssistantSystemPromptInput = {
 }
 
 describe('assistant dynamic context prompt blocks', () => {
+  it('keeps static late-result and research policy resident while changing only current turn facts', () => {
+    const ordinary = buildAssistantSystemPromptLayers({
+      ...baseConversationInput, hostedRuntime: true, ordinaryInboundTurn: true,
+      assistantResearchAvailable: true,
+    })
+    const later = buildAssistantSystemPromptLayers({
+      ...baseConversationInput, hostedRuntime: true, ordinaryInboundTurn: true,
+      assistantResearchAvailable: true, currentLocalDate: '2026-06-30',
+      assistantDynamicContextPrompts: ['A new trusted result for this turn.'],
+    })
+    for (const layers of [ordinary, later]) {
+      expect(layers.stableRouteCapabilityPrompt).toContain('Late child results for ordinary inbound turns:')
+      expect(layers.stableRouteCapabilityPrompt).toContain('Configured Exa research:')
+      expect(layers.dynamicTurnContextPrompt).not.toContain('Late child results for ordinary inbound turns:')
+      expect(layers.dynamicTurnContextPrompt).not.toContain('Configured Exa research:')
+      expect(layers.dynamicTurnContextPrompt).toContain('Turn kind: ordinary inbound.')
+    }
+    expect(later.stableRouteCapabilityPrompt).toBe(ordinary.stableRouteCapabilityPrompt)
+    expect(later.dynamicTurnContextPrompt).toContain('A new trusted result for this turn.')
+    const unavailable = buildAssistantSystemPromptLayers({
+      ...baseConversationInput, hostedRuntime: true, ordinaryInboundTurn: true,
+      assistantResearchAvailable: false,
+    })
+    expect(unavailable.stableRouteCapabilityPrompt).not.toContain('Configured Exa research:')
+    expect(unavailable.stableRouteCapabilityPrompt).not.toBe(ordinary.stableRouteCapabilityPrompt)
+    const scheduled = buildAssistantSystemPromptLayers({
+      ...baseConversationInput, hostedRuntime: true, ordinaryInboundTurn: false,
+      assistantResearchAvailable: true, scheduledOccurrenceAt: '2026-06-29T12:00:00Z',
+    })
+    expect(scheduled.dynamicTurnContextPrompt).not.toContain('Turn kind: ordinary inbound.')
+    expect(scheduled.stableRouteCapabilityPrompt).toContain('Never perform this recheck during a scheduled automation')
+  })
+
+  it('does not route group email into unavailable filesystem or browser procedures', () => {
+    const layers = buildAssistantSystemPromptLayers({
+      ...baseConversationInput, channel: 'email', conversationScope: 'group',
+      hostedRuntime: true, assistantHostedGroupToolSurface: 'shared_read',
+      assistantResearchAvailable: true,
+    })
+    const prompt = layers.prompt
+    expect(prompt).not.toContain('Murph skill router:')
+    expect(prompt).not.toContain('For requested real-world browser actions')
+    expect(prompt).not.toContain('`stage` names the failure')
+    expect(prompt).not.toContain('Configured Exa research:')
+    expect(prompt).not.toContain('vault-cli commons knowledge search')
+    expect(prompt).not.toContain('vault-cli commons protocol')
+    expect(prompt).not.toContain('read the matching chronic-illness')
+    expect(prompt).toContain('Complex and low-capacity care:')
+    expect(prompt).toContain('Never psychologize physical illness')
+    expect(prompt).toContain('route the affected person to appropriate urgent or emergency help')
+    expect(prompt).toContain('Never conflate public protocol discovery')
+    expect(prompt).toContain('In group email, do not use the CLI or shell')
+    expect(prompt).toContain('Understand before recommending')
+    expect(prompt).toContain('dangerous sleepiness')
+    expect(prompt).toContain('the sender is not authenticated strongly enough')
+  })
+
+  it.each(['linq', 'telegram'])('composes existing-file attachment guidance for private %s replies', (channel) => {
+    const layers = buildAssistantSystemPromptLayers({
+      ...baseConversationInput,
+      channel,
+      conversationScope: 'direct',
+      hostedRuntime: true,
+    })
+    const prompt = [
+      layers.staticCacheableCorePrompt,
+      layers.stableRouteCapabilityPrompt,
+      layers.threadContextPrompt,
+      layers.dynamicTurnContextPrompt,
+    ].join('\n')
+    const tool = resolveMurphDynamicTools({ vaultFileSendAvailable: true })
+      .find(tool => tool.name === 'send_vault_file')
+    expect(tool).toBeDefined()
+    const existingFileGuidance = 'For an existing saved file, pass its current vault-relative ref directly'
+    expect(prompt).toContain(existingFileGuidance)
+    expect(tool!.description).toContain(existingFileGuidance)
+    expect(prompt).toContain('Never stage possible later sends or move or copy existing files there.')
+    expect(prompt).toContain('the runtime adds the exact approval link outside model context')
+    expect(prompt).not.toMatch(/only (?:be sent to|for) (?:the current |your )?iMessage/iu)
+  })
+
   it('assembles the CLI error-recovery rule exactly once', () => {
     const layers = buildAssistantSystemPromptLayers(baseConversationInput)
     const prompt = [
@@ -55,22 +137,40 @@ describe('assistant dynamic context prompt blocks', () => {
     const hostedDirectLayers = buildAssistantSystemPromptLayers({
       ...baseConversationInput,
       conversationScope: 'direct',
+      currentInstant: '2027-02-14T07:17:05.678Z',
+      currentLocalDate: '2027-02-13',
+      currentTimeZone: 'America/Los_Angeles',
       hostedRuntime: true,
     })
     const hostedGroupLayers = buildAssistantSystemPromptLayers({
       ...baseConversationInput,
       conversationScope: 'group',
+      currentInstant: '2027-02-14T07:17:05.678Z',
+      currentLocalDate: '2027-02-13',
+      currentTimeZone: 'America/Los_Angeles',
       hostedRuntime: true,
     })
 
     expect(hostedDirectLayers.threadContextPrompt).toContain(
       "use the user's current local time to adapt suggestions about meals, sleep, caffeine, and exercise",
     )
+    expect(hostedDirectLayers.dynamicTurnContextPrompt).toContain(
+      'Current local clock for the user (America/Los_Angeles): 2027-02-13 23:17:05 [UTC 2027-02-14T07:17:05.678Z].',
+    )
+    expect(hostedGroupLayers.staticCacheableCorePrompt).toContain(
+      'The room runtime is not a participant.',
+    )
     expect(hostedGroupLayers.threadContextPrompt).toContain(
-      'The runtime member is a synthetic room container, not the human speaker',
+      'Keep personal account settings, billing, wearable connection',
     )
     expect(hostedGroupLayers.threadContextPrompt).not.toContain(
       'use the user\'s current local time',
+    )
+    expect(hostedGroupLayers.dynamicTurnContextPrompt).not.toContain(
+      'Current local clock for the user',
+    )
+    expect(hostedGroupLayers.dynamicTurnContextPrompt).not.toContain(
+      '2027-02-14T07:17:05.678Z',
     )
     expect(
       buildAssistantSystemPromptLayers({
@@ -78,6 +178,12 @@ describe('assistant dynamic context prompt blocks', () => {
         conversationScope: 'direct',
       }).threadContextPrompt,
     ).not.toContain('use the user\'s current local time')
+    expect(
+      buildAssistantSystemPromptLayers({
+        ...baseConversationInput,
+        conversationScope: 'direct',
+      }).dynamicTurnContextPrompt,
+    ).not.toContain('Current local clock for the user')
   })
 
   it.each(['direct', 'group'] as const)(

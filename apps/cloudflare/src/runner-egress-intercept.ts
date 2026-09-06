@@ -22,12 +22,6 @@ import {
   HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS,
 } from "@murphai/hosted-execution/assistant-model";
 import {
-  HOSTED_GEMINI_VIDEO_ANALYSIS_MODEL,
-} from "@murphai/hosted-execution/assistant-capabilities";
-import {
-  HOSTED_RUNTIME_LOG_PATH,
-} from "@murphai/hosted-execution/routes";
-import {
   buildHostedCodexMemoryUsageRecord,
   buildHostedElevenLabsMusicUsageRecord,
   buildHostedElevenLabsTtsUsageRecord,
@@ -65,6 +59,9 @@ import {
   readHostedRunnerInternalOperation,
   readHostedRunnerSafeResponseBodyMetadata,
 } from "./runner-outbound/diagnostics.ts";
+import {
+  HOSTED_RUNNER_WEB_CONTROL_ROUTES,
+} from "./runner-outbound/shared-web-control-policy.ts";
 import {
   applyRunnerRuntimeUsageSettlement,
   requireRunnerRuntimeWriteFenceWrite,
@@ -139,8 +136,8 @@ import {
   DEFAULT_GEMINI_API_BASE_URL,
   HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_BODY_BYTES,
   HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_RESPONSE_BODY_BYTES,
-  isAllowedHostedGeminiVideoAnalysisRequest,
   parseHostedGeminiVideoAnalysisRequestBody,
+  readHostedGeminiVideoAnalysisRequestModel,
   readHostedGeminiVideoAnalysisUsageMetadata,
 } from "./runner-egress-gemini.ts";
 import {
@@ -167,6 +164,11 @@ const HOSTED_RUNTIME_AUTHORITY_HEADER_NAMES = [
 
 const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
 const DEFAULT_OPENAI_API_BASE_URL = "https://api.openai.com";
+const OPENAI_AUTHORIZATION_ALERT_SINGLETON_NAME = "production";
+const OPENAI_AUTHORIZATION_ALERT_REPORT_FAILURE_CODE =
+  "openai_authorization_alert_report_failed";
+const OPENAI_AUTHORIZATION_ALERT_REPORT_FAILURE_MESSAGE =
+  "OpenAI authorization alert report failed.";
 const DEFAULT_EXA_API_BASE_URL = "https://api.exa.ai";
 const DEFAULT_MAPBOX_API_BASE_URL = "https://api.mapbox.com";
 const DEFAULT_TELEGRAM_API_BASE_URL = "https://api.telegram.org";
@@ -206,6 +208,7 @@ export const HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS = {
   gemini: "generativelanguage.googleapis.com",
   linq: "api.linqapp.com",
   mapbox: "api.mapbox.com",
+  mediaStore: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.mediaStore,
   openAi: "api.openai.com",
   runnerControl: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.runnerControl,
   telegram: "api.telegram.org",
@@ -506,6 +509,7 @@ export const HOSTED_RUNNER_OUTBOUND_BY_HOST: Record<string, HostedRunnerOutbound
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.gemini]: handleHostedRunnerGeminiOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.linq]: handleHostedRunnerLinqOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.mapbox]: handleHostedRunnerMapboxOutbound,
+  [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.mediaStore]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.openAi]: handleHostedRunnerOpenAiOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.runnerControl]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.telegram]: handleHostedRunnerTelegramOutbound,
@@ -1508,6 +1512,53 @@ async function maybeHandleCustomInferenceRequest(input: {
   }
 }
 
+function reportOpenAiAuthorizationFailureSafely(input: {
+  ctx?: HostedRunnerOutboundContext;
+  env: RunnerOutboundEnvironmentSource;
+  status: 401 | 403;
+}): Promise<void> | undefined {
+  let failureLogged = false;
+  const logFailure = (): void => {
+    if (failureLogged) {
+      return;
+    }
+    failureLogged = true;
+    console.warn(OPENAI_AUTHORIZATION_ALERT_REPORT_FAILURE_MESSAGE, {
+      failureCode: OPENAI_AUTHORIZATION_ALERT_REPORT_FAILURE_CODE,
+    });
+  };
+
+  try {
+    const namespace = input.env.OPENAI_AUTHORIZATION_ALERT_MONITOR;
+    if (!namespace) {
+      logFailure();
+      return;
+    }
+    const reportPromise = namespace
+      .getByName(OPENAI_AUTHORIZATION_ALERT_SINGLETON_NAME)
+      .reportFailure({
+        observedAtMs: Date.now(),
+        status: input.status,
+      })
+      .then(() => undefined)
+      .catch(() => {
+        logFailure();
+      });
+    if (typeof input.ctx?.waitUntil === "function") {
+      try {
+        input.ctx.waitUntil(reportPromise);
+        return;
+      } catch {
+        logFailure();
+      }
+    }
+    return reportPromise;
+  } catch {
+    logFailure();
+    return;
+  }
+}
+
 async function maybeHandleOpenAiRequest(input: {
   ctx?: HostedRunnerOutboundContext;
   env: RunnerOutboundEnvironmentSource;
@@ -1626,6 +1677,16 @@ async function maybeHandleOpenAiRequest(input: {
     upstreamFetchImpl: input.upstreamFetchImpl,
     url: input.url,
   });
+  if (response.status === 401 || response.status === 403) {
+    const reportPromise = reportOpenAiAuthorizationFailureSafely({
+      ctx: input.ctx,
+      env: input.env,
+      status: response.status,
+    });
+    if (reportPromise) {
+      await reportPromise;
+    }
+  }
   if (diagnosticPromise && typeof input.ctx?.waitUntil !== "function") {
     await diagnosticPromise;
   }
@@ -2193,11 +2254,12 @@ async function maybeHandleGeminiRequest(input: {
   if (input.url.origin !== DEFAULT_GEMINI_API_BASE_URL) {
     return null;
   }
+  const model = readHostedGeminiVideoAnalysisRequestModel(
+    input.request.method,
+    input.url.pathname,
+  );
   if (
-    !isAllowedHostedGeminiVideoAnalysisRequest(
-      input.request.method,
-      input.url.pathname,
-    )
+    model === null
     || input.url.search.length > 0
     || input.request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase()
       !== "application/json"
@@ -2233,6 +2295,7 @@ async function maybeHandleGeminiRequest(input: {
   try {
     parsedBody = parseHostedGeminiVideoAnalysisRequestBody(
       JSON.parse(new TextDecoder().decode(requestBody)),
+      model,
     );
   } catch {
     return disallowedProviderEgress();
@@ -2285,7 +2348,7 @@ async function maybeHandleGeminiRequest(input: {
   const usageRecording = recordHostedGeminiVideoAnalysisUsage({
     authorization,
     env: input.env,
-    model: HOSTED_GEMINI_VIDEO_ANALYSIS_MODEL,
+    model,
     occurredAt: new Date(providerRequestStartedAt).toISOString(),
     providerRequestId:
       response.headers.get("x-goog-request-id")
@@ -2873,12 +2936,13 @@ async function writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog(input: {
   userId: string;
   writeFence: HostedProviderEgressWriteFenceMetadata | null;
 }): Promise<void> {
+  const route = HOSTED_RUNNER_WEB_CONTROL_ROUTES.runtimeLogWrite;
   const writeFence = input.writeFence ?? readRuntimeLogWriteFenceMetadata({
     headers: input.request.headers,
     userId: input.userId,
   });
   const response = await handleRunnerOutboundRequest(
-    new Request(`${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane}${HOSTED_RUNTIME_LOG_PATH}`, {
+    new Request(`${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.webControlPlane}${route.path}`, {
       body: JSON.stringify({
         entries: [{
           at: new Date().toISOString(),
@@ -2908,7 +2972,7 @@ async function writeHostedRunnerOpenAiCacheDiagnosticRuntimeLog(input: {
             }
           : {}),
       },
-      method: "POST",
+      method: route.method,
     }),
     input.env,
     input.userId,
@@ -4383,6 +4447,7 @@ function readTelegramSentinelFilePath(pathname: string): string | null {
 function isAllowedTelegramOperation(operation: string): boolean {
   return operation === "sendMessage"
     || operation === "sendPhoto"
+    || operation === "sendDocument"
     || operation === "sendRichMessage"
     || operation === "sendVoice"
     || operation === "sendChatAction"

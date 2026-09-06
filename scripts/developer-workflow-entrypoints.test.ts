@@ -55,30 +55,15 @@ function listFiles(root: string, relativeDirectory = ""): string[] {
 function createPlanHarness() {
   const root = createTempRoot("open-exec-plan-");
   const scriptsDirectory = path.join(root, "scripts");
-  const delegate = path.join(root, "fake-open-exec-plan");
-  const capture = path.join(root, "delegate-arguments");
   mkdirSync(scriptsDirectory, { recursive: true });
+  mkdirSync(path.join(root, "agent-docs", "exec-plans", "active"), {
+    recursive: true,
+  });
   writeExecutable(
     path.join(scriptsDirectory, "open-exec-plan.sh"),
     readFileSync(path.join(repoRoot, "scripts", "open-exec-plan.sh"), "utf8"),
   );
-  writeFileSync(
-    path.join(scriptsDirectory, "repo-tools.config.sh"),
-    `cobuild_repo_tool_bin() {
-  printf '%s\\n' "\${MURPH_TEST_PLAN_BIN:?}"
-}
-`,
-  );
-  writeExecutable(
-    delegate,
-    `#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\\n' "$@" > "\${MURPH_TEST_PLAN_CAPTURE:?}"
-mkdir -p agent-docs/exec-plans/active
-printf 'created\\n' > "agent-docs/exec-plans/active/$1.md"
-`,
-  );
-  return { capture, delegate, root };
+  return { root };
 }
 
 function createPreCommitHarness() {
@@ -103,6 +88,10 @@ function createPreCommitHarness() {
     `#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\\n' "$@" > "\${MURPH_TEST_PNPM_CAPTURE:?}"
+if [[ "\${MURPH_TEST_GENERATOR_FAIL:-0}" == '1' ]]; then
+  printf '%s\\n' "\${MURPH_TEST_GENERATOR_DIAGNOSTIC:-synthetic generator failure}" >&2
+  exit 1
+fi
 if [[ "\${MURPH_TEST_WRITE_GENERATED:-0}" == '1' ]]; then
   cli_dir="$2"
   case "\${MURPH_TEST_GENERATOR_MUTATION:-}" in
@@ -196,7 +185,7 @@ afterEach(() => {
   while (roots.length > 0) rmSync(roots.pop()!, { force: true, recursive: true });
 });
 
-describe("open execution plan wrapper", () => {
+describe("open execution plan entrypoint", () => {
   it.each([
     ["-h", ["-h"]],
     ["--help", ["--help"]],
@@ -214,7 +203,6 @@ describe("open execution plan wrapper", () => {
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe("Usage: scripts/open-exec-plan.sh <slug> [title]\n");
     expect(listFiles(harness.root)).toEqual(before);
-    expect(existsSync(harness.capture)).toBe(false);
   });
 
   it.each([
@@ -228,22 +216,104 @@ describe("open execution plan wrapper", () => {
       {
         cwd: harness.root,
         encoding: "utf8",
-        env: {
-          ...process.env,
-          MURPH_TEST_PLAN_BIN: harness.delegate,
-          MURPH_TEST_PLAN_CAPTURE: harness.capture,
-        },
       },
     );
 
     expect(result.status, result.stderr).toBe(0);
-    expect(readFileSync(harness.capture, "utf8")).toBe("routine-change\nRoutine title\n");
+    const activeDirectory = path.join(
+      harness.root,
+      "agent-docs",
+      "exec-plans",
+      "active",
+    );
+    const planFiles = readdirSync(activeDirectory);
+    expect(planFiles).toHaveLength(1);
+    const planFile = planFiles[0]!;
+    const dateMatch = /^(\d{4}-\d{2}-\d{2})-routine-change\.md$/u.exec(planFile);
+    expect(dateMatch).not.toBeNull();
+    const dateStamp = dateMatch![1];
+    expect(result.stdout).toBe(
+      `Created agent-docs/exec-plans/active/${planFile}\n`,
+    );
+    expect(readFileSync(path.join(activeDirectory, planFile), "utf8")).toBe(`# Routine title
+
+Status: active
+Created: ${dateStamp}
+Updated: ${dateStamp}
+
+## Goal
+
+- Define the concrete user-visible and engineering outcome.
+
+## Success criteria
+
+- List objective checks required to call this done.
+
+## Scope
+
+- In scope:
+- Out of scope:
+
+## Constraints
+
+- Technical constraints:
+- Product/process constraints:
+
+## Risks and mitigations
+
+1. Risk:
+   Mitigation:
+
+## Tasks
+
+1. Replace with ordered concrete tasks.
+
+## Decisions
+
+- None yet.
+
+## Verification
+
+- Commands to run:
+- Expected outcomes:
+`);
+  });
+
+  it("rejects an invalid slug without creating a plan", () => {
+    const harness = createPlanHarness();
+    const result = spawnSync(
+      "bash",
+      ["scripts/open-exec-plan.sh", "Not-Kebab-Case"],
+      { cwd: harness.root, encoding: "utf8" },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe(
+      "Slug must be kebab-case: lowercase letters, numbers, hyphens\n",
+    );
     expect(
-      readFileSync(
-        path.join(harness.root, "agent-docs", "exec-plans", "active", "routine-change.md"),
-        "utf8",
-      ),
-    ).toBe("created\n");
+      readdirSync(path.join(harness.root, "agent-docs", "exec-plans", "active")),
+    ).toEqual([]);
+  });
+
+  it("does not overwrite an existing plan", () => {
+    const harness = createPlanHarness();
+    const args = ["scripts/open-exec-plan.sh", "routine-change", "Routine title"];
+    const first = spawnSync("bash", args, {
+      cwd: harness.root,
+      encoding: "utf8",
+    });
+    const second = spawnSync("bash", args, {
+      cwd: harness.root,
+      encoding: "utf8",
+    });
+
+    expect(first.status, first.stderr).toBe(0);
+    expect(second.status).toBe(1);
+    expect(second.stdout).toMatch(/^Plan already exists: /u);
+    expect(
+      readdirSync(path.join(harness.root, "agent-docs", "exec-plans", "active")),
+    ).toHaveLength(1);
   });
 });
 
@@ -266,22 +336,6 @@ describe("pre-commit fixture identity", () => {
 });
 
 describe("pre-commit CLI schema generation", () => {
-  it("documents the narrow ordinary merge-commit exception", () => {
-    const agents = readFileSync(path.join(repoRoot, "AGENTS.md"), "utf8");
-    const workflowRouting = readFileSync(
-      path.join(repoRoot, "agent-docs", "operations", "agent-workflow-routing.md"),
-      "utf8",
-    );
-
-    expect(agents).toContain("`scripts/committer` intentionally rejects an active `MERGE_HEAD`");
-    expect(agents).toContain("ordinary `git commit` without path arguments or hook bypass");
-    expect(workflowRouting).toContain("Narrow merge-commit exception");
-    expect(workflowRouting).toContain("`git diff --name-only --diff-filter=U`");
-    expect(workflowRouting).toContain("ordinary `git commit` without path arguments");
-    expect(workflowRouting).toContain("Do not pass `--no-verify`");
-    expect(workflowRouting).toContain("does not authorize starting a merge");
-  });
-
   it("skips generation for a CLI test-only change", () => {
     const harness = createPreCommitHarness();
     const testPath = path.join(
@@ -370,6 +424,30 @@ describe("pre-commit CLI schema generation", () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(readFileSync(harness.capture, "utf8")).toContain("gen:config-schema");
+  });
+
+  it("surfaces generator diagnostics and the canonical recovery commands", () => {
+    const harness = createPreCommitHarness();
+    writeFileSync(
+      path.join(harness.repository, "packages", "cli", "src", "input.ts"),
+      "staged\n",
+    );
+    runGit(harness.repository, ["add", "packages/cli/src/input.ts"]);
+    const hookRepoRoot = runGit(harness.repository, ["rev-parse", "--show-toplevel"]);
+    const diagnostic = `${hookRepoRoot}/packages/core/dist/index.d.ts: synthetic stale declaration`;
+
+    const result = runPreCommit(harness, {
+      MURPH_TEST_GENERATOR_DIAGNOSTIC: diagnostic,
+      MURPH_TEST_GENERATOR_FAIL: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain(
+      "<repo>/packages/core/dist/index.d.ts: synthetic stale declaration",
+    );
+    expect(result.stderr).not.toContain(hookRepoRoot);
+    expect(result.stderr).toContain("pnpm --dir packages/cli verify:prepared-runtime");
+    expect(result.stderr).toContain("pnpm --dir packages/cli gen:config-schema");
   });
 
   it("fails before generation when a tracked CLI input has unstaged changes", () => {

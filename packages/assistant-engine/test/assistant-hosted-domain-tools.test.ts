@@ -45,10 +45,22 @@ describe('hosted domain dynamic tools', () => {
       'occurrenceProjection.status=pending',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'no member action is needed',
+      'briefly confirm the saved change and that the recurring reminder remains active',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'For an active one-shot at schedule, say the saved edit may not affect the occurrence already in progress',
+      'Its exact next delivery time is not yet available; do not promise one',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'do not expose scheduler, projection, or occurrence terminology',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).not.toContain(
+      'explain briefly that the scheduler is finishing current work',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).not.toContain(
+      'will project the next occurrence automatically',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'For an active one-shot at schedule, say the saved edit may not affect the reminder already in progress',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'do not promise that occurrence will deliver or that another occurrence will be scheduled automatically',
@@ -96,10 +108,28 @@ describe('hosted domain dynamic tools', () => {
       'never derive a slug from a title or invent one',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'For inspect, lookup is one scalar string containing either an exact automationId or an exact stable recipe key supplied by the currently loaded skill',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'for patch, lookup is only the concrete automationId returned by the immediately preceding inspect',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'lookup is never a title, natural-language phrase, object, or record',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'when the turn has only a title or natural-language phrase, resolve exactly one automationId from current read-only automation inventory before inspect and ask if zero or multiple matches remain',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'patch never changes the recipe key',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'Inspect is read-only and returns the authoritative stored version plus scheduler timing projection',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      "For a later question about an existing automation's timing, inspect it without mutation and answer from the current stored schedule and occurrence projection. If inspection fails, make no timing claim.",
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'merely to verify this returned save or patch result',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'pass expectedUpdatedAt from that readback',
@@ -109,6 +139,18 @@ describe('hosted domain dynamic tools', () => {
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'a replacement recurring wall-clock schedule that omits schedule.timeZone preserves the stored explicit timezone',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'Pass contextReferences as an array shaped exactly [{"entityKind":"<canonical-kind>","entityId":"<exact-id>"}]',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'both camel-case keys are required on every entry',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'pass an object such as {"model":"gpt-5.6-luna"}',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'Never pass a bare string or Luna, Terra, or Sol.',
     )
   })
 
@@ -1385,6 +1427,13 @@ describe('hosted domain dynamic tools', () => {
   })
 
   it('uses accountId for bounded device actions and rejects credentials', () => {
+    expect(MURPH_DEVICE_TOOL.description).toContain('Apple Health (sourceProvider apple_health_kit)')
+    expect(MURPH_DEVICE_TOOL.description).toContain('WHOOP (sourceProvider whoop_v2)')
+    expect(MURPH_DEVICE_TOOL.description).toContain('A saved result confirms the check-in preference')
+    expect(MURPH_DEVICE_TOOL.description).toContain('Off stops only these check-ins; connection and syncing stay unchanged')
+    expect(readToolRequest('device', {
+      action: 'configure_no_data_outreach', mode: 'off', sourceProvider: 'apple_health_kit',
+    })).toMatchObject({ kind: 'device' })
     expect(MURPH_DEVICE_TOOL.description).toMatch(
       /current private member message/u,
     )
@@ -1594,6 +1643,7 @@ describe('hosted domain dynamic tools', () => {
     const automationTool = {
       request: vi.fn(async () => ({
         action: 'inspect' as const,
+        executionInspection: { status: 'unavailable' as const },
         automationId: 'automation-1',
         effectiveTimeZone: 'America/Chicago',
         lookupId: 'evening-wind-down',
@@ -1634,6 +1684,7 @@ describe('hosted domain dynamic tools', () => {
     }, { signal: null })
     expect(readResultPayload(result)).toEqual({
       action: 'inspect',
+      executionInspection: { status: 'unavailable' },
       automationId: 'automation-1',
       effectiveTimeZone: 'America/Chicago',
       occurrenceProjection: {

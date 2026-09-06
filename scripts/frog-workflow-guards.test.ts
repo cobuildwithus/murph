@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { validatePrComplexitySummary } from "./check-pr-complexity-summary.mjs";
 import {
   normalizeFrogPullRequestBody,
   selectFrogPullRequest,
@@ -216,40 +217,6 @@ fi
     ]) {
       expect(skill).toContain(heading);
     }
-
-    const agents = readRepoFile("AGENTS.md");
-    expect(agents).toContain("§ Developer Friction Logging");
-    expect(agents).toContain("commit each created entry with the task");
-
-    const workflowRouting = readRepoFile(
-      "agent-docs",
-      "operations",
-      "agent-workflow-routing.md",
-    );
-    expect(workflowRouting).toContain("### Developer Friction Logging");
-    expect(workflowRouting).toContain(
-      "For every edit-authorized repository task",
-    );
-    expect(workflowRouting).toMatch(
-      /Creating or\s+updating a tracked plan file is edit-authorized repository work/u,
-    );
-    expect(workflowRouting).toContain("planning-only");
-    expect(workflowRouting).toContain("run `scripts/frog list`");
-    expect(workflowRouting).toMatch(
-      /record it\s+through `scripts\/frog log`/u,
-    );
-    expect(workflowRouting).toContain(
-      "A task is not complete while its Frog entry is untracked",
-    );
-
-    const completionWorkflow = readRepoFile(
-      "agent-docs",
-      "operations",
-      "completion-workflow.md",
-    );
-    expect(completionWorkflow).toContain(
-      "Include every public-safe Frog entry created or modified during the task in that same scoped commit",
-    );
   });
 
   it("keeps the Action on trusted default-branch events with narrow authority", () => {
@@ -432,6 +399,25 @@ fi
     expect(normalizedBody.match(/^## Architecture and reuse$/gmu)).toHaveLength(
       1,
     );
+    expect(normalizedBody.match(/^## Complexity impact$/gmu)).toHaveLength(1);
+    const complexityItems = /^## Complexity impact\n\n(?<items>(?:- .+\n?)+)/mu
+      .exec(normalizedBody)?.groups?.items
+      .trim()
+      .split("\n");
+    expect(complexityItems).toHaveLength(3);
+    expect(
+      validatePrComplexitySummary({
+        changedPaths: [".agents/friction-log/example.md"],
+        prBodyHtml: [
+          "<h2>Complexity impact</h2>",
+          "<ul>",
+          ...(complexityItems ?? []).map((item) =>
+            `<li>${item.replace(/^- /u, "")}</li>`
+          ),
+          "</ul>",
+        ].join("\n"),
+      }),
+    ).toEqual([]);
     expect(normalizedBody.match(/^## Hot reply path impact$/gmu)).toHaveLength(
       1,
     );

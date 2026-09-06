@@ -25,8 +25,10 @@ import {
   readHostedExecutionSafeErrorName,
 } from "@murphai/hosted-execution";
 import {
+  archiveClosedEventLedgerShards,
   archiveClosedIntegrationIngestShards,
   runGeneratedImageCaptureRetention,
+  type ArchiveClosedEventLedgerShardsResult,
   type ArchiveClosedIntegrationIngestShardsResult,
   type RunGeneratedImageCaptureRetentionResult,
 } from "@murphai/core";
@@ -42,9 +44,9 @@ import {
 import type { RuntimeWakeSignal } from "./runtime-wake.ts";
 import {
   HOSTED_GROUP_IDLE_COMPACT_MIN_THREAD_TOKENS,
+  HOSTED_IDLE_ARCHIVE_TIMEOUT_MS,
   HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS,
   HOSTED_IDLE_COMPACT_TIMEOUT_MS,
-  HOSTED_INTEGRATION_INGEST_ARCHIVE_TIMEOUT_MS,
 } from "./idle-maintenance-limits.ts";
 import {
   runHostedPendingAssistantInputContentRetention,
@@ -52,9 +54,9 @@ import {
 
 export {
   HOSTED_GROUP_IDLE_COMPACT_MIN_THREAD_TOKENS,
+  HOSTED_IDLE_ARCHIVE_TIMEOUT_MS,
   HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS,
   HOSTED_IDLE_COMPACT_TIMEOUT_MS,
-  HOSTED_INTEGRATION_INGEST_ARCHIVE_TIMEOUT_MS,
 } from "./idle-maintenance-limits.ts";
 
 // Personal threads keep the measured post-compaction floor (~40k tokens).
@@ -63,7 +65,6 @@ export {
 // idle shutdown can compact large-but-below-ceiling threads before the next
 // wake pays the full resend cost.
 export const HOSTED_INBOX_MEDIA_RETENTION_RETRY_DELAY_MS = 5 * 60 * 1000;
-const HOSTED_INBOX_VIDEO_RETENTION_WINDOW_MS = 0;
 
 type HostedIdleMaintenanceWake = {
   nextWakeAt?: string;
@@ -85,7 +86,7 @@ export type HostedIdleMaintenanceOutcome =
     } & HostedIdleMaintenanceWake);
 
 // One idle-checkpoint maintenance step: bounded media retention, abortable
-// integration-ingest archiving, and opportunistic fail-open thread compaction.
+// canonical archive work, and opportunistic fail-open thread compaction.
 // Runs only on TTL idle shutdown (never deploy evacuation). A pending wake
 // aborts it immediately; the engine kills the warm process before returning,
 // so the idle checkpoint that snapshots the Codex home never captures a rollout
@@ -93,6 +94,7 @@ export type HostedIdleMaintenanceOutcome =
 // statements.
 export async function runHostedIdleCheckpointMaintenance(input: {
   credentialSource: AssistantUsageCredentialSource;
+  generatedImageRetentionMaxCaptures?: number;
   materializeRetentionCandidatePaths?: ((
     storedPaths: readonly string[]
   ) => Promise<InboxMediaRetentionMaterializeResult | void>) | null;
@@ -166,34 +168,48 @@ export async function runHostedIdleCheckpointMaintenance(input: {
           protectedStoredPaths: input.protectedStoredPaths,
           signal: abortController.signal,
           vaultRoot: input.vaultRoot,
-          videoRetentionWindowMs: HOSTED_INBOX_VIDEO_RETENTION_WINDOW_MS,
         });
         retentionWake = mergeInboxRetentionWakes(
           retentionWake,
           resolveInboxMediaRetentionWake(retentionResult),
         );
-        const retireGeneratedImages = () => runGeneratedImageCaptureRetention({
-          materializeCandidatePaths:
-            input.materializeRetentionCandidatePaths ?? undefined,
-          ...(input.pendingWork ? { maxCaptures: 1 } : {}),
-          protectedCaptureIds: input.protectedCaptureIds,
-          protectedStoredPaths: input.protectedStoredPaths,
-          signal: abortController.signal,
-          vaultRoot,
-        });
-        const generatedImageRetention = input.persistGeneratedImageRetention
-          ? await input.persistGeneratedImageRetention(retireGeneratedImages)
-          : await retireGeneratedImages();
-        if (generatedImageRetention.blockedCaptureCount > 0) {
-          emitGeneratedImageRetentionBlockedLog({
-            memberId: input.memberId,
-            result: generatedImageRetention,
+        const generatedImageRetentionMaxCaptures =
+          input.generatedImageRetentionMaxCaptures === undefined
+            ? input.pendingWork ? 1 : undefined
+            : input.pendingWork
+              ? Math.min(input.generatedImageRetentionMaxCaptures, 1)
+              : input.generatedImageRetentionMaxCaptures;
+        if (generatedImageRetentionMaxCaptures === 0) {
+          retentionWake = mergeInboxRetentionWakes(
+            retentionWake,
+            resolveInboxMediaRetentionImmediateWake(),
+          );
+        } else {
+          const retireGeneratedImages = () => runGeneratedImageCaptureRetention({
+            materializeCandidatePaths:
+              input.materializeRetentionCandidatePaths ?? undefined,
+            ...(generatedImageRetentionMaxCaptures === undefined
+              ? {}
+              : { maxCaptures: generatedImageRetentionMaxCaptures }),
+            protectedCaptureIds: input.protectedCaptureIds,
+            protectedStoredPaths: input.protectedStoredPaths,
+            signal: abortController.signal,
+            vaultRoot,
           });
+          const generatedImageRetention = input.persistGeneratedImageRetention
+            ? await input.persistGeneratedImageRetention(retireGeneratedImages)
+            : await retireGeneratedImages();
+          if (generatedImageRetention.blockedCaptureCount > 0) {
+            emitGeneratedImageRetentionBlockedLog({
+              memberId: input.memberId,
+              result: generatedImageRetention,
+            });
+          }
+          retentionWake = mergeInboxRetentionWakes(
+            retentionWake,
+            resolveGeneratedImageRetentionWake(generatedImageRetention),
+          );
         }
-        retentionWake = mergeInboxRetentionWakes(
-          retentionWake,
-          resolveGeneratedImageRetentionWake(generatedImageRetention),
-        );
         const envelopeMigration = await runInboxEnvelopeMigration({
           apply: true,
           ...(input.pendingWork ? { maxFiles: 1 } : {}),
@@ -258,10 +274,10 @@ export async function runHostedIdleCheckpointMaintenance(input: {
     if (input.vaultRoot) {
       const archiveSignal = AbortSignal.any([
         abortController.signal,
-        AbortSignal.timeout(HOSTED_INTEGRATION_INGEST_ARCHIVE_TIMEOUT_MS),
+        AbortSignal.timeout(HOSTED_IDLE_ARCHIVE_TIMEOUT_MS),
       ]);
       try {
-        const archiveResult = await archiveClosedIntegrationIngestShards({
+        const archiveResult = await archiveClosedEventLedgerShards({
           signal: archiveSignal,
           vaultRoot: input.vaultRoot,
         });
@@ -270,7 +286,7 @@ export async function runHostedIdleCheckpointMaintenance(input: {
           || archiveResult.repairedShardCount > 0
           || archiveResult.blockedShardCount > 0
         ) {
-          emitIntegrationIngestArchiveLog({
+          emitEventLedgerArchiveLog({
             memberId: input.memberId,
             result: archiveResult,
           });
@@ -284,10 +300,41 @@ export async function runHostedIdleCheckpointMaintenance(input: {
             wakeInterrupted,
           });
         }
-        emitIntegrationIngestArchiveFailureLog({
+        emitEventLedgerArchiveFailureLog({
           error,
           memberId: input.memberId,
         });
+      }
+      if (!archiveSignal.aborted) {
+        try {
+          const archiveResult = await archiveClosedIntegrationIngestShards({
+            signal: archiveSignal,
+            vaultRoot: input.vaultRoot,
+          });
+          if (
+            archiveResult.archivedShardCount > 0
+            || archiveResult.repairedShardCount > 0
+            || archiveResult.blockedShardCount > 0
+          ) {
+            emitIntegrationIngestArchiveLog({
+              memberId: input.memberId,
+              result: archiveResult,
+            });
+          }
+        } catch (error) {
+          if (abortController.signal.aborted) {
+            return buildInterruptedMaintenanceOutcome({
+              retentionWake,
+              shutdownSignal: input.shutdownSignal,
+              vaultRoot: input.vaultRoot,
+              wakeInterrupted,
+            });
+          }
+          emitIntegrationIngestArchiveFailureLog({
+            error,
+            memberId: input.memberId,
+          });
+        }
       }
     }
     if (abortController.signal.aborted) {
@@ -351,63 +398,96 @@ export async function runHostedIdleCheckpointMaintenance(input: {
       );
     }
 
-    const boundModel = outcome.kind === "compacted"
-      ? outcome.model
-      : null;
-    if (
-      outcome.kind === "compacted"
-      && boundModel
-      && input.recordUsage
-      && input.resolveAssistantSessionId
-    ) {
-      // The entire accounting path (session resolution + record write) is
-      // fire-and-forget: billing telemetry must never break the idle
-      // checkpoint nor delay a pending wake.
-      const { recordUsage, resolveAssistantSessionId } = input;
-      const { threadId, usage } = outcome;
-      const model = boundModel;
-      void (async () => {
-        const assistantSessionId = await resolveAssistantSessionId(threadId);
-        if (!assistantSessionId) {
-          // No matching session: skip rather than write an ambiguous identity.
-          return;
-        }
-        const usageExtraction = usage.source === "estimated"
-          ? {
-              usageExtractionSourcePath:
-                ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
-              usageExtractionVersion: ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
-            }
-          : {};
-        const tokenPricingBasis = resolveHostedAiUsageTokenPricingBasis({
-          model,
-          providerName: usageProviderName,
-          serviceTier: outcome.serviceTier,
-        });
-        await recordUsage(
-          buildAssistantMaintenanceUsageRecord({
-            assistantSessionId,
-            codexThreadId: threadId,
-            credentialSource: input.credentialSource,
-            featureKey: "assistant_idle_compact",
-            memberId: input.memberId,
-            model,
-            occurredAt: compactStartedAt,
-            providerName: usageProviderName,
-            tokenPricingBasis,
-            triggerKind: "automation_idle_compact",
-            usage,
-            ...usageExtraction,
-          }),
-        );
-      })().catch(() => undefined);
-    }
+    // Session resolution and record writes must never delay an idle checkpoint
+    // or a pending foreground wake.
+    void recordIdleCompactionUsage({
+      outcome,
+      credentialSource: input.credentialSource,
+      memberId: input.memberId,
+      occurredAt: compactStartedAt,
+      providerName: usageProviderName,
+      recordUsage: input.recordUsage,
+      resolveAssistantSessionId: input.resolveAssistantSessionId,
+    }).catch(() => undefined);
 
     return attachInboxMediaRetentionWake(outcome, retentionWake);
   } finally {
     input.shutdownSignal?.removeEventListener("abort", onShutdownAbort);
     wakeWatchAbort.abort();
     await wakeWatch;
+  }
+}
+
+async function recordIdleCompactionUsage(input: {
+  outcome: CodexWarmThreadCompactionOutcome;
+  credentialSource: AssistantUsageCredentialSource;
+  memberId: string;
+  occurredAt: string;
+  providerName: string | null;
+  recordUsage: ((record: AssistantUsageRecord) => Promise<void>) | null;
+  resolveAssistantSessionId: ((threadId: string) => Promise<string | null>) | null;
+}): Promise<void> {
+  const { outcome, recordUsage, resolveAssistantSessionId } = input;
+  if (outcome.kind === "skipped" || !outcome.usage || !outcome.model
+    || !recordUsage || !resolveAssistantSessionId) return;
+  const { threadId, usage, model } = outcome;
+  const assistantSessionId = await resolveAssistantSessionId(threadId);
+  if (!assistantSessionId) {
+    // No matching session: skip rather than write an ambiguous identity.
+    return;
+  }
+  const usageExtraction = usage.source === "estimated"
+    ? {
+        usageExtractionSourcePath:
+          ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
+        usageExtractionVersion: ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
+      }
+    : {};
+  const tokenPricingBasis = resolveHostedAiUsageTokenPricingBasis({
+    model,
+    providerName: input.providerName,
+    serviceTier: outcome.serviceTier,
+  });
+  const operations = usage.source === "measured" && usage.responses?.length
+    ? usage.responses.map((response) => ({
+        providerRequestId: response.responseId,
+        providerRequestOutcome: outcome.kind === "failed" ? "failed" as const : "succeeded" as const,
+        usage: {
+          cachedInputTokens: response.cachedInputTokens,
+          cacheWriteTokens: response.cacheWriteInputTokens,
+          inputTokens: response.inputTokens,
+          outputTokens: response.outputTokens,
+          reasoningTokens: response.reasoningOutputTokens,
+          totalTokens: response.totalTokens,
+          rawUsageJson: {
+            cachedInputTokens: response.cachedInputTokens,
+            cacheWriteInputTokens: response.cacheWriteInputTokens,
+            inputTokens: response.inputTokens,
+            outputTokens: response.outputTokens,
+            reasoningOutputTokens: response.reasoningOutputTokens,
+            totalTokens: response.totalTokens,
+          },
+        },
+        usageExtractionSourcePath: "rawResponse.completed.usage",
+        usageExtractionVersion: "codex-idle-compaction-raw-v1",
+      }))
+    : [{ usage, ...usageExtraction }];
+  for (const operation of operations) {
+    const record = buildAssistantMaintenanceUsageRecord({
+      assistantSessionId,
+      codexThreadId: threadId,
+      credentialSource: input.credentialSource,
+      featureKey: "assistant_idle_compact",
+      memberId: input.memberId,
+      model,
+      occurredAt: input.occurredAt,
+      providerName: input.providerName,
+      tokenPricingBasis,
+      triggerKind: "automation_idle_compact",
+      ...operation,
+    });
+    // A failed telemetry write must not discard later measured operations.
+    await recordUsage(record).catch(() => undefined);
   }
 }
 
@@ -449,6 +529,62 @@ function emitIntegrationIngestArchiveLog(input: {
     message: blocked
       ? "Hosted idle maintenance archived eligible integration ingest shards, but one or more shards require repair."
       : "Hosted idle maintenance archived eligible integration ingest shards.",
+    phase: "checkpoint",
+    userId: input.memberId,
+  });
+}
+
+function emitEventLedgerArchiveLog(input: {
+  memberId: string;
+  result: ArchiveClosedEventLedgerShardsResult;
+}): void {
+  const blocked = input.result.blockedShardCount > 0;
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    details: {
+      eventLedgerArchiveBytes: input.result.archivedByteCount,
+      eventLedgerArchiveRepairedShards: input.result.repairedShardCount,
+      eventLedgerArchiveSourceBytes: input.result.sourceByteCount,
+      eventLedgerArchivedShards: input.result.archivedShardCount,
+      eventLedgerBlockedShards: input.result.blockedShardCount,
+      eventLedgerScannedShards: input.result.scannedShardCount,
+    },
+    level: blocked ? "warn" : "info",
+    message: blocked
+      ? "Hosted idle maintenance archived eligible event ledger shards, but one or more shards require repair."
+      : "Hosted idle maintenance archived eligible event ledger shards.",
+    phase: "checkpoint",
+    userId: input.memberId,
+  });
+}
+
+function emitEventLedgerArchiveFailureLog(input: {
+  error: unknown;
+  memberId: string;
+}): void {
+  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(input.error);
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    details: {
+      failureCode: "event_ledger_archive_failed",
+      ...(typeof diagnostics?.errorCode === "string"
+        ? { failureErrorCode: diagnostics.errorCode }
+        : {}),
+      ...(typeof diagnostics?.errorName === "string"
+        ? { failureErrorName: diagnostics.errorName }
+        : {}),
+      failureErrorDetailPresent: typeof diagnostics?.errorDetail === "string",
+      ...(typeof diagnostics?.errorStatus === "number"
+        ? { failureErrorStatus: diagnostics.errorStatus }
+        : {}),
+      failureMessagePresent:
+        input.error instanceof Error && input.error.message.trim().length > 0,
+      failureName: readHostedExecutionSafeErrorName(input.error) ?? null,
+    },
+    error: input.error,
+    level: "warn",
+    message:
+      "Hosted idle maintenance could not archive closed event ledger shards; checkpointing will continue.",
     phase: "checkpoint",
     userId: input.memberId,
   });

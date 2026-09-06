@@ -2,6 +2,7 @@ import {
   ExperimentSchedule,
   ExperimentScheduleSidebar,
 } from "@/src/components/experiments/experiment-detail/experiment-schedule";
+import { ResultsSummary } from "@/src/components/experiments/experiment-detail/results-summary";
 import { ExperimentSummaryTiles } from "@/src/components/experiments/experiment-detail/experiment-summary-tiles";
 import type { ExperimentSchedule as ExperimentScheduleModel } from "@/src/types/experiments";
 
@@ -77,6 +78,27 @@ export function ExperimentRepeatedResultsStudy() {
             },
             schedule: DESIGN_REPEATED_RESULTS_SCHEDULE,
           }}
+        />
+
+        <ResultsSummary
+          signals={[
+            {
+              label: "Repetition benchmark", value: "12", unit: "reps", statistic: "max",
+              baseline: "10 reps", delta: "+2 reps", direction: "up", expected: "",
+              latestResult: { date: "2026-08-15", value: "9", unit: "reps" },
+            },
+            {
+              label: "Grip endurance", value: "41", unit: "sec", statistic: "mean",
+              delta: "", direction: "neutral", expected: "",
+              latestResult: { date: "2026-08-15", value: "38", unit: "sec" },
+            },
+          ]}
+          trends={[{
+            label: "Repetition benchmark", unit: "reps", startDate: "2026-08-09",
+            history: [], baseline: [{ day: 1, value: 8 }, { day: 2, value: 9 }, { day: 3, value: 10 }],
+            active: [{ day: 4, value: 12 }, { day: 5, value: 10 }, { day: 7, value: 9 }],
+            baselineAvg: 10, currentValue: 12, statistic: "max", delta: "+2 reps",
+          }]}
         />
 
         <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_18rem]">

@@ -38,10 +38,34 @@ afterEach(() => {
 
 describe('Codex thread instructions', () => {
   it('keeps the Murph execution kernel compact without coding-agent baggage', () => {
-    expect(Buffer.byteLength(MURPH_CODEX_BASE_INSTRUCTIONS, 'utf8')).toBeLessThan(3_000)
+    // Includes native result-reading guidance; complete provider input grows by
+    // 41 tokens in both the individual and group capture fixtures.
+    expect(Buffer.byteLength(MURPH_CODEX_BASE_INSTRUCTIONS, 'utf8')).toBeLessThan(3_600)
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       "Complete the user's in-scope request end to end",
     )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'An explicit task-completion request authorizes necessary use or transmission of reliable canonical facts',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'expected acknowledgements for its destination and purpose',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'do not re-ask saved facts',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'another destination or purpose, material new choices, password or full payment-card entry',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'Human-only challenges need the smallest exact-point handoff; resume yourself',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain(
+      'one-time codes, CAPTCHA, new consent',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      "Treat ordinary tool friction as recoverable: inspect state and exhaust the owner's bounded safe recovery",
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain('connected sources')
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain('untrusted data')
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain('never fabricate tool output')
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
@@ -63,7 +87,7 @@ describe('Codex thread instructions', () => {
       'Use commentary for brief progress',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'Answer, explanation, review, diagnosis, plan, or content requests—including "build me a plan"—do not by themselves authorize implementation or changes to saved state or external systems',
+      'An answer, explanation, review, diagnosis, plan—including "build me a plan"—or content request does not authorize implementation or external or saved-state changes',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       'Murph instructions or a selected skill may define a narrow internal canonical write',
@@ -73,6 +97,9 @@ describe('Codex thread instructions', () => {
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       'Otherwise mutate state only when explicitly asked',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'Outside the explicit task authority above',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).not.toContain(
       'not unrelated mutations',
@@ -209,14 +236,14 @@ describe('Codex thread instructions', () => {
         name: 'member maintenance',
       },
     ] as const
-    const outputOnlyOverrides = [
-      'features.shell_tool=false',
-      'web_search="disabled"',
-      'features.apps=false',
-      'features.browser_use=false',
-      'features.plugins=false',
-      'features.multi_agent=false',
-    ]
+    const outputOnlyThreadConfig = {
+      'features.apps': false,
+      'features.browser_use': false,
+      'features.multi_agent': false,
+      'features.plugins': false,
+      'features.shell_tool': false,
+      web_search: 'disabled',
+    }
 
     for (const [index, scenario] of scenarios.entries()) {
       codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
@@ -241,9 +268,9 @@ describe('Codex thread instructions', () => {
             ? 'danger-full-access'
             : 'read-only',
         }),
-        codexConfigOverrides: scenario.maintenance !== null
-          ? []
-          : outputOnlyOverrides,
+        codexThreadConfig: scenario.maintenance !== null
+          ? null
+          : outputOnlyThreadConfig,
         developerInstructions: scenario.contract,
         dynamicTools: scenario.maintenance === 'group'
           ? [MURPH_GROUP_ROOM_MODEL_TOOL]
@@ -294,7 +321,7 @@ describe('Codex thread instructions', () => {
             : 'danger-full-access',
         )
       } else {
-        expect(appServerInput?.configOverrides).toEqual(outputOnlyOverrides)
+        expect(appServerInput?.threadConfig).toEqual(outputOnlyThreadConfig)
         expect(appServerInput?.dynamicTools).toEqual([])
         expect(appServerInput?.sandbox).toBe('read-only')
       }

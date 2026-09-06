@@ -85,15 +85,15 @@ describe('assistant nutrition strategy skill', () => {
     const prompt = buildPrompt()
 
     expect(prompt).toContain(
-      "Route by the user's visible outcome and read the primary owner.",
+      "Read the primary owner for the user's visible outcome.",
     )
     expect(prompt).toContain(
-      'inspect at most two candidates; this cap is discovery-only',
+      'inspect at most two for discovery',
     )
     expect(prompt).toContain(
-      'follow explicit handoffs and load every distinct safety or execution owner',
+      'follow handoffs and load each safety/execution owner',
     )
-    expect(prompt).toContain('Do not preload skills or call a discovery CLI just to route.')
+    expect(prompt).toContain('Do not preload or use a discovery CLI.')
   })
 
   it('stays policy-only and composes with existing owners', async () => {
@@ -256,16 +256,16 @@ describe('assistant nutrition strategy skill', () => {
       'Use the target-authority and canonical-discovery rules below after every explicit interactive request to set nutrition targets or receive a numeric daily nutrition card, even when the visible context appears to contain a complete bundle.',
     )
     expect(compactGoals).toContain(
-      'run `vault-cli goal list --status active --limit 200 --format json`.',
+      'run `vault-cli meal totals --from <date> --to <same-date> --resolve-goals --format json`.',
     )
     expect(compactGoals).toContain(
-      'If it returns 200 records, the bounded read may be incomplete: fail closed with ordinary text, no Goal or measurement mutation, and no card.',
+      '`conflict`, `incompatible`, or `capacity` means ordinary text, no Goal or measurement mutation, and no card.',
     )
     expect(compactGoals).toContain(
-      'run `vault-cli goal show <goal-id> --format json` for every returned active Goal whose list item reports a nonzero `data.metricTargetsCount`.',
+      'do not repeat goal list/show to re-resolve active authority.',
     )
     expect(compactGoals).toContain(
-      'Do not select detail reads by title, slug, domain, context-snapshot visibility, or the default list prefix.',
+      'This query owns the complete active target scan and deterministic rules below;',
     )
     expect(compactGoals).toContain(
       'Keep this active-target authority read separate from the all-status lookup used below to reuse or honor Murph\'s managed paused or abandoned proposal',
@@ -445,7 +445,13 @@ describe('assistant nutrition strategy skill', () => {
     )
     expect(compactGoals).toContain('Effective dates are also part of target authority.')
     expect(compactGoals).toContain(
-      'Resolve them against the exact card `localDate`: the selected capture date for a scheduled closeout, which may be a historical catch-up date rather than the occurrence date, or the explicitly requested date.',
+      'Resolve them against the exact card `localDate`: the engine-supplied occurrence local date for a scheduled closeout, or the explicitly requested date for an interactive request.',
+    )
+    expect(compactGoals).toContain(
+      'A historical automatic capture cannot authorize a scheduled card.',
+    )
+    expect(compactGoals).not.toContain(
+      'historical catch-up date',
     )
     expect(compactGoals).toContain(
       'Never use wall-clock today as a substitute.',

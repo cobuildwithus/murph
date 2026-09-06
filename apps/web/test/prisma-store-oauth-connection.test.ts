@@ -23,7 +23,7 @@ const {
   readHostedMemberSuspensionAfterLockTxMock: vi.fn(
     async (): Promise<"active" | "missing" | "suspended"> => "active",
   ),
-  supersedeDirtyStateMock: vi.fn(async () => undefined),
+  supersedeDirtyStateMock: vi.fn(async (): Promise<"classification_pending" | void> => undefined),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/shared", async (importOriginal) => ({
@@ -157,6 +157,9 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
 
     const store = new PrismaDeviceSyncControlPlaneStore({
       prisma: {
+        deviceOauthSession: {
+          findUnique: async () => ({ userId: session.userId }),
+        },
         $transaction: async <TResult>(
           callback: (transaction: {
             $queryRaw: typeof queryRaw;
@@ -410,7 +413,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       prisma: tx,
     });
     expect(lockHostedMemberRowMock.mock.invocationCallOrder[0]).toBeLessThan(
-      readHostedHealthDataConsentStateMock.mock.invocationCallOrder[0] ?? 0,
+      readHostedHealthDataConsentStateMock.mock.invocationCallOrder[1] ?? 0,
     );
 
     expect(created.id).toMatch(/^dsc_[A-Za-z0-9_-]+$/u);
@@ -1268,7 +1271,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(tx.deviceConnection.update).not.toHaveBeenCalled();
   });
 
-  it("retries legacy classification once behind the consent and dirty-marker transaction", async () => {
+  it("commits legacy classification before retrying connection replacement", async () => {
     let stored = createConnection({
       accessTokenEncrypted: null,
       id: "dsc_classification_retry",
@@ -1314,10 +1317,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     });
     supersedeDirtyStateMock
-      .mockRejectedValueOnce({
-        code: "HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_CLASSIFICATION_PENDING",
-        retryable: true,
-      })
+      .mockResolvedValueOnce("classification_pending")
       .mockResolvedValueOnce(undefined);
 
     await expect(store.upsertConnection({
@@ -1346,12 +1346,13 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       userId: "user-123",
     });
     expect(lockHostedMemberRowMock.mock.invocationCallOrder[0]).toBeLessThan(
-      readHostedHealthDataConsentStateMock.mock.invocationCallOrder[0] ?? 0,
+      readHostedHealthDataConsentStateMock.mock.invocationCallOrder[1] ?? 0,
     );
     expect(readHostedHealthDataConsentStateMock.mock.invocationCallOrder[0]).toBeLessThan(
       supersedeDirtyStateMock.mock.invocationCallOrder[0] ?? 0,
     );
     expect(transaction).toHaveBeenCalledTimes(2);
+    expect(tx.deviceConnection.update).toHaveBeenCalledOnce();
   });
 
   it("bounds repeated connection unique-conflict recovery to one retry", async () => {
@@ -2205,9 +2206,10 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(findMany).toHaveBeenCalledTimes(1);
   });
 
-  it("uses an id-and-status-only member projection for companion status", async () => {
+  it("uses bounded lifecycle metadata without credential ciphertext for companion selection", async () => {
     const findMany = vi.fn(async () => [{
       id: "dsc_123",
+      setupPhase: "source_confirmed",
       status: "active",
     }]);
     const store = new PrismaDeviceSyncControlPlaneStore({
@@ -2219,10 +2221,11 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     await expect(store.listMemberConnectionStatuses({
       limit: 32,
       provider: "junction",
-      status: "not_disconnected",
+      status: "all",
       userId: "user-123",
     })).resolves.toEqual([{
       id: "dsc_123",
+      setupPhase: "source_confirmed",
       status: "active",
     }]);
     expect(findMany).toHaveBeenCalledWith({
@@ -2230,11 +2233,11 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       take: 33,
       select: {
         id: true,
+        setupPhase: true,
         status: true,
       },
       where: {
         provider: "junction",
-        status: { not: "disconnected" },
         userId: "user-123",
       },
     });

@@ -22,17 +22,14 @@ export const HOSTED_RUNTIME_SYSTEM_MAILBOX_FRONTIER_CLASSES = [
 export type HostedRuntimeSystemMailboxFrontierClass =
   (typeof HOSTED_RUNTIME_SYSTEM_MAILBOX_FRONTIER_CLASSES)[number];
 
-// Legacy Temporal readers reject unknown reconciliation keys. New readers use
-// this signed search value to opt into the Environment fact until those readers
-// have drained and the compatibility floor can be removed.
-export const HOSTED_RUNTIME_RECONCILIATION_ENVIRONMENT_INTERVIEW_SEARCH =
-  "?includeEnvironmentInterviewPending=1" as const;
-
 export interface HostedRuntimeReconciliationFactsWorkspace {
   hostedMailboxSystemHandledThroughSeq?: string;
   inboxMediaRetentionWakeAt: string | null;
+  nextDefaultProcessingWakeAt?: string | null;
+  nextDefaultProcessingWakeReason?: string | null;
   nextWakeAt: string | null;
   nextWakeReason: string | null;
+  systemMailboxProgressGeneration?: string;
   systemMailboxFrontier?: HostedRuntimeSystemMailboxFrontierClass | null;
   version: string | null;
 }
@@ -44,27 +41,21 @@ export interface HostedRuntimeReconciliationFactsBlocked {
 
 export interface HostedRuntimeReconciliationFacts {
   blocked: HostedRuntimeReconciliationFactsBlocked | null;
-  environmentInterviewPending: boolean;
   mailboxLag: HostedMailboxLaneLag[];
   workspace: HostedRuntimeReconciliationFactsWorkspace | null;
 }
 
 export interface HostedRuntimeReconciliationFactsWireResponse {
   blocked: HostedRuntimeReconciliationFactsBlocked | null;
-  environmentInterviewPending?: boolean;
   mailboxLag: HostedMailboxLaneLag[];
   workspace: HostedRuntimeReconciliationFactsWorkspace | null;
 }
 
 export function projectHostedRuntimeReconciliationFactsWireResponse(
   facts: HostedRuntimeReconciliationFacts,
-  includeEnvironmentInterviewPending = false,
 ): HostedRuntimeReconciliationFactsWireResponse {
   return {
     blocked: facts.blocked,
-    ...(includeEnvironmentInterviewPending
-      ? { environmentInterviewPending: facts.environmentInterviewPending }
-      : {}),
     mailboxLag: facts.mailboxLag,
     workspace: facts.workspace,
   };

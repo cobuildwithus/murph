@@ -20,6 +20,7 @@ Colors and fonts are mapped to standard shadcn CSS variables in `apps/web/app/gl
 Invoke the installed `impeccable` skill by name. Skill installation is environment-owned; do not assume a checkout-local skill directory exists.
 
 Run via `$impeccable <command>` (or pinned shortcuts if created). Useful commands for this project:
+
 - `$impeccable craft [feature]` — shape, then build a feature end-to-end.
 - `$impeccable shape [feature]` — plan UX/UI before writing code.
 - `$impeccable critique [target]` — UX review with heuristic scoring.
@@ -81,42 +82,89 @@ cd apps/web && pnpm typecheck
 
 ## Rules
 
-- Follow the task-class implementation route in `agent-docs/operations/agent-workflow-routing.md`; frontend implementation has no separate implementation-model requirement. Follow `agent-docs/operations/completion-workflow.md` for routed browser proof, the frontend lens inside the preliminary `completion-specialists` ReviewGPT pass, and any independently applicable final ReviewGPT gate.
-- Follow `agent-docs/operations/product-ux.md` before and after code. Treat
-  loading time, progress, skeletons, empty, partial, stale, error, and recovery
-  states as part of the product experience.
-- Use shadcn components and standard Tailwind classes. Arbitrary values for edge cases only.
-- No `@radix-ui/*` imports. We use base UI.
-- Motion restrained — only for hierarchy or affordance.
-- Verify UI changes in the browser at every viewport where the result can
-  materially differ. Check phone and desktop when responsive behavior can
-  change.
-- Reuse [localhost:3000/design?tab=components](http://localhost:3000/design?tab=components) before creating a near-duplicate. Every user-facing hosted Web UI diff needs a repository-owned, reviewer-openable representation: the real production component or consent surface on the matching `/design` tab, or the composed section under `/screenshots/<category>`. Add or update a catalog/study state only when no existing route and anchor render the changed state.
-- Add a `/screenshots` study only when a difficult or reusable state benefits from stable presentation proof. Render the real production component with synthetic props, no live data, no live requests, and all interactive controls `inert`. A screenshot study proves presentation only, not the complete product journey.
-- For content-only authored changelog entries and edition metadata, use the narrow no-preview proof route in `apps/web/changelog/README.md`. Any changelog renderer, component, style, visual, or interaction change uses the normal current-branch proof rule.
-- Treat the unlinked and noindex route as a discovery control, not security. Never put private member data or credentials there.
-- Match rendered evidence to the changed visual, state, interaction, and
-  responsive risk. A change can need no screenshots, one screenshot, or many.
-  Do not capture another viewport only to meet a quota. When a screenshot is
-  useful, crop it to the changed component or section and inspect it at native
-  resolution so ordinary body copy is legible.
-- The `Pull request evidence` check requires a dedicated `Design proof` section
-  with an absolute anchored `Design page` link plus risk-matched `Evidence` and
-  `Coverage` for user-facing UI diffs. It validates structure only. The
-  preliminary frontend review owns repository origin, reachability, currentness,
-  and representation quality; refresh an expired or inaccessible preview. The
-  check does not impose a screenshot count. Design and screenshot-study-only
-  changes are exempt so those references can be maintained independently.
-  Existing `page.tsx` and `layout.tsx` files also receive a narrow metadata-only
-  exemption when the checker can prove that the only runtime source change is
-  an unreferenced static object-literal `metadata` export. Dynamic metadata,
-  viewport or theme metadata, route additions/deletions, and any rendered-source
-  change still require design proof.
+Follow `agent-docs/operations/product-ux.md` for the changed journey and
+`agent-docs/operations/completion-workflow.md` for review and PR gates.
+Frontend work has no special implementation-model requirement.
+
+- Preserve the page shell across loading, empty, unavailable, and error states.
+  Reuse sibling state patterns and shape skeletons like the content they replace.
+- Put useful content first. Add supporting copy only when it helps understanding
+  or action; avoid repeating headings, status, dates, or controls.
+- Reuse the component catalog before adding a near-duplicate. Every user-facing
+  hosted Web change needs a reviewer-openable representation on the matching
+  `/design` tab or `/screenshots/<category>`, current to the changed state.
+- Presentation studies render real production components with synthetic props,
+  no live data/requests, and inert controls. Use the actual page for journey proof.
+  Noindex/unlinked routes are not security boundaries.
+- Inspect material states, accessibility, and viewports where behavior can differ.
+  There is no screenshot quota; capture evidence that actually proves the claim.
+- Keep local data personas synthetic and on real query paths. Never bundle member
+  exports, private data, or credentials into development selectors or studies.
+- Follow the completion workflow's design-proof fields and narrow metadata-only
+  exception. Content-only changelog records follow `apps/web/changelog/README.md`.
+
+## Rendered evidence and publication
+
+For the Playwright fallback, prefer an existing design-proof capture spec.
+If none covers the state, use the established `apps/web/e2e/pr-*-design-proof.spec.ts`
+pattern for one task-scoped spec: run through `apps/web/playwright.config.ts`
+so its smoke environment owns the dev server, open the anchored `/design` or
+`/screenshots` state, block non-loopback requests, wait for fonts and two
+animation frames, assert the production surface, and capture that surface
+rather than a long full page. In a secondary worktree, choose a task-unique
+port and Next dist suffix. For example:
+
+```bash
+VIEWPORT_OVERFLOW_PORT=<unique-port> \
+NEXT_DIST_DIR_SUFFIX=<task-slug>-proof \
+DESIGN_PROOF_OUTPUT_DIR=../../.artifacts/review-gpt/<task-slug> \
+  pnpm --dir apps/web exec playwright test \
+    e2e/<capture-spec>.spec.ts --config playwright.config.ts --project chromium
+```
+
+Inspect each selected image at native resolution, keep it ignored and
+redacted under `.artifacts/review-gpt/`, and remove a one-off capture spec
+after proof unless it adds durable regression value.
+
+Before any image or video leaves the machine, inspect each screenshot at
+native resolution and replay each video, including its audio. Prefer
+synthetic fixtures, then crop or redact all private or identifying material:
+names, handles, email addresses, phone numbers, member or provider
+identifiers, real faces or identifying avatars, health or conversation
+content, secrets and tokens, sensitive URLs or query strings, local usernames
+or home-directory paths, notifications, and unrelated browser or system
+chrome. Strip embedded location or device metadata, use a flattened export
+rather than editable redaction overlays, and keep file names, alt text, and
+surrounding prose identifier-free. Treat GitHub attachments as public, durable
+third-party artifacts: never upload an unsafe original with the intention to
+edit or delete it later. If redaction would remove the proof or privacy is
+uncertain, do not upload the media; record the evidence blocker and use
+another proof surface.
+
+Publish only the selected privacy-safe media with GitHub CLI 2.99.0 or newer.
+Use the repeatable `--attach` flag on `gh pr create`, `gh pr edit`, or
+`gh pr comment`; append `#<alt text>` to an image path, while video paths do
+not accept alt text. When the body already references the same local path,
+`gh` replaces that reference with the uploaded URL; otherwise it appends the
+attachment. For example:
+
+```bash
+gh pr comment <pr-number> \
+  --body 'Responsive design proof' \
+  --attach './.artifacts/review-gpt/<task-slug>/desktop.png#Desktop changed state' \
+  --attach './.artifacts/review-gpt/<task-slug>/phone.png#Phone changed state'
+```
+
+Reopen the rendered PR or comment after upload. Confirm the intended media
+and image alt text appear, no private material is visible, and no local path
+remains. A nonzero command can still mean some attachments were published;
+inspect the rendered result before retrying and retry only missing media.
+See GitHub's
+[media attachment announcement](https://github.blog/changelog/2026-09-01-github-cli-media-in-issues-pull-requests-and-comments/)
+for the supported command surface.
 
 ## Docs to update
 
-When frontend behavior changes:
-- `DESIGN.md` (visual tokens, new components, updated patterns)
-- `PRODUCT.md` (only if brand personality, anti-references, or design principles shift)
-- `agent-docs/PRODUCT_SENSE.md`
-- `apps/web/README.md`
+Update only the owner whose contract changed: `DESIGN.md` for tokens and
+patterns, `PRODUCT.md` for brand principles, `agent-docs/PRODUCT_SENSE.md` for
+product meaning, or `apps/web/README.md` for setup/runtime contracts.

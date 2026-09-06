@@ -12,6 +12,31 @@ const currentWorkoutId = 'evt_current_workout'
 const olderWorkoutId = 'evt_older_workout'
 
 describe('Codex workout delivery context', () => {
+  it.each([
+    'workout start --help', 'workout set log --help', 'workout show --help',
+    'workout start -h', 'workout set log --schema --format json',
+  ])(
+    'does not treat command help as a failed workout result: %s',
+    (command) => {
+      const tracker = createCodexWorkoutDeliveryContextTracker({})
+      observeCommand(tracker, {
+        command: `vault-cli ${command}`,
+        id: 'command-help',
+        output: 'Usage: vault-cli workout ...',
+      })
+      expect(tracker.readReferences(0)).toBeUndefined()
+      observeCommand(tracker, {
+        command: 'vault-cli workout start Current --format json',
+        id: 'start-after-help',
+        output: workoutStartResult(currentWorkoutId),
+      })
+      expect(tracker.readReferences(0)).toEqual([{
+        entityId: currentWorkoutId,
+        entityKind: 'activity_session',
+      }])
+    },
+  )
+
   it('attributes a live-workout start to the ordinal captured when the command began', () => {
     const tracker = createCodexWorkoutDeliveryContextTracker({})
     observeCommand(tracker, {
@@ -27,6 +52,20 @@ describe('Codex workout delivery context', () => {
       entityKind: 'activity_session',
     }])
     expect(tracker.readReferences(1)).toBeUndefined()
+  })
+
+  it('recognizes a note-less workout start result', () => {
+    const tracker = createCodexWorkoutDeliveryContextTracker({})
+    observeCommand(tracker, {
+      command: 'vault-cli workout start Current --format json',
+      id: 'start-note-less',
+      output: workoutStartResult(currentWorkoutId, null),
+    })
+
+    expect(tracker.readReferences(0)).toEqual([{
+      entityId: currentWorkoutId,
+      entityKind: 'activity_session',
+    }])
   })
 
   it('carries an incoming exact workout only through a matching mutation result', () => {
@@ -316,7 +355,10 @@ function observeCommand(
   })
 }
 
-function workoutStartResult(eventId: string) {
+function workoutStartResult(
+  eventId: string,
+  note: string | null = 'Current workout',
+) {
   return {
     activityType: 'strength-training',
     created: true,
@@ -326,7 +368,7 @@ function workoutStartResult(eventId: string) {
     kind: 'activity_session',
     ledgerFile: '/vault/bank/ledger.md',
     lookupId: eventId,
-    note: 'Current workout',
+    note,
     occurredAt: '2026-08-24T14:00:00.000Z',
     title: 'Current workout',
     vault: '/vault',

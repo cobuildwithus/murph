@@ -41,6 +41,14 @@ type RenderClientComponentOptions = {
   visibilityState?: DocumentVisibilityState;
 };
 
+/**
+ * For components that choose browser behavior at module evaluation (such as
+ * Base UI), first render a placeholder with `requireButton: false`, then
+ * dynamically import the component and call `rerender`. A static import runs
+ * before this helper installs DOM globals and can leave controls inert.
+ * See `labs-page.test.tsx` for this sequence, cleanup, and the inline-style
+ * `getComputedStyle` shim needed by its real popup controls in Linkedom.
+ */
 export async function renderClientComponent(
   element: ReactElement,
 ): Promise<RenderClientComponentResult<HTMLButtonElement>>;

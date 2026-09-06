@@ -1,3 +1,4 @@
+import { readWorkflowSkillPolicy } from './support/workflow-skill-policy.js'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 
@@ -10,6 +11,9 @@ import {
 import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
 
 async function readSkill(slug: string) {
+  if (slug === 'experiment-onboarding') {
+    return readWorkflowSkillPolicy(slug)
+  }
   return readFile(
     path.join(resolveAssistantSkillsRoot(), slug, 'SKILL.md'),
     'utf8',
@@ -59,7 +63,7 @@ describe('repeated workout tally guidance', () => {
       'even when that reminder also carries a `workout_format` template reference',
     )
     expect(strength).toContain(
-      'Only an exact standalone `workout_format` reminder context',
+      'An exact standalone `workout_format` reminder context',
     )
     expect(strength).toContain(
       'starts a new `activity_session` through `tracked-table`',

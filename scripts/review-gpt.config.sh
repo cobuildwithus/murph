@@ -271,7 +271,7 @@ package_script="scripts/package-audit-context-full.sh"
 # composer to have no app connector selected before auto-send because review
 # context must come from the guarded codebase ZIP.
 app_connector="current"
-model="gpt-5.6-sol"
+model="gpt-6-pro"
 thinking="current"
 response_timeout_ms="${response_timeout_ms:-$((250 * 60 * 1000))}"
 
@@ -328,15 +328,10 @@ review_gpt_register_dir_preset "legacy-removal" "legacy-removal.md" \
   "hard-cut" \
   "greenfield-hard-cut"
 review_gpt_register_dir_preset "pr-review" "$review_gpt_pr_review_prompt_file" \
-  "Deep PR review for serious bugs, invariant drift, and material simplification using the guarded codebase ZIP." \
+  "PR review for realistic serious bugs and material Complexity Collapse using the guarded codebase ZIP." \
   "pr-deep-review" \
   "deep-pr-review" \
   "pr-bugs-and-architecture"
-review_gpt_register_dir_preset "completion-specialists" "completion-specialists.md" \
-  "Preliminary combined Product UX, prompt, frontend, and coverage review for an exact pushed PR head." \
-  "completion-review" \
-  "specialist-review" \
-  "prompt-frontend-coverage"
 review_gpt_register_dir_preset "package-boundaries" "package-boundaries.md" \
   "Package-boundary, circular-dependency, and mixed-concern audit focused on workspace ownership seams." \
   "package-boundary" \
@@ -347,8 +342,8 @@ review_gpt_register_dir_preset "package-boundaries" "package-boundaries.md" \
   "mixed-package-concerns"
 
 # Keep the PR-only evidence and REVIEW_COMPLETE contract out of aggregate
-# exploratory reviews. The dedicated `completion-specialists` and `pr-review`
-# presets are invoked only by their pushed-head completion workflows.
+# exploratory reviews. The dedicated `pr-review` preset is invoked only by its
+# pushed-head completion workflow.
 review_gpt_register_preset_group "all" \
   "Run every non-PR ReviewGPT audit preset." \
   "security" \

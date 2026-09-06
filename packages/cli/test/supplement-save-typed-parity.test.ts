@@ -738,7 +738,8 @@ test('supplement save rejects more than the canonical ingredient limit', async (
     assert.equal(saveResult.envelope.ok, false)
     if (!saveResult.envelope.ok) {
       assert.equal(saveResult.envelope.error.code, 'VALIDATION_ERROR')
-      assert.match(saveResult.envelope.error.message ?? '', /<=64 items/u)
+      assert.equal(saveResult.envelope.error.message, 'The command input is invalid.')
+      assert.equal(saveResult.envelope.error.fieldErrors?.[0]?.path, 'ingredient')
     }
   } finally {
     await rm(parentRoot, {

@@ -26,9 +26,6 @@ import {
   type HostedWorkspaceSnapshotSizeDiagnostics,
 } from "@murphai/runtime-state/node";
 import {
-  listTransientInboxVideoStoredPaths,
-} from "@murphai/inboxd/retention";
-import {
   compactHostedUnresolvedAssistantInputIds,
 } from "./pending-input-index.ts";
 import {
@@ -79,6 +76,13 @@ import {
 import {
   pruneHostedWorkspaceSnapshotRuntimeOwnedSymlinks,
 } from "./snapshot-cleanup.ts";
+import {
+  publishHostedWorkspaceMediaReferencesForSnapshot,
+  type PublishHostedWorkspaceMediaReferencesResult,
+} from "./media-references.ts";
+import type {
+  HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
+} from "./workspace-runner.ts";
 import {
   clearLegacyWorkspaceRefsForV2SnapshotMaterialization,
   materializeLegacyWorkspaceRefsForV2Snapshot,
@@ -166,6 +170,10 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
     createCheckpointSnapshot: async (checkpointInput, context) => {
       await input.waitForBackgroundAssistantWork(context?.signal ?? null);
       return await createHostedWorkspaceBridgeCheckpointSnapshot({
+        currentSnapshotRef: resolveHostedWorkspaceBridgeCurrentSnapshotRef(
+          checkpointInput,
+          input.request,
+        ),
         platform: input.platform,
         readCurrentLease,
         request: {
@@ -188,6 +196,16 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
             ? checkpointInput.inboxMediaRetentionWakeAt ?? null
             : input.request.workspace?.inboxMediaRetentionWakeAt ?? null,
           leaseGeneration: input.request.leaseGeneration,
+          ...(checkpointInput.systemMailboxProgressGeneration === undefined
+            ? {}
+            : {
+                nextDefaultProcessingWakeAt:
+                  checkpointInput.nextDefaultProcessingWakeAt ?? null,
+                nextDefaultProcessingWakeReason:
+                  checkpointInput.nextDefaultProcessingWakeReason ?? null,
+                systemMailboxProgressGeneration:
+                  checkpointInput.systemMailboxProgressGeneration,
+              }),
           nextWakeAt: Object.hasOwn(checkpointInput, "nextWakeAt")
             ? checkpointInput.nextWakeAt ?? null
             : null,
@@ -240,7 +258,18 @@ export function createHostedRuntimeBridgeLeaseFromWorkspaceRequest(
   };
 }
 
+function resolveHostedWorkspaceBridgeCurrentSnapshotRef(
+  checkpointInput: HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
+  request: HostedWorkspaceInvocationRequest,
+): HostedExecutionSnapshotRef | null {
+  if (Object.hasOwn(checkpointInput, "currentSnapshotRef")) {
+    return checkpointInput.currentSnapshotRef ?? null;
+  }
+  return request.workspace?.snapshotRef ?? null;
+}
+
 async function createHostedWorkspaceBridgeCheckpointSnapshot(input: {
+  currentSnapshotRef: HostedExecutionSnapshotRef | null;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   previousWorkspaceCheckpointedAt: string | null;
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
@@ -294,6 +323,7 @@ type HostedWorkspaceSnapshotStage =
   "plan" | "session" | "archive" | "upload" | "checkpoint";
 
 interface HostedWorkspaceBridgeV2SnapshotInput {
+  currentSnapshotRef: HostedExecutionSnapshotRef | null;
   platform: HostedWorkspaceRuntimeJobOptions["platform"];
   previousWorkspaceCheckpointedAt: string | null;
   readCurrentLease: HostedRuntimeBridgeReadCurrentLease;
@@ -346,7 +376,7 @@ async function createHostedWorkspaceV2Snapshot(
     const legacyMaterializationPlan =
       await prepareLegacyWorkspaceRefsForV2SnapshotMaterialization({
         artifactStore: input.platform.artifactStore,
-        platform: input.platform,
+        currentSnapshotRef: input.currentSnapshotRef,
         signal: input.signal,
         vaultRoot: input.vaultRoot,
       });
@@ -578,19 +608,21 @@ async function createHostedWorkspaceV2Snapshot(
         });
       }
     }
+    const mediaReferences =
+      await publishHostedWorkspaceMediaReferencesForLoggedSnapshot({
+        platform: input.platform,
+        signal: input.signal,
+        userId: input.userId,
+        vaultRoot: input.vaultRoot,
+      });
     const encrypted = await runHostedWorkspaceSnapshotMeasuredStep({
       key: "snapshotArchiveBuildElapsedMs",
       run: async () => {
-        const transientInboxVideoStoredPaths =
-          await listTransientInboxVideoStoredPaths({
-            signal: input.signal,
-            vaultRoot: input.vaultRoot,
-          });
         assertHostedWorkspaceSnapshotConstructionLive(input.signal);
         const archivePlan = await collectHostedWorkspaceSnapshotArchivePlan({
           codexHomeSnapshotHashSecret: input.snapshotDiagnosticsHashSecret,
           durableRoot,
-          excludedVaultPaths: transientInboxVideoStoredPaths,
+          excludedVaultPaths: mediaReferences.excludedVaultPaths,
           extraFiles: legacySnapshotExtraFiles,
           operatorHomeRoot,
           signal: input.signal,
@@ -1053,6 +1085,9 @@ function recordHostedWorkspaceSnapshotOptionalTiming(
 function createHostedCheckpointSnapshotRequestLogDetails(
   request: HostedWorkspaceSnapshotCheckpointRequest,
 ): HostedRuntimeRedactedJson {
+  const nowMs = Date.now();
+  const wake = describeHostedCheckpointWake(request.nextWakeAt, nowMs);
+  const defaultWake = describeHostedCheckpointWake(request.nextDefaultProcessingWakeAt, nowMs);
   return {
     checkpointReason: request.reason,
     handledConversationFrontierSelected:
@@ -1064,6 +1099,12 @@ function createHostedCheckpointSnapshotRequestLogDetails(
       : {}),
     nextWakeAtPresent: request.nextWakeAt != null,
     nextWakeReasonPresent: request.nextWakeReason != null,
+    nextWakeState: wake.state,
+    nextWakeOffsetMs: wake.offsetMs,
+    nextDefaultProcessingWakeState: defaultWake.state,
+    nextDefaultProcessingWakeOffsetMs: defaultWake.offsetMs,
+    nextDefaultProcessingWakeReasonPresent: request.nextDefaultProcessingWakeReason != null,
+    systemMailboxProgressGenerationPresent: request.systemMailboxProgressGeneration != null,
     redactedStatusPresent: request.redactedStatus !== null,
     ...(request.runtimeWakePendingAtCheckpoint === undefined
       ? {}
@@ -1071,6 +1112,23 @@ function createHostedCheckpointSnapshotRequestLogDetails(
           runtimeWakePendingAtCheckpoint:
             request.runtimeWakePendingAtCheckpoint,
         }),
+  };
+}
+
+function describeHostedCheckpointWake(
+  wakeAt: string | null | undefined,
+  nowMs: number,
+): {
+  state: "omitted" | "none" | "invalid" | "due" | "future";
+  offsetMs: number | null;
+} {
+  if (wakeAt === undefined) return { state: "omitted", offsetMs: null };
+  if (wakeAt === null) return { state: "none", offsetMs: null };
+  const wakeMs = Date.parse(wakeAt);
+  if (!Number.isFinite(wakeMs)) return { state: "invalid", offsetMs: null };
+  return {
+    state: wakeMs <= nowMs ? "due" : "future",
+    offsetMs: wakeMs - nowMs,
   };
 }
 
@@ -1398,6 +1456,44 @@ function createAssistantGeneratedDeliveryResiduePruneLogDetails(
     prunedAssistantRuntimeResidueFileCount:
       result.generatedDeliveryFilesPruned,
   };
+}
+
+async function publishHostedWorkspaceMediaReferencesForLoggedSnapshot(input: {
+  platform: HostedWorkspaceRuntimeJobOptions["platform"];
+  signal: AbortSignal | null;
+  userId: string;
+  vaultRoot: string;
+}): Promise<PublishHostedWorkspaceMediaReferencesResult> {
+  const mediaReferences = await publishHostedWorkspaceMediaReferencesForSnapshot({
+    mediaStore: input.platform.mediaStore ?? null,
+    signal: input.signal,
+    vaultRoot: input.vaultRoot,
+  });
+  if (shouldLogHostedWorkspaceMediaReferencePublication(mediaReferences)) {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        excludedVaultPathCount: mediaReferences.excludedVaultPaths.length,
+        mediaReferenceCount: mediaReferences.referenceCount,
+        prunedMediaCount: mediaReferences.prunedMediaCount,
+        snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
+        uploadedMediaCount: mediaReferences.uploadedMediaCount,
+      },
+      level: "info",
+      message: "Hosted workspace snapshot published media references.",
+      phase: "checkpoint",
+      userId: input.userId,
+    });
+  }
+  return mediaReferences;
+}
+
+function shouldLogHostedWorkspaceMediaReferencePublication(
+  mediaReferences: PublishHostedWorkspaceMediaReferencesResult,
+): boolean {
+  return mediaReferences.referenceCount > 0
+    || mediaReferences.uploadedMediaCount > 0
+    || mediaReferences.prunedMediaCount > 0;
 }
 
 async function writeHostedCheckpointSnapshotFinishedLog(input: {

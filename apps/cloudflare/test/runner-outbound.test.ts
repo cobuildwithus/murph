@@ -39,6 +39,7 @@ import {
   buildHostedMailboxPayloadSecureBoxAad,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   isHostedRuntimePrivateImageDeliveryUrl,
+  type HostedWorkspaceCheckpointRequest,
   type HostedWorkspaceReadResponse,
 } from "@murphai/hosted-execution/runtime-control";
 import {
@@ -88,6 +89,7 @@ import {
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH,
+  HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH,
   HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH,
   HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
   HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH,
@@ -101,6 +103,7 @@ import {
   HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
   HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER,
 } from "@murphai/hosted-execution/vault-share";
+import * as hostedCrypto from "../src/crypto.ts";
 import {
   encryptHostedStorageEnvelope,
   type R2PutValueLike,
@@ -118,14 +121,22 @@ import {
   createHostedBundleStore,
 } from "../src/bundle-store.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
+import { createCloudflareArtifactStore } from "../src/runtime-platform/artifact-store.ts";
+import { HostedRuntimeArtifactWriteError } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import { clearHostedRuntimeCryptoContextEnvelopeCacheForTests } from "../src/hosted-crypto/runtime-user-crypto-context.ts";
+import {
+  CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_ENDPOINT,
+} from "../src/internal-hosts.ts";
 import {
   handleRunnerOutboundRequest,
   type RunnerOutboundEnvironmentSource,
 } from "../src/runner-outbound.ts";
 import {
+  HOSTED_RUNTIME_ARTIFACT_UPLOAD_DEADLINE_HEADER,
   HOSTED_RUNTIME_ARTIFACT_FETCH_CORRELATION_ID_HEADER,
   HOSTED_RUNTIME_ARTIFACT_READ_PURPOSE_HEADER,
+  HOSTED_RUNTIME_ATTEMPT_ID_HEADER,
+  HOSTED_RUNTIME_LEASE_GENERATION_HEADER,
   HOSTED_WEB_CONTROL_FORWARDED_RESPONSE_HEADER,
 } from "../src/runner-outbound/headers.ts";
 import {
@@ -140,9 +151,6 @@ import {
   readHostedRunnerWebControlRoute,
 } from "../src/runner-outbound/shared-web-control-policy.ts";
 import {
-  handleRunnerGeneratedImageUploadRequest,
-} from "../src/runner-outbound/generated-images.ts";
-import {
   handleRunnerPrivateImageUrlPublishRequest,
 } from "../src/runner-outbound/private-image-urls.ts";
 import type {
@@ -152,7 +160,6 @@ import {
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH,
 } from "../src/runtime-mailbox-payload-decode-contract.ts";
 import {
-  HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH,
   HOSTED_EXECUTION_RUNNER_PRIVATE_IMAGE_URL_PUBLISH_PATH,
   HOSTED_EXECUTION_RUNNER_TELEGRAM_DOWNLOAD_FILE_PATH,
   HOSTED_EXECUTION_RUNNER_TELEGRAM_GET_FILE_PATH,
@@ -212,8 +219,24 @@ const MISSING_ARTIFACT_URL = `http://artifacts.worker/objects/${"a".repeat(64)}`
 const HEARTBEAT_URL = "http://runner-control.worker/internal/active-invocation/heartbeat";
 const PRIVATE_MEDIA_PUBLISH_EXPIRES_AT = "2033-05-18T03:33:20.000Z";
 const PRIVATE_MEDIA_PUBLISH_URL =
-  `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`;
+  `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`;
+type HostedSystemProgressProjection = Required<Pick<
+  HostedWorkspaceCheckpointRequest,
+  | "nextDefaultProcessingWakeAt"
+  | "nextDefaultProcessingWakeReason"
+  | "systemMailboxProgressGeneration"
+>>;
 const ALLOWLISTED_WEB_CONTROL_CASES = [
+  {
+    body: {
+      action: "authorize",
+      expiresAt: "2036-08-25T18:10:00.000Z",
+      requestId: "assistant.notification.requested:operator-task:opt_synthetic",
+      taskId: "opt_synthetic",
+    },
+    name: "hosted operator task control",
+    path: HOSTED_RUNTIME_OPERATOR_TASK_CONTROL_PATH,
+  },
   {
     body: {
       action: "upgrade_edge",
@@ -2325,6 +2348,132 @@ describe("handleRunnerOutboundRequest", () => {
     expect(ownsActiveInvocationLease).not.toHaveBeenCalled();
   });
 
+  it("records a container-origin completion against the exact durable write fence", async () => {
+    const recordRuntimeCompletionFromContainer = vi.fn(async () => ({
+      completed: true,
+    }));
+    const response = await handleRunnerOutboundRequest(
+      new Request(CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_ENDPOINT, {
+        body: JSON.stringify({
+          result: {
+            nextWakeAt: null,
+            status: "idle",
+          },
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          "x-hosted-runtime-attempt-id": "attempt_1",
+          "x-hosted-runtime-lease-generation": "9",
+          "x-hosted-runtime-workspace-version": "4",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName() {
+            return {
+              recordRuntimeCompletionFromContainer,
+            };
+          },
+        },
+      }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ completed: true });
+    expect(recordRuntimeCompletionFromContainer).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "9",
+      result: {
+        nextWakeAt: null,
+        status: "idle",
+      },
+      userId: "member_123",
+    });
+  });
+
+  it("returns a not-recorded container completion without a second authority read", async () => {
+    const recordRuntimeCompletionFromContainer = vi.fn(async () => ({
+      completed: false,
+    }));
+    const response = await handleRunnerOutboundRequest(
+      new Request(CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_ENDPOINT, {
+        body: JSON.stringify({ result: { status: "idle" } }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+          [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt_stale",
+          [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: "8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName: () => ({ recordRuntimeCompletionFromContainer }),
+        },
+      }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ completed: false });
+    expect(recordRuntimeCompletionFromContainer).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    {
+      body: JSON.stringify({ result: { status: "idle" } }),
+      headers: createRunnerProxyHeaders({
+        "content-type": "application/json; charset=utf-8",
+      }),
+      name: "missing fence authority",
+      status: 401,
+    },
+    {
+      body: "{",
+      headers: createRunnerProxyHeaders({
+        "content-type": "application/json; charset=utf-8",
+        [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt_malformed",
+        [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: "9",
+      }),
+      name: "malformed input",
+      status: 400,
+    },
+    {
+      body: JSON.stringify({
+        padding: "x".repeat(256 * 1024),
+        result: { status: "idle" },
+      }),
+      headers: createRunnerProxyHeaders({
+        "content-type": "application/json; charset=utf-8",
+        [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt_oversized",
+        [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: "10",
+      }),
+      name: "an oversized body",
+      status: 413,
+    },
+  ])("rejects container completion with $name", async ({ body, headers, status }) => {
+    const recordRuntimeCompletionFromContainer = vi.fn(async () => ({
+      completed: true,
+    }));
+    const response = await handleRunnerOutboundRequest(
+      new Request(CLOUDFLARE_HOSTED_RUNTIME_COMPLETION_ENDPOINT, {
+        body,
+        headers,
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        USER_RUNNER: {
+          getByName: () => ({ recordRuntimeCompletionFromContainer }),
+        },
+      }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(status);
+    expect(recordRuntimeCompletionFromContainer).not.toHaveBeenCalled();
+  });
+
   it("rejects workspace checkpoints when the live invocation lease is stale", async () => {
     const ownsActiveInvocationLease = vi.fn(async () => false);
     const fetchMock = vi.fn();
@@ -3117,37 +3266,6 @@ describe("handleRunnerOutboundRequest", () => {
     expect(emailSendMock).toHaveBeenCalledOnce();
   });
 
-  it("tombstones generated-image URL uploads after the write fence", async () => {
-    const runner = createWorkspaceVersionAwareUserRunner();
-    const fetchMock = vi.fn<typeof fetch>();
-    vi.stubGlobal("fetch", fetchMock);
-
-    const uploadRequest = new Request(
-      `http://results.worker${HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH}`,
-      {
-        headers: createMailboxPayloadDecodeHeaders(),
-        method: "POST",
-      },
-    );
-    const response = await handleRunnerOutboundRequest(
-      uploadRequest,
-      createRunnerOutboundEnv({
-        USER_RUNNER: {
-          getByName: runner.getByName,
-        },
-      }),
-      "member_123" ,
-    );
-
-    expect(response.status).toBe(410);
-    expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
-    expect(fetchMock).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({
-      error:
-        "Legacy generated-image URL uploads have moved to private provider attachments.",
-    });
-  });
-
   it("sends the minimal image payload through the serialized UserRunner publisher", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const pngBytes = new Uint8Array([
@@ -3755,6 +3873,385 @@ describe("handleRunnerOutboundRequest", () => {
     assert.deepEqual(ingress.rootKey, ingressRoot);
     assert.equal(ingress.rootKeyId, "udrk:ingress:test-root");
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([10001, 10043])("recovers a brief R2 artifact PUT service failure (%i)", async (code) => {
+    const test = await createArtifactPutRecoveryFixture();
+    const encrypt = vi.spyOn(hostedCrypto, "encryptHostedStorageEnvelope");
+    test.put.mockRejectedValueOnce(new Error(`put: Synthetic service failure (${code})`));
+    const key = await hostedArtifactObjectKey({ sha256: test.sha256, userId: "member_123" });
+    expect(await test.env.BUNDLES.head?.(key)).toBeNull();
+
+    const response = await handleRunnerOutboundRequest(test.request, test.env, "member_123");
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, sha256: test.sha256, size: test.bytes.byteLength });
+    expect(test.put).toHaveBeenCalledTimes(2);
+    expect(test.put.mock.calls[0]).toEqual(test.put.mock.calls[1]);
+    expect(test.put.mock.calls[0]?.[0]).toBe(key);
+    expect(encrypt).toHaveBeenCalledOnce();
+    expect(test.bodyRead).toHaveBeenCalledOnce();
+    expect(test.cryptoFixture.fetchMock).toHaveBeenCalledOnce();
+    expect(test.validate).toHaveBeenCalledTimes(2);
+    expect(test.validate).toHaveBeenNthCalledWith(2, {
+      attemptId: "attempt_1", generation: "9", userId: "member_123",
+    });
+    expect(await test.env.BUNDLES.head?.(key)).toMatchObject({ key });
+    const read = await handleRunnerOutboundRequest(
+      new Request(test.request.url, { headers: test.request.headers }), test.env, "member_123",
+    );
+    expect(read.status).toBe(200);
+    const readback = new Uint8Array(await read.arrayBuffer());
+    expect(readback).toEqual(test.bytes);
+    expect(sha256Hex(readback)).toBe(test.sha256);
+    expect(test.put).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([10001, 10043])("preserves the first R2 failure when two PUTs fail (%i)", async (code) => {
+    const test = await createArtifactPutRecoveryFixture();
+    const first = new Error(`put: Synthetic first failure (${code})`);
+    test.put.mockRejectedValueOnce(first)
+      .mockRejectedValueOnce(new Error("put: Synthetic second failure (10043)"));
+
+    await expect(handleRunnerOutboundRequest(test.request, test.env, "member_123")).rejects.toBe(first);
+
+    expect(test.put).toHaveBeenCalledTimes(2);
+    expect(test.put.mock.calls[0]).toEqual(test.put.mock.calls[1]);
+    expect(test.validate).toHaveBeenCalledTimes(2);
+    expect(await test.env.BUNDLES.get(test.put.mock.calls[0]![0])).toBeNull();
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Hosted runner artifact request failed.",
+        details: expect.objectContaining({
+          artifactR2Code: code, artifactStorageStage: "r2_put",
+          artifactWriteAttempt: 2, artifactWriteDisposition: "exhausted",
+        }),
+      }),
+    );
+    expect(JSON.stringify(hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls))
+      .not.toContain('"recovered"');
+  });
+
+  it("preserves the first service failure when the second PUT fails permanently", async () => {
+    const test = await createArtifactPutRecoveryFixture();
+    const first = new Error("put: Synthetic first failure (10001)");
+    test.put.mockRejectedValueOnce(first)
+      .mockRejectedValueOnce(new Error("put: Synthetic access denied (10003)"));
+    await expect(handleRunnerOutboundRequest(test.request, test.env, "member_123")).rejects.toBe(first);
+    expect(test.put).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["unknown code", new Error("put: Synthetic unknown failure (10099)")],
+    ["quota", new Error("put: Synthetic quota failure (10009)")],
+    ["rate limit", new Error("put: Synthetic rate limit (10058)")],
+    ["client disconnect", new Error("put: Synthetic client disconnect (10054)")],
+    ["unauthorized", new Error("put: Synthetic unauthorized (10002)")],
+    ["access denied", new Error("put: Synthetic access denied (10003)")],
+    ["integrity", new Error("put: Synthetic bad digest (10037)")],
+    ["incomplete body", new Error("put: Synthetic incomplete body (10013)")],
+    ["generic fetch", new TypeError("fetch failed")],
+    ["TypeError with code", new TypeError("put: Synthetic service failure (10001)")],
+    ["abort exception", new DOMException("put: Synthetic service failure (10043)", "AbortError")],
+    ["arbitrary error", new Error("Synthetic failure")],
+    ["non-terminal code", new Error("put: Synthetic (10001) extra text")],
+    ["different operation", new Error("get: Synthetic service failure (10043)")],
+    ["unscoped prose", new Error("Synthetic failure (10001)")],
+    ["nested code", new Error("Synthetic wrapper", { cause: new Error("put: Synthetic (10001)") })],
+    ["HTTP failure", Object.assign(new Error("Synthetic HTTP failure"), { status: 503 })],
+    ["code property only", Object.assign(new Error("put: Synthetic failure"), { code: 10001 })],
+    ["string", "put: Synthetic service failure (10001)"],
+    ["plain object", { message: "put: Synthetic service failure (10043)" }],
+  ])("does not retry an out-of-scope artifact PUT failure: %s", async (_name, error) => {
+    const test = await createArtifactPutRecoveryFixture();
+    test.put.mockRejectedValueOnce(error);
+    await expect(handleRunnerOutboundRequest(test.request, test.env, "member_123")).rejects.toBe(error);
+    expect(test.put).toHaveBeenCalledOnce();
+    expect(test.validate).toHaveBeenCalledOnce();
+    expect(JSON.stringify(hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls))
+      .not.toContain("artifactR2Code");
+  });
+
+  it("retains an ordinary single PUT without recovery work", async () => {
+    const test = await createArtifactPutRecoveryFixture();
+    const response = await handleRunnerOutboundRequest(test.request, test.env, "member_123");
+    expect(response.status).toBe(200);
+    expect(test.put).toHaveBeenCalledOnce();
+    expect(test.validate).toHaveBeenCalledOnce();
+    expect(test.bodyRead).toHaveBeenCalledOnce();
+    expect(JSON.stringify(hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls))
+      .not.toContain("artifactR2Code");
+  });
+
+  it("does not enable recovery for other hosted artifact store callers", async () => {
+    const test = await createArtifactPutRecoveryFixture();
+    const first = new Error("put: Synthetic service failure (10001)");
+    test.put.mockRejectedValueOnce(first);
+    const crypto = await resolveRunnerOutboundUserCryptoContext({
+      bucket: test.env.BUNDLES, domain: "runtime", env: test.env,
+      environment: readHostedExecutionEnvironment(asWorkerStringEnvironment(test.env)), userId: "member_123",
+    });
+    const store = createHostedArtifactStore({
+      bucket: test.env.BUNDLES, key: crypto.rootKey, keyId: crypto.rootKeyId, userId: "member_123",
+    });
+    await expect(store.writeArtifact(test.sha256, test.bytes)).rejects.toBe(first);
+    expect(test.put).toHaveBeenCalledOnce();
+  });
+
+  it("replays an ambiguously persisted first PUT with the identical encrypted artifact", async () => {
+    const test = await createArtifactPutRecoveryFixture();
+    test.put.mockImplementationOnce(async (...args) => {
+      await test.persist(...args);
+      throw new Error("put: Synthetic post-persistence service failure (10043)");
+    });
+    expect((await handleRunnerOutboundRequest(test.request, test.env, "member_123")).status).toBe(200);
+    expect(test.put).toHaveBeenCalledTimes(2);
+    expect(test.put.mock.calls[0]).toEqual(test.put.mock.calls[1]);
+    const read = await handleRunnerOutboundRequest(
+      new Request(test.request.url, { headers: test.request.headers }), test.env, "member_123",
+    );
+    expect(new Uint8Array(await read.arrayBuffer())).toEqual(test.bytes);
+  });
+
+  it("returns unauthorized with no second PUT when the live fence is revoked during backoff", async () => {
+    const test = await createArtifactPutRecoveryFixture();
+    let live = true;
+    test.validate.mockImplementation(async () => live);
+    test.put.mockRejectedValueOnce(new Error("put: Synthetic service failure (10001)"));
+    hostedExecutionMocks.emitHostedExecutionStructuredLog.mockImplementation((event) => {
+      if (event.message === "Hosted runner artifact write recovery backoff.") {
+        queueMicrotask(() => { live = false; });
+      }
+    });
+    const response = await handleRunnerOutboundRequest(test.request, test.env, "member_123");
+    expect(response.status).toBe(401);
+    expect(test.put).toHaveBeenCalledOnce();
+    expect(test.validate).toHaveBeenCalledTimes(2);
+    expect(await test.env.BUNDLES.get(test.put.mock.calls[0]![0])).toBeNull();
+  });
+
+  it.each(["before request", "during encryption", "after first PUT", "during backoff", "during revalidation"])(
+    "does not repeat an artifact PUT on cancellation %s", async (when) => {
+      const controller = new AbortController();
+      const test = await createArtifactPutRecoveryFixture({ signal: controller.signal });
+      const cancelled = new DOMException("Synthetic cancellation", "AbortError");
+      test.put.mockImplementationOnce(async () => {
+        if (when === "after first PUT") controller.abort(cancelled);
+        throw new Error("put: Synthetic service failure (10043)");
+      });
+      if (when === "before request") controller.abort(cancelled);
+      if (when === "during encryption") {
+        const encrypt = hostedCrypto.encryptHostedStorageEnvelope;
+        vi.spyOn(hostedCrypto, "encryptHostedStorageEnvelope").mockImplementationOnce(async (input) => {
+          const envelope = await encrypt(input);
+          controller.abort(cancelled);
+          return envelope;
+        });
+      }
+      if (when === "during backoff") {
+        hostedExecutionMocks.emitHostedExecutionStructuredLog.mockImplementation((event) => {
+          if (event.message === "Hosted runner artifact write recovery backoff.") {
+            queueMicrotask(() => controller.abort(cancelled));
+          }
+        });
+      }
+      if (when === "during revalidation") {
+        test.validate.mockResolvedValueOnce(true).mockImplementationOnce(async () => {
+          controller.abort(cancelled);
+          return true;
+        });
+      }
+      const addListener = vi.spyOn(test.request.signal, "addEventListener");
+      await expect(handleRunnerOutboundRequest(test.request, test.env, "member_123"))
+        .rejects.toBe(cancelled);
+      expect(test.put).toHaveBeenCalledTimes(["before request", "during encryption"].includes(when) ? 0 : 1);
+      expect(test.validate).toHaveBeenCalledTimes(when === "during revalidation" ? 2 : 1);
+      if (when === "during backoff") {
+        expect(addListener).toHaveBeenCalledWith("abort", expect.any(Function), { once: true });
+      }
+      expect(JSON.stringify(hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls))
+        .not.toContain('"recovered"');
+    },
+  );
+
+  it.each(["fence", "crypto", "body", "first PUT", "backoff", "revalidation"])(
+    "does not renew the recovery window after slow %s", async (stage) => {
+      const test = await createArtifactPutRecoveryFixture();
+      const first = new Error("put: Synthetic service failure (10001)");
+      const expire = () => test.clock.mockReturnValue(test.now + 1_000);
+      if (stage === "fence") test.validate.mockImplementationOnce(async () => { expire(); return true; });
+      if (stage === "crypto") {
+        const encrypt = hostedCrypto.encryptHostedStorageEnvelope;
+        vi.spyOn(hostedCrypto, "encryptHostedStorageEnvelope").mockImplementationOnce(async (input) => {
+          const envelope = await encrypt(input);
+          expire();
+          return envelope;
+        });
+      }
+      if (stage === "backoff") {
+        hostedExecutionMocks.emitHostedExecutionStructuredLog.mockImplementation((event) => {
+          if (event.message === "Hosted runner artifact write recovery backoff.") queueMicrotask(expire);
+        });
+      }
+      if (stage === "body") test.bodyRead.mockImplementationOnce(async () => { expire(); return toArrayBuffer(test.bytes); });
+      if (stage === "revalidation") {
+        test.validate.mockResolvedValueOnce(true).mockImplementationOnce(async () => { expire(); return true; });
+      }
+      test.put.mockImplementationOnce(async () => {
+        if (stage === "first PUT") expire();
+        throw first;
+      });
+      await expect(handleRunnerOutboundRequest(test.request, test.env, "member_123")).rejects.toBe(first);
+      expect(test.put).toHaveBeenCalledOnce();
+      expect(test.validate).toHaveBeenCalledTimes(stage === "revalidation" ? 2 : 1);
+      expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: "Hosted runner artifact request failed.",
+          details: expect.objectContaining({ artifactWriteAttempt: 1, artifactWriteDisposition: "budget_exhausted" }),
+        }),
+      );
+    },
+  );
+
+  it.each(["expired", "too short", "malformed", "non-finite"])(
+    "does not retry with an %s caller upload deadline", async (kind) => {
+      const test = await createArtifactPutRecoveryFixture();
+      const deadlines: Record<string, string> = {
+        expired: String(test.now - 1), "too short": String(test.now + 200),
+        malformed: "not-a-deadline", "non-finite": "Infinity",
+      };
+      test.request.headers.set(HOSTED_RUNTIME_ARTIFACT_UPLOAD_DEADLINE_HEADER, deadlines[kind]!);
+      const first = new Error("put: Synthetic service failure (10043)");
+      test.put.mockRejectedValueOnce(first);
+      await expect(handleRunnerOutboundRequest(test.request, test.env, "member_123")).rejects.toBe(first);
+      expect(test.put).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("does not extend the local recovery window for a distant caller deadline", async () => {
+    const test = await createArtifactPutRecoveryFixture();
+    test.request.headers.set(HOSTED_RUNTIME_ARTIFACT_UPLOAD_DEADLINE_HEADER, String(test.now + 60_000));
+    const first = new Error("put: Synthetic service failure (10001)");
+    test.put.mockImplementationOnce(async () => {
+      test.clock.mockReturnValue(test.now + 1_000);
+      throw first;
+    });
+    await expect(handleRunnerOutboundRequest(test.request, test.env, "member_123")).rejects.toBe(first);
+    expect(test.put).toHaveBeenCalledOnce();
+  });
+
+  it("does not PUT after a rejected initial fence", async () => {
+    const test = await createArtifactPutRecoveryFixture();
+    test.validate.mockResolvedValue(false);
+    expect((await handleRunnerOutboundRequest(test.request, test.env, "member_123")).status).toBe(401);
+    expect(test.put).not.toHaveBeenCalled();
+    expect(test.bodyRead).not.toHaveBeenCalled();
+    expect(test.cryptoFixture.fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not PUT or retry on artifact hash mismatch", async () => {
+    const test = await createArtifactPutRecoveryFixture();
+    const request = createArtifactPutRequest({ bytes: test.bytes, sha256: "a".repeat(64), workspaceVersion: "4" });
+    await expect(handleRunnerOutboundRequest(request, test.env, "member_123")).rejects.toThrow("hash mismatch");
+    expect(test.put).not.toHaveBeenCalled();
+    expect(test.validate).toHaveBeenCalledOnce();
+  });
+
+  it.each(["body", "encryption"])("does not classify a %s error as an R2 PUT failure", async (stage) => {
+    const test = await createArtifactPutRecoveryFixture();
+    const error = new Error(`put: Synthetic ${stage} failure (10001)`);
+    if (stage === "body") test.bodyRead.mockRejectedValueOnce(error);
+    else vi.spyOn(hostedCrypto, "encryptHostedStorageEnvelope").mockRejectedValueOnce(error);
+    await expect(handleRunnerOutboundRequest(test.request, test.env, "member_123")).rejects.toBe(error);
+    expect(test.put).not.toHaveBeenCalled();
+    expect(test.validate).toHaveBeenCalledOnce();
+    expect(JSON.stringify(hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls))
+      .not.toContain("artifactR2Code");
+  });
+
+  it("does not retry crypto-context acquisition when it fails", async () => {
+    const test = await createArtifactPutRecoveryFixture();
+    test.cryptoFixture.fetchMock.mockResolvedValueOnce(new Response(null, { status: 403 }));
+    await expect(handleRunnerOutboundRequest(test.request, test.env, "member_123")).rejects.toThrow();
+    expect(test.cryptoFixture.fetchMock).toHaveBeenCalledOnce();
+    expect(test.put).not.toHaveBeenCalled();
+    expect(test.bodyRead).not.toHaveBeenCalled();
+  });
+
+  it("reports only finite R2 recovery metadata, and only reports recovery after persistence", async () => {
+    const test = await createArtifactPutRecoveryFixture();
+    const key = await hostedArtifactObjectKey({ sha256: test.sha256, userId: "member_123" });
+    const privateCanary = "SYNTHETIC_PRIVATE_CANARY";
+    let finishPut!: () => void;
+    const secondPut = new Promise<void>((resolve) => { finishPut = resolve; });
+    test.put.mockRejectedValueOnce(new Error(`put: ${privateCanary} ${key} https://synthetic.example.test/ (10043)`))
+      .mockImplementationOnce(async (...args) => { await secondPut; await test.persist(...args); });
+    const pending = handleRunnerOutboundRequest(test.request, test.env, "member_123");
+    await vi.waitFor(() => expect(test.put).toHaveBeenCalledTimes(2));
+    expect(await test.env.BUNDLES.get(key)).toBeNull();
+    expect(JSON.stringify(hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls)).not.toContain('"recovered"');
+    finishPut();
+    expect((await pending).status).toBe(200);
+    expect(await test.env.BUNDLES.head?.(key)).toMatchObject({ key });
+    const events = hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls.map(([event]) => event);
+    const recovery = events.filter((event) => event.details?.artifactStorageStage === "r2_put");
+    expect(recovery.map((event) => ({
+      code: event.details.artifactR2Code, stage: event.details.artifactStorageStage,
+      attempt: event.details.artifactWriteAttempt, disposition: event.details.artifactWriteDisposition,
+    }))).toEqual([
+      { code: 10043, stage: "r2_put", attempt: 1, disposition: "backoff" },
+      { code: 10043, stage: "r2_put", attempt: 2, disposition: "recovered" },
+    ]);
+    for (const event of recovery) {
+      expect(Object.keys(event.details).length).toBeLessThanOrEqual(32);
+      expect(event.error).toBeUndefined();
+    }
+    const logs = JSON.stringify(events);
+    for (const forbidden of [privateCanary, key, test.sha256, "member_123", "https://synthetic.example.test/", String(test.put.mock.calls[0]![1])]) {
+      expect(logs).not.toContain(forbidden);
+    }
+    const read = await handleRunnerOutboundRequest(
+      new Request(test.request.url, { headers: test.request.headers }), test.env, "member_123",
+    );
+    expect(new Uint8Array(await read.arrayBuffer())).toEqual(test.bytes);
+  });
+
+  it.each([10001, 10043])("keeps recovery inside one container artifact upload (%i)", async (code) => {
+    const test = await createArtifactPutRecoveryFixture();
+    const fetchImpl = vi.fn<typeof fetch>(async (url, init) =>
+      handleRunnerOutboundRequest(new Request(url, init), test.env, "member_123"));
+    const store = createCloudflareArtifactStore({
+      fetchImpl, timeoutMs: 5_000,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({ attemptId: "attempt_1", leaseGeneration: "9", userId: "member_123", workspaceVersion: "4" }),
+      },
+    });
+    test.put.mockRejectedValueOnce(new Error(`put: Synthetic service failure (${code})`));
+    await Promise.all([store.put({ bytes: test.bytes, sha256: test.sha256 }), store.put({ bytes: test.bytes, sha256: test.sha256 })]);
+    await store.put({ bytes: test.bytes, sha256: test.sha256 });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(test.put).toHaveBeenCalledTimes(2);
+    expect(new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get(HOSTED_RUNTIME_ARTIFACT_UPLOAD_DEADLINE_HEADER))
+      .toBe(String(test.now + 5_000));
+    expect(fetchImpl.mock.calls[0]?.[1]?.signal?.aborted).toBe(false);
+  });
+
+  it("leaves exhausted uploads with the existing typed failure and no container retry", async () => {
+    const test = await createArtifactPutRecoveryFixture();
+    const fetchImpl = vi.fn<typeof fetch>(async (url, init) =>
+      handleRunnerOutboundRequest(new Request(url, init), test.env, "member_123"));
+    const store = createCloudflareArtifactStore({
+      fetchImpl, timeoutMs: 5_000,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({ attemptId: "attempt_1", leaseGeneration: "9", userId: "member_123", workspaceVersion: "4" }),
+      },
+    });
+    test.put.mockRejectedValue(new Error("put: Synthetic service failure (10001)"));
+    const error = await store.put({ bytes: test.bytes, sha256: test.sha256 }).catch((failure: unknown) => failure);
+    expect(error).toBeInstanceOf(HostedRuntimeArtifactWriteError);
+    expect(error).toMatchObject({ retryable: true });
+    expect(test.put).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
   it("authorizes artifact PUTs after live lease validation", async () => {
@@ -6660,6 +7157,11 @@ describe("handleRunnerOutboundRequest", () => {
 
   it("retains delayed cleanup when completion retry sees the new snapshot already current", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
+    const progressProjection: HostedSystemProgressProjection = {
+      nextDefaultProcessingWakeAt: "2026-05-02T00:05:00.000Z",
+      nextDefaultProcessingWakeReason: "assistant",
+      systemMailboxProgressGeneration: "7",
+    };
     const bytes = new Uint8Array([1, 2, 3, 4]);
     const snapshotId = "snapshot_complete_retry_replaced_cleanup";
     const objectKey = await hostedWorkspaceSnapshotObjectKey({
@@ -6717,6 +7219,7 @@ describe("handleRunnerOutboundRequest", () => {
             ...createHostedWorkspaceCheckpointResponseWithSnapshotRef(
               "5",
               checkpointRequest.snapshotRef,
+              progressProjection,
             ),
             checkpointConflictReason: "workspace_version",
             checkpointed: false,
@@ -6733,6 +7236,7 @@ describe("handleRunnerOutboundRequest", () => {
 
     const response = await handleRunnerOutboundRequest(
       createWorkspaceSnapshotCompleteRequest({
+        progressProjection,
         snapshotId,
         snapshotRef,
         workspaceVersion: "4",
@@ -6761,6 +7265,96 @@ describe("handleRunnerOutboundRequest", () => {
       replacedSnapshotRef,
       snapshotId,
     });
+  });
+
+  it("does not synthesize snapshot checkpoint success when system progress state differs", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    const snapshotId = "snapshot_complete_retry_progress_mismatch";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: bytes.byteLength,
+      encryptedObjectSha256: sha256Hex(bytes),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    const requestedProgressProjection: HostedSystemProgressProjection = {
+      nextDefaultProcessingWakeAt: null,
+      nextDefaultProcessingWakeReason: null,
+      systemMailboxProgressGeneration: "7",
+    };
+    runner.workspaceSnapshotUploadSessions.set(
+      snapshotId,
+      createWorkspaceSnapshotUploadSession(snapshotRef),
+    );
+    const deleteObject = vi.fn(async () => {});
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: bytes.byteLength }),
+        async (key) => ({
+          checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
+          customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
+          key,
+          size: bytes.byteLength,
+        }),
+        deleteObject,
+      ),
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    vi.stubGlobal("fetch", createWorkspaceSnapshotCompleteWebFetchMock({
+      onCheckpoint: (args) => {
+        const checkpointRequest = readTestFetchBodyObject(
+          args,
+          "workspace snapshot progress-mismatch checkpoint request",
+        );
+        return new Response(
+          JSON.stringify({
+            ...createHostedWorkspaceCheckpointResponseWithSnapshotRef(
+              "5",
+              checkpointRequest.snapshotRef,
+              {
+                ...requestedProgressProjection,
+                systemMailboxProgressGeneration: "8",
+              },
+            ),
+            checkpointConflictReason: "workspace_version",
+            checkpointed: false,
+          }),
+          {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          },
+        );
+      },
+    }));
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotCompleteRequest({
+        progressProjection: requestedProgressProjection,
+        snapshotId,
+        snapshotRef,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted workspace snapshot checkpoint state mismatch.",
+    });
+    expect(deleteObject).not.toHaveBeenCalled();
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(true);
   });
 
   it("replays completion against the exact snapshot ref committed before response loss", async () => {
@@ -8096,6 +8690,11 @@ describe("handleRunnerOutboundRequest", () => {
 
   it("deletes replaced state without deleting the current snapshot", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
+    const progressProjection: HostedSystemProgressProjection = {
+      nextDefaultProcessingWakeAt: "2026-05-02T00:05:00.000Z",
+      nextDefaultProcessingWakeReason: "assistant",
+      systemMailboxProgressGeneration: "7",
+    };
     const snapshotId = "snapshot_complete_expired_current_retry";
     const objectKey = await hostedWorkspaceSnapshotObjectKey({
       snapshotId,
@@ -8145,6 +8744,7 @@ describe("handleRunnerOutboundRequest", () => {
     });
     const fetchMock = createWorkspaceSnapshotCompleteWebFetchMock({
       currentSnapshotRef: snapshotRef,
+      currentSystemProgressProjection: progressProjection,
       currentWorkspaceVersion: "5",
       onCheckpoint: () => {
         throw new Error("expired current retry should not checkpoint again");
@@ -8154,6 +8754,7 @@ describe("handleRunnerOutboundRequest", () => {
 
     const response = await handleRunnerOutboundRequest(
       createWorkspaceSnapshotCompleteRequest({
+        progressProjection,
         snapshotId,
         snapshotRef,
         workspaceVersion: "4",
@@ -8187,6 +8788,82 @@ describe("handleRunnerOutboundRequest", () => {
       userId: "member_123",
     });
     expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(false);
+  });
+
+  it("keeps an expired current snapshot session when system progress state differs", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const snapshotId = "snapshot_complete_expired_progress_mismatch";
+    const objectKey = await hostedWorkspaceSnapshotObjectKey({
+      snapshotId,
+      userId: "member_123",
+    });
+    const snapshotRef = createWorkspaceSnapshotV2Ref({
+      encryptedByteSize: 4,
+      encryptedObjectSha256: "a".repeat(64),
+      objectKey,
+      snapshotId,
+      userId: "member_123",
+    });
+    const requestedProgressProjection: HostedSystemProgressProjection = {
+      nextDefaultProcessingWakeAt: null,
+      nextDefaultProcessingWakeReason: null,
+      systemMailboxProgressGeneration: "7",
+    };
+    runner.workspaceSnapshotUploadSessions.set(
+      snapshotId,
+      createWorkspaceSnapshotUploadSession(snapshotRef, {
+        expiresAt: "2000-01-01T00:00:00.000Z",
+      }),
+    );
+    const deleteObject = vi.fn(async () => {});
+    const env = createRunnerOutboundEnv({
+      BUNDLES: createWorkspaceSnapshotBucket(
+        async (key) => ({ key, size: 4 }),
+        async (key) => ({
+          checksums: createWorkspaceSnapshotHeadChecksums(snapshotRef),
+          customMetadata: createWorkspaceSnapshotHeadMetadata(snapshotRef),
+          key,
+          size: 4,
+        }),
+        deleteObject,
+      ),
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const fetchMock = createWorkspaceSnapshotCompleteWebFetchMock({
+      currentSnapshotRef: snapshotRef,
+      currentSystemProgressProjection: {
+        ...requestedProgressProjection,
+        systemMailboxProgressGeneration: "8",
+      },
+      currentWorkspaceVersion: "5",
+      onCheckpoint: () => {
+        throw new Error("expired current retry should not checkpoint again");
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotCompleteRequest({
+        progressProjection: requestedProgressProjection,
+        snapshotId,
+        snapshotRef,
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted workspace snapshot checkpoint state mismatch.",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(deleteObject).not.toHaveBeenCalled();
+    expect(runner.recordHostedWorkspaceSnapshotOrphanCandidate).not.toHaveBeenCalled();
+    expect(runner.deleteHostedWorkspaceSnapshotUploadSession).not.toHaveBeenCalled();
+    expect(runner.workspaceSnapshotUploadSessions.has(snapshotId)).toBe(true);
   });
 
   it("rejects an expired retry before session or web access when the active fence moved", async () => {
@@ -9821,20 +10498,37 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
     const delayedPutStarted = new Promise<void>((resolve) => {
       markDelayedPutStarted = resolve;
     });
+    let releaseChildPut = (): void => {};
+    const childPutGate = new Promise<void>((resolve) => {
+      releaseChildPut = resolve;
+    });
+    let activeChildPuts = 0;
+    let settledChildPuts = 0;
+    let rootActiveChildPuts: number | undefined;
     let delayedPutCompleted = false;
     const bucket = {
       ...defaultEnv.BUNDLES,
       async put(key: string, value: R2PutValueLike) {
         putKeys.push(key);
-        if (key.endsWith(".metric-bucket-00.json")) {
-          throw new Error("synthetic metric bucket write failure");
-        }
-        if (key.endsWith(".labs.json")) {
+        if (key === runner.recordHostedBrowserVaultReplicaOrphanCandidate.mock.calls[0]?.[0]?.objectKey) {
+          rootActiveChildPuts = activeChildPuts;
           markDelayedPutStarted();
           await delayedPutGate;
+          await defaultEnv.BUNDLES.put(key, value);
           delayedPutCompleted = true;
+          return;
         }
-        await defaultEnv.BUNDLES.put(key, value);
+        activeChildPuts += 1;
+        try {
+          if (key.endsWith(".labs.json")) await childPutGate;
+          if (key.endsWith(".core.json")) {
+            throw new Error("synthetic core write failure");
+          }
+          await defaultEnv.BUNDLES.put(key, value);
+        } finally {
+          activeChildPuts -= 1;
+          settledChildPuts += 1;
+        }
       },
     };
     const env = createRunnerOutboundEnv({
@@ -9853,13 +10547,26 @@ it("returns foreground-pending checkpoint responses from snapshot completion wit
       "member_123",
     );
 
-    await delayedPutStarted;
-    expect(putKeys.some((key) => key.endsWith(".labs.json"))).toBe(true);
-    expect(runner.admitHostedBrowserVaultReplicaDirectPut).toHaveBeenCalledOnce();
-    expect(runner.releaseHostedBrowserVaultReplicaDirectPut).not.toHaveBeenCalled();
-
-    releaseDelayedPut();
-    await expect(writePromise).rejects.toThrow("synthetic metric bucket write failure");
+    try {
+      await vi.waitFor(() => expect(settledChildPuts).toBe(34), { timeout: 5_000 });
+      expect(activeChildPuts).toBe(1);
+      expect(rootActiveChildPuts).toBeUndefined();
+      expect(putKeys).toHaveLength(35);
+      expect(runner.admitHostedBrowserVaultReplicaDirectPut).toHaveBeenCalledOnce();
+      expect(runner.releaseHostedBrowserVaultReplicaDirectPut).not.toHaveBeenCalled();
+      releaseChildPut();
+      await Promise.race([delayedPutStarted, writePromise]);
+      expect(rootActiveChildPuts).toBe(0);
+      expect(settledChildPuts).toBe(35);
+      expect(putKeys).toHaveLength(36);
+      expect(runner.admitHostedBrowserVaultReplicaDirectPut).toHaveBeenCalledOnce();
+      expect(runner.releaseHostedBrowserVaultReplicaDirectPut).not.toHaveBeenCalled();
+    } finally {
+      releaseChildPut();
+      releaseDelayedPut();
+      await writePromise.catch(() => {});
+    }
+    await expect(writePromise).rejects.toThrow("synthetic core write failure");
 
     const plannedReplicaCandidate = runner.recordHostedBrowserVaultReplicaOrphanCandidate.mock
       .calls[0]?.[0];
@@ -10638,9 +11345,30 @@ async function createMailboxPayloadDecodeBody(input: {
   };
 }
 
+async function createArtifactPutRecoveryFixture(options: { signal?: AbortSignal } = {}) {
+  const cryptoFixture = await createHostedRuntimeCryptoContextFixture();
+  const validate = vi.fn(async (_input: { attemptId: string; generation: string; userId: string }) => true);
+  const env = createRunnerOutboundEnv({
+    ...cryptoFixture.env,
+    USER_RUNNER: { getByName: () => ({ validateRuntimeWriteFence: validate }) },
+  });
+  vi.stubGlobal("fetch", cryptoFixture.fetchMock);
+  // Advance this clock explicitly for budget tests, independently of CI load.
+  const now = Date.now();
+  const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+  const bytes = new Uint8Array([3, 1, 4]);
+  const sha256 = sha256Hex(bytes);
+  const request = createArtifactPutRequest({ bytes, sha256, workspaceVersion: "4", signal: options.signal });
+  const bodyRead = vi.spyOn(request, "arrayBuffer");
+  const persist = env.BUNDLES.put.bind(env.BUNDLES);
+  const put = vi.spyOn(env.BUNDLES, "put");
+  return { bodyRead, bytes, clock, cryptoFixture, env, now, persist, put, request, sha256, validate };
+}
+
 function createArtifactPutRequest(input: {
   bytes: Uint8Array;
   sha256: string;
+  signal?: AbortSignal;
   workspaceVersion: string | null;
 }): Request {
   return new Request(`http://artifacts.worker/objects/${input.sha256}`, {
@@ -10653,6 +11381,7 @@ function createArtifactPutRequest(input: {
         : { "x-hosted-runtime-workspace-version": input.workspaceVersion }),
     }),
     method: "PUT",
+    signal: input.signal,
   });
 }
 
@@ -10679,6 +11408,7 @@ function createWorkspaceSnapshotStartRequest(input: {
 }
 
 function createWorkspaceSnapshotCompleteRequest(input: {
+  progressProjection?: HostedSystemProgressProjection;
   snapshotId: string;
   snapshotRef: HostedWorkspaceSnapshotV2Ref;
   workspaceVersion: string;
@@ -10693,6 +11423,7 @@ function createWorkspaceSnapshotCompleteRequest(input: {
           attemptId: "attempt_1",
           expectedWorkspaceVersion: input.workspaceVersion,
           leaseGeneration: "9",
+          ...input.progressProjection,
           nextWakeAt: null,
           nextWakeReason: null,
           reason: input.reason ?? "idle_shutdown",
@@ -11661,12 +12392,14 @@ function createHostedWorkspaceCheckpointResponse(
 function createHostedWorkspaceCheckpointResponseWithSnapshotRef(
   version: string,
   snapshotRef: unknown,
+  progressProjection?: HostedSystemProgressProjection,
 ) {
   const response = createHostedWorkspaceCheckpointResponse(version, null);
   return {
     ...response,
     workspace: {
       ...response.workspace,
+      ...progressProjection,
       snapshotRef,
     },
   };
@@ -11675,6 +12408,7 @@ function createHostedWorkspaceCheckpointResponseWithSnapshotRef(
 function createHostedWorkspaceReadResponse(
   snapshotRef: NonNullable<HostedWorkspaceReadResponse["workspace"]>["snapshotRef"] = null,
   version = "4",
+  progressProjection?: HostedSystemProgressProjection,
 ): HostedWorkspaceReadResponse {
   return {
     fetchedAt: "2026-04-26T00:00:05.000Z",
@@ -11682,6 +12416,7 @@ function createHostedWorkspaceReadResponse(
       checkpointedAt: "2026-04-26T00:00:05.000Z",
       createdAt: "2026-04-26T00:00:00.000Z",
       inboxMediaRetentionWakeAt: null,
+      ...progressProjection,
       nextWakeAt: null,
       nextWakeReason: null,
       redactedStatus: null,
@@ -11696,8 +12431,13 @@ function createHostedWorkspaceReadResponse(
 function createHostedWorkspaceReadFetchResponse(
   snapshotRef: NonNullable<HostedWorkspaceReadResponse["workspace"]>["snapshotRef"] = null,
   version = "4",
+  progressProjection?: HostedSystemProgressProjection,
 ): Response {
-  return new Response(JSON.stringify(createHostedWorkspaceReadResponse(snapshotRef, version)), {
+  return new Response(JSON.stringify(createHostedWorkspaceReadResponse(
+    snapshotRef,
+    version,
+    progressProjection,
+  )), {
     headers: {
       "content-type": "application/json; charset=utf-8",
     },
@@ -11714,6 +12454,7 @@ function isHostedWorkspaceReadFetch(args: Parameters<typeof fetch>): boolean {
 
 function createWorkspaceSnapshotCompleteWebFetchMock(input: {
   currentSnapshotRef?: NonNullable<HostedWorkspaceReadResponse["workspace"]>["snapshotRef"];
+  currentSystemProgressProjection?: HostedSystemProgressProjection;
   currentWorkspaceVersion?: string;
   onWorkspaceRead?(): Promise<void> | void;
   onCheckpoint(args: Parameters<typeof fetch>): Promise<Response> | Response;
@@ -11724,6 +12465,7 @@ function createWorkspaceSnapshotCompleteWebFetchMock(input: {
       return createHostedWorkspaceReadFetchResponse(
         input.currentSnapshotRef ?? null,
         input.currentWorkspaceVersion ?? "4",
+        input.currentSystemProgressProjection,
       );
     }
     return await input.onCheckpoint(args);

@@ -31,12 +31,13 @@
   "dependencies": {
     "@murphai/assistant-engine": "workspace:*",
     "@murphai/assistantd": "workspace:*",
+    "@murphai/contracts": "workspace:*",
     "@murphai/hosted-execution": "workspace:*",
     "@murphai/inbox-services": "workspace:*",
     "@murphai/operator-config": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
     "@murphai/vault-usecases": "workspace:*",
-    "incur": "0.4.5",
+    "incur": "0.5.1",
     "ink": "^6.8.0",
     "react": "^19.2.6"
   },

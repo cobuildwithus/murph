@@ -1,8 +1,20 @@
 # Security
 
-Last verified: 2026-08-26
+Last verified: 2026-08-31
 
 ## Non-Negotiable Rules
+
+- Terminal Linq retry authority comes only from an existing runtime-owned
+  failed delivery, current exact chat/sender routing, consent-aware runtime
+  access, and current line/chat egress policy. The existing runtime access owner
+  must allow recovery both before content retrieval and at attempt claiming;
+  explicit health-data consent withdrawal denies it at either checkpoint.
+  Provider retrieval must match the original
+  message, chat, outbound direction, failed status, iMessage service, and
+  sender. Never use provider content to select a recipient or line. The retry
+  stores only its timestamp and blinded original-message correlation on
+  the existing delivery-message row. Retrieved bodies and attachment URLs stay
+  request-local and never enter logs, mailbox input, or another content store.
 
 - Treat `.env` and `.env.*` files as secret inputs. Murph's CLI may load local `.env.local` and `.env` files at runtime for operator credentials, but agents and runtime logs must never print, fixture, package, or commit their contents.
 - Do not share raw filesystem archives of a repo clone for review or support. Ignored local `.env` files and build output such as `.next/` can leak through a clone/archive even when git has no tracked secret diff; use the guarded `scripts/package-audit-context.sh` / `pnpm zip:src` path instead, because it stages git-visible files and filters blocked local residue from the bundle.
@@ -10,6 +22,13 @@ Last verified: 2026-08-26
 - The release artifact guard permits one generated public data store: `package/node_modules/@murphai/health-commons/generated/knowledge.sqlite`. This exact bundled path contains public authored Health Commons knowledge and no user data. Every other `.sqlite`, `.db`, backup, or dump path remains blocked.
 - Keep sensitive identifiers out of committed fixtures, examples, screenshots, uploaded artifacts, and user/provider-facing output. Do not let identifier redaction block local root-cause debugging.
 - Treat auth, wallet, payment, and health-related data flows as security-sensitive until documented otherwise.
+- `conversationWorkPending: true` on an authenticated ensure-processing request
+  is a transient allocation fact, not consent or execution authority. Temporal
+  derives it only from Web-admitted conversation lag. The body-bound callback
+  signature or existing Web OIDC and target-user binding remain mandatory;
+  default mode, live consent, pending-target reconciliation, immutable standby
+  binding, and runtime write fences still apply. Background processing modes
+  cannot carry the fact.
 - Hosted health-data withdrawal is authorized only by the durable
   `launch.health-data = revoked` grant. A missing legacy grant is not
   withdrawal. Write revocation before cleanup, and recheck it independently at
@@ -18,28 +37,14 @@ Last verified: 2026-08-26
   for the per-user Cloudflare execution barrier to serialize behind earlier
   ensures, re-read the Web-owned grant, clear its write fence, and stop the
   runner. Every later ensure re-reads the grant; renewal waits behind the stop
-  before granting. An instant-start or authenticated established-direct-chat
-  typing shell-prewarm hint uses that same per-user barrier and live admission
-  read. The typing producer resolves only the private home-chat blind index and
-  performs an advisory active-access/root check after acknowledging the webhook;
-  it receives no member id from Linq and grants no runtime authority. The shared
-  HTTP route obtains the named runner stub without binding durable state.
-  Because this hint is optional, it is admitted only when the barrier is idle;
-  repeated hints and hints arriving during authoritative ensure, withdrawal, or
-  deletion return without joining the FIFO. The
-  optional read abandons after a fixed 250 ms
-  deadline so it cannot hold authoritative processing, withdrawal, or deletion
-  behind the ordinary Web-control timeout; only allowed admission reserves and
-  binds its exact versioned container in the existing user-control stop-target
-  field, then waits for the container to register the hint before releasing the
-  barrier. Withdrawal and account deletion consume that exact target, while
-  container destruction supersedes a pending platform wait before stopping it.
-  Web admission also requires an
-  extant, non-suspended member, so a hint queued behind account deletion cannot
-  treat the deleted consent row as a compatible legacy grant and recreate
-  runner state. Cleanup failure must never restore authority. Keep Settings,
-  export, and deletion available without waking the paused runtime; only
-  renewed consent may restore processing.
+  before granting. Current Web producers no longer send member-specific shell
+  prewarm hints. The authenticated compatibility receiver accepts older callers
+  under its existing bounded admission barrier but creates no container or
+  member binding. Pristine global inventory is content-free and memberless;
+  only normal admitted execution binds it to a member. Web admission requires
+  an extant, non-suspended member, and cleanup failure never restores authority.
+  Keep Settings, export, and deletion available without waking the paused
+  runtime; only renewed consent may restore processing.
 - Treat suspected breaches, unauthorized access, unauthorized disclosures, vendor incidents, and accidental tracking disclosures involving identifiable health data as FTC HBNR triage events; use `agent-docs/compliance/ftc-hbnr-incident-plan.md` before deciding that notice is not required.
 - Do not add third-party advertising pixels, retargeting SDKs, behavioral ad attribution, customer-list matching, tag-manager destinations, or analytics destinations that receive health data or health-context metadata; use `agent-docs/compliance/health-data-tracking-and-ads-rule.md` for any telemetry or marketing-tool review.
 - Hosted Web must keep the global `Referrer-Policy` at `strict-origin` or
@@ -47,6 +52,14 @@ Last verified: 2026-08-26
   document pathname, query, or fragment. Murph Safe retains its route-specific
   `no-referrer` override. Event-payload redaction is defense in depth and must
   not substitute for this transport-level boundary.
+- The public `/food` page may search for a brand logo through Brandfetch when
+  the optional client identifier exists. Send only the bounded brand name plus
+  a broad food category to the fixed `api.brandfetch.io/v2/search/` endpoint.
+  Send no user search term, UPC, nutrition, test, account, or health data. Use
+  omitted credentials, `no-referrer`, fixed CSP API and image origins, strict
+  matching of the returned brand name, and a fixed Brandfetch CDN hostname.
+  Keep no server proxy, durable result cache, or logo copy. Deduplicate results
+  only in page memory and fall back to local category art.
 - Do not echo model API keys, base headers, or other provider credentials in CLI output, fixtures, or persisted artifacts.
 - For hosted Junction webhook recovery, an active provider result means every
   matching exact-source row returned by the live provider-list call has the
@@ -341,55 +354,84 @@ Last verified: 2026-08-26
   group turn with accepted user-action input and the Worker-held credential;
   unverified external groups omit the tool. Any participant in an authenticated
   group may explicitly request analysis of a video sent by any participant in
-  that same accepted group turn. The tool selects only the exact accepted video
-  message; current route authority, accepted-input membership, and frozen
-  attachment evidence bind it to the active group. It does not compare the
-  requester with the uploader. The schema may be
-  present before that input has video authority because provider tools freeze
-  at turn start and the first video may arrive through live steering. Group
-  participation does not authorize videos outside the current accepted group
-  turn. The tool may select only an accepted-message video whose path, size,
-  digest, MIME, message
-  ref, and ordinal were snapshotted in turn-owned memory before Codex could act
-  on that input. Freeze initial inputs before provider start and active-steered
-  inputs in the accepted-input validator before forwarding the steer; never
-  refresh an existing attachment key from model-writable files, and intersect
-  snapshots with the current accepted-input scope. Open the resolved file
-  without following the final symlink, read only the exact snapshotted size,
-  probe EOF, verify its SHA-256 digest and supported container signature, and
-  fail closed on unavailable materialization or drift. Ordinary hosted inbox
-  videos are warm-container-only material: derive their normalized paths from
-  validated canonical capture records, fail snapshot construction closed if
-  those records cannot be classified safely, and exclude the paths from every
-  new encrypted workspace snapshot even while pending input still protects the
-  local file. Once unprotected, use the existing atomic inbox-retention write
-  with a zero-length video window. Retention failure may remain nonblocking for
-  replies only because snapshot exclusion is the independent persistence
-  boundary. An explicit canonical event raw reference is the sole durable-save
-  exception and keeps its separately authorized lifecycle. The tool
-  pins Gemini 3.7 Flash, 1 FPS, low thinking, one call, no retry, a 14 MiB raw
-  cap, a 90-second timeout, and a bounded response. The Worker must revalidate
-  the exact request and use manual redirects before replacing the runner
-  sentinel with `GEMINI_API_KEY`. A protocol-valid successful response must be
-  withheld until Web durably accepts its exact usage record; callback rejection
-  fails the tool closed. An upstream response above the 1 MiB delivery cap is a
+  that same group conversation, including earlier turns while their input
+  evidence remains available. Before provider execution, the turn owner freezes
+  historical attachment evidence only when source, account, thread, audience,
+  and optional session match current accepted input. Direct conversations also
+  match the participant; group conversations do not compare uploader and
+  requester. Missing conversation identity and future messages grant no historical
+  authority. Retired text grants no authority; unexpired attachment identity may
+  remain available after the separate 14-day text-retirement deadline. Live steering freezes new accepted
+  input before forwarding it. Never refresh existing frozen attachment keys
+  from model-writable files. Historical image/video references grant only bounded attachment discovery and
+  selected media access, never current-input authority for other tools or delivery.
+  The tool remains unavailable without a current accepted user action or for
+  unverified external groups. Open the resolved file without following the final
+  symlink, read its exact frozen size, probe EOF, verify SHA-256 and supported
+  container signature, and fail closed on missing bytes or drift.
+  Ordinary hosted inbox videos use a 30-day media-byte retention window while
+  inbox images use 90 days and audio keeps 14 days. Encrypted workspace snapshots
+  and hosted canonical write receipts externalize image/video bytes through
+  owner-scoped hosted media references before excluding them from the portable
+  archive and receipt payload artifacts. A sparse raw receipt must carry its
+  external media identity; receipt replay restores metadata before selected use.
+  Durable captures do not inherit inbox TTLs. The existing runner SQL owner
+  claims irreversible retirement before network deletion, rejects preservation
+  of retired identities, and keeps retry evidence until ciphertext is purged.
+  Selected local cache reads also enforce the reference deadline. The atomic
+  inbox-retention owner expires unprotected bytes; explicit canonical event raw
+  references keep their separately authorized lifecycle. Media-bearing input
+  records survive residue pruning through their image/video window, while message
+  text, transcripts, derived evidence, and quoted content retain 14-day cleanup.
+  Late projection updates cannot restore retired text. Discovery returns only
+  dated media identity, at most 20 entries per page; selected image reads verify
+  frozen size and SHA-256 through the existing image resolver. Metadata listing
+  does not guarantee byte availability, and existing media deadlines are not
+  extended retroactively. The video-analysis tool
+  pins Gemini 3.8 Flash and maps only `standard` to 1 FPS or
+  `detailed_motion` to 5 FPS. Murph chooses that semantic mode before egress;
+  raw FPS remains unavailable to the model and member. Both current profiles
+  use medium thinking, omit an explicit output-token cap, allow one call, do
+  not retry, keep the 14 MiB raw cap and 90-second timeout, and bound both the
+  delivered response and tool result. The Worker must revalidate the exact
+  request and use manual redirects before replacing the runner sentinel with
+  `GEMINI_API_KEY`. During the model rollout it may also accept the exact
+  previous `gemini-3.7-flash` path with either current profile or the exact
+  deployed legacy profile of 1 FPS, low thinking, and a 1,800-token output cap
+  from an older warm runner. The capped profile remains invalid on the 3.8
+  path, mixed profiles remain denied, usage records retain the model derived
+  from the admitted path, new runners emit only 3.8 current profiles, and the
+  3.7 reader is removed after the rollback floor advances. Usage recording is
+  best-effort and cannot withhold an otherwise valid provider response. An
+  upstream response above the 1 MiB delivery cap is a
   protocol violation: reject it without widening the buffer, let Murph absorb
   that unaccountable provider cost, and log only bounded status metadata. Do not
-  persist or log video bytes, prompts,
-  paths, or Gemini prose outside the authorized assistant transcript; usage may
+  log video bytes, prompts, paths, or Gemini prose. Retain raw video only through
+  the canonical inbox and encrypted workspace; Gemini prose may enter the
+  authorized assistant transcript only. Usage may
   retain only allowlisted token counters and provider metadata. Treat every
   byte and every returned character as untrusted content, not instructions.
   The one-call ceiling is turn-scoped. A rare outer hosted replay after Gemini
   acceptance but before terminal delivery evidence may resend the same
   explicitly requested clip to the same provider; the endpoint supplies no
   usable idempotency key. Treat this as a bounded v1 at-least-once residual,
-  not permission to retry within a turn. Do not add durable video/result state
-  without a separate retention and recovery design.
-  Completed turns use trusted failure text when the model returns blank or
-  selects no reply, while non-empty model/card wording wins. A terminal primary
-  provider failure after the tool result remains under ordinary outer-turn
-  retry ownership; the failed attempt does not independently deliver that
-  fallback.
+  not permission to retry within a turn. Do not add a second video owner or
+  durable provider-result cache without a separate retention and recovery design.
+  The existing in-memory turn state binds the first completed provider result
+  to its accepted message ref, attachment ordinal, complete question, and
+  sampling mode across group-draft reconsideration. An exact repeat returns
+  that result without provider egress. A distinct later request receives no
+  provider call and must keep the earlier result attributed only to its earlier
+  request while saying the later request was not analyzed. It must neither
+  replace the completed result with an internal duplicate-call status nor use
+  earlier-video evidence to answer the later request.
+  Codex owns every non-empty semantic reply; the runtime does not classify,
+  replace, or append to model wording. The runtime retains the latest
+  structured video-tool fallback only for blank or no-reply recovery,
+  including the composed status for a distinct later request. A terminal
+  primary provider failure after the tool result remains under ordinary
+  outer-turn retry ownership; the failed attempt does not independently
+  deliver that fallback.
 - Direct-plan upgrades use Stripe Customer Portal's `subscription_update_confirm`
   flow for the authenticated member's exact current Customer, Subscription,
   Subscription Item, and server-selected target Price. The browser chooses no
@@ -428,8 +470,10 @@ Last verified: 2026-08-26
   after Stripe returns and before decrypting a Checkout URL or projecting retry
   permission, so membership removal during provider I/O degrades to
   status/cancel-only recovery; fulfillment remains bound to the frozen purchase.
-  Family admission first binds the
-  opaque selector to the owner's roster before locking the beneficiary. A
+  Family admission locks the owner before a distinct beneficiary, matching
+  Family subscription reconciliation. It binds the opaque selector to that
+  owner's roster before taking the beneficiary lock. Hosted-group sponsorship
+  remains on its separate beneficiary-first ledger protocol. A
   payer-wide conflict with another frozen target may be inspected or canceled
   but must never return a payable URL or retry permission, regardless of the
   requested or frozen target kind. Active-purchase projection releases a
@@ -645,11 +689,44 @@ Last verified: 2026-08-26
   verifier is its postdeploy rollback floor: a pre-floor retry must fail before
   database authority is exposed, and recovery must roll forward rather than use
   an older workflow that lacks the complete-domain proof.
+- The Linq production-canary reset is an internal fixed-target mutation, not a
+  general test-account API. Vercel alone configures the one normalized Photon
+  sender and a dedicated reset bearer; the request accepts no path, query, or
+  body selector. Authentication uses constant-time comparison before input
+  inspection. The admission owner takes its existing version-independent
+  contact lock, derives event ids only from that contact's key-rotation-aware
+  budget rows, and asks the delivery-ledger owner to remove only compare-and-
+  delete-proven `attempted` instant-first-turn claims with no provider,
+  receipt, child-message, or encrypted-payload evidence. Completed rows remain
+  evidence; provider-dispatch or ambiguous rows fail the transaction closed.
+  The canonical account-deletion owner then removes the canary member. The
+  response contains booleans and counts only, and no production log or CI
+  artifact may contain either phone number, credentials, message text, chat or
+  message ids, or provider responses.
 - Privy completion with an ambient Murph app session is same-member reauthentication, not account switching. The fresh Privy user id and resolved member id must both match that app session before web issues a replacement session; a member who intends to switch accounts must end the current app session first.
-- Every interactive authentication completion that may mutate Privy-derived identity, sender, routing, or messaging state must perform a bounded live-provider read for the exact principal, including new-member creation, changed-principal recovery, exact-principal consent retry, and lost-response retry. A changed principal may replace an existing member binding only when that live principal still owns a verified email resolving uniquely to the same member's durable verified-email authorization. The same live identity snapshot must supply every later identity, verified-email, sender-authority, routing, and messaging-state mutation in that completion; a bearer-token snapshot is candidate-lookup input, not replacement or downstream write authority. Every non-best-effort live binding, including secondary Telegram ownership, must be checked and written in the same transaction as the principal replacement so a split credential rolls the entire completion back. An exact already-bound principal remains the member candidate during an interactive retry; a different bearer or live phone cannot redirect or reject that retry. Interactive completion preserves a non-null stored phone whenever the live phone differs, and only the settings phone-link/transfer owner may replace it. Same-phone verification may refresh, and an absent phone may be filled only when the verified bearer and live projection agree and no other member owns that phone; optional enrichment never vetoes an exact-principal retry. Missing, stale, or mismatched provider state, phone-only changed-principal matches, credentials split across members on unbound or changed-principal attempts, and non-interactive callers such as App Review operations must continue to fail closed.
+- Provider-observed Linq email identity retains its encrypted normalized source
+  separately from verified-email authorization. Every canonical verified-email
+  write checks the handle owner under the normalized email contact lock before
+  the member lock. Primary conflicts fail before mutation; optional secondary
+  email enrichment preserves phone/Telegram authentication while skipping the
+  conflicting email. New-member email resolution checks the live handle before
+  creation. Email unlink takes the same lock and atomically clears only its
+  expected handle, encrypted source, authorization, and matching routes; a
+  replacement handle is preserved. A durable handle alone is private direct
+  routing authority; group admission continues to require verified email or an
+  exact recovered route. Recovery takes the same contact lock before chat and
+  member locks, rejects a foreign handle through the identity owner, and writes
+  its durable encrypted identity together with temporary routing. It never
+  creates verified-email authorization. Direct inbound resolution does not
+  replace a retained handle with a separately verified email; each resolves
+  through its existing authority, with cross-member disagreement rejected.
+  Same-member ciphertext continuity and the
+  Web writer rollback floor are owned by `docs/hosted-contact-privacy-rotation.md`.
+- Every interactive authentication completion that may mutate Privy-derived identity, sender, routing, or messaging state must perform a bounded live-provider read for the exact principal, including new-member creation, changed-principal recovery, exact-principal consent retry, and lost-response retry. A changed principal may replace an existing member binding only when that live principal still owns a verified email resolving uniquely to the same member's durable verified-email authorization. The same live identity snapshot must supply every later identity, verified-email, sender-authority, routing, and messaging-state mutation in that completion; a bearer-token snapshot is candidate-lookup input, not replacement or downstream write authority. Every non-best-effort live binding, including secondary Telegram ownership, must be checked and written in the same transaction as the principal replacement so a split credential rolls the entire completion back. An exact already-bound principal remains the member candidate during an interactive retry; a different bearer or live phone cannot redirect or reject that retry. Interactive completion preserves a non-null stored phone whenever the live phone differs, and only the settings phone-link/transfer owner may replace it. Same-phone verification may refresh, and an absent phone may be filled only when the verified bearer and live projection agree and no other member owns that phone; optional enrichment never vetoes an exact-principal retry. Missing, stale, or mismatched provider state, phone-only changed-principal matches, credentials split across members on unbound or changed-principal attempts, and non-interactive callers such as App Review operations must continue to fail closed. A non-interactive split-phase caller that prepares this live identity before database checkout must bind it to the exact nullable preflight member owner: the existing transactional resolver rejects any member-existence drift, and a preflight new-member path consults the existing pending-deletion owner before provider or KMS preparation.
 - Settings account linking must use Privy's link or update operation for the exact app-session Privy principal; login operations must not stand in for linking. Settings mounts one page-level Privy provider and opens the provider flow directly from the user action. Normal provider success syncs only the exact returned phone. Privy's `account_transfer_required` callback is a non-terminal handoff into its transfer UI, so a later provider-flow exit is only a wake-up: web management-reads the same Privy user and persists only a proven change from the phone observed immediately before the provider flow. An unchanged phone is a quiet cancellation, an absent intermediate replacement remains retryable, and an ambiguous Murph save retries the same expectation without reopening Privy. On remount, a phone present on the exact Privy principal but absent or different in the Murph projection is reconciled as that exact-phone expectation instead of reopening Privy. When Privy transfers a phone from another Privy principal, automatic reconciliation additionally requires a typed provider not-found for that exact source principal and two exact, transactionally locked proofs that the source Murph member is either the pristine `not_started` signup scaffold or the untouched legacy automatic Pulse-trial scaffold. A member with a starter grant is active product state and is never disposable through this transfer path. The allowlist includes only the known system-created billing, routing, workspace, mailbox, counter, crypto, consent, unused web-invite, and same-Privy web-session shapes; any member activity, product state, device state, connected-app or clinical state, credits, referrals, shares, feedback, phone-bound invitation/outreach, or ambiguous state fails closed to support. Murph first commits a source suspension fence, then the existing account-deletion owner performs provider and billing cleanup. Its final transaction management-reads the target Privy principal immediately beforehand, takes the phone lock before sorted source/target member locks, revalidates the exact disposable scaffold, persists the cleanup receipt, deletes that fully proven scaffold, and attaches the phone plus channel projection to the target atomically. General or active member data is never auto-deleted because any such state fails the disposable-source gate.
+- Settings linked-account removal starts with Privy's unlink operation for the exact app-session principal. Settings derives each method from the full management-read user, including top-level Telegram, and offers unlink only when that provider identity exactly matches the canonical identity; provider ambiguity or mismatch fails closed, and the browser rechecks the same canonical value immediately before unlink. Web mutates Murph state only after a bounded management read proves that account type absent and another supported verified email, phone, or Telegram sign-in remains. Because this reduces authority, fresh same-member authentication—not active billing—is its access boundary. The transaction locks the member, requires the submitted provider identity to match the current blind index when one exists, and clears only the identity-owned sign-in, sender, alias, and messaging-route projections. Modern Linq routing is owned by an exact contact kind and lookup-key match; only legacy kindless Linq routing is treated as phone-owned. Billing email and unrelated channels remain intact. A stale tab cannot clear a replacement identity. Telegram replacement completes this revocation before opening the ordinary link flow, so Privy never receives a second same-type link attempt.
 - Rebuildable inbox-derived artifacts can still contain sensitive health data and must be treated as high-sensitivity runtime material. Never persist provider secrets alongside those artifacts.
-- Hosted clinical-record retrieval is a web-owned credential and provider-egress boundary. Web alone stores encrypted FHIR access/refresh tokens, resolves the provider base URL, follows same-base pagination, and returns one size-bounded sanitized JSON page through signed, active-write-fenced runtime callbacks. The system mailbox and Temporal signal contain only `{runId, generation}`; runtime descriptors contain only opaque ids and hashes. Never put tokens, raw patient ids, raw FHIR base/page URLs, authorization headers, raw page bodies, or clinical values in Postgres, Temporal state, assistant session state, model prompts, diagnostics, or logs. `@murphai/vault-usecases/clinical-records` may atomically stage only the already-bounded sanitized pages in private `.runtime/operations/clinical-records/**` state so the encrypted hosted workspace can resume after foreground preemption; that non-canonical checkpoint is portable, schema- and run-bound, and removed on terminal completion or rejection. Full semantic validation still precedes final raw-page/manifest persistence. Web current-run authority is rechecked immediately before the raw batch and again before canonical mutation. The initial backend lane allows one retrieval generation per unique member/provider connection so immutable raw evidence cannot grow through repeated retrieval jobs; retry, reconnect, or refresh must remain closed until a bounded retention lifecycle preserves every canonical raw reference. A terminal `authorization-required` response is web-owned: web clears unusable credentials and marks the connection `needs_reauth`, while runtime must not overwrite that terminal outcome.
+- Hosted clinical-record retrieval is a web-owned credential and provider-egress boundary. Web alone stores encrypted FHIR access tokens, resolves the provider base URL, follows same-base pagination, and returns one size-bounded sanitized JSON page through signed, active-write-fenced runtime callbacks. The system mailbox and Temporal signal contain only `{runId, generation}`; runtime descriptors contain only opaque ids and hashes. Never put tokens, raw patient ids, raw FHIR base/page URLs, authorization headers, raw page bodies, or clinical values in Postgres, Temporal state, assistant session state, model prompts, diagnostics, or logs. `@murphai/vault-usecases/clinical-records` may atomically stage only the already-bounded sanitized pages in private `.runtime/operations/clinical-records/**` state so the encrypted hosted workspace can resume after foreground preemption; that non-canonical checkpoint is portable, schema- and run-bound, and removed on terminal completion or rejection. Full semantic validation still precedes final raw-page/manifest persistence. Web current-run authority is rechecked immediately before the raw batch and again before canonical mutation. Repeat authorization keeps the same member/provider source and encrypted patient binding, with at most eight immutable snapshots per source and twenty sources per member. Temporary patient context and access tokens are erased at terminal completion or disconnect; the binding remains encrypted with existing member/connection/epoch AAD. Acquisition and callback persistence recheck live consent under the shared member lock, and callback persistence rechecks suspension. Withdrawal schedules clinical cleanup before the runtime stop barrier; cleanup skips a renewed grant. A terminal `authorization-required` response clears access and keeps `needs_reauth`; a same-generation runtime may finalize saved counts without reactivating it.
 - Clinical query-scope and slice ids are bounded adapter-owned acquisition
   identifiers. They may be stored in the run plan, runtime descriptor,
   operational page claim, checkpoint, and raw manifest, but must never contain
@@ -661,7 +738,7 @@ Last verified: 2026-08-26
 - `vault-cli route estimate` is an env-gated external egress surface backed by `MAPBOX_ACCESS_TOKEN`. Keep the token in env only, treat any Mapbox geocoding or Search Box lookup as temporary/non-persistent, do not persist route inputs or outputs in Murph state, and only return route geometry when the caller explicitly asks for it. Hosted execution may expose that same CLI path only when the Worker secret is intentionally configured for Cloudflare's runner egress intercept; the raw token must not be copied into the hosted runtime env.
 - `vault-cli research scout` is an env-gated external egress surface backed by `EXA_API_KEY`. Conversation-facing single-scout input requires `mode: "focused"`; managed broad discovery uses `research scout-batch`. Every provider-bound profile value in either lane must belong to the finite, field-specific, server-owned public concept set. Focused mode synthesizes a fixed provider question from those values and never accepts arbitrary question prose or categories. A question that cannot be represented by the set must make no Exa call. Batch lanes retain the legacy tag-only query, prompt, and provider route. The tool must not persist Exa output or profile payloads; assistant flows may append only curated, deduplicated, non-diagnostic research-scout summaries through the normal knowledge surface.
 - Hosted Clinical Records keeps Epic SMART client configuration, OAuth state,
-  PKCE verifiers, patient ids, access tokens, and refresh tokens in `apps/web`.
+  PKCE verifiers, encrypted patient binding/context and access tokens in `apps/web`.
   Patient/token/verifier/cursor ciphertext uses purpose-specific hosted crypto
   lanes and exact member/connection/version AAD; raw secrets must never enter
   prompts, Temporal, assistant state, workspace snapshots, logs, callback
@@ -735,7 +812,7 @@ Last verified: 2026-08-26
   server-rendered join flow instead of granting Starter. A client-supplied
   invite code or a Privy authentication webhook is never independent enrollment
   authority.
-- Cloudflare-hosted reply aliases are private signed routing capabilities, not SMTP sender-identity proof. Hosted email ingress may accept the current per-user signed reply alias after the web-owned callback resolves its alias key to an active member, and it must do that before persisting the raw `.eml` or dispatching hosted execution; leaked aliases must not route to another member or be described as verified email ownership. Web is allowed to derive and display the same deterministic per-member alias as Cloudflare because web owns member routing state; verified-email sync should persist the alias lookup key before settings presents the alias as reachable. Treat hosted email signing-secret rotation as a compatibility event because deterministic displayed aliases and stored lookup keys are derived from that secret. Direct mail to the fixed public sender address must remain fail-closed unless a trusted runtime seam supplies a provider-authenticated sender verdict with aligned SPF, DKIM, or DMARC proof, then resolves only through a synced verified-owner index that stores secret-derived sender hashes instead of raw verified emails. The direct-public path must require matching envelope and `From` sender values plus authenticated sender proof before lookup, public-sender misses or failed owner authorization should be accepted-and-dropped instead of bounced so the mailbox leaks less account state, new outbound mail should reuse one stable per-user reply alias instead of minting fresh per-thread route state, and any accepted reply-alias message must remain scoped to the alias owner. Every direct hosted email egress, including a serialized thread reply, must resolve that owner's current verified email immediately before provider entry and replace the target's entire `To`/`Cc` audience with only that address; group targets continue through group authority and fanout unchanged. The hosted worker must never treat envelope/header `From` fields or raw `Authentication-Results` / `ARC-*` headers as authentication proof.
+- Cloudflare-hosted reply aliases are private signed routing capabilities, not SMTP sender-identity proof. Hosted email ingress may accept the current per-user signed reply alias after the web-owned callback resolves its alias key to an active member, and it must do that before persisting the raw `.eml` or dispatching hosted execution; leaked aliases must not route to another member or be described as verified email ownership. Web is allowed to derive and display the same deterministic per-member alias as Cloudflare because web owns member routing state; verified-email sync should persist the alias lookup key before settings presents the alias as reachable. Treat hosted email signing-secret rotation as a compatibility event because deterministic displayed aliases and stored lookup keys are derived from that secret. Direct mail to the fixed public sender address must remain fail-closed unless a trusted runtime seam supplies a provider-authenticated sender verdict with aligned SPF, DKIM, or DMARC proof, then resolves only through a synced verified-owner index that stores secret-derived sender hashes instead of raw verified emails. The direct-public path must require matching envelope and `From` sender values plus authenticated sender proof before lookup, public-sender misses or failed owner authorization should be accepted-and-dropped instead of bounced so the mailbox leaks less account state, new outbound mail should reuse one stable per-user reply alias instead of minting fresh per-thread route state, and any accepted reply-alias message must remain scoped to the alias owner. A same-member direct hosted email notification may use its frozen explicit target only as conversation-binding evidence; it is never final recipient authority. Every direct hosted email egress, including a serialized thread reply, must resolve that owner's current verified email immediately before provider entry and replace the target's entire `To`/`Cc` audience with only that address; group targets continue through group authority and fanout unchanged. The hosted worker must never treat envelope/header `From` fields or raw `Authentication-Results` / `ARC-*` headers as authentication proof.
 - The canonical `mail@mail.withmurph.ai` address is an unauthenticated bootstrap hint, never a private assistant-input route. Cloudflare may read only a bounded header prefix to require one matching envelope/Header `From`, then must discard the original subject, body, attachments, threading metadata, and raw message before storage, mailbox append, model or tool execution, or runtime wake. Web may use that sender only as a blinded lookup candidate, take the global admission advisory lock without waiting, recheck current verified-email and active-member authority under the member lock, and send a fixed private continuation to the current verified inbox with the current signed personal alias in `Reply-To`. A global-lock collision is silently dropped so unauthenticated bursts cannot fill the shared database pool with lock waiters. Verified-email authentication must prepare the reply capability from the freshly read provider identity, not a stale bearer snapshot, and atomically rotate it with the authoritative email update. Unknown, inactive, mismatched, limited, lock-colliding, or provider-failed outcomes remain non-diagnostic to the SMTP sender. The member's reply to that private continuation is the first assistant input; the original public message is never retroactively authorized.
 - An authenticated Web action that already resolves the member's current signed personal alias may put its prepared request directly into a `mailto:` for that alias. It must not route an intent-bearing body through the unauthenticated public bootstrap; only the signed-alias message may become the first assistant input.
 - `POST /api/device-sync/companion/admission` is the admission-only native
@@ -775,7 +852,7 @@ Last verified: 2026-08-26
   setup failure to `COMPANION_ADMISSION_SUPPORT_REQUIRED`. Do not expose
   internal hosted lifecycle codes through this route or let a client retry the
   terminal support outcome in a loop.
-- Native iOS and Android device-sync routes under `/api/device-sync/companion/**` normally authenticate with a Privy identity token in `Authorization: Bearer` (no cookie fallback, so no browser ambient authority or CSRF surface). The sign-in contract accepts only `platform: "ios" | "android"` when supplied. The Messages enrollment route follows the bearer rule, then mints a renewable Messages-only lifecycle credential and a 24-hour action bearer; only its revoke, renewal, and closed member-action routes accept those derived scopes. The one pre-login exception, `POST /api/device-sync/companion/auth-diagnostics`, accepts only an allowlisted, size-bounded failure envelope containing app-owned categories, an optional closed platform value that defaults to iOS for legacy clients, and an optional Murph-recognized Privy auth machine code; unsupported provider codes become `null`. It writes one structured hosted warning, has no database or object-storage sink, and must never retain or log raw provider prose, email, phone, OTP, tokens, authorization headers, member/user ids, or health data. Treat its telemetry as spoofable rather than audit evidence; a bundled mobile secret is not an attestation boundary because it can be extracted and replayed. Production keeps this route hidden unless `MURPH_COMPANION_AUTH_DIAGNOSTICS_ENABLED=1`, and the production build must use explicit Vercel API credentials to prove the enabled WAF rule is the first active custom rule, matches only this exact path, and caps requests at 30 per minute per IP with a fixed window. The Junction SDK sign-in token authenticated routes mint is short-lived, returned exactly once, and must never be logged or persisted. Only a visible Android Connect Health Connect action or explicit hosted reconnect may send `connect` and run the account-ensure step, which must reuse the shared device-sync `upsertConnection` external-account identity discipline so SDK and Junction Link flows always share one `device_connection`; passive `resume`, omitted-intent reconciliation, foreground return, and data ingress may not ensure or reactivate a row. Source-scoped status accepts only a normalized Junction provider slug and filters both connected-source availability and durable receipt signals. A webhook receipt may store `sourceProviderSlug` only when the provider-owned parser identifies an actual data-bearing source; data-less historical completions, lifecycle events, and legacy rows keep it null and cannot satisfy a source-scoped read. A later canonical-import receipt may use the normalized source and resource bound to an exact encrypted dirty payload, but only when that same source/resource identity appears in the committed canonical importer result, the bounded exact receipt set is atomically persisted with machine-local job success, its checkpoint commits, and Web atomically records the receipt while deleting that same payload row. Zero-record, source-fenced, unrelated-resource, scheduled-child, and otherwise successful no-op jobs acknowledge work without creating freshness evidence. The junction client's API-key-prefix/environment validation is the sandbox/production separation authority, and the response surfaces the active environment.
+- Native iOS and Android device-sync routes under `/api/device-sync/companion/**` normally authenticate with a Privy identity token in `Authorization: Bearer` (no cookie fallback, so no browser ambient authority or CSRF surface). The sign-in contract accepts only `platform: "ios" | "android"` when supplied. The Messages enrollment route follows the bearer rule, then mints a renewable Messages-only lifecycle credential and a 24-hour action bearer; only its revoke, renewal, and closed member-action routes accept those derived scopes. The one pre-login exception, `POST /api/device-sync/companion/auth-diagnostics`, accepts only an allowlisted, size-bounded failure envelope containing app-owned categories, an optional closed platform value that defaults to iOS for legacy clients, and an optional Murph-recognized Privy auth machine code; unsupported provider codes become `null`. It accepts additional closed session-restore, session-refresh, backend-auth-rejection, and explicit-sign-out diagnostics with strictly formatted app/build/OS versions and an optional UUIDv4 generated once per client process. This UUID is not persisted or associated with a member or installation. It writes one structured hosted log (`eventCode: companion_auth_diagnostic`), using info for successful restoration and ordinary sign-out state and warning for failures, has no database or object-storage sink, and must never retain or log raw provider prose, email, phone, OTP, tokens, authorization headers, member/user ids, or health data. Treat its telemetry as spoofable rather than audit evidence; a bundled mobile secret is not an attestation boundary because it can be extracted and replayed. Production keeps this route hidden unless `MURPH_COMPANION_AUTH_DIAGNOSTICS_ENABLED=1`, and the production build must use explicit Vercel API credentials to prove the enabled WAF rule is the first active custom rule, matches only this exact path, and caps requests at 30 per minute per IP with a fixed window. The Junction SDK sign-in token authenticated routes mint is short-lived, returned exactly once, and must never be logged or persisted. Only a visible Android Connect Health Connect action or explicit hosted reconnect may send `connect` and run the account-ensure step, which must reuse the shared device-sync `upsertConnection` external-account identity discipline so SDK and Junction Link flows always share one `device_connection`; passive `resume`, omitted-intent reconciliation, foreground return, and data ingress may not ensure or reactivate a row. Source-scoped status accepts only a normalized Junction provider slug and filters both connected-source availability and durable receipt signals. A webhook receipt may store `sourceProviderSlug` only when the provider-owned parser identifies an actual data-bearing source; data-less historical completions, lifecycle events, and legacy rows keep it null and cannot satisfy a source-scoped read. A later canonical-import receipt may use the normalized source and resource bound to an exact encrypted dirty payload, but only when that same source/resource identity appears in the committed canonical importer result, the bounded exact receipt set is atomically persisted with machine-local job success, its checkpoint commits, and Web atomically records the receipt while deleting that same payload row. Zero-record, source-fenced, unrelated-resource, scheduled-child, and otherwise successful no-op jobs acknowledge work without creating freshness evidence. The junction client's API-key-prefix/environment validation is the sandbox/production separation authority, and the response surfaces the active environment.
 - Initial onboarding follows the same bearer-only native boundary and accepts no
   member id from the client. The browser completion route instead requires the
   normal hosted app session plus same-origin/CSRF enforcement. Both routes
@@ -786,7 +863,7 @@ Last verified: 2026-08-26
   avatar are server-derived. Never log identity tokens, signed handoffs, or the
   resulting contact-card URL.
 - The companion address-book route accepts only a 192 KiB closed projection of 1-1,000 canonical international phones with either one safe first-name token plus an optional last initial or two to four distinct safe labels joined by the explicit ` / ` alternative separator; sentence-shaped labels, more than four alternatives, and empty enabled projections fail closed. The iOS producer case-folds and sorts eligible labels, then keeps the first four and omits later labels from the advisory prefix. The alternative form preserves disagreement without inventing one full name or choosing a winner; its bounded prefix may be non-exhaustive. An empty contact list is valid only as an exact replay probe for an already-committed replacement and can never create or replace a projection. Replacement requires active access and current launch consent; authenticated status and self-deletion remain available without active billing so cleanup is not trapped. Web must immediately replace each phone with a member-scoped HMAC token derived through the dedicated non-exportable KMS MAC keyring, and Postgres must store only token/version plus a member-bound encrypted label. Do not reuse the web wrap key, app-session HMAC, existing global contact blind index, or any content-encryption key for these tokens. A database or ordinary-content-key compromise must not be enough to test phone candidates. This is not zero knowledge: live Web MAC authority and live group processing remain sensitive boundaries. Only an authorized live group route may consult the human group owner's enabled projection, through either `read_chat_participants` for a canonical current phone participant or an exact provider-authenticated Linq participant add/remove event for that routed group. The event consumer must first prove that the matching hosted identity lacks active Murph activation evidence, may retain the label only in the existing bounded encrypted one-shot route context, and must present it as weak context rather than participant-authored text. Participant label staging and projection replacement/deletion must share the owner-member lock; every non-replay replacement or deletion clears pending encrypted group-event buffers for that owner's routes before commit, so an unconsumed revoked label cannot reach the model without adding an ordinary-message lookup. The participant event transaction must also reject any changed-handle lookup key that belongs to the routed Linq account, even when the provider omits `is_me`. Before KMS or token lookup, each advisory read must confirm that the owner still exists, is unsuspended, and holds current launch consent. The read must not reapply personal or sponsored billing access to an already-enabled projection; the authorized live group route is its access boundary. The participant's durable activation result remains independent; a label for a registered participant must never replace or modify their Murph identity. Labels must never grant identity, membership, consent, route, delivery, invite, signup, or profile authority, and optional lookup failure must leave the truthful roster and ordinary message path unchanged. Provider-event ledger rows must retain no participant handle or label. Replacement/deletion must remain CAS/replay safe; the projection remains active until explicit stop, account deletion, or the companion's next foreground reconciliation after Contacts permission loss removes it, and account deletion must remove both owner tables. No-expiry projections may pin the prior readable MAC version indefinitely; routine retirement must wait for the indexed row count to reach zero. Emergency retirement must deploy both gates Off, retire and drain every old Web writer for at least the route's explicit maximum duration, disable the affected key, reset each complete affected projection through the locked delete-shaped lifecycle so status is truthfully Off and revision/CAS history remains, prove zero affected rows, deploy the new keyring before reopening replacement, require explicit re-sharing, and reopen advisory reads last.
-- The automatic authenticated Linq speaker-label read is a third presentation-only consumer of that same route-authorized address-book projection. Web must first resolve exact current room membership: one unsuspended member's authorized `profile-name.v0` snapshot wins; ambiguous or suspended matches stay unnamed; and only a canonical phone with zero matches or one unsuspended match without a profile name may reach the existing set-based owner-contact reader. The response may contain only the sender handle, bounded display name, explicit profile or unverified-contact provenance, and exact handles proven to have no name after every applicable authorized source was checked—never a member id or participant id. The runner keeps only an operation memo plus the bounded private 14-day-positive/six-hour-proven-negative file cache under `.runtime/cache/**`; cache keys are opaque and route-scoped, the cache is excluded from snapshots, and corrupt, stale, unauthorized, or unreadable state is a miss. Neither the response nor either cache supplies identity, membership, consent, routing, matching, persistence, delivery, or effect authority. Only an exact accepted message reference plus trusted server derivation may authorize a participant-scoped effect.
+- The automatic authenticated Linq speaker-label read is a third presentation-only consumer of that same route-authorized address-book projection. Web must first resolve exact current room membership: one unsuspended member's authorized `profile-name.v0` snapshot wins; ambiguous or suspended matches stay unnamed; and only a canonical phone with zero matches or one unsuspended match without a profile name may reach the existing set-based owner-contact reader. The response may contain only the sender handle, bounded display name, explicit profile or unverified-contact provenance, and exact handles proven to have no name after every applicable authorized source was checked—never a member id or participant id. The runner keeps only an operation memo plus the bounded private 14-day-positive/six-hour-proven-negative file cache under `.runtime/operations/assistant/state/group-participant-display-names.json`; cache keys are opaque and route-scoped, and the cache is portable, rebuildable state inside the encrypted hosted workspace snapshot. A renamed or newly unauthorized presentation label may remain until its fixed TTL expires; corrupt, expired, or unreadable state is a miss. Neither the response nor either cache supplies identity, membership, consent, routing, matching, delivery, or effect authority. Only an exact accepted message reference plus trusted server derivation may authorize a participant-scoped effect.
 - A speaker-label result is cacheable only after its source is complete at the existing authority boundary. An active `profile-name.v0` grant with a null pending snapshot is unavailable, never evidence of profile absence or permission to fall through to an owner contact. The address-book reader checks at most 16 exact phones; only those submitted handles may receive contact labels or negative evidence, and batch overflow remains operation-local. This uses the existing next-operation recovery path and adds no invalidation or readiness state.
 - Messages mini-app credentials are random, member-scoped, and persisted only as two Messages-domain-separated lookup hashes in one deterministic Messages-owned row per member in the existing short-lived session table: a renewable lifecycle hash and the current 24-hour action hash. Never persist either raw bearer or the raw-token hash that the historical unscoped device-agent reader used. Before enrollment or renewal reads identity or authority, it must finish validating the bounded request body. Enrollment must lock the hosted member and active sponsorship rows, re-check active access and current launch consent, and atomically rotate both bearers in that one feature-owned row so repeated setup stays bounded and account deletion serializes without post-deletion recreation. Renewal needs no Privy token or running containing app: it resolves only the indexed lifecycle hash, locks the same member and sponsorship rows, proves the lifecycle bearer still deterministically owns the stored action generation, re-checks active access and historical launch consent, and rotates the expired action generation in the same short database-only transaction. Concurrent renewal must converge on the same deterministic action bearer; it may not create a second row, call a provider, or open another authority path. A lifecycle bearer remains valid only until explicit revoke, replacement enrollment, access loss, consent loss, or account deletion. Expired-session cleanup must not revoke a renewable row merely because its action bearer expired. Explicit revocation accepts either exact current bearer and compare-and-sets the stable row plus the authenticated generation, so an expired action can clean up while a stale, replaced, or rollback-written generation cannot revoke its replacement. Device-agent routes must also require their distinct `hbds_agent_` prefix before hashing so either `hbds_imessage_` scope can never export wearable credentials across current operation or reader rollback. Re-check active hosted access and historical launch consent on every renewal and member action (the extension has no consent UI, so stale document versions must not break it while members with no launch grant stay fail-closed), while keeping exact self-revocation available after access or consent is lost so cleanup cannot be blocked. The member-action body must be a strict, bounded, versioned closed union; never admit client-selected member ids, canonical record ids from the card, arbitrary paths, generic patches, database operations, tool calls, or model fallback. Keep the message URL capability-less: the private-state exceptions are bounded presentation fragments containing immutable values already visible in that private-direct message. A fragment may contain health-related presentation values, but never a member identity, canonical record reference, credential, token, or other authority; it is decoded locally and never requested from the Web origin. Never log the full compact-table URL. Never link Privy into the extension, and never copy, persist, log, or share a raw Privy access, refresh, or identity token. The containing app must explicitly address the shared Keychain group for the derived credential pair while keeping each target's private group first so Privy's default Keychain storage remains private.
 - The same narrow authority-free presentation exception includes V4/V6 workout
@@ -1069,6 +1146,15 @@ Last verified: 2026-08-26
   authorize a send. Conversely, expired detached-control replay re-hands a
   still-valid private effect instead of appending another group terminal; only
   its provider-entry authority may convert that effect to the fixed fallback.
+  A current-sender `assistant.ask.requested` keeps its encrypted wake after the
+  ten-minute request expiry only while its system sequence remains ahead of the
+  durable consumed watermark, so Web can still persist that terminal result.
+  The mailbox's 14-day privacy deadline remains absolute. If that deadline
+  retires the wake first, Web returns the explicit `content_expired` terminal
+  reason and the runtime may retire only that unrecoverable request; ordinary
+  `expired` or `unavailable` responses still cannot substitute for the required
+  current-sender completion. Other Assistant Ask targets retain their ordinary
+  expiry behavior.
 - Rolling compatibility is legacy-facing only. New callers use one strict body
   marker. New Web rejects deployed unmarked old `ask_current_sender` requests:
   the old runtime cannot prove the required exact-room notice happened before
@@ -1103,9 +1189,9 @@ Last verified: 2026-08-26
 - Only an authoritative assistant-configuration web response with `updated` or `unchanged` status may refresh the ephemeral target for later provider turns in that invocation. Failure statuses leave it unchanged, the current turn remains immutable, and web remains the sole durable preference owner. A model or reasoning change must preserve the provider-native Codex thread and apply both settings on the next separately accepted `turn/start`; it must not bootstrap a replacement thread merely because those preferences changed. Idle compaction must attribute usage from the model actually bound to the warm thread rather than the future preference and skip provider work when that bound model cannot be priced.
 - The hosted plan-usage tool may reach only the bounded signed `POST /api/internal/hosted-execution/plan-usage/tool` web callback through `web-control.worker` under the exact active runtime write fence. It accepts no model-provided member id or arguments: web binds the read to the runtime-authenticated member and returns the same bounded usage projection used by Settings. Web alone derives access, plan labels, percentages, forecast, and any recommended billing action from current Postgres state. The tool has no Stripe read or mutation authority, cannot create or lock an allowance period, and must return `group_not_supported` for synthetic thread containers rather than exposing personal billing facts in a group runtime.
 - The Cloudflare Telegram usage-limit notice route accepts only web's exact project- and environment-pinned Vercel OIDC identity and requires the bound-user header to match the route user. Web owns the durable delivery claim plus recipient and message selection; the Worker accepts only the narrow send tuple and owns Telegram credential injection. Vercel OIDC is the sole intended web-to-Worker credential for this route; do not add a co-located shared signing secret that cannot prove the database claim or prevent replay. The runner cannot call this route. After OIDC and request validation, web atomically starts the exact period-scoped delivery immediately before the request, retries only failures proven pre-provider or explicit Telegram rate limits, and treats other post-dispatch uncertainty as terminal because Telegram has no idempotent-send primitive. The delivery row is the sole durable dispatch owner; do not add a parallel allowance-period marker.
-- The Cloudflare-to-web hosted runtime owner-release callback is a separate narrow signed control-plane acknowledgement, not a work payload or scheduler. Cloudflare may call it once only after an exact successful completion clears the matching write fence, with no request body and a timeout capped at two seconds; a just-finished future mailbox retry continuation skips the callback. Web accepts only the empty query or the exact signature-bound positive `immediateRecheckRequested=1` query, derives the user only from the signed user header, and applies the normal nonce/replay checks. Without the positive edge, Web emits the existing payload-free `runtime_recheck_requested` Temporal signal only for current runnable mailbox lag and never infers work from a persisted due wake alone. The positive edge is normally transient invocation output for a newly committed default or retention schedule that this invocation produced but did not service; inherited or already-attempted wakes do not emit it on the ordinary result path. The narrow exception is transport-loss recovery after explicit inactive-container proof and durable workspace-version advance: because attempt-local provenance is unavailable, Cloudflare may conservatively emit the edge for a recovered due default wake, causing one facts re-read. Known future mailbox retry continuations never emit it. Empty facts and suppressed retry continuations leave the existing owner horizon intact. Do not persist the edge or add mailbox content, checkpoint refs, wake metadata, secrets, or provider data to this callback. Failure is non-fatal and Cloudflare must not retry it or reinterpret the completed runtime result.
-- The internal RunnerContainer-to-UserRunner completion receipt is not a second completion authority. RunnerContainer may send it only after a parsed successful result settles and the matching in-memory operation is absent. UserRunner must re-read and compare the runtime-kind user, attempt, and generation before using the existing full-token completion compare-and-swap; stale, duplicate, or mismatched receipts are no-ops. The receipt stays on the existing Durable Object binding, is never exposed as an HTTP route or written to logs, and failure must preserve the completed result and the outer UserRunner completion fallback. Checkpoint success, container stop, idle expiry, and elapsed time remain insufficient authority.
-- The completion receipt wait is capped at one second. Timeout returns the already completed runner result to the outer fallback, and any late receipt rejection is observed without changing fence authority or retrying the invocation.
+- The Cloudflare-to-web hosted runtime owner-release callback is a separate narrow signed control-plane acknowledgement, not a work payload or scheduler. Cloudflare may call it once only after an exact successful completion clears the matching write fence, with no request body and a timeout capped at two seconds; a just-finished future mailbox retry continuation skips the callback. The signed query carries only the bounded opaque `runtimeAttemptId` whose fence was cleared and the optional exact positive `immediateRecheckRequested=1` edge. Web derives the user only from the signed user header and applies the normal nonce/replay checks. For actionable work it emits pointer-only `runtime_owner_released`; Temporal may release an accepted-processing horizon only when that attempt id matches, so a delayed callback cannot release a newer owner. Legacy callbacks without the attempt pointer remain facts-only `runtime_recheck_requested` signals during rollout. Web never infers work from a persisted due wake alone. The positive edge is normally transient invocation output for a newly committed default or retention schedule that this invocation produced but did not service; inherited or already-attempted wakes do not emit it on the ordinary result path. The narrow exception is transport-loss recovery after explicit inactive-container proof and durable workspace-version advance: because attempt-local provenance is unavailable, Cloudflare may conservatively emit the edge for a recovered due default wake, causing one facts re-read. Known future mailbox retry continuations never emit it. Empty facts and suppressed retry continuations leave the existing owner horizon intact. Do not persist the edge or add mailbox content, checkpoint refs, wake metadata, secrets, or provider data to this callback. Failure is non-fatal and Cloudflare must not retry it or reinterpret the completed runtime result. The exact completion winner may separately notify the token's runner-container name with attempt, generation, and user identity only. That internal metadata-only RPC is lifecycle advice, not completion authority: the container must match an in-memory successful result before cleanup, and that result alone owns the interaction-generation baseline captured at invocation admission. Every mismatch or delivery failure falls back to the existing timer without exposing result or provider data.
+- The internal container-process-to-UserRunner completion receipt is not a second completion authority. The container entrypoint may send it only for a parsed successful result and only after clearing the invocation's wake and abort pointers, decrementing active work, and cleaning request transport. The internal runner-control route requires the exact attempt and generation headers, binds the request to the routed user, bounds and parses the result body, and then calls UserRunner's existing atomic completion method without a separate validation read. UserRunner must compare the runtime-kind user, attempt, and generation before using the existing full-token completion compare-and-swap; stale, duplicate, mismatched, or storage-failed receipts are not recorded. The ordinary outer result remains the normal completion path. Receipt failure must preserve that completed result, and checkpoint success, container stop, idle expiry, or elapsed time remain insufficient authority.
+- The completion receipt wait is capped at one second by both a fetch abort and an independent hard deadline. An unavailable route, non-success response, transport failure, invalid response, or non-settling fetch records only a safe `not_recorded` diagnostic and cannot change the completed result, add a retry, or delay shutdown drain beyond that bound. Successful diagnostics distinguish only `recorded` from `not_recorded`; UserRunner owns the more precise durable failure reason.
 - Cloudflare Durable Object storage that holds hosted gateway projections, gateway event logs, or similar hot derived user data must stay encrypted at rest with the worker's hosted storage crypto rather than being persisted as plaintext coordination state.
 - Hosted R2 storage namespace ids are metadata-opacity helpers, not auth boundaries. The deterministic `hsn_${hash(userId)}` namespace is acceptable only while hosted user ids remain high-entropy random ids, R2 buckets stay private, and stored payloads stay encrypted. Do not log, export, or expose hosted R2 object keys or namespace ids to users or third parties; enforce access through signed control-plane requests, Durable Object user binding, crypto context authority, and explicit ownership checks. If user ids become guessable or any R2 object key/listing can leak outside trusted runtime operators, switch the namespace to a stored random per-user `storageNamespaceId` or a versioned secret-HMAC-derived value before exposing that surface.
 - Hosted per-user env overrides are for per-user credentials and verified-identity metadata only. They must never be allowed to set executable selectors or process-control variables such as `FFMPEG_COMMAND`, `WHISPER_COMMAND`, `WHISPER_MODEL_PATH`, `NODE_OPTIONS`, `LD_PRELOAD`, or `DYLD_INSERT_LIBRARIES`, because those values can steer subprocess execution inside the hosted runner.
@@ -1136,18 +1222,23 @@ Last verified: 2026-08-26
 - Tool authority for the reserved support-escalation shape exists only for an explicit Murph human-support request in a verified private direct conversation. That request authorizes one account-linked call whose summary begins with the exact reserved prefix and continues with Murph's concise, bounded, de-identified product-only explanation in its own words. The model-facing contract forbids copied or quoted conversation text and every private category forbidden for ordinary feedback; shared parsing and Web persistence apply the same deterministic sanitizer before recording. The linked marker remains fixed server-authored metadata while the explanation is stored in a separate anonymous detail row. The explicit human-support request also authorizes the paired Web owner to disclose that sanitized explanation beside the internal member id to the dedicated support recipient. This intentionally accepts the same residual semantic-redaction risk described above for the explanation while never treating raw conversation text as disclosure authority. The anonymous explanation also enters the configured general product-feedback digest without the linked marker or member id and follows ordinary anonymous-feedback retention after account deletion; the linked marker is deleted with the account. Those existing audience and retention owners preserve de-identified product triage without adding another state or lifecycle path. Every value under the exact reserved prefix must enter the support owner; empty, wrong-kind, changelog-linked, group, and unverified shapes fail closed before persistence. A generic bug handoff does not authorize the reserved shape. The support address remains opt-in and appears only when explicitly requested.
 - The reserved verified-private support-escalation shape is the narrow internal-email exception to ordinary feedback disclosure. Web persists one fixed server-authored member-linked marker and one anonymous row containing only the prefix-stripped sanitized explanation, then may pair that read-back explanation with the callback-bound member id and internal feedback id in the immediate support alert. Both rows must validate before provider entry. Replay treats the first stored anonymous explanation as authority and reproduces the same body and provider idempotency key even if a later callback rewords the issue; missing, member-linked, empty, unsanitized, overlong, or still-prefixed stored detail fails before Resend. The alert remains plain text, fixed-recipient, daily-capped, and forbidden from including raw or quoted member text or any private category prohibited by the model-facing contract. The explicit request authorizes only Murph's sanitized de-identified product explanation beside identity, with the same documented residual semantic-redaction risk; it never authorizes transcript disclosure.
 - The internal product-feedback digest may disclose only the fixed
-  server-owned kind labels, truthful grouped per-kind counts, and the
+  server-owned kind and neutral ordinal member-section labels, truthful grouped
+  per-kind counts, and the
   capture-scrubbed de-identified product-feedback summaries of the three
-  allowlisted product-feedback kinds to the dedicated configured operator
-  recipient list through the existing Resend transport. The disclosure
-  boundary for summary text is the capture side: the recording path stores
-  only a bounded de-identified product-only summary written under the
-  model-facing contract and passed through the shared deterministic redaction
-  pass, so the digest renders stored summaries verbatim and adds nothing else.
-  Its bounded, deterministically ordered row query must select only the kind
-  and summary columns, its count aggregate groups only by kind, and neither
-  may read any member identifier, internal feedback id, changelog metadata, or
-  any other private row content. The cron route must retain the shared
+  allowlisted kinds to the dedicated configured operator recipient list
+  through the existing Resend transport. The row read may use Web's existing
+  server-controlled member id only as an in-memory grouping key; that id must
+  not enter the email body, and the digest must not read the member relation,
+  contact data, or infer a human from a synthetic group runtime. Unlinked
+  groupchat and truly anonymous rows share one final section so the email does
+  not misattribute either to a person. The disclosure boundary for summary
+  text is the capture side: the recording path stores only a bounded de-identified product-only
+  summary written under the model-facing contract and passed through the
+  shared deterministic redaction pass, so the digest renders stored summaries
+  verbatim. Its bounded, deterministically ordered row query must select only
+  kind, member id, and summary; its count aggregate groups only by kind; and
+  neither may read an internal feedback id, changelog metadata, or any other
+  private row content. The cron route must retain the shared
   timing-safe Vercel bearer check before any database read, missing
   configuration must fail before that read, and recipient addresses must
   remain environment-held and absent from logs.
@@ -1202,7 +1293,7 @@ Last verified: 2026-08-26
 - `computer_open` is the single hosted browser entry primitive. It creates, reuses, resumes, or safely reclaims the member's active Kernel-backed run through signed computer-use callbacks, then returns sanitized current page URL/title plus visible page text to the trusted model without heuristic text redaction so the browser primitive remains usable. Reclaiming an `awaiting_user` run is server-owned: the web service selects the active member run, uses hidden hosted mailbox/delivery-context proof when present, may resume a completed handoff or stale checkpointing recovery, and must not accept model-provided run ids, confirmation text, or resume evidence as authority. Open or expired handoffs, fresh checkpointing handoffs, and browserless Managed Auth transitions remain locked until the web-owned handoff flow finishes, expires through the normal recovery path, or matching hidden reply proof is supplied. `computer_act` is a bounded raw Playwright execution primitive that runs inside the same web-owned Kernel browser session. The service keeps member/run/session authorization, request signing, timeout caps, URL/title/result capture, display-cache sanitization, and redacted Kernel failure diagnostics, but it does not pretend to sandbox individual Playwright APIs or enforce a browser network policy. Because `page`, `context`, and `browser` are available to the trusted model, any hard private-network or protocol enforcement would need to live below Playwright. `computer_os_control` is a bounded fallback that maps one validated mouse or keyboard action to Kernel computer controls through the same signed callback path; it must not expose screenshot capture, clipboard read/write, cursor introspection, raw Kernel handles, raw Kernel API credentials, browser cookies, storage state, live-view URLs, or typed text in tool results or runtime logs. Policy and skill instructions must tell the model not to query or return cookies, storage state, local storage, hidden browser credentials, raw Kernel capabilities, live-view URLs, passwords, payment details, one-time codes, raw tokens, or similar secrets. Sensitive user input should pause for handoff instead of being serialized into Playwright source or OS-control text. `computer_pause_for_user` remains the durable human checkpoint primitive for missing user input or direct takeover. It must not send a separate user-visible message; it must mark the run `awaiting_user` with the reason, pending handoff, hidden delivery context, and last known URL/title before returning structured pause details to the model. A returned member-gated `handoffUrl` remains available in the normal tool result so the model can include one natural link when the user needs it; the runtime must not append a second handoff block, and `finish_without_reply` remains unavailable after a successful pause. Raw Kernel live-view URLs must remain hidden. Legacy pause request `message` fields may be accepted during deploy skew only and must be ignored, not persisted or sent. Same-turn computer tools must stay locked after a pause request.
 - Hosted audio transcription is a Worker-owned Workers AI effect. The hosted runtime may send only audio attachment bytes to the fixed `murph-transcribe.worker/v1/transcribe` host: either ffmpeg-prepared audio (16 kHz WAV for local whisper compatibility, or remote-only 64 kbps MP3 after `-vn` sanitization with metadata/chapter stripping), or — when remote transcription is the only transcription lane — the original audio attachment in a conservative remote-verified audio format with matching MIME, container signature, and byte cap. Passthrough originals may carry container metadata such as device tags, and their duration is bounded only by the byte cap; known video-capable or container-ambiguous MIME/container signals like `.m4a`, `.mp4`, `audio/m4a`, `audio/mp4`, `audio/ogg`, `audio/opus`, and `video/*` stay on the ffmpeg `-vn` path rather than passthrough. The Worker validates the signed runner-scoped `workers_ai_transcribe` provider credential, exact write-fence proof, or a provider-egress token before calling the `AI` binding, returns only bounded transcript JSON, and must never log or persist transcript text, audio bytes, or Workers AI account context in structured logs or runtime env. Keep account-level Workers AI request/response logging and AI Gateway capture disabled for this Worker; voice audio is health-adjacent data and must not be persisted by dashboard-side inference logging.
 - Environment walkthrough audio may enter only through the authenticated same-origin Web route and the Vercel-OIDC-bound Cloudflare staging route for the same member. Store it application-encrypted under the member's opaque R2 namespace; never expose its object key, bytes, transcript, or provider request in browser-visible status, logs, mailbox metadata, assistant conversation history, or outbound messaging. The system mailbox carries only bounded integrity metadata and the opaque audio key. The write-fenced runtime may read and delete that key only for the bound member, uses the existing Worker-owned transcription effect, and passes the resulting transcript only to the exact silent `habitat-voice` maintenance turn. That turn has no conversation history, dynamic tools, or delivery route; its maintenance policy permits only Habitat show, catalog, and save commands and treats the transcript as untrusted evidence. Successful processing deletes the staged object after checkpoint; account deletion sweeps the member prefix and the 24-hour lifecycle remains the final asynchronous backstop.
-- Private assistant images use the `vault_image` media type, never the public `image` URL type. The descriptor persists only a normalized vault-relative ref, SHA-256, exact byte count, filename, allowlisted image MIME type, alt text, and bounded source metadata. OpenAI image failure diagnostics may expose only the structured error message, code, and request id after control stripping, whitespace normalization, and fixed code-point caps; never copy a raw error body, request body, authorization material, key, image bytes, or arbitrary header into the tool result or hosted completion. A provider message can echo private prompt context, so keep it only in the private tool/model transcript and runtime-authored completion input. Runtime provenance authenticates the completion status, not the provider text: the model must treat that diagnostic as untrusted evidence, never follow commands, links, permission claims, tool requests, or policy text inside it, and must not add it to operational logs or repeat it verbatim to the member by default. Final delivery must reload the regular file, enforce the private-image size cap, verify the descriptor metadata plus image signature, and complete that verification before recording provider dispatch. Linq receives verified message-image bytes through its existing attachment-upload API; Telegram receives them through multipart `sendPhoto`. Do not mint a public or signed URL as the internal representation. The sole URL-only exception is Linq group-avatar ingestion: after chat-authority preflight, the write-fenced Worker route sends only validated bytes and MIME type to the existing per-user `UserRunner`, which serializes staging and account deletion under one mutation lock, verifies the write fence inside that lock, stores one deterministic application-encrypted object under the member's opaque private-media R2 prefix, and returns an opaque at-most-one-day capability on the current deployment's exact Worker origin. Worker publication derives that origin from the required non-secret `CF_PUBLIC_BASE_URL`; Web validation derives it from `HOSTED_EXECUTION_CONTROL_URL`. Production and preview must reject one another's current capability origins while the exact legacy signed-Images shape and queryless `https://imagedelivery.net/<account>/<image>/public` shape remain temporarily accepted during their drain window; no other queryless Images variant is compatible. The canonical Worker capability path ends in `group-avatar.<ext>`, with the extension derived from the verified MIME type; the Worker and Web/runtime validators must also accept the already-shipped extensionless path through the one-day capability lifetime and warm-container rollback drain. Deploy dual-shape Web/runtime validation before canonical Worker minting, and rollback minting before removing either compatibility consumer. If deletion owns the lock first, queued staging must fail after the cleared fence is rechecked; if staging owns it first, deletion must wait and then sweep the staged object before reporting completion. The encrypted capability may carry only the member id, image hash, exact byte count, allowlisted MIME type, and expiry needed to reconstruct and verify that object; none of those fields, the R2 key, or the storage namespace may appear in the URL or logs. The public GET/HEAD route must accept only those exact capability shapes, return matching successful content headers with an empty HEAD body, reject an extension that disagrees with the decrypted MIME type, fail closed on expiry, tampering, extra query parameters, missing bytes, decrypt failure, size/hash mismatch, or image-signature mismatch, and return `private, no-store`. A retry must reuse the deterministic object only while its original R2 lifecycle window remains and must cap capability expiry at that boundary. At or after the boundary, the mutation-locked `UserRunner` must replace the same deterministic key before returning a newly bounded capability, so no capability outlives the object lifecycle window it names. Account deletion must make the existing bounded Cloudflare cleanup attempt before acknowledging completion; success synchronously sweeps the prefix, while timeout or provider failure leaves the encrypted receipt and retention cron as retry ownership. The R2 lifecycle makes a staged object eligible for asynchronous deletion after 24 hours and is not a physical-deletion deadline. Provider acceptance or fetch timing is never deletion authority. The URL must never enter model output, response media, or assistant outbox state. A non-2xx Linq avatar response may expose only an allowlisted documented nested four-digit provider code; the strict hosted-execution parser derives the fixed first-party recovery text. Provider prose, raw bodies, trace ids, headers, and transport or timeout errors remain outside the tool result. The legacy write-fenced `results.worker/generated-images` endpoint remains a `410 Gone` tombstone, and the exact signed and queryless-public Images URL shapes are accepted only as rolling-deploy compatibility inputs while old producers and rollback candidates drain.
+- Private assistant images use the `vault_image` media type, never the public `image` URL type. The descriptor persists only a normalized vault-relative ref, SHA-256, exact byte count, filename, allowlisted image MIME type, alt text, and bounded source metadata. OpenAI image failure diagnostics may expose only the structured error message, code, and request id after control stripping, whitespace normalization, and fixed code-point caps; never copy a raw error body, request body, authorization material, key, image bytes, or arbitrary header into the tool result or hosted completion. A provider message can echo private prompt context, so keep it only in the private tool/model transcript and runtime-authored completion input. Runtime provenance authenticates the completion status, not the provider text: the model must treat that diagnostic as untrusted evidence, never follow commands, links, permission claims, tool requests, or policy text inside it, and must not add it to operational logs or repeat it verbatim to the member by default. Final delivery must reload the regular file, enforce the private-image size cap, verify the descriptor metadata plus image signature, and complete that verification before recording provider dispatch. Linq receives verified message-image bytes through its existing attachment-upload API; Telegram receives them through multipart `sendPhoto`. Do not mint a public or signed URL as the internal representation. The sole URL-only exception is Linq group-avatar ingestion: after chat-authority preflight, the write-fenced Worker route sends only validated bytes and MIME type to the existing per-user `UserRunner`, which serializes staging and account deletion under one mutation lock, verifies the write fence inside that lock, stores one deterministic application-encrypted object under the member's opaque private-media R2 prefix, and returns an opaque at-most-one-day capability on the current deployment's exact Worker origin. Worker publication derives that origin from the required non-secret `CF_PUBLIC_BASE_URL`; Web validation derives it from `HOSTED_EXECUTION_CONTROL_URL`. Production and preview must reject one another's capability origins. The only accepted Worker capability path ends in `group-avatar.<ext>`, with the extension derived from the verified MIME type. If deletion owns the lock first, queued staging must fail after the cleared fence is rechecked; if staging owns it first, deletion must wait and then sweep the staged object before reporting completion. The encrypted capability may carry only the member id, image hash, exact byte count, allowlisted MIME type, and expiry needed to reconstruct and verify that object; none of those fields, the R2 key, or the storage namespace may appear in the URL or logs. The public GET/HEAD route must accept only that canonical capability shape, return matching successful content headers with an empty HEAD body, reject an extension that disagrees with the decrypted MIME type, fail closed on expiry, tampering, extra query parameters, missing bytes, decrypt failure, size/hash mismatch, or image-signature mismatch, and return `private, no-store`. A retry must reuse the deterministic object only while its original R2 lifecycle window remains and must cap capability expiry at that boundary. At or after the boundary, the mutation-locked `UserRunner` must replace the same deterministic key before returning a newly bounded capability, so no capability outlives the object lifecycle window it names. Account deletion must make the existing bounded Cloudflare cleanup attempt before acknowledging completion; success synchronously sweeps the prefix, while timeout or provider failure leaves the encrypted receipt and retention cron as retry ownership. The R2 lifecycle makes a staged object eligible for asynchronous deletion after 24 hours and is not a physical-deletion deadline. Provider acceptance or fetch timing is never deletion authority. The URL must never enter model output, response media, or assistant outbox state. A non-2xx Linq avatar response may expose only an allowlisted documented nested four-digit provider code; the strict hosted-execution parser derives the fixed first-party recovery text. Provider prose, raw bodies, trace ids, headers, and transport or timeout errors remain outside the tool result.
 - A Linq response card's static `image_url` is message presentation, not an authority capability or the internal representation of a private assistant image. It carries one bounded authority-free presentation snapshot, but path encoding is not encryption: Vercel and Linq can observe those values. The path must be queryless and contain no member, team, challenge, conversation, or canonical record identity, credential, signature, or other authority. For schema-V5 challenge standings, the producer must preserve exact names only in the native fragment and provider captions; the image envelope uses the fixed `Challenge standings` title, null subtitle/footer, and ordinal `Participant N` or `Team N` labels while preserving only scorer-owned non-identifying presentation values. The Web `ImageResponse` route must validate an exact canonical Base64URL envelope before reading local render assets, perform no database or remote read, emit no application logs or analytics, and return `private, no-store` plus `noindex`. Do not place the URL in analytics, durable diagnostic artifacts, or model-authored content. Linq may fetch and rehost the resulting image; neither fetch timing nor provider acceptance grants application authority.
 - Model-authored Telegram rich content is untrusted presentation input, not a provider or network capability. Admit it only through the direct-turn or authenticated-group Telegram card capability and the strict shared contract. The accepted subset contains no explicit links, images, media, maps, custom emoji, scripts, styles, event handlers, or remote-fetching attribute. Its Telegram projection must set `skip_entity_detection` so plain text cannot become a provider-created link, email, mention, hashtag, command, or phone action; existing semantic cards retain their current entity behavior. Allow only bounded headings, paragraphs, lists, callouts, details, tables, and inline formatting with the documented closed attributes. Reject malformed nesting, unknown entities, excessive depth or element counts, oversized tables, and any content whose trusted text projection exceeds 4,096 characters. Derive the fallback from the validated tree; never accept a model-authored fallback copy. Do not log raw card HTML outside the existing authorized transcript and outbox owners.
 - Hosted generated voice memos are Worker-mediated ElevenLabs plus channel-native delivery effects. Store only bounded transcript/config metadata plus Linq attachment references or Telegram delivery-time generation references in assistant runtime/outbox records; never write generated audio bytes, ElevenLabs request text beyond the intended transcript field, provider secrets, presigned upload headers, or Telegram multipart audio bodies into logs, docs, fixtures, or user-facing output.
@@ -1250,24 +1341,9 @@ Last verified: 2026-08-26
   its exact outer run directory.
   Candidate code has arbitrary execution authority within that account, so a
   personal or credential-bearing account is never an acceptable worker.
-  The Blacksmith workflow must retain read-only repository contents permission,
-  no GitHub Environment, no OIDC permission, no Actions-secret references, and
-  pinned actions. The dispatcher must pin the Blacksmith organization,
-  default-branch ref, workflow, and job before each fresh canonical Testbox is
-  created instead of trusting mutable local profile/config values or an
-  arbitrary reusable lease. Before candidate sync can execute repository code,
-  the default-branch workflow must install the trusted verification shell as a
-  root-owned file outside the workspace; canonical delegation invokes that
-  absolute path, which validates the two allowed commands and directly `exec`s
-  the candidate verifier through `env -i` with an isolated temporary home and a
-  one-bit trusted-entry marker. The candidate verifier must fail closed without
-  that marker and then call the shared sanitized core. A change to the workflow
-  or trusted entrypoint cannot use the not-yet-landed trust root for proof:
-  verify it locally, land it through the protected workflow-change path, then
-  run a post-landing remote proof. Never treat either boundary as a sandbox for
-  a compromised initiating account; any process that can already read a
-  production secret and make arbitrary network calls can exfiltrate it without
-  Crabbox.
+  Never treat the static worker boundary as a sandbox for a compromised
+  initiating account; any process that can already read a production secret and
+  make arbitrary network calls can exfiltrate it without Crabbox.
 
 ### Local production-secret stop boundary
 
@@ -1276,6 +1352,17 @@ unavailable. Provider CLI or API output that lists a variable name, target, or
 scope is metadata only; it is never evidence that the value can or should be
 read locally. Do not download, copy, inject, echo, or reconstruct a production
 secret in a local process, file, worktree, test, or debugging session.
+
+The sole local exception is the operator-provisioned Temporal diagnostics path
+documented in `agent-docs/references/hosted-temporal-orchestration.md`. It may
+pass an already-present Temporal API credential directly to one bounded CLI or
+SDK process without inspecting, printing, copying, persisting, or repackaging
+the value. This exception does not authorize pulling provider environment
+values, creating a persistent CLI profile, forwarding local environment state
+to CI or a remote runner, or mutating Temporal. Start with list, describe,
+query, and metadata-only history inspection; signals, starts, resets,
+terminations, schedule changes, and deployment routing still require explicit
+authorization for the current task.
 
 When requested work would require a production secret, stop before
 implementation or execution. Explain the exact blocked operation, the class of
@@ -1311,13 +1398,44 @@ locally readable.
   and checks out only the public default branch. Candidate code executes only
   in the unprivileged Repo Hygiene job, which uploads one exact-run/head fixture
   artifact. The trusted controller bounds and canonicalizes that artifact as
-  untrusted JSON, pins the reviewed private SHA and SHA-suffixed immutable
-  lightweight tag from `.github/temporal-compatibility-controller.json`, and
-  accepts only the returned exact private run and proof-digest job. Private CI
-  must never check out or import public candidate code. Neither side may restore
-  candidate-controlled caches beside credentials, read private logs or
+  untrusted JSON. With the repository-scoped App token, it resolves private
+  `main` to an exact commit before dispatch, validates the fixed
+  `public-murph-integration.yml` workflow identity, dispatches only that workflow
+  at `main` with returned run details, and accepts only its returned
+  first-attempt run when the workflow identity and `head_sha` match the
+  pre-resolved private commit. It re-reads private `main` after successful job
+  attestation and fails closed on movement. The public repository stores no
+  private SHA/tag pointer and no private Current/Ramping reader policy; those
+  reader revisions are derived and attested inside private protected CI.
+  Private CI must never check out or import public pull-request candidate code
+  for Temporal compatibility. The protected pull-request compatibility lane is
+  fixture-only: it receives only the bounded canonical artifact produced by
+  unprivileged public CI. Separately, after a revision reaches protected public
+  `main`, the existing deployment controller may request `release_admission`
+  against exact private `main`. Only the unprivileged hosted jobs check out that
+  exact released public revision; they select the canonical foreground-priority
+  lane and force its standby mode to `allocate`. Credentialed Temporal setup
+  and attestation jobs remain isolated jobs that check out only private
+  controller or immutable reader source. The final private release attestation
+  consumes job results, independently re-reads both protected branches, and
+  names a digest bound to both SHAs, the fixed scope, and the public protected
+  environment's non-secret expected production target digest. Private setup
+  and final attestation derive the live target from protected Temporal
+  configuration and reject mismatch without returning its address, namespace,
+  credentials, poller identities, or timestamps. Neither side may
+  restore candidate-controlled caches beside credentials, read private logs or
   artifacts, expose reader revisions publicly, or accept workflow/check names
   from the candidate.
+- Hosted Web production has one deployment authority: Vercel's Git integration
+  creates a candidate for every exact `main` commit, and configured Deployment
+  Checks alone admit it to production domains. Do not grant Full Production
+  Deployment permission to ordinary operators or automation, and do not use
+  local production uploads, promotion of an existing deployment, Instant
+  Rollback, or Force Promote; those paths can reuse stale commit evidence or
+  bypass the check. Recovery is a revert or forward-fix commit on `main` so the
+  replacement receives fresh compatibility proof. Provider owners remain
+  break-glass authority outside the automatic guarantee and must not exercise
+  it as an ordinary deployment path.
 - The public automated live Junction wearable canary uses only sandbox Junction
   authority, Kernel browser authority, and a dedicated Garmin test account. Keep
   those five credentials
@@ -1352,54 +1470,28 @@ locally readable.
   browser transport.
   Because a newly added workflow is not yet a protected trust root, its first
   credentialed proof occurs only after that exact workflow lands on `main`.
-- The protected native iOS and Android PR E2E lanes may share a Junction sandbox only through
-  an explicit non-empty `JUNCTION_CLIENT_USER_ID_NAMESPACE` whose default is
-  absent everywhere else. The dedicated Vercel custom environment is the sole
-  namespace value owner: the controller reads that exact non-sensitive variable by its
-  configured Vercel environment-variable id and validates its custom-environment
-  scope before any cleanup, deployment retirement, deployment, or native
-  dispatch. Cleanup must completely enumerate and validate the configured team,
-  ignore every unrelated namespace, delete at most one exact namespace-owned
-  user, and prove that namespace empty before resetting the isolated database.
-  Deployment retirement must first enumerate aliases through each already
-  validated lane-owned deployment, reject malformed alias responses, and delete
-  those exact alias ids before deleting the deployment so the reusable custom
-  environment cannot retain an alias to deleted state.
-  This namespace limits trusted cleanup; it does not scope the Junction Team API
-  key, which retains full team data access. A second key on the same team is not
-  a least-privilege boundary, so the shared sandbox must contain only disposable
-  test identities and never staging, production, or real-person data.
-  Hosted crypto for that candidate must use the dedicated Vercel project's
-  exact named custom-environment OIDC subject (`environment:native-ios-e2e`), as
-  reported by Vercel project/deployment metadata. The non-production Workload
-  Identity provider must explicitly admit that subject, the preview crypto
-  service account must grant impersonation only to that exact principal, and
-  the service account must have only key-level access to the preview KMS
-  keyring. Do not substitute the generic `environment:preview` subject for a
-  custom-environment deployment.
-  The production provider is not changed by E2E activation. The E2E principal
-  must have no impersonation binding on the production crypto service account
-  and no IAM role on production KMS keys; the production service account must
-  continue to admit only the exact production subject. Provider admission alone
-  grants no crypto authority, so prove the effective boundary across the Vercel
-  subject, provider mapping and condition, service-account policies,
-  hosted-crypto variables, and key-level IAM before the first credentialed
-  sweep.
-  Android reuses this exact namespace, isolated database, Privy principal, and
-  Vercel custom environment through the existing trusted cleanup owner. The
-  two destructive native jobs therefore share one non-canceling live lock.
-  Android dispatch accepts only a separately configured reviewed commit behind
-  an immutable lightweight private-repository tag, an exact hosted Web SHA and
-  origin, and a short-lived lease. The public controller may hold only Actions
-  write and Contents read in that private repository. Its existing protected
-  process mints repository-scoped installation tokens just in time, refreshes
-  them before expiry, and removes the App private key from the environment
-  before child commands; it never receives the fixed OTP, reads private job
-  logs or artifacts, or executes candidate code with credentials. The private workflow keeps raw instrumentation/provider
-  output in runner-temporary storage, publishes only one closed allowlisted
-  stage summary, and removes all raw output before completion. Its production
-  canary owns no database, Privy, or Junction reset authority.
-- Cloudflare hosted deploys intentionally run the manual predeploy gates, hosted Codex auth guard, production build prep, Wrangler deploy, and deployed endpoint smoke on protected-main Blacksmith runners. Treat that as the only approved Blacksmith production-secret trust expansion: keep the workflow protected-main-only before environment attachment, scope production secrets to the validation, render, deploy, and smoke steps after checkout verification, and do not move any broader production secret access to Blacksmith without a fresh security review and durable docs update.
+- Native iOS and Android public controllers are protected-main production
+  canaries only. They run on staggered six-hour schedules and admit no PR or
+  deployment-status event. Manual recovery must name `refs/heads/main` at the
+  exact current `main` SHA before protected environment work. The controllers
+  own no database, Privy, Junction, custom-environment deployment, or
+  identity-reset authority. The iOS controller attaches the existing
+  `native-ios-hosted-e2e` environment but passes only its repository-scoped App
+  private key and production-alias Vercel token to controller steps; legacy
+  database and provider secrets are not passed to controller processes. Reviewed private
+  source refs and SHAs live in `.github/native-hosted-e2e-controller.json` so a
+  source rotation must pass ordinary protected-main review. Each controller
+  proves the policy tag is an immutable lightweight tag resolving to the exact
+  policy SHA and dispatches only when the current production alias equals the
+  exact current `main` SHA. Any alias lag fails closed.
+  Android's public controller may hold only Actions write and Contents read in
+  the private repository. It mints repository-scoped installation tokens just
+  in time, refreshes them before expiry, and removes the App private key from
+  the environment before child commands. The private workflow keeps raw
+  instrumentation/provider output in runner-temporary storage, publishes only
+  one closed allowlisted stage summary, and removes all raw output before
+  completion. Public orchestration never reads private job logs or artifacts.
+- Cloudflare hosted deploys run the manual predeploy gates, hosted Codex auth guard, production build prep, Wrangler deploy, and deployed endpoint smoke on GitHub-hosted Ubuntu runners. Keep the workflow protected-main-only before environment attachment and scope production secrets to the validation, render, deploy, and smoke steps after checkout verification.
 - Cloudflare runner Containers must explicitly render Wrangler SSH disabled for
   every class and must contain no authorized keys. Deploy automation must not
   accept an environment-controlled SSH key or compatibility switch that can
@@ -1407,6 +1499,19 @@ locally readable.
   isolation flag enabled until the configured compatibility date provides the
   same boundary by default. Use structured logs, Durable Object status,
   Container inventory, and managed deploy smoke as the diagnostic boundary.
+- Ready inventory in the global runner fleet must remain content-free and memberless until an
+  exact `UserRunner` claim. Its coordinator may persist only release/region,
+  opaque slot names, and opaque claim tombstones; it must never receive a
+  member id, workspace reference, provider credential, or canonical product
+  fact. The container's immutable binding is the sole opaque-name-to-member mapping
+  for both warm and cold allocations. Legacy ENAM targets preserve their original
+  region and namespace; new global targets must never be parsed as member names.
+  Before provider credential minting, invocation, wake, or cleanup, the
+  per-member owner must re-read that binding and require the exact member,
+  release, region, and slot. A claimed slot is never reusable across members;
+  terminal retirement destroys the container and scrubs claim/member identity.
+  Codex standby preflight uses a disposable content-free home and must not make
+  a provider request or retain a resident member-configured App Server.
 - The same protected-main Cloudflare workflow may attach the GitHub `Preview`
   Environment only for the explicit `preview` target. That environment must
   contain staging-only credentials and must not duplicate production database,
@@ -1443,6 +1548,18 @@ locally readable.
   submitted Session ID's unique blind lookup key still resolves to a current
   checkout attempt; syntax alone, an unknown ID, or a cleared/stale binding
   cannot create an operator email.
+- Resend-backed positive Stripe payment notifications must use that same
+  environment-owned operational sender, recipient allowlist, and API key. They
+  may be emitted only after the verified receipt owner accepts a positive
+  `invoice.paid` amount whose billing reason is not `subscription_cycle`, or
+  fulfills a usage-credit Checkout or saved-card PaymentIntent. The plain-text
+  body is limited to amount and currency, a bounded payment category, event
+  type and time, live/test mode, and the opaque Stripe event id. It must not
+  read or include member/customer identity,
+  contact details, checkout contents, invoice line items, raw provider objects,
+  or webhook payloads. The receipt-local sent timestamp is an operational
+  delivery marker only; it is not payment, entitlement, or usage-credit
+  authority.
 - Assistant runtime state is high-sensitivity local runtime data: directories under `vault/.runtime/operations/assistant/**` must be `0700`, files under that tree must be `0600`, secret-bearing provider headers must never remain inline in persisted session JSON, and operator-facing repair flows should use `assistant doctor --repair` to tighten assistant runtime permissions in place. Inline secret findings indicate stale local session data that should be rebuilt or repaired manually rather than a supported migration lane.
 - Vault-file refs remain normalized and non-hidden except for one flat assistant-owned shape: `.runtime/operations/assistant/generated-deliveries/<filename>`. Initial preparation may accept that exact ref only after the reader-compatible runner has converged, and both initial and retry paths must adopt/revalidate its regular bounded file before revalidating filename, media type, byte size, and SHA-256. Adoption tightens assistant-runtime parents to `0700` and the exact file to `0600`; ordinary vault refs are not chmodded. Prefix siblings, nested paths, hidden filenames, control characters, snapshot-excluded temp/lock names, symlinks, special files, and every other hidden ref fail closed. Never infer ownership or deletion authority from `exports/assistant-deliveries/**` or another generic vault path.
 - Do not clear or abandon provider-native assistant thread continuity merely because a tool returned authenticated private data or because provider history differs slightly from delivered output. Session invalidation is not a privacy boundary. Protect private data through authorization, bounded tool results, output and logging policy, and the normal encrypted snapshot boundary.
@@ -1451,7 +1568,7 @@ locally readable.
 - Runtime observability writes under `vault/.runtime/operations/assistant/diagnostics/**`, `vault/.runtime/operations/assistant/journals/**`, quarantine metadata, and persisted delivery errors must redact inline bearer tokens, cookies, API keys, and similar secret material before the artifact is committed.
 - Persisted runtime logs, CI logs, uploaded artifacts, and user/provider-facing output must never print raw PHI, health data, vault contents, model prompts, model messages, transcripts, request/response bodies, final provider requests, file text, lab reports, or similarly sensitive payloads. Local one-off diagnostics may inspect concrete payload shape or values when needed to prove root cause, but must stay out of commits, uploaded artifacts, and external surfaces, and must never expose secrets or raw credentials. The static `pnpm logs:guard` check blocks direct logging of variables named `prompt`, `messages`, `input`, `output`, `response`, `body`, `transcript`, `vault`, `finalRequest`, `fileText`, and `labReport` unless the value is passed through an explicit redaction, sanitization, or summarization helper, or reduced to counts/status for persisted or uploaded logs.
 - Device-sync account metadata is internal diagnostic state only. Hosted and local storage writes must sanitize it down to a compact shallow scalar record instead of persisting provider profile payloads, nested JSON blobs, or oversized string fields.
-- The resident Codex App Server is a privileged local adapter, not a sandbox boundary. Normal assistant turns should rely on the bound Murph runtime/tool surface and canonical write ownership in `packages/core`, not a second provider-workspace or canonical-write-guard safety model. The narrow exception is `executeReadOnlyAssistantAsk`: model-invoked commands in that one-shot child are confined by the native `murph-group-read` permission profile. The child reuses the trusted hosted Codex home for minimum auth/config lifecycle, but its thread request passes the named `permissions` override, exact runtime roots, empty working directory, disabled instruction sources, and approval policy `never`, and never passes a legacy `sandbox` field. The App Server response is not an authorization boundary. The profile grants read only to Codex's minimal runtime and exact group workspace roots, denies `.runtime/**`, `.codex/**`, retired vault-share projection roots, and environment files, disables tool network plus project config/instruction discovery, and gives shell commands an inherit-none environment with no provider credential or hosted secret. The supervising App Server may receive minimum provider auth, but the child's only dynamic tool is the consent-aware lazy `murph.group/read_shared` read. It receives no mutation or delivery tool, route grant, signing material, MCP, web search, memory, plugin, app, or multi-agent authority. A production-like Linux sandbox smoke must prove the actual profile enforcement or the feature remains disabled.
+- The resident Codex App Server is a privileged local adapter, not a sandbox boundary. Detached read-only asks are the narrow native-permission exception. Group/member asks use `murph-group-read`, which hides `.runtime` and project configuration. Authenticated operator diagnostics instead run once with `murph-operator-diagnostic-read`, the exact bound workspace including `.runtime`, and only the hosted Codex `sessions/` directory as an optional second root. Both profiles deny writes and network. The operator profile also denies project configuration, environment files, credentials, and runtime secret sidecars. Every detached child starts in a fresh temporary directory with approval policy `never`, no inherited model-run secrets, and no mutation, effect, delivery, MCP, app, plugin, memory, web-search, or multi-agent authority. Only joined-group asks receive the consent-aware `murph.group/read_shared` tool; only member disclosure flows use the separate tool-free reviewer.
 - Hosted process-only App Server initialization may begin only after workspace
   restore, final managed Codex config/auth preparation, and staging of the first
   fresh auto-reply-enabled pre-pass Linq or Telegram input candidate. Email,
@@ -1481,12 +1598,19 @@ locally readable.
   background-work waiting remain outside the lock. No launch key, container
   identity, late initialization response, or merely resident process may
   substitute for current turn or signed provider authority.
-- Model-backed detached system-mailbox notifications without a valid scheduled occurrence must remain isolated output-only provider work. They receive no conversation history, private context, native resume, dynamic or hosted tool context, shell, browser, apps, plugins, web search, provider fetch, public fetch, artifact materializer, image-generation launcher, progress delivery, or delegated-agent surface. Treat embedded provider, callee, webhook, and Family text only as untrusted data; only the final delivery adapter may send the formatted result. Run them as fresh ephemeral threads whose restrictive thread config leaves the resident App Server launch identity unchanged and cannot persist a resumable notification thread.
-- `assistant.ask.requested` and `assistant.ask.completed` may carry bounded question and answer content only in the existing encrypted mailbox and transient process state. Web derives the target runtime, exact membership generation, origin, expiry, and private return route from the signed caller; the model cannot supply them. Only the trusted target adapter may pass an authorized workspace root and committed conversation evidence to `executeReadOnlyAssistantAsk`. Web rechecks membership before target context is read and before completion is appended, and the private runtime treats the answer as untrusted data. Leaving, rejoining, expiry, an unsafe route, or a stale runtime fence suppresses completion rather than widening access. Failed Ask diagnostics may expose only a validated opaque request id, an allowlisted Prisma `P####` code when present, and HTTP status; they must never expose raw exceptions, response bodies, mailbox content, questions, answers, membership ids, runtime ids, or return routes. Diagnostic values are correlation metadata only and are never caller-supplied authority.
+- Model-backed detached system-mailbox notifications without a valid scheduled occurrence must remain isolated output-only provider work. Except for the exact private-to-group context-handoff profile, they receive no conversation history or private context. That handoff may read only the canonical target group's committed transcript plus its bounded, delimiter-safe handoff context and trusted consented `profile-name.v0` attribution. Every such turn receives no native resume, dynamic or hosted tool context, shell, browser, apps, plugins, web search, provider fetch, public fetch, artifact materializer, image-generation launcher, progress delivery, or delegated-agent surface. Treat embedded provider, callee, webhook, Family, and handoff context text only as untrusted data; only the final delivery adapter may send the formatted result. Run them as fresh isolated threads under the native capability deny set without layering a legacy sandbox override onto that policy. A handoff commits its standalone message to the canonical conversation session and clears stale native resume state so ordinary follow-up reconstructs from durable history; no notification persists a resumable provider thread.
+- `assistant.ask.requested` and `assistant.ask.completed` may carry bounded question and answer content only in the existing encrypted mailbox and transient process state. A private current member's `list_memberships` read may expose one page of their current opaque membership generations, existing safe titles, real human chat participant counts, and requester-authorized Contacts names; unmatched phones are reduced to NANP area code plus last four or international last four, while email participants use a generic marker. Full provider handles never enter model-visible output or new persistence, another member's or the group owner's Contacts cannot substitute, and every membership owns its own roster availability status. These fields are presentation evidence only: the model may choose only an exact `membershipId` returned in the current conversation and must never expose, invent, edit, derive, or accept it from the member. Web remains the authority owner: under its admission lock it proves the membership belongs to the signed requester, remains active, points to the expected runtime, and retains valid route authority. Ask and handoff replay compare the exact membership generation; leaving and rejoining makes an old clarification stale. Only the trusted target adapter may pass an authorized workspace root and committed conversation evidence to `executeReadOnlyAssistantAsk`. Web rechecks membership before target context is read and before completion is appended, and the private runtime treats the answer as untrusted data. Expiry, an unsafe route, or a stale runtime fence suppresses completion rather than widening access. Failed Ask diagnostics may expose only a validated opaque request id, an allowlisted Prisma `P####` code when present, and HTTP status; they must never expose raw exceptions, response bodies, mailbox content, questions, answers, membership ids, runtime ids, or return routes. Diagnostic values are correlation metadata only and are never caller-supplied authority.
 - Except for that explicitly confined Assistant Ask child, Codex running inside the local Murph runtime or hosted execution container is assumed to have full access to that local/container filesystem. Passing repo-relative, vault-relative, or container-local paths to Codex so it can inspect or modify files is not a privacy leak by itself. Those paths still must not escape into user-facing messaging copy, public API responses, persisted logs/diagnostics, fixtures, generated docs, screenshots, provider requests, external review bundles, or other third-party outputs unless the surface has an explicit safe path policy.
 - Assistant turns may execute the same canonical local assistant/vault tool catalog shape through the active vault's per-turn Murph runtime context. Message-triggered assistant auto-reply now has the same full Murph autonomy as other assistant turns, including assistant runtime control plus canonical `memory` / `automation` and canonical vault write surfaces, so any accepted inbound channel message is effectively an operator-authorized action for that bound user and vault. The hard-cut assistant command surface is Codex App Server only: it may run with normal local CLI/filesystem/env authority through Codex-specific launch/config options, while legacy OpenAI-compatible endpoint flags are not part of the command surface. That privileged Codex App Server posture still does not grant hosted-control-plane authority outside the local runtime boundary.
 
 ## Scheduled assistant action authority
+
+An optional private follow-up attachment is a staged message effect, not general
+automation-write authority. The host permits it only on eligible original turns,
+binds it to actual outbox dispatch, and rejects recursive attachments. Due child
+turns reuse the existing read-only scheduled configuration, with fresh committed
+history and no mutation tools or hosted write ports. The source and parent IDs
+are host-owned canonical fields, not model-selectable attachment arguments.
 
 A scheduled tool action is authorized only by the trusted runtime's exact
 `automationId + occurrenceAt` pair when the turn trigger is `automation-cron` and
@@ -1516,11 +1640,12 @@ neither capability.
 ## Hosted operator tasks
 
 Operator-task admission is restricted to the existing hosted Ops allowlist and
-same-origin mutation boundary. Every task is bound to one active member and the
-admitting operator, and a stable idempotency key is bound to an exact hashed
-request shape. A diagnostic receives one fixed read-only disclosure,
-cannot deliver to the member, and stores its bounded result with member-bound
-secure-box encryption. A message is restricted to an existing private direct
+same-origin mutation boundary. Every task is bound to one active target runtime
+and workspace plus the admitting operator, and a stable idempotency key is bound
+to an exact hashed request shape. A diagnostic calls
+`executeOperatorDiagnostic` once, cannot deliver to the member, and stores its
+bounded result through the existing member-bound secure-box encryption and
+expiry owner without disclosure metadata or a review turn. A message is restricted to an existing private direct
 route; Web reauthorizes the member-bound task immediately before model work and
 again at the normal notification/outbox boundary. Neither path creates
-first-contact, group, arbitrary tool, or runtime-shell authority.
+first-contact or group-delivery authority.

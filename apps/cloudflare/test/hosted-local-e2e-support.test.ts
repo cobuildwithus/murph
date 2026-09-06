@@ -597,6 +597,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     const allToolNames = listMurphDynamicToolNames();
     const baseToolNames = allToolNames.filter((name) =>
       name !== "murph.analyze_video"
+      && name !== "murph.create_calendar_link"
       && !name.startsWith("murph.computer_")
       && !name.startsWith("murph.connected_apps_")
       && !hostedGroupFamilyToolNames.includes(name)
@@ -620,6 +621,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     const allToolsAvailable = {
       analyzeVideoAvailable: true,
       askGrokAvailable: true,
+      calendarLinkAvailable: true,
       connectedAppsAvailable: true,
       computerToolsAvailable: true,
       exerciseRoutineResponseCardAvailable: true,
@@ -642,6 +644,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     expect(allToolNames).toContain("murph.computer_open");
     expect(allToolNames).toContain("murph.connected_apps_manage");
     expect(allToolNames).toContain("murph.create_phone_call");
+    expect(allToolNames).toContain("murph.create_calendar_link");
     expect(hostedGroupFamilyToolNames).toHaveLength(6);
     expect(allToolNames)
       .toEqual(expect.arrayContaining(hostedGroupFamilyToolNames));
@@ -702,6 +705,10 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     );
     expectAdvertisedMurphDynamicTools(
       [buildResponsesRequest(allToolNames, "code-mode")],
+      allToolsAvailable,
+    );
+    expectAdvertisedMurphDynamicTools(
+      [buildResponsesRequest(allToolNames, "code-mode-namespaced")],
       allToolsAvailable,
     );
   });
@@ -933,6 +940,9 @@ function buildResponsesRequest(
     description: namespacedToolNames
       .filter((name) =>
         name !== "murph.automation"
+        && name !== "murph.attach_response_card"
+        && name !== "murph.attach_exercise_routine_card"
+        && name !== "murph.attach_telegram_rich_content"
         && !hostedGroupFamilyToolNames.includes(name)
       )
       .map((name) => name.replace(/^murph\./u, "murph__"))

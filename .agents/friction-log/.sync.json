@@ -539,6 +539,178 @@
     {
       "issue": "cobuildwithus/murph#2364",
       "path": ".agents/friction-log/20260826141134-preliminary-reviewgpt-omits/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2369",
+      "path": ".agents/friction-log/20260826093734-package-vitest-configs/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2377",
+      "path": ".agents/friction-log/20260826015901-prisma-format-rewrites/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2388",
+      "path": ".agents/friction-log/20260826170418-reviewgpt-attachment-capture/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2389",
+      "path": ".agents/friction-log/20260826103349-fresh-task-worktrees/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2401",
+      "path": ".agents/friction-log/20260826210817-crabbox-teardown-removes/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2404",
+      "path": ".agents/friction-log/20260826142809-repository-cli-help/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2412",
+      "path": ".agents/friction-log/20260826235403-finish-task-fails/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2416",
+      "path": ".agents/friction-log/20260826234025-codex-worktree-setup/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2420",
+      "path": ".agents/friction-log/20260825193250-hosted-local-linq/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2426",
+      "path": ".agents/friction-log/20260826182325-changelog-guidance-omits/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2428",
+      "path": ".agents/friction-log/20260826184600-pre-commit-hides-stale-workspace-schema-error/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2429",
+      "path": ".agents/friction-log/20260827074738-detached-reviewgpt-wake/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2432",
+      "path": ".agents/friction-log/20260826133951-reviewgpt-preflight-cannot/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2434",
+      "path": ".agents/friction-log/20260824054820-package-typecheck-accepts/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2438",
+      "path": ".agents/friction-log/20260826104842-release-cli-manifest/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2439",
+      "path": ".agents/friction-log/20260826104719-cli-artifact-generator/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2444",
+      "path": ".agents/friction-log/20260827014032-committer-cannot-update/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2450",
+      "path": ".agents/friction-log/20260826222133-document-local-crypto/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2464",
+      "path": ".agents/friction-log/20260826200626-assistant-cli-manifest/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2491",
+      "path": ".agents/friction-log/20260826114848-cli-config-schema/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2493",
+      "path": ".agents/friction-log/20260826111646-reviewgpt-wait-loses/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2494",
+      "path": ".agents/friction-log/20260826145746-storage-guard-cannot/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2496",
+      "path": ".agents/friction-log/20260828103705-concurrent-hosted-web/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2498",
+      "path": ".agents/friction-log/20260827150613-live-hosted-assistant/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2513",
+      "path": ".agents/friction-log/20260827124612-hosted-local-e2e/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2514",
+      "path": ".agents/friction-log/20260828163031-assistant-runtime-full/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2560",
+      "path": ".agents/friction-log/20260828164243-committer-rejects-directory/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2561",
+      "path": ".agents/friction-log/20260829030500-viewport-overflow-playwright/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2624",
+      "path": ".agents/friction-log/20260830165335-hosted-local-setup/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2639",
+      "path": ".agents/friction-log/20260830175325-built-cli-test/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2647",
+      "path": ".agents/friction-log/20260831025840-hosted-member-seed/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2677",
+      "path": ".agents/friction-log/20260830174923-hosted-local-docker/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2717",
+      "path": ".agents/friction-log/20260901173517-hosted-local-no/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2729",
+      "path": ".agents/friction-log/20260829231539-real-codex-harness/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2768",
+      "path": ".agents/friction-log/20260902184741-frontend-design-proof/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2790",
+      "path": ".agents/friction-log/20260903165242-web-typecheck-retains/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2799",
+      "path": ".agents/friction-log/20260903235348-reviewgpt-snapshot-listing/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2900",
+      "path": ".agents/friction-log/20260901162111-retire-worktree-partial/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2903",
+      "path": ".agents/friction-log/20260905003755-reviewgpt-minimum-duration/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2907",
+      "path": ".agents/friction-log/20260904202051-fresh-worktree-web/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2930",
+      "path": ".agents/friction-log/20260904203503-document-and-meal/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2934",
+      "path": ".agents/friction-log/20260905051606-checkpoint-log-independence/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#2962",
+      "path": ".agents/friction-log/20260905120003-base-ui-composed/friction.md"
     }
   ],
   "version": 1

@@ -10,31 +10,6 @@ const repoRoot = path.resolve(path.dirname(scriptPath), "..");
 const sharedHostMode = resolveSharedHostMode(process.env);
 process.env.MURPH_VERIFY_SHARED_HOST = sharedHostMode;
 
-if (process.env.MURPH_WORKSPACE_ARTIFACT_LOCK_HELD !== "1") {
-  const result = spawnSync(
-    process.execPath,
-    [
-      path.join(repoRoot, "scripts", "run-with-workspace-artifact-lock.mjs"),
-      "build:test-runtime:prepared",
-      "--",
-      process.execPath,
-      scriptPath,
-      ...process.argv.slice(2),
-    ],
-    {
-      cwd: repoRoot,
-      env: process.env,
-      stdio: "inherit",
-    },
-  );
-
-  if (result.error) {
-    throw result.error;
-  }
-
-  process.exit(result.status ?? 1);
-}
-
 if (
   sharedHostMode === "1" &&
   process.env.MURPH_VERIFY_HOST_SLOT_HELD !== "1"
@@ -91,7 +66,6 @@ const workspaceSmokePackages = [
   {
     packageName: "assistant-engine",
     requiredSubpaths: [
-      "assistant-automation",
       "assistant-state",
       "knowledge",
     ],

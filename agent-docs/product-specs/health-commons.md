@@ -4,7 +4,7 @@ Last verified: 2026-08-10
 
 ## Current State
 
-Murph needs a public, living Health Commons for protocol pages, biomarker pages, evidence/source pages, exact protocol revisions, and redirects/disambiguation. This layer must stay forkable and reviewable like a small wiki while remaining structured enough to bind private runs, outcome cards, and future cohort learning to exact protocol versions.
+Murph needs a public, living Health Commons for goal guides, protocol pages, biomarker pages, evidence/source pages, exact reusable revisions, and redirects/disambiguation. This layer must stay forkable and reviewable like a small wiki while remaining structured enough to bind private goals, runs, outcome cards, and future cohort learning to exact public versions.
 
 ## Product Boundary
 
@@ -27,6 +27,7 @@ The storage primitive is a typed wiki page plus generated projections. Product/d
 | Product concept | Stored form |
 | --- | --- |
 | Biomarker page | `entityType: biomarker` |
+| Outcome-first Goal guide | `entityType: goal_template` |
 | Intervention page | `entityType: experiment_family`, `familyKind: intervention` |
 | Modality page | `entityType: experiment_family`, `familyKind: modality` |
 | Protocol spec | `entityType: protocol_variant` |
@@ -194,13 +195,15 @@ When Murph later supports community forks, those forks should be structured diff
 Generated entities carry:
 
 - `pageRevisionId` for the whole page.
+- `workflowSpecRevisionId` for the reusable outcome and private setup contract on a Goal guide.
 - `runSpecRevisionId` for performable protocol fields, experiment-onboarding setup policy, test plans, and expected signal descriptions used to choose and interpret outcomes.
 - `recipeHash` for duplicate-protocol detection.
 - `catalogHash` for the build-time catalog release and generated artifact cohort.
 
 The full catalog is a build-time generator structure, not a runtime artifact.
 Runtime surfaces should consume scoped generated artifacts instead of a monolith:
-web route bundles/projections for public pages, compact protocol index/run-spec/
+web route bundles/projections for public pages, the compact Goal browse index,
+compact protocol index/run-spec/
 family-graph artifacts for CLI and hosted protocol reads, the compact
 `biomarker-desired-directions.json` projection for progress-card sentiment, and
 separate source indexes only for tools that explicitly need source lookup. The
@@ -245,8 +248,9 @@ resolves, or cases where one clearly indicated direct action makes comparison
 unnecessary. A proposal never authorizes a run, reminder, check-in, or tracking
 plan; each requires its own applicable authorization.
 An authored knowledge page can support this lookup without a protocol or UI.
-Hosted runner packaging must include that compact direction projection and the
-knowledge index without shipping the web artifact tree. A missing direction
+Hosted runner packaging must include that compact direction projection, the
+knowledge index, and the compact public Goal index without shipping the rest of
+the web artifact tree. A missing direction
 projection is auxiliary availability loss: progress cards remain available with
 neutral mover sentiment
 and a visible caveat on the private card itself. Raster delivery preserves the

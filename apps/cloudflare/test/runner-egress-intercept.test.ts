@@ -1,3 +1,4 @@
+import { ContainerProxy } from "./stubs/cloudflare-containers.ts";
 import { describe, expect, it, vi, afterEach } from "vitest";
 import {
   buildExaResearchScoutOutputSchema,
@@ -68,12 +69,15 @@ import type {
 } from "../src/runner-outbound.ts";
 import type {
   WorkerActiveRuntimeUserFenceResult,
+  WorkerOpenAiAuthorizationAlertStubLike,
   WorkerProviderEgressCredentialValidationResult,
   WorkerProviderEgressTokenValidationResult,
 } from "../src/worker-contracts.ts";
 import {
   createHostedExecutionTestEnv,
 } from "./hosted-execution-fixtures.ts";
+import { RunnerContainer } from "../src/runner-container.ts";
+import { StandbyRunnerContainer } from "../src/standby-runner-container.ts";
 import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
 } from "../src/deploy-smoke-live-model.ts";
@@ -86,6 +90,7 @@ import {
 import { parseHostedXaiRequestBody } from "../src/runner-egress-xai.ts";
 import {
   HOSTED_GEMINI_VIDEO_ANALYSIS_PATH,
+  HOSTED_GEMINI_VIDEO_ANALYSIS_PREVIOUS_MODEL_PATH,
 } from "../src/runner-egress-gemini.ts";
 import {
   sealHostedInferenceRuntimeTarget,
@@ -122,6 +127,46 @@ const OPENAI_WEBSOCKET_HANDSHAKE_HEADERS = {
 } as const;
 const TEST_TEXT_ENCODER = new TextEncoder();
 const PROVIDER_REQUEST_STARTED_AT = "2026-07-23T12:00:00.000Z";
+
+type OpenAiAuthorizationAlertReport = Parameters<
+  WorkerOpenAiAuthorizationAlertStubLike["reportFailure"]
+>[0];
+
+function createAuthorizedOpenAiModelsRequest(input: {
+  headers?: Readonly<Record<string, string>>;
+  url?: string;
+} = {}): Request {
+  return new Request(input.url ?? "https://api.openai.com/v1/models", {
+    headers: {
+      ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
+      ...input.headers,
+    },
+    method: "GET",
+  });
+}
+
+function createOpenAiAuthorizationAlertTestNamespace(
+  reportFailure: WorkerOpenAiAuthorizationAlertStubLike["reportFailure"],
+) {
+  const getByName = vi.fn(
+    (_name: string): WorkerOpenAiAuthorizationAlertStubLike => ({
+      reportFailure,
+    }),
+  );
+  return { getByName, namespace: { getByName } };
+}
+
+function createWaitUntilCollector() {
+  const promises: Promise<unknown>[] = [];
+  return {
+    context: {
+      waitUntil(promise: Promise<unknown>): void {
+        promises.push(promise);
+      },
+    },
+    promises,
+  };
+}
 
 function createHostedExaResearchScoutRequestBody(
   overrides: Record<string, unknown> = {},
@@ -245,8 +290,7 @@ function createHostedGeminiVideoAnalysisRequestBody(
       role: "user",
     }],
     generationConfig: {
-      maxOutputTokens: 1_800,
-      thinkingConfig: { thinkingLevel: "low" },
+      thinkingConfig: { thinkingLevel: "medium" },
     },
     systemInstruction: {
       parts: [{ text: HOSTED_GEMINI_VIDEO_ANALYSIS_SYSTEM_INSTRUCTION }],
@@ -428,7 +472,7 @@ describe("hostedRunnerIntercept", () => {
         revision: 7,
         schema: HOSTED_INFERENCE_RUNTIME_TARGET_SCHEMA,
         supportsImages: false,
-        verificationProfile: "murph-codex-0.149.1-portable-responses-v1",
+        verificationProfile: "murph-codex-0.151.0-portable-responses-v1",
       },
     });
     const validateRuntimeProviderEgressToken = vi.fn(async (input: {
@@ -723,6 +767,39 @@ describe("hostedRunnerIntercept", () => {
       userId: "member_123",
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("hard-cuts the retired generated-image upload route through the generic effects-port fallback", async () => {
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+
+    const response = await hostedRunnerIntercept(
+      new Request("http://results.worker/generated-images", {
+        headers: BOUND_USER_WRITE_FENCE_HEADERS,
+        method: "POST",
+      }),
+      createInterceptEnv({ validateRuntimeWriteFence }),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: "Not found",
+    });
+    expect(validateRuntimeWriteFence).not.toHaveBeenCalled();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          hostKind: "effects_port",
+          method: "POST",
+          operation: "effects_port",
+          responseStatus: 404,
+        }),
+        level: "warn",
+        message: "Hosted runner internal outbound response completed.",
+        phase: "wake.running",
+      }),
+    );
   });
 
   it("rejects internal virtual-host requests without a runtime write fence", async () => {
@@ -2125,7 +2202,16 @@ describe("hostedRunnerIntercept", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("injects Gemini credentials, preserves the fixed request, and records token usage", async () => {
+  it.each([
+    {
+      model: "gemini-3.8-flash",
+      path: HOSTED_GEMINI_VIDEO_ANALYSIS_PATH,
+    },
+    {
+      model: "gemini-3.7-flash",
+      path: HOSTED_GEMINI_VIDEO_ANALYSIS_PREVIOUS_MODEL_PATH,
+    },
+  ])("injects Gemini credentials and records $model usage", async ({ model, path }) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(PROVIDER_REQUEST_STARTED_AT));
     const upstreamPayload = {
@@ -2163,7 +2249,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request(
-        `https://generativelanguage.googleapis.com${HOSTED_GEMINI_VIDEO_ANALYSIS_PATH}`,
+        `https://generativelanguage.googleapis.com${path}`,
         {
           body: JSON.stringify(requestBody),
           headers: {
@@ -2218,7 +2304,7 @@ describe("hostedRunnerIntercept", () => {
       providerName: "Google Gemini",
       providerRequestId: "gemini-req-1",
       reasoningTokens: 7,
-      requestedModel: "gemini-3.7-flash",
+      requestedModel: model,
       totalTokens: 345,
       triggerKind: "analyze-video",
       usageExtractionSourcePath: "gemini.generateContent.usageMetadata",
@@ -2493,7 +2579,7 @@ describe("hostedRunnerIntercept", () => {
                   data: Buffer.from("video-bytes").toString("base64"),
                   mimeType: "video/mp4",
                 },
-                videoMetadata: { fps: 5 },
+                videoMetadata: { fps: 2 },
               },
               { text: "Count reps." },
             ],
@@ -4964,6 +5050,381 @@ describe("hostedRunnerIntercept", () => {
         message: "Hosted runner provider egress completed.",
       }),
     );
+  });
+
+  it("reports an authorized upstream OpenAI 401 with only the privacy-safe fields without delaying the response", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-29T18:42:03.456Z"));
+    let reportCompleted = false;
+    let completeReport = (_value: { accepted: true }): void => {
+      throw new Error("OpenAI authorization alert report did not start.");
+    };
+    const reportFailure = vi.fn(
+      (_report: OpenAiAuthorizationAlertReport) =>
+        new Promise<{ accepted: true }>((resolve) => {
+          completeReport = resolve;
+        }).finally(() => {
+          reportCompleted = true;
+        }),
+    );
+    const alert = createOpenAiAuthorizationAlertTestNamespace(reportFailure);
+    const deferred = createWaitUntilCollector();
+    const upstreamResponse = new Response("private-upstream-response-body", {
+      headers: {
+        "content-type": "application/json",
+        "x-private-response": "private-response-header",
+      },
+      status: 401,
+      statusText: "Unauthorized",
+    });
+    const upstreamFetch = vi.fn<typeof fetch>(async () => upstreamResponse);
+
+    const response = await handleHostedRunnerOpenAiOutbound(
+      createAuthorizedOpenAiModelsRequest({
+        headers: { "x-private-request": "private-request-header" },
+        url:
+          "https://api.openai.com/v1/models?private_query=private-request-query",
+      }),
+      createInterceptEnv({
+        OPENAI_API_KEY: "openai-worker-secret",
+        OPENAI_AUTHORIZATION_ALERT_MONITOR: alert.namespace,
+        validateRuntimeWriteFence: async () => true,
+      }),
+      deferred.context,
+      upstreamFetch,
+    );
+
+    expect(response).toBe(upstreamResponse);
+    expect(response.status).toBe(401);
+    expect(response.statusText).toBe("Unauthorized");
+    expect(response.headers.get("x-private-response")).toBe(
+      "private-response-header",
+    );
+    expect(upstreamFetch).toHaveBeenCalledOnce();
+    expect(reportCompleted).toBe(false);
+    expect(deferred.promises).toHaveLength(1);
+    expect(alert.getByName).toHaveBeenCalledOnce();
+    expect(alert.getByName).toHaveBeenCalledWith("production");
+    expect(reportFailure).toHaveBeenCalledOnce();
+    expect(reportFailure).toHaveBeenCalledWith({
+      observedAtMs: Date.parse("2026-08-29T18:42:03.456Z"),
+      status: 401,
+    });
+    const report = reportFailure.mock.calls[0]![0];
+    expect(Object.keys(report).sort()).toEqual(["observedAtMs", "status"]);
+    expect(JSON.stringify(report)).not.toContain("private-");
+
+    completeReport({ accepted: true });
+    await Promise.all(deferred.promises);
+    expect(reportCompleted).toBe(true);
+    expect(await response.text()).toBe("private-upstream-response-body");
+  });
+
+  it("routes standby provider and internal hosts through concrete class interception", async () => {
+    const fetchMock = vi.fn<typeof fetch>(
+      async () => new Response("provider-ok", { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const proxy = new ContainerProxy(
+      {
+        props: {
+          className: StandbyRunnerContainer.name,
+          containerId: "standby--v-version_1--0123456789abcdef0123456789abcdef",
+          enableInternet: true,
+        },
+      },
+      createInterceptEnv({
+        OPENAI_API_KEY: "openai-worker-secret",
+        validateRuntimeWriteFence: async () => true,
+      }),
+    );
+
+    const providerResponse = await proxy.fetch(createAuthorizedOpenAiModelsRequest());
+
+    expect(providerResponse.status).toBe(200);
+    expect(await providerResponse.text()).toBe("provider-ok");
+    expect(readForwardedRequest(fetchMock).headers.get("authorization"))
+      .toBe("Bearer openai-worker-secret");
+
+    const internalResponse = await proxy.fetch(new Request(
+      `http://${HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.effectsPort}/missing-identity`,
+      { method: "POST" },
+    ));
+
+    expect(internalResponse.status).toBe(403);
+    expect(await internalResponse.text()).toBe("Missing hosted runner identity.");
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("awaits alert admission through the real Containers outbound context", async () => {
+    let admitReport = (_value: { accepted: true }): void => {
+      throw new Error("OpenAI authorization alert report did not start.");
+    };
+    let reportStarted = (_value: void): void => {
+      throw new Error("OpenAI authorization alert report did not start.");
+    };
+    const reportStartedPromise = new Promise<void>((resolve) => {
+      reportStarted = resolve;
+    });
+    const reportFailure = vi.fn(
+      (_report: OpenAiAuthorizationAlertReport) =>
+        new Promise<{ accepted: true }>((resolve) => {
+          admitReport = resolve;
+          reportStarted(undefined);
+        }),
+    );
+    const alert = createOpenAiAuthorizationAlertTestNamespace(reportFailure);
+    const upstreamResponse = new Response("original-upstream-body", {
+      headers: {
+        "content-type": "application/problem+json",
+        "x-original-header": "original-header-value",
+      },
+      status: 401,
+      statusText: "Original Unauthorized",
+    });
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () => upstreamResponse));
+    const proxy = new ContainerProxy(
+      {
+        props: {
+          className: RunnerContainer.name,
+          containerId: "member_123--v-version_1",
+        },
+      },
+      createInterceptEnv({
+        OPENAI_API_KEY: "openai-worker-secret",
+        OPENAI_AUTHORIZATION_ALERT_MONITOR: alert.namespace,
+        validateRuntimeWriteFence: async () => true,
+      }),
+    );
+
+    let handlerSettled = false;
+    const responsePromise = proxy.fetch(createAuthorizedOpenAiModelsRequest())
+      .then((response) => {
+        handlerSettled = true;
+        return response;
+      });
+    await reportStartedPromise;
+    await Promise.resolve();
+    expect(handlerSettled).toBe(false);
+
+    admitReport({ accepted: true });
+    const response = await responsePromise;
+
+    expect(response).toBe(upstreamResponse);
+    expect(response.status).toBe(401);
+    expect(response.statusText).toBe("Original Unauthorized");
+    expect(response.headers.get("content-type")).toBe(
+      "application/problem+json",
+    );
+    expect(response.headers.get("x-original-header")).toBe(
+      "original-header-value",
+    );
+    expect(await response.text()).toBe("original-upstream-body");
+    expect(alert.getByName).toHaveBeenCalledWith("production");
+    expect(reportFailure).toHaveBeenCalledOnce();
+  });
+
+  it("awaits an authorized upstream OpenAI 403 when waitUntil registration fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-29T19:00:00.000Z"));
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let admitReport = (_value: { accepted: true }): void => {
+      throw new Error("OpenAI authorization alert report did not start.");
+    };
+    let reportStarted = (_value: void): void => {
+      throw new Error("OpenAI authorization alert report did not start.");
+    };
+    const reportStartedPromise = new Promise<void>((resolve) => {
+      reportStarted = resolve;
+    });
+    const reportFailure = vi.fn(
+      (report: OpenAiAuthorizationAlertReport) => {
+        expect(report).toEqual({
+          observedAtMs: Date.parse("2026-08-29T19:00:00.000Z"),
+          status: 403,
+        });
+        return new Promise<{ accepted: true }>((resolve) => {
+          admitReport = resolve;
+          reportStarted(undefined);
+        });
+      },
+    );
+    const alert = createOpenAiAuthorizationAlertTestNamespace(reportFailure);
+    const upstreamResponse = new Response("forbidden", { status: 403 });
+    const waitUntil = vi.fn((_promise: Promise<unknown>) => {
+      throw new Error("private-wait-until-detail");
+    });
+
+    let handlerSettled = false;
+    const responsePromise = handleHostedRunnerOpenAiOutbound(
+      createAuthorizedOpenAiModelsRequest(),
+      createInterceptEnv({
+        OPENAI_API_KEY: "openai-worker-secret",
+        OPENAI_AUTHORIZATION_ALERT_MONITOR: alert.namespace,
+        validateRuntimeWriteFence: async () => true,
+      }),
+      { waitUntil },
+      async () => upstreamResponse,
+    ).then((response) => {
+      handlerSettled = true;
+      return response;
+    });
+    await reportStartedPromise;
+    await Promise.resolve();
+    expect(handlerSettled).toBe(false);
+
+    admitReport({ accepted: true });
+    const response = await responsePromise;
+
+    expect(response).toBe(upstreamResponse);
+    expect(alert.getByName).toHaveBeenCalledWith("production");
+    expect(reportFailure).toHaveBeenCalledOnce();
+    expect(waitUntil).toHaveBeenCalledOnce();
+    expect(warning).toHaveBeenCalledOnce();
+    expect(warning).toHaveBeenCalledWith(
+      "OpenAI authorization alert report failed.",
+      { failureCode: "openai_authorization_alert_report_failed" },
+    );
+    expect(JSON.stringify(warning.mock.calls)).not.toContain(
+      "private-wait-until-detail",
+    );
+  });
+
+  it("does not report OpenAI success, Murph-local authorization rejection, or transport failure", async () => {
+    const reportFailure = vi.fn(
+      async (_report: OpenAiAuthorizationAlertReport) =>
+        ({ accepted: true }) as const,
+    );
+    const alert = createOpenAiAuthorizationAlertTestNamespace(reportFailure);
+    const successfulUpstreamFetch = vi.fn<typeof fetch>(
+      async () => new Response("ok", { status: 200 }),
+    );
+    const rejectedUpstreamFetch = vi.fn<typeof fetch>(
+      async () => new Response("must not be reached", { status: 401 }),
+    );
+    const transportFailure = new Error("synthetic OpenAI transport failure");
+    const failedUpstreamFetch = vi.fn<typeof fetch>(async () => {
+      throw transportFailure;
+    });
+    const waitUntil = vi.fn();
+    const authorizedEnv = createInterceptEnv({
+      OPENAI_API_KEY: "openai-worker-secret",
+      OPENAI_AUTHORIZATION_ALERT_MONITOR: alert.namespace,
+      validateRuntimeWriteFence: async () => true,
+    });
+
+    const successResponse = await handleHostedRunnerOpenAiOutbound(
+      createAuthorizedOpenAiModelsRequest(),
+      authorizedEnv,
+      { waitUntil },
+      successfulUpstreamFetch,
+    );
+    const rejectedResponse = await handleHostedRunnerOpenAiOutbound(
+      createAuthorizedOpenAiModelsRequest(),
+      createInterceptEnv({
+        OPENAI_API_KEY: "openai-worker-secret",
+        OPENAI_AUTHORIZATION_ALERT_MONITOR: alert.namespace,
+        validateRuntimeWriteFence: async () => false,
+      }),
+      { waitUntil },
+      rejectedUpstreamFetch,
+    );
+    await expect(handleHostedRunnerOpenAiOutbound(
+      createAuthorizedOpenAiModelsRequest(),
+      authorizedEnv,
+      { waitUntil },
+      failedUpstreamFetch,
+    )).rejects.toBe(transportFailure);
+
+    expect(successResponse.status).toBe(200);
+    expect(rejectedResponse.status).toBe(401);
+    expect(successfulUpstreamFetch).toHaveBeenCalledOnce();
+    expect(rejectedUpstreamFetch).not.toHaveBeenCalled();
+    expect(failedUpstreamFetch).toHaveBeenCalledOnce();
+    expect(alert.getByName).not.toHaveBeenCalled();
+    expect(reportFailure).not.toHaveBeenCalled();
+    expect(waitUntil).not.toHaveBeenCalled();
+  });
+
+  it("isolates a rejected alert RPC and preserves the exact upstream OpenAI response", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const reportFailure = vi.fn(
+        async (_report: OpenAiAuthorizationAlertReport) => {
+          throw new Error("private-rpc-rejection-detail");
+        },
+      );
+      const alert = createOpenAiAuthorizationAlertTestNamespace(reportFailure);
+      const deferred = createWaitUntilCollector();
+      const upstreamResponse = new Response("original-upstream-body", {
+        headers: {
+          "content-type": "application/problem+json",
+          "x-original-header": "original-header-value",
+        },
+        status: 401,
+        statusText: "Original Unauthorized",
+      });
+
+      const response = await handleHostedRunnerOpenAiOutbound(
+        createAuthorizedOpenAiModelsRequest(),
+        createInterceptEnv({
+          OPENAI_API_KEY: "openai-worker-secret",
+          OPENAI_AUTHORIZATION_ALERT_MONITOR: alert.namespace,
+          validateRuntimeWriteFence: async () => true,
+        }),
+        deferred.context,
+        async () => upstreamResponse,
+      );
+
+      expect(response).toBe(upstreamResponse);
+      expect(response.status).toBe(401);
+      expect(response.statusText).toBe("Original Unauthorized");
+      expect(response.headers.get("content-type")).toBe(
+        "application/problem+json",
+      );
+      expect(response.headers.get("x-original-header")).toBe(
+        "original-header-value",
+      );
+      expect(await response.text()).toBe("original-upstream-body");
+      expect(deferred.promises).toHaveLength(1);
+      await Promise.all(deferred.promises);
+      expect(warning).toHaveBeenCalledOnce();
+      expect(warning).toHaveBeenCalledWith(
+        "OpenAI authorization alert report failed.",
+        { failureCode: "openai_authorization_alert_report_failed" },
+      );
+      expect(JSON.stringify(warning.mock.calls)).not.toContain(
+        "private-rpc-rejection-detail",
+      );
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  it("logs the same fixed safe failure once when the alert binding is absent", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const upstreamResponse = new Response("forbidden", { status: 403 });
+
+      const response = await handleHostedRunnerOpenAiOutbound(
+        createAuthorizedOpenAiModelsRequest(),
+        createInterceptEnv({
+          OPENAI_API_KEY: "openai-worker-secret",
+          validateRuntimeWriteFence: async () => true,
+        }),
+        { waitUntil: vi.fn() },
+        async () => upstreamResponse,
+      );
+
+      expect(response).toBe(upstreamResponse);
+      expect(warning).toHaveBeenCalledOnce();
+      expect(warning).toHaveBeenCalledWith(
+        "OpenAI authorization alert report failed.",
+        { failureCode: "openai_authorization_alert_report_failed" },
+      );
+    } finally {
+      warning.mockRestore();
+    }
   });
 
   it("injects OpenAI authorization for Responses WebSocket upgrades without body diagnostics", async () => {
@@ -9049,6 +9510,11 @@ describe("hostedRunnerIntercept", () => {
     },
     {
       method: "POST",
+      operation: "sendDocument",
+      query: "",
+    },
+    {
+      method: "POST",
       operation: "sendPhoto",
       query: "",
     },
@@ -10087,6 +10553,8 @@ function createInterceptEnv(input: {
   MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED?: string;
   MURPH_HOSTED_LOCAL_PROFILE?: string;
   OPENAI_API_KEY?: string;
+  OPENAI_AUTHORIZATION_ALERT_MONITOR?:
+    RunnerOutboundEnvironmentSource["OPENAI_AUTHORIZATION_ALERT_MONITOR"];
   readActiveRuntimeUserFence?: () => Promise<WorkerActiveRuntimeUserFenceResult>;
   readDeploySmokeLiveModelTurnFence?: () => Promise<{
     active: boolean;
@@ -10140,6 +10608,8 @@ function createInterceptEnv(input: {
       input.MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED,
     MURPH_HOSTED_LOCAL_PROFILE: input.MURPH_HOSTED_LOCAL_PROFILE,
     OPENAI_API_KEY: input.OPENAI_API_KEY,
+    OPENAI_AUTHORIZATION_ALERT_MONITOR:
+      input.OPENAI_AUTHORIZATION_ALERT_MONITOR,
     RUNNER_CONTAINER: {
       get: () => ({
         readActiveRuntimeUserFence:

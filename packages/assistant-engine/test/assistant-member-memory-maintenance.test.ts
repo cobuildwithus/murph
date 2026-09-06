@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
-import { readMemoryDocument } from '@murphai/core'
+import { readMemoryDocument, updateMemory } from '@murphai/core'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
@@ -23,11 +23,23 @@ afterEach(async () => {
 })
 
 describe('member-memory maintenance boundary', () => {
-  it('reads, adds, and updates canonical memory through the authorized host', async () => {
+  it('states the exact-once read and guarded mutation receipt contract', () => {
+    expect(MURPH_MEMBER_MEMORY_TOOL.description).toContain(
+      'Call show exactly once per maintenance turn and use that one result for deduplication and mutation targeting.',
+    )
+    expect(MURPH_MEMBER_MEMORY_TOOL.description).toContain(
+      "pass that record's exact updatedAt as expectedUpdatedAt",
+    )
+    expect(MURPH_MEMBER_MEMORY_TOOL.description).toContain(
+      'If a record changed after show, leave the newer value unchanged and end the write attempt',
+    )
+  })
+
+  it('reads, adds, updates, and forgets canonical memory through the authorized host', async () => {
     const vaultRoot = await makeVaultRoot()
 
     const shown = await execute(vaultRoot, { action: 'show' })
-    expect(readResult(shown)).toMatchObject({
+    expect(readResult(shown)).toEqual({
       document: { exists: false, records: [] },
       memory: null,
     })
@@ -37,27 +49,33 @@ describe('member-memory maintenance boundary', () => {
       section: 'Preferences',
       text: 'Prefers concise weekly summaries.',
     }))
-    expect(added).toMatchObject({
+    const memoryId = readMemoryId(added)
+    const addedUpdatedAt = readMemoryUpdatedAt(added)
+    expect(added).toEqual({
       created: true,
       memory: {
+        id: memoryId,
         section: 'Preferences',
         text: 'Prefers concise weekly summaries.',
+        updatedAt: addedUpdatedAt,
       },
     })
-    const memoryId = readMemoryId(added)
 
     const updated = readResult(await execute(vaultRoot, {
       action: 'update',
+      expectedUpdatedAt: addedUpdatedAt,
       memoryId,
       section: 'Instructions',
       text: 'Keep weekly summaries concise.',
     }))
-    expect(updated).toMatchObject({
+    const updatedUpdatedAt = readMemoryUpdatedAt(updated)
+    expect(updated).toEqual({
       created: false,
       memory: {
         id: memoryId,
         section: 'Instructions',
         text: 'Keep weekly summaries concise.',
+        updatedAt: updatedUpdatedAt,
       },
     })
     await expect(readMemoryDocument(vaultRoot)).resolves.toMatchObject({
@@ -67,12 +85,279 @@ describe('member-memory maintenance boundary', () => {
         text: 'Keep weekly summaries concise.',
       }],
     })
+
+    expect(readResult(await execute(vaultRoot, {
+      action: 'forget',
+      expectedUpdatedAt: updatedUpdatedAt,
+      memoryId,
+    }))).toEqual({
+      forgotten: true,
+      memory: null,
+    })
+    await expect(readMemoryDocument(vaultRoot)).resolves.toMatchObject({
+      records: [],
+    })
+  })
+
+  it('keeps the private-free 24-record result-size proof compact without changing persistence', async () => {
+    const vaultRoot = await makeVaultRoot()
+    const sections = [
+      'Identity',
+      'Preferences',
+      'Instructions',
+      'Context',
+    ] as const
+    const initialMemoryIds: string[] = []
+
+    for (const section of sections) {
+      for (let index = 0; index < 6; index += 1) {
+        const text = [
+          `Synthetic ${section.toLowerCase()} memory fixture ${index + 1}`,
+          'for deterministic compact result sizing only.',
+        ].join(' ').padEnd(129, '.')
+        expect(Buffer.byteLength(text, 'utf8')).toBe(129)
+        const result = readResult(await execute(vaultRoot, {
+          action: 'upsert',
+          section,
+          text,
+        }))
+        initialMemoryIds.push(readMemoryId(result))
+      }
+    }
+
+    const canonicalShow = await readMemoryDocument(vaultRoot)
+    const showResult = await execute(vaultRoot, { action: 'show' })
+    const showText = readResultText(showResult)
+    expect(JSON.parse(showText)).toEqual({
+      document: {
+        exists: true,
+        records: canonicalShow.records.map(({ id, section, text, updatedAt }) => ({
+          id,
+          section,
+          text,
+          updatedAt,
+        })),
+      },
+      memory: null,
+    })
+    expect(canonicalShow.records).toHaveLength(24)
+    expect(canonicalShow.records.map((record) => record.id)).toEqual(
+      initialMemoryIds,
+    )
+    const fullShowBytes = Buffer.byteLength(JSON.stringify({
+      document: canonicalShow,
+      memory: null,
+    }), 'utf8')
+    expect(Buffer.byteLength(showText, 'utf8')).toBeLessThan(fullShowBytes)
+
+    const addedText = 'Synthetic compact upsert preference'.padEnd(78, '.')
+    expect(Buffer.byteLength(addedText, 'utf8')).toBe(78)
+    const addedResult = await execute(vaultRoot, {
+      action: 'upsert',
+      section: 'Preferences',
+      text: addedText,
+    })
+    const addedTextResult = readResultText(addedResult)
+    const added = JSON.parse(addedTextResult) as unknown
+    const addedMemoryId = readMemoryId(added)
+    const addedUpdatedAt = readMemoryUpdatedAt(added)
+    expect(added).toEqual({
+      created: true,
+      memory: {
+        id: addedMemoryId,
+        section: 'Preferences',
+        text: addedText,
+        updatedAt: addedUpdatedAt,
+      },
+    })
+    const canonicalAfterAdd = await readMemoryDocument(vaultRoot)
+    expect(canonicalAfterAdd.records).toHaveLength(25)
+    expect(
+      canonicalAfterAdd.records
+        .filter((record) => record.id !== addedMemoryId)
+        .map(({ id, section, text }) => ({ id, section, text })),
+    ).toEqual(
+      canonicalShow.records.map(({ id, section, text }) => ({
+        id,
+        section,
+        text,
+      })),
+    )
+    const canonicalAddedRecord = canonicalAfterAdd.records.find(
+      (record) => record.id === addedMemoryId,
+    )
+    if (!canonicalAddedRecord) {
+      throw new Error('Expected the compact upsert record to persist.')
+    }
+    const fullAddedResultBytes = Buffer.byteLength(JSON.stringify({
+      created: true,
+      document: canonicalAfterAdd,
+      memory: canonicalAddedRecord,
+    }), 'utf8')
+    expect(Buffer.byteLength(addedTextResult, 'utf8'))
+      .toBeLessThan(fullAddedResultBytes)
+
+    const updatedText = 'Synthetic compact identity update'.padEnd(64, '.')
+    expect(Buffer.byteLength(updatedText, 'utf8')).toBe(64)
+    const updatedMemoryId = initialMemoryIds[0]
+    if (!updatedMemoryId) {
+      throw new Error('Expected one initial memory id for exact-id update.')
+    }
+    const recordBeforeUpdate = canonicalShow.records.find(
+      (record) => record.id === updatedMemoryId,
+    )
+    if (!recordBeforeUpdate) {
+      throw new Error('Expected the exact-id update target to exist.')
+    }
+    const updatedResult = await execute(vaultRoot, {
+      action: 'update',
+      expectedUpdatedAt: recordBeforeUpdate.updatedAt,
+      memoryId: updatedMemoryId,
+      section: 'Identity',
+      text: updatedText,
+    })
+    const updatedTextResult = readResultText(updatedResult)
+    const updatedUpdatedAt = readMemoryUpdatedAt(
+      JSON.parse(updatedTextResult) as unknown,
+    )
+    expect(JSON.parse(updatedTextResult)).toEqual({
+      created: false,
+      memory: {
+        id: updatedMemoryId,
+        section: 'Identity',
+        text: updatedText,
+        updatedAt: updatedUpdatedAt,
+      },
+    })
+    const canonicalAfterUpdate = await readMemoryDocument(vaultRoot)
+    const canonicalUpdatedRecord = canonicalAfterUpdate.records.find(
+      (record) => record.id === updatedMemoryId,
+    )
+    if (!canonicalUpdatedRecord) {
+      throw new Error('Expected the exact-id update record to persist.')
+    }
+    const fullUpdatedResultBytes = Buffer.byteLength(JSON.stringify({
+      created: false,
+      document: canonicalAfterUpdate,
+      memory: canonicalUpdatedRecord,
+    }), 'utf8')
+    expect(Buffer.byteLength(updatedTextResult, 'utf8'))
+      .toBeLessThan(fullUpdatedResultBytes)
+    expect(canonicalAfterUpdate.records).toHaveLength(25)
+    expect(canonicalAfterUpdate.records.map((record) => record.id).sort()).toEqual(
+      canonicalAfterAdd.records.map((record) => record.id).sort(),
+    )
+    expect(
+      canonicalAfterUpdate.records
+        .filter((record) => record.id !== updatedMemoryId)
+        .map(({ id, section, text }) => ({ id, section, text })),
+    ).toEqual(
+      canonicalAfterAdd.records
+        .filter((record) => record.id !== updatedMemoryId)
+        .map(({ id, section, text }) => ({ id, section, text })),
+    )
+    expect(canonicalUpdatedRecord).toMatchObject({
+      id: updatedMemoryId,
+      section: 'Identity',
+      text: updatedText,
+    })
+    expect(canonicalAfterUpdate.records).toContainEqual(
+      expect.objectContaining({
+        id: addedMemoryId,
+        section: 'Preferences',
+        text: addedText,
+      }),
+    )
+  })
+
+  it('leaves newer saved memory unchanged after a stale maintenance read', async () => {
+    const vaultRoot = await makeVaultRoot()
+    const added = readResult(await execute(vaultRoot, {
+      action: 'upsert',
+      section: 'Preferences',
+      text: 'Use the original saved format.',
+    }))
+    const memoryId = readMemoryId(added)
+    const staleUpdatedAt = readMemoryUpdatedAt(added)
+    const current = await updateMemory(vaultRoot, {
+      expectedUpdatedAt: staleUpdatedAt,
+      recordId: memoryId,
+      text: 'Use the newer saved format.',
+    })
+
+    const staleUpdate = await execute(vaultRoot, {
+      action: 'update',
+      expectedUpdatedAt: staleUpdatedAt,
+      memoryId,
+      text: 'A stale overwrite must not persist.',
+    })
+    const staleForget = await execute(vaultRoot, {
+      action: 'forget',
+      expectedUpdatedAt: staleUpdatedAt,
+      memoryId,
+    })
+
+    for (const result of [staleUpdate, staleForget]) {
+      expect(result.rpcResult.success).toBe(false)
+      expect(result.rpcResult.contentItems[0]?.text).toBe(
+        'saved memory changed after show; leave the newer value unchanged and end this maintenance write attempt',
+      )
+    }
+    await expect(readMemoryDocument(vaultRoot)).resolves.toMatchObject({
+      records: [current.record],
+    })
+  })
+
+  it('does not mutate canonical memory after maintenance is aborted', async () => {
+    const vaultRoot = await makeVaultRoot()
+    const added = readResult(await execute(vaultRoot, {
+      action: 'upsert',
+      section: 'Preferences',
+      text: 'Keep the saved value.',
+    }))
+    const memoryId = readMemoryId(added)
+    const expectedUpdatedAt = readMemoryUpdatedAt(added)
+    const abortSignal = AbortSignal.abort(
+      new Error('Foreground work preempted maintenance.'),
+    )
+
+    const results = await Promise.all([
+      execute(vaultRoot, {
+        action: 'upsert',
+        section: 'Context',
+        text: 'This addition must not persist.',
+      }, abortSignal),
+      execute(vaultRoot, {
+        action: 'update',
+        expectedUpdatedAt,
+        memoryId,
+        text: 'This update must not persist.',
+      }, abortSignal),
+      execute(vaultRoot, {
+        action: 'forget',
+        expectedUpdatedAt,
+        memoryId,
+      }, abortSignal),
+    ])
+
+    expect(results.map((result) => result.rpcResult.success)).toEqual([
+      false,
+      false,
+      false,
+    ])
+    await expect(readMemoryDocument(vaultRoot)).resolves.toMatchObject({
+      records: [{
+        id: memoryId,
+        section: 'Preferences',
+        text: 'Keep the saved value.',
+      }],
+    })
   })
 
   it('rejects calls without exact managed-maintenance authority', async () => {
     const vaultRoot = await makeVaultRoot()
     const result = await executeMemberMemoryDynamicTool({
-      available: true,
+      abortSignal: null,
       managedMaintenanceAuthorized: false,
       request: {
         args: {
@@ -93,12 +378,38 @@ describe('member-memory maintenance boundary', () => {
   })
 
   it('parses only the strict member-memory action surface', () => {
+    const expectedUpdatedAt = '2026-08-30T12:00:00.000Z'
     expect(readMemberMemoryDynamicToolRequest({
       arguments: { action: 'show' },
       tool: MURPH_MEMBER_MEMORY_TOOL.name,
     })?.kind).toBe('member-memory')
     expect(readMemberMemoryDynamicToolRequest({
-      arguments: { action: 'forget', memoryId: 'mem_not_allowed' },
+      arguments: {
+        action: 'update',
+        expectedUpdatedAt,
+        memoryId: 'mem_exact',
+        text: 'Updated exact fact.',
+      },
+      tool: MURPH_MEMBER_MEMORY_TOOL.name,
+    })?.kind).toBe('member-memory')
+    expect(readMemberMemoryDynamicToolRequest({
+      arguments: {
+        action: 'forget',
+        expectedUpdatedAt,
+        memoryId: 'mem_exact',
+      },
+      tool: MURPH_MEMBER_MEMORY_TOOL.name,
+    })?.kind).toBe('member-memory')
+    expect(readMemberMemoryDynamicToolRequest({
+      arguments: {
+        action: 'update',
+        memoryId: 'mem_missing_version',
+        text: 'Unsafe update.',
+      },
+      tool: MURPH_MEMBER_MEMORY_TOOL.name,
+    })?.kind).toBe('invalid-member-memory-arguments')
+    expect(readMemberMemoryDynamicToolRequest({
+      arguments: { action: 'forget', memoryId: 'mem_missing_version' },
       tool: MURPH_MEMBER_MEMORY_TOOL.name,
     })?.kind).toBe('invalid-member-memory-arguments')
     expect(readMemberMemoryDynamicToolRequest({
@@ -120,9 +431,10 @@ async function execute(
     MemberMemoryDynamicToolRequest,
     { kind: 'member-memory' }
   >['args'],
+  abortSignal: AbortSignal | null = null,
 ): Promise<Awaited<ReturnType<typeof executeMemberMemoryDynamicTool>>> {
   return await executeMemberMemoryDynamicTool({
-    available: true,
+    abortSignal,
     managedMaintenanceAuthorized: true,
     request: { args, kind: 'member-memory' },
     vaultRoot,
@@ -132,8 +444,18 @@ async function execute(
 function readResult(
   result: Awaited<ReturnType<typeof executeMemberMemoryDynamicTool>>,
 ): unknown {
+  return JSON.parse(readResultText(result))
+}
+
+function readResultText(
+  result: Awaited<ReturnType<typeof executeMemberMemoryDynamicTool>>,
+): string {
   expect(result.rpcResult.success).toBe(true)
-  return JSON.parse(result.rpcResult.contentItems[0]?.text ?? 'null')
+  const text = result.rpcResult.contentItems[0]?.text
+  if (text === undefined) {
+    throw new TypeError('member-memory result is missing result text')
+  }
+  return text
 }
 
 function readMemoryId(result: unknown): string {
@@ -149,4 +471,19 @@ function readMemoryId(result: unknown): string {
     throw new TypeError('member-memory result is missing a memory id')
   }
   return memory.id
+}
+
+function readMemoryUpdatedAt(result: unknown): string {
+  const memory = typeof result === 'object' && result !== null && 'memory' in result
+    ? result.memory
+    : null
+  if (
+    typeof memory !== 'object'
+    || memory === null
+    || !('updatedAt' in memory)
+    || typeof memory.updatedAt !== 'string'
+  ) {
+    throw new TypeError('member-memory result is missing updatedAt')
+  }
+  return memory.updatedAt
 }

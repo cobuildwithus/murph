@@ -2,6 +2,7 @@ import type { CanonicalEntity } from "../canonical-entities.ts";
 import { experimentOutcomeSchema } from "@murphai/contracts";
 import { metricPointRecordIds } from "../metrics/index.ts";
 import { buildPersonalPatternReportFromWearableBundleAndMetricPoints } from "../personal-patterns.ts";
+import { buildJournalView } from "../journal-view.ts";
 import { isDefaultProjectedQueryEntity } from "../query-visibility.ts";
 import type { OverviewWeeklySampleSummary } from "../overview.ts";
 import { summarizeDailySamples, type DailySampleSummary } from "../summaries.ts";
@@ -76,17 +77,19 @@ export async function createBrowserVaultReplica(
   const allMetricPoints = input.metricPoints;
   const requestedMetrics = collectRequestedBrowserVaultMetrics(defaultProjectedVault.entities);
   const explicitRequestedMetrics = collectExplicitBrowserVaultMetrics(defaultProjectedVault.entities);
+  const requestedMetricKeys = new Set(requestedMetrics.map((metric) => metric.metricKey));
+  const explicitRequestedMetricKeys = new Set(explicitRequestedMetrics.map((metric) => metric.metricKey));
   const anchoredMetricRecords = collectExperimentMeasurementAnchorRecords(defaultProjectedVault.entities);
   const cutoff = subtractDaysFromIsoDate(generatedAt.slice(0, 10), METRIC_LOOKBACK_DAYS);
   const metricPoints = allMetricPoints.filter((point) =>
-    isBrowserVaultMetricRowPoint(point, requestedMetrics) &&
+    isBrowserVaultMetricRowPoint(point, requestedMetricKeys) &&
     (point.effectiveDate >= cutoff || isAnchoredBrowserMetricPoint(point, anchoredMetricRecords))
   );
   const selectionMetricPoints = allMetricPoints.filter((point) =>
-    isBrowserVaultRequestedMetricPoint(point, requestedMetrics) &&
+    isBrowserVaultRequestedMetricPoint(point, requestedMetricKeys) &&
     (point.effectiveDate >= cutoff ||
       isAnchoredBrowserMetricPoint(point, anchoredMetricRecords) ||
-      isBrowserVaultRequestedMetricPoint(point, explicitRequestedMetrics))
+      isBrowserVaultRequestedMetricPoint(point, explicitRequestedMetricKeys))
   );
   await yieldToBrowserVaultReplicaCancellation(input.signal);
   const metricRows = toBrowserVaultMetricRows({ points: metricPoints });
@@ -110,7 +113,10 @@ export async function createBrowserVaultReplica(
     input.vault,
     wearableSummaryBundle,
     allMetricPoints,
-    { asOf: generatedAt },
+    {
+      asOf: generatedAt,
+      vocabulary: input.personalPatternVocabulary,
+    },
   );
   await yieldToBrowserVaultReplicaCancellation(input.signal);
   const replicaWithoutVersion: BrowserVaultReplica = {
@@ -127,6 +133,10 @@ export async function createBrowserVaultReplica(
       row.biomarkerKey !== null &&
       row.value !== null
     ),
+    journal: buildJournalView(input.vault, allMetricPoints, {
+      asOf: addDaysToIsoDate(generatedAt.slice(0, 10), 1),
+      vocabulary: input.personalPatternVocabulary,
+    }),
     labResultRows,
     metricGoalProgressRows: buildMetricGoalProgressRows(defaultProjectedVault.entities, allMetricPoints, generatedAt),
     metricRows,
@@ -365,18 +375,18 @@ function dedupeRequestedMetrics(metrics: readonly BrowserVaultRequestedMetric[])
 // metric-SELECTION surface keeps its stricter requested-only gate.
 function isBrowserVaultMetricRowPoint(
   point: MetricPoint,
-  requestedMetrics: readonly BrowserVaultRequestedMetric[],
+  requestedMetricKeys: ReadonlySet<string>,
 ): boolean {
-  return isBrowserVaultRequestedMetricPoint(point, requestedMetrics)
+  return isBrowserVaultRequestedMetricPoint(point, requestedMetricKeys)
     || point.source.kind === "test-result"
     || point.source.kind === "observation";
 }
 
 function isBrowserVaultRequestedMetricPoint(
   point: MetricPoint,
-  requestedMetrics: readonly BrowserVaultRequestedMetric[],
+  requestedMetricKeys: ReadonlySet<string>,
 ): boolean {
-  return requestedMetrics.some((metric) => metric.metricKey === point.metricKey);
+  return requestedMetricKeys.has(point.metricKey);
 }
 
 function isActiveGoalEntity(entity: CanonicalEntity): boolean {
@@ -742,4 +752,8 @@ function subtractDaysFromIsoDate(value: string, days: number): string {
 
   parsed.setUTCDate(parsed.getUTCDate() - days);
   return parsed.toISOString().slice(0, 10);
+}
+
+function addDaysToIsoDate(value: string, days: number): string {
+  return subtractDaysFromIsoDate(value, -days);
 }

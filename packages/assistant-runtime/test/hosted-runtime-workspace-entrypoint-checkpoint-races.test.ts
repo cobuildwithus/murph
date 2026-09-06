@@ -14,6 +14,7 @@ import {
   readConversationImportedSeqs,
   removeTempRoot,
   requireEventIndex,
+  runHostedWorkspaceRuntimeJobInProcess,
   stageAssistantInputEventForMailboxItem,
   waitForFakeTimerScheduled,
   waitUntil,
@@ -79,7 +80,6 @@ import {
   HostedWorkspaceRunnerUserMismatchError,
   drainHostedRuntimeDeferredUsageCompletionsBestEffort,
   parseHostedAssistantWorkspaceRuntimeJobInput,
-  runHostedWorkspaceRuntimeJobInProcess,
   type HostedWorkspaceRuntimeJobOptions,
   type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
@@ -1629,145 +1629,301 @@ describe("hosted workspace runtime entrypoint", () => {test("retained post-check
     }
   });
 
-  test("runtime wakes that interrupt checkpoint publication do not service same-key due wakes before checkpoint", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-idle-checkpoint-"));
+  test("a committed checkpoint response lost to its self-wake does not defer due assistant work for another idle window", async () => {
+    const workspaceRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-runtime-committed-checkpoint-self-wake-"),
+    );
+    const vaultRoot = path.join(workspaceRoot, "durable", "vault");
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const idleCheckpointDelayMs = 180_000;
     const assistantOneObserved = createDeferred<void>();
     const assistantTwoObserved = createDeferred<void>();
+    const firstCompletionResponseLost = createDeferred<void>();
+    const firstSnapshotInterrupted = createDeferred<void>();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const shutdownController = new AbortController();
+    const startedAtMs = Date.parse(TEST_NOW);
     let assistantPhaseCalls = 0;
-    let snapshotAttempt = 0;
+    let archiveBuilds = 0;
+    let completionCalls = 0;
+    let firstRemoteCommitAtMs: number | null = null;
+    let firstSnapshotInterruptionReason: unknown = null;
+    let remoteCommittedWorkspace: HostedWorkspaceState | null = null;
+    let assistantServicedAtMs: number | null = null;
+    let sessionStarts = 0;
+    let resultPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
 
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     try {
       vi.setSystemTime(new Date(TEST_NOW));
+      await mkdir(path.join(workspaceRoot, "durable", "home"), { recursive: true });
+      await mkdir(path.join(workspaceRoot, "scratch"), { recursive: true });
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      const resultPromise = withRealTimeout(
-        runHostedWorkspaceRuntimeJobInProcess(
-          createWorkspaceRuntimeJobInput({
-            request: {
-              attemptId: "attempt_synthetic_same_key_checkpoint_interrupt",
-              idleCheckpointDelayMs,
-              leaseGeneration: "9",
-              userId: TEST_USER_ID,
-              workspaceVersion: "4",
+      const workspaceSnapshotPort: NonNullable<
+        HostedRuntimePlatform["workspaceSnapshotPort"]
+      > = {
+        async abortSnapshotSession() {
+          throw new Error("A completion-attempted session must not be aborted.");
+        },
+        async completeSnapshotSession(input) {
+          completionCalls += 1;
+          events.push(`snapshot.complete:${completionCalls}`);
+          if (remoteCommittedWorkspace === null) {
+            remoteCommittedWorkspace = createWorkspaceState({
+              nextWakeAt: input.checkpointRequest.nextWakeAt ?? null,
+              nextWakeReason: input.checkpointRequest.nextWakeReason ?? null,
+              redactedStatus: input.checkpointRequest.redactedStatus ?? null,
+              snapshotRef: input.ref,
+              version: "5",
+            });
+            events.push(`remote.commit:${remoteCommittedWorkspace.version}`);
+          }
+          if (completionCalls === 1) {
+            firstRemoteCommitAtMs = Date.now();
+            runtimeWakeSignal.notify({ notifiedAtEpochMs: Date.now() });
+            await withRealTimeout(
+              firstSnapshotInterrupted.promise,
+              5_000,
+              () => `Snapshot signal did not observe its self-wake: ${events.join(",")}`,
+            );
+            events.push("snapshot.response-lost:1");
+            firstCompletionResponseLost.resolve();
+            // Model the Cloudflare port's one exact internal transport replay;
+            // the canonical result remains the already committed v5 workspace.
+            completionCalls += 1;
+            events.push(`snapshot.complete:${completionCalls}`);
+          }
+          return {
+            checkpoint: {
+              checkpointed: true,
+              workspace: remoteCommittedWorkspace,
             },
+            snapshotRef: input.ref,
+          };
+        },
+        async putSnapshotObjectDirect() {
+          return {
+            snapshotDirectR2PresignElapsedMs: 1,
+            snapshotDirectR2PutElapsedMs: 1,
+          };
+        },
+        async restoreWorkspaceSnapshot() {
+          throw new Error("This test starts from a materialized workspace.");
+        },
+        async startSnapshotSession() {
+          sessionStarts += 1;
+          const snapshotId = `committed_checkpoint_self_wake_${sessionStarts}`;
+          const objectKey =
+            `users/${TEST_USER_ID}/workspace-snapshots/${snapshotId}.snapshot.enc`;
+          return {
+            encryption: {
+              aad: buildHostedWorkspaceSnapshotV2Aad({
+                objectKey,
+                snapshotId,
+                userId: TEST_USER_ID,
+              }),
+              dataKeyBase64: "synthetic-data-key",
+              ivBase64: "synthetic-iv",
+              rootKeyId: "synthetic-root-key",
+              scheme: HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+              wrappedDataKey: "synthetic-wrapped-data-key",
+            },
+            limits: {
+              maxSinglePartEncryptedBytes: 1_024,
+              warnEncryptedBytes: 512,
+            },
+            objectKey,
+            snapshotId,
+          };
+        },
+      };
+      const platform = createPlatform({
+        mailboxPort: createMailboxPort({
+          events,
+          items: [],
+        }),
+        workspacePort: createWorkspacePort({
+          checkpointRequests,
+          events,
+          workspace: createWorkspaceState({
+            nextWakeAt: TEST_NOW,
+            nextWakeReason: "assistant",
+            version: "4",
           }),
-          {
-            async createCheckpointSnapshot(snapshotInput) {
-              snapshotAttempt += 1;
-              events.push(`snapshot:${snapshotAttempt}:${snapshotInput.reason}`);
-              if (snapshotAttempt === 1) {
-                throw new HostedRuntimeCheckpointInterruptedByWakeError();
-              }
-              return {
-                snapshotRef: createBundleRef({
-                  hash: `${snapshotAttempt}`.repeat(64).slice(0, 64),
-                  key:
-                    "users/bundles/member-synthetic/"
-                    + `runtime-same-key-checkpoint-interrupt-${snapshotAttempt}.bundle.json`,
-                  size: 640,
-                }),
-              };
-            },
-            async importItem(item) {
-              events.push(`mailbox.importItem:${item.item.id}`);
-              return { status: "imported" };
-            },
-            platform: createPlatform({
-              mailboxPort: createMailboxPort({
-                events,
-                items: [],
-              }),
-              workspacePort: createWorkspacePort({
-                checkpointRequests,
-                events,
-                workspace: createWorkspaceState({
-                  nextWakeAt: TEST_NOW,
-                  nextWakeReason: "assistant",
-                  version: "4",
-                }),
-              }),
-            }),
-            async runAssistantPhase(input) {
-              assistantPhaseCalls += 1;
-              events.push(
-                `assistant.phase:${assistantPhaseCalls}:`
-                  + `${input.workspace?.nextWakeAt ?? "none"}:`
-                  + `${input.workspace?.nextWakeReason ?? "none"}`,
-              );
-              if (assistantPhaseCalls === 1) {
-                assistantOneObserved.resolve();
-                return {
-                  afterCheckpoint: async () => ({
-                    checkpointReason: "provider_cleanup",
-                    nextWakeAt: TEST_NOW,
-                    nextWakeReason: "assistant",
-                  }),
-                  checkpointReason: "canonical_runtime_commit",
-                  nextWakeAt: TEST_NOW,
-                  nextWakeReason: "assistant",
-                  progressed: true,
-                  redactedStatus: {
-                    hostedAssistantProgressed: true,
-                  },
-                };
-              }
-
-              if (assistantPhaseCalls === 2) {
-                assistantTwoObserved.resolve();
-                return {
-                  checkpointReason: "assistant_runtime_commit",
-                  nextWakeAt: null,
-                  nextWakeReason: null,
-                  progressed: true,
-                  redactedStatus: {
-                    hostedAssistantProgressed: true,
-                  },
-                };
-              }
-
-              throw new Error("Interrupted same-key due wake should service exactly once.");
-            },
-            vaultRoot,
+        }),
+        workspaceSnapshotPort,
+      });
+      const runtimeJobInput = createWorkspaceRuntimeJobInput({
+        request: {
+          attemptId: "attempt_synthetic_committed_checkpoint_self_wake",
+          idleCheckpointDelayMs,
+          leaseGeneration: "9",
+          userId: TEST_USER_ID,
+          workspaceVersion: "4",
+        },
+      });
+      const runtimeConfig = runtimeJobInput.runtime;
+      assert.ok(runtimeConfig);
+      const snapshotArchiveBuilder: HostedWorkspaceSnapshotArchiveBuilder = {
+        async buildEncryptedSnapshot(input) {
+          archiveBuilds += 1;
+          if (archiveBuilds === 1) {
+            assert.ok(input.signal);
+            const recordInterruption = () => {
+              firstSnapshotInterruptionReason = input.signal?.reason;
+              events.push("snapshot.signal-aborted:1");
+              firstSnapshotInterrupted.resolve();
+            };
+            if (input.signal.aborted) {
+              recordInterruption();
+            } else {
+              input.signal.addEventListener("abort", recordInterruption, { once: true });
+            }
+          }
+          const temporaryDirectoryPath = await mkdtemp(
+            path.join(input.outputDir, "synthetic-snapshot-"),
+          );
+          const encryptedFilePath = path.join(
+            temporaryDirectoryPath,
+            "snapshot.enc",
+          );
+          await writeFile(encryptedFilePath, "encrypted snapshot", "utf8");
+          return {
+            compression: HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
+            encryptedByteSize: 18,
+            encryptedFilePath,
+            encryptedObjectSha256: "a".repeat(64),
+            fileCount: input.archiveEntries.length,
+            plaintextArchiveSha256: "b".repeat(64),
+            temporaryDirectoryPath,
+            totalPlainBytes: 18,
+          };
+        },
+      };
+      const bridgeOptions = createHostedWorkspaceRuntimeBridgeJobOptions({
+        decodeMailboxPayload: {
+          async decode() {
+            return {
+              reasonCode: "unused_in_snapshot_control_test",
+              retryable: false,
+              status: "blocked",
+            };
           },
-        ),
-        15_000,
-        () => events.join(","),
-      );
+        },
+        platform,
+        readCurrentLease: async () => ({
+          attemptId: runtimeJobInput.request.attemptId,
+          leaseGeneration: runtimeJobInput.request.leaseGeneration,
+          providerEgressToken: runtimeJobInput.request.providerEgressToken ?? null,
+          userId: runtimeJobInput.request.userId,
+          workspaceVersion: runtimeJobInput.request.workspaceVersion,
+        }),
+        request: runtimeJobInput.request,
+        runtime: runtimeConfig,
+        snapshotArchiveBuilder,
+        snapshotDiagnosticsHashSecret: "f".repeat(64),
+        vaultRoot,
+        waitForBackgroundAssistantWork: async () => undefined,
+      });
+
+      resultPromise = runHostedWorkspaceRuntimeJobInProcess(runtimeJobInput, {
+        createCheckpointSnapshot: bridgeOptions.createCheckpointSnapshot,
+        async importItem(item) {
+          events.push(`mailbox.importItem:${item.item.id}`);
+          return { status: "imported" };
+        },
+        platform,
+        runtimeWakeSignal,
+        async runAssistantPhase(input) {
+          assistantPhaseCalls += 1;
+          events.push(
+            `assistant.phase:${assistantPhaseCalls}:`
+              + `${input.workspace?.nextWakeAt ?? "none"}:`
+              + `${input.workspace?.nextWakeReason ?? "none"}`,
+          );
+          if (assistantPhaseCalls === 1) {
+            assistantOneObserved.resolve();
+            return {
+              afterCheckpoint: async () => ({
+                checkpointReason: "provider_cleanup",
+                nextWakeAt: TEST_NOW,
+                nextWakeReason: "assistant",
+              }),
+              checkpointReason: "canonical_runtime_commit",
+              nextWakeAt: TEST_NOW,
+              nextWakeReason: "assistant",
+              progressed: true,
+              redactedStatus: {
+                hostedAssistantProgressed: true,
+              },
+            };
+          }
+
+          if (assistantPhaseCalls === 2) {
+            assistantServicedAtMs = Date.now();
+            assistantTwoObserved.resolve();
+            return {
+              checkpointReason: "assistant_runtime_commit",
+              nextWakeAt: null,
+              nextWakeReason: null,
+              progressed: true,
+              redactedStatus: {
+                hostedAssistantProgressed: true,
+              },
+            };
+          }
+
+          throw new Error("Interrupted same-key due wake should service exactly once.");
+        },
+        shutdownSignal: shutdownController.signal,
+        vaultRoot,
+      });
 
       await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
       await waitForFakeTimerScheduled(() => events.join(","));
       await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
+      await withRealTimeout(
+        firstCompletionResponseLost.promise,
+        15_000,
+        () => events.join(","),
+      );
       await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
+
       assert.ok(
-        requireEventIndex(events, "snapshot:2:idle_shutdown")
+        requireEventIndex(events, "snapshot.complete:2")
           < requireEventIndex(events, `assistant.phase:2:${TEST_NOW}:assistant`),
       );
-
-      await waitForFakeTimerScheduled(() => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs);
-      const result = await resultPromise;
-
-      assert.deepEqual(events.filter((event) => event.startsWith("snapshot:")), [
-        "snapshot:1:idle_shutdown",
-        "snapshot:2:idle_shutdown",
-        "snapshot:3:idle_shutdown",
-      ]);
-      assert.deepEqual(checkpointRequests.map((request) => [
-        request.reason,
-        request.nextWakeAt,
-        request.nextWakeReason,
-      ]), [
-        ["idle_shutdown", TEST_NOW, "assistant"],
-        ["idle_shutdown", null, null],
-      ]);
-      assert.equal(result.nextWakeAt, null);
-      assert.equal(result.status, "idle");
+      assert.ok(
+        requireEventIndex(events, "remote.commit:5")
+          < requireEventIndex(events, "snapshot.response-lost:1"),
+      );
+      assert.ok(
+        firstSnapshotInterruptionReason
+          instanceof HostedRuntimeCheckpointInterruptedByWakeError,
+      );
+      assert.equal(checkpointRequests.length, 0);
+      if (firstRemoteCommitAtMs === null || assistantServicedAtMs === null) {
+        throw new Error(`Missing latency timestamp: ${events.join(",")}`);
+      }
+      const assistantDelayAfterRemoteCommitMs =
+        assistantServicedAtMs - firstRemoteCommitAtMs;
+      assert.ok(
+        assistantDelayAfterRemoteCommitMs < idleCheckpointDelayMs,
+        "A remotely committed checkpoint response lost to its self-wake "
+          + "must not make due assistant work wait for another idle window: "
+          + JSON.stringify({
+            events,
+            firstRemoteCommitAtMs: firstRemoteCommitAtMs - startedAtMs,
+            assistantDelayAfterRemoteCommitMs,
+            assistantServicedAtMs: assistantServicedAtMs - startedAtMs,
+          }),
+      );
     } finally {
+      shutdownController.abort(new Error("Test cleanup."));
+      await resultPromise?.catch(() => undefined);
       vi.useRealTimers();
-      await removeTempRoot(vaultRoot);
+      await removeTempRoot(workspaceRoot);
     }
   });
 

@@ -26,6 +26,15 @@ contracts live in `@murphai/hosted-execution/orchestration-control`. Use
 `@murphai/hosted-execution/routes` for stable route constants and builders.
 Use `@murphai/hosted-execution/assistant-usage` for the hosted assistant usage
 record contract, parser, id helper, and credential-source helper.
+The v2 turn profile may include `knowledgeCounts` on the `vault-cli knowledge`
+command aggregate: show, list, search, write, and other call counts, plus missing,
+invalid, conflict, and other failure counts. Counts reconcile with the existing
+call/failure totals; missing pages remain failed commands. Classification reads
+only bounded complete JSON error envelopes and persists numbers, never page
+slugs, arguments, paths, or error text. Older readers omit this optional field;
+new readers continue accepting profiles without it. These diagnostic counters
+do not change token metering or billing. Existing compound-command and batch
+family attribution stays unchanged; those calls are not reclassified as knowledge.
 Use `@murphai/hosted-execution/plan-usage` for the strict request and member
 plan-usage status codec. The empty request preserves the original response
 shape; a caller may opt into the optional nullable `subscriptionActionQuote`
@@ -73,6 +82,10 @@ mention the deleted generic state.
 - Temporal calls Cloudflare `ensure-processing`; Cloudflare returns
   `runtime_processing_accepted` or `retry_later` and owns runner start, wake,
   active-fence alarm cleanup, and execution cleanup.
+- The optional positive-only `conversationWorkPending` ensure fact permits
+  standby allocation for admitted conversation work in default mode. Deploy
+  the accepting Cloudflare receiver before its Temporal producer; absent fields
+  preserve existing behavior. It grants no consent, access, or write authority.
 - device-sync runtime snapshot/apply/token contracts stay on
   `@murphai/device-syncd/hosted-runtime`; this package only carries the outer
   hosted runtime control seam plus the shared device-sync wake-hint shape needed

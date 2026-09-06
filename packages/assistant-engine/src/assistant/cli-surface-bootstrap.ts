@@ -22,6 +22,7 @@ const assistantCliSurfaceBootstrapAllOptionsCommandNames = new Set([
   'assistant onboarding resume-context',
   'goal save',
   'memory upsert',
+  'wearables activity list',
 ])
 export const assistantCliSurfacePrebuiltArtifactFileName =
   'cli-surface-contract.generated.json'
@@ -431,7 +432,10 @@ function renderAssistantCliContractCommandLine(
   const optionsSchema = command.schema?.options
   const argNames = readAssistantCliSchemaPropertyNames(argsSchema)
   const optionNames = readAssistantCliSchemaPropertyNames(optionsSchema)
-  const args = argNames.map((name) => `<${name}>`)
+  const requiredArgNames = new Set(argsSchema?.required ?? [])
+  const args = argNames.map((name) =>
+    requiredArgNames.has(name) ? `<${name}>` : `[${name}]`,
+  )
   const options = optionNames
     .filter((name) => !assistantCliSurfaceBootstrapIgnoredOptionNames.has(name))
     .map((name) => renderAssistantCliOptionSignature(name, optionsSchema?.properties?.[name]))

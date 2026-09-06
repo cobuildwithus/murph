@@ -1,594 +1,58 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-08-26
+Last verified: 2026-09-05
 
 ## Purpose
 
-This index is the table of contents for the current canonical docs in this repository.
-It intentionally lists live architecture, product, verification, and package-boundary docs only.
+Personal Patterns expiry and checkpoint wake diagnostics are specified in
+`agent-docs/RELIABILITY.md` and the hosted runtime protocol reference.
 
-Local agents treat production secret values as unavailable and stop for user
-discussion before any task-specific production migration, deployment, rollout
-freeze, dry run, protected-identity proof, or write that depends on them. The
-canonical trust boundary and authorization requirements for any later hosted or
-protected path are specified by `agent-docs/SECURITY.md`.
-
-Markdown-only pull requests keep their seven existing required contexts, while
-flat, dated release-note records may use base-trusted exact-inventory receipts
-instead of runtime-heavy proof. Every other Markdown path retains full CI, and
-Vercel custom environments always retain their builds. The narrow path
-allowlist, fail-closed classifier boundary, base-to-synthetic-merge documentation
-proof, unchanged GitHub main-push verification, production Web ignored-build
-reuse, and focused proof are specified by
-`agent-docs/operations/verification-and-runtime.md` and
+Runtime-owned terminal Linq send recovery and replacement receipt ownership
+are specified by `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, and
+`agent-docs/SECURITY.md`; focused provider and PostgreSQL proof is indexed in
 `agent-docs/references/testing-ci-map.md`.
 
-`vault-cli` runner-bundle budget ownership and focused proof are specified by
-`agent-docs/operations/verification-and-runtime.md` and
-`agent-docs/references/testing-ci-map.md`.
+Device-sync metadata priority within the existing bounded envelope is specified
+by `agent-docs/RELIABILITY.md`, including the service-owned finite ECG binding
+reason in hosted failure events; Junction's progress keys remain provider-owned.
 
-Hosted Browser Vault terminal-failure convergence, joined-cancellation ownership, and direct proof
-expectations are specified by `agent-docs/references/hosted-runtime-protocol.md`.
-
-Kernel browser-session authority is independent of the optional Live View
-capability. Web-owned automation may continue when that viewer cannot be safely
-embedded. One code-owned Kernel host policy derives validation and CSP, while
-direct handoff publication and Managed Auth fallback remain fail-closed human
-exposure boundaries. This split is specified by `ARCHITECTURE.md`,
-`agent-docs/SECURITY.md`, and `apps/web/README.md`.
-
-Large hand-authored runtime and provider suites are partitioned into
-behavior-owned test modules backed by adjacent owner-specific harnesses. Root,
-diff-aware, package, and release coverage lanes run those owners on the ordinary
-Node heap without package-specific invocation branches. The command contract
-and proof map, including the general behavior-cohesion rule for hand-authored
-test modules and owner-specific harnesses, are specified by
-`agent-docs/operations/verification-and-runtime.md` and
-`agent-docs/references/testing-ci-map.md`.
-
-Composed package coverage schedules Hosted Local Harness after every unrelated
-owner and holds it while Assistant Engine remains active, preventing their real
-child runtimes from overlapping without reducing earlier refill. The scheduling
-contract and proof are specified by
-`agent-docs/operations/verification-and-runtime.md` and
-`agent-docs/references/testing-ci-map.md`.
-
-Every pull request carries one mechanically validated, field-complete
-deployment-concerns disposition. Applicable deploy boundaries record supported skew, safe order,
-rollback floor, expected exposure, reversibility, convergence proof, and
-post-deploy checks; other changes record one concrete not-applicable reason.
-Every PR also records non-obvious affected surfaces, a mechanically validated
-architecture/reuse summary, foreground reply-path impact, complete initial
-provider-input impact, and categorized added/deleted LOC. User-facing hosted
-Web UI changes additionally carry mechanically validated design-proof fields
-and dedicated risk-matched catalog/study evidence. Content-only authored
-changelog entries plus optional edition metadata use the narrow changelog-owned
-no-preview proof route; renderer, component, style, visual, or interaction
-changes keep the normal current-branch proof rule.
-The contract and its proof are specified by
-`agent-docs/operations/completion-workflow.md` and
-`agent-docs/references/testing-ci-map.md`.
-
-A validated final ReviewGPT `ROUND_OUTCOME: PASS` proceeds directly to the
-parent's remaining completion checks without a user-resume pause. Preliminary
-specialist results receive an evidence-backed parent disposition update and may
-continue remediation without a separate user-resume pause. Final `FINDINGS`
-retain the turn-ending pause and block all candidate mutation. These boundaries
-are specified by
-`agent-docs/operations/completion-workflow.md` and
-`agent-docs/operations/pr-reviewgpt-loop.md`.
-
-Changes that can alter Murph's interpretation, tool behavior, silence
-decision, or user-visible reply require deterministic boundary proof plus one
-focused production-derived real-Codex journey and manual review of the actual
-synthetic replies. When the default subscription is usage-limited before any
-provider action, the repository grants one bounded retry through a discovered
-already-authenticated alternate Codex home without reading or copying auth or
-cycling profiles. The one-command local subscription runner, provider-key
-boundary, UX verdict, and PR evidence contract are specified by
-`.agents/skills/verify-murph-assistant/SKILL.md`,
-`agent-docs/operations/completion-workflow.md`,
-`agent-docs/operations/verification-and-runtime.md`, and
-`agent-docs/references/testing-ci-map.md`.
-
-Required Temporal compatibility tolerates only the bounded `404` visibility
-window for the exact private run id returned by an accepted dispatch. It never
-searches for or guesses a run, and every later polling, identity, reader, and
-attestation failure remains fail-closed. This boundary and its focused proof
-are specified by `agent-docs/RELIABILITY.md` and
-`agent-docs/references/testing-ci-map.md`.
-
-Direct iMessage workout apply may carry bounded rendering context and return an
-optional authoritative post-write V4/V6 card in the existing terminal receipt.
-Mutation authority remains with the locked canonical workout, and response-card
-construction adds no reread, queue, or persisted projection. This contract is
-specified by `agent-docs/RELIABILITY.md`.
-
-Direct and authenticated-group Telegram model-authored rich-content admission,
-optional semantic-card selection, closed HTML, disabled automatic Telegram
-entities, trusted text fallback derivation, and the group-audience runner
-rollback floor are jointly specified by `ARCHITECTURE.md`,
-`agent-docs/PRODUCT_SENSE.md`, `agent-docs/SECURITY.md`, and
-`agent-docs/RELIABILITY.md`.
-
-Local setup and assistant delivery no longer own an operational email provider:
-setup manages Telegram, the local inbox runtime retains Telegram and Linq, and
-generic email remains confined to hosted ingress and injected hosted delivery.
-This ownership split is jointly specified by `ARCHITECTURE.md`,
-`agent-docs/SECURITY.md`, `agent-docs/operations/verification-and-runtime.md`,
-and `agent-docs/references/testing-ci-map.md`.
-
-The canonical public Murph email address is a content-discarding bootstrap for
-existing verified members, while authenticated guided actions and signed reply
-aliases remain the one-step private assistant-input paths. Web admits public
-bootstrap hints through a nonblocking global gate plus a member lock, and live
-verified-email rebinding atomically rotates the private reply capability. This
-boundary is jointly specified by `agent-docs/SECURITY.md` and
-`agent-docs/RELIABILITY.md`; its completed round-three scope decision is recorded
-in `agent-docs/exec-plans/completed/2026-08-20-public-email-bootstrap-round-3-retrospective.md`.
-
-The internal hosted signup notification replaces opaque identifiers with local
-time, exact signup or activation provenance, and an explicitly approximate
-network location. Its request context is disclosed for at most 24 hours; reads
-stop at expiry, the existing hourly retention owner retires overdue ciphertext
-in bounded indexed batches, and a database-owned attempt trigger clears both
-value and expiry across mixed Web versions. Unreadable optional context
-degrades to the context-free notice instead of suppressing delivery. The
-notification does not read or include member email addresses or
-phone numbers. Batch activation without member-level provenance omits source.
-This boundary is jointly specified by `ARCHITECTURE.md` and
-`agent-docs/SECURITY.md`.
-
-Hosted device-sync wake ownership keeps provider cadence in Web's canonical
-`nextReconcileAt`, while the encrypted system-mailbox item retains exact
-connection-specific retry work and Web dirty rows retain dirty resource/deletion
-work across cold replacement. The machine-local SQLite store is an execution
-cache; hosted provider scheduling is mailbox-connection scoped, retained wakes
-come from actual manifest-shaped queued/running rows, and a durable completion
-checkpoint fences canonical cadence publication. An unchanged stale tuple may
-re-signal the same durable mailbox item once in each Web recovery bucket without
-minting another schedule-event or mailbox-item identity. Provider execution is
-intentionally at-least-once across a lost post-pull record/completion checkpoint:
-the canonical mailbox item/event already exists in the committed input
-workspace. Each background device-sync pass has a 120-second cooperative budget
-while foreground work and invocation aborts may end it earlier. Its terminal
-runtime marker carries only a bounded slowest-job sample with job/provider/
-resource classification, disposition, durable-progress presence, and phase
-counts and timings; it omits identities, payloads, cursors, provider responses,
-health values, and raw errors. The fixture commits that clean input through the production v2
-checkpoint bridge before the four read-only provider classes run. The incident
-pass then creates the machine-local SQLite execution record, and its production
-v2 post-pull archive plan observes the live store, omits it from the archive, and
-retains the durable mailbox state. The proof injects its only failure when that
-v2 snapshot checkpoint is persisted, leaving the clean input ref as the last
-committed snapshot. The next recovery bucket cold-restores that exact ref through
-the production restore dispatch, reconstructs from durable authority, and may
-repeat the same method/path classes without publishing cadence early. The
-deterministic WHOOP proof covers four initial
-classes, one four-class replay (eight requests total), eight measured workspace
-checkpoint attempts with seven commits and one injected failure, no third
-provider pull, and cadence publication only after the durable recovery/completion
-checkpoint. The first later bucket performs one bounded post-publication
-convergence checkpoint while returning idle with no wake; the following bucket
-is fully quiescent with no provider work or checkpoint.
-The contract is jointly specified by
-`agent-docs/RELIABILITY.md` and
-`agent-docs/references/hosted-runtime-protocol.md`.
-
-The external-provider request guard is an ownership check: registered providers
-use their official SDK, and unavoidable raw transports are confined to exact
-path-and-function owners with a one-call limit. Its policy and focused proof are
-specified by `agent-docs/SECURITY.md`,
-`agent-docs/references/testing-ci-map.md`, and
-`agent-docs/exec-plans/active/2026-08-12-provider-request-guard.md`.
-
-On-demand hosted video analysis is one turn-scoped Gemini 3.7 Flash call over
-an exact accepted-message attachment authority. The tool is offered on
-private-direct turns and authenticated Linq/Telegram group turns with accepted
-user-action input and a configured Worker credential. Any participant in an
-authenticated group may explicitly request analysis of any participant's video
-in that same accepted group turn. Current route authority, accepted-input
-membership, and frozen attachment evidence bind the selected video to the
-active group; no requester/uploader identity comparison exists. Unverified
-external groups omit it. The tool may be present before the input has video
-authority because provider tools freeze at turn start and the first video may
-arrive through live steering. Murph freezes attachment metadata before Codex
-can act on each initial or live-steered input, verifies the exact bytes before
-cross-provider egress, pins 1 FPS and bounded output, and keeps credentials at
-the Worker boundary. Ordinary inbound hosted video
-bytes stay outside workspace snapshots and become immediately
-retention-eligible when active input no longer needs them; explicit canonical
-durable references are the exception. The
-architecture, security, deployment order, and
-verification owners are `ARCHITECTURE.md`,
-`agent-docs/SECURITY.md`, `apps/cloudflare/DEPLOY.md`, and
-`agent-docs/references/testing-ci-map.md`.
-
-Hosted Junction setup recovery treats a signed source-attributed webhook as a
-trigger, not as connection proof. Web reads the live provider source list, then
-atomically confirms the matching pending setup, callback-equivalent source
-initial work, its mandatory mailbox handoff, source receipt, dirty work, and
-webhook trace under the existing health-data admission lock. The handoff is
-required even when dirty state exists. Established sources skip the recovery
-provider read. The trust and
-failure contracts require the literal provider status `connected`; ambiguous or
-error states stay pending and retry. If another admission changes the source
-while that provider read runs, durable event work retries and merges its exact
-payload on replay before trace completion; rehydratable hints may settle. These
-contracts are jointly specified by `ARCHITECTURE.md`,
-`agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`, and
-`agent-docs/references/testing-ci-map.md`.
-
-Personal-to-group projection convergence, including attempt-local foreground
-preemption, abort/shutdown admission before every scope, its single forwarded deadline, and
-authoritative Web-response ownership, typed destination-failure isolation,
-and deterministic maximum-cardinality proof, is specified by
-`ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, and
-`agent-docs/references/hosted-runtime-protocol.md`.
-
-The lower-level hosted browser assertion first-invalid boundary, single-use
-nonce persisted horizon, mixed-version cleanup safety, and opt-in PostgreSQL
-concurrency proof are jointly specified by `ARCHITECTURE.md`,
-`agent-docs/SECURITY.md`, and `agent-docs/references/testing-ci-map.md`.
-
-Telegram direct and authenticated-group Rich Message authority, optional
-catalog-position image provenance, single-message fallback ownership, and
-valid-envelope retry classification across all Telegram send operations are
-specified by `ARCHITECTURE.md` and `agent-docs/RELIABILITY.md`.
-
-Durable onboarding follow-up enrollment is activation-owned across standard
-Linq, Linq instant-start, and Telegram. Activation persists one canonical start
-and independently carries any available direct route; a missing Telegram route
-is filled later by ordinary managed reconciliation without moving the original
-finite window. Welcome delivery is optional and never owns enrollment.
-Every new activation wake emits enrollment intent; genuine member activation
-enrolls while synthetic group-thread containers explicitly opt out. Legacy
-wakes default to enrollment during rollout. Direct-route enforcement, bounded
-write retry, archive preservation, and hosted-local proof are specified by `ARCHITECTURE.md`,
-`agent-docs/RELIABILITY.md`,
-`packages/assistant-runtime/README.md`, and
-`agent-docs/references/testing-ci-map.md`.
-
-Linq signup-delivery failure suppression uses member-serialized, indexed
-existence reads for the exact five-attempt identity and the member/day live set.
-Its terminal-ordering and focused PostgreSQL proof are specified by
-`agent-docs/RELIABILITY.md` and
-`agent-docs/references/testing-ci-map.md`.
-
-Direct-insert hosted callback nonce replay convergence through the
-`nonce_hash` primary key, database-clock refusal after the inclusive callback
-expiry boundary, plus bounded background retention and its opt-in PostgreSQL
-concurrency proof, are jointly specified by `ARCHITECTURE.md`,
-`agent-docs/references/hosted-temporal-orchestration.md`, and
-`agent-docs/references/testing-ci-map.md`.
-
-Member-owned device provider application ownership, exact OAuth and connection
-revision binding, invocation-scoped credential projection, exact token-return
-authority, credential-free stored-token cleanup without operator fallback, and
-permanent-versus-transient credential failure handling are jointly specified by
-`ARCHITECTURE.md`, `agent-docs/SECURITY.md`, and
-`agent-docs/RELIABILITY.md`.
-
-Bounded Junction workout-stream reduction, fixed-distance split correction,
-projection-owned per-workout feature association without public provider IDs,
-and raw-point nonretention are specified by `agent-docs/RELIABILITY.md`,
-`packages/device-syncd/README.md`, and
-`docs/device-provider-compatibility-matrix.md`.
-
-Hosted device-sync dirty admission prepares classification, compression,
-sealing, and any clean-to-dirty mailbox wake outside database ownership, then
-revalidates consent, connection/source identity, the exact dirty snapshot, and
-every applicable exact crypto root under the final admission lock. One exact
-winner drift permits one fresh full replan. Compact-only webhook hints skip
-dirty crypto preparation, use the canonical final transaction owner, and
-prepare a mailbox root only when the locked preflight observes a possible
-clean transition; source admission uses an exact, minimally projected, max-one
-database read. Built-in webhook admission is capped at two resources,
-companion admission carries one, and the final transaction remains
-provider-closed. This contract and its focused real-PostgreSQL withdrawal proof
-are jointly specified by `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`,
-`agent-docs/operations/device-sync-ingestion-invariants.md`, and
-`agent-docs/references/testing-ci-map.md`.
-
-Checkpointed personal health state gets one wake-raced share-projection
-opportunity before device-sync maintenance or dirty acknowledgement resumes;
-conversation work still preempts, projection failure retains the existing
-device continuation, one destination's typed missing-root failure cannot starve
-healthy later scopes while shared-infrastructure errors stop fanout, complete
-capture binds projected bytes to the vault owner before any
-detached delivery, and source-workspace fencing makes an older in-flight
-replacement a no-op after a newer checkpoint. Group reads use the current
-Web-owned snapshot without per-group fanout or another freshness owner.
-The producer-first hard-cut rollout is specified by `apps/cloudflare/DEPLOY.md`.
-This contract is jointly specified by `ARCHITECTURE.md`,
-`agent-docs/RELIABILITY.md`, and
-`agent-docs/references/hosted-runtime-protocol.md`.
-
-Exact-sender member-reported daily metrics reuse accepted-message authority,
-the encrypted personal mailbox, canonical `manual` observations, and that same
-checkpoint-gated share projection. New admission rechecks explicit health-data
-consent under the sender lock. A deterministic mailbox identity lets the
-existing Cloudflare exact-request replay resolve a committed response loss
-without re-admitting health data, while the generic mailbox append remains the
-only payload/conflict owner. The durable receipt consumes the projection
-owner's exact result. Device observations remain independent, and contradicted
-snapshots are never represented as live values. This contract is
-jointly specified by `ARCHITECTURE.md`, `agent-docs/SECURITY.md`,
-`agent-docs/RELIABILITY.md`, and
-`agent-docs/product-specs/group-challenge-data-diagnostics.md`.
-
-Hosted cold-start ownership keeps established-member startup on the ordinary
-post-Temporal direct ensure so container boot can overlap fenced invocation
-preparation. The separate first-contact shell hint is serialized by the
-per-user health-data consent barrier. Its route lookup remains mutation-free;
-its optional admission abandons after 250 ms, and allowed admission then owns
-exact stop-target reservation and container registration. Web admits it only
-for an extant, non-suspended member whose grant is not revoked, preserving
-missing-grant compatibility only for legacy members that still exist.
-Foreground readiness and exact-target
-destruction retain priority over the platform wait. Rollout puts Web first,
-then drains older containers immediately. This contract is jointly specified by
-`ARCHITECTURE.md`, `agent-docs/SECURITY.md`, and
-`agent-docs/references/hosted-runtime-protocol.md`.
-
-The public footer's fixed, bodyless incident.io status-summary read, strict-origin
-transport boundary, display-only authority, and subprocessor disclosure are
-jointly specified by `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, and
-`docs/incident-response.md`.
-
-Static SSH worker archive readiness and executor-owned, resource-qualified
-verification scheduling are jointly specified by `ARCHITECTURE.md`,
-`agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`,
-`agent-docs/operations/verification-and-runtime.md`, and
-`agent-docs/references/testing-ci-map.md`.
-
-Current-sender Assistant Ask binds one exact accepted-message reference. Group
-Murph infers a fixed audience from ordinary language, asks a natural
-clarification when needed, and sends advance notice before a group-bound
-personal read; Web keeps exact-source identity, route, replay, and same-sender
-continuation authority, including causally monotonic clarification replacement
-and resolved-pointer replay closure. Current-sender clarification and
-continuation reuse the stateful dynamic-tool chain in provider request order,
-so one cannot overtake the other while independent new exact-ref requests stay
-concurrent. App Server request intake claims one turn-local decision per exact
-accepted ref in arrival order before lane selection or the pre-tool hook,
-preventing contradictory or duplicate same-ref effects; repeated
-group decisions share one in-flight notice, notice failure retains that claim,
-and Web's exact-source identity remains the durable replay fence. A marked
-current caller may start a group-bound read only after the required notice;
-unmarked old group calls fail closed before tool or mailbox work during
-Web-first rollout,
-while unmarked private calls and already-persisted legacy work retain their
-bounded drain. One `current_sender_personal` target owns the read while a
-separate result destination owns group or same-channel direct delivery; replay
-cannot switch that destination. A valid answered group completion whose sender
-loses personal runtime access before provider entry converges to the existing
-fixed non-disclosing fallback rather than becoming stranded. Private delivery
-has a distinct identity from the canonical group completion/fallback, so expiry
-or a lost private route produces only a fresh non-disclosing group
-`cannot_answer` completion. Its exact
-reviewed-text binding, personal direct-route revalidation at every provider
-attempt, and terminal no-fallback failure, plus exact legacy `aask_done_*` and
-current `aask_private_*` pre-checkpoint staging without generic-notification
-admission, canonical-sent exact-session
-continuity with queue-time causal binding across compatible model changes,
-pre-sent first-attended binding without conversation mutation, legacy omission
-fail-closed behavior, and unresolved outbox retention,
-including bound-only repair before ordinary direct scheduled and Assistant Ask
-continuation turns or direct exact-notification history mutation while unbound
-ownership stays attended-only,
-are jointly specified by `ARCHITECTURE.md`,
-`agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`,
-`agent-docs/operations/verification-and-runtime.md`, and
-`agent-docs/references/hosted-runtime-protocol.md` plus
-`agent-docs/references/testing-ci-map.md`.
-
-Hosted runtime-progress monitoring and Linq exact-consume reaction confirmation,
-including consumed conversation exclusion before lane head/count selection,
-canonical device-retry wake timing, bounded raw candidate scans, receipt-backed
-confirmation-failure ownership, and provider-no-replay recovery, are jointly
-specified by `agent-docs/RELIABILITY.md` and
-`agent-docs/references/hosted-runtime-protocol.md`.
-
-Silent member-memory consolidation reuses the shared restricted one-shot turn,
-grants the exact built-in automation its canonical host-owned memory state tool,
-suppresses native effects at the host boundary, and has no dedicated permission
-profile or provider-catalog inventory contract. This boundary and its focused
-proof are jointly specified by `ARCHITECTURE.md`, `agent-docs/SECURITY.md`,
-`agent-docs/RELIABILITY.md`, and `agent-docs/references/testing-ci-map.md`.
-
-Independent partial PlanetScale metric normalization, sparse connection-error
-port acceptance without false monitoring pages, continued evaluation of
-available database signals, per-port baseline advancement with new/reset
-suppression, bounded confirmation for safe usable partial observations,
-transient diagnostic missing-port evidence with rollback-compatible
-durable normalization, conservative legacy-window provenance,
-parsed-observation retention across later retry failure, and
-one-shot telemetry-only operator paging with unresolved-window coalescing,
-current-pressure priority including direct and pooled connection errors in one
-combined pre-first-page incident, post-ack recurrence suppression, durable
-owed-page preservation inside non-replayable category-specific admission,
-truthful connection-error and mixed telemetry window provenance, and
-rollback-compatible additive state with deliberately compatible physical sample
-columns are
-jointly specified by `ARCHITECTURE.md`,
-`agent-docs/RELIABILITY.md`, `agent-docs/references/testing-ci-map.md`, and
-`apps/cloudflare/README.md`.
-
-Automatic meal-photo schema-v2 enrollment ordering, including the one-row
-per-installation revision fence, credential-free revocation tombstone,
-prepared-before-active iOS credential handoff, bodyless scoped activation,
-member-plus-Family-sponsorship authority serialization,
-schema-v1 revision-zero compatibility with row-owned revocation generations,
-expand/contract migration sequence, and
-the independent identity-authenticated foreground camera/Photos submission
-path with member-bound UUID retry identity and shared private ingestion, plus
-the focused static, PostgreSQL, and physical-iPhone proof matrix, is jointly specified by `ARCHITECTURE.md`,
-`agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`,
-`agent-docs/operations/verification-and-runtime.md`, and
-`agent-docs/references/testing-ci-map.md`.
-
-Protected-main Junction wearable canary credential derivation, handling, and
-verification ownership are specified by `agent-docs/SECURITY.md` and
-`agent-docs/references/testing-ci-map.md`.
-
-Spread-free official provider SDK request construction, including the generated
-Composio client boundary, and the safe opt-in Stripe test-mode resume contract
-probe are jointly specified by
-`agent-docs/SECURITY.md` and `agent-docs/references/testing-ci-map.md`.
-The external-provider guard also recognizes defaulted, assigned, and exact
-one-hop low-level transports while the sole xAI exception proves the direct
-runtime URL and closed request syntax.
-
-Private generated-image failure diagnostics, their failure-only scope,
-untrusted-provider-text boundary, and reader-first hosted compatibility
-contract are jointly specified by `ARCHITECTURE.md`,
-`agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`, and
-`agent-docs/references/hosted-runtime-protocol.md`.
-
-Ready hosted generated-image completions enter the next Codex admission by
-exact trusted input id. If newer conversation input is already waiting, the
-completion precedes it in the same frozen batch while the ordinary pending
-input index remains the durable retry owner and reconstructs that order after
-an invocation restart, including when new foreground input arrives first.
-Restored folding is bounded to same-route conversation events strictly after
-the completion's trusted origin. The exact authenticated group-route match
-excludes provider continuation sessions; ordinary batching still uses them as
-a boundary. This contract is jointly specified by `ARCHITECTURE.md`,
-`docs/contracts/00-invariants.md`, and
-`agent-docs/references/hosted-runtime-protocol.md`.
-
-Hosted inbound reply-thread binding, active-turn route preservation, ephemeral
-delivery-context preservation, and provider-rendered iMessage response-card
-image and semantic-text fallback are jointly specified by
-`ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, and
-`agent-docs/operations/imessage-deliverability.md`.
-
-Venice's code-owned provider-model binding without duplicate deploy variables
-provider-aware immutable allowance pricing, explicit Codex prompt-cache
-boundary, and capped real-Codex cache-reuse activation gate are jointly
-specified by
-`ARCHITECTURE.md`, `agent-docs/SECURITY.md`,
-`agent-docs/RELIABILITY.md`,
-`agent-docs/product-specs/hosted-plan-usage.md`, and the Web and Cloudflare app
-docs.
-
-Response-card request eligibility, multi-input live-turn invalidation,
-whole-response semantics, delivery ownership, interactive Messages-extension
-transcript rendering with a truthful provider-static fallback,
-installed-extension nutrition identity, App-Store-icon-free static fallback,
-provider-owned card masking, a concise date-and-meal-count nutrition
-caption with conditional partial-state and assessed-goal-direction subcaptions,
-one trusted provider reply-thread binding, bounded offline V3 compact-table,
-read-only V4 workout-session, editable V6 workout-session with a
-runtime-hydrated typed optimistic projection, and reader-first V7 workout
-refresh with a member-scoped authenticated canonical snapshot, V4 logical capacity of 16
-exercises and 16 sets per exercise with measured fragment/image length as the
-final gate, a compact four-exercise transcript summary plus remaining count,
-and V5 challenge-standings
-fragments, plus the shared
-strict queryless static-image route are specified by
-`ARCHITECTURE.md`,
-`agent-docs/SECURITY.md`,
-`agent-docs/RELIABILITY.md`,
-`agent-docs/operations/imessage-deliverability.md`, and
-`agent-docs/product-specs/imessage-workout-tracking.md` plus
-`agent-docs/product-specs/challenge-standings-card.md`.
-
-Hosted R2 uses one canonical ENAM production bucket and one isolated preview
-bucket. The Worker binding, presign target, lifecycle helper, cold restore, and
-runtime cleanup share that environment-selected owner. Account deletion uses
-only the canonical ENAM binding. The contract is jointly specified by
-`ARCHITECTURE.md`, `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`, and
-`apps/cloudflare/README.md`.
-
-Signed hosted runtime crypto callbacks are user-bound, workspace-scoped
-resource authority without duplicate operation admission. Temporal/UserRunner,
-Settings vault export, and ordinary active-member runtime surfaces retain their
-own mode, session/MFA/consent, and active-access admission respectively. The
-contract is specified by `agent-docs/references/hosted-runtime-protocol.md` and
-`agent-docs/references/hosted-temporal-orchestration.md`.
-
-Native companion account admission reuses the canonical capacity-gated signup
-welcome for verified phones, completes without a route when no line is
-assignable, lets an exact active member's provider-attested direct input bind a
-managed reply-safe line without proactive eligibility, keeps the separate Web
-welcome email out of the companion path, and retries only the exact pending
-activation mailbox wake after a missed runtime signal. This contract is jointly specified by `ARCHITECTURE.md`,
-`agent-docs/SECURITY.md`, `agent-docs/product-specs/companion-app.md`, and
-`docs/device-sync-hosted-control-plane.md`.
-
-Metadata-only Stripe failure email ownership for terminal checkout and
-subscription actions, current-attempt/provider-effect
-identity, paid Family capacity/member-transition identity, safe request
-correlation through dependency-free hosted-error translation, preservation of
-the general runtime's ordinary Node migration/tooling boundary, blind-bound
-public redirect ownership, explicit recovery ownership, replay defense, and
-the rule that alerts never become billing or retry authority are jointly specified by
-`ARCHITECTURE.md`, `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`, and
-`apps/web/README.md`.
-
-Hosted mailbox and Privy identity preparation use one request-local,
-crypto-only exact-root boundary: provider/KMS work settles before `BEGIN`, the
-transaction revalidates the precise root under its canonical lock, and a typed
-winner drift permits one fresh full preparation attempt. Mailbox callers carry
-that generic capability directly, while Privy phone-conflict suppression reads
-only blind-index ownership and never decrypts an unprepared second member. The
-contract is specified by `ARCHITECTURE.md` and `agent-docs/RELIABILITY.md`.
+This is a directory, not a second copy of the system contracts. Start with
+`AGENTS.md` and `agent-docs/operations/agent-workflow-routing.md`; open the
+owners relevant to the task. A row's date is its recorded verification date,
+not a guarantee that every claim was checked in this cleanup.
 
 ## Canonical Docs
-
-Member-owned device-provider application authority, including the shared
-webhook admission fence for app-bound connections, is jointly specified by
-`ARCHITECTURE.md`, `agent-docs/SECURITY.md`, and `agent-docs/RELIABILITY.md`.
-
-Daily nutrition cards use one prompt-owned known-context suitability rule and
-one compact safety question before new numeric targets when needed. Routine
-cards do not run a universal clinical-history or measurement preflight, and a
-health-context fact constrains only the target or advice it materially affects.
-Stale or incomplete context snapshots likewise direct only the canonical read
-needed for a concrete concern or an owning workflow's explicit contract. The
-Goal, totals, card-validation, and delivery owners remain unchanged. This
-contract is jointly specified by `ARCHITECTURE.md`,
-`agent-docs/RELIABILITY.md`, and
-`agent-docs/operations/imessage-deliverability.md`.
-
-Hosted growth observability keeps daily snapshot mutation and same-date recovery
-on its authenticated cron endpoint; the ops page is read-only. Dashboard reads
-run in explicit waves below the hosted Web pool ceiling, and retained mailbox
-payloads reuse the set-based root unwrap path. This contract is specified by
-`agent-docs/RELIABILITY.md`.
 
 | Path | Purpose | Source of truth | Criticality | Last verified |
 | --- | --- | --- | --- | --- |
 | `README.md` | Human-facing repo overview, install path, public package posture, local/hosted runtime tiers, and verification entrypoints. | Current repository state | High | 2026-05-02 |
-| `ARCHITECTURE.md` | Top-level module map, trust boundaries, persisted-state rules, canonical finite support-automation ownership and fire-time authority, provider-neutral longitudinal sleep-pattern reads, warm Codex App Server lifecycle and root-turn-only invocation authority, bounded root-plus-three detached child persistence with all-child checkpoint proof, shared accepted-message targeting for native replies and reactions, interactive Messages-extension response-card rendering with a provider-static fallback, one trusted provider reply-thread binding, and offline native decoding, hosted mailbox/checkpoint ownership including read-only Assistant Ask request/reply with exact requester identity, deterministic unavailable copy, post-Temporal direct latency hints, pass-wide joined-group request/completion pre-checkpoint admission, and pass-owned fresh-input completion ordering with a read-only complete-index fallback, exact-grant consented group-to-member disclosure with the ordinary scheduled group runtime plus server-expiry-bounded same-turn polling and no second provider turn, live read-only Labs discovery ownership, durable input-bound subscription-action claims, enforced hosted usage plus generic purchase/referral credit ownership, and the cross-lane per-member causal sequence, canonical companion per-setting watermarks, signed input-bound hosted personality projection/event convergence with private-person versus synthetic-room ownership and current Linq route validation, bounded exact-successor provider-turn batching for personal assistant preferences plus accepted group-room model selection with fixed provider/reasoning, the single-snapshot conversation-ahead handoff and owner-release Temporal recheck, managed hosted Codex auth snapshot boundary, hosted provider egress credential boundary, independent Cloudflare-owned PlanetScale database-health persistence and paced Linq paging, hosted Clinical Records control-plane ownership with all-24 primary query activation and query-scope/slice-bound page authority, hosted computer-use ownership, hosted generated-image ownership with exact-id ready-completion admission and trusted attachment-time byte-metadata canonicalization, hosted Retell phone-call ownership, hosted Linq first-contact admission fail-open policy plus deploy-skew compatibility column, hosted Temporal hard-cut pointer, capacity-gated companion signup welcome with no-line activation and exact pending-activation runtime-wake recovery, bounded device-sync and attempt-owned automatic meal-photo mailbox handoff with ordinary 9pm cron projection, capture engagement, staging cleanup, and foreground-fair dispatch, authenticated-group twice-weekly room-model consolidation over bounded admitted transcripts with one advisory derived page and a current-input write tool, automatic scheduled companion overnight-PRV admission with on-phone reduction, explicit connect/passive-resume authority, one connection/night owner, bounded replay receipts, encrypted retry retention, canonical-success acknowledgement, immutable nightly import, metric separation, physical validation/deployment gates, single-region ENAM R2 ownership, terminal-checkout-action-owned metadata-only Stripe failure alerts without billing authority, plus active-turn targeting lifecycle, control-flow contracts, and package-boundary rules. | Current runtime architecture | High | 2026-08-13 |
-| `agent-docs/ARCHITECTURE_GUIDANCE.md` | Pre-implementation decision sequence for outcomes, current owners, evidence, minimum durable corrections, recoverable bounded error detail, failure and deployment behavior, and focused proof. | Architecture planning guidance | High | 2026-08-24 |
+| `ARCHITECTURE.md` | Current runtime architecture, including hosted media identity, reference-only preservation and receipt recovery. | Current runtime architecture | High | 2026-09-05 |
+| `agent-docs/ARCHITECTURE_GUIDANCE.md` | Architecture planning guidance. | Architecture planning guidance | High | 2026-08-24 |
 | `PRODUCT.md` | Strategic design context: register, users, brand personality, anti-references, design principles. Loaded by the impeccable skill before any UI work. | Product/brand strategic context | High | 2026-04-24 |
-| `DESIGN.md` | Visual design system in Google Stitch DESIGN.md format: color, typography, elevation, components, do's/don'ts, YAML token frontmatter, and reviewable group-usage funding patterns. Loaded by the impeccable skill before any UI work. | Visual design system | High | 2026-07-22 |
+| `DESIGN.md` | Visual design system. | Visual design system | High | 2026-07-22 |
 | `docs/architecture.md` | Concise architecture summary, repo-shape overview, package-boundary hygiene notes, and hosted ownership baseline. | Current architectural baseline | High | 2026-05-13 |
-| `docs/contracts/` | Frozen contract docs for vault layout, schemas, commands, and cross-cutting invariants, including warm Codex App Server lifetime and bounded root-plus-three detached child persistence. | Canonical vault interface decisions | High | 2026-07-20 |
-| `docs/contracts/06-hosted-workspace-file-count.md` | Hosted workspace file-count invariant for restored runtime write paths, checkpoint/restore cost, compact side-effect storage choices, generated-delivery classification, and bounded generated-image payload retention. | Hosted workspace checkpoint/restore contract | High | 2026-08-04 |
-| `docs/device-sync-hosted-control-plane.md` | Current hosted control-plane direction for device sync, including encrypted Cloudflare Queue webhook burst transport, serial Web/Postgres admission, companion account admission with the canonical capacity-gated signup welcome, no-line activation, Web-only welcome email, exact pending-activation runtime-wake recovery, encrypted dirty-payload retention, generic terminal acknowledgement, and the companion overnight-PRV lane's bounded replay receipts plus canonical-import acknowledgement. | Device-sync architecture direction | Medium | 2026-08-13 |
+| `docs/contracts/` | Frozen contract docs for vault layout, schemas, commands, and cross-cutting invariants. | Canonical vault interface decisions | High | 2026-07-20 |
+| `docs/contracts/06-hosted-workspace-file-count.md` | Hosted workspace checkpoint/restore contract. | Hosted workspace checkpoint/restore contract | High | 2026-08-04 |
+| `docs/device-sync-hosted-control-plane.md` | Current hosted control-plane direction for device sync. | Device-sync architecture direction | Medium | 2026-08-13 |
 | `docs/device-provider-contribution-kit.md` | Maintainer guide for adding wearable providers. | Provider contribution workflow | Medium | 2026-05-13 |
-| `docs/device-provider-compatibility-matrix.md` | Canonical provider planning matrix and evidence expectations, including the beta direct WHOOP overnight-PRV summary and validation gates. | Device-provider normalization planning | Medium | 2026-07-14 |
-| `docs/hosted-contact-privacy-rotation.md` | Hosted blind-index keyring seam and future rotation constraints, including group-scoped consent-permission digests and their in-flight drain floor. | Hosted contact-privacy rotation seam | Medium | 2026-07-16 |
+| `docs/device-provider-compatibility-matrix.md` | Canonical provider planning matrix and evidence expectations. | Device-provider normalization planning | Medium | 2026-07-14 |
+| `docs/hosted-contact-privacy-rotation.md` | Hosted blind-index keyring seam and future rotation constraints. | Hosted contact-privacy rotation seam | Medium | 2026-07-16 |
 | `docs/hosted-account-data-deletion-export.md` | Hosted account data export and deletion workflow, store coverage, security checks, and retention limits. | Hosted account privacy workflow | High | 2026-05-13 |
-| `docs/hosted-runtime-log-database.md` | Dedicated hosted runtime-log Postgres ownership, deletion fence, retention, migration preflight, and rollback floor. | Hosted runtime observability storage | High | 2026-08-07 |
+| `docs/hosted-runtime-log-database.md` | Dedicated hosted runtime-log Postgres ownership, deletion fence, retention, web-control preflight rejection attribution, shared-CLI usage-profile timing contract (phases, transport bounds, coverage, and consumer-first rollout), migration preflight, and rollback floor. | Hosted runtime observability storage and usage-profile diagnostics | High | 2026-09-04 |
 | `docs/legal-consent-implementation.md` | Hosted legal consent document registry, event/grant storage, API routes, and gate helpers. | Hosted legal consent workflow | High | 2026-05-13 |
-| `docs/incident-response.md` | Canonical incident.io-backed runbook for declaring, coordinating, communicating, resolving, and learning from Murph production incidents, including the `status.withmurph.ai` setup contract. | Incident coordination and public status policy | High | 2026-08-05 |
+| `docs/incident-response.md` | Canonical incident.io-backed runbook for declaring, coordinating, communicating, resolving, and learning from Murph production incidents. | Incident coordination and public status policy | High | 2026-08-05 |
 | `docs/health-data-incident-runbook.md` | Engineering runbook for suspected health-data incidents, consent bypasses, vendor incidents, and tracking disclosures. | Health-data incident response | High | 2026-08-05 |
 | `docs/templates/README.md` | Entry points for reusable device-provider templates. | Template inventory | Low | 2026-04-03 |
-| `agent-docs/strategy.md` | Internal product north star for making member-valued health progress radically easier through progressively complete context, connected evidence, useful action, authorized proactive support, and delight. | Current product strategy | High | 2026-07-15 |
-| `agent-docs/PRODUCT_SENSE.md` | Current product posture for a broad personal health assistant, including immediate value, compounding context, consequential discovery, proactive support, composable primitives, first-visit personalization, conversation-first control, channel-native Telegram and iMessage presentation with bounded model-authored Telegram rich content and exclusive semantic-card ownership, uncertainty-aware profile/contact speaker labels, public product-link sharing, pre-save capacity disclosure, and product guardrails. | Current product behavior | High | 2026-08-13 |
-| `agent-docs/PRODUCT_CONSTITUTION.md` | Internal product constitution and tradeoff rules, including selective proactivity and progressively deeper member-controlled context. | Product principles | High | 2026-07-15 |
-| `agent-docs/FRONTEND.md` | Frontend implementation guidance for `apps/web`, including design-system sources (`PRODUCT.md`, `DESIGN.md`), model-neutral implementation routing, live component/consent/section proof destinations, representation updates when needed, risk-based rendered proof, preliminary ReviewGPT frontend review, and completion-workflow routing. | Current frontend implementation guidance | Medium | 2026-08-19 |
-| `agent-docs/product-marketing-context.md` | Product marketing context for Murph as a broad personal health assistant, with honest fact/strategy/hypothesis/target-state labels, longitudinal-context and proactivity differentiation, delight, private-first onboarding, optional social support, and experiments as one primitive. | Product/marketing decisions | High | 2026-07-15 |
-| `agent-docs/user-interviews.md` | User-interview kit for testing first useful threads, longitudinal context value, follow-through, primitive selection, and optional social support without leading the participant. | User research method | Medium | 2026-07-12 |
+| `agent-docs/strategy.md` | Current product strategy. | Current product strategy | High | 2026-07-15 |
+| `agent-docs/PRODUCT_SENSE.md` | Current product posture for a broad personal health assistant. | Current product behavior | High | 2026-08-13 |
+| `agent-docs/PRODUCT_CONSTITUTION.md` | Internal product constitution and tradeoff rules. | Product principles | High | 2026-07-15 |
+| `agent-docs/FRONTEND.md` | Frontend implementation guidance for `apps/web`. | Current frontend implementation guidance | Medium | 2026-08-31 |
+| `agent-docs/product-marketing-context.md` | Product/marketing decisions. | Product/marketing decisions | High | 2026-07-15 |
+| `agent-docs/user-interviews.md` | User research method. | User research method | Medium | 2026-07-12 |
 | `agent-docs/QUALITY_SCORE.md` | Current quality posture by area. | Current repo quality posture | Medium | 2026-04-06 |
-| `agent-docs/RELIABILITY.md` | Reliability guardrails and failure-mode expectations, including capture-before-detach, source-version-fenced personal-to-group health projection with foreground scope preemption, server-deadline and transport-margin effect ownership, retained device retry ownership, and bounded composed fanout; exact pre-`BEGIN` pending-group payload-root preparation with authenticated-malformed-only retirement, exact pre-`BEGIN` Starter activation-root prewarming with bounded stale-authority retry, in-flight pending-group line recovery, indexed Linq signup-delivery liveness recomputation under the member owner, trusted private-image attachment metadata, shared exact-message reply/reaction targeting, assistant-runtime-owned operation-local plus bounded private file-backed Linq speaker-label caching, generated-voice transcript fallback ownership with stable provider-effect identity, bounded hosted managed-automation reconciliation with audience-owned member/group seeds and immutable-id silent maintenance policies, deterministic reminder-availability pre-expiry wakes and foreground-preemptible provider reads, transaction-atomic group-share grant and projection-maintenance admission with scheduled mailbox recovery and explicit pending reads, retry-owned Stripe usage-credit fulfillment with frozen-policy saved-card recovery across authorized targets, status-only stale-amount conflicts, payer-and-target-scoped session-stable lost-response recovery, retry-owned group-sponsorship celebration with route and authority rechecks, terminal-action-owned metadata-only best-effort Stripe failure alerting with recovered diagnostics kept silent, beneficiary-serialized indexed 32-slot grant settlement and admission with exact provider-final reservation release and final reversal-capacity validation, post-commit referral reward reconciliation and runtime rechecks, bounded assistant outbox retries, interactive Messages-extension response-card rendering with a provider-static fallback and physical-device visibility gate, hosted Telegram rich routine-card authority and single-message fallback ownership, durable text-only native iMessage app-card rejection fallback with one effective in-flight/replay identity, non-affirmative Linq group-reaction root-prepared mailbox appends, durable failure-only fallback log entries, one trusted provider reply-thread binding, authorized stale-thread recovery, and ambiguous-delivery suppression, stale signup-welcome retirement, the one-reader Assistant Ask lane with post-Temporal direct latency hints, safe pre-checkpoint accepted-input completion admission and output-only caller continuation, deterministic unavailable copy, and server-expiry-bounded scheduled same-turn polling, bounded no-retry Labs discovery, the bounded day-key-idempotent internal product-feedback digest with same-hour retry, bounded in-turn private support escalation with stable stored-detail replay and capped email, time-indexed hosted-runtime latency candidate admission with exact hydration plus bounded `READ COMMITTED` checkpoint locking, transaction-local ID handoff, fresh-snapshot lease revalidation, and retry-backed nonblocking provider/assistant trace writes, Cloudflare container/Durable Object direct-RPC call discipline, hosted device-sync canonical schedule-event/mailbox-item identity with bounded at-least-once read replay and completion-fenced cadence, attempt-owned mailbox-canonical automatic meal-photo ingestion with member-wide accepted-capture engagement, a retryable managed-closeout postcondition, fail-closed canonical photo retirement, generated-image per-capture retirement with dormant-snapshot re-arm, run-frozen Clinical Records all-24 query activation and query-slice protocol compatibility, single-region ENAM R2 ownership with fail-closed deploy metadata validation, and Stripe-effect compatibility recovery through the existing visible reply and account-deletion dialog owners. | Runtime reliability policy | High | 2026-08-26 |
-| `agent-docs/operations/stripe-effect-compatibility-cutover.md` | Expand-only Stripe claim compatibility deployment, Portal retirement/drain, complete Direct Checkout authority, retry-owned webhook replay, rollback floor, removal, and real-PostgreSQL barrier proof. | Hosted billing operations | High | 2026-08-15 |
-| `agent-docs/SECURITY.md` | Security constraints, trust boundaries, and escalation rules, including ambient app-session-bound Privy reauthentication and management-read, exact-transition Settings account linking, the hosted-web origin-only referrer boundary for telemetry, scripts, and the fixed public incident.io status-summary read, fixed-catalog one-time usage-credit Checkout plus current-policy saved-card personal, Family, and group PaymentIntents with explicit payer action available independently of current capacity, stale-amount keys confined to non-creating recovery, and authenticated payer-and-target-scoped session-stable explicit reauthorization, terminal-action-only Stripe failure alert classification, participant-authorized purchase-bound group sponsorship content, current-sender-bound usage-referral authority, verified Stripe-event purchase grants, and server-owned referral grants, root-turn-only invocation route/device authority, opaque accepted-message refs with effect-time authority revalidation, callback-bound private-person versus synthetic-room personalization, accepted-input and current non-direct Linq route authority, route-bound profile/contact speaker labels with unregistered-phone fallback but no identity or effect authority, native read-only Assistant Ask confinement with exact requester-participant identity and payloadless post-Temporal direct wakes, membership-bound return authority, and bounded opaque failure correlation, exact-grant group-to-member disclosure with one outgoing reviewer, output-only caller-group composition from bounded reviewed input, scheduled group-tool factory initiation, and server-expiry-bounded same-turn polling with independently authorized ordinary-turn tools, the web-owned read-only Labs provider boundary, fixed-count internal product-feedback digest disclosure, explicit verified-private support-escalation authority for one bounded de-identified written issue with reserved-prefix fail-closed routing plus anonymous digest and retention ownership, accepted-input authority for low-risk hosted assistant configuration, automatic meal-photo least-privilege, capture-level consent, access-checked direct-route resolution, and receipt-checked retained-photo cleanup, the signed payload-free hosted runtime owner-release callback, Cloudflare deploy Blacksmith secret access, Worker-owned hosted provider/generated-image credentials with finite-concept focused and legacy-batch Exa input, runner-scoped OpenAI egress credentials, protected Junction wearable-canary and retired-login scrub boundaries, Vercel-owned non-sensitive namespace-only native iOS E2E cleanup on a disposable shared sandbox with explicit full-Team-API authority disclosure, companion account admission with capacity-gated iMessage welcome, no-line activation, Web-only welcome email, and exact pending-activation runtime-wake retry, web-owned Retell phone-call credentials, hosted Linq first-contact admission fail-open plus deploy-skew-safe ignored raw-text compatibility column and duplicate-safe decision policy, hosted computer-use Kernel/browser secret handling plus Managed Auth provider-writer, serialized mailbox-sequence reply boundary, group-local advisory room-model handle retention without identity or permission authority, capability-rotation, and suspended-owner cleanup-fence ownership, Composio connected-app authority with bounded structured provider-code logging plus fixed web-owned OpenWeather official-alert authority, strict query-scope and slice binding for Clinical Records page authority, and the scheduled six-field companion overnight-PRV boundary with forbidden raw data, passive-resume fencing, one connection/night admission, bounded retention, canonical acknowledgement, and physical validation gates. | Security policy | High | 2026-08-20 |
+| `agent-docs/RELIABILITY.md` | Reliability guardrails, request-local artifact PUT recovery, immutable wearable notification replay, durable retry ownership, and accepted-mailbox progress evidence. | Runtime reliability policy | High | 2026-09-06 |
+| `agent-docs/operations/stripe-effect-compatibility-cutover.md` | Hosted billing operations. | Hosted billing operations | High | 2026-08-28 |
+| `agent-docs/SECURITY.md` | Security constraints, trust boundaries, hosted media receipt recovery and atomic retirement, and escalation rules. | Security policy | High | 2026-09-05 |
 | `agent-docs/compliance/README.md` | Compliance reference-pack overview, launch minimums, and official source links for consumer health-data obligations. | Compliance docs index | High | 2026-04-29 |
 | `agent-docs/compliance/2026-07-23-connected-source-launch-gate.md` | Connected-source permission assumption, launch status, and ongoing provider controls. | Connected-source release gate | High | 2026-07-23 |
 | `agent-docs/compliance/ftc-hbnr-incident-plan.md` | Internal incident playbook for suspected FTC HBNR breaches, unauthorized disclosures, vendor incidents, and tracking disclosures involving health data. | Health-data incident response | High | 2026-04-29 |
@@ -596,51 +60,53 @@ payloads reuse the set-based root unwrap path. This contract is specified by
 | `agent-docs/compliance/vendor-health-data-addendum.md` | Vendor clause library and procurement checklist for providers that process identifiable health data or health-context metadata. | Vendor health-data contracting | High | 2026-04-29 |
 | `agent-docs/compliance/health-data-tracking-and-ads-rule.md` | Hard rule and review checklist for analytics, telemetry, ad pixels, attribution, and marketing tools on health-data surfaces. | Health-data tracking policy | High | 2026-04-29 |
 | `agent-docs/product-specs/index.md` | Index for product-spec docs. | Product-spec inventory | High | 2026-07-16 |
-| `agent-docs/product-specs/imessage-workout-tracking.md` | Canonical workout-backed live session cards, closed generic/workout payload shapes, bounded read-only V4 and runtime-hydrated editable V6, structurally fenced lookup-plus-state bindings, deterministic member actions and authenticated read-only snapshots through the existing mailbox and card decoder, immutable transcript and stateless image snapshots with the canonical Murph badge, bounded workout provider chrome with semantic text recovery, privacy boundaries, persisted-owner rollback floors, and native-first release gating. | iMessage workout product spec | High | 2026-08-26 |
+| `agent-docs/product-specs/imessage-workout-tracking.md` | iMessage workout product spec. | iMessage workout product spec | High | 2026-09-03 |
 | `agent-docs/product-specs/bring-your-own-inference.md` | Personal custom inference contract covering verified member-owned endpoints, explicit selection, no silent fallback, privacy, metering, and recovery. | Hosted assistant/custom inference product spec | High | 2026-07-31 |
 | `agent-docs/product-specs/member-owned-device-provider-applications.md` | Member-owned OAuth client application contract for provider-portal provisioning, exact app revision binding, polling-first runtime config, and optional signed webhooks. | Device-provider connection product spec | High | 2026-08-09 |
-| `agent-docs/product-specs/measured-biomarker-index.md` | Curated measured-biomarker navigation over preserved private lab history, including explicit admission, alias, and disclosure-layout contracts. | Biomarkers product spec | High | 2026-07-20 |
-| `agent-docs/product-specs/personal-patterns.md` | Private repeated action-to-next-day sleep and recovery clues, including existing-history reuse, comparison matching, evidence stages, thresholds, refresh behavior, and ownership. | Personal Patterns product spec | High | 2026-08-10 |
+| `agent-docs/product-specs/measured-biomarker-index.md` | Curated measured-biomarker navigation over preserved private lab history. | Biomarkers product spec | High | 2026-07-20 |
+| `agent-docs/product-specs/journal.md` | Private timeline derived from canonical health records. | Journal product spec | High | 2026-08-24 |
+| `agent-docs/product-specs/personal-patterns.md` | Deterministic private context-to-outcome findings. | Personal Patterns product spec | High | 2026-08-24 |
 | `agent-docs/product-specs/repo.md` | Canonical repository posture and success criteria. | Current repo product spec | High | 2026-04-06 |
-| `agent-docs/product-specs/starter-usage.md` | Non-expiring $4.50 starter usage on the immutable usage-credit ledger, including exactly-once enrollment, operator-discretion recovery only from a locked exhausted direct-Starter gate, full-grant-plus-debit legacy migration, paid conversion boundaries, the completed 69-object legacy provider drain, bounded delayed-Stripe compatibility, and the two-plane forward-only Web/runner cutover. | Hosted access/billing product spec | High | 2026-08-18 |
-| `agent-docs/product-specs/hosted-plan-downgrades.md` | Edge-to-Pulse renewal switches plus the web-owned hosted assistant configuration and personalization resolvers, including gated OpenAI/Venice core-provider choice, the fully deployed input-bound-only model/reasoning update contract, personal Luna/Terra choices, billing-gated Sol, relation-derived group-chat Sol with room-scoped Luna/Terra/Sol selection and fixed provider/reasoning, conversation style controls, the enforced composed included-plus-credit usage boundary with separate group funding, and the one-time durable-workflow recheck rollout. | Hosted billing/current-state spec | High | 2026-07-30 |
-| `agent-docs/product-specs/hosted-plan-usage.md` | Web-owned enforced overall AI-usage projection with price-derived paid allowances and generic purchase/referral credit folded into one Settings percentage, internal forecasts that may threshold actions without displaying estimated days remaining, prospective $7.50 group-thread limits, operator-discretion exhausted-Starter recovery with ledger-version replay safety and stalled-mailbox wake recovery, automatic-recovery-aware link-free group continuity heads-ups framed as Murph time, one member exhaustion recovery contract with a first-party link, accepted-message-bound responding-sender earned and funding follow-up options, explicit-request subscription quotes and personal top-up navigation, Stripe-owned immediate plan confirmation, exact authorized Family owner-self navigation, and the private accepted-input-bound subscription action surface. | Hosted billing/current-state spec | High | 2026-08-18 |
-| `agent-docs/product-specs/hosted-group-member-plan.md` | Private $3.50 Core subscription for confirmed hosted-group members, including route-owner membership at organic group creation, its internal Group billing identity, Pulse runtime mapping, price-derived allowance, signed private actions, and public-checkout exclusion. | Hosted billing/product spec | High | 2026-08-25 |
-| `agent-docs/product-specs/labs-discovery.md` | Implemented read-only lab catalog and ZIP collection-site discovery through private Murph and the authenticated unlinked Labs page, with provider-neutral member-facing language. | Hosted Labs product spec | High | 2026-07-16 |
-| `agent-docs/product-specs/hosted-usage-topups.md` | Durable hosted usage-credit contract: usage credit without message estimates, bounded indexed 32-slot settlement/admission and exact provider-final release, truthful structured capacity-conflict checkout UX, one-time personal and Family top-ups, immediate group funding controls at every capacity with same-route private sponsor management, signed funding-only locators for groups without owner-created join codes, direct funding requests without referral detours, automatic-refill-aware low-capacity urgency and setup-independent exhaustion recovery, low-capacity-only deterministic exact-$5 automatic refill admission, post-commit saved-card dispatch, Stripe-only grants, no funding-setup field in assistant group usage, quiet-by-default group contributions, explicit participant-authorized message/poem/15-second-song formats, malformed creative-envelope omission that preserves running-bit activation and settlement, strict generated-song media fidelity without text fallback, the shared 72-entry/12 KB cold replay boundary, and pre-feature generic notes constrained to plain messages with later refills silent. | Hosted billing/product spec | High | 2026-08-26 |
-| `agent-docs/product-specs/hosted-usage-referrals.md` | Conversational personal/group usage missions with explicit arming, portable Linq/Telegram qualification, canonical credit-entry accounting, final rewards, privacy-safe source celebration, exact direct-route authority, and runtime-owned exact legacy-notice recovery. | Hosted growth/product spec | High | 2026-08-10 |
-| `agent-docs/product-specs/physical-notes.md` | Expressive GPT Image artwork mailed through one Lob effect, with end-to-end HTTP-ambiguity preservation, bounded same-key send replay, accepted-message-only deferred provider reconciliation that cannot send or recall mail, selector-fingerprinted accepted-input recovery binding across restarted turns, uncertainty-safe lost-response copy, checked-outcome plus remaining-blocker recovery, transaction-atomic terminal note/usage/blocker/result settlement, member-wide unresolved-effect guards, member/group complimentary claims, and ordinary Murph usage. | Hosted physical-note product spec | High | 2026-08-21 |
-| `agent-docs/product-specs/hosted-support-escalation.md` | Background-first product-failure feedback, opt-in support-address disclosure, and one-turn reserved escalation after an explicit verified-private human-support request, with Murph's bounded sanitized issue in its own words, explicit residual semantic-risk ownership, truthful completion copy, immediate alerts containing the validated stored issue and internal ids, explicit digest and anonymous-retention ownership, a three-email-per-UTC-day server limit, stable provider idempotency, and archived review-history routing. | Hosted support product spec | High | 2026-08-05 |
-| `agent-docs/product-specs/hosted-family-plan.md` | Hosted Family plan for 2-6 sponsored people, mixed Pulse/Edge member assignments, exact owner-funded member usage top-ups, webhook-owned capacity, private member accounts, chat-first invites, bounded legacy trial conversion, and privacy boundaries. | Hosted billing/product spec | High | 2026-08-10 |
-| `agent-docs/product-specs/health-commons.md` | Health Commons product boundary for wiki-like pages, build-time catalog generation, runnable-protocol publishing and withdrawal, exact page/run-spec Start identity, terminally immutable withdrawn private-run lineage, scoped runtime artifacts, future aggregate outcome summaries, revisions, and artifact manifests. | Health Commons behavior | High | 2026-07-29 |
-| `agent-docs/product-specs/murph-safe-public-product-search.md` | Murph Safe public supplement and branded-food evidence search, normalized public API, exact test-linkage rules, privacy, and abuse bounds. | Public product evidence behavior | High | 2026-07-16 |
+| `agent-docs/product-specs/starter-usage.md` | Non-expiring $4.50 starter usage on the immutable usage-credit ledger. | Hosted access/billing product spec | High | 2026-08-18 |
+| `agent-docs/product-specs/hosted-plan-downgrades.md` | Edge-to-Pulse renewal switches plus the web-owned hosted assistant configuration and personalization resolvers. | Hosted billing/current-state spec | High | 2026-07-30 |
+| `agent-docs/product-specs/hosted-plan-usage.md` | Hosted billing/current-state spec. | Hosted billing/current-state spec | High | 2026-08-18 |
+| `agent-docs/product-specs/hosted-group-member-plan.md` | Private $3.50 Core subscription for confirmed hosted-group members. | Hosted billing/product spec | High | 2026-08-25 |
+| `agent-docs/product-specs/labs-discovery.md` | Hosted Labs product spec. | Hosted Labs product spec | High | 2026-07-16 |
+| `agent-docs/product-specs/hosted-usage-topups.md` | Hosted billing/product spec. | Hosted billing/product spec | High | 2026-08-26 |
+| `agent-docs/product-specs/hosted-usage-referrals.md` | Hosted growth/product spec. | Hosted growth/product spec | High | 2026-08-10 |
+| `agent-docs/product-specs/physical-notes.md` | Hosted physical-note product spec. | Hosted physical-note product spec | High | 2026-08-21 |
+| `agent-docs/product-specs/hosted-support-escalation.md` | Hosted support product spec. | Hosted support product spec | High | 2026-08-05 |
+| `agent-docs/product-specs/hosted-family-plan.md` | Hosted billing/product spec. | Hosted billing/product spec | High | 2026-08-10 |
+| `agent-docs/product-specs/health-commons.md` | Health Commons behavior. | Health Commons behavior | High | 2026-07-29 |
+| `agent-docs/product-specs/public-goal-guides.md` | Goal guide behavior. | Goal guide behavior | High | 2026-08-30 |
+| `agent-docs/product-specs/murph-safe-public-product-search.md` | Public product evidence behavior. | Public product evidence behavior | High | 2026-09-02 |
 | `agent-docs/product-specs/protocol-summary-copy.md` | Source-of-truth copy rules for Health Commons protocol `summary:` fields shown on `/experiments` cards. | Health Commons protocol card copy | High | 2026-04-30 |
-| `agent-docs/product-specs/murph-onboarding.md` | Aspiration-anchored new-member onboarding contract for a private broad-assistant relationship, including a compact progressive-disclosure skill router, observable bounded-history forward-progress inference with the shared 72-entry/12 KB cold replay boundary, brief aspiration-thread capture, explicit park, progressive health foundation with an immediate three-child memo split, separate start acknowledgement, modality-matched lab closer, contextual return, collaborative first step, text-only launch close, and finite completion. | New-member onboarding behavior | High | 2026-08-26 |
-| `agent-docs/product-specs/experiment-onboarding.md` | Experiment-only onboarding boundary for exact Health Commons start intents, title-only unavailable-start recovery, withdrawn-protocol recovery without in-place or post-terminal lineage replacement, baseline policy, saved-run timing ownership, safety/setup flow, capturable session outcomes, bounded assistant support, deterministic closeout, and trusted private progress-card handoff. | Experiment onboarding behavior | High | 2026-07-30 |
+| `agent-docs/product-specs/murph-onboarding.md` | Aspiration-anchored new-member onboarding contract for a private broad-assistant relationship. | New-member onboarding behavior | High | 2026-09-05 |
+| `agent-docs/product-specs/experiment-onboarding.md` | Experiment onboarding behavior. | Experiment onboarding behavior | High | 2026-07-30 |
 | `agent-docs/product-specs/experiment-adherence-confidence.md` | Read-time assumed adherence, confidence ladder, correction semantics, category-scoped activity evidence, and typed subjective session evidence for experiments. | Experiment adherence behavior | High | 2026-07-16 |
 | `agent-docs/product-specs/experiment-outcome-selection.md` | Experiment-only selection rules for member-valued and capturable outcomes, credible evidence, typed session metrics, timeframe integrity, and setup handoff. | Experiment outcome selection behavior | High | 2026-07-16 |
 | `agent-docs/product-specs/protocol-outcome-network.md` | Protocol outcome network boundary for private outcome cards now and future sharing, contribution, cohort summaries, and social guardrails. | Outcome network behavior | High | 2026-05-13 |
-| `agent-docs/product-specs/captures.md` | Capture primitive product boundary for dated private media evidence, durable user-authored media, and 14-day generated-image payload retention with mandatory lookup materialization, checkpointed deadlines, replay-blocking tombstones, and lookup-backed generated-origin recovery that still requires outbox delivery proof. | Capture behavior | High | 2026-08-10 |
-| `agent-docs/product-specs/companion-app.md` | Native iOS and Android health companions: canonical account admission with a capacity-gated first iMessage, no-line activation and managed-line inbound-first recovery, Web-only welcome email, exact pending-activation runtime-wake retry, broad Apple Health sync, closed WHOOP enrichment, scheduled overnight PRV on iOS, and a narrow Health Connect bridge on Android. | Companion app plan | High | 2026-08-13 |
+| `agent-docs/product-specs/captures.md` | Capture behavior. | Capture behavior | High | 2026-08-10 |
+| `agent-docs/product-specs/companion-app.md` | Companion app plan. | Companion app plan | High | 2026-08-13 |
 | `agent-docs/product-specs/query-metric-universality.md` | Universal metric queryability invariant: every metric-bearing canonical event yields a query metric point through the generic extraction rule. | Query metric product spec | High | 2026-07-22 |
-| `agent-docs/product-specs/companion-app-mvp.md` | Two-screen companion build spec plus bounded WHOOP metadata enrichment and the strict scheduled six-field overnight-PRV beta: one-time enrollment, constant-memory five-minute windows, protected scalar recovery, one immutable nightly summary, metric separation, bounded retention, and deployment/physical-validation gates. | Companion app build plan | High | 2026-07-14 |
-| `agent-docs/product-specs/ios-address-book-advisory-names.md` | Optional iOS Contacts projection with bounded one-to-four-label alternatives, member-scoped KMS MAC tokens, encrypted advisory labels, route-authorized iMessage/SMS roster lookup and sender attribution with one hosted-group access workflow, typed provider capability gaps, participant-access reconciliation, CAS deletion/retention, residual threat model, and rollout order. | Companion/group privacy contract | High | 2026-07-30 |
-| `agent-docs/product-specs/habitat.md` | Habitat progressive member life-context: domains, `habitat` bank family, domain catalog, coverage derivation, context-dividend collection rules, environment/workspace v1 indicators, and bounded Environment voice-to-Browser-Vault replica convergence and recovery. | Habitat product spec | High | 2026-08-11 |
+| `agent-docs/product-specs/companion-app-mvp.md` | Companion app build and authentication recovery telemetry contract. | Companion app build plan | High | 2026-09-05 |
+| `agent-docs/product-specs/ios-address-book-advisory-names.md` | Companion/group privacy contract. | Companion/group privacy contract | High | 2026-08-28 |
+| `agent-docs/product-specs/habitat.md` | Habitat product spec. | Habitat product spec | High | 2026-08-11 |
 | `agent-docs/product-specs/murph-contact-card-picker.md` | Post-signup add-Murph-to-contacts step with member-chosen contact-card avatar, independent from `/home` first-visit personalization. | Contact-card picker spec | Medium | 2026-07-22 |
-| `agent-docs/product-specs/murph-personas.md` | Six base personalities, 36 premade ordered combinations, direct `/home` first-visit picker ownership, combination-id persistence, main-owned voice/tone defaults, legacy read normalization, and six-set preview ownership. | Murph persona behavior | High | 2026-07-22 |
-| `agent-docs/product-specs/murph-tone-and-voice.md` | Conversation-first contract for the persona baseline plus hosted Tone, Voice, Humor, Push, Detail, and the conversational-only Unhinged dial across first-visit personalization, private Murph, and synthetic room runtimes, including accepted-input and current-Linq-route authority, personal Settings convergence, room-owned group controls, the running-turn voice-memo default plus explicit current-user named one-off override, per-dial projection and canonical companion watermarks, exact-successor compound message batches, sparse web projection, per-setting causal ordering, shared owners, prompt behavior, the same-turn read plus bounded step for a bare directional request, the group shared-dial buy-in rule for Unhinged, and rollout and rollback floors. | Murph speaking-style preference spec | Medium | 2026-08-10 |
+| `agent-docs/product-specs/murph-personas.md` | Murph persona behavior. | Murph persona behavior | High | 2026-07-22 |
+| `agent-docs/product-specs/murph-tone-and-voice.md` | Murph speaking-style preference spec. | Murph speaking-style preference spec | Medium | 2026-08-10 |
 | `agent-docs/product-specs/shared-message-targeting.md` | Shared opaque accepted-message reference, authority resolver, native-reply marker, reaction reuse, provider behavior, and immediate runner rollout contract. | Assistant messaging behavior | High | 2026-07-16 |
-| `agent-docs/product-specs/group-chat-social-dynamics.md` | Human-first group-chat psychology, conversational-floor ownership, one-shot pre-commit reply reconsideration with a four-second held-draft window, commit-owned user transcript materialization, provisional conversational segments, one same-thread continuation, and an atomic now-versus-next-turn cutoff; one-bubble interactive replies; setup-to-human handoff; arrival-to-resident tapering; participation boundaries; comedy authority; and brief public-reference grounding for earned playful turns. | Group conversation behavior | High | 2026-08-21 |
-| `agent-docs/product-specs/group-managed-automations.md` | Implemented member/group managed-owner isolation, execution checks, and retirement behavior; no member-facing group social automation currently ships. | Managed group automation behavior | High | 2026-07-26 |
-| `agent-docs/product-specs/group-health-newsletter.md` | Newsletter as a private skill recipe over an ordinary wall-clock-aware group automation, consent-aware shared reads, normal current-chat delivery, and an optional generic group-email effect with Web-owned recipient revalidation and existing-outbox durability. | Group newsletter behavior | Medium | 2026-08-22 |
+| `agent-docs/product-specs/group-chat-social-dynamics.md` | Group conversation behavior. | Group conversation behavior | High | 2026-08-21 |
+| `agent-docs/product-specs/group-managed-automations.md` | Implemented member/group managed-owner isolation, execution checks, and retirement behavior. | Managed group automation behavior | High | 2026-07-26 |
+| `agent-docs/product-specs/group-health-newsletter.md` | Group newsletter behavior. | Group newsletter behavior | Medium | 2026-08-22 |
 | `agent-docs/product-specs/group-challenge-formats-and-scorecards.md` | Individual, team, and collective challenge formats plus one-to-five model-interpreted additive components with deterministic point arithmetic and aggregation. | Group challenge scorecards | High | 2026-07-29 |
-| `agent-docs/product-specs/group-challenge-data-diagnostics.md` | Truthful complete or partial group-challenge standings, evidence-ordered missing-data guidance with explicit first-projection `pending` versus completed-empty `missing` states, group-authorized fresh exact-scope reads, consent-fenced member-reported Manual corrections, source-tagged multi-source health shares without cross-source selection, rollback-readable legacy sleep compatibility, and connection/source-epoch-coherent privacy-bounded `device-sync-status.v0` observations. | Group challenge diagnostics | High | 2026-08-13 |
-| `agent-docs/product-specs/challenge-standings-card.md` | Native Messages presentation contract for individual, team, and collective challenge standings with truthful partial and unscored states, authenticated Linq group-only delivery, complete semantic captions, and an identity-free static-image projection with the canonical Murph badge. | Group challenge standings response card | High | 2026-08-11 |
-| `agent-docs/product-specs/personal-group-awareness.md` | Personal Murph read access to hosted-group memberships, including owner discoverability for organic routed groups without implicit vault sharing, ordinary-owner composition with existing membership-gated group actions, requested permissions, active self grants, and owner-authorized permission links. | Hosted group self-awareness | High | 2026-08-25 |
-| `agent-docs/product-specs/private-group-consultation.md` | Implemented Assistant Ask request/reply primitive plus the separate target-authored private-to-group context handoff, with exact requester identity, provider-free cached-root admission transactions, pinned transport and mailbox replay after lost responses or membership-count changes, delimiter-safe untrusted context, plain-text model output with runtime-owned delivery, deterministic exact unavailable delivery, bounded foreground-causal draining, bounded opaque failure correlation, and post-Temporal direct latency hints. | Hosted group consultation | High | 2026-08-24 |
-| `agent-docs/product-specs/consented-group-disclosure.md` | Exact-grant group-to-member Assistant Ask plus exact-message current-sender requests, with independent valid sources in one accepted turn, model-inferred natural-language audience and clarification, Web-owned exact sender/source/route admission, same-channel private-route proof, group notice before a personal read, fail-closed unmarked group rollout skew, one outgoing allow/deny review, mutually exclusive private/group terminal retry, non-disclosing fallback, replay/concurrency ownership, and bounded private/persisted legacy drain. | Hosted group disclosure | High | 2026-08-13 |
-| `agent-docs/product-specs/hosted-group-join-confirmation.md` | First-join private Murph confirmation with a sanitized group name, deterministic web or reaction copy, first-party sharing-editor link, and one durable member-row owner for Linq routing, activation, invite, and mailbox writes. | Hosted group membership behavior | High | 2026-07-23 |
-| `agent-docs/product-specs/clinical-records-intake.md` | Epic SMART clinical-record connection, exact API-registration catalog, all-24 primary query activation across 17 permissions, provider-directory, credential/control-plane, query-slice-bound retrieval, raw-first vault import, privacy, recovery, and rollout contract. | Clinical Records intake behavior | High | 2026-07-21 |
+| `agent-docs/product-specs/group-challenge-data-diagnostics.md` | Group challenge diagnostics. | Group challenge diagnostics | High | 2026-08-26 |
+| `agent-docs/product-specs/challenge-standings-card.md` | Group challenge standings response card. | Group challenge standings response card | High | 2026-08-11 |
+| `agent-docs/product-specs/personal-group-awareness.md` | Personal Murph read access to hosted-group memberships. | Hosted group self-awareness | High | 2026-08-29 |
+| `agent-docs/product-specs/private-group-consultation.md` | Hosted group consultation. | Hosted group consultation | High | 2026-08-28 |
+| `agent-docs/product-specs/consented-group-disclosure.md` | Hosted group disclosure. | Hosted group disclosure | High | 2026-08-26 |
+| `agent-docs/product-specs/hosted-group-join-confirmation.md` | Hosted group membership behavior. | Hosted group membership behavior | High | 2026-07-23 |
+| `agent-docs/product-specs/clinical-records-intake.md` | Bounded clinical import, saved results and recovery. | Clinical Records intake behavior | High | 2026-09-05 |
 | `agent-docs/phone-calls/retell-phone-agent.md` | Retell hosted phone agent prompt, authority, transfer, and call-brief handling rules. | Hosted phone-call provider setup | Medium | 2026-06-25 |
 | `agent-docs/phone-calls/retell-analysis-fields.md` | Retell post-call analysis field contract and transcript-retention boundary. | Hosted phone-call provider setup | Medium | 2026-06-25 |
 | `agent-docs/feature-user-story-audit/README.md` | Feature user-story audit overview and artifact inventory. | Point-in-time feature audit | Low | 2026-06-21 |
@@ -649,43 +115,45 @@ payloads reuse the set-based root unwrap path. This contract is specified by
 | `agent-docs/feature-user-story-audit/testing-errors.md` | Test errors captured during the feature user-story audit. | Point-in-time feature audit | Low | 2026-06-21 |
 | `agent-docs/references/README.md` | Reference-pack overview and maintenance rules. | Reference pack conventions | Medium | 2026-03-12 |
 | `agent-docs/references/repo-scope.md` | Concrete repo scope and routing boundaries. | Repo ownership boundary | High | 2026-04-06 |
-| `agent-docs/references/testing-ci-map.md` | Verification map for packages, apps, smoke flows, event-time-ready exact-head PR-CI ownership and acceptance-parity guards, executable same-repository plus fork feature/default-branch draft-reset resolution proof through the base-repository head filter, shared native iOS/Android infrastructure-retry command proof, immutable exact-base/exact-candidate docs-drift CI comparisons, the every-PR deployment-concerns disposition guard, optional local diff diagnosis, mandatory pre-direct-default acceptance, canonical executors, production-image native Linux confinement for both read-only member and group profiles, the coverage-bearing default scenario-integrity command, and current coverage surfaces including Environment voice replica convergence and contiguous Browser Vault refresh-control collapse, real-PostgreSQL device-sync reconnect retention, consent-ordering, and reconnect/acknowledgement lock-order proofs, routed-group structural materialization through private membership discovery without implicit vault sharing, companion Starter enrollment with a routable welcome line, without an assignable line, and at proactive capacity, bounded indexed usage-credit settlement, provider-final reservation release, reversal-capacity validation, allowance-overshoot alerting through the existing operational Resend incident owner, the protected-main live Junction Garmin canary with its frozen-workspace Codex CLI PATH and Kernel headed-remote tunnel preflight and exact two-step consent progression, plus operator-run Oura browser proof, shared-sandbox native iOS hosted E2E namespace isolation with one Vercel-owned non-sensitive value, bounded complete inventory, and unrelated-user preservation, App Router-inclusive spread-free Stripe request enforcement and the safe test-mode resume contract probe, workspace-checkpoint CAS and mailbox-acknowledgement atomicity, the harness-compiled hosted-local Retell Web request-server fault preload without TypeScript loader composition or a production instrumentation hook, physical-note one-effect, selector-bound accepted-input recovery replay, concurrent-selector exclusion, and concurrent-acceptance settled-cost PostgreSQL concurrency, reminder-availability cadence and foreground-preemption proof, authenticated Linq speaker-label batching plus bounded edit preparation/KMS composition and real-PostgreSQL three-contender proof, indexed signup-delivery failure liveness under unrelated PostgreSQL history and concurrent terminals, bounded file-cache behavior, exact-ref current-sender multi-request and fail-closed separated/unseparated audience-directive proof, the exact-count local device-sync database-spike and one-set-read maximum-cardinality runtime-apply replays, deterministic hosted device-sync durable-identity, bounded at-least-once replay, completion-fence, and quiescence proof, one-turn private support escalation and detailed alerts, the internal product-feedback digest, the hosted-runtime latency deterministic lock-order, checkpoint lease-race, and newest-250 cardinality proofs, Settings phone-transfer provider-free preparation and exact-drift proof, and the Clinical Records callback/account-deletion real-PostgreSQL concurrency proof. | Testing and CI truth | High | 2026-08-27 |
+| `agent-docs/references/testing-ci-map.md` | Verification map for packages, apps, hosted media follow-up proof, smoke flows, cancellation-config parity, exact-head PR CI, protected-main runtime proof, deferred-tool advertisement fixtures, canonical executors, compiler cache policy, and current coverage owners. | Testing and CI truth | High | 2026-09-05 |
+| `packages/core/bench/README.md` | Secret-free Docker import and hydration reproduction, required one-vCPU latency CI budgets, and sizing evidence limits. | Container CPU benchmark | Medium | 2026-09-04 |
 | `agent-docs/references/health-entity-taxonomy-seam.md` | Shared owner seam for health taxonomy metadata. | Health taxonomy seam | Medium | 2026-04-06 |
-| `agent-docs/references/hosted-runtime-protocol.md` | Hosted mailbox/workspace checkpoint protocol, including trusted generated-image attachment metadata, exact-id ready-completion admission and provider-acceptance-owned wake retention ahead of already-waiting conversation input in one Codex batch, generated-delivery reader-first rollout, exact flat runtime staging, permission adoption, quiescent cleanup, and rollback-floor sequencing; shared accepted-message targeting and its runner rollback floor; exact-scope current shared-data reads with transaction-atomic projection handoffs, scheduled retryable maintenance-row recovery, source-query null-cursor first-materialization pages bounded to 25 exact replacements with prompt continuation and foreground gaps, opaque grantor- and destination-inactivity deferral, fresh reaffirmation generations, bounded legacy generation backfill, member-local seven-date consent bounds, explicit pending snapshots, capability-safe deferred projection obligations, consumer-first rollout, immediately available reported sleep stages, coherent single-generation device-source observations, checkpoint-gated consented vault-share projection fairness with complete device-only deferral, capture-before-owned-delivery, retained end-to-end delivery ownership with nonblocking foreground admission, retained failure/preemption ownership, source-workspace stale-writer fencing, high-water-complete dirty-only deferral, budget-continuation priority, and immediate shutdown handoff, plus shared missed-signal recovery for unconsumed device-sync mailbox pointers and device-sync canonical schedule-event/mailbox-item identity with bounded at-least-once read replay, completion-fenced cadence, and quiescent later recovery buckets; authenticated Linq group speaker-label provenance, unregistered-contact fallback, operation-local and bounded private file-backed caching, parser-compatible rollout, signed payload-shape compatibility with redacted diagnostics, and iMessage app fallback minimization plus mode-independent first-contact disposition; the paired hard-cut Assistant Ask mailbox lifecycle with exact requester identity, deterministic exact unavailable delivery, post-Temporal direct latency hints and post-enrollment instant-start foreground prewarm with conversation-first deferred activation signaling and provider-dependent crash-window recovery, pass-wide joined-group request and accepted-input completion pre-checkpoint admission, pass-owned fresh-input occurrence ordering plus a read-only complete-index fallback, natural answer continuation or exact unavailable notification through existing output-only delivery surfaces, provider-accepted and replay-safe current-sender private exact-completion imports that preserve the logical direct session while invalidating stale native resume, bounded failed-request correlation, plus exact-grant group-to-member asks and exact-message current-sender authority with output-only caller-group composition or live-revalidated scheduled same-turn polling and no producer flag; exact all-resident proof for up to three per-root one-shot children, including one detached read-only candidate plus one outgoing disclosure reviewer, beside the serial foreground writer; serialized cross-lane preference causality with field-scoped replay handling and active person-or-room wake recovery; signed email reply-alias ingress; runtime write-fence authority, post-settlement managed-AI revocation, and direct exact-abort background-mode preemption for foreground priority with platform/control-plane stop reconciliation; latency-neutral stale-fence classification, same-call timing diagnostics, coherent concurrent-replacement attribution, and attempt-scoped R2 response-header/body-consumption restore timing; checkpoint, restore, and owner-release sequencing; provider egress, including explicit group-access offer publication and active-offer dedupe; mailbox import; provider-visible ordinal-bounded active-turn targeting; direct-canonical Browser Vault refresh cancellation with terminal no-progress outcomes; and durable wake ownership. | Hosted execution architecture | High | 2026-08-25 |
-| `agent-docs/references/hosted-temporal-orchestration.md` | Durable hard-cut Temporal orchestration ADR defining final ownership split, private Murph Cloud production worker, deployment, prior-private-version rollback ownership, and repository-relocation replay continuity, pointer-only Temporal state including the payload-free runtime wake used by provider changes and the same-transaction durable maintenance-mailbox handoff used by new group-share grants, signal-aware retry/wait behavior including failed-runtime completion backoff, web signal-client and worker Temporal Cloud auth/TLS parity, callback-signed execution-adapter and device-sync scheduled wake sweep contract, signed memberless `bindings-v1` Web and Cloudflare owner admission before worker polling, web-owned reconciliation facts without Activity-local signed usage decisions, post-start exact-code AI-usage denial as an unchanged mailbox prefix with durable lag preserved, mailbox-lag priority, global device-sync scheduled-wake Schedule ownership with bounded due-reconcile and shared unconsumed device-sync mailbox handoff recovery, production Workflow bundle, cache-memory, fixed execution-slot and autoscaling-poller limits, two-instance Render capacity, Cloudflare scheduler deletion targets, Vercel Workflow nudge deletion targets, architecture guard coverage, and acceptance criteria; `agent-docs/exec-plans/completed/TEMPORAL.md` is the completed execution snapshot. | Hosted Temporal orchestration target | High | 2026-08-22 |
+| `agent-docs/references/hosted-runtime-protocol.md` | Hosted mailbox/workspace checkpoints, exact ownership and idle restore publication, and accepted-work monitoring boundaries. | Hosted execution architecture | High | 2026-09-04 |
+| `agent-docs/references/hosted-temporal-orchestration.md` | Hosted Temporal orchestration target. | Hosted Temporal orchestration target | High | 2026-09-03 |
 | `agent-docs/references/data-model-seams.md` | Current shared-owner notes for high-leverage data-model seams. | Data-model seam guidance | Medium | 2026-04-07 |
 | `agent-docs/references/giant-file-composability-seams.md` | Paused giant-file cleanup planning guidance and current worth-planning/keep-together notes for oversized multi-responsibility files. | Giant-file composability seam guidance | Medium | 2026-06-03 |
 | `agent-docs/research/2026-08-23-vault-cli-error-recovery-audit.md` | Point-in-time exhaustive Vault CLI audit of generic, lossy, untyped, misleading-success, and privacy-unsafe error paths, with prioritized model-recovery work packages. | CLI error-recovery audit | Medium | 2026-08-24 |
 | `agent-docs/research/2026-08-13-alternating-routine-set-resolution.md` | Privacy-safe production correlation and root-cause analysis for repeated strength-set completions attributed to the wrong exercise in an alternating routine. | Investigation artifact | Medium | 2026-08-13 |
-| `agent-docs/research/2026-08-05-ios-android-companion-parity-audit.md` | Point-in-time exhaustive crosswalk of landed Murph iOS companion pull requests against Android main, with confirmed product, correctness, health, contact, release, and verification gaps plus platform-specific exclusions. | Mobile companion parity audit | Medium | 2026-08-05 |
-| `agent-docs/research/2026-07-16-codex-session-architecture-audit.md` | Point-in-time aggregate evidence from the frozen 30-day Codex session audit, including corpus coverage, change-mapping dispositions, steering themes, and confidence limits. | Architecture audit research artifact | Medium | 2026-07-18 |
+| `agent-docs/research/2026-08-05-ios-android-companion-parity-audit.md` | Mobile companion parity audit. | Mobile companion parity audit | Medium | 2026-08-05 |
+| `agent-docs/research/2026-07-16-codex-session-architecture-audit.md` | Point-in-time aggregate evidence from the frozen 30-day Codex session audit. | Architecture audit research artifact | Medium | 2026-07-18 |
 | `agent-docs/research/2026-07-10-junction-labs-commerce-and-fulfillment.md` | Point-in-time Junction lab-ordering research and phased product, commerce, fulfillment, result-import, and launch-gate proposal. | Research and future planning artifact | Medium | 2026-07-10 |
 | `agent-docs/research/2026-06-25-imessage-line-flag-evidence.md` | Point-in-time redacted evidence note for the 2026-06-25 iMessage line flag investigation. | Investigation artifact | Medium | 2026-06-26 |
-| `agent-docs/research/murph-age-autoresearch.md` | Murph Age autoresearch operating rules, including the ReviewGPT-vs-Codex role split, transition gates, and source/privacy boundaries. | Murph Age research workflow | High | 2026-05-09 |
-| `agent-docs/operations/agent-workflow-routing.md` | Workflow router and compact agent work contract for task classes, proportional Product UX planning and walkthrough routing, action authority, evidence/tool use, focused local PR proof with exact-head CI ownership, parent-owned preliminary ReviewGPT disposition continuation and final-finding pauses, review gates, commit paths, worktree isolation, and safe retirement. | Agent workflow routing | High | 2026-08-24 |
-| `agent-docs/operations/product-ux.md` | Single owner for proportional Product UX planning, post-code walkthroughs, and preliminary review across affected people, minimum current requirements, current writer/consumer gates, complete journeys, risk-based evidence, and parent-owned finding dispositions. | Product UX workflow | High | 2026-08-21 |
-| `agent-docs/operations/native-android-hosted-e2e.md` | Protected native Android hosted E2E ownership, exact Web/Android source binding, the single shared hosted-native PR credential and identity lifecycle environment, cross-platform Privy client identifier contract, refreshable repository-scoped GitHub App credentials, receipted and unreceipted dispatch fencing, production-canary isolation, privacy boundary, rollout order, and physical-device proof gap. | Native Android verification operations | High | 2026-08-21 |
-| `agent-docs/operations/verification-and-runtime.md` | Verification ownership by delivery path, including focused local proof, immutable exact-base/exact-synthetic-merge docs-drift CI comparisons, deliberate near-merge Ready admission with authenticated-agent `gh pr ready` ownership, event-time-ready draft-reset receipts with base-repository-filtered exact workflow-run head resolution for same-repository and fork feature/default-branch PRs, broad exact-head CI for PRs, the protected-main headed-Kernel Garmin Junction canary with unattended route-bound fail-closed two-step consent automation, manual-path preservation, one-shot selection and confirmation submissions, content-free stalled-confirmation action, checkbox, and frame counts, a current-route recheck after asynchronous surface sampling, and a post-reload page-load boundary before disconnect cleanup, fail-closed tag-release matrices with exact-head packing, native iOS and Android hosted E2E statuses whose explicit real-journey passes are production-shaped proof, the shared infrastructure-only exact-head retry owner, namespace-only cleanup inside a disposable shared Junction sandbox, claim-based rendered evidence, canonical command and executor semantics, runtime proof boundaries, and package/app testing surfaces. | Verification policy | High | 2026-08-26 |
-| `agent-docs/operations/database-transaction-starvation-audit.md` | Point-in-time production catalog at its exact audited base covering interactive transactions and explicit locks, starvation classifications, retained-lock evidence policy, replacement patterns, PR ordering, and privacy-safe observability. | Database critical-section reliability | High | 2026-08-09 |
-| `agent-docs/operations/typescript-verification-performance.md` | TypeScript 7 worker budgets, optional local canonical verification with explicit Crabbox-on-Blacksmith escalation and an exclusive heavyweight lane, focused PR proof, direct-default acceptance, scoped diff and repo-tools caps, incremental CI state, editor/watch guidance, and benchmark method. | Verification performance policy | Medium | 2026-07-29 |
-| `agent-docs/operations/completion-workflow.md` | Outcome-based completion with proportional Product UX plans and walkthroughs, claim-based evidence, a concise PR contract, ordered exact-head ReviewGPT gates, cross-owner composition mapping with stable composed/E2E proof, parent-owned accept/reject dispositions with specialist remediation continuation and a final-finding pause, focused local proof, broad PR CI, scoped commit and plan closure, and merge-readiness handoff. | Completion workflow | High | 2026-08-24 |
-| `agent-docs/operations/imessage-deliverability.md` | iMessage/SMS deliverability guidance for assistant prompts, outbound copy, exact-message targeting, inbound-triggered daily home-line redirects with a one-hundred-message explicit-resend bank, reminders, member-owned current-home routing, daily line limits, notifications, line health, pacing, links, cold-contact behavior, outbox-owned interactive response cards with provider-owned outer chrome, a provider-static raster carrying the canonical Murph badge and native-visible hierarchy, neutral incomplete nutrition progress, and a physical-device visibility gate, first-rate-limit and complete-response 2.5-second capability-deadline fallback, durable failure-only fallback log entries, classified stale-app-card recovery under the promoted identity, one trusted provider reply-thread binding, invocation-local late-input delivery context without durable recipient exposure, bounded offline V1-V5 fragments, offline native decoding, one effective text-fallback identity across provider entry, authorized stale-thread recovery, replay, and ambiguous-delivery suppression, the one-hundred-message group outreach bank, provider-native authoritative group-signup reply identity and accepted-day suppression, conversation-first instant-start activation signaling with request-local failure handling and provider-dependent crash recovery, member-wide accepted meal-capture engagement, and blocked-model system-import admission. | Phone-number messaging policy | High | 2026-08-11 |
-| `agent-docs/operations/local-storage-lifecycle.md` | Local Vitest temp-root ownership, abrupt-run stale cleanup, unmanaged temporary checkout ratcheting, automatic Spotlight exclusion for registered worktrees, and exact build-output cleanup rules. | Local rebuildable-storage lifecycle | High | 2026-08-10 |
-| `agent-docs/operations/hosted-local-worktree-dev.md` | Hosted-local worktree dev workflow and helper spec for isolated ports, database, local hosted crypto state, Wrangler state, Next dist dir, optional MinIO data, fail-closed Temporal disable overrides across child env sources, frontend-only Vercel-link setup with local hosted URL overrides, and webhook tunnels. | Local hosted runtime workflow | Medium | 2026-08-20 |
-| `agent-docs/operations/pr-reviewgpt-loop.md` | Exact-head managed-browser completion workflow: one preliminary pass and the eligible final gate can run concurrently; preliminary results use a parent-owned, evidence-backed accept/reject update and continue accepted remediation, while final `FINDINGS` pause all candidate mutation unless a narrow exception applies. Rejected findings need no model withdrawal, while accepted findings retain verification and rerun rules. The loop also owns exact-head packaging, immutable baselines, bounded coverage patches, completion watchers, correction versus full snapshots, moving-base handling, anomaly retrospectives, and the seven-round hard cap. | PR ReviewGPT loops | Medium | 2026-08-24 |
-| `agent-docs/operations/device-sync-ingestion-invariants.md` | Device-sync push/pull ingestion invariants, including Junction's hourly one-day fidelity catch-up plus daily broad correction sweep, canonical-receipt routing of both incoming and displaced provider days into bounded durable per-day calendar jobs for sparse corrections, retained calendar obligations across account/source authority loss, connect-route-owned source-alias equivalence and persisted source-identity projection across routine, precise, retained-repair, hydration, and hosted job-listing boundaries, shared newest-lifecycle source consolidation with independent monotonic arrival evidence plus Web-owned exact-source authorization-epoch replacement, structurally complete provider-scoped parsing plus strict pre-write complete-set validation and exact daily-state receipt proof with authoritative exact-source empty-set replacement, fetch-side preservation of provider-day conflicts for importer-owned validation, provider-clock-only temporal derivation, unversioned complete-set daily/feature reconciliation, revisioned stable sparse intervals, and a one-shot profile admission-revision bump with closed equal-revision stable-ID migration plus no-ID replay retention that preserves member history and rejects semantic changes; bounded vault-local closed-source-day temporal ownership/retraction with durable failed/yielded resource-day continuation and queued/running-only temporal deduplication so succeeded history cannot suppress later source/data widening; aggregate-cadence and per-source recovery ownership; Fitbit-to-Google-Health replacement with post-authorization exact-source terminal history, one source-bearing canonical commit boundary, produced-resource obligations, canonical successor aliases, job-bound authorization-epoch dedupe and supersession, reauthorization-epoch fencing, provider-job-bound logical-fact freshness, provider-provenance-owned daily finalization, and provisional current-day legacy visibility; hosted connection-binding plus `connectedAt` epoch supersession of fetch/control work while accepted credential-independent import carriers remain durable through a persisted server classification bit; private store-owned or consent-ordered payload preparation; marker-before-payload reconnect cleanup; payload replay with local-scheduler backoff; and companion-only scheduled overnight-PRV admission with explicit connect/passive-resume authority, immutable nightly identity, bounded local scalar recovery, and SDNN/Recovery separation. | Device-sync ingestion contract | High | 2026-08-20 |
+| `agent-docs/research/murph-age-autoresearch.md` | Murph Age autoresearch operating rules. | Murph Age research workflow | High | 2026-05-09 |
+| `agent-docs/operations/agent-workflow-routing.md` | Task scope, authority, checkout, commits, and instruction ownership. | Agent workflow routing | High | 2026-09-04 |
+| `agent-docs/operations/product-ux.md` | Product UX workflow. | Product UX workflow | High | 2026-08-31 |
+| `agent-docs/operations/native-android-hosted-e2e.md` | Native Android verification operations. | Native Android verification operations | High | 2026-09-01 |
+| `agent-docs/operations/verification-and-runtime.md` | Verification ownership by delivery path, CI compiler memory and production-build proof, independent worktree build outputs, authorized base reconciliation with bounded conflict resolution, and Temporal integration build/process-shard proof. | Verification policy | High | 2026-09-05 |
+| `agent-docs/operations/database-transaction-starvation-audit.md` | Database critical-section reliability. | Database critical-section reliability | High | 2026-08-09 |
+| `agent-docs/operations/typescript-verification-performance.md` | Verification performance policy. | Verification performance policy | Medium | 2026-07-29 |
+| `agent-docs/operations/completion-workflow.md` | Completion workflow. | Completion workflow | High | 2026-09-02 |
+| `agent-docs/operations/imessage-deliverability.md` | Phone-number messaging policy. | Phone-number messaging policy | High | 2026-08-11 |
+| `agent-docs/operations/local-storage-lifecycle.md` | Local rebuildable-storage lifecycle and guarded partial-retirement recovery. | Local rebuildable-storage lifecycle | High | 2026-09-06 |
+| `agent-docs/operations/hosted-local-worktree-dev.md` | Local hosted runtime workflow, call-scoped cancellation, and exact-child startup/exit cleanup ownership. | Local hosted runtime workflow | Medium | 2026-09-05 |
+| `agent-docs/operations/pr-reviewgpt-loop.md` | PR review for realistic serious bugs and material Complexity Collapse, with a three-round review cap, no base-update limit, response timing and evidence requirements, and same-session waiting or paced polling by default. | Final PR ReviewGPT loop | Medium | 2026-09-04 |
+| `agent-docs/operations/device-sync-ingestion-invariants.md` | Device-sync push/pull ingestion invariants. | Device-sync ingestion contract | High | 2026-08-20 |
 | `agent-docs/PLANS.md` | Execution-plan lifecycle and storage rules. | Plan workflow | Medium | 2026-03-31 |
-| `agent-docs/exec-plans/completed/README.md` | Marks completed plans as immutable, non-operative historical snapshots and routes current implementation, deployment, rollback, and incident guidance to live owner docs. | Completed-plan archive interpretation | Medium | 2026-07-22 |
+| `agent-docs/exec-plans/completed/README.md` | Completed-plan archive interpretation. | Completed-plan archive interpretation | Medium | 2026-07-22 |
 | `agent-docs/generated/README.md` | Meaning and expectations for generated doc artifacts. | Generated-doc conventions | Low | 2026-04-02 |
-| `agent-docs/exec-plans/active/` | Task-owned in-flight execution plans, including bounded Gemini video analysis, current phone-call status remediation, and the ReviewGPT 0.5.131 exact-head gate. | Active plan lifecycle | Medium | 2026-08-20 |
+| `agent-docs/exec-plans/active/` | Task-owned in-flight execution plans. | Active plan lifecycle | Medium | 2026-08-20 |
 | `agent-docs/exec-plans/tech-debt-tracker.md` | Current debt register with owner/priority/status. | Rolling debt tracker | Medium | 2026-03-12 |
-| `agent-docs/prompts/` | Reusable prompt, frontend, coverage, and fallback deep-review guidance. Product UX review rules live in `agent-docs/operations/product-ux.md`. | Workflow prompt library | Low | 2026-08-17 |
+| `agent-docs/prompts/` | Optional task-specific review prompts; the completion workflow determines required gates. | Workflow prompt library | Low | 2026-08-17 |
 | `agent-docs/prompts/seam-audits/` | One-pass bespoke seam prompts governed by a shared review-only, evidence, correction, and zero-finding contract. | Seam-audit prompt library | Low | 2026-07-13 |
-| `apps/web/README.md` | Hosted web control-plane overview, env/runtime contract, one-shot first-visit persona picker handoff, fixed-pack usage-credit Checkout plus capped monthly group authorization and explicit saved-card PaymentIntents, metadata-only Stripe failure alert configuration, canonical purchase/referral credit-entry ownership and remaining projections, conversational referral state, product-label database restore and constraint rollout order, gated OpenAI/Venice assistant Settings projection, signed conversation convergence, and cross-lane mailbox causal-sequence ownership, hosted AI usage allowance ownership, hosted computer-use run/handoff ownership, hosted Linq first-contact decision retention and iMessage app-fallback screening boundary, health-data revocation rollback floor, approval-read rollback floor, Temporal reconciliation-facts boundary, and app-source/testkit ownership split. | `apps/web/**` | Medium | 2026-08-09 |
-| `apps/cloudflare/README.md` | Hosted execution-plane overview and runtime contract, including payloadless direct Linq and Assistant Ask latency wakes, strict plan-usage consumer rollout order, Worker-owned provider egress allowlists, runner-scoped OpenAI and Venice egress credentials, asynchronous private generated-image delivery, and encrypted temporary group-avatar staging. | `apps/cloudflare/**` | Medium | 2026-07-29 |
-| `apps/cloudflare/DEPLOY.md` | Current deployment procedure for hosted execution, including the coordinated health-data revocation Web/Worker rollback floor, gated Venice provider activation, Web-first Gemini video-analysis pricing and immediate Worker/runner activation, rollout and rollback floors for shared message targeting, direct support escalation, and group room-model maintenance, hard-cut Assistant Ask and consented group disclosure rollback floors, phone-call fail-closed direct-origin/result/stop rollout with deterministic-item rollback proof and fence drain, group-funding urgency/capability rollout order, additive failed-request diagnostic rollout, native permission smoke, Blacksmith deploy handoff validation, private generated-image delivery and group-avatar staging, the approval-read web/runtime compatibility floor, the gated personality projection-convergence hard cut, and no signed usage-allowance start secret. | Hosted deploy flow | Medium | 2026-08-20 |
+| `apps/web/README.md` | Hosted Web setup, runtime ownership, and build/deploy contracts. | `apps/web/**` | Medium | 2026-08-09 |
+| `apps/cloudflare/README.md` | Hosted execution-plane overview and runtime contract. | `apps/cloudflare/**` | Medium | 2026-07-29 |
+| `apps/cloudflare/scripts/benchmark-workspace-restore.md` | Synthetic encrypted restore benchmark, measurement controls, and local/Linux limitations. | Cloudflare workspace restore | Medium | 2026-09-04 |
+| `apps/cloudflare/DEPLOY.md` | Current deployment procedure for hosted execution. | Hosted deploy flow | Medium | 2026-08-26 |
 | `packages/assistantd/README.md` | Local assistant daemon boundary and control-plane contract. | `packages/assistantd/**` | Medium | 2026-03-30 |
-| `packages/assistant-runtime/README.md` | Headless hosted runtime surface consumed by Cloudflare, including bounded same-conversation exact-successor provider-turn batches, terminal input-id authority for Web-derived preference order, mailbox-causal assistant-preference application, and legacy pending-item replay. | `packages/assistant-runtime/**` | Medium | 2026-07-15 |
+| `packages/assistant-runtime/README.md` | Headless hosted runtime surface consumed by Cloudflare. | `packages/assistant-runtime/**` | Medium | 2026-07-15 |
 | `packages/device-syncd/README.md` | Local wearable sync runtime boundary and env contract. | `packages/device-syncd/**` | Medium | 2026-04-02 |
 | `packages/clinical-records/README.md` | Pure Clinical Records Intake contracts for raw FHIR retrieval manifests, deterministic FHIR source references, and upsert/retract/review import-plan decisions. | `packages/clinical-records/**` | Medium | 2026-07-10 |
 | `packages/health-metrics/README.md` | Neutral MetricPoint contracts, health metric definitions, unit normalization, display formatting, and selection policy. | `packages/health-metrics/**` | Medium | 2026-05-02 |
@@ -696,7 +164,9 @@ payloads reuse the set-based root unwrap path. This contract is specified by
 
 ## Conventions
 
-- Keep this index focused on live docs that describe the current repo state.
-- Do not list point-in-time architecture reviews, migration guides, or historical cleanup audits here.
-- Keep current external compatibility references such as the device-provider compatibility matrix when they describe active planning or provider requirements.
-- Update this index whenever canonical docs are added, removed, moved, or materially repurposed.
+- Keep one short discovery description per document; detailed behavior belongs
+  in that document and its executable owner, not this index.
+- Update entries when docs are added, removed, moved, or materially repurposed.
+- Research and audits are evidence for their stated date, not operating policy.
+- Completed plans are immutable historical snapshots. Use live owner docs for
+  implementation, deployment, rollback, and incident response.

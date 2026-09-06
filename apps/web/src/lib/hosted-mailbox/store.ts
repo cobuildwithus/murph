@@ -25,6 +25,7 @@ import {
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 import type {
   HostedExecutionConversationMessageWake,
+  HostedExecutionDeviceSyncWake,
   HostedExecutionEnvironmentVoiceCapturedWake,
   HostedExecutionMealPhotoCapturedWake,
   HostedExecutionWake,
@@ -85,6 +86,9 @@ export {
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
 };
 
+export const HOSTED_MAILBOX_PENDING_CURRENT_SENDER_ASK_RETENTION_DISPOSITION =
+  "assistant_ask.current_sender_pending";
+
 export type HostedMailboxStoreClient = PrismaClient | Prisma.TransactionClient;
 export type HostedMailboxMutationTx = Prisma.TransactionClient;
 
@@ -119,6 +123,9 @@ export interface HostedMailboxPayloadRow {
 }
 
 export type HostedMailboxItemRecord = HostedMailboxItem;
+export type HostedMailboxItemRecordWithRetention = HostedMailboxItemRecord & {
+  contentRetiredAt: string | null;
+};
 export type HostedMailboxPayloadRecord = HostedMailboxPayload;
 
 export interface HostedMailboxItemCheckpointRecord {
@@ -134,6 +141,16 @@ export interface AppendHostedMailboxItemResult {
   dedupeConflict: boolean;
   inserted: boolean;
   item: HostedMailboxItemRecord;
+}
+
+export interface AppendHostedScheduledDeviceSyncWakeResult
+  extends AppendHostedMailboxItemResult {
+  runtimeOwnedRetiredDuplicate: boolean;
+}
+
+interface AppendHostedMailboxItemInternalResult
+  extends AppendHostedMailboxItemResult {
+  runtimeOwnedRetiredDuplicate?: true;
 }
 
 export interface HostedMailboxSourceConversationEntry {
@@ -315,6 +332,7 @@ interface AppendHostedMailboxItemBaseInput {
 }
 
 interface AppendHostedMailboxItemInternalInput extends AppendHostedMailboxItemBaseInput {
+  acceptRuntimeOwnedRetiredDuplicate?: boolean;
   itemId?: string;
   sourceMessageLookupKey?: string | null;
 }
@@ -580,7 +598,7 @@ async function appendHostedMailboxItemWithEncryptionTx(
     encryption: HostedMailboxAppendEncryptionOwner;
     tx: HostedMailboxMutationTx;
   },
-): Promise<AppendHostedMailboxItemResult> {
+): Promise<AppendHostedMailboxItemInternalResult> {
   const normalized = normalizeHostedMailboxAppendInput(input);
   const {
     dedupeKey,
@@ -626,16 +644,15 @@ async function appendHostedMailboxItemWithEncryptionTx(
   });
 
   if (existing) {
-    const dedupeConflict = hasHostedMailboxDedupeConflict({
+    const duplicate = await classifyHostedMailboxDuplicateTx({
+      acceptRuntimeOwnedRetiredDuplicate:
+        input.acceptRuntimeOwnedRetiredDuplicate === true,
       existing,
-      kind,
-      lane,
-      payloadBytes,
-      payloadHash,
-      payloadSchema,
+      normalized,
+      tx: input.tx,
     });
     recordHostedMailboxDedupeConflictLog({
-      dedupeConflict,
+      dedupeConflict: duplicate.dedupeConflict,
       existing,
       kind,
       lane,
@@ -646,11 +663,14 @@ async function appendHostedMailboxItemWithEncryptionTx(
 
     return {
       duplicate: true,
-      dedupeConflict,
+      dedupeConflict: duplicate.dedupeConflict,
       inserted: false,
       item: await hydrateHostedMailboxItemTx({
         record: existing,
       }),
+      ...(duplicate.runtimeOwnedRetiredDuplicate
+        ? { runtimeOwnedRetiredDuplicate: true }
+        : {}),
     };
   }
 
@@ -759,16 +779,15 @@ async function appendHostedMailboxItemWithEncryptionTx(
       throw new Error("Hosted mailbox append conflict could not be resolved.");
     }
 
-    const dedupeConflict = hasHostedMailboxDedupeConflict({
+    const duplicate = await classifyHostedMailboxDuplicateTx({
+      acceptRuntimeOwnedRetiredDuplicate:
+        input.acceptRuntimeOwnedRetiredDuplicate === true,
       existing: concurrentExisting,
-      kind,
-      lane,
-      payloadBytes,
-      payloadHash,
-      payloadSchema,
+      normalized,
+      tx: input.tx,
     });
     recordHostedMailboxDedupeConflictLog({
-      dedupeConflict,
+      dedupeConflict: duplicate.dedupeConflict,
       existing: concurrentExisting,
       kind,
       lane,
@@ -779,11 +798,14 @@ async function appendHostedMailboxItemWithEncryptionTx(
 
     return {
       duplicate: true,
-      dedupeConflict,
+      dedupeConflict: duplicate.dedupeConflict,
       inserted: false,
       item: await hydrateHostedMailboxItemTx({
         record: concurrentExisting,
       }),
+      ...(duplicate.runtimeOwnedRetiredDuplicate
+        ? { runtimeOwnedRetiredDuplicate: true }
+        : {}),
     };
   }
 
@@ -816,6 +838,30 @@ export async function appendHostedMailboxEnvelopeTx(input: {
     ...input,
     encryption: { mode: "legacy-transaction" },
   });
+}
+
+/**
+ * Scheduled v3 device-sync wakes retain one stable identity while their
+ * runtime-owned continuation remains active. Once retention removes the
+ * imported payload, Web reuses only the runtime's exact sequence owner.
+ */
+export async function appendHostedScheduledDeviceSyncWakeEnvelopeTx(input: {
+  envelope: HostedExecutionDeviceSyncWake;
+  tx: HostedMailboxMutationTx;
+}): Promise<AppendHostedScheduledDeviceSyncWakeResult> {
+  const result = await appendHostedMailboxEnvelopeInternalTx({
+    acceptRuntimeOwnedRetiredDuplicate:
+      isHostedScheduledDeviceSyncWakeV3(input.envelope),
+    encryption: { mode: "legacy-transaction" },
+    envelope: input.envelope,
+    tx: input.tx,
+  });
+
+  return {
+    ...result,
+    runtimeOwnedRetiredDuplicate:
+      result.runtimeOwnedRetiredDuplicate === true,
+  };
 }
 
 /**
@@ -1092,13 +1138,14 @@ export async function appendHostedMailboxEnvelopeWithIdentityTx(input: {
 }
 
 async function appendHostedMailboxEnvelopeInternalTx(input: {
+  acceptRuntimeOwnedRetiredDuplicate?: boolean;
   encryption: HostedMailboxAppendEncryptionOwner;
   envelope: HostedMailboxProducerEnvelope;
   expiresAt?: Date | string | null;
   itemId?: string;
   sourceMessageLookupKey?: string | null;
   tx: HostedMailboxMutationTx;
-}): Promise<AppendHostedMailboxItemResult> {
+}): Promise<AppendHostedMailboxItemInternalResult> {
   const envelope = input.envelope;
   await assertHostedMailboxEnvelopeWorkspaceTargetTx({
     envelope,
@@ -1129,6 +1176,12 @@ async function appendHostedMailboxEnvelopeInternalTx(input: {
     : null;
 
   return appendHostedMailboxItemWithEncryptionTx({
+    ...(input.acceptRuntimeOwnedRetiredDuplicate === undefined
+      ? {}
+      : {
+          acceptRuntimeOwnedRetiredDuplicate:
+            input.acceptRuntimeOwnedRetiredDuplicate,
+        }),
     assistantInputLookupKey,
     dedupeKey: envelope.eventId,
     ...(input.expiresAt === undefined ? {} : { expiresAt: input.expiresAt }),
@@ -1398,34 +1451,6 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
   userId: string;
 }): Promise<FetchHostedRuntimeMailboxProjectionResult> {
   const prisma = input.prisma ?? getPrisma();
-  const now = input.now ?? new Date();
-
-  if (isHostedMailboxRootClient(prisma)) {
-    return prisma.$transaction((tx) =>
-      fetchHostedRuntimeMailboxProjectionTx({
-        ...input,
-        now,
-        tx,
-      })
-    );
-  }
-
-  return fetchHostedRuntimeMailboxProjectionTx({
-    ...input,
-    now,
-    tx: prisma,
-  });
-}
-
-async function fetchHostedRuntimeMailboxProjectionTx(input: {
-  cursorMode?: HostedMailboxFetchCursorMode | null;
-  lanes: readonly HostedMailboxRuntimeFetchLaneCursor[];
-  limitPerLane: number;
-  now: Date | string;
-  tx: HostedMailboxMutationTx;
-  userId: string;
-}): Promise<FetchHostedRuntimeMailboxProjectionResult> {
-  const prisma = input.tx;
   const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
   const limitPerLane = normalizeHostedMailboxFetchLimit(input.limitPerLane);
   const fetchedAt = normalizeHostedMailboxDate(
@@ -1766,6 +1791,10 @@ export async function readHostedMailboxMaxSeqByLane(input: {
     const row = await prisma.hostedMailboxItem.findFirst({
       orderBy: {
         laneSeq: "desc",
+      },
+      select: {
+        laneSeq: true,
+        updatedAt: true,
       },
       where: {
         ...buildHostedMailboxLiveItemWhere(now),
@@ -2537,7 +2566,7 @@ export async function readHostedMailboxItemCheckpointById(input: {
 export async function readHostedMailboxItemById(input: {
   mailboxItemId: string;
   prisma?: HostedMailboxStoreClient;
-}): Promise<HostedMailboxItemRecord | null> {
+}): Promise<HostedMailboxItemRecordWithRetention | null> {
   const prisma = input.prisma ?? getPrisma();
   const mailboxItemId = requireNonEmptyString(
     input.mailboxItemId,
@@ -2550,7 +2579,12 @@ export async function readHostedMailboxItemById(input: {
     },
   });
 
-  return record ? projectHostedMailboxItem(record) : null;
+  return record
+    ? {
+        ...projectHostedMailboxItem(record),
+        contentRetiredAt: record.contentRetiredAt?.toISOString() ?? null,
+      }
+    : null;
 }
 
 export async function readHostedMailboxLiveItemById(input: {
@@ -3439,6 +3473,162 @@ function hasHostedMailboxDedupeConflict(input: {
     || normalizeNullableString(input.existing.payloadHash) !== normalizeNullableString(input.payloadHash)
     || input.existing.payloadSchema !== input.payloadSchema
   );
+}
+
+async function classifyHostedMailboxDuplicateTx(input: {
+  acceptRuntimeOwnedRetiredDuplicate: boolean;
+  existing: HostedMailboxItemRow;
+  normalized: NormalizedHostedMailboxAppendInput;
+  tx: HostedMailboxMutationTx;
+}): Promise<{
+  dedupeConflict: boolean;
+  runtimeOwnedRetiredDuplicate: boolean;
+}> {
+  const exactDedupeConflict = hasHostedMailboxDedupeConflict({
+    existing: input.existing,
+    kind: input.normalized.kind,
+    lane: input.normalized.lane,
+    payloadBytes: input.normalized.payloadBytes,
+    payloadHash: input.normalized.payloadHash,
+    payloadSchema: input.normalized.payloadSchema,
+  });
+  const runtimeOwnedRetiredDuplicate = exactDedupeConflict
+    && input.acceptRuntimeOwnedRetiredDuplicate
+    && await hasHostedMailboxRuntimeImportedRetiredDuplicateTx(input);
+
+  return {
+    dedupeConflict: exactDedupeConflict && !runtimeOwnedRetiredDuplicate,
+    runtimeOwnedRetiredDuplicate,
+  };
+}
+
+function isHostedScheduledDeviceSyncWakeV3(
+  envelope: HostedExecutionDeviceSyncWake,
+): boolean {
+  const connectionId = normalizeNullableString(envelope.connectionId);
+  const expectedConnectedAt = normalizeNullableString(
+    envelope.expectedConnectedAt,
+  );
+  const nextReconcileAt = normalizeNullableString(
+    envelope.hint?.nextReconcileAt,
+  );
+  const provider = normalizeNullableString(envelope.provider);
+  const hintKeys = envelope.hint === null || envelope.hint === undefined
+    ? []
+    : Object.keys(envelope.hint).sort();
+
+  if (
+    !connectionId
+    || !expectedConnectedAt
+    || !nextReconcileAt
+    || !provider
+    || envelope.reason !== "reconcile_due"
+    || envelope.occurredAt !== nextReconcileAt
+    || envelope.hint?.occurredAt !== nextReconcileAt
+    || hintKeys.length !== 2
+    || hintKeys[0] !== "nextReconcileAt"
+    || hintKeys[1] !== "occurredAt"
+  ) {
+    return false;
+  }
+
+  return envelope.eventId === [
+    "device-sync",
+    "scheduled-reconcile",
+    "v3",
+    connectionId,
+    expectedConnectedAt,
+    nextReconcileAt,
+  ].join(":");
+}
+
+async function hasHostedMailboxRuntimeImportedRetiredDuplicateTx(input: {
+  existing: HostedMailboxItemRow;
+  normalized: NormalizedHostedMailboxAppendInput;
+  tx: HostedMailboxMutationTx;
+}): Promise<boolean> {
+  const rows = await input.tx.$queryRaw<Array<{ accepted: boolean }>>`
+    SELECT EXISTS (
+      SELECT 1
+      FROM "hosted_mailbox_item" AS item
+      JOIN "hosted_workspace" AS workspace
+        ON workspace."user_id" = item."user_id"
+      JOIN "hosted_mailbox_lane_counter" AS lane_counter
+        ON lane_counter."user_id" = item."user_id"
+        AND lane_counter."lane" = item."lane"
+      CROSS JOIN LATERAL (
+        SELECT CASE
+          WHEN jsonb_typeof(
+            workspace."redacted_status_json"
+              -> 'hostedMailboxSystemImportedSeq'
+          ) = 'string'
+            AND (
+              workspace."redacted_status_json"
+                ->> 'hostedMailboxSystemImportedSeq'
+            ) ~ '^(0|[1-9][0-9]{0,18})$'
+            AND (
+              length(
+                workspace."redacted_status_json"
+                  ->> 'hostedMailboxSystemImportedSeq'
+              ) < 19
+              OR (
+                workspace."redacted_status_json"
+                  ->> 'hostedMailboxSystemImportedSeq'
+              ) <= '9223372036854775807'
+            )
+            THEN (
+              workspace."redacted_status_json"
+                ->> 'hostedMailboxSystemImportedSeq'
+            )::bigint
+          ELSE NULL
+        END AS system_imported_seq
+      ) AS runtime_progress
+      WHERE item."id" = ${input.existing.id}
+        AND item."user_id" = ${input.normalized.userId}
+        AND item."dedupe_key" = ${input.normalized.dedupeKey}
+        AND item."kind" = ${input.normalized.kind}
+        AND item."lane" = ${input.normalized.lane}
+        AND item."occurred_at" = ${input.normalized.occurredAt}
+        AND item."payload_schema" = ${input.normalized.payloadSchema}
+        AND item."expires_at" IS NOT DISTINCT FROM ${input.normalized.expiresAt}
+        AND item."assistant_input_lookup_key" IS NULL
+        AND item."source_message_lookup_key" IS NULL
+        AND item."payload_inline_ciphertext" IS NULL
+        AND item."payload_ref" IS NULL
+        AND item."payload_bytes" IS NULL
+        AND item."payload_hash" IS NULL
+        AND item."content_retired_at" IS NOT NULL
+        AND item."retention_disposition" IS NULL
+        AND (
+          (
+            item."lane_seq" = lane_counter."consumed_seq" + 1::bigint
+            AND workspace."redacted_status_json"
+              -> 'hostedMailboxSystemFirstPendingSeq'
+              = to_jsonb(item."lane_seq"::text)
+          )
+          OR (
+            jsonb_typeof(
+              workspace."redacted_status_json"
+                -> 'hostedMailboxSystemDeviceSyncContinuationSeqs'
+            ) = 'array'
+            AND (
+              workspace."redacted_status_json"
+                -> 'hostedMailboxSystemDeviceSyncContinuationSeqs'
+            ) ? item."lane_seq"::text
+          )
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM "hosted_mailbox_payload" AS payload
+          WHERE payload."mailbox_item_id" = item."id"
+        )
+        AND runtime_progress.system_imported_seq >= item."lane_seq"
+        AND runtime_progress.system_imported_seq
+          <= lane_counter."next_seq" - 1::bigint
+    ) AS accepted
+  `;
+
+  return rows[0]?.accepted === true;
 }
 
 export function resolveHostedMailboxPayloadRef(payloadRef: string): string {

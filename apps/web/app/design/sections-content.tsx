@@ -1,3 +1,5 @@
+import { ModelSettingsHoverPreview } from "./model-settings-hover-preview";
+
 import {
   BiomarkerBoundaryResultStudy,
   BiomarkerDetailStudy,
@@ -40,6 +42,7 @@ import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ActionApprovalLifecycleStudy } from "./action-approval-lifecycle-study";
 import { ShareLinkPreviewsStudy } from "./share-link-previews-study";
 import { ChangelogArchiveStudy } from "./changelog-archive-study";
+import { CalendarLinkStudy } from "./calendar-link-study";
 import { ClinicalRecordsConnectLauncherStudy } from "./clinical-records-connect-launcher-study";
 import { ClubsPageStudy } from "./clubs-page-study";
 import { ConnectedAppAuthorizationStudy } from "./connected-app-authorization-study";
@@ -61,6 +64,7 @@ import { HomepageAuthWarmRuntimeStudy } from "./homepage-auth-warm-runtime-study
 import { JoinFamilyBillingRecoveryStudy } from "./join-family-billing-recovery-study";
 import { OpsUsageStudy } from "./ops-usage-study";
 import { OpsOperatorTaskStudy } from "./ops-operator-task-study";
+import { RuntimeMaintenanceStudy } from "./runtime-maintenance-study";
 import {
   PersonaOnboardingStudy,
   PersonaSettingsStudy,
@@ -80,6 +84,7 @@ import { EnvironmentProgressStudy } from "./environment-progress-study";
 import { EnvironmentPrintStudy } from "./environment-print-study";
 import { PersonalPatternsStudy } from "./personal-patterns-study";
 import { BrowserVaultLoadingTransitionsStudy } from "./browser-vault-loading-transitions-study";
+import { FoodLabelLabStudy } from "./food-label-lab-study";
 import {
   SCREENSHOT_CATEGORIES,
   type ScreenshotCategory,
@@ -139,6 +144,7 @@ export function SectionsContent({
                 authenticated={false}
                 contactInfo={{
                   phone: "+15555550100",
+                  phoneConfigured: false,
                   telegram: "murph_test_bot",
                 }}
                 messengerChannel="imessage"
@@ -233,30 +239,34 @@ export function SectionsContent({
         <>
           <Separator />
 
-          <StudySection title="Settings model choice with provider usage disclosure">
+          <StudySection title="Settings model choice for Edge and Max">
             <div
               id="settings-model-provider-save-controls"
               data-design-section="settings-compact-provider-control"
               className="max-w-5xl"
-              inert
             >
-              <HostedAssistantModelSettings
-                canUpgradeToEdge={false}
-                configurationAvailable
-                customInferenceAvailable
-                initialDormantSolPreference={false}
-                initialModel="gpt-5.6-terra"
-                initialProvider="venice"
-                solAvailable
-                veniceAvailable
-              />
+              <ModelSettingsHoverPreview>
+                <HostedAssistantModelSettings
+                  availableModels={["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-6-astra"]}
+                  canUpgradeToEdge={false}
+                  configurationAvailable
+                  customInferenceAvailable
+                  initialDormantSolPreference={false}
+                  initialModel="gpt-5.6-terra"
+                  initialProvider="openai"
+                  solAvailable
+                  veniceAvailable
+                />
+              </ModelSettingsHoverPreview>
             </div>
           </StudySection>
 
           <Separator />
 
           <StudySection title="Settings inference routing, locked models, and endpoint">
-            <SettingsCustomInferenceStudy />
+            <ModelSettingsHoverPreview>
+              <SettingsCustomInferenceStudy />
+            </ModelSettingsHoverPreview>
           </StudySection>
 
           <Separator />
@@ -269,6 +279,12 @@ export function SectionsContent({
 
       {category === "messages" ? (
         <>
+          <Separator />
+
+          <StudySection title="Stateless calendar link">
+            <CalendarLinkStudy />
+          </StudySection>
+
           <Separator />
 
           <StudySection title="Secure approval pending and recorded states">
@@ -297,6 +313,14 @@ export function SectionsContent({
 
       {category === "health" ? (
         <>
+          <Separator />
+
+          <StudySection title="Food Label Lab">
+            <div className="-mx-5 sm:-mx-8 lg:-mx-12" inert>
+              <FoodLabelLabStudy />
+            </div>
+          </StudySection>
+
           <Separator />
 
           <StudySection title="Environment full-width progressive voice capture">
@@ -664,7 +688,7 @@ export function SectionsContent({
 
           <Separator />
 
-          <StudySection title="Clinical Records scheduled launcher">
+          <StudySection title="Medical records import and recovery">
             <ClinicalRecordsConnectLauncherStudy />
           </StudySection>
 
@@ -784,6 +808,15 @@ export function SectionsContent({
 
       {category === "ops" ? (
         <>
+          <Separator />
+
+          <StudySection
+            id="stalled-runtime-rechecks"
+            title="Runtime rechecks and legacy-stall discovery"
+          >
+            <RuntimeMaintenanceStudy />
+          </StudySection>
+
           <Separator />
 
           <StudySection title="Ops usage search and recovery">

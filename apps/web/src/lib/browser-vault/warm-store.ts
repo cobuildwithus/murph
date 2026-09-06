@@ -298,14 +298,7 @@ export function abortBrowserVaultInFlightLoad(): void {
  * identity cannot repopulate the snapshot after it resolves.
  */
 export function clearBrowserVaultWarmState(): void {
-  generation += 1;
-  inFlightController?.abort();
-  inFlightController = null;
-  inFlight = null;
-  inFlightObservationOnly = false;
-  inFlightRequestsRefresh = false;
-  inFlightRequestedShards = [];
-  inFlightRequestedMetricBuckets = [];
+  abortBrowserVaultInFlightLoad();
   readySnapshot = null;
   stopSessionInvalidationListener?.();
   stopSessionInvalidationListener = null;

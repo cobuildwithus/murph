@@ -7,7 +7,6 @@ import { describe, expect, it } from "vitest";
 import {
   HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS,
   HOSTED_RUNTIME_SYSTEM_MAILBOX_FRONTIER_CLASSES,
-  projectHostedRuntimeReconciliationFactsWireResponse,
 } from "../packages/hosted-execution/src/reconciliation-facts-wire.ts";
 
 import {
@@ -16,11 +15,15 @@ import {
 } from "./temporal-compatibility-producer-fixtures.ts";
 
 describe("Temporal compatibility producer fixtures", () => {
-  it("executes the production wire projection across populated and nullable branches", () => {
+  it("executes the production wire projection across every optional frontier and progress shape", () => {
     const fixtures = buildTemporalCompatibilityProducerFixtures();
+    const frontierFixtureCount =
+      HOSTED_RUNTIME_SYSTEM_MAILBOX_FRONTIER_CLASSES.length + 2;
 
     expect(fixtures).toHaveLength(
-      HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS.length + 1,
+      HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS.length
+        + frontierFixtureCount
+        + 1,
     );
     expect(fixtures[0]).toEqual({
       blocked: null,
@@ -31,38 +34,51 @@ describe("Temporal compatibility producer fixtures", () => {
       fixture.blocked === null ? [] : [fixture.blocked.reason])).toEqual(
       HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS,
     );
-    expect(fixtures.flatMap((fixture) =>
+
+    const frontierFixtures = fixtures.slice(
+      HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS.length + 1,
+    );
+    expect(frontierFixtures.map((fixture) =>
       fixture.workspace !== null && Object.hasOwn(fixture.workspace, "systemMailboxFrontier")
-        ? [fixture.workspace.systemMailboxFrontier]
-        : [])).toEqual([
+        ? fixture.workspace.systemMailboxFrontier
+        : "omitted")).toEqual([
       ...HOSTED_RUNTIME_SYSTEM_MAILBOX_FRONTIER_CLASSES,
       null,
+      "omitted",
     ]);
-    expect(fixtures.some((fixture) =>
+    expect(frontierFixtures.at(-1)?.workspace).not.toHaveProperty(
+      "hostedMailboxSystemHandledThroughSeq",
+    );
+
+    const progressWorkspaces = frontierFixtures.flatMap((fixture) =>
       fixture.workspace !== null
-      && !Object.hasOwn(fixture.workspace, "systemMailboxFrontier"))).toBe(true);
+        && Object.hasOwn(fixture.workspace, "systemMailboxProgressGeneration")
+        ? [fixture.workspace]
+        : []);
+    expect(progressWorkspaces).toHaveLength(2);
+    expect(progressWorkspaces[0]).toMatchObject({
+      nextDefaultProcessingWakeAt: "2026-01-01T00:03:00.000Z",
+      nextDefaultProcessingWakeReason: "assistant_due",
+      systemMailboxFrontier: "default_owned",
+      systemMailboxProgressGeneration: "7",
+    });
+    expect(progressWorkspaces[1]).toMatchObject({
+      nextDefaultProcessingWakeAt: null,
+      nextDefaultProcessingWakeReason: null,
+      systemMailboxFrontier: "model_free",
+      systemMailboxProgressGeneration: "8",
+    });
+    for (const workspace of progressWorkspaces) {
+      expect(workspace).toHaveProperty("nextDefaultProcessingWakeAt");
+      expect(workspace).toHaveProperty("nextDefaultProcessingWakeReason");
+      expect(workspace).toHaveProperty("systemMailboxProgressGeneration");
+    }
+
     expect(fixtures[1]).toMatchObject({
       mailboxLag: [{ maxUpdatedAt: "2026-01-01T00:00:00.000Z" }],
       workspace: {
         hostedMailboxSystemHandledThroughSeq: "0",
-        systemMailboxFrontier: "default_owned",
       },
-    });
-    expect(fixtures.every((fixture) =>
-      !Object.hasOwn(fixture, "environmentInterviewPending"))).toBe(true);
-  });
-
-  it("projects Environment state only for a negotiated reader", () => {
-    expect(projectHostedRuntimeReconciliationFactsWireResponse({
-      blocked: null,
-      environmentInterviewPending: true,
-      mailboxLag: [],
-      workspace: null,
-    }, true)).toEqual({
-      blocked: null,
-      environmentInterviewPending: true,
-      mailboxLag: [],
-      workspace: null,
     });
   });
 

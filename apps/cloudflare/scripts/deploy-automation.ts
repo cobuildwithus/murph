@@ -3,7 +3,10 @@ export type {
   HostedContainerInstanceType,
   HostedDeployAutomationEnvironment,
 } from "./deploy-automation/environment.ts";
-export { readHostedDeployAutomationEnvironment } from "./deploy-automation/environment.ts";
+export {
+  HOSTED_DEPLOY_AUTOMATION_OPTIONAL_VAR_NAMES,
+  readHostedDeployAutomationEnvironment,
+} from "./deploy-automation/environment.ts";
 export {
   HOSTED_WORKER_REQUIRED_SECRET_NAMES,
   buildHostedWorkerSecretsPayload,

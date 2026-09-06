@@ -15,6 +15,7 @@ import {
 import Image from "next/image";
 import { LoaderCircle } from "lucide-react";
 
+import { DashboardPageStatus } from "@/src/components/dashboard/dashboard-page-status";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import { PageHeader } from "@/src/components/ui/page-header";
@@ -98,7 +99,7 @@ export default function EnvironmentPageClient({
 }: {
   contactOptions: readonly MurphContactOption[];
 }) {
-  const { client, dataVersion, error, refresh, status } = useBrowserVault();
+  const { client, dataVersion, refresh, status } = useBrowserVault();
   const [voiceRefreshState, setVoiceRefreshState] = useState<VoiceRefreshState>(
     { status: "idle" },
   );
@@ -313,13 +314,13 @@ export default function EnvironmentPageClient({
   if (status === "error") {
     return (
       <EnvironmentShell>
-        <Alert variant="destructive">
-          <AlertTitle>Could not load your environment</AlertTitle>
-          <AlertDescription>
-            {error ??
-              "Murph could not unlock your private Habitat records right now."}
-          </AlertDescription>
-        </Alert>
+        <DashboardPageStatus
+          actionLabel="Try again"
+          description="Your private environment data could not be opened. Your data is still safe."
+          onAction={() => void refresh()}
+          title="Environment could not load"
+          tone="error"
+        />
       </EnvironmentShell>
     );
   }
@@ -528,12 +529,11 @@ export function EnvironmentEmptyState({
             id="environment-empty-title"
             className="max-w-[19ch] text-balance font-serif text-4xl font-semibold leading-[1.04] tracking-[-0.03em] text-foreground"
           >
-            Fill in your report to review your setup for sleep, air quality and
-            focus.
+            Review how your home supports you.
           </h2>
           <p className="mt-5 max-w-[58ch] text-pretty text-base leading-relaxed text-muted-foreground">
-            Answer one short topic at a time. Murph turns your answers into a
-            grade and practical next checks.
+            Answer a few short questions. Murph will grade your setup and show
+            what to check next.
           </p>
 
           <div className="mt-8 flex flex-col items-start gap-4">

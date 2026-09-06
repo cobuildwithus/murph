@@ -2258,6 +2258,155 @@ test("a prepared domain root warms the scoped active key before its row exists",
   assert.equal(tx.persistedEnvelopes.length, 0);
 });
 
+test.each(["create", "replace", "consent_revoked", "suspended", "root_race"] as const)(
+  "connection %s prepares KMS before its transaction and rechecks authority",
+  async (scenario) => {
+    const { tx } = await createHostedWebCryptoTransactionFixture();
+    const { PrismaHostedConnectionStore } = await import(
+      "../src/lib/device-sync/prisma-store/connections"
+    );
+    const steps: string[] = [];
+    assert.ok(gcpKmsMock.client);
+    gcpKmsMock.client = createStepRecordingKmsClient({ client: gcpKmsMock.client, steps });
+    const userId = "member-connection-prepared-root";
+    let insideTransaction = false;
+    const state: { stored: HostedConnectionRecord | null } = { stored: null };
+    let attempts = 0;
+    const { prepareHostedCryptoDomainRootCandidates } = await import("../src/lib/hosted-crypto/domain-root-store");
+    const winner = scenario === "root_race"
+      ? (await prepareHostedCryptoDomainRootCandidates({ domains: ["device"], prisma: tx.prisma, userId })).get("device")
+      : null;
+    const active = (await prepareHostedCryptoDomainRootCandidates({
+      domains: ["device"], prisma: tx.prisma, userId,
+    })).get("device");
+    assert.ok(active);
+    tx.persistedEnvelopes.push(active);
+    const baseQuery = tx.prisma.$queryRaw.bind(tx.prisma);
+    const client = Object.assign(tx.prisma, {
+      async $queryRaw<T = unknown>(...args: Parameters<Prisma.TransactionClient["$queryRaw"]>): Promise<T> {
+        const query = args[0] as TemplateStringsArray | Prisma.Sql;
+        const sql = !Array.isArray(query) && "sql" in query ? query.sql : query.join("?");
+        if (sql.includes('from "hosted_member"')) {
+          steps.push("member.lock");
+          return [] as T;
+        }
+        if (sql.includes("suspended_at")) {
+          return [{ suspendedAt: insideTransaction && scenario === "suspended" ? new Date() : null }] as T;
+        }
+        if (sql.includes("device_sync_dirty_connection")) {
+          return [] as T;
+        }
+        return baseQuery<T>(...args);
+      },
+      async $transaction<T>(run: (transaction: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+        attempts += 1;
+        if (winner && attempts === 1) tx.persistedEnvelopes.splice(0, 1, winner);
+        steps.push("transaction.begin");
+        insideTransaction = true;
+        try {
+          return await run(client);
+        } finally {
+          insideTransaction = false;
+          steps.push("transaction.end");
+        }
+      },
+      hostedConsentGrant: {
+        async findUnique() {
+          return {
+            scope: "launch.health-data",
+            status: insideTransaction && scenario === "consent_revoked" ? "revoked" : "granted",
+          };
+        },
+      },
+      deviceConnection: {
+        async findUnique() { return state.stored; },
+        async findFirst() { return null; },
+        async create({ data }: { data: Record<string, unknown> }) {
+          steps.push("connection.write");
+          state.stored = Object.assign(createHostedRuntimeDeviceSecretRecord({
+            accessTokenEncrypted: "",
+            connectionId: "dsc_prepared",
+            externalAccountIdEncrypted: "",
+            refreshTokenEncrypted: "",
+            tokenVersion: 1,
+            userId,
+          }), data);
+          return state.stored;
+        },
+        async update({ data }: { data: Record<string, unknown> }) {
+          steps.push("connection.write");
+          assert.ok(state.stored);
+          state.stored = Object.assign({}, state.stored, data);
+          return state.stored;
+        },
+      },
+    });
+    // The full store uses the real crypto implementation and only this narrow
+    // in-memory database boundary; KMS performs real local envelope cryptography.
+    const { createPrismaClient } = await import("../src/lib/prisma");
+    const backingClient = createPrismaClient({
+      databaseUrl: "postgresql://postgres:postgres@127.0.0.1:5432/murph_test",
+      poolMax: 1,
+    });
+    const prisma = new Proxy(backingClient, {
+      get(target, property) {
+        const owner = Reflect.has(client, property) ? client : target;
+        const value = Reflect.get(owner, property, owner);
+        return typeof value === "function" ? value.bind(owner) : value;
+      },
+    });
+    const store = new PrismaHostedConnectionStore({
+      prisma,
+      providerAccountBlindIndexKey: Buffer.alloc(32, 17),
+    });
+    const input = {
+      connectedAt: "2026-09-01T12:00:00.000Z",
+      existingAccountPolicy: "replace" as const,
+      externalAccountId: "account-prepared-root",
+      ownerId: userId,
+      provider: "oura",
+      tokens: { accessToken: "access-old", refreshToken: "refresh-old" },
+    };
+    if (scenario === "consent_revoked" || scenario === "suspended") {
+      await expect(store.upsertConnection(input)).rejects.toMatchObject({
+        code: scenario === "suspended" ? "CONNECTION_OWNER_SUSPENDED" : "HEALTH_DATA_CONSENT_REQUIRED",
+      });
+      expect(steps).not.toContain("connection.write");
+      expect(tx.persistedEnvelopes).toEqual([active]);
+    } else {
+      const { runWithHostedDomainRootUnwrapCache } = await import(
+        "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+      );
+      const created = await runWithHostedDomainRootUnwrapCache(() => store.upsertConnection(input));
+      expect(created.externalAccountId).toBe(input.externalAccountId);
+      if (scenario === "replace") {
+        await store.upsertConnection({
+          ...input,
+          connectedAt: "2026-09-02T12:00:00.000Z",
+          tokens: { accessToken: "access-new", refreshToken: "refresh-new" },
+        });
+      }
+      assert.ok(state.stored);
+      expect(state.stored.tokenVersion).toBe(scenario === "replace" ? 2 : 1);
+      expect(parseSerializedHostedSecureBoxEnvelope(state.stored.accessTokenEncrypted ?? "").rootKeyId)
+        .toBe(tx.persistedEnvelopes[0]?.rootKeyId);
+    }
+    if (scenario === "root_race") {
+      expect(attempts).toBe(2);
+      expect(steps.filter((step) => step === "connection.write")).toHaveLength(1);
+    }
+    await backingClient.$disconnect();
+    let locked = false;
+    for (const step of steps) {
+      if (step === "transaction.begin") locked = true;
+      if (step === "transaction.end") locked = false;
+      if (step.startsWith("kms.")) expect(locked, step).toBe(false);
+    }
+    expect(steps).toContain("kms.decrypt");
+    expect(steps.indexOf("kms.decrypt")).toBeLessThan(steps.indexOf("member.lock"));
+  },
+);
+
 test("the prepared Web root token commits and reuses only its exact scoped root", async () => {
   const { tx } = await createHostedWebCryptoTransactionFixture();
   const {
@@ -3573,6 +3722,8 @@ function createHostedMemberIdentityServiceTransaction(): HostedCryptoTestTransac
           input.data.assistantPersonaCausalSeq === null
             ? null
             : BigInt(input.data.assistantPersonaCausalSeq),
+        groupJournalCaptureConsentRequestedAt: null,
+        groupJournalCaptureEnabled: null,
         assistantDetail: null,
         assistantDetailCausalSeq:
           input.data.assistantDetailCausalSeq === undefined ||
@@ -3650,6 +3801,8 @@ function buildHostedMemberIdentityRecord(
   const now = new Date("2026-05-02T00:00:00.000Z");
   return {
     createdAt: now,
+    linqEmailHandleLookupKey: nullableString(input.linqEmailHandleLookupKey),
+    linqEmailHandleEncrypted: null,
     maskedPhoneNumberHint: nullableString(input.maskedPhoneNumberHint),
     memberId: input.memberId,
     phoneLookupKey: nullableString(input.phoneLookupKey),

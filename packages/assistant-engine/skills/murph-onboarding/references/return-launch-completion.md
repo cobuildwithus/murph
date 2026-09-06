@@ -76,14 +76,10 @@ Once the user selects or confirms a desired change likely to depend on repeated
 behavior, read `behavior-followthrough` before choosing the first step. First
 make one bounded evidence pass across the foundation, relevant canonical
 records, connected data, and any confirmed enrichment that could materially
-change the choice. When that pass spans more than one source or owner,
-immediately call `murph.send_progress_update` once before the first read. In
-one short natural line, name the few user-facing areas you are checking and why
-they matter to the chosen next step; do not say only that you are "checking a
-few things." This update is required even when each individual read is routine,
-and it is not needed for one targeted read. Continue the evidence pass
-immediately and do not repeat the update in the substantive reply. Ground the
-outcome and reason, the user's current behavior or routine,
+change the choice. Follow the global progress rule. This bounded pass does not
+trigger an update merely because it spans multiple sources or owners; routine
+context reads and a straightforward first-step question stay silent and answer
+directly. Ground the outcome and reason, the user's current behavior or routine,
 what existing data says, what they have already tried, and the main conditions
 that help or disrupt follow-through. Do not scan unrelated health history.
 
@@ -189,8 +185,8 @@ Onboarding is complete with `user_answered` only when all of these are true:
 
 An experiment, plan, support loop, wearable connection, lab upload, group, or
 specific positive health fact is not required. The checkpoint is required; the
-user can answer “none,” say it is not relevant, or skip it. “Later,” “tomorrow,”
-or “I don't have it handy” leaves onboarding open.
+user can answer “none,” say it is not relevant, or skip it. Apply the defer
+evidence owned by `persistence-recovery-follow-up.md` before completion.
 
 #### Arm the first personal read
 

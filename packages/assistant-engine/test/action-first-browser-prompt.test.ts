@@ -15,27 +15,42 @@ describe('action-first browser prompt contract', () => {
     })
 
     expect(executionText).toContain(
-      'For browser-backed real-world action requests such as ordering, reordering, booking, rescheduling, canceling, paying, refilling, submitting a form, or using a portal',
+      'For requested real-world browser actions (orders, bookings, changes, payments, refills, forms, portals)',
     )
     expect(executionText).toContain(
-      'treat product, catalog, web, email, calendar, or vault lookup as preflight only',
+      'lookup is preflight only',
     )
     expect(executionText).toContain(
-      'use that tool instead of replying with only a search result, product link, appointment portal, or instructions',
+      'use a completion-capable tool when the next safe step is clear',
+    )
+    expect(executionText).toContain(
+      'plus `appointment-scheduling` for medical check-in/intake',
     )
   })
 
-  it('preserves point-of-risk pauses instead of premature search-only replies', () => {
+  it('delegates point-of-risk decisions and preserves bounded recovery', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'For irreversible browser actions, make reversible progress first and stop only at a real point of risk',
+      '`computer-use` owns approval, disclosure, takeover, and bounded recovery',
     )
     expect(prompt).toContain(
-      'login/private handoff, missing material choice, unavailable payment or sensitive input, final confirmation, or a site/tool blocker',
+      'Make reversible progress first',
     )
     expect(prompt).toContain(
-      'do not imply you opened or can drive checkout unless an actual runtime action happened',
+      'an unresponsive control needs re-inspection',
+    )
+    expect(prompt).toContain(
+      'one safe alternate interaction before allowed OS fallback',
+    )
+    expect(prompt).toContain(
+      'Re-inspect after an OS action; never repeat it when state changed',
+    )
+    expect(prompt).toContain(
+      'Refresh only with no unknown side effect and safe entered state',
+    )
+    expect(prompt).toContain(
+      'Claim actions or completion only from runtime evidence',
     )
     expect(prompt).toContain(
       'Complete the browser task end-to-end when the user has asked you to do it and the needed information is available.',
@@ -46,13 +61,24 @@ describe('action-first browser prompt contract', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'ask for approval in chat so a simple "yes" or "go ahead" can resume the run',
+      'Ask the smallest concrete in-chat approval question',
     )
     expect(prompt).toContain(
-      'A handoff link may be included for optional inspection or takeover',
+      'a handoff link is optional unless takeover is required',
+    )
+  })
+
+  it('includes a fresh handoff link when direct takeover is required', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain(
+      "For takeover, include the pause tool's fresh URL",
     )
     expect(prompt).toContain(
-      'do not require the user to open it or instruct them to click the final site control',
+      'and one precise action',
+    )
+    expect(prompt).toContain(
+      "For takeover, include the pause tool's fresh URL and one precise action",
     )
   })
 })

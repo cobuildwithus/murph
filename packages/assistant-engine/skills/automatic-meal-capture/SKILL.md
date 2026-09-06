@@ -1,15 +1,20 @@
 ---
 name: automatic-meal-capture
-description: Use for Murph iPhone automatic meal capture setup, Photos permissions, background behavior, the on-device Meals review page, missing or delayed imports, the automatic 9pm closeout, retained-photo cleanup, and calorie-aware enrichment of automatically captured meal photos.
+description: Use in a private direct conversation when someone asks how to start recurring meal tracking or how Murph can track meals, and whenever someone explicitly asks about Murph iPhone automatic meal capture setup, Photos permissions, background behavior, the on-device Meals review page, missing or delayed imports, the automatic 9pm closeout, retained-photo cleanup, or calorie-aware enrichment of automatically captured meal photos.
 ---
 
 # Automatic meal capture
 
 ## Own the automatic-capture boundary
 
-Use this skill when a member asks how automatic meal capture works, needs the
-iPhone app, is setting it up, says a photo did not arrive, asks what Murph can
-see, or wants device-captured meal photos included in calorie or macro tracking.
+In a private direct conversation, load this skill when a member asks how to
+start recurring meal tracking or how Murph can track meals, even when they do
+not say "automatic." In any conversation, also use it when a member explicitly
+asks how automatic meal capture works, needs the iPhone app for that feature,
+is setting it up, says a photo did not arrive, asks what Murph can see, or wants
+device-captured meal photos included in calorie or macro tracking. Do not treat
+a generic group request, a request to continue an established manual workflow,
+or already-completed setup as a fresh app-install request.
 
 Automatic capture already creates a canonical photo-only meal. This skill owns
 the iPhone setup and arrival-verification workflow; it does not create a second
@@ -17,9 +22,42 @@ meal store or a duplicate meal record. Read
 `$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/SKILL.md` before estimating nutrition
 or interpreting meal patterns. A successful automatic import ensures one
 private 9pm managed closeout for that member; there is no separate automation
-opt-in. Load this skill alongside `food-journal` on every eligible interactive
-meal turn and check recent unresolved device meals. Use `nutrition-strategy` for
-forward-looking decisions about what to eat.
+opt-in. Load this skill alongside `food-journal` on eligible interactive
+automatic-capture turns and check recent unresolved device meals. Use
+`nutrition-strategy` for forward-looking decisions about what to eat.
+
+## Answer a general recurring meal-tracking request
+
+For a private direct request about starting recurring meal tracking, use known
+context before choosing the first option:
+
+- When device compatibility is unknown or a compatible iPhone is established,
+  no manual-only preference is established, and setup is not already complete,
+  lead with automatic capture as the lowest-friction supported option. Briefly
+  explain that the member can download or open the Murph iPhone app, enable Meal
+  capture, and have eligible new food photos picked up without messaging each
+  meal. Include the canonical App Store listing and the shortest relevant setup
+  steps below in the first answer.
+- When known context establishes Android or another incompatible device, or the
+  member prefers manual capture, lead with the food-journal skill's manual text,
+  voice-note, and user-sent-photo options. Do not push the iPhone app or repeat
+  automatic setup unless the member asks about it.
+- When automatic meal capture is already enabled, explain the current capture,
+  review, or recovery path that answers the question. Do not tell the member to
+  download the app again or repeat completed setup steps.
+
+When automatic capture leads, keep manual text, voice-note, and user-sent-photo
+logging available as an alternative in the same answer. Do not assume the
+member has a compatible iPhone, make the app a prerequisite for all meal
+tracking, or promise that iOS background work will capture every meal. If
+device compatibility is unknown, state the compatible-iPhone condition rather
+than delaying the useful handoff with a question.
+
+In a group, do not introduce the app or personalized automatic-capture setup for
+a generic meal-tracking request. Share the canonical public App Store listing
+only when someone explicitly asks how to get, download, or install the app, and
+keep sign-in, permissions, and personalized health setup in the person's
+private Murph conversation or in the app.
 
 ## Set up the iPhone app
 
@@ -191,7 +229,12 @@ On a scheduled run:
    this scheduled occurrence instant: that removal revision proves an earlier
    attempt of the same occurrence already cleaned it. `closeout-work` includes
    that evidence without carrying it into a later occurrence. Group captures
-   by local capture date. A late import gets one dated catch-up.
+   by local capture date. A capture is eligible for member-visible presentation
+   only when its local capture date equals the engine-supplied `Occurrence local
+   date`. A late import from an earlier date remains full cleanup work, but it
+   never authorizes a dated catch-up, card, question, or closeout text. When
+   current and historical captures are selected together, exclude every
+   historical capture from current-date presentation inputs.
 3. Compare nearby meals before counting so a manual record or second photo of
    the same eating occasion is not silently double counted.
 4. Run `vault-cli meal show <meal-id> --format json` for each selected meal and
@@ -209,28 +252,32 @@ On a scheduled run:
    fails the run. On retry, combine photos that remain with same-occurrence
    removal revisions so a provider or partial-cleanup failure loses no meal.
 
-Before step 6, apply the estimation-eligibility rule above. When estimation is
-skipped, complete photo cleanup and stop with the established non-numeric
-closeout: ask no estimate-enabling question and run no Goal, totals, or card
-work. Otherwise, after cleaning each capture that still fails the last-resort
-threshold, send one compact question for only those meals and stop before Goal,
-totals, or card work. Use local time when all share the occurrence date; include
-date and time for any historical or multi-date set. Ask only for missing identity
-and amount, expose no meal ids, and do not substitute ordinary closeout or a
-dashboard refusal. This is the sole scheduled-question exception; its answer
-uses the existing-meal recovery above.
+After all selected cleanup, stop before any presentation work when no selected
+capture has the occurrence local date. Return
+`{"kind":"skip","privateSummary":"Historical meal cleanup completed."}` and
+run no Goal, totals, card, or clarification work. When current and historical
+captures were selected together, continue with current-date captures only.
 
-6. After inspection, enrichment, read-back, and photo cleanup, first prove the
-   cheap read-only active Goal discovery is complete. Run `vault-cli goal list --status active
-   --limit 200 --format json`. If it returns 200 records, fail closed with the
-   ordinary compact closeout: run no Goal detail reads, perform no Goal or
-   measurement mutation, ask no question, and attach no card. Otherwise, run
-   `vault-cli goal show <goal-id> --format json` for every returned active Goal
-   whose list item reports a nonzero `data.metricTargetsCount`. Do not select
-   detail reads by title, slug, domain, context-snapshot visibility, or the
-   default list prefix. Resolve metric identity, unit, comparator, effective
-   date, conflicts, and the 1,200-kcal boundary only after inspecting that
-   complete detail set. This active-target authority read is separate from any
+Before step 6, apply the estimation-eligibility rule above to those current-date
+captures. When estimation is skipped, complete photo cleanup and stop with the
+established non-numeric closeout: ask no estimate-enabling question and run no
+Goal, totals, or card work. Otherwise, after cleaning each current-date capture
+that still fails the last-resort threshold, send one compact question for only
+those meals and stop before Goal, totals, or card work. Use local time for the
+occurrence date. Ask only for missing identity and amount, expose no meal ids,
+and do not substitute ordinary closeout or a dashboard refusal. This is the sole
+scheduled-question exception; its answer uses the existing-meal recovery above.
+
+6. After inspection, enrichment, read-back, and photo cleanup, run
+   `vault-cli meal totals --from <occurrence-local-date> --to <occurrence-local-date> --resolve-goals --format json`.
+   This query owns the complete active target scan and deterministic rules below;
+   do not repeat goal list/show to re-resolve active authority.
+   Use fresh canonical totals and `goalContext` points. `conflict`, `incompatible`,
+   or `capacity` means ordinary compact closeout, no Goal or measurement
+   mutation, no question, and no card. `ready` still requires the suitability,
+   intent, and meal-completeness gates. Only `missing` permits the existing
+   first-run proposal exception below. Historical compatibility is read-only
+   display authority. This active-target authority read is separate from any
    all-status Goal lookup used to reuse or honor Murph's managed paused or
    abandoned proposal; never substitute that lookup here. If active authority
    is ambiguous, unit-incompatible, comparator-incompatible, or otherwise
@@ -250,7 +297,7 @@ uses the existing-meal recovery above.
    or this responsible first-run proposal candidate remains, apply the concise
    known-context numeric-suitability rule in the
    `murph.attach_response_card` prompt before deriving or presenting numeric
-   values, any Goal write, totals, or a card. Do not run a universal medical
+   values, any Goal write, or a card. Do not run a universal medical
    history or measurement checklist. When known context suppresses numeric
    output or suitability remains unresolved, keep the ordinary compact closeout,
    perform no Goal or measurement mutation, ask no question, and attach no card.
@@ -259,7 +306,7 @@ uses the existing-meal recovery above.
    explicit targets are unambiguous,
    and already-known inputs prove one responsible five-target bundle, create
    that single canonical Goal as
-   `paused`, with `window.startAt` equal to the selected capture/card local date.
+   `paused`, with `window.startAt` equal to the occurrence local date.
    Read it back, then explain all five provisional values, their material facts
    and assumptions, and the effective date in ordinary text. Ask no question,
    attach no card, and never activate it on the scheduled turn. Member
@@ -267,10 +314,8 @@ uses the existing-meal recovery above.
    interactive turn. If numeric presentation is suppressed, or the active
    target bundle is ambiguous, unit-incompatible, or comparator-incompatible,
    retain the ordinary compact closeout and do not attach a card. Keep the occurrence
-   local date from step 1 only as the work and retry boundary. Resolve target
-   applicability against the single selected card `localDate`: the capture date
-   whose totals and card are being closed out, including a historical catch-up
-   date. A target
+   local date from step 1 as both the work boundary and the only scheduled card
+   `localDate`. Historical captures are cleanup-only and never card inputs. A target
    qualifies only when that card date is on or after the containing Goal's
    `window.startAt`, on or before its optional `window.targetAt`, and inside the
    target's optional inclusive `startAt`/`targetAt` interval. Ignore an
@@ -308,21 +353,22 @@ uses the existing-meal recovery above.
    ask no question, perform no Goal or measurement mutation, and use ordinary
    closeout text without a card.
 7. Only when the complete target-authority read in step 6 resolves one
-   unambiguous card-authorizing bundle, run the exact canonical
-   `vault-cli meal totals --from <date> --to <date>` read for the selected date
-   range immediately before any response-card attachment; do not reuse an
-   earlier total or calculate nutrition independently. On an interactive card
+   unambiguous card-authorizing bundle, use its fresh canonical totals
+   immediately before any response-card attachment. If a meal or Goal changed
+   after that read, rerun `vault-cli meal totals --from <occurrence-local-date>
+   --to <occurrence-local-date> --resolve-goals --format json` first; otherwise
+   do not repeat the read. Never calculate nutrition independently or reuse
+   totals from an earlier turn. On an interactive card
    request, apply food-journal's selected-date incomplete-meal recovery to
    every saved meal whose nutrition coverage blocks the card, including a
    manual, conversation, provider, or device meal not selected by this
    closeout. Do not widen the scheduled-question exception above: a scheduled
    run follows its existing compact closeout when an unselected meal remains
-   incomplete. When the run covers
-   exactly one local date, the canonical read includes a calorie total, and
+   incomplete. When the canonical read includes a calorie total and
    the card-time safety gate from step 6 still passes, call
    `murph.attach_response_card` with this exact mapping:
-   `card: { kind: "daily_nutrition", version: 2, localDate: <the single
-   selected date>, mealCount: <top-level mealCount>, totals: { calories,
+   `card: { kind: "daily_nutrition", version: 2, localDate:
+   <occurrence-local-date>, mealCount: <top-level mealCount>, totals: { calories,
    proteinGrams, carbsGrams, fatGrams, fiberGrams }, goals: { calories,
    proteinGrams, carbsGrams, fatGrams, fiberGrams } }`. Copy every metric's
    complete `{ total, mealCount }` pair unchanged from the canonical read,
@@ -342,11 +388,11 @@ uses the existing-meal recovery above.
    replaces that text with the deterministic closeout derived from the card.
    Do not author a second nutrition summary. The runtime labels partial totals
    as partial and identifies missing or under-supported nutrition honestly. For
-   multi-date catch-up, missing calories, an incomplete or conflicting active
-   target bundle, or numerical suppression, retain the current compact text,
-   one-question, or non-numeric behavior and do not attach a card. Never attach
-   the photos. Suppress the message only when neither a retained photo nor a
-   same-occurrence removal revision is selected.
+   missing calories, an incomplete or conflicting active target bundle, or
+   numerical suppression, retain the current compact text, one-question, or
+   non-numeric behavior and do not attach a card. Never attach the photos.
+   Historical-only work already returned the required skip before this step;
+   historical captures never become presentation inputs for current-date work.
 
 ## Handle edge cases
 

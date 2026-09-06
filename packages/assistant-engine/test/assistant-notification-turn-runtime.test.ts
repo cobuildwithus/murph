@@ -229,6 +229,60 @@ afterEach(() => {
   vi.doUnmock('../src/assistant/response-media.js')
   vi.doUnmock('../src/assistant/first-contact.js')
   vi.doUnmock('../src/assistant/cron/output-history.js')
+  vi.doUnmock('../src/assistant/maintenance-evidence.js')
+  vi.doUnmock('../src/assistant/group-room-model.js')
+})
+
+test.each([
+  { profile: 'member-memory', status: 'empty', page: 'missing', skip: true },
+  { profile: 'group-room-model', status: 'empty', page: 'missing', skip: true },
+  { profile: 'member-memory', status: 'unavailable', page: 'missing', skip: false },
+  { profile: 'member-memory', status: 'available', page: 'missing', skip: false },
+  { profile: 'group-room-model', status: 'empty', page: 'present', skip: false },
+  { profile: 'group-room-model', status: 'empty', page: 'unavailable', skip: false },
+  { profile: 'group-room-model', status: 'available', page: 'missing', skip: false },
+  { profile: 'habitat-voice', status: 'not-applicable', page: 'missing', skip: false },
+] as const)('empty maintenance admission: $profile/$status/$page', async ({ profile, status, page, skip }) => {
+  vi.doMock('../src/assistant/maintenance-evidence.js', () => ({
+    readAssistantMaintenanceConversationEvidence: vi.fn(async () => ({
+      prompt: 'Engine-supplied synthetic evidence.',
+      status,
+    })),
+  }))
+  vi.doMock('../src/assistant/group-room-model.js', async (importOriginal) => ({
+    ...await importOriginal<typeof import('../src/assistant/group-room-model.js')>(),
+    readAssistantGroupRoomModelState: vi.fn(async () => page === 'present'
+      ? { kind: page, body: '## Room guide\n'.repeat(2_000), digest: 'a'.repeat(64), status: 'active' }
+      : { kind: page, digest: 'a'.repeat(64) }),
+  }))
+  const { mocks, deliverMessage, sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
+    providerResult: createProviderResult({
+      response: JSON.stringify({ kind: 'skip', privateSummary: 'Silent maintenance complete.' }),
+    }),
+    turnId: 'turn-empty-maintenance',
+  })
+  const onProviderRequestStarted = vi.fn()
+  const result = await sendAssistantNotificationLocal({
+    executionContext: { hosted: null },
+    instructions: 'Perform the authorized silent maintenance.',
+    onProviderRequestStarted,
+    turnPolicy: {
+      kind: 'maintenance-exact-skip',
+      maintenanceProfile: profile,
+      privateSummary: 'Silent maintenance complete.',
+    },
+    vault: '/vaults/empty-maintenance',
+  })
+  expect(result.decision).toEqual({ kind: 'skip', privateSummary: 'Silent maintenance complete.' })
+  expect(result.response).toBeNull()
+  expect(deliverMessage).not.toHaveBeenCalled()
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledTimes(skip ? 0 : 1)
+  if (skip) {
+    expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+    expect(mocks.recordAssistantUsageEvent).not.toHaveBeenCalled()
+    expect(onProviderRequestStarted).not.toHaveBeenCalled()
+    expect(result.session.turnCount).toBe(0)
+  }
 })
 
 test('sendAssistantNotificationLocal scopes cron output history to the resolved conversation session', async () => {
@@ -1112,7 +1166,7 @@ test('sendAssistantNotificationLocal sends required exact text without a provide
   })
 })
 
-test('sendAssistantNotificationLocal rejects deferred immediate exact-text delivery but accepts queue-only deferral', async () => {
+test('sendAssistantNotificationLocal converges a deferred exact-text retry after post-queue cancellation', async () => {
   const initialSession = createAssistantSession({
     binding: {
       actorId: 'actor-exact',
@@ -1131,15 +1185,27 @@ test('sendAssistantNotificationLocal rejects deferred immediate exact-text deliv
   sharedPlan.conversationPolicy.audience.channel = 'telegram'
   sharedPlan.conversationPolicy.audience.threadId = 'thread-exact'
   sharedPlan.conversationPolicy.audience.threadIsDirect = true
-  const deliverMessage = vi.fn(async () => ({
-    delivery: null,
-    deliveryError: null,
-    intent: {
-      intentId: 'intent-deferred',
-    },
-    kind: 'queued',
-    session: null,
-  }))
+  const abortController = new AbortController()
+  const abortError = new VaultCliError(
+    'ASSISTANT_CRON_FOREGROUND_YIELDED',
+    'Assistant background work yielded to fresh foreground input.',
+  )
+  let deliveryAttempt = 0
+  const deliverMessage = vi.fn(async () => {
+    deliveryAttempt += 1
+    if (deliveryAttempt === 2) {
+      abortController.abort(abortError)
+    }
+    return {
+      delivery: null,
+      deliveryError: null,
+      intent: {
+        intentId: 'intent-deferred',
+      },
+      kind: 'queued' as const,
+      session: null,
+    }
+  })
   const runtimeState = {
     outbox: {
       deliverMessage,
@@ -1281,8 +1347,12 @@ test('sendAssistantNotificationLocal rejects deferred immediate exact-text deliv
   vi.mocked(runtimeState.sessions.save).mockClear()
   mocks.markAssistantFirstContactSeen.mockClear()
 
+  const beforeCommit = vi.fn(async () => undefined)
   const result = await sendAssistantNotificationLocal({
+    abortSignal: abortController.signal,
     answeredMailboxItemIds: ['aask_done_exact'],
+    beforeCommit,
+    deferCommitUntilDeliveryAccepted: true,
     deliveryDedupeToken: 'signup-welcome:member_exact',
     deliveryDispatchMode: 'queue-only',
     deliveryIdempotencyKey: 'signup-welcome:member_exact',
@@ -1298,6 +1368,8 @@ test('sendAssistantNotificationLocal rejects deferred immediate exact-text deliv
   })
 
   expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
+  expect(abortController.signal.aborted).toBe(true)
+  expect(beforeCommit).toHaveBeenCalledOnce()
   expect(deliverMessage).toHaveBeenCalledWith(
     expect.objectContaining({
       answeredMailboxItemIds: ['aask_done_exact'],
@@ -2222,6 +2294,14 @@ test('sendAssistantNotificationLocal passes user-facing provider text through be
 })
 
 test('sendAssistantNotificationLocal isolates detached provider results without delivering', async () => {
+  vi.doMock('../src/assistant/maintenance-evidence.js', () => ({
+    readAssistantMaintenanceConversationEvidence: vi.fn(async (input: { profile: string }) => ({
+      prompt: input.profile === 'group-room-model'
+        ? '## Group conversation evidence (engine-supplied, bounded, last 7 days)\nSynthetic group context.'
+        : '## Conversation evidence (engine-supplied, bounded, last 7 days)\nSynthetic member context.',
+      status: 'available',
+    })),
+  }))
   const providerSession = createAssistantSession({
     binding: {
       actorId: 'actor-skip',
@@ -2537,10 +2617,6 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
     expect.objectContaining({
       input: expect.objectContaining({
-        codexConfigOverrides: [
-          'memories.use_memories=false',
-          'memories.generate_memories=false',
-        ],
         maintenanceProfile: 'member-memory',
         prompt: expect.stringContaining(
           '## Conversation evidence (engine-supplied, bounded, last 7 days)',
@@ -2624,66 +2700,74 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
   expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
   expect(deliverMessage).not.toHaveBeenCalled()
 
-  vi.clearAllMocks()
-  mocks.executeCodexTurnWithRecovery.mockResolvedValueOnce({
-    kind: 'succeeded',
-    providerTurn: {
-      ...createProviderResult({
-        rawEvents: [
-          {
-            method: 'item/completed',
-            params: {
-              item: {
-                arguments: {
-                  action: 'upsert',
-                  section: 'Context',
-                  text: 'Prefers morning summaries.',
+  for (const action of ['upsert', 'forget'] as const) {
+    vi.clearAllMocks()
+    mocks.executeCodexTurnWithRecovery.mockResolvedValueOnce({
+      kind: 'succeeded',
+      providerTurn: {
+        ...createProviderResult({
+          rawEvents: [
+            {
+              method: 'item/completed',
+              params: {
+                item: {
+                  arguments: action === 'upsert'
+                    ? {
+                        action,
+                        section: 'Context',
+                        text: 'Prefers morning summaries.',
+                      }
+                    : {
+                        action,
+                        expectedUpdatedAt: '2026-04-09T03:00:00.000Z',
+                        memoryId: 'mem_exact',
+                      },
+                  id: `member-memory-${action}`,
+                  namespace: 'murph',
+                  success: true,
+                  tool: 'member_memory',
+                  type: 'dynamicToolCall',
                 },
-                id: 'member-memory-write',
-                namespace: 'murph',
-                success: true,
-                tool: 'member_memory',
-                type: 'dynamicToolCall',
               },
             },
-          },
-        ],
-        response: JSON.stringify({
-          kind: 'send_message',
-          privateSummary: 'Should not send.',
-          text: 'Visible maintenance message.',
+          ],
+          response: JSON.stringify({
+            kind: 'send_message',
+            privateSummary: 'Should not send.',
+            text: 'Visible maintenance message.',
+          }),
+          session: providerSession,
         }),
-        session: providerSession,
-      }),
-      additionalUsages: [],
-    },
-  })
-
-  let invalidMaintenanceError: unknown
-  try {
-    await sendAssistantNotificationLocal({
-      instructions: 'Run overnight memory maintenance.',
-      turnPolicy: {
-        kind: 'maintenance-exact-skip',
-        maintenanceProfile: 'member-memory',
-        privateSummary: 'No notification required.',
+        additionalUsages: [],
       },
-      vault: '/vaults/skip',
     })
-  } catch (error) {
-    invalidMaintenanceError = error
+
+    let invalidMaintenanceError: unknown
+    try {
+      await sendAssistantNotificationLocal({
+        instructions: 'Run overnight memory maintenance.',
+        turnPolicy: {
+          kind: 'maintenance-exact-skip',
+          maintenanceProfile: 'member-memory',
+          privateSummary: 'No notification required.',
+        },
+        vault: '/vaults/skip',
+      })
+    } catch (error) {
+      invalidMaintenanceError = error
+    }
+    expect(invalidMaintenanceError).toMatchObject({
+      code: 'ASSISTANT_NOTIFICATION_MAINTENANCE_DECISION_INVALID',
+    })
+    expect((invalidMaintenanceError as Error & {
+      details?: Record<string, unknown>
+    }).details).toMatchObject({
+      assistantNotificationProviderNonReplayableWork: true,
+      assistantNotificationStage: 'provider',
+    })
+    expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+    expect(deliverMessage).not.toHaveBeenCalled()
   }
-  expect(invalidMaintenanceError).toMatchObject({
-    code: 'ASSISTANT_NOTIFICATION_MAINTENANCE_DECISION_INVALID',
-  })
-  expect((invalidMaintenanceError as Error & {
-    details?: Record<string, unknown>
-  }).details).toMatchObject({
-    assistantNotificationProviderNonReplayableWork: true,
-    assistantNotificationStage: 'provider',
-  })
-  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
-  expect(deliverMessage).not.toHaveBeenCalled()
 
   vi.clearAllMocks()
   mocks.executeCodexTurnWithRecovery.mockResolvedValueOnce({
@@ -3855,6 +3939,12 @@ test('sendAssistantNotificationLocal rejects an append-only clarification after 
     vault: '/vaults/scheduled-local-time-clarification-skip',
   })).rejects.toMatchObject({
     code: 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+    context: {
+      assistantNotificationValidationFailureReason:
+        'runtime_presentation_non_send_decision',
+    },
+    message:
+      'A runtime-owned notification presentation requires a send_message decision.',
   })
 
   expect(deliverMessage).not.toHaveBeenCalled()
@@ -3933,6 +4023,7 @@ test('sendAssistantNotificationLocal delivers ordinary context handoff text thro
     instructions: 'Use the bounded handoff context in this group.',
     notificationPromptProfile: 'context-handoff',
     responsePolicy: { kind: 'require_send' },
+    sandbox: 'danger-full-access',
     threadIsDirect: false,
     vault: '/vaults/context-handoff',
   })
@@ -3948,6 +4039,9 @@ test('sendAssistantNotificationLocal delivers ordinary context handoff text thro
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
     expect.objectContaining({
       allowFinishWithoutReply: false,
+      input: expect.objectContaining({
+        sandbox: 'danger-full-access',
+      }),
       profile: {
         nativeResumePolicy: 'disabled',
         promptProfile: 'conversation',
@@ -3962,7 +4056,10 @@ test('sendAssistantNotificationLocal delivers ordinary context handoff text thro
     }),
   )
   expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
-    expect.objectContaining({ assistantTranscriptText: response }),
+    expect.objectContaining({
+      assistantTranscriptText: response,
+      providerResumeStateAction: 'clear',
+    }),
   )
   expect(mocks.recordAssistantUsageEvent).toHaveBeenCalledTimes(1)
   expect(mocks.recordAdditionalAssistantUsageEvents).toHaveBeenCalledTimes(1)
@@ -4121,9 +4218,14 @@ test('sendAssistantNotificationLocal rejects a selected song without generated m
     vault: '/vaults/group-sponsorship-text',
   })).rejects.toMatchObject({
     code: 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+    context: {
+      assistantNotificationValidationFailureReason:
+        'creative_response_media_invalid',
+    },
     details: expect.objectContaining({
       assistantNotificationProviderNonReplayableWork: false,
     }),
+    message: 'A song notification requires exactly one generated song attachment.',
   })
 
   expect(observedProviderInputs[0]).toMatchObject({
@@ -5453,31 +5555,63 @@ describe('parseAssistantNotificationDecision', () => {
     const { parseAssistantNotificationDecision } = await import(
       '../src/assistant/notification-turn.ts'
     )
+    const captureDecisionError = (value: string): unknown => {
+      try {
+        parseAssistantNotificationDecision(value)
+      } catch (error) {
+        return error
+      }
+      throw new Error('Expected assistant notification decision parsing to fail.')
+    }
+    const hostilePrivateResponse =
+      'HOSTILE_PRIVATE_PROVIDER_RESPONSE_DO_NOT_EMIT_7f3b2f'
 
-    expect(() => parseAssistantNotificationDecision('not json at all')).toThrowError(
-      new VaultCliError(
-        'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+    const unparseableError = captureDecisionError(hostilePrivateResponse)
+    expect(unparseableError).toMatchObject({
+      code: 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+      context: {
+        assistantNotificationValidationFailureReason: 'decision_json_unparseable',
+      },
+      message:
         'Assistant notification turn must return a single valid JSON decision object.',
-      ),
+    })
+    expect(JSON.stringify(unparseableError)).not.toContain(hostilePrivateResponse)
+
+    const malformedJsonError = captureDecisionError(
+      `{"kind":"send_message","text":${hostilePrivateResponse}}`,
     )
-    expect(() =>
-      parseAssistantNotificationDecision('{"kind":"send_message","privateSummary":"brief"}'),
-    ).toThrowError(
-      new VaultCliError(
-        'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
-        'Assistant notification turn returned an invalid decision object.',
-      ),
-    )
-    expect(() =>
-      parseAssistantNotificationDecision(
-        '{"kind":"skip","unexpected":"value","privateSummary":"No action"}',
-      ),
-    ).toThrowError(
-      new VaultCliError(
-        'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
-        'Assistant notification turn returned an invalid decision object.',
-      ),
-    )
+    expect(malformedJsonError).toMatchObject({
+      code: 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+      context: {
+        assistantNotificationValidationFailureReason: 'decision_json_unparseable',
+      },
+      message: 'Assistant notification turn returned an invalid decision object.',
+    })
+    expect(JSON.stringify(malformedJsonError)).not.toContain(hostilePrivateResponse)
+
+    const schemaPrivateResponse =
+      'PRIVATE_SCHEMA_RESPONSE_DO_NOT_EMIT_902c45'
+    const schemaError = captureDecisionError(JSON.stringify({
+      kind: 'send_message',
+      privateSummary: schemaPrivateResponse,
+    }))
+    expect(schemaError).toMatchObject({
+      code: 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+      context: {
+        assistantNotificationValidationFailureReason: 'decision_schema_invalid',
+      },
+      message: 'Assistant notification turn returned an invalid decision object.',
+    })
+    expect(JSON.stringify(schemaError)).not.toContain(schemaPrivateResponse)
+    expect(captureDecisionError(
+      '{"kind":"skip","unexpected":"value","privateSummary":"No action"}',
+    )).toMatchObject({
+      code: 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+      context: {
+        assistantNotificationValidationFailureReason: 'decision_schema_invalid',
+      },
+      message: 'Assistant notification turn returned an invalid decision object.',
+    })
   })
 })
 

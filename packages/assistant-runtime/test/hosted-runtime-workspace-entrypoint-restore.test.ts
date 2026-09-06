@@ -22,6 +22,7 @@ import {
   readConversationImportedSeqs,
   removeTempRoot,
   requireEventIndex,
+  runHostedWorkspaceRuntimeJobInProcess,
   sha256Hex,
   stagePendingLinqAssistantInputForMailboxItem,
   summarizeStageTimings,
@@ -111,10 +112,12 @@ import {
   HostedWorkspaceRunnerUserMismatchError,
   drainHostedRuntimeDeferredUsageCompletionsBestEffort,
   parseHostedAssistantWorkspaceRuntimeJobInput,
-  runHostedWorkspaceRuntimeJobInProcess,
   type HostedWorkspaceRuntimeJobOptions,
   type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
+import {
+  startHostedWorkspaceRestorePreparation,
+} from "../src/hosted-workspace-restore-preparation.ts";
 import {
   collectHostedPendingAssistantInputMediaRetentionProtections,
   compactHostedPendingAssistantInputIds,
@@ -132,6 +135,7 @@ import {
   writeHostedMailboxImportState,
   type HostedMailboxImportState,
 } from "../src/hosted-runtime/mailbox-state.ts";
+import { drainHostedRuntimeLogWritesBestEffort } from "../src/hosted-runtime/runtime-logs.ts";
 import {
   HostedRuntimeArtifactReadError,
   type HostedRuntimeDeviceSyncPort,
@@ -142,7 +146,198 @@ import {
   type HostedRuntimeWorkspaceSnapshotPort,
 } from "../src/hosted-runtime-contracts.ts";
 
-describe("hosted workspace runtime entrypoint", () => {test("does not run assistant outbox phase when mailbox import fails before checkpoint", async () => {
+async function createWorkspaceRestoreFixture(snapshotId: string) {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+  const events: string[] = [];
+  const mailboxStarted = createDeferred<void>();
+  const mailboxRelease = createDeferred<void>();
+  const baseMailboxPort = createMailboxPort({ events, items: [] });
+  const mailboxPort: HostedRuntimeMailboxPort = {
+    ...baseMailboxPort,
+    async fetch(request) {
+      mailboxStarted.resolve();
+      await mailboxRelease.promise;
+      return await baseMailboxPort.fetch(request);
+    },
+  };
+  const restoreWorkspaceSnapshot = vi.fn(async (
+    input: Parameters<HostedRuntimeWorkspaceSnapshotPort["restoreWorkspaceSnapshot"]>[0],
+  ) => {
+    events.push("workspace.restore");
+    await initializeVault({ createdAt: TEST_NOW, vaultRoot: input.durableRoot });
+  });
+  const platform = createPlatform({
+    events,
+    mailboxPort,
+    workspacePort: createWorkspacePort({
+      checkpointRequests: [],
+      events,
+      workspace: createWorkspaceState({
+        snapshotRef: createWorkspaceSnapshotV2Ref(snapshotId),
+        version: "0",
+      }),
+    }),
+    workspaceSnapshotPort: {
+      async abortSnapshotSession() {
+        throw new Error("Restore seam test must not abort snapshots.");
+      },
+      async completeSnapshotSession() {
+        throw new Error("Restore seam test must not complete snapshots.");
+      },
+      async putSnapshotObjectDirect() {
+        throw new Error("Restore seam test must not upload snapshots.");
+      },
+      restoreWorkspaceSnapshot,
+      async startSnapshotSession() {
+        throw new Error("Restore seam test must not start snapshots.");
+      },
+    },
+  });
+
+  return {
+    events,
+    job: createWorkspaceRuntimeJobInput(),
+    mailboxRelease,
+    mailboxStarted,
+    platform,
+    restoreWorkspaceSnapshot,
+    vaultRoot,
+  };
+}
+
+describe("hosted workspace runtime entrypoint", () => {
+  test("waits for and consumes the exact prepared restore once before later runtime work", async () => {
+    const fixture = await createWorkspaceRestoreFixture("snapshot-prepared-restore-gate");
+    const preparation = startHostedWorkspaceRestorePreparation({
+      job: fixture.job,
+      platform: fixture.platform,
+      signal: null,
+      vaultRoot: fixture.vaultRoot,
+    });
+    const preparedResult = await preparation.promise;
+    const preparedGate = createDeferred<typeof preparedResult>();
+    const preparedWorkspaceRestore = {
+      ...preparation,
+      promise: preparedGate.promise,
+    };
+
+    try {
+      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(fixture.job, {
+        async createCheckpointSnapshot() {
+          throw new Error("Prepared restore gate test should not checkpoint.");
+        },
+        async importItem() {
+          throw new Error("Prepared restore gate test should not import mailbox items.");
+        },
+        platform: fixture.platform,
+        preparedWorkspaceRestore,
+        vaultRoot: fixture.vaultRoot,
+      });
+
+      assert.deepEqual(fixture.events, ["workspace.read", "workspace.restore"]);
+      expect(fixture.restoreWorkspaceSnapshot).toHaveBeenCalledOnce();
+
+      preparedGate.resolve(preparedResult);
+      await fixture.mailboxStarted.promise;
+
+      assert.deepEqual(fixture.events, ["workspace.read", "workspace.restore"]);
+      expect(fixture.restoreWorkspaceSnapshot).toHaveBeenCalledOnce();
+
+      fixture.mailboxRelease.resolve();
+      const result = await resultPromise;
+
+      assert.equal(result.status, "idle");
+      assert.equal(fixture.events.filter((event) => event === "workspace.read").length, 1);
+      assert.equal(fixture.events.filter((event) => event === "workspace.restore").length, 1);
+      assert.ok(fixture.events.includes("mailbox.fetch"));
+      expect(fixture.restoreWorkspaceSnapshot).toHaveBeenCalledOnce();
+    } finally {
+      fixture.mailboxRelease.resolve();
+      await removeTempRoot(fixture.vaultRoot);
+    }
+  });
+
+  test("propagates prepared restore rejection before later runtime work", async () => {
+    const fixture = await createWorkspaceRestoreFixture(
+      "snapshot-prepared-restore-rejection",
+    );
+    const preparation = startHostedWorkspaceRestorePreparation({
+      job: fixture.job,
+      platform: fixture.platform,
+      signal: null,
+      vaultRoot: fixture.vaultRoot,
+    });
+    const preparedResult = await preparation.promise;
+    const preparedGate = createDeferred<typeof preparedResult>();
+    const preparedFailure = new Error("Synthetic prepared restore failure.");
+
+    try {
+      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(fixture.job, {
+        async createCheckpointSnapshot() {
+          throw new Error("Rejected prepared restore must not checkpoint.");
+        },
+        async importItem() {
+          throw new Error("Rejected prepared restore must not import mailbox items.");
+        },
+        platform: fixture.platform,
+        preparedWorkspaceRestore: {
+          ...preparation,
+          promise: preparedGate.promise,
+        },
+        vaultRoot: fixture.vaultRoot,
+      });
+
+      assert.deepEqual(fixture.events, ["workspace.read", "workspace.restore"]);
+      preparedGate.reject(preparedFailure);
+
+      await expect(resultPromise).rejects.toBe(preparedFailure);
+      assert.deepEqual(fixture.events, ["workspace.read", "workspace.restore"]);
+      expect(fixture.restoreWorkspaceSnapshot).toHaveBeenCalledOnce();
+    } finally {
+      fixture.mailboxRelease.resolve();
+      await removeTempRoot(fixture.vaultRoot);
+    }
+  });
+
+  test("retains the default workspace read and restore path without prepared work", async () => {
+    const snapshotId = "snapshot-default-restore-path";
+    const fixture = await createWorkspaceRestoreFixture(snapshotId);
+
+    try {
+      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(fixture.job, {
+        async createCheckpointSnapshot() {
+          throw new Error("Default restore path test should not checkpoint.");
+        },
+        async importItem() {
+          throw new Error("Default restore path test should not import mailbox items.");
+        },
+        platform: fixture.platform,
+        vaultRoot: fixture.vaultRoot,
+      });
+
+      await fixture.mailboxStarted.promise;
+      assert.deepEqual(fixture.events, ["workspace.read", "workspace.restore"]);
+      expect(fixture.restoreWorkspaceSnapshot).toHaveBeenCalledOnce();
+
+      fixture.mailboxRelease.resolve();
+      const result = await resultPromise;
+      assert.equal(result.status, "idle");
+      assert.equal(fixture.events.filter((event) => event === "workspace.read").length, 1);
+      assert.equal(fixture.events.filter((event) => event === "workspace.restore").length, 1);
+      assert.ok(fixture.events.includes("mailbox.fetch"));
+      const checkpointBuilderInput =
+        mocks.createHostedWorkspaceSnapshotCheckpointRequestBuilder.mock.calls.at(-1)?.[0];
+      assert.deepEqual(
+        checkpointBuilderInput?.metadata.currentSnapshotRef,
+        createWorkspaceSnapshotV2Ref(snapshotId),
+      );
+    } finally {
+      fixture.mailboxRelease.resolve();
+      await removeTempRoot(fixture.vaultRoot);
+    }
+  });
+
+  test("does not run assistant outbox phase when mailbox import fails before checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     let assistantPhaseCalled = false;
@@ -335,14 +530,15 @@ describe("hosted workspace runtime entrypoint", () => {test("does not run assist
       await expect(resultPromise).rejects.toThrow(
         "Foreground test should not build checkpoint requests.",
       );
+      await drainHostedRuntimeLogWritesBestEffort();
 
       assert.deepEqual(events, [
         "workspace.read",
         "mailbox.fetch",
-        "runtime.log:mailbox.imported",
         "mailbox.fetch",
-        "runtime.log:mailbox.imported",
         "assistant.phase",
+        "runtime.log:mailbox.imported",
+        "runtime.log:mailbox.imported",
         "runtime.log:checkpoint.runtime_residue_deferred",
       ]);
       assert.deepEqual(checkpointRequests, []);
@@ -1145,8 +1341,10 @@ describe("hosted workspace runtime entrypoint", () => {test("does not run assist
           hostedMailboxImportedCount: 0,
           hostedMailboxNextRetryAtPresent: true,
           hostedMailboxRetryableBlockedCount: 1,
+          hostedMailboxSystemFirstPendingSeq: null,
           hostedMailboxSystemHandledThroughSeq: "0",
           hostedMailboxSystemImportedSeq: "0",
+          hostedMailboxSystemDeviceSyncContinuationSeqs: [],
         },
         status: "scheduled",
       });
@@ -2024,15 +2222,30 @@ describe("hosted workspace runtime entrypoint", () => {test("does not run assist
         },
       );
 
-      assert.deepEqual(artifactGetCalls, [
+      assert.deepEqual(artifactGetCalls.slice(0, 3), [
         baseHash,
         hotHash,
         receiptLogHash,
+      ]);
+      assert.deepEqual(
+        artifactGetCalls
+          .filter((hash) => hash === olderReceiptHash || hash === receiptHash),
+        [olderReceiptHash, receiptHash],
+      );
+      assert.deepEqual([...artifactGetCalls.slice(3)].sort(), [
         olderReceiptHash,
         olderPayloadHash,
         receiptHash,
         exactPayloadHash,
-      ]);
+      ].sort());
+      assert.ok(
+        artifactGetCalls.indexOf(olderReceiptHash)
+          < artifactGetCalls.indexOf(olderPayloadHash),
+      );
+      assert.ok(
+        artifactGetCalls.indexOf(receiptHash)
+          < artifactGetCalls.indexOf(exactPayloadHash),
+      );
       assert.equal(await readFile(path.join(vaultRoot, "note.md"), "utf8"), "base note\n");
       assert.equal(
         await readFile(path.join(vaultRoot, "journal", "2026-04-28.md"), "utf8"),
@@ -2675,6 +2888,7 @@ describe("hosted workspace runtime entrypoint", () => {test("does not run assist
         },
       );
 
+      await drainHostedRuntimeLogWritesBestEffort();
       const mailboxFetchIndex = requireEventIndex(events, "mailbox.fetch");
       assert.equal(events.includes("artifact.get:eager-raw-capture"), false);
       for (const [index] of artifactHashes.entries()) {
@@ -2904,7 +3118,6 @@ describe("hosted workspace runtime entrypoint", () => {test("does not run assist
       assert.deepEqual(importedSeqs, mailboxItems.map((item) => item.laneSeq));
       assert.equal(artifactPutCalls.length, 1);
       assert.ok(mailboxFetchIndex < mailboxImportedLogIndex);
-      assert.ok(mailboxImportedLogIndex < requireEventIndex(events, `snapshot.create:${mailboxItemCount}`));
       assert.equal(stageSummary["workspace.read"]?.count, 1);
       assert.equal(stageSummary["artifact.get"]?.count, 1);
       assert.equal(stageSummary["mailbox.fetch"]?.count, 1);
@@ -2929,8 +3142,10 @@ describe("hosted workspace runtime entrypoint", () => {test("does not run assist
           hostedMailboxFetchedCount: mailboxItemCount,
           hostedMailboxImportedCount: mailboxItemCount,
           hostedMailboxRetryableBlockedCount: 0,
+          hostedMailboxSystemFirstPendingSeq: null,
           hostedMailboxSystemHandledThroughSeq: "0",
           hostedMailboxSystemImportedSeq: "0",
+          hostedMailboxSystemDeviceSyncContinuationSeqs: [],
         },
         status: "idle",
       });

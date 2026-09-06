@@ -341,6 +341,24 @@ test('buildAssistantCliSurfaceContract normalizes commands into a compact index 
         name: 'document import',
       },
       {
+        description: 'List semantic daily activity summaries.',
+        hint:
+          'One read: day totals omit flags; workout facts use --include-workout-summaries; lap/split facts use --include-workout-details. Choose first; never probe and retry.',
+        name: 'wearables activity list',
+        schema: {
+          options: {
+            properties: {
+              date: {
+                type: 'string',
+              },
+              includeWorkoutDetails: {
+                type: 'boolean',
+              },
+            },
+          },
+        },
+      },
+      {
         description: 'Root status alias',
         name: 'status',
       },
@@ -376,6 +394,10 @@ test('buildAssistantCliSurfaceContract normalizes commands into a compact index 
   assert.match(
     contract,
     /- `assistant onboarding resume-context`: Read compact setup context for onboarding resume; options --limit=number\./u,
+  )
+  assert.match(
+    contract,
+    /- `wearables activity list`: List semantic daily activity summaries\.; options --date=string, --includeWorkoutDetails; hint One read: day totals omit flags; workout facts use --include-workout-summaries; lap\/split facts use --include-workout-details\. Choose first; never probe and retry\./u,
   )
   assert.doesNotMatch(contract, /Search the indexed documents/u)
   assert.doesNotMatch(contract, /Root command help/u)
@@ -613,10 +635,11 @@ test('readAssistantCliLlmsManifest launches workspace CLI source with base tscon
   assert.equal(spawnCall.cwd, path.join(path.sep, 'tmp', 'murph-workspace'))
 })
 
-test('readAssistantCliLlmsFullManifest launches the full schema-bearing manifest', async () => {
+test('readAssistantCliLlmsFullManifest keeps adaptive source discovery and supports an owner-defined runtime timeout', async () => {
   vi.resetModules()
 
   const fakeTsxBinary = path.join(path.sep, 'tmp', 'murph-test-bin', 'tsx')
+  const timeoutSpy = vi.spyOn(globalThis, 'setTimeout')
   const spawnCalls: Array<{
     args: string[]
     command: string
@@ -674,6 +697,7 @@ test('readAssistantCliLlmsFullManifest launches the full schema-bearing manifest
     cliEnv: {
       PATH: path.dirname(fakeTsxBinary),
     },
+    timeoutMs: 5 * 60_000,
   })
 
   assert.equal(manifest.commands[0]?.name, 'goal save')
@@ -683,9 +707,98 @@ test('readAssistantCliLlmsFullManifest launches the full schema-bearing manifest
   assert.ok(spawnCall)
   assert.equal(spawnCall.command, fakeTsxBinary)
   assert.deepEqual(spawnCall.args.slice(3), ['--llms-full', '--format', 'json'])
+  assert.ok(timeoutSpy.mock.calls.some(([, delay]) => delay === 5 * 60_000))
 })
 
-test('generate-cli-surface-contract builds the prebuilt artifact from the full manifest', async () => {
+test('readAssistantCliLlmsFullManifestFromCliEntry requires the explicit built CLI with an owner-defined timeout', async () => {
+  vi.resetModules()
+
+  const fakeTsxBinary = path.join(path.sep, 'tmp', 'murph-test-bin', 'tsx')
+  const timeoutSpy = vi.spyOn(globalThis, 'setTimeout')
+  const spawnCalls: Array<{
+    args: string[]
+    command: string
+  }> = []
+
+  vi.doMock('node:fs/promises', async () => {
+    const actual =
+      await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+    return {
+      ...actual,
+      access: vi.fn(async (targetPath: string) => {
+        if (
+          targetPath === fakeTsxBinary ||
+          targetPath.endsWith('tsconfig.base.json') ||
+          targetPath.endsWith(path.join('packages', 'cli', 'src', 'bin.ts')) ||
+          targetPath.endsWith(path.join('packages', 'cli', 'dist', 'bin.js'))
+        ) {
+          return
+        }
+
+        throw new Error(`missing test executable: ${targetPath}`)
+      }),
+    }
+  })
+  vi.doMock('node:child_process', () => ({
+    spawn: vi.fn((command: string, args: string[]) => {
+      spawnCalls.push({ args: [...args], command })
+      return createManifestCommandChildProcess({
+        commands: [{ name: 'goal save' }],
+      })
+    }),
+  }))
+
+  const {
+    readAssistantCliLlmsFullManifestFromCliEntry,
+  } = await import('../src/assistant/cli-surface-manifest.ts')
+
+  await readAssistantCliLlmsFullManifestFromCliEntry({
+    cliEntryPath: path.join(repoRoot, 'packages', 'cli', 'dist', 'bin.js'),
+    workingDirectory: repoRoot,
+  })
+
+  assert.equal(spawnCalls.length, 1)
+  const spawnCall = spawnCalls[0]
+  assert.ok(spawnCall)
+  assert.equal(spawnCall.command, process.execPath)
+  assert.match(spawnCall.args[0] ?? '', /packages[\\/]cli[\\/]dist[\\/]bin\.js$/u)
+  assert.deepEqual(spawnCall.args.slice(1), ['--llms-full', '--format', 'json'])
+  assert.ok(timeoutSpy.mock.calls.some(([, delay]) => delay === 5 * 60_000))
+})
+
+test('readAssistantCliLlmsFullManifestFromCliEntry fails before spawn when the built CLI is absent', async () => {
+  vi.resetModules()
+
+  vi.doMock('node:fs/promises', async () => {
+    const actual =
+      await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+    return {
+      ...actual,
+      access: vi.fn(async () => {
+        throw new Error('missing built CLI')
+      }),
+    }
+  })
+  const spawnMock = vi.fn()
+  vi.doMock('node:child_process', () => ({
+    spawn: spawnMock,
+  }))
+
+  const {
+    readAssistantCliLlmsFullManifestFromCliEntry,
+  } = await import('../src/assistant/cli-surface-manifest.ts')
+
+  await assert.rejects(
+    readAssistantCliLlmsFullManifestFromCliEntry({
+      cliEntryPath: path.join(repoRoot, 'packages', 'cli', 'dist', 'bin.js'),
+      workingDirectory: repoRoot,
+    }),
+    /required built workspace CLI is unavailable/u,
+  )
+  assert.equal(spawnMock.mock.calls.length, 0)
+})
+
+test('generateAssistantCliSurfaceContract preserves the artifact schema and serialization', async () => {
   vi.resetModules()
 
   const writeFileMock = vi.fn(
@@ -701,13 +814,11 @@ test('generate-cli-surface-contract builds the prebuilt artifact from the full m
     }
   })
 
-  const readAssistantCliLlmsManifest = vi.fn(
-    async (_input: { workingDirectory?: string | null }) => {
-      throw new Error('compact manifest should not be used for prebuilt generation')
-    },
-  )
-  const readAssistantCliLlmsFullManifest = vi.fn(
-    async (_input: { workingDirectory?: string | null }) => ({
+  const readAssistantCliLlmsFullManifestFromCliEntry = vi.fn(
+    async (_input: {
+      cliEntryPath: string
+      workingDirectory?: string | null
+    }) => ({
       commands: [
         {
           description: 'Create or update one goal from typed command fields.',
@@ -719,7 +830,7 @@ test('generate-cli-surface-contract builds the prebuilt artifact from the full m
                   type: 'string',
                 },
               },
-              required: ['title'],
+              required: [],
             },
             options: {
               properties: {
@@ -739,30 +850,46 @@ test('generate-cli-surface-contract builds the prebuilt artifact from the full m
     }),
   )
   vi.doMock('../src/assistant/cli-surface-manifest.js', () => ({
-    buildAssistantCliProcessEnv: () => ({}),
-    readAssistantCliLlmsFullManifest,
-    readAssistantCliLlmsManifest,
+    readAssistantCliLlmsFullManifestFromCliEntry,
   }))
 
-  await import('../src/assistant/generate-cli-surface-contract.ts')
+  const artifactPath = path.join(
+    repoRoot,
+    'packages',
+    'assistant-engine',
+    'dist',
+    'assistant',
+    'cli-surface-contract.generated.json',
+  )
+  const cliEntryPath = path.join(repoRoot, 'packages', 'cli', 'dist', 'bin.js')
+  const {
+    generateAssistantCliSurfaceContract,
+  } = await import('../src/assistant/generate-cli-surface-contract.ts')
 
-  assert.equal(readAssistantCliLlmsManifest.mock.calls.length, 0)
-  assert.equal(readAssistantCliLlmsFullManifest.mock.calls.length, 1)
+  await generateAssistantCliSurfaceContract({
+    artifactPath,
+    cliEntryPath,
+    workingDirectory: repoRoot,
+  })
+
+  assert.equal(readAssistantCliLlmsFullManifestFromCliEntry.mock.calls.length, 1)
   assert.equal(
     path.resolve(
-      readAssistantCliLlmsFullManifest.mock.calls[0]?.[0]?.workingDirectory ?? '',
+      readAssistantCliLlmsFullManifestFromCliEntry.mock.calls[0]?.[0]
+        ?.workingDirectory ?? '',
     ),
     repoRoot,
+  )
+  assert.equal(
+    readAssistantCliLlmsFullManifestFromCliEntry.mock.calls[0]?.[0]?.cliEntryPath,
+    cliEntryPath,
   )
   assert.equal(writeFileMock.mock.calls.length, 1)
 
   const writeCall = writeFileMock.mock.calls[0]
   assert.ok(writeCall)
-  const [artifactPath, rawArtifact, encoding] = writeCall
-  assert.match(
-    String(artifactPath),
-    /packages[\\/]assistant-engine[\\/]src[\\/]assistant[\\/]cli-surface-contract\.generated\.json$/u,
-  )
+  const [writtenArtifactPath, rawArtifact, encoding] = writeCall
+  assert.equal(writtenArtifactPath, artifactPath)
   assert.equal(encoding, 'utf8')
 
   const artifact = JSON.parse(String(rawArtifact)) as {
@@ -776,7 +903,7 @@ test('generate-cli-surface-contract builds the prebuilt artifact from the full m
   assert.deepEqual(Object.keys(artifact).sort(), ['contract', 'schemaVersion'])
   assert.match(
     artifact.contract,
-    /- `goal save`: Create or update one goal from typed command fields\.; args <title>; options --horizon=short_term\|medium_term\|long_term\|ongoing, --status=active\|paused\|completed\|abandoned\./u,
+    /- `goal save`: Create or update one goal from typed command fields\.; args \[title\]; options --horizon=short_term\|medium_term\|long_term\|ongoing, --status=active\|paused\|completed\|abandoned\./u,
   )
 })
 
@@ -1094,6 +1221,46 @@ test('buildAssistantCliSurfaceContract exposes optional enum fields for detailed
   )
   assert.doesNotMatch(contract, /requestId/u)
   assert.doesNotMatch(contract, /--vault/u)
+})
+
+test('buildAssistantCliSurfaceContract distinguishes optional positional arguments', async () => {
+  const {
+    buildAssistantCliSurfaceContract,
+  } = await import('../src/assistant/cli-surface-bootstrap.ts')
+
+  const contract = buildAssistantCliSurfaceContract({
+    commands: [
+      {
+        description: 'Create or update one goal from typed command fields.',
+        name: 'goal save',
+        schema: {
+          args: {
+            properties: {
+              title: {
+                type: 'string',
+              },
+            },
+            required: [],
+          },
+          options: {
+            properties: {
+              id: {
+                type: 'string',
+              },
+              status: {
+                enum: ['active', 'paused', 'completed', 'abandoned'],
+                type: 'string',
+              },
+            },
+          },
+        },
+      },
+    ],
+  })
+
+  assert.ok(contract)
+  assert.match(contract, /args \[title\]/u)
+  assert.doesNotMatch(contract, /args <title>/u)
 })
 
 test('buildAssistantCliSurfaceContract keeps large manifests compact without non-hot descriptions or schemas', async () => {

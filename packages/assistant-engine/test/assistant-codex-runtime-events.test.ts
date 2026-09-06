@@ -70,6 +70,71 @@ import {
 } from '../src/assistant-codex-events.ts'
 
 describe('assistant codex event shaping', () => {
+  it('accepts new thread metadata and excludes raw provider usage metadata from persisted events', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-protocol-upgrade-work-')
+    const codexHome = await createTempDir('assistant-codex-protocol-upgrade-home-')
+    const traces: unknown[] = []
+    const children: MockChildProcess[] = []
+    mockWarmCodexProcess(children, 31_990, async (child) => {
+      const initialize = await waitForRpcMethod(child, 'initialize')
+      child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+      const threadStart = await waitForRpcMethod(child, 'thread/start')
+      child.stdout.write(jsonLine({
+        id: threadStart.id,
+        result: { thread: { id: 'thread-153', model: null, reasoningEffort: null } },
+      }))
+      const turnStart = await waitForRpcMethod(child, 'turn/start')
+      child.stdout.write(jsonLine({ id: turnStart.id, result: { turn: { id: 'turn-153' } } }))
+      writeStartedTurn(child, 'thread-153', 'turn-153')
+      for (const method of ['modelProvider/authRecoveryStarted', 'modelProvider/authRecoveryCompleted']) {
+        child.stdout.write(jsonLine({
+          method,
+          params: { threadId: 'thread-153', turnId: 'turn-153', provider: 'openai', message: 'Authentication recovery status.' },
+        }))
+      }
+      child.stdout.write(jsonLine({
+        method: 'rawResponse/completed',
+        params: {
+          threadId: 'thread-153', turnId: 'turn-153', responseId: 'response-153', usage: null,
+          usageMetadata: { amount: null, metadata: { privatePayload: 'SYNTHETIC_RAW_USAGE_MARKER' } },
+        },
+      }))
+      child.stdout.write(jsonLine({
+        method: 'item/completed',
+        params: {
+          threadId: 'thread-153', turnId: 'turn-153',
+          item: { type: 'agentMessage', id: 'message-153', text: 'Done.', phase: 'final_answer', delivery: null, questions: null },
+        },
+      }))
+      writeCompletedTurn(child, 'thread-153', 'turn-153')
+    })
+    const result = await executeCodexAppServerTurn({
+      codexHome, workingDirectory, prompt: 'Reply once.',
+      model: 'gpt-5.6-terra', reasoningEffort: 'low', sandbox: 'workspace-write',
+      onTraceEvent: (event) => { traces.push(event) },
+    })
+    expect(result.finalMessage).toBe('Done.')
+    expect(result.threadId).toBe('thread-153')
+    expect(result.turnId).toBe('turn-153')
+    expect(JSON.stringify({ events: result.jsonEvents, traces })).not.toContain('SYNTHETIC_RAW_USAGE_MARKER')
+    expect(children).toHaveLength(1)
+  })
+
+  it.each(['modelProvider/authRecoveryStarted', 'modelProvider/authRecoveryCompleted'])(
+    'keeps %s informational instead of treating it as a turn failure',
+    (method) => {
+      const event = {
+        method,
+        params: {
+          threadId: 'thread-153', turnId: 'turn-153', provider: 'openai',
+          message: 'Recovering from an authentication error.',
+        },
+      }
+      expect(extractCodexErrorMessage(event)).toBeNull()
+      expect(normalizeCodexEvent(event)).toMatchObject({ kind: 'unknown', eventType: method })
+    },
+  )
+
   it('normalizes exact Codex 0.147 notifications across the consumed item families', () => {
     const modelRerouted = {
       method: 'model/rerouted',
@@ -2087,6 +2152,7 @@ describe('assistant codex event shaping', () => {
       expect(onFinishWithoutReplyAccepted).toHaveBeenCalledWith({
         deliveryContextOrdinal: 0,
         messageReactionPending: true,
+        precedingReplyDeliveryContextOrdinal: null,
       })
       expect(onFinishWithoutReplyRecorded).toHaveBeenCalledOnce()
       expect(onFinishWithoutReplyRecorded).toHaveBeenCalledWith({
@@ -2150,6 +2216,16 @@ describe('assistant codex event shaping', () => {
                   id: 'user-cross-context-initial',
                   type: 'userMessage',
                   content: [{ type: 'text', text: 'react to my earlier message' }],
+                },
+              },
+            }))
+            child.stdout.write(jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'assistant-cross-context-initial',
+                  text: 'Earlier answer.',
+                  type: 'agentMessage',
                 },
               },
             }))
@@ -2229,12 +2305,13 @@ describe('assistant codex event shaping', () => {
           },
         ],
       })
-      // The accepted event settles the cumulative prefix through ordinal 1,
-      // so the ordinal-0 reaction must keep suppression evidence deferred.
+      // The earlier reply owns ordinal 0, while its reaction and the later
+      // no-reply suffix both require deferred suppression evidence.
       expect(onFinishWithoutReplyAccepted).toHaveBeenCalledOnce()
       expect(onFinishWithoutReplyAccepted).toHaveBeenCalledWith({
         deliveryContextOrdinal: 1,
         messageReactionPending: true,
+        precedingReplyDeliveryContextOrdinal: 0,
       })
     })
 
@@ -2332,6 +2409,7 @@ describe('assistant codex event shaping', () => {
       expect(onFinishWithoutReplyAccepted).toHaveBeenCalledWith({
         deliveryContextOrdinal: 0,
         messageReactionPending: false,
+        precedingReplyDeliveryContextOrdinal: null,
       })
       expect(onFinishWithoutReplyRecorded).toHaveBeenCalledWith({
         deliveryContextOrdinal: 0,
@@ -2829,12 +2907,12 @@ describe('assistant codex event shaping', () => {
         writeSubAgentActivity(
           child,
           'thread-background-boundary-parent',
+          'turn-background-boundary-parent',
           'thread-background-boundary-child',
           'started',
           {
             agentPath: '/root/onboarding-import',
             id: 'spawn-background-boundary-child',
-            turnId: 'turn-background-boundary-parent',
           },
         )
         writeCompletedTurn(
@@ -2902,6 +2980,7 @@ describe('assistant codex event shaping', () => {
         writeSubAgentActivity(
           child,
           'thread-interrupted-boundary-parent',
+          'turn-interrupted-boundary-parent',
           'thread-interrupted-boundary-child',
         )
         writeStartedTurn(
@@ -2978,12 +3057,8 @@ describe('assistant codex event shaping', () => {
         writeSubAgentActivity(
           child,
           'thread-multi-root-boundary-parent-a',
+          'turn-multi-root-boundary-parent-a',
           'thread-multi-root-boundary-child-a',
-        )
-        writeStartedTurn(
-          child,
-          'thread-multi-root-boundary-child-a',
-          'turn-multi-root-boundary-child-a',
         )
         writeCompletedTurn(
           child,
@@ -2998,9 +3073,17 @@ describe('assistant codex event shaping', () => {
           threadId: 'thread-multi-root-boundary-parent-b',
           turnId: 'turn-multi-root-boundary-parent-b',
         })
+        // The first root already admitted this child. Its own start can arrive
+        // after the later root binds without transferring parent ownership.
+        writeStartedTurn(
+          child,
+          'thread-multi-root-boundary-child-a',
+          'turn-multi-root-boundary-child-a',
+        )
         writeSubAgentActivity(
           child,
           'thread-multi-root-boundary-parent-b',
+          'turn-multi-root-boundary-parent-b',
           'thread-multi-root-boundary-child-b',
         )
         writeStartedTurn(
@@ -3094,6 +3177,7 @@ describe('assistant codex event shaping', () => {
           writeSubAgentActivity(
             child,
             'thread-three-child-parent',
+            'turn-three-child-parent',
             `thread-three-child-${suffix}`,
           )
           writeStartedTurn(
@@ -3173,6 +3257,7 @@ describe('assistant codex event shaping', () => {
         writeSubAgentActivity(
           child,
           'thread-failed-child-parent',
+          'turn-failed-child-parent',
           'thread-failed-child-child',
         )
         writeStartedTurn(
@@ -3206,6 +3291,342 @@ describe('assistant codex event shaping', () => {
       expect(spawnedChildren).toHaveLength(1)
     })
 
+    it('accepts the canonical root-thread child completion activity', async () => {
+      const workingDirectory = await createTempDir('assistant-codex-completed-child-work-')
+      const codexHome = await createTempDir('assistant-codex-completed-child-home-')
+      const spawnedChildren: MockChildProcess[] = []
+      const scannedThreadIds: string[] = []
+      mockWarmCodexProcess(spawnedChildren, 31_872, async (child) => {
+        await initializeWarmTurn(
+          child,
+          'thread-completed-child-parent',
+          'turn-completed-child-parent',
+        )
+        writeSubAgentActivity(
+          child,
+          'thread-completed-child-parent',
+          'turn-completed-child-parent',
+          'thread-completed-child-child',
+        )
+        writeStartedTurn(
+          child,
+          'thread-completed-child-child',
+          'turn-completed-child-child',
+        )
+        writeCompletedTurn(
+          child,
+          'thread-completed-child-parent',
+          'turn-completed-child-parent',
+        )
+        writeSubAgentActivity(
+          child,
+          'thread-completed-child-parent',
+          'turn-completed-child-parent',
+          'thread-completed-child-child',
+          'completed',
+          {
+            id: 'subagent-completed-turn-completed-child-child',
+          },
+        )
+
+        for (let requestCount = 1; requestCount <= 2; requestCount += 1) {
+          const request = await respondToBackgroundTerminals(child, requestCount)
+          scannedThreadIds.push(String(asRecord(request.params).threadId))
+        }
+      })
+
+      await executeBackgroundBoundaryTurn(
+        codexHome,
+        workingDirectory,
+        'run one bounded child with canonical completion activity',
+      )
+      await expect(waitForWarmCodexBackgroundWork()).resolves.toBeUndefined()
+
+      expect(scannedThreadIds).toEqual([
+        'thread-completed-child-parent',
+        'thread-completed-child-child',
+      ])
+      expect(spawnedChildren[0]?.signalCode).toBeNull()
+      expect(spawnedChildren).toHaveLength(1)
+    })
+
+    it('ignores a child completion acknowledgement after its boundary clears', async () => {
+      const workingDirectory = await createTempDir('assistant-codex-late-completed-child-work-')
+      const codexHome = await createTempDir('assistant-codex-late-completed-child-home-')
+      const spawnedChildren: MockChildProcess[] = []
+      const releaseLateCompletion = createDeferred<void>()
+      const lateCompletionWritten = createDeferred<void>()
+      mockWarmCodexProcess(spawnedChildren, 31_873, async (child) => {
+        await initializeWarmTurn(
+          child,
+          'thread-late-completed-child-parent',
+          'turn-late-completed-child-parent',
+        )
+        writeSubAgentActivity(
+          child,
+          'thread-late-completed-child-parent',
+          'turn-late-completed-child-parent',
+          'thread-late-completed-child-child',
+        )
+        writeStartedTurn(
+          child,
+          'thread-late-completed-child-child',
+          'turn-late-completed-child-child',
+        )
+        writeCompletedTurn(
+          child,
+          'thread-late-completed-child-child',
+          'turn-late-completed-child-child',
+        )
+        writeCompletedTurn(
+          child,
+          'thread-late-completed-child-parent',
+          'turn-late-completed-child-parent',
+        )
+        await respondToBackgroundTerminals(child, 1)
+        await respondToBackgroundTerminals(child, 2)
+
+        await releaseLateCompletion.promise
+        writeSubAgentActivity(
+          child,
+          'thread-late-completed-child-parent',
+          'turn-late-completed-child-parent',
+          'thread-late-completed-child-child',
+          'completed',
+          {
+            id: 'subagent-completed-turn-late-completed-child-child',
+          },
+        )
+        lateCompletionWritten.resolve(undefined)
+      })
+
+      await executeBackgroundBoundaryTurn(
+        codexHome,
+        workingDirectory,
+        'run one child whose acknowledgement arrives late',
+      )
+      await expect(waitForWarmCodexBackgroundWork()).resolves.toBeUndefined()
+
+      releaseLateCompletion.resolve(undefined)
+      await lateCompletionWritten.promise
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      await expect(waitForWarmCodexBackgroundWork()).resolves.toBeUndefined()
+
+      expect(spawnedChildren[0]?.signalCode).toBeNull()
+      expect(spawnedChildren).toHaveLength(1)
+    })
+
+    it.each([
+      {
+        name: 'an independent later root',
+        resumeSessionId: null,
+        scenario: 'independent',
+        successorThreadId: 'thread-stale-completed-child-parent-b',
+      },
+      {
+        name: 'a resumed root thread',
+        resumeSessionId: 'thread-stale-completed-child-parent-a',
+        scenario: 'resumed',
+        successorThreadId: 'thread-stale-completed-child-parent-a',
+      },
+    ])('ignores a prior child completion while $name is active', async ({
+      resumeSessionId,
+      scenario,
+      successorThreadId,
+    }) => {
+      const successorChildThreadId =
+        `thread-stale-completed-child-child-b-${scenario}`
+      const successorChildTurnId =
+        `turn-stale-completed-child-child-b-${scenario}`
+      const successorTurnId =
+        `turn-stale-completed-child-parent-b-${scenario}`
+      const workingDirectory = await createTempDir(
+        `assistant-codex-stale-completed-child-${scenario}-work-`,
+      )
+      const codexHome = await createTempDir(
+        `assistant-codex-stale-completed-child-${scenario}-home-`,
+      )
+      const spawnedChildren: MockChildProcess[] = []
+      const completeSuccessorChild = createDeferred<void>()
+      const staleCompletionWritten = createDeferred<void>()
+      const scannedThreadIds: string[] = []
+      mockWarmCodexProcess(spawnedChildren, 31_874, async (child) => {
+        await initializeWarmTurn(
+          child,
+          'thread-stale-completed-child-parent-a',
+          'turn-stale-completed-child-parent-a',
+        )
+        writeSubAgentActivity(
+          child,
+          'thread-stale-completed-child-parent-a',
+          'turn-stale-completed-child-parent-a',
+          'thread-stale-completed-child-child-a',
+        )
+        writeStartedTurn(
+          child,
+          'thread-stale-completed-child-child-a',
+          'turn-stale-completed-child-child-a',
+        )
+        writeCompletedTurn(
+          child,
+          'thread-stale-completed-child-child-a',
+          'turn-stale-completed-child-child-a',
+        )
+        writeCompletedTurn(
+          child,
+          'thread-stale-completed-child-parent-a',
+          'turn-stale-completed-child-parent-a',
+        )
+
+        for (let requestCount = 1; requestCount <= 2; requestCount += 1) {
+          const request = await respondToBackgroundTerminals(child, requestCount)
+          scannedThreadIds.push(String(asRecord(request.params).threadId))
+        }
+
+        if (resumeSessionId) {
+          const resume = await waitForRpcMethod(child, 'thread/resume')
+          const resumeParams = asRecord(resume.params)
+          child.stdout.write(jsonLine({
+            id: resume.id,
+            result: {
+              approvalPolicy: resumeParams.approvalPolicy,
+              cwd: resumeParams.cwd,
+              sandbox: codexSandboxPolicyForMode('workspace-write'),
+              thread: { id: successorThreadId },
+            },
+          }))
+          const turn = await waitForRpcMethodCount(child, 'turn/start', 2)
+          child.stdout.write(jsonLine({
+            id: turn.id,
+            result: { turn: { id: successorTurnId } },
+          }))
+        } else {
+          await writeWarmTurnStarted({
+            child,
+            requestCount: 2,
+            threadId: successorThreadId,
+            turnId: successorTurnId,
+          })
+        }
+        writeSubAgentActivity(
+          child,
+          successorThreadId,
+          successorTurnId,
+          successorChildThreadId,
+        )
+        writeStartedTurn(
+          child,
+          successorChildThreadId,
+          successorChildTurnId,
+        )
+
+        writeSubAgentActivity(
+          child,
+          'thread-stale-completed-child-parent-a',
+          'turn-stale-completed-child-parent-a',
+          'thread-stale-completed-child-child-a',
+          'completed',
+          {
+            id: 'subagent-completed-turn-stale-completed-child-child-a',
+          },
+        )
+        staleCompletionWritten.resolve(undefined)
+        writeCompletedTurn(
+          child,
+          successorThreadId,
+          successorTurnId,
+        )
+
+        await completeSuccessorChild.promise
+        writeCompletedTurn(
+          child,
+          successorChildThreadId,
+          successorChildTurnId,
+        )
+        for (let requestCount = 3; requestCount <= 4; requestCount += 1) {
+          const request = await respondToBackgroundTerminals(child, requestCount)
+          scannedThreadIds.push(String(asRecord(request.params).threadId))
+        }
+      })
+
+      await executeBackgroundBoundaryTurn(
+        codexHome,
+        workingDirectory,
+        'complete the first child boundary',
+      )
+      await expect(waitForWarmCodexBackgroundWork()).resolves.toBeUndefined()
+
+      await executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexHome,
+        env: { PATH: '/custom/bin' },
+        prompt: 'start the successor child boundary',
+        resumeSessionId,
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+      await staleCompletionWritten.promise
+
+      const publishCheckpoint = vi.fn()
+      const successorBoundary = waitForWarmCodexBackgroundWork().then(
+        publishCheckpoint,
+      )
+      await new Promise((resolve) => setTimeout(resolve, 75))
+      expect(publishCheckpoint).not.toHaveBeenCalled()
+
+      completeSuccessorChild.resolve(undefined)
+      await expect(successorBoundary).resolves.toBeUndefined()
+
+      expect(scannedThreadIds).toEqual([
+        'thread-stale-completed-child-parent-a',
+        'thread-stale-completed-child-child-a',
+        successorThreadId,
+        successorChildThreadId,
+      ])
+      expect(spawnedChildren[0]?.signalCode).toBeNull()
+      expect(spawnedChildren).toHaveLength(1)
+    })
+
+    it('fails closed on a current-turn completion for an unadmitted child', async () => {
+      const workingDirectory = await createTempDir(
+        'assistant-codex-untracked-completed-child-work-',
+      )
+      const codexHome = await createTempDir(
+        'assistant-codex-untracked-completed-child-home-',
+      )
+      const spawnedChildren: MockChildProcess[] = []
+      mockWarmCodexProcess(spawnedChildren, 31_876, async (child) => {
+        await initializeWarmTurn(
+          child,
+          'thread-untracked-completed-child-parent',
+          'turn-untracked-completed-child-parent',
+        )
+        writeSubAgentActivity(
+          child,
+          'thread-untracked-completed-child-parent',
+          'turn-untracked-completed-child-parent',
+          'thread-untracked-completed-child-child',
+          'completed',
+          { id: 'subagent-completed-turn-untracked-completed-child-child' },
+        )
+        writeCompletedTurn(
+          child,
+          'thread-untracked-completed-child-parent',
+          'turn-untracked-completed-child-parent',
+        )
+      })
+
+      await executeBackgroundBoundaryTurn(
+        codexHome,
+        workingDirectory,
+        'attempt to complete an unadmitted child',
+      )
+      await expect(waitForWarmCodexBackgroundWork()).rejects.toMatchObject({
+        code: 'ASSISTANT_CODEX_BACKGROUND_WORK_UNSUPPORTED',
+      })
+      expect(spawnedChildren[0]?.signalCode).toBe('SIGTERM')
+    })
+
     it('tracks every sequential child admitted before the boundary', async () => {
       const workingDirectory = await createTempDir('assistant-codex-sequential-child-work-')
       const codexHome = await createTempDir('assistant-codex-sequential-child-home-')
@@ -3220,6 +3641,7 @@ describe('assistant codex event shaping', () => {
         writeSubAgentActivity(
           child,
           'thread-sequential-parent',
+          'turn-sequential-parent',
           'thread-sequential-child-a',
         )
         writeStartedTurn(
@@ -3247,6 +3669,7 @@ describe('assistant codex event shaping', () => {
         writeSubAgentActivity(
           child,
           'thread-sequential-parent',
+          'turn-sequential-parent',
           'thread-sequential-child-b',
         )
         writeCompletedTurn(
@@ -3296,12 +3719,14 @@ describe('assistant codex event shaping', () => {
         writeSubAgentActivity(
           child,
           'thread-child-interaction-child',
+          'turn-child-interaction-child',
           'thread-child-interaction-parent',
           'interacted',
         )
         writeSubAgentActivity(
           child,
           'thread-child-interaction-parent',
+          'turn-child-interaction-parent',
           'thread-child-interaction-child',
         )
         writeCompletedTurn(
@@ -3335,6 +3760,7 @@ describe('assistant codex event shaping', () => {
         writeSubAgentActivity(
           child,
           'thread-child-terminal-parent',
+          'turn-child-terminal-parent',
           'thread-child-terminal-child',
         )
         writeStartedTurn(

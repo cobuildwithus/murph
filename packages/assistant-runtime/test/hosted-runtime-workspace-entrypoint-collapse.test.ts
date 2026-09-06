@@ -555,25 +555,44 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
     }
   });
 
-  test("collapse invariant 2a: due projected assistant wake gets one hot no-progress attempt before checkpoint", async () => {
+  test.each([
+    {
+      expectedCheckpointDelayMs: 180_000,
+      expectedImmediateRecheck: undefined,
+      expectedWakeReason: "assistant",
+      mailboxWakeAt: new Date(Date.parse(TEST_NOW) + 5 * 60_000).toISOString(),
+      scenario: "retains the serviced assistant wake ahead of a future mailbox wake",
+    },
+    {
+      expectedCheckpointDelayMs: 0,
+      expectedImmediateRecheck: true,
+      expectedWakeReason: "mailbox",
+      mailboxWakeAt: TEST_NOW,
+      scenario: "hands a due mailbox wake to its owner after assistant service",
+    },
+  ])("collapse invariant 2a: $scenario", async ({
+    expectedCheckpointDelayMs,
+    expectedImmediateRecheck,
+    expectedWakeReason,
+    mailboxWakeAt,
+  }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const idleCheckpointDelayMs = 180_000;
-    const auxiliaryMailboxWakeAt = new Date(
-      Date.parse(TEST_NOW) + 5 * 60_000,
-    ).toISOString();
     const assistantOneObserved = createDeferred<void>();
     const assistantTwoObserved = createDeferred<void>();
+    const runtimeAbortController = new AbortController();
     let firstCheckpointStartedAtMs: number | null = null;
     let assistantPhaseCalls = 0;
+    let invocationPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
 
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     try {
       vi.setSystemTime(new Date(TEST_NOW));
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
 
-      const resultPromise = withRealTimeout(
+      invocationPromise =
         runHostedWorkspaceRuntimeJobInProcess(
           createWorkspaceRuntimeJobInput({
             request: {
@@ -629,7 +648,7 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
 
               assistantTwoObserved.resolve();
               return {
-                nextWakeAt: auxiliaryMailboxWakeAt,
+                nextWakeAt: mailboxWakeAt,
                 nextWakeReason: "mailbox",
                 progressed: false,
                 redactedStatus: {
@@ -637,27 +656,39 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
                 },
               };
             },
+            signal: runtimeAbortController.signal,
             vaultRoot,
           },
-        ),
+        );
+      const resultPromise = withRealTimeout(
+        invocationPromise,
         15_000,
         () => events.join(","),
       );
 
       await withRealTimeout(assistantOneObserved.promise, 15_000, () => events.join(","));
-      await waitForFakeTimerScheduled(() => events.join(","));
+      if (expectedCheckpointDelayMs > 0) {
+        await waitForFakeTimerScheduled(() => events.join(","));
+      }
       await withRealTimeout(assistantTwoObserved.promise, 15_000, () => events.join(","));
-      await vi.advanceTimersByTimeAsync(idleCheckpointDelayMs - 1);
-      assert.equal(checkpointRequests.length, 0);
       assert.deepEqual(events.filter((event) => event.startsWith("assistant.phase:")), [
         "assistant.phase:1:none",
         `assistant.phase:2:${TEST_NOW}`,
       ]);
 
-      await vi.advanceTimersByTimeAsync(1);
+      if (expectedCheckpointDelayMs > 0) {
+        await vi.advanceTimersByTimeAsync(expectedCheckpointDelayMs - 1);
+        assert.equal(checkpointRequests.length, 0);
+        await vi.advanceTimersByTimeAsync(1);
+      } else {
+        await vi.runAllTimersAsync();
+      }
       const result = await resultPromise;
 
-      assert.equal(firstCheckpointStartedAtMs, Date.parse(TEST_NOW) + idleCheckpointDelayMs);
+      assert.equal(
+        firstCheckpointStartedAtMs,
+        Date.parse(TEST_NOW) + expectedCheckpointDelayMs,
+      );
       assert.ok(
         requireEventIndex(events, `assistant.phase:2:${TEST_NOW}`)
           < requireEventIndex(events, "snapshot:idle_shutdown"),
@@ -667,13 +698,123 @@ describe("hosted workspace runtime entrypoint", () => {test("collapse invariant 
         request.nextWakeAt,
         request.nextWakeReason,
       ]), [
-        ["idle_shutdown", TEST_NOW, "assistant"],
+        ["idle_shutdown", TEST_NOW, expectedWakeReason],
       ]);
-      assert.equal(result.immediateRecheckRequested, undefined);
+      assert.equal(result.immediateRecheckRequested, expectedImmediateRecheck);
       assert.equal(result.status, "scheduled");
       assert.equal(result.nextWakeAt, TEST_NOW);
+      assert.equal(result.nextWakeReason, expectedWakeReason);
       assert.equal(assistantPhaseCalls, 2);
     } finally {
+      runtimeAbortController.abort(new DOMException("Synthetic test cleanup.", "AbortError"));
+      await invocationPromise?.catch(() => undefined);
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("a requested owner handoff checkpoints after the current foreground pass", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-collapse-invariant-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const checkpointObserved = createDeferred<void>();
+    const assistantObserved = createDeferred<void>();
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const runtimeAbortController = new AbortController();
+    let assistantPhaseCalls = 0;
+    let invocationPromise: ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      invocationPromise =
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_collapse_invariant_owner_handoff",
+              idleCheckpointDelayMs: 180_000,
+              leaseGeneration: "9",
+              userId: TEST_USER_ID,
+              workspaceVersion: "4",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              events.push(`snapshot:${snapshotInput.reason}`);
+              checkpointObserved.resolve();
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "8".repeat(64),
+                  key: "users/bundles/member-synthetic/collapse-owner-handoff.bundle.json",
+                  size: 640,
+                }),
+              };
+            },
+            async importItem() {
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({ events, items: [] }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({
+                  nextWakeAt: TEST_NOW,
+                  nextWakeReason: "assistant",
+                  version: "4",
+                }),
+              }),
+            }),
+            async runAssistantPhase() {
+              assistantPhaseCalls += 1;
+              assistantObserved.resolve();
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                nextWakeAt: new Date(Date.parse(TEST_NOW) + 60_000).toISOString(),
+                nextWakeReason: "assistant",
+                progressed: true,
+                redactedStatus: {
+                  hostedAssistantProgressed: true,
+                },
+              };
+            },
+            runtimeWakeSignal,
+            signal: runtimeAbortController.signal,
+            vaultRoot,
+          },
+        );
+      const resultPromise = withRealTimeout(
+        invocationPromise,
+        15_000,
+        () => events.join(","),
+      );
+
+      await withRealTimeout(assistantObserved.promise, 15_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
+      runtimeWakeSignal.notify({
+        requestedProcessingMode: "system_mailbox",
+      });
+      await withRealTimeout(checkpointObserved.promise, 15_000, () => events.join(","));
+      const result = await resultPromise;
+
+      assert.deepEqual(checkpointRequests.map((request) => [
+        request.reason,
+        request.nextWakeAt,
+        request.nextWakeReason,
+      ]), [
+        [
+          "idle_shutdown",
+          new Date(Date.parse(TEST_NOW) + 60_000).toISOString(),
+          "assistant",
+        ],
+      ]);
+      assert.equal(result.immediateRecheckRequested, true);
+      assert.equal(assistantPhaseCalls, 1);
+    } finally {
+      runtimeAbortController.abort(new DOMException("Synthetic test cleanup.", "AbortError"));
+      await invocationPromise?.catch(() => undefined);
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
     }

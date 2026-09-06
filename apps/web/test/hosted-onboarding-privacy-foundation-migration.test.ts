@@ -83,6 +83,8 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     "emailPublicBootstrapAttempts HostedEmailPublicBootstrapAttempt[]",
     'groupCurrentSenderClarificationsAsRuntime HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationRuntime")',
     'groupCurrentSenderClarificationsAsTarget HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationTarget")',
+    'groupJournalCaptureConsentRequestedAt DateTime? @map("group_journal_capture_consent_requested_at")',
+    'groupJournalCaptureEnabled Boolean? @map("group_journal_capture_enabled")',
     'groupPrivateConversionTrackedAt DateTime? @map("group_private_conversion_tracked_at")',
     'groupSponsorshipMomentsCreated HostedGroupSponsorshipMoment[] @relation("HostedGroupSponsorshipMomentCreator")',
     'groupSponsorshipsPaid HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationPayer")',
@@ -131,6 +133,8 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
   ],
   HostedMemberIdentity: [
     'memberId String @unique @map("member_id")',
+    'linqEmailHandleLookupKey String? @unique @map("linq_email_handle_lookup_key")',
+    'linqEmailHandleEncrypted String? @map("linq_email_handle_encrypted")',
     'maskedPhoneNumberHint String? @map("masked_phone_number_hint")',
     'phoneLookupKey String? @unique @map("phone_lookup_key")',
     'phoneNumberEncrypted String? @map("phone_number_encrypted")',
@@ -971,6 +975,8 @@ describe("hosted Prisma baseline migration", () => {
       "20260812030200_whoop_capacity_index",
       "20260812030300_referral_handoff_indexes",
       "20260812050000_hosted_sensitive_action_transient_retention_index",
+      "20260826190000_hosted_vault_share_delivery_cursor_index",
+      "20260905120000_hosted_operator_task_result_retention_index",
     ]);
     expect(
       migrationEntries.filter((entry) => !queryShapeMigrationEntries.has(entry)),
@@ -1177,6 +1183,13 @@ describe("hosted Prisma baseline migration", () => {
       "20260825193000_hosted_group_private_conversion",
       "20260826120000_hosted_group_participant_observation",
       "20260826201500_imessage_mini_app_renewal_credential",
+      "20260826230000_hosted_stripe_payment_notification_email",
+      "20260830150000_hosted_system_progress_projection",
+      "20260830170000_hosted_account_cleanup_temporal",
+      "20260831150000_group_journal_capture",
+      "20260904190000_linq_email_handle_identity",
+      "20260905000000_clinical_record_reader_cleanup",
+      "20260905010000_linq_terminal_message_retry",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(

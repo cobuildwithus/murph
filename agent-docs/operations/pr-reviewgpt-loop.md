@@ -1,42 +1,32 @@
 # PR ReviewGPT Completion Loops
 
-Last verified: 2026-08-24
+Last verified: 2026-09-04
 
-This document owns two distinct managed-browser ReviewGPT stages for PR-lane
-completion:
+Use this runbook only when `completion-workflow.md` selects final ReviewGPT or
+the user requests it. It owns the managed-browser review, exact-head packaging,
+finding disposition, retries, and base-update rules. It does not add a local
+specialist or deep-review pass.
 
-1. One preliminary `completion-specialists` pass combines the applicable
-   Product UX, prompt, frontend, and coverage lenses. It may return one bounded coverage patch
-   artifact.
-2. The separate `pr-review` loop is the final cross-cutting gate for eligible work
-   and replaces local `deep-review`.
-
-Both stages use the managed Eragon, Phlebas, Hercules, Mountain, Vonneumann, and
-Apollo browser lanes. They
-never share round state: the preliminary pass does not create or advance the
-final gate's immutable first-reviewed-head baseline. After focused local proof
-and the parent's candidate review, both stages may start concurrently against
-the same exact pushed candidate head. Their findings are resolved together
-before the parent's final review and completion.
-
-Never combine local `deep-review` with the final ReviewGPT gate for the same
-completed change, including when the change is complex, sensitive, or the user
-asks for a final bug hunt.
-
-For final-ReviewGPT-eligible PR-lane work, do not call the PR good to merge until
-the latest substantive round is resolved, local triage has zero accepted
-findings, every required finding-disposition boundary is complete, and PR CI is green on the
-final head. A round is resolved by `ROUND_OUTCOME: PASS`, or by
-`ROUND_OUTCOME: FINDINGS` when the parent accepts none and records concrete
-disposition evidence. A completed anomaly retrospective may justify continuing
-the same PR, but it never substitutes for a later resolved result on the
-resulting patch.
+Read the sections needed for the current round. Run on the stable pushed head
+after focused local proof and parent candidate review, concurrently with CI.
+Keep one completion owner. Completion requires the resolved review, zero
+unresolved accepted findings, and green required CI; a retrospective alone is
+not review approval.
 
 ## Outcome and Completion Bar
 
-Certify the exact pushed PR patch against its stated user outcome and repository
-invariants using the guarded repository snapshot. Round 1 is always a full-patch
-audit. On round 2 or later, the packager reads the PR body's explicit context
+Review the exact pushed PR patch for serious, realistically reachable bugs and
+material Complexity Collapse using the guarded repository snapshot. A bug needs
+a causing change, plausible trigger, and serious current harm. Code-path proof
+suffices without a prior incident; practical rare exploits and destructive failures remain in scope.
+Complexity Collapse independently qualifies when a bounded correction removes
+meaningful code, concepts, or owners while preserving required behavior and
+invariants without replacement machinery. Minor refactoring, UX polish,
+disclosure gaps, and speculative edge cases are not blocking findings. The
+targeted exploratory presets remain available separately.
+
+Round 1 is always a full-patch audit. On round 2 or later, the packager reads the
+PR body's explicit context
 sensitivity and measures the complete current PR against its base. Sensitive or
 undeclared PRs re-send a fresh full snapshot regardless of size. Routine PRs do
 the same at 500 changed lines or 10 changed files; only routine PRs below both
@@ -57,6 +47,13 @@ draft-only or send-without-wait run intentionally retains its target because
 the prepared draft or conversation is the user-facing result. Never implement
 this cleanup as a profile-wide tab sweep or close a target that the current run
 did not create.
+
+Normal reviews use regular Chat, never ChatGPT Work. The package confirms that
+surface before model selection, before staging, and immediately before send. A
+fresh new-chat target switches the Chat/Work control to Chat when necessary; an
+existing Work conversation or an unconfirmed new-chat surface fails closed.
+Deep Research remains on its dedicated surface. Keep this browser-DOM policy in
+ReviewGPT rather than duplicating it in Murph's lane wrapper or prompts.
 
 This ownership rule is required because the managed browser lanes keep
 background response-polling timers reliable and ReviewGPT pins only the owned
@@ -81,57 +78,45 @@ restart.
 
 ## Wait And Wake Ownership
 
-Give every ReviewGPT run one completion owner. For a normal active review run,
-use `--wait` and let that invocation own response capture until it returns on
-completion, timeout, or failure. Waiting on that completion-returning process is
-not status polling. Do not spend the active agent turn repeatedly reopening the
-thread, querying the process, or otherwise asking whether the review is done.
+Give every ReviewGPT run one completion owner in the original Codex
+session/thread. Prefer `--wait` and let that invocation own response capture
+until completion, timeout, or failure. Keep the same session active and watch
+that process through the tool's wait/resume facility, including across yielded
+tool calls. A slow review alone is not a reason to end the turn, arm an
+automatic continuation, or move completion work into a new session.
 
-When an accepted ReviewGPT request must outlive the active turn, prefer a
-detached `cobuild-review-gpt thread wake` handoff. Bind it to the exact thread,
-capture metadata, owning Codex session, repository checkout, and managed browser
-lane. The detached watcher owns the wait and resumes Codex only after the
-response is complete; the active agent does not remain in a progress-check
-loop. Use `--poll-interval 5m` so watcher checks are no more frequent than once
-every five minutes. Unless an explicit caller- or user-supplied per-run bound
-already applies, use `--poll-timeout 260m`; preserve any explicit bound. That
-wake timeout is independent of the normal ReviewGPT response-capture timeout,
-which defaults to 250 minutes.
+When a completion-returning wait is unavailable, poll the exact accepted
+ReviewGPT thread from the same Codex session, leaving at least five minutes
+between status checks. Use interruptible waits between checks and honor the
+existing per-run timeout. Waiting for output from the existing `--wait` process
+is not a separate status poll; do not add a second thread-status polling loop
+while that process owns capture.
 
-Manual status polling is a fallback only when neither a completion-returning
-wait nor a completion watcher can notify the owning model and the task cannot
-safely proceed without a check. In that case, leave at least five minutes
-between checks and stop polling as soon as one completion owner is available.
-Do not stack a manual polling loop on top of a live `--wait` process or detached
-wake watcher.
+Reserve detached `cobuild-review-gpt thread wake` for a deliberate handoff when
+the current session cannot remain active or the user requests it. Bind it to
+the exact thread, capture metadata, owning Codex session, repository checkout,
+and managed browser lane. Once handed off, the watcher owns completion; do
+not also run a manual polling loop. Use `--poll-interval 5m` and, unless an
+explicit caller- or user-supplied per-run bound already applies,
+`--poll-timeout 260m`. Preserve explicit bounds. That wake timeout remains
+independent of normal ReviewGPT response capture, which defaults to 250
+minutes.
 
-The completion watcher does not relax exact-head, exact-thread, attachment,
-artifact, model, timeout, or response-marker validation. In particular, keep
-the preliminary coverage-patch download and application boundary in
-`agent-docs/operations/completion-workflow.md` § Preliminary ReviewGPT Packet;
-do not use a generic wake handoff as authority to apply an artifact.
+Same-session waiting, polling, and deliberate handoffs all preserve exact-head,
+exact-thread, attachment, model, timeout, and response-marker validation.
 
 ## Finding Disposition Boundary
 
-Every substantive preliminary specialist result and every final `FINDINGS`
-result uses this parent-owned disposition boundary. Validate the exact response
-first, then have the parent triage every finding. The user-visible report states
-the result and, for each finding, the parent's accepted or rejected disposition,
-concrete code or path evidence, current user or operational harm, and the
-smallest justified fix with its complexity cost.
-
-A preliminary specialist result does not end the active task turn. After the
-parent reports the result and dispositions as a progress update, it may inspect
-an attached coverage artifact and remediate accepted findings within the
-existing task authority without asking for separate user permission. This
-continuation does not authorize a scope expansion, destructive action, or
-external action that otherwise requires approval.
+Every final `FINDINGS` result uses this parent-owned disposition boundary.
+Validate the exact response first, then have the parent triage every finding.
+The user-visible report states the result and, for each finding, the parent's
+accepted or rejected disposition, concrete code or path evidence, current user
+or operational harm or removable complexity, and the smallest justified
+correction with its complexity cost.
 
 A final `ROUND_OUTCOME: FINDINGS` keeps the turn-ending pause: report the result
 and dispositions, then wait for the user to resume before mutating the
-candidate, downloading or applying an artifact, launching another review, or
-merging. If a concurrent final stage returns `FINDINGS`, that stricter pause
-also blocks pending specialist-driven mutation. A validated final
+candidate, launching another review, or merging. A validated final
 `ROUND_OUTCOME: PASS` has no findings to disposition and proceeds directly to
 the remaining parent review and merge checks without a user-resume pause.
 
@@ -141,19 +126,18 @@ override that judgment. A rejected finding requires neither a code change nor
 reviewer withdrawal. A `FINDINGS` result needs no review rerun
 when the parent accepts zero findings and records evidence-backed rejection
 reasons. Accepted findings remain unresolved until fixed and verified; the
-one-pass preliminary stage then resolves under its existing parent-revalidation
-rule, while the final gate requires a later resolved result.
+final gate requires a later resolved result.
 
 Two narrow exceptions let a final `FINDINGS` result complete its disposition
-boundary without ending the turn after the parent reports every finding and its
-evidence-backed disposition as a progress update:
+boundary without ending the turn after the parent reports every finding and
+its evidence-backed disposition:
 
-- `Complexity Collapse`: the substantive result contains exactly one finding,
-  ReviewGPT classifies it as `Complexity Collapse`, and the parent independently
-  accepts it after proving that the correction preserves every requested
-  behavior and invariant, stays within the current task's existing edit
-  authority, and yields net deletion or removes concrete concepts or owners
-  without replacement machinery.
+- `Complexity Collapse`: the result contains exactly one finding, classified
+  as Complexity Collapse. The parent proves that its correction preserves all
+  required behavior and invariants, stays within existing edit authority, and
+  yields net deletion or removes meaningful concepts or owners without
+  replacement machinery.
+
 - `Non-Production Remediation`: every accepted finding in the result can be
   corrected entirely in isolated tests, fixtures, or direct-proof scaffolding;
   authored repository docs or process text that is not consumed at runtime; or
@@ -170,150 +154,13 @@ continue the ReviewGPT loop without asking the user for separate permission.
 Use the ordinary turn-ending pause when an accepted finding does not qualify,
 the correction expands beyond the proven boundary, requested behavior or the
 intended outcome would change, scope or authority would expand, or a destructive
-or external action needs new approval. Neither exception bypasses an anomaly
-retrospective or the seven-round hard cap.
+or external action needs new approval. Neither exception bypasses a required
+scope decision or the three-round hard cap.
 
-`INVALID` and `RETROSPECTIVE_REQUIRED` retain their existing stop behavior
-rather than using this disposition path.
-
-## Preliminary Specialist Pass
-
-Run one preliminary specialist pass when any of these lenses apply:
-
-- Product UX: a product-owned journey, semantic-copy, required-action,
-  state-selection, visible-feedback, timing, delivery, permission, recovery,
-  or interaction-economy dimension changed;
-- prompt: prompt text, instruction stacks, tool descriptions, prompt assembly,
-  or prompt regression behavior changed;
-- frontend: user-facing `apps/web` UI changed outside the tiny static-copy fast
-  path; or
-- coverage: the diff changes executable behavior or changes the tests, fixtures,
-  configuration, or direct-proof scaffolding that establishes its proof.
-
-The task must use a clean worktree/PR lane. Commit and push the review candidate
-and open or update the PR. The canonical `pnpm --silent review:gpt` command
-suppresses pnpm's pre-wrapper working-directory banner, recognizes the PR-only
-preset, resolves the current branch PR, checks the clean local head
-against its pushed head, and exports the required PR ref and phase before the
-package can create an attachment. The coordinator records the applicable lenses,
-product outcome, direct journey evidence, focused local proof, current exact-head
-CI status, and selected redacted rendered evidence in the review packet. The PR
-body supplies its short outcome, Product UX result, evidence, and applicable
-risk details. CI may still be `pending`; the preliminary pass runs concurrently
-with it.
-
-Do not add `ReviewGPT first-reviewed head` merely for the preliminary pass. When
-final round 1 starts concurrently, add it before launching both jobs and set it
-to their shared exact pushed head. The preliminary pass still does not consume
-or advance the final gate's baseline.
-
-Run the preliminary preset with exact-head packaging:
-
-The repo config defaults response capture to 250 minutes. The workflow commands
-inherit that timeout; use `--wait-timeout` only for an intentional per-run override.
-
-```bash
-pnpm --silent review:gpt completion-specialists \
-    --wait \
-    --response-marker SPECIALIST_REVIEW_COMPLETE \
-    --response-file audit-packages/pr-<number>-specialists.md \
-    --prompt "Preliminary specialist review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). Apply every Product UX, prompt, frontend, and coverage lens that the changed dimensions require."
-```
-
-Set `REVIEW_GPT_RENDERED_EVIDENCE_PATHS` to newline-separated image paths only
-when images are part of the selected proof. It can contain zero, one, or many
-images. An applicable frontend lens can omit it only when the PR explains why
-images add no material proof and supplies another direct way to judge the
-changed claim. Evidence paths must be repo-relative PNG, JPEG, or WebP files
-under `.artifacts/review-gpt/` or `audit-packages/`; they stay ignored and
-uncommitted. Redact direct identifiers and private content before packaging
-them. The packager rejects absolute paths, traversal, symlinks, missing files,
-unsupported types, and paths outside those two roots.
-
-Set `REVIEW_GPT_PR_URL` only when intentionally targeting a PR other than the
-one associated with the current branch. The guard still requires the local
-head to equal that PR's pushed head. An explicit `REVIEW_GPT_REVIEW_PHASE` must
-match the selected PR preset or the command fails before invoking ReviewGPT.
-
-Keep the invocation's `--prompt` to the compact target/head instruction shown
-above. The completion-specialists preset delegates detailed lens criteria to
-the canonical files already inside `codebase.zip`; do not paste the PR body or
-those lens documents into the composer. The wrapper rejects an assembled
-completion-specialists prompt above 6,500 UTF-8 bytes, counting the preset plus
-every `--prompt` and `--prompt-file` value. Run
-completion-specialists as the only preset so another preset cannot escape the
-assembled-size check. If the ZIP tile is ready while Send remains disabled,
-treat that as composer validation, not a second hydration lifecycle: remove
-duplicated prompt text before retrying instead of extending browser waits or
-rotating lanes.
-
-The guarded ZIP contains:
-
-- `review-gpt-pr-context/pr-body.md`
-- `review-gpt-pr-context/pr.diff`
-- `review-gpt-pr-context/changed-files.txt`
-- `review-gpt-pr-context/review-phase.json`
-- `review-gpt-pr-context/rendered-evidence.txt`
-- `agent-docs/operations/product-ux.md` and the applicable prompt, frontend, and
-  coverage references
-- every explicitly listed rendered-evidence image
-- current source, tests, and repository guidance
-
-`review-phase.json` must identify `preliminary_specialists` and the exact pushed
-head. The response must contain `SPECIALIST_REVIEW_COMPLETE` and one of
-`SPECIALIST_OUTCOME: PASS`, `SPECIALIST_OUTCOME: FINDINGS`, or
-`SPECIALIST_OUTCOME: INVALID`. Apply the same exact-turn, attachment, configured
-model, and owned-target checks used by the final gate. Because this is a narrow,
-lens-scoped pass, its minimum trustworthy duration is 5 minutes rather than the
-final gate's default 7.5-minute floor. A marked response below 5 minutes does not
-count. The ReviewGPT package enforces that same five-minute minimum for marked
-concrete-model responses. Duration alone is not sufficient: confirm the exact
-turn, attachment, requested model selection, completion marker, and substantive
-lens coverage, then record the elapsed time and lane/model evidence.
-An `INVALID` result is a tooling/evidence failure: correct the gap and retry the
-same preliminary pass. A `PASS` or `FINDINGS` result is the one substantive
-specialist pass; do not split or rerun it by lens. Apply the parent-owned
-finding-disposition boundary, report the result and dispositions as a progress
-update, then continue with accepted remediation or artifact inspection without
-a user-resume pause. If a concurrent final stage has returned `FINDINGS`, obey
-its turn-ending pause before any candidate mutation.
-
-After the parent reports the preliminary dispositions, handle only accepted
-findings against the real code and tests. If the response attaches
-`reviewgpt-coverage.patch`,
-retain the exact review thread URL, artifact index, and selected lane. Download
-only that assistant-owned artifact from the same thread with the managed lane's
-CDP endpoint, for example:
-
-```bash
-pnpm exec cobuild-review-gpt thread download \
-  --artifact-index <index> \
-  --chat-url <exact-review-thread-url> \
-  --browser-endpoint http://127.0.0.1:<selected-lane-port> \
-  --output-dir audit-packages/pr-<number>-specialists
-```
-
-Read the full patch before applying it. Confirm every path is a test, fixture,
-or direct-proof scaffold; reject production, prompt, UI, config, schema,
-workflow, dependency, lockfile, generated, or docs hunks. Run
-`git apply --check audit-packages/pr-<number>-specialists/reviewgpt-coverage.patch`
-only after that inspection, then apply that same named file deliberately and
-rerun the focused local proof for the affected behavior. Push the result so the
-required exact-head CI surface evaluates it. Never pipe a downloaded artifact
-directly into `git apply`, and never treat the attachment as landed code.
-
-Resolve accepted Product UX, prompt, and frontend findings in the
-parent, rerun focused proof, and push the resulting candidate. If final round 1
-ran concurrently, preserve its first-reviewed-head baseline and verify the
-combined behavior-bearing remediation in the next substantive round. If accepted
-Product UX remediation materially changed a product-owned dimension, the
-parent must reapply `agent-docs/operations/product-ux.md` § Review Ownership to
-that corrected pushed head and updated direct journey evidence, then record a
-refreshed product purpose verdict. This is parent-owned corrected-head
-revalidation, not another subagent or ReviewGPT invocation. Do not rerun the
-preliminary pass for those substantive corrections. Complete parent final
-review and final verification only after findings from both stages are
-resolved, then close any active plan and push the final task head.
+`INVALID` stops for an evidence gap. Older review results may contain
+`RETROSPECTIVE_REQUIRED`; triage their concrete evidence under the current
+finding bar and scope-decision rule rather than reviving superseded categories
+or automatic size/round triggers.
 
 ## Final Gate: When It Runs
 
@@ -325,11 +172,7 @@ Run the loop when all of the following hold:
    or trivial copy-only.
 3. Focused local proof and the parent's candidate review are complete, and the
    exact pushed candidate is stable enough for a full-patch audit.
-4. The preliminary specialist pass starts against the same exact head when any
-   of its lenses apply. It may still be running; completion still requires its
-   substantive result, resolved findings, and recorded coverage-patch
-   disposition.
-5. The user has not explicitly opted out of the final gate in the current task.
+4. The user has not explicitly opted out of the final gate in the current task.
 
 The review target is the pushed PR head. Run the loop from a clean checkout or
 worktree of the PR branch at that pushed head so ReviewGPT artifacts, CI, and
@@ -360,22 +203,19 @@ table. Here `<full-sha>` means exactly the 40-character lowercase hexadecimal
 value returned by `git rev-parse HEAD`; a shortened SHA is invalid.
 
 Fire each round as soon as the head it reviews is pushed. Do not wait for PR CI
-to go green first. Final round 1 may run in parallel with both CI and the
-preliminary specialist pass on the same head; use separate managed browser
-lanes for concurrent ReviewGPT jobs. Their preflights serialize only a missing
-PR-base fetch in the shared Git directory; packaging and browser execution stay
-concurrent. Green CI on the final head and resolved results from both ReviewGPT
-stages remain separate merge-readiness gates.
+to go green first. Final round 1 runs in parallel with CI. Green CI on the final
+head and a resolved final review remain separate merge-readiness gates.
 
 Skip the final gate for docs/process-only PRs, prompt-primary PRs,
 frontend-only PRs that satisfy the eligibility exemption, trivial copy-only
 changes, other low-risk changes that satisfy
 `agent-docs/operations/completion-workflow.md` § Final ReviewGPT Eligibility, or
 explicit current-task user opt-out. If ReviewGPT is opted out and the
-cross-cutting trigger still applies, route to local `deep-review` instead;
-never run both. Prompt-primary PRs still run the preliminary specialist prompt
-lens, and exempt frontend-only PRs still run every applicable preliminary
-product, frontend, and coverage lens plus their ordinary rendered and UI proof.
+cross-cutting trigger still applies, record the opt-out and continue with parent
+review and direct proof; do not substitute a mandatory local subagent.
+Prompt-primary PRs still require parent prompt inspection, and exempt
+frontend-only PRs still require Product UX, rendered, accessibility, and focused
+UI proof.
 Run the separate final gate only when other scope independently requires it or
 the current user explicitly asks for it.
 
@@ -584,21 +424,18 @@ the current user explicitly asks for it.
    round. Correct its evidence or invocation gap and retry the same round number
    against the same pushed head.
 
-   Treat 7.5 minutes as the default final-gate trust floor, not an absolute
-   stopwatch verdict. A marked concrete-model response below 6.5 minutes is too
-   fast and does not count. A response from 6.5 minutes up to the 7.5-minute
-   default is near-threshold and may count at local discretion when inspection
-   confirms the exact turn, attachment, requested model selection, completion
-   marker, and a substantive review proportionate to the requested scope. Record
-   the elapsed time, selected lane/model evidence, artifact-quality judgment,
-   and acceptance reason in the round handoff. ReviewGPT's package-level
-   five-minute attestation threshold does not replace this stricter final-gate
-   judgment. Responses at or above 7.5 minutes still require all ordinary
-   evidence checks and are not trusted by duration alone.
+   Require at least 4.5 minutes (270 seconds) for a marked concrete-model final
+   response. The repository wrapper passes `--minimum-marked-response-time 270s`
+   to align the tool's attestation fallback with this final-gate minimum. Below
+   that minimum, the response does not count. At or above it, inspect the exact
+   turn, attachment, requested model selection, completion marker, and a
+   substantive review proportionate to the requested scope. Record the elapsed
+   time, selected lane/model evidence, artifact-quality judgment, and acceptance
+   reason in the round handoff. Duration alone never establishes a valid review.
 
-   If a too-fast response is not accepted under this narrow exception, preserve
-   it only as diagnostic output and retry the same substantive round number
-   against the same pushed head. Browser, model, capture, attachment, and
+   Preserve a too-fast response only as diagnostic output and retry the same
+   substantive round number against the same pushed head. Browser, model,
+   capture, attachment, and
    too-fast-response retries never advance the round counter. If evidence shows
    a different or downgraded model, incomplete response, missing snapshot, or
    shallow/templated output, discard the round regardless of duration, correct
@@ -607,33 +444,25 @@ the current user explicitly asks for it.
    `REVIEW_GPT_BROWSER_LANE` and note the temporary override in handoff.
 
 4. Triage every finding locally before fixing:
-   - **Accepted bug/edge case**: confirm the issue through a
-     production-faithful path before fixing. Use the closest actual runtime
-     boundary for the touched surface: hosted-local scenario, app route flow,
-     built CLI path, package integration path, or another owner lane that
-     exercises production code rather than a bespoke mock. Keep the
-     reproduction as committed regression coverage when the owner has a
-     suitable lane.
-   - **Accepted simplification**: accept only when the change removes more
-     complexity than it adds and has direct proof that required behavior and
-     invariants are preserved.
-   - **Accepted purpose drift**: first prove whether the non-obvious surface is
-     necessary for the PR outcome. Delete it or split it into a separate PR when
-     it is unnecessary. When it is necessary but undisclosed, update the PR
-     intent contract with the reason and regression proof before the next
-     review round. Disclosure alone does not cure unnecessary scope.
+   - **Accepted serious bug**: prove the causing change, realistic trigger, and
+     serious impact through the actual runtime path. Use the closest existing
+     route, package, CLI, or integration lane for focused regression proof.
+     A practical exploit or destructive failure does not require a prior
+     incident. Unsupported hypothetical states do not qualify.
+   - **Accepted Complexity Collapse**: prove the exact removable code or
+     concepts, the smaller target shape, and preserved behavior and invariants.
+     Require net source deletion or fewer meaningful concepts/owners without
+     replacement machinery; reject cosmetic or disproportionate refactors.
    - **Rejected**: wrong, already handled, speculative, not worth the added
      complexity, or missing the required reproduction/proof. Note the reason.
 
-   In a `same_thread_delta` round, accept a reported bug only when the remediation
-   delta introduced it or made it materially worse. A serious issue in unchanged
-   original PR work triggers the retrospective path. In a later `full_snapshot`
-   round, the reviewer audits the complete current PR again, so either an
-   original-PR or review-induced issue may be accepted and fixed normally. A
-   pre-existing or adjacent issue belongs outside this PR unless the stated
-   outcome cannot ship without resolving it. A claimed correction that fails to
-   resolve its prior accepted finding counts as review-induced and must be
-   corrected before the stage resolves.
+   In a `same_thread_delta` round, inspect the remediation and directly affected
+   paths only. A qualifying original finding there may be accepted without
+   restarting the full audit. In a `full_snapshot` round, inspect the complete
+   current PR. Label every finding by its actual origin; a failed correction does
+   not relabel the original cause. Verify claimed fixes and reassess old
+   findings against the serious-bug and Complexity Collapse bars. Rejected or
+   out-of-scope observations do not remain blockers. Exclude findings equivalent on the base.
 
    ReviewGPT findings are adversarial signals, not implementation instructions.
    Before accepting a finding, identify the invariant it protects and any
@@ -665,45 +494,24 @@ the current user explicitly asks for it.
    reconciliation for a low-incidence temporary window.
 
    Apply the parent-owned finding-disposition boundary after completing this
-   triage. Preliminary specialist remediation may proceed after the parent
-   reports every disposition as a progress update. A final `FINDINGS` result
-   pauses steps 5–7 until the user resumes, including any pending
-   specialist-driven mutation, except that a qualifying `Complexity Collapse`
-   or `Non-Production Remediation` exception may proceed immediately after the
-   report. Remediation remains limited to accepted findings and the proven task
-   or exception boundary. A validated final `ROUND_OUTCOME: PASS` continues
+   triage. A final `FINDINGS` result pauses steps 5–7 until the user resumes,
+   except that qualifying `Complexity Collapse` or `Non-Production Remediation`
+   may proceed immediately after the report. Remediation remains limited to accepted findings and the
+   proven task or exception boundary. A validated final `ROUND_OUTCOME: PASS` continues
    without that pause.
 
-5. Before another tactical fix, run the anomaly retrospective when any of these
-   is true:
+5. Revisit the requirement before fixing only when concrete evidence shows
+   remediation is repeatedly failing at the same cause, growing compensating
+   machinery, or requiring a product/authority decision outside the task.
+   Compare the original outcome with the current implementation and choose the
+   smallest justified correction or scope change. Record a material decision
+   with the PR evidence. Patch size and round count alone do not trigger this
+   step; the packager's size-based context selection remains unchanged.
 
-   - authored-source churn reaches 2,000 lines; 3,000 lines is a strong red flag
-     that requires an explicit indivisible-large-feature rationale;
-   - review remediation has added at least 500 authored-source lines and grown
-     source additions by at least 25 percent from the first-reviewed head;
-   - the next run would be substantive round 3 or later;
-   - the same underlying mechanism produced an accepted finding in the previous
-     round; or
-   - the proposed cure adds a new owner, state machine, queue, lease, fence,
-     lifecycle, compatibility path, migration, repair pass, or reconciliation
-     mechanism.
-
-   Source churn means authored-source additions plus deletions; tests, fixtures,
-   docs, config/tooling, and generated files stay separate. The retrospective is
-   not an automatic merge rejection and does not presume structural rework.
-   Restate the original requirement, compare the first reviewed and current
-   shapes, attribute review-driven growth and repeated mechanisms, and choose
-   deletion, reverting review machinery, shrinking, splitting, redesigning, or
-   explicitly justified continuation. Record the decision in the PR body or a
-   concise PR comment and carry it in later-round metadata. Never reset the
-   first-reviewed baseline.
-
-6. Fix only accepted findings after the reproduction/proof or required
-   retrospective is in place. A Complexity Collapse correction must yield net
-   deletion or remove concrete concepts/owners without replacement machinery.
-   Run the verification required by
-   `agent-docs/operations/verification-and-runtime.md` for the touched owners,
-   update the evidence and risk notes when they changed, and push to the PR branch.
+6. Correct accepted findings within existing authority, preserve the intended
+   success path, and prefer the smallest correction at the owning boundary. Run focused
+   verification under `verification-and-runtime.md`, update affected evidence,
+   and push to the PR branch.
 
 7. Fire the next substantive round immediately after a pushed accepted fix
    changes production source, runtime config, schema, behavior, or the
@@ -720,18 +528,6 @@ the current user explicitly asks for it.
    schema, or the implemented contract. Run their focused verification and CI
    instead. If such a change does alter the implemented contract or executable
    behavior, use the ordinary next-round rule.
-
-   One narrow exception closes a disclosure-only finding: when every other
-   accepted finding is resolved and ReviewGPT accepted necessary-but-undisclosed
-   Purpose Drift as the only remaining issue, update `Non-obvious affected
-   surfaces` and retry the same substantive round number against the same pushed
-   head. Keep the original round metadata and state in the invocation that this
-   is a disclosure-only verification retry, naming the prior finding and the
-   corrected reason and regression proof. The retry verifies only that corrected
-   intent contract against the already-reviewed patch; it does not reopen the
-   patch, advance the substantive-round counter, or reset the first-reviewed
-   baseline. The retry must still return `ROUND_OUTCOME: PASS` before the gate is
-   complete.
 
 ## Base-Update-Only Exception
 
@@ -756,26 +552,23 @@ required GitHub checks. Do not wait for optional or non-required status checks
 after those gates are green unless a failing check is relevant to the changed
 surface or the user explicitly requested it.
 
-When strict up-to-date checks block the merge, prefer the merge queue. If no
-queue is available, the unchanged reviewed patch has a one-update budget for
-this completion attempt: perform one normal base update, record any conflict
-paths and preservation reasons, run focused verification for affected surfaces,
-and let required PR CI gate that head. The budget remains consumed until merge
-or handoff; a later base advance, CI retry, or agent turn does not reset it. Do
-not rerun ReviewGPT solely for that update. If any resolution authors behavior
-not already represented by the reviewed PR or current base, materially changes
-the implemented contract, includes another branch-authored change, or cannot be
-confidently classified as mechanical, use the ordinary next-substantive-round
-rule instead of the base-only budget.
+When the authorized merge path needs a current base, prefer the merge queue
+when available. Otherwise reconcile the base with a normal merge or rebase,
+record any conflict paths and preservation reasons, run focused verification for
+affected surfaces, and let required PR CI gate the resulting head. Preserve
+published history unless rewriting it is explicitly authorized. Do not rerun
+ReviewGPT solely for a behavior-preserving base update. If a resolution authors
+behavior not already represented by the reviewed PR or current base, materially
+changes the implemented contract, or cannot be confidently classified as
+mechanical, use the ordinary next-substantive-round rule.
 
-If the base advances again after required CI is green on that one updated head,
-do not update the branch or restart CI. Fetch the current base and rerun
-`git merge-tree --write-tree`. When it is clean, use only an already-authorized
-non-refresh merge path: the merge queue or an explicit stale-head/admin bypass.
-Such a bypass may relax only strict-current status; it never bypasses required
-CI or routed review gates. If the merge-tree conflicts, or no non-refresh path
-is both available and authorized, report `moving-base race`, leave the PR and
-worktree active, and stop. Do not poll for a quiet base.
+There is no numerical limit on base updates. If the base advances again, inspect
+the new diff and current mergeability, then continue necessary reconciliation
+within the existing merge authorization. Base movement alone does not require
+another prompt. Avoid updates that the merge path does not need; use green CI on
+the unchanged PR head when branch protections permit it. A changed PR head still
+requires its own required CI. Never bypass required checks, routed review gates,
+or unresolved ownership or product decisions to finish a merge.
 
 ## Stop Condition
 
@@ -786,16 +579,16 @@ worktree active, and stop. Do not poll for a quiet base.
   for an evidence-backed reason after its disposition boundary.
 - `ROUND_OUTCOME: INVALID` is an evidence/invocation failure. It does not advance
   the round counter; correct the gap and retry the same substantive round.
-- `ROUND_OUTCOME: RETROSPECTIVE_REQUIRED` pauses tactical remediation until the
-  requirement-level retrospective is recorded. It is not a structural verdict.
-- Hard cap: 7 rounds per PR. There is no automatic eighth substantive round. An
-  accepted round-seven finding may still be reproduced and fixed; do not leave a
-  known bug in place merely because the review counter reached seven. After that
-  fix, pause the ReviewGPT loop and confirm the preliminary specialist pass,
-  required local audit, parent final review, verification, and PR CI are all
-  complete. Record the cap
+- A concrete requirement or authority gap pauses dependent remediation until
+  the parent resolves the scope decision under step 5. The reviewer reports
+  qualifying findings or evidence gaps, not escalation by size or round number.
+- Hard cap: 3 rounds per PR. There is no automatic fourth substantive round. An
+  accepted round-three finding may still be reproduced and fixed; do not leave a
+  known bug in place merely because the review counter reached three. After that
+  fix, pause the ReviewGPT loop and confirm parent final review, verification,
+  and PR CI are all complete. Record the cap
   retrospective and obtain an explicit continuation decision before starting
-  round eight; the answer may be delete, revert, shrink, split, redesign,
+  round four; the answer may be delete, revert, shrink, split, redesign,
   continue, or abandon. A green non-ReviewGPT gate does not make the PR
   merge-ready without the required later resolved result.
 - Report a per-round summary at handoff: findings received, accepted, rejected
@@ -804,26 +597,20 @@ worktree active, and stop. Do not poll for a quiet base.
 
 ## Boundaries
 
-- The preliminary specialist pass and final gate both require a clean exact-head
-  worktree/PR lane. Current-checkout fast-path work cannot use this document as
-  a substitute for its routed local proof.
-- When both stages run concurrently, package the same exact pushed head, use
-  separate managed browser lanes, keep their response files and markers
-  distinct, and preserve the final round-one baseline if specialist remediation
-  creates a later substantive round.
+- The final gate requires a clean exact-head worktree/PR lane. Current-checkout
+  fast-path work cannot use this document as a substitute for its routed local
+  proof.
 - Do not run local Codex `deep-review` for a completed change that uses this PR
   gate. An explicit request for deep review or a final bug hunt is fulfilled by
   this cross-cutting ReviewGPT review and does not create a second pass.
-- Do not substitute Codex subagents, pasted text, connector context,
+- Do not substitute pasted text, connector context,
   dirty-worktree context, ad hoc archives, or an unmanaged/non-ReviewGPT browser
-  profile for either ReviewGPT stage.
-- Do not commit ReviewGPT responses, rendered evidence, or downloaded patch
-  artifacts. Files under `audit-packages/` and `.artifacts/review-gpt/` are
+  profile for the final gate.
+- Do not commit ReviewGPT responses or rendered evidence. Files under
+  `audit-packages/` and `.artifacts/review-gpt/` are
   local working artifacts.
   Agents may instead post a concise PR comment as each round is resolved,
   stating what they fixed and why; these comments are optional.
 - The `pr-review` prompt lives at
   `scripts/chatgpt-review-presets/pr-deep-review.md`; despite the historical
   filename, it is the ReviewGPT PR-review prompt used by this loop.
-- The preliminary prompt lives at
-  `scripts/chatgpt-review-presets/completion-specialists.md`.

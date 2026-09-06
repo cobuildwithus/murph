@@ -284,6 +284,8 @@ export class KernelComputerClient implements ComputerKernelClient {
         name: input.profileName,
         save_changes: input.saveChanges,
       },
+      // Profiles restore old tabs; canaries need only their saved login state.
+      start_url: "about:blank",
       stealth: true,
       telemetry: { enabled: false },
       timeout_seconds: input.timeoutSeconds,

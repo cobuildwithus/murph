@@ -24,6 +24,14 @@ export const isoTimestampSchema = z
 export const localDateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/u, 'Expected a calendar date in YYYY-MM-DD form.')
+  .refine(
+    (value) => {
+      const parsed = new Date(`${value}T00:00:00.000Z`)
+      return Number.isFinite(parsed.getTime())
+        && parsed.toISOString().slice(0, 10) === value
+    },
+    'Expected a real calendar date in YYYY-MM-DD form.',
+  )
   .describe('Calendar date in YYYY-MM-DD form.')
 
 export const occurredAtOptionSchema = z
@@ -59,6 +67,10 @@ const vaultCliBatchCommandErrorStageSchema = z.enum([
   'filesystem',
   'integrity',
   'persistence',
+  'protocol_family_graph',
+  'protocol_index',
+  'protocol_run_specs',
+  'query_source',
   'read',
   'render',
   'response',
@@ -113,6 +125,18 @@ export const vaultCliBatchResultEnvelopeSchema = z.object({
   schema: z.literal(VAULT_CLI_BATCH_RESULT_SCHEMA),
   vault: pathSchema,
   count: z.number().int().nonnegative(),
+  requested: z.number().int().nonnegative().optional().describe(
+    'Number of child commands requested by the caller.',
+  ),
+  executed: z.number().int().nonnegative().optional().describe(
+    'Number of child commands executed before the batch finished or stopped early.',
+  ),
+  succeeded: z.number().int().nonnegative().optional().describe(
+    'Number of executed child commands that succeeded.',
+  ),
+  stoppedEarly: z.boolean().optional().describe(
+    'Whether stopOnError prevented at least one requested child command from executing.',
+  ),
   failed: z.number().int().nonnegative(),
   commands: z
     .array(vaultCliBatchCommandResultEnvelopeSchema)
@@ -134,6 +158,47 @@ export const vaultCliBatchResultSchema = vaultCliBatchResultEnvelopeSchema
         code: z.ZodIssueCode.custom,
         message: 'Batch count must equal the number of command results.',
         path: ['count'],
+      })
+    }
+    if (
+      result.executed !== undefined &&
+      result.executed !== result.commands.length
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Batch executed must equal the number of command results.',
+        path: ['executed'],
+      })
+    }
+    if (
+      result.requested !== undefined &&
+      result.requested < result.commands.length
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Batch requested must not be less than executed commands.',
+        path: ['requested'],
+      })
+    }
+    if (
+      result.succeeded !== undefined &&
+      result.succeeded !== result.commands.filter((command) => command.ok).length
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Batch succeeded must equal the successful command results.',
+        path: ['succeeded'],
+      })
+    }
+    if (
+      result.stoppedEarly !== undefined &&
+      result.requested !== undefined &&
+      result.stoppedEarly !== (result.requested > result.commands.length)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Batch stoppedEarly must reflect unexecuted requested commands.',
+        path: ['stoppedEarly'],
       })
     }
     if (
@@ -471,7 +536,7 @@ export const workoutAddResultSchema = z.object({
   durationMinutes: z.number().int().positive(),
   distanceKm: z.number().nonnegative().nullable(),
   workout: workoutSessionResultSchema.nullable(),
-  note: z.string().min(1),
+  note: z.string().min(1).nullable(),
 })
 
 export const captureResultItemSchema = z.object({
@@ -522,6 +587,16 @@ export const workoutUnitPreferencesResultSchema = z.object({
   updated: z.boolean(),
   recordedAt: isoTimestampSchema.nullable(),
   unitPreferences: workoutUnitPreferenceValuesResultSchema,
+})
+
+export const workoutCapturePreferencesResultSchema = z.object({
+  vault: pathSchema,
+  preferencesPath: pathSchema,
+  updated: z.boolean(),
+  recordedAt: isoTimestampSchema.nullable(),
+  captureDefaults: z.object({
+    durationMinutes: z.number().int().positive().max(24 * 60).nullable(),
+  }),
 })
 
 export const workoutImportInspectResultSchema = z.object({

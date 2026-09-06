@@ -78,6 +78,40 @@ function selectAuditMetadata(records: unknown[], action: string): Array<{
     }));
 }
 
+async function snapshotRelativeFiles(
+  vaultRoot: string,
+  relativeRoot: string,
+): Promise<Array<[string, string]>> {
+  const absoluteRoot = path.join(vaultRoot, relativeRoot);
+  let entries: string[];
+
+  try {
+    entries = await fs.readdir(absoluteRoot, { recursive: true });
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+
+  const snapshot: Array<[string, string]> = [];
+  for (const relativePath of entries) {
+    try {
+      snapshot.push([
+        relativePath,
+        (await fs.readFile(path.join(absoluteRoot, relativePath))).toString("base64"),
+      ]);
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "EISDIR") {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  return snapshot.sort(([left], [right]) => left.localeCompare(right));
+}
+
 test("goals support multiple active records and preserve relationships in markdown registries", async () => {
   const vaultRoot = await makeTempDirectory("murph-goals");
   await initializeVault({ vaultRoot });
@@ -209,6 +243,79 @@ test("goals default start dates from the vault timezone only when missing", asyn
   }
 });
 
+test("goal update-only intent rejects an absent id before canonical or audit writes", async () => {
+  const vaultRoot = await makeTempDirectory("murph-goal-update-only");
+  await initializeVault({ vaultRoot });
+
+  const created = await upsertGoal({
+    vaultRoot,
+    title: "Keep this goal",
+    slug: "keep-this-goal",
+    window: {
+      startAt: "2026-03-12",
+    },
+  });
+  assert.equal(created.created, true);
+
+  const replacementSuffix = created.record.entity.goalId.endsWith("A") ? "B" : "A";
+  const missingGoalId = `${created.record.entity.goalId.slice(0, -1)}${replacementSuffix}`;
+  const goalBefore = await readGoal({
+    vaultRoot,
+    goalId: created.record.entity.goalId,
+  });
+  const auditBefore = await snapshotRelativeFiles(vaultRoot, "audit");
+  const operationsBefore = await listWriteOperationMetadataPaths(vaultRoot);
+
+  for (const update of [
+    {
+      status: "paused" as const,
+    },
+    {
+      slug: created.record.entity.slug,
+      title: "Must not replace",
+    },
+  ]) {
+    await assert.rejects(
+      () =>
+        upsertGoal({
+          vaultRoot,
+          goalId: missingGoalId,
+          requireExistingGoalId: true,
+          ...update,
+        }),
+      (error: unknown) =>
+        error instanceof VaultError
+        && error.code === "VAULT_GOAL_MISSING"
+        && error.message === "Goal was not found.",
+    );
+  }
+
+  assert.deepEqual(
+    await readGoal({
+      vaultRoot,
+      goalId: created.record.entity.goalId,
+    }),
+    goalBefore,
+  );
+  assert.deepEqual(
+    await snapshotRelativeFiles(vaultRoot, "audit"),
+    auditBefore,
+  );
+  assert.deepEqual(
+    await listWriteOperationMetadataPaths(vaultRoot),
+    operationsBefore,
+  );
+
+  const updated = await upsertGoal({
+    vaultRoot,
+    goalId: created.record.entity.goalId,
+    requireExistingGoalId: true,
+    title: "Update this goal",
+  });
+  assert.equal(updated.created, false);
+  assert.equal(updated.record.entity.title, "Update this goal");
+});
+
 test("goal updates can clear shared relation fields without leaving stale links behind", async () => {
   const vaultRoot = await makeTempDirectory("murph-goal-clear-links");
   await initializeVault({ vaultRoot });
@@ -337,6 +444,82 @@ test("goal upserts preserve metric targets in canonical frontmatter", async () =
   assert.match(read.document.markdown, /targetId: fasting-glucose-under-90/);
 });
 
+test("goal upserts preserve Health Commons goal lineage", async () => {
+  const vaultRoot = await makeTempDirectory("murph-goal-commons-lineage");
+  await initializeVault({ vaultRoot });
+  const commonsGoalRef = {
+    key: "goal_template:lower-resting-heart-rate",
+    pageRevisionId: `sha256:${"a".repeat(64)}`,
+    workflowSpecRevisionId: `sha256:${"b".repeat(64)}`,
+  } as const;
+
+  const created = await upsertGoal({
+    vaultRoot,
+    title: "Lower my resting heart rate",
+    commonsGoalRef,
+  });
+  const updated = await upsertGoal({
+    vaultRoot,
+    goalId: created.record.entity.goalId,
+    priority: 7,
+  });
+  const read = await readGoal({
+    vaultRoot,
+    goalId: created.record.entity.goalId,
+  });
+
+  assert.deepEqual(updated.record.entity.commonsGoalRef, commonsGoalRef);
+  assert.deepEqual(read.entity.commonsGoalRef, commonsGoalRef);
+  assert.match(read.document.markdown, /commonsGoalRef:/);
+  assert.match(read.document.markdown, /goal_template:lower-resting-heart-rate/);
+});
+
+test("goal upserts reject malformed Health Commons lineage without changing the goal or audit", async () => {
+  const vaultRoot = await makeTempDirectory("murph-goal-invalid-commons-lineage");
+  await initializeVault({ vaultRoot });
+  const created = await upsertGoal({
+    vaultRoot,
+    title: "Improve my deep sleep",
+    commonsGoalRef: {
+      key: "goal_template:improve-deep-sleep",
+      pageRevisionId: `sha256:${"a".repeat(64)}`,
+      workflowSpecRevisionId: `sha256:${"b".repeat(64)}`,
+    },
+  });
+  const goalMarkdownBefore = created.record.document.markdown;
+  const auditBefore = await readJsonlRecords({
+    vaultRoot,
+    relativePath: created.auditPath,
+  });
+
+  await assert.rejects(
+    () =>
+      upsertGoal({
+        vaultRoot,
+        goalId: created.record.entity.goalId,
+        commonsGoalRef: invalidTestValue({
+          key: "goal_template:improve-deep-sleep",
+          pageRevisionId: "sha256:not-a-digest",
+          workflowSpecRevisionId: `sha256:${"b".repeat(64)}`,
+        }),
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === "commonsGoalRef must be a valid Health Commons goal reference.",
+  );
+
+  const unchanged = await readGoal({
+    vaultRoot,
+    goalId: created.record.entity.goalId,
+  });
+  assert.equal(unchanged.document.markdown, goalMarkdownBefore);
+  assert.deepEqual(
+    await readJsonlRecords({ vaultRoot, relativePath: created.auditPath }),
+    auditBefore,
+  );
+});
+
 test("goal upserts merge concurrent partial updates with the latest record", async () => {
   const vaultRoot = await makeTempDirectory("murph-goal-concurrent-upsert");
   await initializeVault({ vaultRoot });
@@ -367,21 +550,25 @@ test("goal upserts merge concurrent partial updates with the latest record", asy
     upsertGoal({
       vaultRoot,
       goalId: created.record.entity.goalId,
+      requireExistingGoalId: true,
       status: "paused",
     }),
     upsertGoal({
       vaultRoot,
       goalId: created.record.entity.goalId,
+      requireExistingGoalId: true,
       horizon: "long_term",
     }),
     upsertGoal({
       vaultRoot,
       goalId: created.record.entity.goalId,
+      requireExistingGoalId: true,
       priority: 9,
     }),
     upsertGoal({
       vaultRoot,
       goalId: created.record.entity.goalId,
+      requireExistingGoalId: true,
       window: {
         targetAt: "2026-06-01",
       },
@@ -389,11 +576,13 @@ test("goal upserts merge concurrent partial updates with the latest record", asy
     upsertGoal({
       vaultRoot,
       goalId: created.record.entity.goalId,
+      requireExistingGoalId: true,
       domains: ["Sleep"],
     }),
     upsertGoal({
       vaultRoot,
       goalId: created.record.entity.goalId,
+      requireExistingGoalId: true,
       metricTargets,
     }),
   ]);
@@ -477,6 +666,7 @@ test("goal id-or-slug resolution preserves conflict, missing, and read-preferenc
       upsertGoal({
         vaultRoot,
         goalId: first.record.entity.goalId,
+        requireExistingGoalId: true,
         slug: second.record.entity.slug,
       }),
     (error: unknown) =>

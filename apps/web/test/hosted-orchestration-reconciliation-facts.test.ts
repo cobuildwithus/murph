@@ -3,7 +3,6 @@ import {
 } from "@murphai/hosted-execution/parsers";
 import {
   HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
-  HOSTED_RUNTIME_RECONCILIATION_ENVIRONMENT_INTERVIEW_SEARCH,
 } from "@murphai/hosted-execution/orchestration-control";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -27,7 +26,6 @@ const mocks = vi.hoisted(() => ({
   readHostedMailboxLatestPendingConversationItem: vi.fn(),
   readHostedMailboxMaxSeqByLane: vi.fn(),
   readHostedMailboxPayload: vi.fn(),
-  readPendingHostedEnvironmentInterviewMailboxItem: vi.fn(),
   readHostedMailboxWakeByItemId: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
   readSelectedHostedInferenceConnectionOverride: vi.fn(),
@@ -54,8 +52,6 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
     mocks.readHostedMailboxLatestPendingConversationItem,
   readHostedMailboxMaxSeqByLane: mocks.readHostedMailboxMaxSeqByLane,
   readHostedMailboxPayload: mocks.readHostedMailboxPayload,
-  readPendingHostedEnvironmentInterviewMailboxItem:
-    mocks.readPendingHostedEnvironmentInterviewMailboxItem,
   readHostedMailboxWakeByItemId: mocks.readHostedMailboxWakeByItemId,
   tryMarkHostedMailboxConversationAiUsageDenied:
     mocks.tryMarkHostedMailboxConversationAiUsageDenied,
@@ -151,7 +147,6 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.getPrisma.mockReturnValue(createPrismaClientStub());
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue(MEMBER_ID);
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord());
-    mocks.readPendingHostedEnvironmentInterviewMailboxItem.mockResolvedValue(null);
     mocks.hostedMemberFindUnique.mockResolvedValue(buildMemberAccessRecord());
     mocks.hostedConsentGrantFindUnique.mockResolvedValue(null);
     mocks.hasHostedMemberEstablishedLinqHomeRoute.mockResolvedValue(false);
@@ -224,6 +219,45 @@ describe("hosted orchestration reconciliation facts", () => {
         nextWakeAt: FIXED_NOW,
         nextWakeReason: "assistant",
       }));
+
+      await expect(readOwnerReleaseActionable()).resolves.toBe(false);
+    });
+
+    it("signals for an imported live system item beyond handled-through", async () => {
+      mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+        redactedStatusJson: {
+          hostedMailboxSystemHandledThroughSeq: "0",
+          systemImportedSeq: "1",
+        },
+      }));
+      mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+        { lane: "system", maxSeq: "1" },
+      ]);
+      mocks.readHostedMailboxFirstLiveSystemItemAfterSeq.mockResolvedValue({
+        dedupeKey: "device-sync.wake:owner-release-actionable",
+        kind: "device-sync.wake",
+        laneSeq: "1",
+      });
+
+      await expect(readOwnerReleaseActionable()).resolves.toBe(true);
+      expect(mocks.readHostedMailboxFirstLiveSystemItemAfterSeq).toHaveBeenCalledWith({
+        afterSeq: "0",
+        at: new Date(FIXED_NOW),
+        prisma: expect.any(Object),
+        userId: MEMBER_ID,
+      });
+    });
+
+    it("preserves the owner horizon when the system high-water has no live item", async () => {
+      mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+        redactedStatusJson: {
+          hostedMailboxSystemHandledThroughSeq: "0",
+          systemImportedSeq: "1",
+        },
+      }));
+      mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+        { lane: "system", maxSeq: "1" },
+      ]);
 
       await expect(readOwnerReleaseActionable()).resolves.toBe(false);
     });
@@ -365,6 +399,35 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(JSON.stringify(body)).not.toContain("redactedStatus");
     expect(JSON.stringify(body)).not.toContain(UNSAFE_SENTINEL);
     expect(JSON.stringify(body)).not.toMatch(/payload|message|transcript|source/u);
+    expect(facts.workspace).not.toHaveProperty("nextDefaultProcessingWakeAt");
+    expect(facts.workspace).not.toHaveProperty("nextDefaultProcessingWakeReason");
+    expect(facts.workspace).not.toHaveProperty("systemMailboxProgressGeneration");
+  });
+
+  it("returns the capable system progress projection as one reconciliation facts group", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextDefaultProcessingWakeAt: "2026-05-20T12:05:00.000Z",
+      nextDefaultProcessingWakeReason: "assistant_due",
+      nextWakeAt: "2026-05-20T11:59:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
+      systemMailboxProgressGeneration: "7",
+    }));
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(facts.workspace).toMatchObject({
+      nextDefaultProcessingWakeAt: "2026-05-20T12:05:00.000Z",
+      nextDefaultProcessingWakeReason: "assistant_due",
+      nextWakeAt: "2026-05-20T11:59:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
+      systemMailboxProgressGeneration: "7",
+    });
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
   });
 
   it("logs one metadata-only reconciliation record", async () => {
@@ -382,7 +445,6 @@ describe("hosted orchestration reconciliation facts", () => {
         component: "hosted.orchestration.reconciliation",
         conversationLagPresent: false,
         decisionSource: "workflow",
-        environmentInterviewPending: false,
         mailboxLagLaneCount: 2,
         retryAtPresent: false,
         schema: "murph.hosted-runtime.reconciliation-facts.v1",
@@ -391,9 +453,12 @@ describe("hosted orchestration reconciliation facts", () => {
         usageGateStatus: "not_required",
         userIdPresent: true,
         workspaceInboxMediaRetentionWakeAtPresent: false,
+        workspaceNextDefaultProcessingWakeAtPresent: false,
+        workspaceNextDefaultProcessingWakeReason: null,
         workspaceNextWakeAtPresent: false,
         workspaceNextWakeReason: null,
         workspacePresent: true,
+        workspaceSystemMailboxProgressGenerationPresent: false,
       },
     );
     const loggedMetadata = consoleInfoSpy.mock.calls[0]?.[1];
@@ -402,6 +467,85 @@ describe("hosted orchestration reconciliation facts", () => {
     );
     expect(JSON.stringify(loggedMetadata)).not.toContain(MEMBER_ID);
   });
+
+  it.each([
+    {
+      arrange: (failure: Error) => {
+        mocks.readHostedWorkspace.mockRejectedValueOnce(failure);
+      },
+      stage: "canonical_access_workspace",
+    },
+    {
+      arrange: (failure: Error) => {
+        mocks.hostedConsentGrantFindUnique.mockRejectedValueOnce(failure);
+      },
+      stage: "canonical_consent",
+    },
+    {
+      arrange: (failure: Error) => {
+        mocks.readHostedMailboxMaxSeqByLane.mockRejectedValueOnce(failure);
+      },
+      stage: "canonical_mailbox",
+    },
+    {
+      arrange: (failure: Error) => {
+        mocks.readHostedWorkspace.mockResolvedValueOnce(buildWorkspaceRecord({
+          nextWakeAt: "2026-05-20T11:59:59.000Z",
+          nextWakeReason: "assistant_due",
+        }));
+        mocks.hasHostedMemberEstablishedLinqHomeRoute
+          .mockRejectedValueOnce(failure);
+      },
+      stage: "canonical_projection",
+    },
+    {
+      arrange: (failure: Error) => {
+        mocks.readHostedWorkspace.mockResolvedValueOnce(buildWorkspaceRecord({
+          nextWakeAt: "2026-05-20T11:59:59.000Z",
+          nextWakeReason: "assistant_due",
+        }));
+        mocks.resolveHostedRuntimeAiUsageGate.mockRejectedValueOnce(failure);
+      },
+      stage: "canonical_usage",
+    },
+  ] as const)(
+    "logs a fixed failure record for $stage",
+    async ({ arrange, stage }) => {
+      const failure = new Error("synthetic canonical reconciliation failure");
+      const consoleErrorSpy = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+      arrange(failure);
+
+      const response = await reconciliationRoute.GET(
+        requestForFacts(),
+        routeContext(),
+      );
+
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toEqual({
+        error: {
+          code: "INTERNAL_ERROR",
+          message: "Internal error.",
+        },
+      });
+      expect(
+        consoleErrorSpy.mock.calls.filter(
+          ([message]) =>
+            message === "Hosted runtime reconciliation facts failed.",
+        ),
+      ).toEqual([
+        [
+          "Hosted runtime reconciliation facts failed.",
+          {
+            errorClass: "error",
+            schema: "murph.hosted-runtime.reconciliation-facts.failure.v1",
+            stage,
+          },
+        ],
+      ]);
+    },
+  );
 
   it("imports pending system mailbox work before applying model gates", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
@@ -621,6 +765,16 @@ describe("hosted orchestration reconciliation facts", () => {
 
   it.each([
     ["device-sync.wake", "device-sync.wake:item", "model_free"],
+    [
+      "health.daily-metric.reported",
+      "health.daily-metric.reported:item",
+      "model_free",
+    ],
+    [
+      "environment-interview.completed",
+      "environment-interview.completed:item",
+      "model_free",
+    ],
     [
       "assistant.notification.requested",
       "assistant.notification.requested:group-join:membership",
@@ -864,7 +1018,7 @@ describe("hosted orchestration reconciliation facts", () => {
       revision: 3,
       supportsImages: false,
       verificationProfile:
-        "murph-codex-0.149.1-portable-responses-v1",
+        "murph-codex-0.151.0-portable-responses-v1",
     });
 
     const response = await reconciliationRoute.GET(
@@ -1278,24 +1432,6 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(mocks.sendClaimedHostedAiUsageLimitNoticeToTelegramThread).not.toHaveBeenCalled();
   });
 
-  it("retains Environment interview state for read-only status checks", async () => {
-    mocks.readPendingHostedEnvironmentInterviewMailboxItem.mockResolvedValue({
-      id: "mailbox_environment_interview_1",
-    });
-
-    const {
-      readHostedRuntimeReconciliationFacts,
-    } = await import("../src/lib/hosted-orchestration/runtime-reconciliation-facts");
-    const facts = await readHostedRuntimeReconciliationFacts({
-      decisionSource: "status",
-      usageGateMode: "read_only",
-      userId: MEMBER_ID,
-    });
-
-    expect(facts.environmentInterviewPending).toBe(true);
-    expect(mocks.readPendingHostedEnvironmentInterviewMailboxItem).toHaveBeenCalledTimes(1);
-  });
-
   it("does not gate future model-capable workspace wakes", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       nextWakeAt: "2026-05-20T12:05:00.000Z",
@@ -1310,6 +1446,41 @@ describe("hosted orchestration reconciliation facts", () => {
 
     expect(facts.blocked).toBeNull();
     expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+  });
+
+  it("AI-gates a due default-processing wake hidden behind an earlier system wake", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextDefaultProcessingWakeAt: "2026-05-20T11:59:59.000Z",
+      nextDefaultProcessingWakeReason: "assistant_due",
+      nextWakeAt: "2026-05-20T11:59:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
+      systemMailboxProgressGeneration: "7",
+    }));
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({
+      decision: buildUsageLimitExceededGateDecision(),
+      status: "denied",
+    });
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(facts.blocked?.reason).toBe("ai_usage_denied");
+    expect(facts.workspace).toMatchObject({
+      nextDefaultProcessingWakeAt: "2026-05-20T11:59:59.000Z",
+      nextDefaultProcessingWakeReason: "assistant_due",
+      nextWakeAt: "2026-05-20T11:59:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
+      systemMailboxProgressGeneration: "7",
+    });
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
+      mode: "mutating",
+      now: new Date(FIXED_NOW),
+      userId: MEMBER_ID,
+    });
   });
 
   it("does not block thread-container runtime facts when an active participant keeps an inactive-owner group alive", async () => {
@@ -1376,6 +1547,44 @@ describe("hosted orchestration reconciliation facts", () => {
       now: new Date(FIXED_NOW),
       userId: MEMBER_ID,
     });
+  });
+
+  it("pauses a due default-processing wake hidden behind an earlier system wake", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextDefaultProcessingWakeAt: "2026-05-20T11:59:59.000Z",
+      nextDefaultProcessingWakeReason: "assistant_due",
+      nextWakeAt: "2026-05-20T11:59:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
+      systemMailboxProgressGeneration: "7",
+    }));
+    mocks.hasHostedMemberEstablishedLinqHomeRoute.mockResolvedValue(true);
+    mocks.hasHostedLinqInboundWithinDays.mockResolvedValue(false);
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(response.status).toBe(200);
+    expect(facts.blocked).toEqual({
+      reason: "automation_engagement_paused",
+      retryAt: "2026-05-21T12:00:00.000Z",
+    });
+    expect(facts.workspace).toMatchObject({
+      nextDefaultProcessingWakeAt: "2026-05-20T11:59:59.000Z",
+      nextDefaultProcessingWakeReason: "assistant_due",
+      nextWakeAt: "2026-05-20T11:59:00.000Z",
+      nextWakeReason: "device-sync.reconcile",
+      systemMailboxProgressGeneration: "7",
+    });
+    expect(mocks.hasHostedLinqInboundWithinDays).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      now: new Date(FIXED_NOW),
+      prisma: expect.objectContaining({ kind: "prisma" }),
+    });
+    expect(mocks.hasHostedMailboxMealPhotoCaptureSince).toHaveBeenCalled();
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
   });
 
   it("pauses due automation wakes when a Linq thread-container route has no recent inbound day", async () => {
@@ -1661,22 +1870,6 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(facts.blocked).toBeNull();
   });
 
-  it("projects pending Environment interviews onto the orchestration wire", async () => {
-    mocks.readPendingHostedEnvironmentInterviewMailboxItem.mockResolvedValue({
-      id: "mailbox_environment_interview_1",
-    });
-
-    const response = await reconciliationRoute.GET(
-      requestForFacts(HOSTED_RUNTIME_RECONCILIATION_ENVIRONMENT_INTERVIEW_SEARCH),
-      routeContext(),
-    );
-    const facts = await response.json();
-
-    expect(facts).toMatchObject({
-      environmentInterviewPending: true,
-    });
-  });
-
   it("blocks inactive members while preserving workspace facts", async () => {
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord({
       billingStatus: "paused",
@@ -1696,7 +1889,6 @@ describe("hosted orchestration reconciliation facts", () => {
         reason: "user_not_active",
         retryAt: null,
       },
-      environmentInterviewPending: false,
       mailboxLag: [],
       workspace: {
         inboxMediaRetentionWakeAt: null,
@@ -1861,10 +2053,10 @@ function routeContext(): { params: Promise<{ userId: string }> } {
 
 async function readOwnerReleaseActionable(): Promise<boolean> {
   const {
-    readHostedRuntimeOwnerReleaseMailboxLagActionable,
+    readHostedRuntimeOwnerReleaseActionable,
   } = await import("../src/lib/hosted-orchestration/runtime-reconciliation-facts");
 
-  return await readHostedRuntimeOwnerReleaseMailboxLagActionable({
+  return await readHostedRuntimeOwnerReleaseActionable({
     userId: MEMBER_ID,
   });
 }
@@ -1941,10 +2133,13 @@ function buildWorkspaceRecord(overrides: Partial<{
   checkpointedAt: string | null;
   createdAt: string;
   inboxMediaRetentionWakeAt: string | null;
+  nextDefaultProcessingWakeAt: string | null;
+  nextDefaultProcessingWakeReason: string | null;
   nextWakeAt: string | null;
   nextWakeReason: string | null;
   redactedStatusJson: Record<string, unknown> | null;
   snapshotRef: Record<string, unknown> | null;
+  systemMailboxProgressGeneration: string | null;
   updatedAt: string;
   userId: string;
   version: string;
@@ -1954,6 +2149,8 @@ function buildWorkspaceRecord(overrides: Partial<{
     checkpointedAt: FIXED_NOW,
     createdAt: FIXED_NOW,
     inboxMediaRetentionWakeAt: null,
+    nextDefaultProcessingWakeAt: null,
+    nextDefaultProcessingWakeReason: null,
     nextWakeAt: null,
     nextWakeReason: null,
     redactedStatusJson: {
@@ -1966,6 +2163,7 @@ function buildWorkspaceRecord(overrides: Partial<{
       size: 128,
       updatedAt: FIXED_NOW,
     },
+    systemMailboxProgressGeneration: null,
     updatedAt: FIXED_NOW,
     userId: MEMBER_ID,
     version: "4",

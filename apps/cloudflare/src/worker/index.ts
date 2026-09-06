@@ -19,6 +19,12 @@ import {
 } from "./fetch-handler.ts";
 import { handleHostedDeviceWebhookQueueBatch } from "../device-webhook-queue.ts";
 import type { DeviceWebhookQueueEnvelopeV1 } from "@murphai/cloudflare-hosted-control/device-webhook-queue";
+import {
+  HOSTED_RUNNER_REGION,
+  readHostedStandbyMode,
+  readHostedStandbyReleaseId,
+  resolveHostedStandbyCoordinatorName,
+} from "../standby-runner-contract.ts";
 
 export const handleWorkerFetch = createWorkerFetchHandler({
   internalRoutes: workerInternalRoutes,
@@ -67,6 +73,37 @@ export function handleDeviceWebhookQueueHealthScheduled(
   );
 }
 
+export function handleStandbyRunnerScheduled(
+  env: Pick<
+    WorkerEnvironmentSource,
+    "CF_VERSION_METADATA" | "HOSTED_EXECUTION_STANDBY_MODE" | "STANDBY_COORDINATOR"
+  >,
+  ctx: Pick<WorkerExecutionContext, "waitUntil">,
+): void {
+  if (env.HOSTED_EXECUTION_STANDBY_MODE === undefined) {
+    return;
+  }
+  readHostedStandbyMode(env);
+  const releaseId = readHostedStandbyReleaseId(env);
+  if (!releaseId) {
+    return;
+  }
+  const namespace = env.STANDBY_COORDINATOR;
+  if (!namespace) {
+    throw new Error("STANDBY_COORDINATOR binding is required.");
+  }
+  const coordinator = namespace.getByName(
+    resolveHostedStandbyCoordinatorName({
+      releaseId,
+      region: HOSTED_RUNNER_REGION,
+    }),
+  );
+  ctx.waitUntil(coordinator.ensureReadyStandby({
+    releaseId,
+    region: HOSTED_RUNNER_REGION,
+  }));
+}
+
 export default {
   async fetch(
     request: Request,
@@ -99,5 +136,6 @@ export default {
   ): void {
     handleDatabaseHealthScheduled(controller, env, ctx);
     handleDeviceWebhookQueueHealthScheduled(controller, env, ctx);
+    handleStandbyRunnerScheduled(env, ctx);
   },
 };

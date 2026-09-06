@@ -1,3 +1,4 @@
+import { createCodexCliTimingReceiver, withCliTimingEnvironmentAdmission } from './assistant-codex/cli-timing.js'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdtemp, rm, stat } from 'node:fs/promises'
@@ -63,7 +64,6 @@ import {
   buildCodexThreadStartParams,
   buildCodexTurnSteerParams,
   buildCodexTurnStartParams,
-  mapCodexAppServerApprovalPolicy,
   mapCodexAppServerSandboxMode,
   resolveSupportedCodexAppServerApprovalPolicy,
 } from './assistant-codex/app-server-requests.js'
@@ -81,9 +81,6 @@ import type {
   MurphDynamicToolRequest,
 } from './assistant-codex/dynamic-tools.js'
 import {
-  MURPH_ASSISTANT_STYLE_TOOL,
-  MURPH_GROUP_ROOM_MODEL_TOOL,
-  MURPH_MEMBER_MEMORY_TOOL,
   type AssistantStyleTurnSettingsOverlay,
 } from './assistant-codex/dynamic-tool-catalog.js'
 import type {
@@ -126,6 +123,10 @@ import {
   readCodexThreadTokenUsage,
   type CodexTokenUsageBreakdown,
 } from './assistant-codex/app-server-protocol.js'
+import {
+  collectCodexCompactionResponseUsage,
+  type CodexCompactionResponseUsage,
+} from './assistant-codex/compaction-usage.js'
 import {
   resolveCodexChildEnv,
   withHostedCodexModelCatalogConfigOverride,
@@ -306,7 +307,11 @@ type CodexAppServerSpawnInput = CodexAppServerProcessInput & {
   coldStartReason: CodexAppServerColdStartReason
 }
 
-type CodexAppServerPreparedTurnInput = CodexAppServerTurnInput & {
+type CodexAppServerPreparedTurnInput = Omit<
+  CodexAppServerTurnInput,
+  'approvalPolicy'
+> & {
+  approvalPolicy: 'never'
   args: readonly string[]
   codexCommand: string
   env: NodeJS.ProcessEnv
@@ -494,7 +499,7 @@ export interface CodexAppServerTurnInput {
   automationRelativeDateReferenceWindow?: AssistantAcceptedTurnInputReferenceWindow | null
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   abortSignal?: AbortSignal
-  approvalPolicy?: string
+  approvalPolicy?: string | null
   configOverrides?: readonly string[]
   codexCommand?: string
   codexHome?: string | null
@@ -521,6 +526,7 @@ export interface CodexAppServerTurnInput {
   onProviderRequestStarted?: ((event: AssistantProviderRequestStartedEvent) => Promise<void> | void) | null
   onAdditionalUsage?: ((usage: AssistantProviderUsageDraft) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
+  followUpAttachmentAllowed?: boolean | null
   groupConversation?: boolean | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
   memberMemoryMaintenanceAuthorized?: boolean | null
@@ -645,6 +651,7 @@ export interface CodexAppServerTurnResult {
   targetInputId: string | null
   additionalUsages: AssistantProviderUsageDraft[]
   responseMedia: AssistantResponseMedia[]
+  followUpRequest: AssistantProviderTurnExecutionResult["followUpRequest"]
   responseCard: AssistantResponseCard | null
   jsonEvents: unknown[]
   providerActionCount: number
@@ -658,6 +665,7 @@ export interface CodexAppServerTurnResult {
 }
 
 export interface CodexAppServerResponseSegment {
+  followUpRequest?: AssistantProviderTurnExecutionResult["followUpRequest"]
   contextReferences?: AssistantProviderResponseSegment['contextReferences']
   deliveryContextOrdinal: number
   media: AssistantResponseMedia[]
@@ -716,6 +724,39 @@ function appendRequiredVaultFileApprovalUrls(
     normalizeNullableString(message),
     ...approvalUrls,
   ].filter((part): part is string => part !== null).join('\n\n')
+}
+
+const MODEL_AUTHORED_CALENDAR_LINK_PATTERN =
+  /https:\/\/www\.withmurph\.ai\/calendar\/[A-Za-z0-9_-]+/gu
+
+function appendRequiredFinalResponseSuffix(
+  message: string,
+  suffix: string | null,
+  fallback: string | null,
+): string
+function appendRequiredFinalResponseSuffix(
+  message: string | null,
+  suffix: string | null,
+  fallback: string | null,
+): string | null
+function appendRequiredFinalResponseSuffix(
+  message: string | null,
+  suffix: string | null,
+  fallback: string | null,
+): string | null {
+  const normalizedSuffix = normalizeNullableString(suffix)
+  if (normalizedSuffix === null) {
+    return message
+  }
+  const messageWithoutModelAuthoredCalendarLink = normalizeNullableString(
+    message?.replace(MODEL_AUTHORED_CALENDAR_LINK_PATTERN, '') ?? null,
+  )
+  return [
+    messageWithoutModelAuthoredCalendarLink ?? normalizeNullableString(fallback),
+    normalizedSuffix,
+  ]
+    .filter((part): part is string => part !== null)
+    .join('\n')
 }
 
 interface RequiredAutomationLocalAtClarification {
@@ -957,7 +998,6 @@ async function prepareCodexAppServerProcessInput(
     args,
     codexCommand,
     env,
-    workingDirectory,
   })
   return {
     args,
@@ -973,13 +1013,11 @@ function buildCodexAppServerLaunchKey(input: {
   args: readonly string[]
   codexCommand: string
   env: NodeJS.ProcessEnv
-  workingDirectory: string
 }): string {
   return hashCodexRawString(JSON.stringify({
     args: input.args,
     codexCommand: input.codexCommand,
     env: stableCodexProcessEnv(input.env),
-    workingDirectory: input.workingDirectory,
   }))
 }
 
@@ -1016,6 +1054,7 @@ export function buildCodexAppServerArgs(
 }
 
 class CodexAppServerProcess {
+  readonly cliTiming = createCodexCliTimingReceiver()
   readonly child: ChildProcessWithoutNullStreams
   readonly coldStartReason: CodexAppServerColdStartReason
   readonly launchKey: string
@@ -1028,6 +1067,7 @@ class CodexAppServerProcess {
   private boundThreadId: string | null = null
   private boundThreadModel: string | null = null
   private boundThreadServiceTier: AssistantProviderServiceTier | null = null
+  private boundTurnId: string | null = null
   private cleanupProcessExitListener: () => void
   private completedTurn = false
   private lastThreadTokenUsage: CodexWarmThreadTokenUsage | null = null
@@ -1045,13 +1085,14 @@ class CodexAppServerProcess {
   // admitted since the last workspace boundary so checkpointing waits for and
   // scans all of them, including children that completed before their parent
   // reply.
-  private readonly detachedChildThreadIds = new Set<string>()
+  private readonly detachedChildParentTurnIds = new Map<string, string>()
   private readonly detachedCompletedChildThreadIds = new Set<string>()
   private readonly detachedChildMessageHandlers = new Map<
     string,
     NonNullable<CodexAppServerActiveTurnBinding['onSubagentMessage']>
   >()
   private detachedChildViolation: string | null = null
+  private readonly detachedRootThreadIdsByTurnId = new Map<string, string>()
   private readonly detachedRootThreadIds = new Set<string>()
   private readonly pendingDetachedUsageReports = new Set<Promise<void>>()
   private stopCompleted = false
@@ -1070,17 +1111,24 @@ class CodexAppServerProcess {
     this.launchKey = input.launchKey
 
     const useProcessGroup = process.platform !== 'win32'
-    // The warm app-server outlives hosted workspace restores, which delete and
-    // recreate the workspace path between invocations. A process anchored to
-    // that directory keeps a dead cwd inode, and Codex config loading then
-    // fails with ENOENT on the next thread/start. Threads receive the real
-    // workspace via the explicit per-thread `cwd` param instead.
-    this.child = spawn(input.codexCommand, [...input.args], {
-      cwd: tmpdir(),
-      detached: useProcessGroup,
-      env: input.env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    })
+    // Keep the process cwd outside the restorable workspace. Hosted restore
+    // stops this process before replacing or sanitizing Codex home, while
+    // threads receive the restored workspace through the explicit per-thread
+    // `cwd` param.
+    const args = [...input.args]
+    // Global Codex config flags precede the existing app-server subcommand.
+    args.splice(args.length - 1, 0, ...this.cliTiming.launchArgs)
+    try {
+      this.child = spawn(input.codexCommand, args, {
+        cwd: tmpdir(),
+        detached: useProcessGroup,
+        env: input.env,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
+    } catch (error) {
+      this.cliTiming.close()
+      throw error
+    }
     this.processGroupPid = useProcessGroup ? this.child.pid ?? null : null
     this.cleanupProcessExitListener = attachCodexAppServerProcessExitCleanup({
       processGroupPid: this.processGroupPid,
@@ -1090,6 +1138,7 @@ class CodexAppServerProcess {
       void this.handleStdinError(error)
     })
     this.child.on('error', (error) => {
+      this.cliTiming.close()
       this.handleProcessError(error)
     })
     this.child.stdout.on('data', (chunk) => {
@@ -1099,6 +1148,7 @@ class CodexAppServerProcess {
       this.handleStderrData(String(chunk))
     })
     this.child.on('exit', () => {
+      this.cliTiming.close()
       // `exit` precedes `close`; claim the cause and sweep the exact owned
       // group before a descendant can keep an inherited stream open forever.
       if (!this.normalShutdown) {
@@ -1107,6 +1157,7 @@ class CodexAppServerProcess {
       }
     })
     this.child.on('close', (code, signal) => {
+      this.cliTiming.close()
       this.handleClose(code, signal)
     })
   }
@@ -1425,7 +1476,7 @@ class CodexAppServerProcess {
   }
 
   private hasPendingDetachedChildren(): boolean {
-    for (const threadId of this.detachedChildThreadIds) {
+    for (const threadId of this.detachedChildParentTurnIds.keys()) {
       if (!this.detachedCompletedChildThreadIds.has(threadId)) {
         return true
       }
@@ -1492,7 +1543,7 @@ class CodexAppServerProcess {
   ): Promise<void> {
     const threadIds = new Set([
       ...this.detachedRootThreadIds,
-      ...this.detachedChildThreadIds,
+      ...this.detachedChildParentTurnIds.keys(),
     ])
     for (const threadId of threadIds) {
       throwIfCodexBackgroundWorkWaitAborted(signal)
@@ -1518,10 +1569,12 @@ class CodexAppServerProcess {
   }
 
   private clearDetachedChildBoundary(): void {
-    this.detachedChildThreadIds.clear()
+    this.boundTurnId = null
+    this.detachedChildParentTurnIds.clear()
     this.detachedCompletedChildThreadIds.clear()
     this.detachedChildMessageHandlers.clear()
     this.detachedChildViolation = null
+    this.detachedRootThreadIdsByTurnId.clear()
     this.detachedRootThreadIds.clear()
   }
 
@@ -1529,25 +1582,86 @@ class CodexAppServerProcess {
     this.detachedChildViolation ??= message
   }
 
+  private admitDetachedChild(input: {
+    parentThreadId: string
+    parentTurnId: string
+    threadId: string
+  }): void {
+    if (
+      this.detachedRootThreadIdsByTurnId.get(input.parentTurnId)
+      !== input.parentThreadId
+    ) {
+      this.recordDetachedChildViolation(
+        'Codex emitted a detached child outside the active root turn.',
+      )
+      return
+    }
+
+    const existingParentTurnId = this.detachedChildParentTurnIds.get(
+      input.threadId,
+    )
+    if (
+      existingParentTurnId !== undefined
+      && existingParentTurnId !== input.parentTurnId
+    ) {
+      this.recordDetachedChildViolation(
+        'Codex reused a detached child across root turns.',
+      )
+      return
+    }
+    this.detachedChildParentTurnIds.set(input.threadId, input.parentTurnId)
+  }
+
   private observeDetachedChildLifecycle(message: CodexRpcMessage): void {
     const activity = readCodexSubagentActivity(message)
     if (activity) {
       const senderThreadId = extractCodexThreadIdFromMessage(message)
-      if (activity.kind === 'malformed' || !activity.agentThreadId) {
+      if (
+        activity.kind === 'malformed'
+        || !activity.agentThreadId
+        || !activity.turnId
+      ) {
         this.recordDetachedChildViolation(
           'Codex emitted a malformed detached-child lifecycle.',
         )
       } else if (activity.kind === 'started') {
-        if (!senderThreadId || !this.detachedRootThreadIds.has(senderThreadId)) {
+        if (
+          !senderThreadId
+          || this.detachedRootThreadIdsByTurnId.get(activity.turnId)
+            !== senderThreadId
+        ) {
           this.recordDetachedChildViolation(
             'Detached Codex children may not spawn nested children.',
           )
         } else {
-          this.detachedChildThreadIds.add(activity.agentThreadId)
+          this.admitDetachedChild({
+            parentThreadId: senderThreadId,
+            parentTurnId: activity.turnId,
+            threadId: activity.agentThreadId,
+          })
           if (this.activeTurn?.onSubagentMessage) {
             this.detachedChildMessageHandlers.set(
               activity.agentThreadId,
               this.activeTurn.onSubagentMessage,
+            )
+          }
+        }
+      } else if (activity.kind === 'completed') {
+        const currentParentThreadId = this.detachedRootThreadIdsByTurnId.get(
+          activity.turnId,
+        )
+        // A prior turn is absent after its boundary clears, so its delayed
+        // acknowledgement is inert. A current turn must name an admitted child.
+        if (currentParentThreadId !== undefined) {
+          if (
+            senderThreadId === currentParentThreadId
+            && this.detachedChildParentTurnIds.get(activity.agentThreadId)
+              === activity.turnId
+          ) {
+            this.detachedCompletedChildThreadIds.add(activity.agentThreadId)
+          } else {
+            this.recordDetachedChildViolation(
+              'Codex emitted an untracked detached-child completion.',
             )
           }
         }
@@ -1600,6 +1714,7 @@ class CodexAppServerProcess {
   }
 
   private async runStop(reason: string): Promise<void> {
+    this.cliTiming.close()
     this.endReason ??= resolveCodexAppServerEndReason(reason)
     this.normalShutdown = true
     this.state = 'stopping'
@@ -1732,7 +1847,6 @@ class CodexAppServerProcess {
   }
 
   private handleStdoutData(text: string): void {
-    this.activeTurn?.onStdoutText(text)
     this.stdoutBuffer += text
     this.stdoutBuffer = consumeCompleteLines(this.stdoutBuffer, (line) => {
       this.handleStdoutLine(line)
@@ -1756,7 +1870,7 @@ class CodexAppServerProcess {
 
   get hasUncheckpointedDetachedWork(): boolean {
     return (
-      this.detachedChildThreadIds.size > 0 ||
+      this.detachedChildParentTurnIds.size > 0 ||
       this.detachedChildViolation !== null
     )
   }
@@ -1807,6 +1921,13 @@ class CodexAppServerProcess {
       this.boundThreadId = threadId
       this.detachedRootThreadIds.add(threadId)
     }
+  }
+
+  noteBoundTurn(threadId: string, turnId: string): void {
+    this.boundThreadId = threadId
+    this.boundTurnId = turnId
+    this.detachedRootThreadIds.add(threadId)
+    this.detachedRootThreadIdsByTurnId.set(turnId, threadId)
   }
 
   noteBoundThreadServiceTier(serviceTier: AssistantProviderServiceTier | null): void {
@@ -1871,8 +1992,21 @@ class CodexAppServerProcess {
       return false
     }
 
-    if (isCodexTurnStartedMethod(readCodexEventMethod(message))) {
-      this.detachedChildThreadIds.add(threadId)
+    if (
+      isCodexTurnStartedMethod(readCodexEventMethod(message))
+      && !this.detachedChildParentTurnIds.has(threadId)
+    ) {
+      if (this.boundThreadId && this.boundTurnId) {
+        this.admitDetachedChild({
+          parentThreadId: this.boundThreadId,
+          parentTurnId: this.boundTurnId,
+          threadId,
+        })
+      } else {
+        this.recordDetachedChildViolation(
+          'Codex emitted a detached child outside the active root turn.',
+        )
+      }
     }
     handler(message)
     return true
@@ -1880,6 +2014,10 @@ class CodexAppServerProcess {
 
   private handleStdoutLine(line: string): void {
     const parsed = tryParseJsonLine(line)
+    if (!parsed.ok || (parsed.value.method !== 'rawResponseItem/completed'
+      && parsed.value.method !== 'rawResponse/completed')) {
+      this.activeTurn?.onStdoutText(`${line}\n`)
+    }
     if (parsed.ok) {
       this.observeDetachedChildLifecycle(parsed.value)
       this.observeThreadTokenUsage(parsed.value)
@@ -2029,7 +2167,8 @@ function readCodexBackgroundTerminalPresence(value: unknown): boolean {
 
 function readCodexSubagentActivity(message: CodexRpcMessage): {
   agentThreadId: string | null
-  kind: 'interacted' | 'interrupted' | 'malformed' | 'started'
+  kind: 'completed' | 'interacted' | 'interrupted' | 'malformed' | 'started'
+  turnId: string | null
 } | null {
   const method = typeof message.method === 'string' ? message.method : null
   if (method !== 'item/completed') {
@@ -2041,10 +2180,23 @@ function readCodexSubagentActivity(message: CodexRpcMessage): {
   }
   const agentThreadId = asCodexString(item?.agentThreadId)
   const kind = asCodexString(item?.kind)
-  if (!agentThreadId || (kind !== 'started' && kind !== 'interacted' && kind !== 'interrupted')) {
-    return { agentThreadId: agentThreadId ?? null, kind: 'malformed' }
+  const turnId = asCodexString(asCodexRecord(message.params)?.turnId)
+  if (
+    !agentThreadId
+    || (
+      kind !== 'completed'
+      && kind !== 'started'
+      && kind !== 'interacted'
+      && kind !== 'interrupted'
+    )
+  ) {
+    return {
+      agentThreadId: agentThreadId ?? null,
+      kind: 'malformed',
+      turnId: turnId ?? null,
+    }
   }
-  return { agentThreadId, kind }
+  return { agentThreadId, kind, turnId: turnId ?? null }
 }
 
 function throwIfCodexBackgroundWorkWaitAborted(
@@ -2472,7 +2624,6 @@ export async function executeCodexManagedAccountOperation(
     args,
     codexCommand,
     env,
-    workingDirectory,
   })
 
   await stopWarmCodexAppServer('managed-account-operation')
@@ -2735,19 +2886,16 @@ export interface CodexWarmThreadCompactionUsage {
   cachedInputTokens: number | null
   inputTokens: number
   outputTokens: number | null
-  source: 'estimated'
+  source: 'estimated' | 'measured'
   totalTokens: number
+  responses?: readonly CodexCompactionResponseUsage[]
 }
-
 function estimateCodexWarmThreadCompactionUsage(
   threadContextTokensBefore: number,
 ): CodexWarmThreadCompactionUsage {
-  // Codex idle compaction consumes the provider response without
-  // surfacing ResponseEvent::Completed.token_usage, then emits a recomputed
-  // post-compact context-size update whose request input/output buckets are
-  // zero. Until Codex surfaces real compact request usage, store the
-  // pre-compact thread context as an explicit lower-bound input/total estimate
-  // so idle compaction spend is not recorded as 0/0/0.
+  // Older/cold-resumed threads do not emit rawResponse/completed. Keep the
+  // existing explicit estimate when actual compact operation usage is absent;
+  // pre-compact context is not a lower bound on provider dollar cost.
   return {
     cachedInputTokens: null,
     inputTokens: threadContextTokensBefore,
@@ -2755,6 +2903,18 @@ function estimateCodexWarmThreadCompactionUsage(
     source: 'estimated',
     totalTokens: threadContextTokensBefore,
   }
+}
+
+function buildMeasuredCodexCompactionUsage(
+  responses: readonly CodexCompactionResponseUsage[],
+): CodexWarmThreadCompactionUsage | null {
+  if (responses.length === 0) return null
+  const inputTokens = responses.reduce((sum, usage) => sum + usage.inputTokens, 0)
+  const outputTokens = responses.reduce((sum, usage) => sum + usage.outputTokens, 0)
+  const cachedInputTokens = responses.reduce((sum, usage) => sum + usage.cachedInputTokens, 0)
+  const totalTokens = inputTokens + outputTokens
+  if (!Number.isSafeInteger(totalTokens)) return null
+  return { cachedInputTokens, inputTokens, outputTokens, responses, source: 'measured', totalTokens }
 }
 
 export type CodexWarmThreadCompactionOutcome =
@@ -2772,6 +2932,9 @@ export type CodexWarmThreadCompactionOutcome =
       reason: 'aborted' | 'process_exit' | 'rpc_error' | 'timeout'
       threadContextTokensBefore: number
       threadId: string
+      model?: string | null
+      serviceTier?: AssistantProviderServiceTier | null
+      usage?: CodexWarmThreadCompactionUsage
     }
   | {
       kind: 'skipped'
@@ -2856,6 +3019,8 @@ export async function compactWarmCodexThread(input: {
   let compactRequestSubmitted = false
   let compactRequestAccepted = false
   let compactStartedItemId: string | null = null
+  let compactTurnId: string | null = null
+  const compactResponses = new Map<string, CodexCompactionResponseUsage>()
   let compactCompletionBuffered = false
   type CompactionSettleReason = 'aborted' | 'compacted' | 'process_exit' | 'rpc_error' | 'timeout'
   let compactionSettleReason: CompactionSettleReason | null = null
@@ -2915,6 +3080,10 @@ export async function compactWarmCodexThread(input: {
         return
       }
 
+      collectCodexCompactionResponseUsage(
+        message, { threadId: vitals.threadId, turnId: compactTurnId }, compactResponses,
+      )
+
       const update = readCodexThreadTokenUsageUpdate(message)
       if (update) {
         return
@@ -2927,6 +3096,7 @@ export async function compactWarmCodexThread(input: {
         const itemId = readCodexContextCompactionItemId(message)
         if (itemId !== null && compactStartedItemId === null) {
           compactStartedItemId = itemId
+          compactTurnId = extractCodexTurnIdFromMessage(message)
         }
         return
       }
@@ -3002,14 +3172,17 @@ export async function compactWarmCodexThread(input: {
         threadContextTokensBefore: vitals.lastInputTokens,
         threadId: vitals.threadId,
         serviceTier: vitals.serviceTier,
-        usage: estimateCodexWarmThreadCompactionUsage(vitals.lastInputTokens),
+        usage: buildMeasuredCodexCompactionUsage([...compactResponses.values()])
+          ?? estimateCodexWarmThreadCompactionUsage(vitals.lastInputTokens),
       }
     }
 
+    const measuredUsage = buildMeasuredCodexCompactionUsage([...compactResponses.values()])
     await processInstance.poison('idle-compaction-failed')
     return {
       kind: 'failed',
       reason: settledReason,
+      ...(measuredUsage ? { usage: measuredUsage, model: vitals.model, serviceTier: vitals.serviceTier } : {}),
       threadContextTokensBefore: vitals.lastInputTokens,
       threadId: vitals.threadId,
     }
@@ -3035,6 +3208,12 @@ function hashCodexRawString(value: string): string {
   return createHash('sha256')
     .update(value)
     .digest('hex')
+}
+
+function buildCodexTurnCorrelation(turnId: string): number {
+  // Keep the opaque provider id out of logs while preserving a safe-integer
+  // join key shared by this turn's timing and action diagnostics.
+  return Number.parseInt(hashCodexRawString(turnId).slice(0, 12), 16)
 }
 
 function readCodexEventMethod(message: CodexRpcMessage): string | null {
@@ -3315,6 +3494,15 @@ async function runCodexAppServerTurnOnProcess(
   let lastEventError: string | null = null
   let lastEventErrorInfo: CodexStructuredErrorInfo | null = null
   let responseMedia: AssistantResponseMedia[] = []
+  const followUpRequests = new Map<number, NonNullable<AssistantProviderTurnExecutionResult["followUpRequest"]>>()
+  const attachFollowUpRequest = (
+    ordinal: number, request: AssistantProviderTurnExecutionResult["followUpRequest"],
+  ): void => {
+    if (request) followUpRequests.set(ordinal, request)
+  }
+  const finalFollowUpRequest = (ordinal: number, deliverable: boolean) =>
+    deliverable ? followUpRequests.get(ordinal) ?? null : null
+
   let responseCard: AssistantResponseCard | null = null
   let responseCardTextFallback: CompactTableWorkoutResponseCardV1 | null = null
   const assistantStyleSettingsOverlay: AssistantStyleTurnSettingsOverlay = {
@@ -3367,9 +3555,16 @@ async function runCodexAppServerTurnOnProcess(
   let providerActionCount = 0
   const providerActionItemIds = new Set<string>()
   const jsonEvents: unknown[] = []
+  let closeCliTiming: ((turnId: string | null) => unknown | null) | undefined
+  const finishCliTiming = () => {
+    const event = closeCliTiming?.(turnId)
+    // Diagnostics must never turn an empty startup failure into provider activity.
+    if (event && jsonEvents.length > 0) jsonEvents.push(event)
+  }
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
   const actionRuntimeIssueTracker = createCodexActionRuntimeIssueTracker()
   let computerToolsLockedAfterUserPause = false
+  let requiredFinalResponseSuffix: string | null = null
   let requiredFinalResponseFallback: string | null = null
   const requiredVaultFileApprovalUrls: string[] = []
   const requiredAutomationLocalAtClarifications =
@@ -3378,10 +3573,6 @@ async function runCodexAppServerTurnOnProcess(
     ? createCodexActionDiagnosticsReducer()
     : null
   let actionDiagnosticsTraceEmitted = false
-  let requiredFinalResponseFallbackOutcome:
-    | 'analyze-video-failure'
-    | 'analyze-video-success'
-    | null = null
   const assistantStreams = new Map<string, string>()
   const assistantStreamOrder: string[] = []
   const externallyVisibleAssistantOutputDeliveryContexts = new Set<number>()
@@ -3485,6 +3676,7 @@ async function runCodexAppServerTurnOnProcess(
 
   const hasRequiredUserVisibleOutput = (): boolean =>
     computerToolsLockedAfterUserPause ||
+    requiredFinalResponseSuffix !== null ||
     requiredFinalResponseFallback !== null ||
     requiredAutomationLocalAtClarifications.size > 0 ||
     requiredVaultFileApprovalUrls.length > 0
@@ -3495,15 +3687,29 @@ async function runCodexAppServerTurnOnProcess(
     }
     noReplySettlementStarted = true
     for (const deliveryContextOrdinal of listNoReplyFinalActionPatchOrdinals()) {
+      const precedingReplyDeliveryContextOrdinal = Math.max(
+        -1,
+        ...precedingAgentMessageSegments
+          .map((segment) => segment.deliveryContextOrdinal)
+          .filter((ordinal) => ordinal < deliveryContextOrdinal),
+        trailingSteerCandidate !== null &&
+            trailingSteerCandidate.deliveryContextOrdinal < deliveryContextOrdinal
+          ? trailingSteerCandidate.deliveryContextOrdinal
+          : -1,
+      )
       await input.onFinishWithoutReplyAccepted?.({
         deliveryContextOrdinal,
         // The accepted event settles the cumulative accepted-turn prefix
-        // through this ordinal, so a reaction recorded for any covered
-        // earlier context must keep terminal suppression evidence deferred
-        // until reaction delivery settles.
+        // only when no earlier reply owns part of that prefix. A reaction
+        // recorded for any covered earlier context must keep terminal
+        // suppression evidence deferred until reaction delivery settles.
         messageReactionPending: reactionPatches.some(
           (entry) => entry.deliveryContextOrdinal <= deliveryContextOrdinal,
         ),
+        precedingReplyDeliveryContextOrdinal:
+          precedingReplyDeliveryContextOrdinal < 0
+            ? null
+            : precedingReplyDeliveryContextOrdinal,
       })
       acceptedNoReplyDeliveryContextOrdinals.push(deliveryContextOrdinal)
       await input.onFinishWithoutReplyRecorded?.({
@@ -3626,6 +3832,9 @@ async function runCodexAppServerTurnOnProcess(
                 ...(typeof input.providerRequestOrdinal === 'number'
                   ? { codexTimingProviderRequestOrdinal: input.providerRequestOrdinal }
                   : {}),
+                ...(turnId === null
+                  ? {}
+                  : { codexTimingTurnCorrelation: buildCodexTurnCorrelation(turnId) }),
                 // This ends when the completion trace is emitted after local
                 // dynamic-tool/progress drains. The outer provider-result
                 // boundary is recorded separately by assistant.turn.timing.
@@ -3894,6 +4103,7 @@ async function runCodexAppServerTurnOnProcess(
             contextReferences: trailingSteerCandidate.contextReferences,
           }),
       deliveryContextOrdinal: trailingSteerCandidate.deliveryContextOrdinal,
+      followUpRequest: trailingSteerCandidate.followUpRequest,
       media: [...trailingSteerCandidate.media],
       response,
       ...(transcriptResponse === response ? {} : { transcriptResponse }),
@@ -4073,6 +4283,12 @@ async function runCodexAppServerTurnOnProcess(
     },
     deliveryContextOrdinal: number,
   ): void => {
+    if (currentDeliveryContextOrdinal() !== deliveryContextOrdinal) {
+      throw new VaultCliError(
+        'ASSISTANT_RESPONSE_MEDIA_CONTEXT_ADVANCED',
+        'Response media cannot attach after accepted input advances the response context.',
+      )
+    }
     if (hasAcceptedNoReplyPatchForDeliveryContext(deliveryContextOrdinal)) {
       throw new VaultCliError(
         'ASSISTANT_RESPONSE_MEDIA_AFTER_NO_REPLY',
@@ -4088,18 +4304,6 @@ async function runCodexAppServerTurnOnProcess(
         `Assistant responses may attach at most ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} media items.`,
       )
     }
-    if (responseCard !== null && nextMedia.length > 0) {
-      throw new VaultCliError(
-        'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
-        'Response media cannot be combined with a response card.',
-      )
-    }
-    if (responseCardTextFallback !== null && nextMedia.length > 0) {
-      throw new VaultCliError(
-        'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
-        'Response media cannot be combined with response card text recovery.',
-      )
-    }
     responseMedia = nextMedia
   }
 
@@ -4107,10 +4311,7 @@ async function runCodexAppServerTurnOnProcess(
     card: AssistantResponseCard,
     deliveryContextOrdinal: number,
   ): void => {
-    if (
-      deliveryContextOrdinal !== 0 ||
-      currentDeliveryContextOrdinal() !== deliveryContextOrdinal
-    ) {
+    if (currentDeliveryContextOrdinal() !== deliveryContextOrdinal) {
       throw new VaultCliError(
         'ASSISTANT_RESPONSE_CARD_CONTEXT_ADVANCED',
         'A response card cannot attach after accepted input advances the response context.',
@@ -4120,24 +4321,6 @@ async function runCodexAppServerTurnOnProcess(
       throw new VaultCliError(
         'ASSISTANT_RESPONSE_CARD_AFTER_NO_REPLY',
         'A response card cannot be attached after finish_without_reply.',
-      )
-    }
-    if (responseCard !== null) {
-      throw new VaultCliError(
-        'ASSISTANT_RESPONSE_CARD_LIMIT_REACHED',
-        'Only one response card may be attached to a final response.',
-      )
-    }
-    if (responseCardTextFallback !== null) {
-      throw new VaultCliError(
-        'ASSISTANT_RESPONSE_CARD_LIMIT_REACHED',
-        'Only one response card outcome may be attached to a final response.',
-      )
-    }
-    if (responseMedia.length > 0) {
-      throw new VaultCliError(
-        'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
-        'A response card cannot be combined with response media.',
       )
     }
     if (requiredVaultFileApprovalUrls.length > 0) {
@@ -4153,10 +4336,7 @@ async function runCodexAppServerTurnOnProcess(
     card: CompactTableWorkoutResponseCardV1,
     deliveryContextOrdinal: number,
   ): void => {
-    if (
-      deliveryContextOrdinal !== 0 ||
-      currentDeliveryContextOrdinal() !== deliveryContextOrdinal
-    ) {
+    if (currentDeliveryContextOrdinal() !== deliveryContextOrdinal) {
       throw new VaultCliError(
         'ASSISTANT_RESPONSE_CARD_CONTEXT_ADVANCED',
         'Response card text recovery cannot attach after accepted input advances the response context.',
@@ -4166,18 +4346,6 @@ async function runCodexAppServerTurnOnProcess(
       throw new VaultCliError(
         'ASSISTANT_RESPONSE_CARD_AFTER_NO_REPLY',
         'Response card text recovery cannot attach after finish_without_reply.',
-      )
-    }
-    if (responseCard !== null || responseCardTextFallback !== null) {
-      throw new VaultCliError(
-        'ASSISTANT_RESPONSE_CARD_LIMIT_REACHED',
-        'Only one response card outcome may be attached to a final response.',
-      )
-    }
-    if (responseMedia.length > 0) {
-      throw new VaultCliError(
-        'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
-        'Response card text recovery cannot be combined with response media.',
       )
     }
     if (requiredVaultFileApprovalUrls.length > 0) {
@@ -4190,17 +4358,9 @@ async function runCodexAppServerTurnOnProcess(
   }
 
   const canApplyNoReplyPatch = (deliveryContextOrdinal: number): boolean => {
-    const trailingSteerCandidateOrdinal =
-      trailingSteerCandidate?.deliveryContextOrdinal
     if (
       externallyVisibleAssistantOutputDeliveryContexts.has(deliveryContextOrdinal) ||
       hasPendingExternallyVisibleAssistantOutput(deliveryContextOrdinal)
-    ) {
-      return false
-    }
-    if (
-      typeof trailingSteerCandidateOrdinal === 'number' &&
-      trailingSteerCandidateOrdinal < deliveryContextOrdinal
     ) {
       return false
     }
@@ -4211,13 +4371,6 @@ async function runCodexAppServerTurnOnProcess(
       return false
     }
     if (responseCardTextFallback !== null) {
-      return false
-    }
-    if (
-      precedingAgentMessageSegments.some((segment) =>
-        segment.deliveryContextOrdinal < deliveryContextOrdinal
-      )
-    ) {
       return false
     }
     return true
@@ -4785,23 +4938,8 @@ async function runCodexAppServerTurnOnProcess(
           authorizeAcceptedMessageTarget:
             input.authorizeAcceptedMessageTarget ?? null,
           assistantStyleSettingsOverlay,
-          assistantStyleSettingsAvailable: input.dynamicTools.some(
-            (tool) =>
-              tool.namespace === MURPH_ASSISTANT_STYLE_TOOL.namespace &&
-              tool.name === MURPH_ASSISTANT_STYLE_TOOL.name,
-          ),
-          groupRoomModelAvailable: input.dynamicTools.some(
-            (tool) =>
-              tool.namespace === MURPH_GROUP_ROOM_MODEL_TOOL.namespace &&
-              tool.name === MURPH_GROUP_ROOM_MODEL_TOOL.name,
-          ),
           groupRoomModelMaintenanceAuthorized:
             input.groupRoomModelMaintenanceAuthorized === true,
-          memberMemoryAvailable: input.dynamicTools.some(
-            (tool) =>
-              tool.namespace === MURPH_MEMBER_MEMORY_TOOL.namespace &&
-              tool.name === MURPH_MEMBER_MEMORY_TOOL.name,
-          ),
           memberMemoryMaintenanceAuthorized:
             input.memberMemoryMaintenanceAuthorized === true,
           abortSignal: input.abortSignal
@@ -4812,6 +4950,7 @@ async function runCodexAppServerTurnOnProcess(
           fetchImpl: input.fetchImpl,
           hostedToolContext,
           materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
+          followUpAttachmentAllowed: input.followUpAttachmentAllowed === true,
           currentResponseMedia: responseMedia,
           currentResponseCard: responseCard ?? responseCardTextFallback,
           groupChallengeResponseCardAllowed:
@@ -4881,19 +5020,17 @@ async function runCodexAppServerTurnOnProcess(
       if (dynamicToolRequest.kind === 'send-progress-update') {
         releaseDynamicProgressPending?.()
       }
-      if (dynamicToolRequest.kind === 'analyze-video') {
-        const analyzeVideoFallback = normalizeNullableString(
-          result.requiredFinalResponseFallback,
-        )
-        if (analyzeVideoFallback !== null) {
-          if (result.rpcResult.success) {
-            requiredFinalResponseFallback = analyzeVideoFallback
-            requiredFinalResponseFallbackOutcome = 'analyze-video-success'
-          } else if (requiredFinalResponseFallbackOutcome !== 'analyze-video-success') {
-            requiredFinalResponseFallback = analyzeVideoFallback
-            requiredFinalResponseFallbackOutcome = 'analyze-video-failure'
-          }
-        }
+      const finalResponseFallback = normalizeNullableString(
+        result.requiredFinalResponseFallback,
+      )
+      if (finalResponseFallback !== null) {
+        requiredFinalResponseFallback = finalResponseFallback
+      }
+      const finalResponseSuffix = normalizeNullableString(
+        result.requiredFinalResponseSuffix,
+      )
+      if (finalResponseSuffix !== null) {
+        requiredFinalResponseSuffix = finalResponseSuffix
       }
       for (const runtimeIssueInput of result.runtimeIssueInputs ?? []) {
         pushRuntimeIssueInput(runtimeIssueInput)
@@ -4938,6 +5075,7 @@ async function runCodexAppServerTurnOnProcess(
           dynamicToolRequestDeliveryContextOrdinal,
         )
       }
+      attachFollowUpRequest(dynamicToolRequestDeliveryContextOrdinal, result.followUpRequestPatch)
       if (result.responseCardPatch) {
         try {
           applyResponseCardPatch(
@@ -4988,7 +5126,10 @@ async function runCodexAppServerTurnOnProcess(
           const text = error instanceof VaultCliError &&
             error.code === 'ASSISTANT_RESPONSE_MEDIA_AFTER_NO_REPLY'
             ? 'response media unavailable after finish_without_reply'
-            : 'response media limit reached'
+            : error instanceof VaultCliError &&
+                error.code === 'ASSISTANT_RESPONSE_MEDIA_CONTEXT_ADVANCED'
+              ? 'response media unavailable for this final response'
+              : 'response media limit reached'
           void tryWriteRpcMessage({
             id: requestId,
             result: {
@@ -5127,6 +5268,7 @@ async function runCodexAppServerTurnOnProcess(
     method: string | null,
   ): void => {
     acceptJsonEvent(message)
+    const observedAtMs = Date.now()
     const providerRequestStartedAtMs = codexProviderRequestStartedAtMs
     const isTurnStartedNotification = isCodexTurnStartedMethod(method)
     const isTurnCompletedNotification = isCodexTurnCompletedMethod(method)
@@ -5134,31 +5276,13 @@ async function runCodexAppServerTurnOnProcess(
       currentTurnStartedNotificationObserved =
         turnId !== null && extractCodexTurnIdFromMessage(message) === turnId
     }
-    const shouldCaptureTurnStartedNotification =
-      providerRequestStartedAtMs !== null &&
-      isTurnStartedNotification &&
-      codexTimingTurnStartedNotificationElapsedMs === null
-    const shouldCaptureTurnCompletedNotification =
-      providerRequestStartedAtMs !== null &&
-      isTurnCompletedNotification &&
-      codexTimingTurnCompletedNotificationElapsedMs === null
-    if (
-      providerRequestStartedAtMs !== null &&
-      (shouldCaptureTurnStartedNotification ||
-        shouldCaptureTurnCompletedNotification)
-    ) {
-      const observedAtMs = Date.now()
-      if (shouldCaptureTurnStartedNotification) {
-        codexTimingTurnStartedNotificationElapsedMs = Math.max(
-          0,
-          observedAtMs - providerRequestStartedAtMs,
-        )
+    if (providerRequestStartedAtMs !== null) {
+      const elapsedMs = Math.max(0, observedAtMs - providerRequestStartedAtMs)
+      if (isTurnStartedNotification) {
+        codexTimingTurnStartedNotificationElapsedMs ??= elapsedMs
       }
-      if (shouldCaptureTurnCompletedNotification) {
-        codexTimingTurnCompletedNotificationElapsedMs = Math.max(
-          0,
-          observedAtMs - providerRequestStartedAtMs,
-        )
+      if (isTurnCompletedNotification) {
+        codexTimingTurnCompletedNotificationElapsedMs ??= elapsedMs
       }
     }
     lastEventError = extractCodexErrorMessage(message) ?? lastEventError
@@ -5176,6 +5300,7 @@ async function runCodexAppServerTurnOnProcess(
     actionDiagnostics?.recordEvent({
       activeTurnId: turnId,
       normalizedEvent,
+      observedAtMs,
       rawEvent: message,
     })
     const transportDiagnosticsTraceEvent = input.onTraceEvent
@@ -5301,6 +5426,7 @@ async function runCodexAppServerTurnOnProcess(
           response: completedFinalAgentMessage,
           media: [...responseMedia],
           card: responseCard,
+          followUpRequest: followUpRequests.get(completedResponseDeliveryContextOrdinal),
           cardTextFallback: responseCardTextFallback,
           ...(completedResponseTargetInputId
             ? { targetInputId: completedResponseTargetInputId }
@@ -5309,28 +5435,27 @@ async function runCodexAppServerTurnOnProcess(
         completedFinalAgentMessage = null
         assistantStreams.clear()
         assistantStreamOrder.length = 0
-        responseMedia = []
       }
+      responseMedia = []
       responseCard = null
       responseCardTextFallback = null
       completedUserMessageOrdinal += 1
     }
 
     const progressEvent = extractCodexProgressEventFromNormalized(normalizedEvent)
-    if (progressEvent) {
-      if (suppressDeliveryContext && progressEvent.kind === 'message') {
-        // A completed no-reply context must not leak later text progress.
-      } else {
-        if (progressEvent.kind === 'message') {
-          if (
-            input.onProgress &&
-            normalizeStreamingText(progressEvent.text)
-          ) {
-            markExternallyVisibleAssistantOutput(deliveryContextOrdinal)
-          }
-        }
-        input.onProgress?.(progressEvent)
+    // A completed no-reply context must not leak later text progress.
+    if (
+      progressEvent &&
+      !(suppressDeliveryContext && progressEvent.kind === 'message')
+    ) {
+      if (
+        progressEvent.kind === 'message' &&
+        input.onProgress &&
+        normalizeStreamingText(progressEvent.text)
+      ) {
+        markExternallyVisibleAssistantOutput(deliveryContextOrdinal)
       }
+      input.onProgress?.(progressEvent)
     }
 
     if (isTurnStartedNotification) {
@@ -5478,15 +5603,13 @@ async function runCodexAppServerTurnOnProcess(
     })
   }
 
-  const acceptTurnStartResultTurnId = (resultTurnId: string | null): void => {
-    if (resultTurnId === null) {
+  const acceptTurnId = (candidateTurnId: string | null): void => {
+    if (candidateTurnId === null) {
       return
     }
     if (turnId === null) {
-      turnId = resultTurnId
-      return
-    }
-    if (turnId !== resultTurnId) {
+      turnId = candidateTurnId
+    } else if (turnId !== candidateTurnId) {
       rejectOnce(
         new VaultCliError(
           'ASSISTANT_CODEX_APP_SERVER_TURN_ID_MISMATCH',
@@ -5496,6 +5619,10 @@ async function runCodexAppServerTurnOnProcess(
           },
         ),
       )
+      return
+    }
+    if (codexThreadId) {
+      codexProcess.noteBoundTurn(codexThreadId, candidateTurnId)
     }
   }
 
@@ -5527,7 +5654,7 @@ async function runCodexAppServerTurnOnProcess(
           )
         }
         const resultTurnId = extractCodexTurnIdFromResult(message.result)
-        acceptTurnStartResultTurnId(resultTurnId)
+        acceptTurnId(resultTurnId)
       }
       return
     }
@@ -5541,7 +5668,7 @@ async function runCodexAppServerTurnOnProcess(
         // active turn. A server request must never authenticate itself by
         // supplying the first turn id seen on the process.
         if (isCodexTurnStartedMethod(method)) {
-          turnId = messageTurnId
+          acceptTurnId(messageTurnId)
         } else {
           if (requestId !== null) {
             rejectPreStartParentTurnRequest(requestId)
@@ -5609,6 +5736,9 @@ async function runCodexAppServerTurnOnProcess(
     const rawEvent = actionDiagnostics.buildTraceEvent({
       codexThreadId,
       providerActionCount,
+      providerStartedAtMs: codexProviderRequestStartedAtMs,
+      turnCorrelation:
+        turnId === null ? null : buildCodexTurnCorrelation(turnId),
       turnId,
     })
     if (!rawEvent) {
@@ -5835,6 +5965,7 @@ async function runCodexAppServerTurnOnProcess(
 
   try {
     codexProcess.bindTurn(activeTurnBinding)
+    closeCliTiming = codexProcess.cliTiming.begin()
     if (!codexProcess.initializedForRpc) {
       lifecycleStage = 'spawn_wait'
       await codexProcess.waitForSpawn()
@@ -5853,6 +5984,10 @@ async function runCodexAppServerTurnOnProcess(
       emitAppServerTimingTrace('warm-reused')
     }
 
+    const threadInput = {
+      ...input,
+      threadConfig: withCliTimingEnvironmentAdmission(input.threadConfig),
+    }
     const resumeThreadId = requestedResumeThreadId
     const threadTimingStage = resumeThreadId ? 'thread-resumed' : 'thread-started'
     lifecycleStage = resumeThreadId ? 'thread_resume' : 'thread_start'
@@ -5861,11 +5996,11 @@ async function runCodexAppServerTurnOnProcess(
         ? sendRequest(
             'thread/resume',
             buildCodexThreadResumeParams({
-              input,
+              input: threadInput,
               codexThreadId: resumeThreadId,
             }),
           )
-        : sendRequest('thread/start', buildCodexThreadStartParams(input)),
+        : sendRequest('thread/start', buildCodexThreadStartParams(threadInput)),
       CODEX_RPC_DEFAULT_TIMEOUT_MS,
       resumeThreadId ? 'thread/resume' : 'thread/start',
     )
@@ -5918,7 +6053,7 @@ async function runCodexAppServerTurnOnProcess(
       CODEX_RPC_DEFAULT_TIMEOUT_MS,
       'turn/start',
     )
-    acceptTurnStartResultTurnId(extractCodexTurnIdFromResult(turnResult))
+    acceptTurnId(extractCodexTurnIdFromResult(turnResult))
     lifecycleStage = 'turn_started'
     emitAppServerTimingTrace('turn-started')
 
@@ -5991,6 +6126,7 @@ async function runCodexAppServerTurnOnProcess(
     } catch (settlementError) {
       turnFailure = settlementError
     }
+    finishCliTiming()
     annotateTurnFailureContext(turnFailure)
     closeLiveTurn()
     normalShutdown = true
@@ -6000,6 +6136,7 @@ async function runCodexAppServerTurnOnProcess(
     ).catch(() => undefined)
     throw turnFailure
   } finally {
+    finishCliTiming()
     closeLiveTurn()
     clearInterruptCleanupTimer()
     cleanupAbortListener()
@@ -6048,18 +6185,12 @@ async function runCodexAppServerTurnOnProcess(
   }
   const selectedFinalMessage =
     finalTrailingSteerCandidate?.response ?? extractedFinalMessage
-  const finalResponseMedia =
-    latestFinalActionPatch?.kind === 'none'
-      ? responseMedia
-      : suppressTrailingSteerCandidateForEarlierNoReply
-        ? responseMedia
-        : finalTrailingSteerCandidate?.media ?? responseMedia
-  const finalResponseCard =
-    latestFinalActionPatch?.kind === 'none'
-      ? responseCard
-      : suppressTrailingSteerCandidateForEarlierNoReply
-        ? responseCard
-        : finalTrailingSteerCandidate?.card ?? responseCard
+  // A latest-context no-reply already promoted and cleared the candidate above.
+  const finalResponseCandidate = suppressTrailingSteerCandidateForEarlierNoReply
+    ? null
+    : finalTrailingSteerCandidate
+  const finalResponseMedia = finalResponseCandidate?.media ?? responseMedia
+  const finalResponseCard = finalResponseCandidate?.card ?? responseCard
   if (finalResponseCard !== null && finalResponseMedia.length > 0) {
     throw new VaultCliError(
       'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
@@ -6067,19 +6198,9 @@ async function runCodexAppServerTurnOnProcess(
     )
   }
   const finalDeliveryContextOrdinal =
-    latestFinalActionPatch?.kind === 'none'
-      ? latestDeliveryContextOrdinal
-      : suppressTrailingSteerCandidateForEarlierNoReply
-        ? latestDeliveryContextOrdinal
-        : finalTrailingSteerCandidate?.deliveryContextOrdinal ??
-          latestDeliveryContextOrdinal
+    finalResponseCandidate?.deliveryContextOrdinal ?? latestDeliveryContextOrdinal
   const finalResponseCardTextFallback =
-    latestFinalActionPatch?.kind === 'none'
-      ? responseCardTextFallback
-      : suppressTrailingSteerCandidateForEarlierNoReply
-        ? responseCardTextFallback
-        : finalTrailingSteerCandidate?.cardTextFallback
-          ?? responseCardTextFallback
+    finalResponseCandidate?.cardTextFallback ?? responseCardTextFallback
   if (finalResponseCardTextFallback !== null && finalResponseMedia.length > 0) {
     throw new VaultCliError(
       'ASSISTANT_RESPONSE_CARD_MEDIA_CONFLICT',
@@ -6102,8 +6223,10 @@ async function runCodexAppServerTurnOnProcess(
     : finalResponseCardTextFallback
       ? renderAssistantWorkoutResponseCardText(finalResponseCardTextFallback)
       : modelFinalMessage
+  const normalizedSemanticFinalMessage =
+    normalizeNullableString(semanticFinalMessage)
   const requiredSemanticFinalMessage =
-    normalizeNullableString(semanticFinalMessage) ??
+    normalizedSemanticFinalMessage ??
     requiredFinalResponseFallback ??
     semanticFinalMessage
   const requiredAutomationLocalAtClarificationsInOrder =
@@ -6112,12 +6235,16 @@ async function runCodexAppServerTurnOnProcess(
     requiredAutomationLocalAtClarificationsInOrder.length === 0
       ? finalResponseCard
       : null
-  const finalMessage = appendRequiredVaultFileApprovalUrls(
-    appendRequiredAutomationLocalAtClarification(
-      requiredSemanticFinalMessage,
-      requiredAutomationLocalAtClarificationsInOrder,
+  const finalMessage = appendRequiredFinalResponseSuffix(
+    appendRequiredVaultFileApprovalUrls(
+      appendRequiredAutomationLocalAtClarification(
+        requiredSemanticFinalMessage,
+        requiredAutomationLocalAtClarificationsInOrder,
+      ),
+      requiredVaultFileApprovalUrls,
     ),
-    requiredVaultFileApprovalUrls,
+    requiredFinalResponseSuffix,
+    requiredFinalResponseFallback,
   )
   const semanticTranscriptMessage = finalResponseCard
     ? requiredAutomationLocalAtClarificationsInOrder.length === 0
@@ -6129,11 +6256,15 @@ async function runCodexAppServerTurnOnProcess(
         )
       : normalizeNullableString(modelFinalMessage) ??
         (finalResponseMedia.length > 0 ? '' : null)
-  const transcriptMessage = appendRequiredAutomationLocalAtClarification(
-    normalizeNullableString(semanticTranscriptMessage) ??
+  const transcriptMessage = appendRequiredFinalResponseSuffix(
+    appendRequiredAutomationLocalAtClarification(
+      normalizeNullableString(semanticTranscriptMessage) ??
       requiredFinalResponseFallback ??
       semanticTranscriptMessage,
-    requiredAutomationLocalAtClarificationsInOrder,
+      requiredAutomationLocalAtClarificationsInOrder,
+    ),
+    requiredFinalResponseSuffix,
+    requiredFinalResponseFallback,
   )
   if (
     noReplySelected &&
@@ -6183,6 +6314,7 @@ async function runCodexAppServerTurnOnProcess(
       ...(segment.transcriptResponse === undefined
         ? {}
         : { transcriptResponse: segment.transcriptResponse }),
+      followUpRequest: segment.followUpRequest,
       media: [...segment.media],
       ...(segment.targetInputId
         ? { targetInputId: segment.targetInputId }
@@ -6196,6 +6328,7 @@ async function runCodexAppServerTurnOnProcess(
       resolveReplyTargetPatch(finalDeliveryContextOrdinal)?.targetInputId ?? null,
     additionalUsages: [...additionalUsages, ...buildSubagentUsageDrafts()],
     responseMedia: finalHasDeliverableOutput ? [...finalResponseMedia] : [],
+    followUpRequest: finalFollowUpRequest(finalDeliveryContextOrdinal, finalHasDeliverableOutput),
     responseCard: finalHasDeliverableOutput ? deliveredFinalResponseCard : null,
     jsonEvents,
     providerActionCount,
@@ -6352,6 +6485,7 @@ function isSerializedDynamicToolRequest(
     request.kind === 'assistant-style' ||
     request.kind === 'personalization' ||
     request.kind === 'subscription' ||
+    request.kind === 'analyze-video' ||
     (request.kind === 'group' &&
       request.request.action === 'ask_current_sender' &&
       request.request.mode !== 'new') ||
@@ -6503,7 +6637,7 @@ function assertCodexResumeContextMatches(input: {
     ],
     [
       'approvalPolicy',
-      mapCodexAppServerApprovalPolicy(input.input.approvalPolicy),
+      input.input.approvalPolicy,
       asCodexString(result?.approvalPolicy),
     ],
     ['cwd', input.input.workingDirectory, actualCwd ? path.resolve(actualCwd) : null],

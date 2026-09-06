@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+<!-- SVG created with Arrow, by QuiverAI (https://quiver.ai) -->
+  <style type="text/css">.cls-0 {fill:#FCF2DF;stroke:#165748;stroke-width:0.7925760000000001;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:10;}
+.cls-1 {fill:#D1CBBE;}
+.cls-2 {fill:#C1724B;stroke:#165748;stroke-width:0.64;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:10;}
+.cls-3 {fill:#A2BEAD;}
+.cls-4 {fill:none;stroke:#165748;stroke-width:0.64;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:10;}
+.cls-5 {fill:#FFF3DE;}
+.cls-6 {fill:none;stroke:#165748;stroke-width:0.64;stroke-linecap:round;stroke-miterlimit:10;}
+.cls-7 {fill:#3E7D6C;stroke:#165748;stroke-width:0.64;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:10;}
+.cls-8 {fill:#FFF3DE;stroke:#165748;stroke-width:0.64;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:10;}
+.cls-9 {fill:none;stroke:#165748;stroke-width:0.7466666666666667;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:10;}
+.cls-10 {fill:#C1724B;stroke:#165748;stroke-width:0.64;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:10;}
+.cls-11 {fill:none;stroke:#165748;stroke-width:0.7466666666666667;stroke-linecap:round;stroke-miterlimit:10;}
+.cls-12 {fill:none;stroke:#165748;stroke-width:0.7466666666666667;stroke-linecap:round;stroke-miterlimit:10;}</style>
+  <rect class="cls-0" x="6.059" y="14.59" width="115.9" height="98.9" stroke-width=".7926"/>
+  <path class="cls-1" d="m113.2 70.31c-0.08533 0.256-0.256 0.512-0.512 0.5973l-29.1 10.07c-0.9387 1.877-2.901 0-2.901 0l-30.21-27.56c-0.6827-0.512-0.768-1.109-0.256-1.877l29.1-10.15 2.645-0.08533 30.98 28.33c0.256 0.1707 0.3413 0.4267 0.256 0.6827z"/>
+  <path class="cls-1" d="m71.51 83.37-29.53-27.9c-1.365-1.365-3.584-1.877-5.376-1.28l-21.16 7.936c-0.6827 0.256-1.024 0.768-1.024 1.451v1.109c0 0.5973 0.1707 0.9387 0.5973 1.365l27.9 28.84c1.792 1.792 4.608 2.56 7.168 1.792l19.97-8.021c1.024-0.3413 1.621-1.28 1.621-2.304v-1.707c0.08533-0.512 0.08533-0.8533-0.1707-1.28z"/>
+  <path class="cls-2" d="m113.2 68.27c-0.08533 0.4267-0.1707 0.8533-0.5973 1.024l-28.93 11.26c-0.5973 0.1707-1.28 0.256-1.792-0.256l-31.32-29.35c-1.109-0.9387-1.621-3.925-0.1707-6.656 0.4267-0.8533 1.109-1.707 1.963-2.048l27.22-10.15c0.768-0.256 1.365-0.1707 1.963 0.3413l31.74 28.07c0.512 0.512 0.3413 1.195-0.3413 1.536l-0.768 0.3413c-0.5973 1.195-0.768 3.072-0.5973 3.925l1.621 1.451c0.08533 0.1707 0.08533 0.3413 0 0.512z" stroke-width=".64"/>
+  <path class="cls-3" d="m87.55 37.72-6.059-5.291c-0.512-0.4267-1.109-0.512-1.792-0.256l-21.5 8.021 6.059 5.803c0.768 0.6827 1.621 0.4267 2.475 0.1707l20.82-7.765v-0.6827z"/>
+  <path class="cls-4" d="m53.33 44.54 28.42 27.22" stroke-width=".64"/>
+  <path class="cls-5" d="m111.5 62.38-27.9 10.07-1.877 3.755 0.4267 3.499 29.7-11.43c-1.024-1.621-1.109-4.181-0.3413-5.888z"/>
+  <path class="cls-6" d="m112.1 62.38" stroke-width=".64"/>
+  <path class="cls-2" d="m82.43 79.62 29.35-11.35c-0.3413-0.5973-0.4267-1.28-0.512-1.963l1.877 1.451c0.512 0.512 0.256 1.28-0.3413 1.536l-29.18 11.26c-0.5973 0.1707-1.28 0.256-1.792-0.256" stroke-width=".64"/>
+  <path class="cls-6" d="m111.9 62.38" stroke-width=".64"/>
+  <path class="cls-4" d="m111.9 62.38" stroke-width=".64"/>
+  <path class="cls-6" d="m112.1 62.38" stroke-width=".64"/>
+  <path class="cls-6" d="m112.1 62.38" stroke-width=".64"/>
+  <path class="cls-6" d="m111.9 62.38" stroke-width=".64"/>
+  <path class="cls-6" d="m111.9 62.38" stroke-width=".64"/>
+  <path class="cls-6" d="m112.1 62.38" stroke-width=".64"/>
+  <path class="cls-2" d="m82.43 79.62c-1.024-1.024-1.195-5.035 1.109-6.315l29.35-11.35" stroke-width=".64"/>
+  <path class="cls-7" d="m71.42 78.85-29.35-28.5c-1.28-1.28-3.413-1.792-5.376-1.195l-20.14 7.595c-1.109 0.512-1.877 1.365-1.792 2.475v3.072c0 0.6827 0.3413 1.365 0.768 1.792l27.9 29.1c1.707 1.792 4.608 2.475 7.083 1.536l19.03-7.765c1.195-0.4267 1.877-1.195 1.877-2.731v-3.925c0.08533-0.512 0-1.024 0-1.451z" stroke-width=".64"/>
+  <path class="cls-8" d="m20.22 62.21 21.5-8.533c0.4267-0.1707 0.8533-0.08533 1.195 0.1707l22.19 21.93c0.4267 0.4267 0.256 0.6827-0.08533 0.768l-21.59 8.533c-0.256 0.08533-0.5973 0.08533-0.8533-0.1707l-22.36-22.44c-0.1707-0.08533-0.08533-0.1707 0-0.256z" stroke-width=".64"/>
+  <path class="cls-9" d="m14.76 59.22c0 0.5973 0.3413 1.195 0.768 1.621l28.33 28.76c1.451 1.536 4.011 2.475 6.4 1.536l19.46-8.448c2.219-0.768 2.731-2.731 0.768-4.437" stroke-width=".7467"/>
+  <path class="cls-10" d="m59.56 82.43c1.109 1.621-0.6827 2.987-2.816 2.731-2.304-0.4267-2.901-2.219-1.195-3.328 1.365-0.6827 3.243-0.4267 4.011 0.5973z" stroke-width=".64"/>
+  <path class="cls-11" d="m26.71 55.89 4.779-1.621" stroke-width=".7467"/>
+  <path class="cls-12" d="m31.49 54.27" stroke-width=".7467"/>
+</svg>

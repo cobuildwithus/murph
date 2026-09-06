@@ -64,6 +64,7 @@ import { getPrisma } from "../prisma";
 import {
   appendHostedMailboxEnvelopeTx,
   appendHostedMailboxEnvelopeWithPreparedCryptoTx,
+  appendHostedScheduledDeviceSyncWakeEnvelopeTx,
   prepareHostedMailboxItemAppendCrypto,
   type AppendHostedMailboxItemResult,
   type PreparedHostedMailboxItemAppendCrypto,
@@ -2567,6 +2568,10 @@ export async function appendHostedDeviceSyncScheduledReconcileWake(input: {
     userId: input.userId,
   });
   const appendResult = await persistHostedDeviceSyncWake({
+    appendMailbox: (tx) => appendHostedScheduledDeviceSyncWakeEnvelopeTx({
+      envelope: wake,
+      tx,
+    }),
     healthDataConnectionId: input.connectionId,
     healthDataUserId: input.userId,
     signalFailureMode: "throw",
@@ -2623,7 +2628,14 @@ export function buildHostedDeviceSyncScheduledReconcileWakeEventId(input: {
   ].join(":");
 }
 
+type HostedDeviceSyncMailboxAppendResult = AppendHostedMailboxItemResult & {
+  runtimeOwnedRetiredDuplicate?: boolean;
+};
+
 async function persistHostedDeviceSyncWake(input: {
+  appendMailbox?(
+    tx: HostedPrismaTransactionClient,
+  ): Promise<HostedDeviceSyncMailboxAppendResult>;
   healthDataConnectionId?: string;
   healthDataUserId?: string;
   wake: HostedExecutionWake;
@@ -2636,22 +2648,24 @@ async function persistHostedDeviceSyncWake(input: {
     mailboxAppend: AppendHostedMailboxItemResult,
   ): Promise<void>;
   complete?(): Promise<void>;
-}): Promise<AppendHostedMailboxItemResult> {
+}): Promise<HostedDeviceSyncMailboxAppendResult> {
   // Webhook retries rebuild fresh signal rows, so the canonical wake identity must stay
   // tied to the stable wake event id instead of the transient signal primary key.
   let mailboxItemId: string | null = null;
   const mailboxAppendState: {
-    result: AppendHostedMailboxItemResult | null;
+    result: HostedDeviceSyncMailboxAppendResult | null;
   } = {
     result: null,
   };
 
   const persistInTransaction = async (tx: HostedPrismaTransactionClient) => {
     await input.persist(tx);
-    const mailboxAppend = await appendHostedMailboxEnvelopeTx({
-      envelope: input.wake,
-      tx,
-    });
+    const mailboxAppend = input.appendMailbox
+      ? await input.appendMailbox(tx)
+      : await appendHostedMailboxEnvelopeTx({
+          envelope: input.wake,
+          tx,
+        });
     mailboxItemId = mailboxAppend.item.id;
     mailboxAppendState.result = mailboxAppend;
     await input.persistAfterAppend?.(tx, mailboxAppend);
@@ -2691,7 +2705,10 @@ async function persistHostedDeviceSyncWake(input: {
     });
   }
 
-  if (wakeAccepted) {
+  if (
+    wakeAccepted
+    && mailboxAppendResult.runtimeOwnedRetiredDuplicate !== true
+  ) {
     await input.complete?.();
   }
 
@@ -3383,9 +3400,7 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
   const dataSourceProviderSlug = normalizeJunctionProviderSlug(
     input.dataSourceProviderSlug,
   );
-  const unknownJunctionDataSource = input.provider === "junction"
-    && dataSourceProviderSlug === null
-    && isHostedJunctionDataWebhookEvent(input.eventType);
+  const unknownJunctionDataSource = isHostedJunctionDataSourceUnknown(input);
   const observedGoogleHealthSource = normalizeJunctionProviderSlug(
     input.sourceObservation?.source.sourceProviderSlug,
   ) === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG;
@@ -3547,6 +3562,35 @@ function buildHostedFitbitMigrationSuccessorEventId(input: {
     input.expectedConnectedAt,
     logicalFactId,
   ].join(":");
+}
+
+function isHostedJunctionDataSourceUnknown(
+  input: HostedDeviceSyncWebhookAdmissionInput,
+): boolean {
+  if (
+    input.provider !== "junction"
+    || normalizeJunctionProviderSlug(input.dataSourceProviderSlug) !== null
+    || !isHostedJunctionDataWebhookEvent(input.eventType)
+  ) {
+    return false;
+  }
+  const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug);
+  // Historical completion has no delivered data to attribute. Its already
+  // prepared exact-source fetch still needs durable admission. Google Health
+  // must retain the migration fence: its executor skips imports before cutover.
+  const sourceScopedHistoryFetch = input.eventType.startsWith("historical.data.")
+    && sourceProviderSlug !== null
+    && sourceProviderSlug !== JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
+    && input.dirtyResources.length > 0
+    && input.dirtyResources.every((resource) =>
+      resource.jobKind === "resource"
+      && resource.resource !== null
+      && resource.resourceCategory !== null
+      && resource.windowStart !== null
+      && resource.windowEnd !== null
+      && canonicalizeJunctionProviderSlug(resource.sourceProviderSlug) === sourceProviderSlug
+      && resource.payload?.webhookDataJson === undefined);
+  return !sourceScopedHistoryFetch;
 }
 
 function isHostedJunctionDataWebhookEvent(eventType: string): boolean {

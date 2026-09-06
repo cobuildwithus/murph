@@ -1,6 +1,6 @@
 # Hosted Temporal Orchestration ADR
 
-Last verified: 2026-08-22
+Last verified: 2026-08-31
 
 ## Decision
 
@@ -24,11 +24,47 @@ The final ownership split is:
   authorization, R2/snapshot transport plumbing, and cleanup.
 
 The public Murph repository owns the released orchestration contracts,
-hosted-local harness, and architecture guardrails. The private
-`cobuildwithus/murph-cloud` repository owns the production Temporal worker,
-Render Blueprint, deploy workflow, operational runbook, and rollback through
-previously deployed private versions. Public Murph contains no worker
-implementation or second production deployment path.
+hosted-local harness, architecture guardrails, and trusted default-branch
+compatibility controller. The private `cobuildwithus/murph-cloud` repository
+owns the production Temporal worker, live Current/Ramping reader discovery and
+attestation, exact-head integration/replay/canary admission, Render Blueprint,
+deploy workflow, operational runbook, and rollback through previously deployed
+private versions. Public Murph contains no worker implementation, private
+reader policy, or second production deployment path.
+
+The compatibility controller persists no private SHA/tag pointer and imports no
+private code. After same-repository human and exact-public-head admission, it
+uses its repository-scoped GitHub App token to resolve private `main`, validates
+the fixed `public-murph-integration.yml` workflow identity, and dispatches that
+workflow at `main` with returned run details. It accepts only the returned first
+attempt whose workflow identity and `head_sha` match the pre-resolved private
+commit. Candidate code can supply only the bounded canonical reconciliation
+fixture artifact produced in unprivileged public CI. Before reporting success,
+the controller re-reads private `main` and fails closed if the branch moved. The
+private protected workflow must derive the live Current and Ramping reader SHAs
+and, while its standby guard remains, include the active legacy Render worker's
+exact live deploy revision. Its final attestation re-reads that complete set and
+fails on identity or routing drift before exact-head integration, exhaustive
+synthetic migration replay, bounded defense-in-depth replay of histories
+returned by Temporal Visibility, or canary proof can become a private deploy
+prerequisite. Visibility is eventually consistent, so only the synthetic
+migration corpus is the exhaustive replay contract.
+
+The pull-request status is candidate evidence, not durable production
+authorization. After a relevant revision reaches public `main`,
+`.github/workflows/temporal-web-deployment-admission.yml` repeats the bounded
+wire proof for that exact public commit against the then-current private
+`main` and live reader set. Its `Temporal Web production admission` job must be
+configured as a Vercel production Deployment Check so a completed build cannot
+move production domains before the proof succeeds. The controller re-reads
+both public and private `main` before accepting the result, while the private
+workflow independently re-reads the complete reader set. Every `main` commit
+must create its managed Vercel candidate, and the Git integration is the only
+production owner. Local production uploads, existing-deployment promotion,
+Instant Rollback, and Force Promote are unsupported; recovery uses a fresh
+revert or forward-fix commit on `main`. This boundary proves
+the hosted reconciliation-facts wire contract; private release admission still
+owns full integration, migration replay, production routing, and canary proof.
 
 Temporal decides when to ask Cloudflare to process based on web-owned
 reconciliation facts and pointer-only signals. Cloudflare starts or wakes the
@@ -105,7 +141,11 @@ attempt.
 
 An exact system-mailbox pointer is admission, not completion. Web projects the
 authenticated `hostedMailboxSystemHandledThroughSeq` scalar from the existing
-redacted workspace checkpoint. Temporal applies three distinct retirement
+redacted workspace checkpoint and classifies only the exact first live system
+row as `model_free` or `default_owned`. Environment completion is one generic
+model-free kind, as is deterministic member-channel reconciliation; Temporal
+does not know their product meaning or select a feature-specific processing
+mode. Temporal applies three distinct retirement
 rules: a handled-through frontier that reaches the pointer lane sequence retires
 it as completed; an explicit `systemMailboxFrontier: null` retires only
 Temporal's noncanonical pointer projection because the current facts admit no
@@ -120,6 +160,21 @@ billing restoration for its bounded active roster, and established-member
 Family invite acceptance all signal that exact pointer after commit. The signal
 is a latency hint: the existing bounded mailbox-handoff sweep owns recovery, and
 Stripe receipts retain their exact pointers for replay.
+
+Patch-aware workflows treat `user_not_active` plus an explicitly absent
+workspace as terminal canonical absence for scheduling. They retain any carried
+mailbox pointer for a possible future authoritative reactivation signal, but
+wait signal-only without a processing Activity or retry timer. A late signal
+that races account deletion may recheck Web facts but cannot turn deleted state
+into a self-retrying runtime. Inactive facts with a non-null workspace do not
+use this rule because that workspace can still own retention work.
+
+Canonical account deletion separately captures the immutable runtime-member
+order in Web's encrypted cleanup receipt. Web terminates those workflows in
+batches of four and durably advances one next-runtime cursor only through the
+contiguous confirmed prefix, so a bounded attempt resumes without skipping a
+failure or replaying earlier confirmed work.
+
 Workspace-version movement may bypass same-version no-progress backoff, but
 cannot prove that the pointed system item was handled.
 
@@ -164,10 +219,12 @@ Allowed Temporal state is tiny and pointer-only:
 - Last reconciliation status, blocked reason/retry timestamp, processing result
   kind, bounded error code, and timestamps.
 - Slim workspace wake/completion projection fields: `nextWakeAt`,
-  `nextWakeReason`, `inboxMediaRetentionWakeAt`, `version`, and the optional
-  authenticated `hostedMailboxSystemHandledThroughSeq` frontier. Temporal may
-  compare that scalar with the current pointer but must not persist another
-  completion cursor.
+  `nextWakeReason`, `nextDefaultProcessingWakeAt`,
+  `nextDefaultProcessingWakeReason`, `systemMailboxProgressGeneration`,
+  `inboxMediaRetentionWakeAt`, `version`, and the optional authenticated
+  `hostedMailboxSystemHandledThroughSeq` frontier. Temporal may compare that
+  scalar with the current pointer but must not persist another completion
+  cursor.
 - Durable timers derived from web-owned runtime/workspace wake projection or
   retry timestamps.
 
@@ -297,6 +354,34 @@ and worker connection code must support the same API key, TLS enablement,
 client certificate/key, server root CA, and server-name override settings so
 `signalWithStart` and worker polling use the same trust model.
 
+### Local Production Diagnostics
+
+Murph developer machines may have the Temporal CLI and API access already
+provisioned in the repository-root local environment for faster production
+diagnosis. The expected local inputs are `TEMPORAL_API_KEY` plus the
+`HOSTED_TEMPORAL_ADDRESS`, `HOSTED_TEMPORAL_NAMESPACE`,
+`HOSTED_TEMPORAL_TASK_QUEUE`, and `HOSTED_TEMPORAL_TLS_ENABLED` connection
+fields. Their presence grants diagnostic connectivity, not general production
+mutation authority.
+
+Treat the repository-root `.env` as an opaque process input: never print,
+quote, grep, copy, persist, upload, or commit its contents. Project only the
+required Temporal fields into the exact bounded CLI or SDK process, use a
+neutral client identity such as `murph-local-temporal-diagnostics`, set an
+explicit command timeout, and do not save the API key in a Temporal CLI profile.
+Begin with list, describe, query, task-queue, deployment, and metadata-only
+history inspection. Keep member identifiers and payloads out of terminal
+output and durable artifacts; aggregate in memory whenever exact workflow
+inspection is necessary. Do not download raw histories when event types,
+failure causes, counts, or query state can answer the question.
+
+Read-only access does not authorize a write. Signals, Workflow starts,
+terminations, resets, batch operations, Schedule changes, Worker Deployment
+routing, and namespace administration require explicit user authorization for
+the current task plus an exact target resolved through read-only checks. After
+any authorized recovery, verify the canonical Web-owned facts rather than
+treating CLI or API acknowledgement as proof of recovery.
+
 Mailbox signals must stay source-less.
 
 ## Global Device-Sync Scheduled Wake Reconciler
@@ -385,7 +470,9 @@ The per-user workflow reads source-less reconciliation facts from web:
 - `blocked`: nullable product/access block with `reason` and `retryAt`
 - `mailboxLag`: lane lag counters only
 - `workspace`: nullable projection with `nextWakeAt`, `nextWakeReason`,
-  `inboxMediaRetentionWakeAt`, optional `systemMailboxFrontier`, and `version`
+  `nextDefaultProcessingWakeAt`, `nextDefaultProcessingWakeReason`,
+  `systemMailboxProgressGeneration`, `inboxMediaRetentionWakeAt`, optional
+  `systemMailboxFrontier`, and `version`
 
 Facts do not contain run/idle decisions, raw mailbox kinds, producer
 source/reason, raw mailbox payloads, workspace redacted status, signed usage
@@ -396,12 +483,26 @@ the explicit not-admitted value without reading mailbox rows; Temporal may
 retire its pointer projection while Web retains durable mailbox truth for a
 future reactivation. Temporal interprets the facts mechanically: fresh mailbox
 signals may ensure processing directly; carried pointers and timers re-read facts;
-conversation lag or a due assistant workspace wake selects default processing;
-system-only lag selects `system_mailbox` processing; a due inbox media retention
-wake selects `inbox_media_retention` processing when foreground/default work is
-not runnable; future or absent wakes wait. These modes are invocation input, not
-new scheduler state. Foreground/default work must replace an active
-system-mailbox or retention owner instead of waiting for its idle checkpoint.
+conversation lag or a due `nextDefaultProcessingWakeAt` selects default
+processing; system-only lag or a due model-free `nextWakeAt` selects
+`system_mailbox` processing; a due inbox media retention wake selects
+`inbox_media_retention` processing when foreground/default work is not runnable;
+future or absent wakes wait. These modes are invocation input, not new scheduler
+state. The runtime's checkpoint projection publishes an ordinary default-owned
+mailbox wake only when a default row owns the currently executable frontier; a
+later default row does not compete with a runnable model-free frontier. A
+recorded device follow-up remains canonical `nextWakeAt`, while an assistant
+deadline remains independently visible through `nextDefaultProcessingWakeAt`.
+Execution eligibility stays unchanged, and explicitly approved continuations
+retain their foreground priority. Foreground/default work must replace an
+active system-mailbox or retention owner instead of waiting for its idle
+checkpoint.
+If a default invocation's live checks disprove its overdue projection and the
+next due frontier belongs to a model-free owner, the runtime first checkpoints
+the corrected projections without advancing handled-through or the system
+progress generation. The checkpoint re-reads all default-work sources, so
+genuinely due default work remains armed; Temporal continues interpreting only
+the resulting durable facts.
 The runtime projects an outbox-only continuation as `assistant_delivery` rather
 than model-capable `assistant`. Web admits that due delivery continuation
 without the managed-AI usage gate; Temporal still selects ordinary processing,
@@ -468,9 +569,9 @@ POST /internal/users/:userId/runtime/ensure-processing
 ```
 
 Temporal signs this request with the hosted internal callback key and includes
-the bound hosted user header in the signature input. Cloudflare accepts only
-that signed form for the runtime processing adapter; Vercel OIDC remains for
-browser-vault, status, and deletion control clients.
+the bound hosted user header in the signature input. Cloudflare also accepts
+Vercel OIDC for Web's existing direct ingress wake; both forms bind the target
+user before the same processing adapter runs.
 Do not introduce a static shared bearer token for this adapter.
 
 Request summary:
@@ -479,12 +580,26 @@ Request summary:
   idempotency at the orchestration boundary.
 - `processingMode`: an optional narrow execution lane selected from current
   reconciliation facts.
+- `conversationWorkPending`: optional exact `true`, valid only with absent,
+  null, or `default` processing mode. Temporal derives it from positive admitted
+  conversation lag in the current reconciliation read. It allows a fresh
+  standby claim without changing runtime admission, consent, write fences,
+  activity priority, or Web-direct latency attribution. Timers, retries, and
+  continued executions rederive it; it is not persisted workflow policy.
 - `assistantExecutionBlocked`: an optional positive-only execution guard valid
   only with `system_mailbox`. Temporal includes it when Web blocks assistant
   admission but retained model-free system work remains runnable. Cloudflare
   forwards it to the runtime invocation without persisting a second policy
   projection; the runtime drains eligible system work, skips assistant
   execution, and preserves the canonical assistant wake for later restoration.
+
+Deploy the Cloudflare receiver accepting this optional field before the Temporal
+producer emits it: older exact-key parsers reject it. Old producers omitting
+the field remain compatible. Roll back the producer before a receiver rollback
+below this contract. The private consumer can retain its existing exact public
+registry dependency by parsing the base request with that package and appending
+its locally validated positive-only fact before signing; remove that adapter
+when adopting a public package release that parses the field.
 
 The request does not carry signed AI usage decisions. Web reconciliation facts
 gate mailbox lag and model-capable workspace wakes before Temporal calls
@@ -662,9 +777,10 @@ The hard-cut architecture is accepted when:
   mailbox, assistant, browser-vault, or device-sync work due.
 - Cloudflare alarms are write-fence cleanup only.
 - Murph runtime code does not know about Temporal.
-- Runtime `nextWakeAt` remains the only source for assistant timer wakeups;
-  runtime `inboxMediaRetentionWakeAt` remains the only source for inbox media
-  retention wakeups.
+- Runtime `nextDefaultProcessingWakeAt` remains the source for ordinary
+  assistant timer wakeups; runtime `nextWakeAt` remains the canonical
+  model-free wake source, and `inboxMediaRetentionWakeAt` remains the only
+  source for inbox media retention wakeups.
 - Temporal stores no full `HostedWorkspaceState`, no full
   `HostedWorkspaceInvocationResult`, and no signed usage decision.
 - Reconciliation facts return `blocked` for usage denial or gate
@@ -683,19 +799,51 @@ The hard-cut architecture is accepted when:
   silently. Murph Cloud independently owns Workflow bundle and replay-policy
   gates.
 - Relevant public producer, contract, hosted-runtime, harness, and CI-owner
-  changes publish one exact-SHA `Temporal compatibility` status. The public
+  changes publish one exact-SHA `Temporal compatibility` pull-request status.
+  That status is candidate evidence and never becomes production authorization
+  merely because it remains green. The public
   controller validates the pull request's exact base repository and ref; only
   pull requests targeting the default branch may publish that SHA-global
   status, so stacked non-default-branch pull requests cannot overwrite it. The
   candidate producer runs only in unprivileged Repo Hygiene and hands the
   trusted controller a run/head-bound bounded JSON artifact. The controller
   never owns worker code or reader policy: private Murph Cloud receives only
-  serialized fixture data, declares the immutable supported-reader set,
-  automatically includes its pinned controller revision, runs every reader,
-  and returns one producer-and-reader proof digest. The committed public policy
-  binds the private controller to a SHA-suffixed immutable tag. Missing, stale,
-  skipped, canceled, duplicated, malformed, or failed proof remains red or
-  pending.
+  serialized fixture data, derives the live Current and traffic-bearing Ramping
+  readers, automatically includes the exact dispatched private candidate and,
+  while the standby guard remains, the active legacy Render worker's exact live deploy
+  revision and bounded `active` or `suspended` state, then runs every reader.
+  Final protected attestation re-reads the complete reader set and legacy state
+  and fails on identity or routing drift through a separate private lifecycle
+  digest before returning one cross-repository proof digest. The public
+  verifier hashes only the sorted immutable reader SHA set, so private
+  lifecycle evidence never enters the public wire format and the public
+  repository does not own or duplicate live reader policy. The public controller resolves
+  private `main` before dispatch, binds the returned first-attempt run to that
+  exact commit, and re-reads private `main` before success. Public code stores
+  no private revision pointer or reader policy. Missing, stale, skipped,
+  canceled, duplicated, malformed, or failed proof remains red or pending.
+
+- Every public `main` push runs the exact-main producer and compatibility
+  controller again in `.github/workflows/temporal-web-deployment-admission.yml`.
+  Vercel must select the `Temporal Web production admission` job as a
+  production Deployment Check; with that external binding in place, production
+  domains stay on the previous deployment until the current public commit,
+  current private `main`, and current live readers produce one accepted proof.
+  That same private run selects the one canonical foreground-priority lane from
+  its integration manifest, forces and observes standby allocation, and emits a
+  second digest bound to both exact main SHAs, the fixed lane, and the public
+  protected environment's expected production Temporal target digest. Private
+  setup and final attestation derive the live target from protected
+  configuration and reject mismatch without exporting its component values.
+  The release mode rejects an arbitrary public ref; public pull requests remain
+  fixture-only and never execute beside private source. The public controller
+  re-reads both branch heads, and private protected attestations re-read the
+  supported reader set and both heads, before success. Every `main` commit creates one managed
+  candidate, and no local production upload or historical promotion/rollback
+  path may compete with that Git owner. Rollback uses a fresh revert commit so
+  it receives current proof. This proves the reconciliation-facts wire boundary
+  and foreground/standby path; Murph Cloud release admission still owns full
+  worker/runtime integration, replay, routing, and canary safety.
 - Focused tests prove that wake acceptance is not completion and that Temporal
   idles only after reconciliation facts are idle.
 - The hosted-local E2E harness includes a non-manual Temporal orchestration

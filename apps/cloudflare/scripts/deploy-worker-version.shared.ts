@@ -4,6 +4,10 @@ import {
   normalizeOptionalString,
   readBooleanEnv,
 } from "./deploy-automation/shared.ts";
+import type {
+  ContainerReleaseEntry,
+  DirectDeployReleaseEvidence,
+} from "./container-release-receipt.ts";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
@@ -18,6 +22,12 @@ export interface DeploymentStatusPayload {
 }
 
 export interface HostedWorkerDeploymentResult {
+  containerReleaseReceipt: {
+    containers: readonly ContainerReleaseEntry[];
+    schemaVersion: 1;
+    versionTag: string;
+    workerVersionId: string;
+  };
   finalDeploymentVersions: Array<{
     percentage: number;
     versionId: string;
@@ -35,7 +45,7 @@ export interface HostedWorkerDeploymentDependencies {
     secretsFilePath: string;
     versionTag: string;
     workerName: string;
-  }): Promise<void>;
+  }): Promise<DirectDeployReleaseEvidence>;
   mkdir(target: string, options: {
     recursive: boolean;
   }): Promise<unknown>;
@@ -128,7 +138,7 @@ async function runDirectDeployment(input: {
   versionTag: string;
   workerName: string;
 }): Promise<HostedWorkerDeploymentResult> {
-  await input.dependencies.deployDirect({
+  const releaseEvidence = await input.dependencies.deployDirect({
     containerRolloutMode: input.containerRolloutMode,
     configPath: input.configPath,
     deploymentMessage: input.deploymentMessage,
@@ -145,8 +155,17 @@ async function runDirectDeployment(input: {
   );
   const finalDeploymentVersions = mapDeploymentVersions(finalDeployment);
   const smokeVersionId = requireSmokeVersionId(finalDeploymentVersions);
+  if (smokeVersionId !== releaseEvidence.workerVersionId) {
+    throw new Error("Direct deploy did not converge the exact Wrangler Worker version.");
+  }
 
   return {
+    containerReleaseReceipt: {
+      containers: releaseEvidence.containers,
+      schemaVersion: 1,
+      versionTag: input.versionTag,
+      workerVersionId: releaseEvidence.workerVersionId,
+    },
     finalDeploymentVersions,
     smokeVersionId,
     workerName: input.workerName,
@@ -261,6 +280,7 @@ async function writeGitHubOutputs(
   }
 
   const lines = [
+    `container_release_receipt=${JSON.stringify(result.containerReleaseReceipt)}`,
     `final_version_traffic=${JSON.stringify(result.finalDeploymentVersions)}`,
     `smoke_version_id=${result.smokeVersionId}`,
   ];

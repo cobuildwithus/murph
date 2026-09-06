@@ -86,8 +86,21 @@ async function replaceGeneratedRoot(
     );
     await rename(temporaryRoot, targetRoot);
   } catch (error) {
+    const publishCollision = isGeneratedRootPublishCollision(error);
+    const sameTreePublished = publishCollision
+      && await generatedTreesMatchExactly(temporaryRoot, targetRoot).catch(() => false);
+    if (sameTreePublished) {
+      await rm(temporaryRoot, { force: true, recursive: true });
+      if (targetMoved) {
+        await rm(backupRoot, { force: true, recursive: true });
+      }
+      return;
+    }
     await rm(temporaryRoot, { force: true, recursive: true }).catch(() => {});
-    if (targetMoved) {
+    if (publishCollision && targetMoved) {
+      await rm(backupRoot, { force: true, recursive: true }).catch(() => {});
+    }
+    if (targetMoved && !publishCollision) {
       await rename(backupRoot, targetRoot).catch(() => {});
     }
     throw error;
@@ -138,6 +151,7 @@ function buildGeneratedFiles(
     ["web/routes/index.json", stablePrettyJson(webArtifacts.routeIndex)],
     ["web/browse/experiments.json", stablePrettyJson(webArtifacts.experimentIndex)],
     ["web/browse/biomarkers.json", stablePrettyJson(webArtifacts.biomarkerIndex)],
+    ["web/browse/goals.json", stablePrettyJson(webArtifacts.goalIndex)],
   ]);
 
   for (const [fileName, bundle] of webArtifacts.routeBundles.entries()) {
@@ -245,6 +259,68 @@ async function readGeneratedTree(root: string): Promise<Map<string, string | nul
   return files;
 }
 
+async function generatedTreesMatchExactly(leftRoot: string, rightRoot: string): Promise<boolean> {
+  const [leftEntries, rightEntries] = await Promise.all([
+    readGeneratedTreeSnapshot(leftRoot),
+    readGeneratedTreeSnapshot(rightRoot),
+  ]);
+  if (leftEntries.size !== rightEntries.size) {
+    return false;
+  }
+
+  for (const [entryName, leftEntry] of leftEntries.entries()) {
+    const rightEntry = rightEntries.get(entryName);
+    if (!rightEntry || leftEntry.kind !== rightEntry.kind) {
+      return false;
+    }
+    if (leftEntry.kind === "directory") {
+      continue;
+    }
+    if (rightEntry.kind !== "file" || !leftEntry.bytes.equals(rightEntry.bytes)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+type GeneratedTreeSnapshotEntry =
+  | { kind: "directory" }
+  | { bytes: Buffer; kind: "file" };
+
+async function readGeneratedTreeSnapshot(
+  root: string,
+): Promise<Map<string, GeneratedTreeSnapshotEntry>> {
+  const entries = new Map<string, GeneratedTreeSnapshotEntry>();
+  await collectGeneratedTreeSnapshot(path.resolve(root), "", entries);
+  return entries;
+}
+
+async function collectGeneratedTreeSnapshot(
+  absoluteRoot: string,
+  relativeDir: string,
+  entries: Map<string, GeneratedTreeSnapshotEntry>,
+): Promise<void> {
+  const directoryEntries = await readdir(path.join(absoluteRoot, relativeDir), {
+    withFileTypes: true,
+  });
+  directoryEntries.sort((left, right) => left.name.localeCompare(right.name));
+
+  for (const entry of directoryEntries) {
+    const relativePath = relativeDir ? path.posix.join(relativeDir, entry.name) : entry.name;
+    const absolutePath = path.join(absoluteRoot, relativePath);
+    if (entry.isDirectory()) {
+      entries.set(relativePath, { kind: "directory" });
+      await collectGeneratedTreeSnapshot(absoluteRoot, relativePath, entries);
+      continue;
+    }
+    if (!entry.isFile()) {
+      throw new Error("Unsupported entry in Health Commons generated tree.");
+    }
+    entries.set(relativePath, { bytes: await readFile(absolutePath), kind: "file" });
+  }
+}
+
 async function collectGeneratedTreeFiles(
   absoluteRoot: string,
   relativeDir: string,
@@ -288,6 +364,10 @@ function formatGeneratedDiff(label: string, files: readonly string[]): string | 
 
 function isNodeErrorWithCode(error: unknown, code: string): boolean {
   return error instanceof Error && "code" in error && error.code === code;
+}
+
+function isGeneratedRootPublishCollision(error: unknown): boolean {
+  return isNodeErrorWithCode(error, "EEXIST") || isNodeErrorWithCode(error, "ENOTEMPTY");
 }
 
 export function parseCliOptions(argv: readonly string[]): CliOptions {

@@ -36,11 +36,17 @@
       "@murphai/clinical-records/retrieval-limits": [
         "../../packages/clinical-records/src/retrieval-limits.ts"
       ],
+      "@murphai/vault-usecases/clinical-records": [
+        "../../packages/vault-usecases/src/clinical-records.ts"
+      ],
       "@murphai/contracts": [
         "../../packages/contracts/src/index.ts"
       ],
       "@murphai/contracts/browser-vault": [
         "../../packages/contracts/src/browser-vault.ts"
+      ],
+      "@murphai/contracts/journal-presentation": [
+        "../../packages/contracts/src/journal-presentation.ts"
       ],
       "@murphai/contracts/zod-runtime": [
         "../../packages/contracts/src/zod-runtime.ts"
@@ -59,6 +65,12 @@
       ],
       "@murphai/health-commons/runtime": [
         "../../packages/health-commons/src/runtime.ts"
+      ],
+      "@murphai/health-commons/goal-runtime": [
+        "../../packages/health-commons/src/goal-runtime.ts"
+      ],
+      "@murphai/health-commons/goal-index-runtime": [
+        "../../packages/health-commons/src/goal-index-runtime.ts"
       ],
       "@murphai/health-commons/generated/*": [
         "../../packages/health-commons/generated/*"
@@ -180,6 +192,9 @@
       "@murphai/runtime-state/assistant-generated-deliveries": [
         "../../packages/runtime-state/src/assistant-generated-deliveries.ts"
       ],
+      "@murphai/runtime-state/cli-timing": [
+        "../../packages/runtime-state/src/cli-timing.ts"
+      ],
       "@murphai/runtime-state/hosted-codex-subscription-auth": [
         "../../packages/runtime-state/src/hosted-codex-subscription-auth.ts"
       ],
@@ -191,6 +206,9 @@
       ],
       "@murphai/runtime-state/node/assistant-runtime-issues": [
         "../../packages/runtime-state/src/node/assistant-runtime-issues.ts"
+      ],
+      "@murphai/runtime-state/node/cli-timing": [
+        "../../packages/runtime-state/src/node/cli-timing.ts"
       ],
       "@murphai/runtime-state/node/loopback-control-plane-auth": [
         "../../packages/runtime-state/src/node/loopback-control-plane-auth.ts"
@@ -224,6 +242,12 @@
       ],
       "@murphai/query/browser-replica-client": [
         "../../packages/query/src/browser-replica-client.ts"
+      ],
+      "@murphai/query/browser-replica-server": [
+        "../../packages/query/src/browser-replica-server.ts"
+      ],
+      "@murphai/vault-usecases/clinical-records": [
+        "../../packages/vault-usecases/src/clinical-records.ts"
       ],
       "@murphai/core": [
         "../../packages/core/src/index.ts"
@@ -335,6 +359,9 @@
       ],
       "@murphai/device-syncd/public-provider-descriptors": [
         "../../packages/device-syncd/src/public-provider-descriptors.ts"
+      ],
+      "@murphai/device-syncd/service": [
+        "../../packages/device-syncd/src/service.ts"
       ],
       "@murphai/device-syncd/source-staleness": [
         "../../packages/device-syncd/src/source-staleness.ts"

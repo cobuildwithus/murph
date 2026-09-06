@@ -280,6 +280,24 @@ describe("hosted device-sync reconcile contract", () => {
 });
 
 describe("hosted device-sync no-data outreach contract", () => {
+  it("accepts the three-day Apple Health default while preserving custom limits", () => {
+    const response = {
+      action: "configure_no_data_outreach",
+      effectiveAfterDays: 3,
+      setting: "default",
+      sourceProviderSlug: "apple_health_kit",
+      status: "saved",
+    };
+    expect(parseHostedExecutionDeviceSyncNoDataOutreachResponse(response)).toEqual(response);
+    for (const invalid of [
+      { ...response, setting: "custom" },
+      { ...response, sourceProviderSlug: "garmin" },
+      { ...response, effectiveAfterDays: 2 },
+    ]) {
+      expect(() => parseHostedExecutionDeviceSyncNoDataOutreachResponse(invalid)).toThrow(/inconsistent/u);
+    }
+  });
+
   it("accepts explicit bounded settings and rejects ambiguous shapes", () => {
     const authority = {
       assistantInputId: "ain_00000000000000000000000000000001",
@@ -512,6 +530,39 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
     for (const [key, value] of Object.entries(sharedMetadata)) {
       expect(result.metadata[key]).toBe(value);
     }
+  });
+
+  it("retains summary progress while composing coverage into a full envelope", () => {
+    const progress = {
+      junctionHistoricalBackfillStatus: "coverage_v3_complete",
+      junctionHistoricalBackfillEmptyAttempts: 0,
+      junctionHistoricalBackfillLastEmptyAt: null,
+      junctionHistoricalBackfillWindowStart: "2025-01-01",
+      junctionHistoricalBackfillWindowEnd: "2025-04-01",
+    };
+    const coverage = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
+      metadata: progress,
+      providerSlug: "omron",
+      resource: "caffeine",
+      version: historyCoverageVersion("caffeine"),
+    });
+    if (!coverage) {
+      throw new TypeError("Expected representable Junction coverage.");
+    }
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: {
+        ...Object.fromEntries(Array.from({ length: 11 }, (_, index) => [`diagnostic${index}`, index])),
+        ...progress,
+      },
+      localConnectionStateUnpublished: true,
+      localMetadata: { ...progress, [coverage.metadataKey]: coverage.value },
+    });
+    expect(result.metadata).toMatchObject({
+      ...progress,
+      [coverage.metadataKey]: coverage.value,
+    });
+    expect(Object.keys(result.metadata)).toHaveLength(16);
+    expect(result.preservedLocalProgress).toBe(true);
   });
 
   it("compacts split coverage slots before merging a full hosted envelope", () => {

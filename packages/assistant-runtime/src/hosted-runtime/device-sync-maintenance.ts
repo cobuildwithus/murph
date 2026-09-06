@@ -22,6 +22,7 @@ import type {
   DeviceSyncJobTimingDiagnostic,
 } from "@murphai/device-syncd/types";
 import {
+  JUNCTION_ECG_BINDING_REASONS,
   resolveDeviceSyncStoreNextJobWakeAt,
   resolveDeviceSyncStoreNextWakeAt,
   type DeviceSyncService,
@@ -43,6 +44,8 @@ import type {
 import {
   applyHostedPendingDirtyDeviceSyncStateForWake,
   fetchCompleteHostedDeviceSyncRuntimeSnapshot,
+  hydrateHostedDeviceSyncControlPlaneState,
+  isHostedDeviceSyncCompletionFenceWake,
   reconcileHostedDeviceSyncControlPlaneState,
   promoteHostedCompletedDirtyPayloadAcks,
   resolveHostedDeviceSyncSchedulerAccountId,
@@ -245,7 +248,6 @@ export async function runHostedDeviceSyncPass(
     pendingDirtyPayloadJobs: [],
     snapshot: null,
   };
-  let controlPlaneSynced = false;
   let processedJobs = 0;
 
   try {
@@ -280,7 +282,6 @@ export async function runHostedDeviceSyncPass(
         skipDirtyPendingFetch: true,
         stagedDirtyAcks: options.stagedDirtyAcks ?? null,
       });
-      controlPlaneSynced = true;
     }
 
     if (syncState.wakeSuperseded === true) {
@@ -425,32 +426,21 @@ export async function runHostedDeviceSyncPass(
       });
     }
 
+    syncState = await reconcileHostedDeviceSyncPassControlPlane({
+      deviceSyncPort,
+      onStage: options.onStage ?? null,
+      platform: options.runtimeLogPlatform ?? null,
+      secret,
+      service,
+      signal: options.signal ?? null,
+      state: syncState,
+      wake,
+    });
     const wakeRecovery = resolveHostedDeviceSyncWakeRecovery({
       service,
       state: syncState,
       wake,
     });
-    if (secret && controlPlaneSynced) {
-      options.onStage?.("control_plane_reconcile");
-      await reconcileHostedDeviceSyncControlPlaneState({
-        deferNextReconcileAtForLocalAccountId: wakeRecovery
-          ? wakeLocalAccountId
-          : null,
-        deviceSyncPort,
-        wake,
-        secret,
-        signal: options.signal ?? null,
-        service,
-        state: syncState,
-      });
-      await completeHostedDeviceSyncFitbitMigrations({
-        deviceSyncPort,
-        platform: options.runtimeLogPlatform ?? null,
-        service,
-        signal: options.signal ?? null,
-        state: syncState,
-      });
-    }
 
     if (shouldYieldHostedDeviceSync(shouldYield)) {
       return buildHostedDeviceSyncYieldedPassResult({
@@ -543,6 +533,124 @@ export async function runHostedDeviceSyncPass(
   } finally {
     closeHostedRuntimeDeviceSyncService(service);
   }
+}
+
+async function reconcileHostedDeviceSyncPassControlPlane(input: {
+  deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined;
+  onStage: ((stage: HostedDeviceSyncPassStage) => void) | null;
+  platform: Pick<HostedRuntimePlatform, "logPort"> | null;
+  secret: string | null;
+  service: DeviceSyncService;
+  signal: AbortSignal | null;
+  state: HostedDeviceSyncRuntimeSyncState;
+  wake: HostedRuntimeEvent;
+}): Promise<HostedDeviceSyncRuntimeSyncState> {
+  if (!input.secret) {
+    return input.state;
+  }
+  if (!input.deviceSyncPort) {
+    throw new Error(
+      "Hosted device-sync control-plane reconciliation requires a configured hosted device-sync control-plane port.",
+    );
+  }
+
+  const deviceSyncPort = input.deviceSyncPort;
+  const secret = input.secret;
+  input.onStage?.("control_plane_reconcile");
+  let state = input.state;
+  const reconcile = () => {
+    const wakeRecovery = resolveHostedDeviceSyncWakeRecovery({
+      service: input.service,
+      state,
+      wake: input.wake,
+    });
+    return reconcileHostedDeviceSyncControlPlaneState({
+      deferNextReconcileAtForLocalAccountId: wakeRecovery
+        ? resolveHostedDeviceSyncWakeLocalAccountId({ state, wake: input.wake })
+        : null,
+      deviceSyncPort,
+      secret,
+      service: input.service,
+      signal: input.signal,
+      state,
+      wake: input.wake,
+    });
+  };
+
+  if (!await reconcile()) {
+    const store = requireHostedRuntimeDeviceSyncStore(input.service);
+    const currentPassState = state;
+    const currentPassAccountId = resolveHostedDeviceSyncWakeLocalAccountId({
+      state,
+      wake: input.wake,
+    });
+    const currentPassAccount = currentPassAccountId
+      ? store.getAccountById(currentPassAccountId)
+      : null;
+    const currentPassCadence = currentPassAccount?.status === "active"
+      ? {
+          connectedAt: currentPassAccount.connectedAt,
+          nextReconcileAt: currentPassAccount.nextReconcileAt,
+        }
+      : null;
+    const snapshot = await fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+      deviceSyncPort,
+      includeCredentialMaterial: true,
+      signal: input.signal,
+    });
+    state = await hydrateHostedDeviceSyncControlPlaneState({
+      deviceSyncPort,
+      secret,
+      service: input.service,
+      signal: input.signal,
+      snapshot,
+      wake: input.wake,
+    });
+    if (state.wakeSuperseded === true) {
+      return state;
+    }
+    state.dirtyWorkRemaining = currentPassState.dirtyWorkRemaining;
+    state.pendingDirtyAcks = currentPassState.pendingDirtyAcks;
+    state.pendingDirtyPayloadJobs = currentPassState.pendingDirtyPayloadJobs;
+    const refreshedAccountId = resolveHostedDeviceSyncWakeLocalAccountId({
+      state,
+      wake: input.wake,
+    });
+    const refreshedAccount = refreshedAccountId
+      ? store.getAccountById(refreshedAccountId)
+      : null;
+    if (
+      currentPassCadence
+      && refreshedAccount?.status === "active"
+      && refreshedAccount.connectedAt === currentPassCadence.connectedAt
+    ) {
+      store.patchAccount(refreshedAccount.id, {
+        nextReconcileAt: currentPassCadence.nextReconcileAt,
+      });
+    }
+    if (snapshot && state.snapshot) {
+      state.snapshot = {
+        ...snapshot,
+        connections: snapshot.connections.filter((entry) =>
+          state.hostedToLocalAccountIds.has(entry.connection.id)
+        ),
+      };
+    }
+    if (!await reconcile()) {
+      throw new Error(
+        "Hosted device-sync control-plane reconciliation changed during its exact retry.",
+      );
+    }
+  }
+
+  await completeHostedDeviceSyncFitbitMigrations({
+    deviceSyncPort,
+    platform: input.platform,
+    service: input.service,
+    signal: input.signal,
+    state,
+  });
+  return state;
 }
 
 async function completeHostedDeviceSyncFitbitMigrations(input: {
@@ -865,6 +973,16 @@ function buildHostedDeviceSyncYieldedPassResult(input: {
         wake: input.wake,
       })
     : null;
+  const retainedWake = wakeRecovery?.wake
+    && isHostedDeviceSyncCompletionFenceWake(wakeRecovery.wake)
+    ? {
+        ...wakeRecovery.wake,
+        hint: {
+          ...wakeRecovery.wake.hint,
+          reason: "yielded_before_reconciliation",
+        },
+      }
+    : wakeRecovery?.wake ?? null;
   const serviceNextWakeAt = resolveHostedDeviceSyncServiceNextWakeAt(input.service);
   return {
     nextWakeAt,
@@ -876,7 +994,7 @@ function buildHostedDeviceSyncYieldedPassResult(input: {
           record: attachHostedDeviceSyncMailboxRetry({
             mailboxRetryAt: wakeRecovery ? nextWakeAt : null,
             record: resolveHostedDeviceSyncDirtyPostCheckpointRecord({ state: syncState }),
-            retainedWake: wakeRecovery?.wake ?? null,
+            retainedWake,
           }),
         })
       : null,
@@ -1298,13 +1416,13 @@ export async function runHostedDeviceSyncWakeLane(input: {
           onProcessedJobs: (observedProcessedJobs) => {
             processedJobs = observedProcessedJobs;
           },
+          onJobTimingDiagnostics: (
+            observedJobTimingDiagnostics: readonly DeviceSyncJobTimingDiagnostic[],
+          ) => {
+            jobTimingDiagnostics = observedJobTimingDiagnostics;
+          },
           ...(input.runtimeLogPlatform?.logPort
             ? {
-                onJobTimingDiagnostics: (
-                  observedJobTimingDiagnostics: readonly DeviceSyncJobTimingDiagnostic[],
-                ) => {
-                  jobTimingDiagnostics = observedJobTimingDiagnostics;
-                },
                 onQueueSnapshots: (observedQueueSnapshots: HostedDeviceSyncPassQueueSnapshots) => {
                   queueSnapshots = observedQueueSnapshots;
                 },
@@ -1366,6 +1484,9 @@ export async function runHostedDeviceSyncWakeLane(input: {
       ...(nextWake.reason ? { nextWakeReason: nextWake.reason } : {}),
       parserProcessed: 0,
       postCheckpointRecord: deviceSyncResult.postCheckpointRecord ?? null,
+      ...(jobTimingDiagnostics.some((diagnostic) => diagnostic.canonicalProgressCommitted === true)
+        ? { systemProgressed: true as const }
+        : {}),
       ...(deviceSyncResult.stagedDirtyAcks
         ? { stagedDirtyAcks: deviceSyncResult.stagedDirtyAcks }
         : {}),
@@ -1911,6 +2032,16 @@ function buildHostedDeviceSyncFailureDiagnosticRedactedJson(
   const redacted: Record<string, boolean | number | string | null> = {
     failureRetryable: diagnostic.retryable,
   };
+
+  // Keep this finite reason ahead of optional details for bounded log sanitizers.
+  const ecgBindingReason = diagnostic.details.junctionEcgBindingReason;
+  if (
+    diagnostic.code === "JUNCTION_ECG_RECORDING_BINDING_INCOMPLETE"
+    && typeof ecgBindingReason === "string"
+    && JUNCTION_ECG_BINDING_REASONS.has(ecgBindingReason)
+  ) {
+    redacted.junctionEcgBindingReason = ecgBindingReason;
+  }
 
   if (diagnostic.accountStatus) {
     redacted.providerAccountStatus = toHostedRuntimeLogCode(diagnostic.accountStatus);

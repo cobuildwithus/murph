@@ -36,6 +36,8 @@ import {
   payloadSchemaEnvelopeSchema,
 } from './commands/command-factory-primitives.js'
 import {
+  commonsGoalListResultSchema,
+  commonsGoalShowResultSchema,
   commonsProtocolExploreResultSchema,
   commonsProtocolListResultSchema,
   commonsProtocolShowResultSchema,
@@ -173,6 +175,7 @@ import {
 } from './commands/workout.js'
 import {
   registerWearablesCommands,
+  wearablesActivityListHint,
   wearablesActivityListResultSchema,
   wearablesBodyStateListResultSchema,
   wearablesDayResultSchema,
@@ -765,6 +768,18 @@ export const vaultCliCommandDescriptors = [
     rootCommandNames: ['commons'],
     leafCommands: [
       {
+        path: ['commons', 'goal', 'list'],
+        description:
+          'List public Health Commons outcome guides with optional text and category filters.',
+        output: commonsGoalListResultSchema,
+      },
+      {
+        path: ['commons', 'goal', 'show'],
+        description:
+          'Show one compact public Health Commons outcome guide by key, slug, route id, or alias, including exact revisions.',
+        output: commonsGoalShowResultSchema,
+      },
+      {
         path: ['commons', 'protocol', 'list'],
         description:
           'List public Health Commons protocol variants with optional text, status, and category filters.',
@@ -831,8 +846,8 @@ export const vaultCliCommandDescriptors = [
         'resolveWorkoutImportStatusForRawSource',
       ],
     },
-    register({ cli, services }) {
-      registerDocumentCommands(cli, services)
+    register({ cli, services, inboxServices }) {
+      registerDocumentCommands(cli, services, inboxServices)
     },
   },
   {
@@ -1533,6 +1548,7 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['wearables', 'activity', 'list'],
         description: 'List semantic daily activity summaries with deduped workouts, steps, and distance details.',
+        hint: wearablesActivityListHint,
         output: wearablesActivityListResultSchema,
       },
       {

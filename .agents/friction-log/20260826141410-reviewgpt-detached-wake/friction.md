@@ -1,6 +1,7 @@
 ---
 title: 'ReviewGPT detached wake rejects its emitted capture identity'
 severity: 'minor'
+issue: 'cobuildwithus/murph#2440'
 ---
 
 ## Expected Behavior
@@ -25,3 +26,13 @@ Validate the persisted committed-turn selector before advertising the replayable
 ## Context
 
 This blocks the documented handoff from a long-running foreground review to its detached completion owner during a PR completion loop.
+
+## Additional reproduction
+
+A completed implementation download can also reject the assistant identity when
+the exporter omits a code-block language badge that the response waiter retained.
+The exporter may reduce the preceding user signature to its attachment label.
+The unique user and assistant message IDs, response content apart from the badge,
+model, and sole attachment control still agree. Canonicalize equivalent rendered
+text consistently in the waiter and exporter so exact artifact recovery does not
+require separate identity verification.

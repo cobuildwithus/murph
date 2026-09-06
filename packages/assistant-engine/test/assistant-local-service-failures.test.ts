@@ -785,6 +785,7 @@ test('sendAssistantMessageLocal recovers reaction no-reply before draining later
     await providerInput.onFinishWithoutReplyAccepted?.({
       deliveryContextOrdinal: 0,
       messageReactionPending: true,
+      precedingReplyDeliveryContextOrdinal: null,
     })
     await providerInput.onFinishWithoutReplyRecorded?.({
       deliveryContextOrdinal: 0,
@@ -1485,6 +1486,7 @@ test('sendAssistantMessageLocal durably records accepted no-reply markers before
     await providerInput.onFinishWithoutReplyAccepted?.({
       deliveryContextOrdinal: 0,
       messageReactionPending: false,
+      precedingReplyDeliveryContextOrdinal: null,
     })
     await providerInput.onFinishWithoutReplyRecorded?.({
       deliveryContextOrdinal: 0,
@@ -1570,6 +1572,7 @@ test('sendAssistantMessageLocal writes no-reply markers after caller retry fence
     await providerInput.onFinishWithoutReplyAccepted?.({
       deliveryContextOrdinal: 0,
       messageReactionPending: false,
+      precedingReplyDeliveryContextOrdinal: null,
     })
     throw new Error('unreachable after no-reply callback failure')
   })
@@ -1614,6 +1617,7 @@ test('sendAssistantMessageLocal completes no-reply if marker persistence fails a
       await providerInput.onFinishWithoutReplyAccepted?.({
         deliveryContextOrdinal: 0,
         messageReactionPending: false,
+        precedingReplyDeliveryContextOrdinal: null,
       })
       await providerInput.onFinishWithoutReplyRecorded?.({
         deliveryContextOrdinal: 0,
@@ -1754,6 +1758,7 @@ test('sendAssistantMessageLocal persists live-steered input before its no-reply 
     await providerInput.onFinishWithoutReplyAccepted?.({
       deliveryContextOrdinal: 1,
       messageReactionPending: false,
+      precedingReplyDeliveryContextOrdinal: null,
     })
     await providerInput.onFinishWithoutReplyRecorded?.({
       deliveryContextOrdinal: 1,
@@ -1850,7 +1855,21 @@ test('sendAssistantMessageLocal persists live-steered input before its no-reply 
   expect(mocks.clearAssistantSessionCodexResumeState).not.toHaveBeenCalled()
 })
 
-test('sendAssistantMessageLocal completes terminal provider failures after live-steered no-reply', async () => {
+test.each([
+  {
+    caseName: 'completes a pure live-steered no-reply',
+    precedingReplyDeliveryContextOrdinal: null,
+    recovers: true,
+  },
+  {
+    caseName: 'retries when an earlier reply still needs delivery',
+    precedingReplyDeliveryContextOrdinal: 0,
+    recovers: false,
+  },
+])('sendAssistantMessageLocal $caseName after a terminal provider failure', async ({
+  precedingReplyDeliveryContextOrdinal,
+  recovers,
+}) => {
   const terminalError = new Error('provider failed after steered no-reply')
   const session = createAssistantSession({
     binding: {
@@ -1900,6 +1919,7 @@ test('sendAssistantMessageLocal completes terminal provider failures after live-
     await providerInput.onFinishWithoutReplyAccepted?.({
       deliveryContextOrdinal: 1,
       messageReactionPending: false,
+      precedingReplyDeliveryContextOrdinal,
     })
     await providerInput.onFinishWithoutReplyRecorded?.({
       deliveryContextOrdinal: 1,
@@ -1952,10 +1972,34 @@ test('sendAssistantMessageLocal completes terminal provider failures after live-
   })
   providerRelease.resolve()
 
-  const [initialResult, steeredResult] = await Promise.all([
+  const [initialOutcome, steeredOutcome] = await Promise.allSettled([
     initialResultPromise,
     steeredResultPromise,
   ])
+
+  if (!recovers) {
+    expect(initialOutcome).toEqual({
+      reason: terminalError,
+      status: 'rejected',
+    })
+    expect(steeredOutcome).toEqual({
+      reason: terminalError,
+      status: 'rejected',
+    })
+    expect(
+      mocks.runtimeState.turns.acceptedInputs.updateAdmissionState,
+    ).not.toHaveBeenCalledWith({
+      admissionState: 'commit-started',
+      turnId: 'turn-1',
+    })
+    expect(mocks.finalizeAssistantTurnArtifacts).not.toHaveBeenCalled()
+    return
+  }
+
+  assert.equal(initialOutcome.status, 'fulfilled')
+  assert.equal(steeredOutcome.status, 'fulfilled')
+  const initialResult = initialOutcome.value
+  const steeredResult = steeredOutcome.value
 
   assert.equal(initialResult.responseDisposition, 'none')
   assert.equal(steeredResult.responseDisposition, 'none')

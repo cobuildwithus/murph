@@ -538,6 +538,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
       retainFailureInScopedCache: true,
       userId: "member_prewarm_1",
     });
+    expect(calls[0]).toBe("unwrap");
     // The scoped cache hands out a private copy and expects it wiped; warming
     // needs the unwrap, not the plaintext.
     expect(issuedRootKeys).toHaveLength(1);

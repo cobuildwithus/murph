@@ -759,7 +759,6 @@ export function verifyWorkspaceImportPolicy({
       "createNamedDeviceProviderRegistry",
       "resolveDeviceProviderDescriptor",
       "resolveDeviceProviderSourcePriority",
-      "requireDeviceProviderOAuthDescriptor",
       "requireDeviceProviderSyncDescriptor",
       "requireDeviceProviderWebhookDescriptor",
       "DeviceProviderDescriptor",

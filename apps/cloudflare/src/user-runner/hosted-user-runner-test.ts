@@ -1,5 +1,6 @@
 import type {
   HostedWorkspaceInvocationResult,
+  HostedWorkspaceReadResponse,
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
@@ -25,6 +26,7 @@ export interface HostedRunnerStuckInvocationTestResult {
 export interface HostedRunnerActiveFenceTestResult {
   attemptId: string;
   processingMode: RunnerWriteFenceToken["processingMode"];
+  runnerContainerName: string | null;
 }
 
 export interface HostedRunnerAgedActiveFenceTestResult {
@@ -99,6 +101,15 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
     });
   }
 
+  async readHostedWorkspaceFromWebForTest(input: {
+    timeoutMs?: number;
+    userId: string;
+  }): Promise<HostedWorkspaceReadResponse> {
+    return await this.readHostedWorkspaceFromWeb(input.userId, {
+      ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+    });
+  }
+
   private async ensureRuntimeProcessingForTest(input: {
     userId: string;
   }): Promise<HostedWorkspaceInvocationResult> {
@@ -125,13 +136,14 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
     userId: string;
   }): Promise<HostedRunnerStuckInvocationTestResult> {
     await this.stateStore.bindUser(input.userId);
+    const record = await this.stateStore.readState();
     const token = await this.stateStore.beginWriteFence({
-      runnerContainerName: input.sameWorkerVersion
+      runnerContainerName: record.pendingRunnerContainerName ?? (input.sameWorkerVersion
         ? resolveHostedExecutionRunnerContainerName({
             source: this.testRunnerRuntimeEnvSource,
             userId: input.userId,
           })
-        : input.userId,
+        : input.userId),
       userId: input.userId,
     });
     if (typeof input.startedAgoMs === "number") {
@@ -156,6 +168,7 @@ export class HostedUserRunnerWithTestControls extends HostedUserRunner {
       ? {
           attemptId: token.attemptId,
           processingMode: token.processingMode,
+          runnerContainerName: token.runnerContainerName,
         }
       : null;
   }

@@ -359,7 +359,7 @@ export class PrismaDeviceSyncControlPlaneStore
   async listMemberConnectionStatuses(input: {
     limit: number;
     provider: string;
-    status: "active" | "not_disconnected";
+    status: "active" | "all" | "not_disconnected";
     userId: string;
   }): Promise<HostedMemberDeviceConnectionStatus[]> {
     return this.connections.listMemberConnectionStatuses(input);

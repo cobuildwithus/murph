@@ -9,10 +9,7 @@ export function LocalRunSection({
   return (
     <section className="bg-[#ede3d0] px-5 pb-16 pt-10 sm:px-10 sm:pb-20 sm:pt-12 lg:px-16 lg:pb-24 lg:pt-14">
       <div className="mx-auto max-w-[1080px]">
-        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#655d4f]">
-          Optional · Open source
-        </span>
-        <h2 className="mt-4 max-w-[18ch] font-serif text-[clamp(1.75rem,3vw,2.5rem)] font-semibold leading-[1.08] tracking-[-0.03em] text-[#2d3436]">
+        <h2 className="max-w-[18ch] font-serif text-[clamp(1.75rem,3vw,2.5rem)] font-semibold leading-[1.08] tracking-[-0.03em] text-[#2d3436]">
           You can also install it locally.
         </h2>
         <p className="mt-5 max-w-[52ch] text-[0.9375rem] leading-[1.75] text-pretty text-[#5a5244] sm:text-base">

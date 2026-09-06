@@ -106,7 +106,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json && node dist/assistant/generate-cli-surface-contract.js",
+    "build": "node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json",
     "typecheck": "node ../../scripts/run-typescript.mjs package -p tsconfig.typecheck.json --pretty false",
     "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage",
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
@@ -129,7 +129,7 @@
     "node": ">=24.14.1"
   },
   "devDependencies": {
-    "@openai/codex": "0.149.1",
+    "@openai/codex": "0.153.4",
     "zod": "^4.4.3"
   }
 }

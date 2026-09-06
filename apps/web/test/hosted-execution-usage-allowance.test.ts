@@ -435,6 +435,44 @@ describe("hosted AI usage allowance pricing", () => {
     });
   });
 
+  it.each([
+    [272_000, "standard", 4_220_000n],
+    [272_001, "standard", 7_365_020n],
+    [272_000, "openai-flex", 2_110_000n],
+    [272_001, "openai-flex", 3_682_510n],
+  ] as const)("prices Astra at %i input tokens with %s accounting", (inputTokens, tokenPricingBasis, expected) => {
+    const result = priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      requestedModel: "gpt-6-astra",
+      servedModel: "openai/gpt-6-astra-2026-09-04",
+      inputTokens,
+      cachedInputTokens: 100_000,
+      cacheWriteTokens: 100_000,
+      outputTokens: 43_000,
+      tokenPricingBasis,
+    });
+    expect(result.costUsdMicros).toBe(expected);
+    expect(result.pricingVersion).toBe(`openai-api-pricing-2026-09-04-gpt-6-astra-${tokenPricingBasis}`);
+    expect(result.pricingSnapshot).toMatchObject({ model: "gpt-6-astra", modelSource: "served", pricingSource: "https://developers.openai.com/api/docs/models/gpt-6-astra" });
+  });
+
+  it.each(["thread.tokenUsage.total.delta", "subagent.turn.tokenUsage.total.delta"])("does not mistake cumulative Astra input for a long request: %s", (usageExtractionSourcePath) => {
+    const result = priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      requestedModel: "gpt-6-astra",
+      servedModel: "gpt-6-astra",
+      inputTokens: 400_000,
+      cachedInputTokens: 0,
+      outputTokens: 10_000,
+      usageExtractionSourcePath,
+    });
+    expect(result.costUsdMicros).toBe(4_500_000n);
+  });
+
+  it("does not invent Venice pricing for Astra", () => {
+    expect(() => priceHostedAiUsageForAllowance({ ...BASE_USAGE_RECORD, requestedModel: "gpt-6-astra", servedModel: "gpt-6-astra", providerName: "venice" })).toThrow("pricing is missing for the provider model");
+  });
+
   it("prices GPT-5.6 model slugs with official standard and flex accounting", () => {
     expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
@@ -544,14 +582,14 @@ describe("hosted AI usage allowance pricing", () => {
   it("prices Venice GPT-5.6 usage at Venice's official provider rates", () => {
     const cases = [
       {
-        costUsdMicros: 10_440_000n,
+        costUsdMicros: 2_230_000n,
         model: "gpt-5.6-luna",
         providerModel: "openai-gpt-56-luna",
         rates: {
-          cachedInput: "130000",
-          cacheWrite: "1560000",
-          input: "1250000",
-          output: "7500000",
+          cachedInput: "30000",
+          cacheWrite: "330000",
+          input: "270000",
+          output: "1600000",
         },
       },
       {
@@ -600,9 +638,31 @@ describe("hosted AI usage allowance pricing", () => {
           standardCostUsdMicros: testCase.costUsdMicros.toString(),
           tokenPricingBasis: "standard",
         },
-        pricingVersion: "venice-api-pricing-2026-08-04-gpt-5.6-standard",
+        pricingVersion: "venice-api-pricing-2026-08-30-gpt-5.6-standard",
       });
     }
+  });
+
+  it("prices regular Venice Luna without applying Luna Pro rates", () => {
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      cachedInputTokens: 0,
+      cacheWriteTokens: 0,
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      providerName: "venice",
+      requestedModel: "gpt-5.6-luna",
+      servedModel: "gpt-5.6-luna",
+      totalTokens: 2_000_000,
+    })).toMatchObject({
+      costUsdMicros: 1_870_000n,
+      counted: true,
+      pricingSnapshot: {
+        providerModel: "openai-gpt-56-luna",
+        standardCostUsdMicros: "1870000",
+      },
+      pricingVersion: "venice-api-pricing-2026-08-30-gpt-5.6-standard",
+    });
   });
 
   it("prices GPT-5.6 Sol tokens at the current Standard and Flex rates", () => {
@@ -1050,10 +1110,10 @@ describe("hosted AI usage allowance pricing", () => {
     });
   });
 
-  it("prices Gemini 3.7 Flash video analysis with thinking in the output bucket", () => {
+  it("prices Gemini 3.8 Flash video analysis with thinking in the output bucket", () => {
     const usage = buildHostedGeminiVideoAnalysisUsageRecord({
       memberId: "member_123",
-      model: "gemini-3.7-flash",
+      model: "gemini-3.8-flash",
       occurredAt: "2026-08-20T12:00:00.000Z",
       providerRequestId: "gemini_request_123",
       usage: {
@@ -1070,7 +1130,7 @@ describe("hosted AI usage allowance pricing", () => {
       counted: true,
       pricingSnapshot: {
         credentialSource: "platform",
-        model: "gemini-3.7-flash",
+        model: "gemini-3.8-flash",
         modelSource: "requested",
         pricingSource: "https://ai.google.dev/gemini-api/docs/pricing",
         pricingWindow: {
@@ -1082,7 +1142,7 @@ describe("hosted AI usage allowance pricing", () => {
           input: "750000",
           outputIncludingThinking: "3750000",
         },
-        requestedModel: "gemini-3.7-flash",
+        requestedModel: "gemini-3.8-flash",
         schema: "murph.hosted-ai-usage-allowance-pricing.v1",
         servedModel: null,
         standardCostUsdMicros: "620",
@@ -1102,7 +1162,7 @@ describe("hosted AI usage allowance pricing", () => {
         },
       },
       pricingVersion:
-        "gemini-3.7-flash-video-pricing-through-2026-12-31",
+        "gemini-3.8-flash-video-pricing-through-2026-12-31",
     });
 
     expect(priceHostedAiUsageForAllowance({
@@ -1121,14 +1181,38 @@ describe("hosted AI usage allowance pricing", () => {
           outputIncludingThinking: "7500000",
         },
       },
-      pricingVersion: "gemini-3.7-flash-video-pricing-from-2027-01-01",
+      pricingVersion: "gemini-3.8-flash-video-pricing-from-2027-01-01",
+    });
+
+    const previousModelUsage = buildHostedGeminiVideoAnalysisUsageRecord({
+      memberId: "member_123",
+      model: "gemini-3.7-flash",
+      occurredAt: "2026-08-20T12:00:00.000Z",
+      providerRequestId: "gemini_request_123",
+      usage: {
+        cachedContentTokenCount: 16,
+        candidatesTokenCount: 80,
+        promptTokenCount: 320,
+        thoughtsTokenCount: 24,
+        totalTokenCount: 424,
+      },
+    });
+
+    expect(priceHostedAiUsageForAllowance(previousModelUsage)).toMatchObject({
+      counted: true,
+      pricingSnapshot: {
+        model: "gemini-3.7-flash",
+        requestedModel: "gemini-3.7-flash",
+      },
+      pricingVersion:
+        "gemini-3.7-flash-video-pricing-through-2026-12-31",
     });
   });
 
   it("fails closed when Gemini video usage drifts from its Worker-authored shape", () => {
     const usage = buildHostedGeminiVideoAnalysisUsageRecord({
       memberId: "member_123",
-      model: "gemini-3.7-flash",
+      model: "gemini-3.8-flash",
       occurredAt: "2026-08-20T12:00:00.000Z",
       usage: {
         candidatesTokenCount: 80,
@@ -1187,7 +1271,7 @@ describe("hosted AI usage allowance pricing", () => {
   it("prices Gemini input-only usage when a blocked response omits candidates", () => {
     const usage = buildHostedGeminiVideoAnalysisUsageRecord({
       memberId: "member_123",
-      model: "gemini-3.7-flash",
+      model: "gemini-3.8-flash",
       occurredAt: "2026-08-20T12:00:00.000Z",
       usage: {
         promptTokenCount: 320,

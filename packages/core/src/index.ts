@@ -33,6 +33,7 @@ export type {
   AssistantPersonalityPreferencesUpdate,
   AssistantPreferencesUpdate,
   PreferencesDocumentSnapshot,
+  WorkoutCapturePreferencesUpdate,
 } from "./preferences.ts";
 export {
   assertPathWithinVault,
@@ -139,6 +140,8 @@ export {
   deleteProvider,
   deleteRecipe,
   ensureJournalDay,
+  listInboxDocumentDefaultPromotionCorrelations,
+  listLiveExactDocumentImportEvidence,
   importAssessmentResponse,
   importDeviceBatch,
   importDocument,
@@ -150,6 +153,7 @@ export {
   linkJournalStreams,
   promoteInboxExperimentNote,
   promoteInboxJournal,
+  recordInboxDocumentDefaultPromotion,
   removeAutomaticMealPhoto,
   repairJunctionWorkoutHeartRateZones,
   repairExperimentMedia,
@@ -161,6 +165,7 @@ export {
   unlinkJournalEventIds,
   unlinkJournalStreams,
   updateAssistantPreferences,
+  updateWorkoutCapturePreferences,
   updateWorkoutUnitPreferences,
   updateWearablePreferences,
   updateExperiment,
@@ -342,6 +347,7 @@ export {
   findEventByExternalRef,
   findEventsByRawRefs,
   readStoredCaptureLookupIndex,
+  isGeneratedImageCaptureEvent,
   runGeneratedImageCaptureRetention,
   buildSleepSessionEventDraft,
   buildSupplementIntakeEventDraft,
@@ -351,6 +357,9 @@ export {
   WORKOUT_SOURCE_IMPORT_STATUS_VALUES,
 } from "./mutations.ts";
 export type {
+  InboxDocumentDefaultPromotionCorrelation,
+  LiveExactDocumentImportEvidence,
+  LiveExactDocumentImportEvidenceGroup,
   WorkoutSourceImportStatus,
 } from "./mutations.ts";
 export type {
@@ -422,4 +431,23 @@ export type {
   RecoverInterruptedClosedIntegrationIngestArchivesResult,
   StoredIntegrationIngestEntry,
 } from "./integration-ingests.ts";
+export {
+  MAX_EVENT_LEDGER_ARCHIVE_BYTES,
+  MAX_EVENT_LEDGER_SHARD_BYTES,
+  archiveClosedEventLedgerShards,
+  isEventLedgerLogicalPath,
+  listEventLedgerShardPaths,
+  listEventLedgerShardPathsInterruptible,
+  listEventLedgerShardSources,
+  readEventLedgerShardRecords,
+  readEventLedgerShardRows,
+  readEventLedgerShardText,
+  resolveEventLedgerShardSource,
+  visitEventLedgerShardRecordsInterruptible,
+} from "./event-ledger-storage.ts";
+export type {
+  ArchiveClosedEventLedgerShardsResult,
+  EventLedgerShardContentReceipt,
+  EventLedgerShardSource,
+} from "./event-ledger-storage.ts";
 export * from "./integration-ingest-migration.ts";

@@ -4,9 +4,7 @@ import {
   buildHostedExecutionAssistantAskRequestedWake,
   buildHostedExecutionAssistantNotificationRequestedWake,
 } from "../src/builders.ts";
-import {
-  HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
-} from "../src/contracts.ts";
+import { HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS } from "../src/contracts.ts";
 import { parseHostedExecutionWake } from "../src/parsers.ts";
 import {
   parseHostedOperatorTaskControlRequest,

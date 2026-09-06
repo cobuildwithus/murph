@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -199,6 +200,184 @@ afterEach(() => {
 })
 
 describe('assistant Codex turn planning', () => {
+  it('characterizes complete route-plan outputs across planner branch families', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const promptTimeContext = {
+      currentLocalDate: '2026-08-30',
+      currentTimeZone: 'America/New_York',
+    }
+    const route = createRoute()
+    const session = createSession()
+    const directAudience = {
+      channel: 'telegram' as const,
+      effectiveThreadIsDirect: true,
+      threadId: 'thread-characterization-direct',
+      threadIsDirect: true,
+    }
+    const groupAudience = {
+      channel: 'linq' as const,
+      effectiveThreadIsDirect: false,
+      threadId: 'thread-characterization-group',
+      threadIsDirect: false,
+    }
+    const scheduledOccurrenceAt = '2026-08-30T09:00:00.000-04:00'
+    const plans = {
+      direct: await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          channel: 'telegram',
+          threadId: directAudience.threadId,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext,
+        route,
+        session,
+        sharedPlan: createSharedPlan({}, directAudience),
+      }),
+      group: await resolveAssistantRouteTurnPlan({
+        executionContext: {
+          hosted: {
+            memberId: 'member-characterization-group',
+            userEnvKeys: [],
+          },
+        },
+        input: {
+          ...createMessageInput(),
+          channel: 'linq',
+          threadId: groupAudience.threadId,
+          threadIsDirect: false,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext,
+        route,
+        session,
+        sharedPlan: createSharedPlan({}, groupAudience),
+      }),
+      maintenance: await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          maintenanceProfile: 'member-memory',
+          scheduledInvocationAuthority: {
+            automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+            occurrenceAt: scheduledOccurrenceAt,
+          },
+          scheduledOccurrenceAt,
+          turnTrigger: 'automation-cron',
+        },
+        profile: {
+          promptProfile: 'maintenance',
+          threadScope: 'isolated-thread',
+          toolProfile: 'maintenance-turn',
+        },
+        promptTimeContext,
+        route,
+        session,
+        sharedPlan: createSharedPlan(),
+      }),
+      outputOnly: await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: createMessageInput(),
+        profile: {
+          promptProfile: 'assistant-ask-continuation',
+          threadScope: 'isolated-thread',
+          toolProfile: 'output-only-turn',
+        },
+        promptTimeContext,
+        route,
+        session,
+        sharedPlan: createSharedPlan({}, directAudience),
+      }),
+      scheduledEmail: await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          channel: 'email',
+          scheduledInvocationAuthority: {
+            automationId: 'automation-characterization-email',
+            occurrenceAt: scheduledOccurrenceAt,
+          },
+          scheduledOccurrenceAt,
+          threadId: 'thread-characterization-email',
+          turnTrigger: 'automation-cron',
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext,
+        route,
+        session,
+        sharedPlan: createSharedPlan({}, {
+          channel: 'email',
+          effectiveThreadIsDirect: true,
+          threadId: 'thread-characterization-email',
+          threadIsDirect: true,
+        }),
+      }),
+    }
+    const digestPlan = (
+      plan: Awaited<ReturnType<typeof resolveAssistantRouteTurnPlan>>,
+    ) => createHash('sha256').update(JSON.stringify({
+      assistantCliContract: plan.assistantCliContract,
+      assistantContractFingerprint: plan.assistantContractFingerprint,
+      assistantPreferredElevenLabsVoiceId:
+        plan.assistantPreferredElevenLabsVoiceId,
+      cliEnv: plan.cliEnv,
+      codexContinuation: plan.codexContinuation,
+      conversationHistoryMessages: plan.conversationHistoryMessages,
+      developerInstructions: plan.developerInstructions,
+      diagnosticsPolicy: plan.diagnosticsPolicy,
+      dynamicTools: plan.dynamicTools,
+      environments: plan.environments,
+      onboardingGuidanceInjected: plan.onboardingGuidanceInjected,
+      planningDiagnostics: {
+        dynamicToolCount: plan.planningDiagnostics.dynamicToolCount,
+        messageTargetDynamicToolsAvailable:
+          plan.planningDiagnostics.messageTargetDynamicToolsAvailable,
+        messageTargetingAvailable:
+          plan.planningDiagnostics.messageTargetingAvailable,
+        shouldPrepareBootstrapContext:
+          plan.planningDiagnostics.shouldPrepareBootstrapContext,
+      },
+      promptCacheMetadata: plan.promptCacheMetadata,
+      resume: plan.resume,
+      sessionContext: plan.sessionContext,
+      systemPrompt: plan.systemPrompt,
+      turnContextPrompt: plan.turnContextPrompt,
+      voiceMemoDeliveryChannel: plan.voiceMemoDeliveryChannel,
+      workingDirectory: plan.workingDirectory,
+    })).digest('hex')
+
+    expect(Object.fromEntries(
+      Object.entries(plans).map(([name, plan]) => [name, digestPlan(plan)]),
+    )).toMatchInlineSnapshot(`
+      {
+        "direct": "beedb5985aa161710fbfe74c9503ef1093fc664046dfc03c2977cb9695b24969",
+        "group": "ead4ee04f2ca83fc9dd1db3a581b0ab3afa60b612d7c9372a26833b8bb98a904",
+        "maintenance": "4c439dbf05ccb6d2cd7540b1ef7f94c99e898afd9b9658abefa860a8b421ca55",
+        "outputOnly": "a83a04afea06e5290de36b14a0fee5d18970077a8294dde129b2e2dfa99116b4",
+        "scheduledEmail": "96c13535e8be8767fd8c935738770caf559223ca0f878ae79672c877ed69825b",
+      }
+    `)
+  })
+
   it('bounds snapshot refresh inside direct provider planning and skips it for groups', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',
@@ -366,9 +545,9 @@ describe('assistant Codex turn planning', () => {
       resolvePlan({ configured: true, group: true }),
       resolvePlan({ configured: true, scheduled: true }),
     ])) {
-      expect(configuredPlan.systemPrompt).toContain(
-        'Configured Exa research:',
-      )
+      expect(configuredPlan.systemPrompt).toContain('Configured Exa research:')
+      expect(configuredPlan.developerInstructions).toContain('Configured Exa research:')
+      expect(configuredPlan.turnContextPrompt).not.toContain('Configured Exa research:')
       expect(configuredPlan.systemPrompt).toContain(
         '`resultIndex` maps to a result',
       )
@@ -381,6 +560,12 @@ describe('assistant Codex turn planning', () => {
       expect(configuredPlan.systemPrompt).toContain(
         'never send a mode-less single-scout request',
       )
+    }
+
+    for (const group of [false, true]) {
+      const configured = await resolvePlan({ configured: true, group })
+      const unavailable = await resolvePlan({ configured: false, group })
+      expect(configured.assistantContractFingerprint).not.toBe(unavailable.assistantContractFingerprint)
     }
 
     const directProgressPlan = await resolvePlan({
@@ -474,13 +659,21 @@ describe('assistant Codex turn planning', () => {
   it('reuses one UTC-only time authority when the member timezone is unknown', async () => {
     const promptTimeContext = {
       canonicalTimeZoneAvailable: false,
-      currentLocalDate: '2026-08-11',
+      currentInstant: '2027-02-14T07:17:05.678Z',
+      currentLocalDate: '2027-02-14',
       currentTimeZone: 'UTC',
     } as const
     const session = createSession()
     const executionPlan = await buildCodexTurnExecutionPlan({
       input: {
         ...createMessageInput(),
+        executionContext: {
+          hosted: {
+            dynamicContextPrompts: [],
+            memberId: 'member-utc-only-time-fixture',
+            userEnvKeys: [],
+          },
+        },
         promptTimeContext,
       },
       plan: createSharedPlan(),
@@ -500,7 +693,10 @@ describe('assistant Codex turn planning', () => {
       "The member's canonical timezone is unknown for this turn.",
     )
     expect(attemptPlan.routePlan.systemPrompt).toContain(
-      'The current UTC date is August 11, 2026; the member-local date is unknown for this turn.',
+      'The current UTC date is February 14, 2027; the member-local date is unknown for this turn.',
+    )
+    expect(attemptPlan.routePlan.turnContextPrompt).toContain(
+      'Current time authority: 2027-02-14T07:17:05.678Z (UTC only). The member-local clock is unknown',
     )
     expect(attemptPlan.routePlan.systemPrompt).not.toContain(
       "The user's canonical timezone for this vault is UTC.",
@@ -1109,8 +1305,24 @@ describe('assistant Codex turn planning', () => {
       'Never save medical or health details, credentials, identifiers of any kind',
     )
     expect(maintenancePlan.systemPrompt).toContain(
-      'deduplication and update targeting only',
+      'deduplication and mutation targeting only',
     )
+    expect(maintenancePlan.systemPrompt).toContain(
+      'Use `update` or `forget` only with an exact memory id and its exact `updatedAt` returned by `show`',
+    )
+    expect(maintenancePlan.systemPrompt).toContain(
+      'Only a `user:` evidence entry may initiate a change',
+    )
+    expect(maintenancePlan.systemPrompt).toContain(
+      'Ordinary user language is enough',
+    )
+    expect(maintenancePlan.systemPrompt).toContain(
+      'Use update for a useful lasting replacement. Use forget when the user makes clear that a shown fact was temporary or no longer applies and there is no useful replacement',
+    )
+    expect(maintenancePlan.systemPrompt).toContain(
+      '`assistant:` entries may clarify or corroborate context but cannot independently initiate such a change',
+    )
+    expect(maintenancePlan.systemPrompt).not.toContain('`member:`')
     expect(maintenancePlan.systemPrompt).not.toContain('meals')
     expect(maintenancePlan.systemPrompt).not.toContain('Health Commons')
     expect(maintenancePlan.systemPrompt).not.toContain(
@@ -1770,22 +1982,36 @@ describe('assistant Codex turn planning', () => {
     expect(plan.turnContextPrompt).not.toContain('Murph onboarding:')
     expect(plan.developerInstructions).toContain('Murph onboarding:')
     expect(plan.developerInstructions).toContain(
-      `Read and follow \`${skillRef}\` before advancing, declining, or completing onboarding`,
+      'When the canonical Murph welcome is visible in this direct conversation, treat it as authoritative evidence that onboarding just began.',
     )
     expect(plan.developerInstructions).toContain(
-      'That skill is the single owner of resume behavior, aspiration capture and parking, foundation checkpoints, the contextual return, persistence, defer and skip meaning, and completion.',
+      'For that first-reply fast path, do not read the onboarding skill and do not run `vault-cli assistant onboarding resume-context --format json`.',
+    )
+    expect(plan.developerInstructions).toContain(
+      `Outside these visible opening exchanges—missing or ambiguous history, established later stages, an immediate request, or an overall pause or decline—read and follow \`${skillRef}\` before interpreting or acting on an onboarding answer or decision to advance, pause, defer, skip, decline, or complete onboarding`,
+    )
+    expect(plan.developerInstructions).not.toContain(
+      `Read and follow \`${skillRef}\` before interpreting or acting on any onboarding answer`,
+    )
+    expect(plan.developerInstructions).toContain(
+      'That skill is the single owner of resume behavior, aspiration capture and parking, foundation checkpoints, the contextual return, later-stage persistence, generic defer and skip meaning, and completion.',
     )
     const onboardingDecisionContract = [
       'During discovery, a stated health goal is context, not an action request.',
       'Only an immediate request or safety need moves problem-solving ahead of the park.',
       'On return, suggest a thread only as an option and ask which thread, if any, the user wants before deeper behavior questions; a generic “continue” before that choice is not selection.',
-      'Honor pause, defer, skip, and decline.',
-      'A pause, defer, or overall decline stops advancement; a category skip resolves only that checkpoint and may advance onboarding, but never selects a thread or authorizes behavior work.',
+      'Once a data source is identified, postponing only its optional connection does not pause onboarding. Do not issue or reissue a link; acknowledge the choice, continue to the next unresolved foundation beat unless the user explicitly pauses onboarding itself, and never imply the connection exists until visible evidence proves it.',
     ] as const
     for (const clause of onboardingDecisionContract) {
       expect(plan.developerInstructions).toContain(clause)
       expect(plan.turnContextPrompt).not.toContain(clause)
     }
+    expect(plan.developerInstructions).not.toContain(
+      'Honor pause, defer, skip, and decline.',
+    )
+    expect(plan.developerInstructions).not.toContain(
+      'A pause, defer, or overall decline stops advancement; a category skip resolves only that checkpoint and may advance onboarding, but never selects a thread or authorizes behavior work.',
+    )
     expect(plan.developerInstructions).not.toContain(
       'roughly 5-6 short assistant messages',
     )
@@ -2663,6 +2889,115 @@ describe('assistant Codex turn planning', () => {
     expect(plan.assistantContractFingerprint).toEqual(expect.any(String))
   })
 
+  it.each([
+    { label: 'direct', threadIsDirect: true },
+    { label: 'group', threadIsDirect: false },
+  ] as const)(
+    'rotates an eligible pre-existing $label group-tool thread once with bounded history',
+    async ({ label, threadIsDirect }) => {
+      planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+        'bootstrap contract',
+      )
+      planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+        supportsNativeResume: true,
+      })
+      const vault = await mkdtemp(
+        path.join(os.tmpdir(), `assistant-group-contract-rotation-${label}-`),
+      )
+      const route = createRoute()
+      const threadId = `thread-contract-rotation-${label}`
+      const hostedToolContext: AssistantHostedToolContext = {
+        ...createHostedToolContext(),
+        groupTool: { request: vi.fn() },
+      }
+      const sharedPlan = createSharedPlan({}, {
+        channel: 'linq',
+        effectiveThreadIsDirect: threadIsDirect,
+        threadId,
+        threadIsDirect,
+      })
+      const common = {
+        executionContext: {
+          hosted: {
+            memberId: `member-contract-rotation-${label}`,
+            userEnvKeys: [],
+          },
+        },
+        hostedToolContext,
+        input: {
+          ...createMessageInput(),
+          channel: 'linq',
+          deliverResponse: true,
+          threadId,
+          threadIsDirect,
+          vault,
+        },
+        profile: {
+          promptProfile: 'conversation' as const,
+          threadScope: 'session-thread' as const,
+          toolProfile: 'provider-turn' as const,
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-08-26',
+          currentTimeZone: 'America/New_York',
+        },
+        route,
+        sharedPlan,
+      }
+
+      try {
+        await appendAssistantTranscriptEntries(vault, 'session-test', [
+          { kind: 'user', text: 'Keep the earlier constraint in mind.' },
+          { kind: 'assistant', text: 'I will preserve that constraint.' },
+        ])
+        const firstPostDeployPlan = await resolveAssistantRouteTurnPlan({
+          ...common,
+          session: createSession({
+            resumeState: {
+              assistantContractFingerprint: '0'.repeat(64),
+              routeFingerprint: route.routeFingerprint ?? route.routeId,
+              threadId: `provider-thread-before-${label}`,
+            },
+            turnCount: 2,
+          }),
+        })
+
+        expect(firstPostDeployPlan.resume).toBeNull()
+        expect(firstPostDeployPlan.dynamicTools).toContainEqual(
+          expect.objectContaining({ name: 'group_consult', namespace: 'murph' }),
+        )
+        expect(firstPostDeployPlan.conversationHistoryMessages).toEqual([
+          { content: 'Keep the earlier constraint in mind.', role: 'user' },
+          { content: 'I will preserve that constraint.', role: 'assistant' },
+        ])
+        expect(firstPostDeployPlan.developerInstructions).not.toBeNull()
+
+        const replacementThreadId = `provider-thread-after-${label}`
+        const secondPostDeployPlan = await resolveAssistantRouteTurnPlan({
+          ...common,
+          session: createSession({
+            resumeState: {
+              assistantContractFingerprint:
+                firstPostDeployPlan.assistantContractFingerprint,
+              routeFingerprint: route.routeFingerprint ?? route.routeId,
+              threadId: replacementThreadId,
+            },
+            turnCount: 3,
+          }),
+        })
+
+        expect(secondPostDeployPlan.resume?.codexThreadId).toBe(
+          replacementThreadId,
+        )
+        expect(secondPostDeployPlan.conversationHistoryMessages).toBeUndefined()
+        expect(secondPostDeployPlan.developerInstructions).toBeNull()
+      } finally {
+        await rm(vault, { force: true, recursive: true })
+      }
+    },
+  )
+
   it('keeps the assistant contract fingerprint stable across repeated identical plans', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
@@ -2697,6 +3032,7 @@ describe('assistant Codex turn planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: first.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
           telegramRichContentResponseCardsAvailable: true,
@@ -3285,6 +3621,70 @@ describe('assistant Codex turn planning', () => {
       .toContain('ask_grok')
   })
 
+  it('plans calendar links for accepted direct Linq text turns only', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const acceptedInputItems = [{
+      id: 'ain_calendar_link_planning',
+      source: 'assistant-input' as const,
+    }]
+    const planToolNamesFor = async (options: {
+      accepted?: boolean
+      channel?: 'linq' | 'telegram'
+      threadIsDirect?: boolean
+    } = {}) => {
+      const channel = options.channel ?? 'linq'
+      const threadIsDirect = options.threadIsDirect ?? true
+      const plan = await resolveAssistantRouteTurnPlan({
+        acceptedInputItems: options.accepted === false ? [] : acceptedInputItems,
+        executionContext: threadIsDirect
+          ? null
+          : {
+              hosted: {
+                memberId: 'member-calendar-link-group',
+                userEnvKeys: [],
+              },
+            },
+        input: {
+          ...createMessageInput(),
+          channel,
+          threadIsDirect,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-08-29',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session: createSession(),
+        sharedPlan: createSharedPlan({}, {
+          channel,
+          effectiveThreadIsDirect: threadIsDirect,
+          threadId: 'thread-calendar-link',
+          threadIsDirect,
+        }),
+      })
+      return plan.dynamicTools.map((tool) => tool.name)
+    }
+
+    expect(await planToolNamesFor()).toContain('create_calendar_link')
+    expect(await planToolNamesFor({ accepted: false }))
+      .not.toContain('create_calendar_link')
+    expect(await planToolNamesFor({ channel: 'telegram' }))
+      .not.toContain('create_calendar_link')
+    expect(await planToolNamesFor({ threadIsDirect: false }))
+      .not.toContain('create_calendar_link')
+  })
+
   it('plans murph.analyze_video for accepted direct and authenticated group turns with the Gemini key', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',
@@ -3413,6 +3813,7 @@ describe('assistant Codex turn planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: telegramReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
           telegramRichContentResponseCardsAvailable: true,
@@ -3463,6 +3864,7 @@ describe('assistant Codex turn planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: linqReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
           messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
@@ -3561,6 +3963,7 @@ describe('assistant Codex turn planning', () => {
         developerInstructions:
           linqCurrentMessageNotReactionEligiblePlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
           messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
@@ -3590,6 +3993,7 @@ describe('assistant Codex turn planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: telegramBusinessReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
           telegramRichContentResponseCardsAvailable: true,
@@ -3617,6 +4021,7 @@ describe('assistant Codex turn planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: telegramInferredBindingPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
           telegramRichContentResponseCardsAvailable: true,
@@ -3696,6 +4101,7 @@ describe('assistant Codex turn planning', () => {
       buildAssistantCodexContractFingerprint({
         developerInstructions: plan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
+          followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
           computerToolsAvailable: true,
           exerciseRoutineResponseCardsAvailable: true,
@@ -4053,14 +4459,10 @@ describe('assistant Codex turn planning', () => {
       'Scheduled automation changes for this group room are available through `murph.automation`.',
     )
     expect(plan.developerInstructions).toContain(
-      'Use `murph.automation` with `action: save` to create an ordinary automation, `action: inspect` to read one without mutation, and `action: patch` to change one.',
+      'For automation creation, inspection, changes, or reconciliation, discover `murph.automation` through native `tool_search` or code-mode `ALL_TOOLS`',
     )
-    expect(plan.developerInstructions).toContain(
-      'Patch `status` to pause, reactivate, or archive an existing automation.',
-    )
-    expect(plan.developerInstructions).toContain(
-      'Ordinary patches preserve its stored route.',
-    )
+    expect(plan.dynamicTools.find((tool) => tool.name === 'automation')?.description).toContain('On patch, inspect the current stored automation first')
+    expect(plan.developerInstructions).toContain('The tool owns exact arguments')
     expect(plan.developerInstructions).toContain(
       'A save always binds to the trusted current group room.',
     )
@@ -5091,31 +5493,49 @@ describe('assistant Codex turn planning', () => {
     )
   })
 
-  it('starts a fresh thread when the dynamic tool contract changes', async () => {
+  it('starts a fresh thread when the exercise routine card contract changes', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportsNativeResume: true,
     })
     const route = createRoute()
+    const currentPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: createMessageInput(),
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-05-04',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route,
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+    const oldDynamicTools = currentPlan.dynamicTools.map((tool) =>
+      tool.name === 'attach_exercise_routine_card'
+        ? {
+            ...tool,
+            inputSchema: {
+              ...tool.inputSchema,
+              required: [
+                ...(tool.inputSchema.required ?? []),
+                'footer',
+                'subtitle',
+              ],
+            },
+          }
+        : tool)
+    expect(currentPlan.dynamicTools).toContainEqual(
+      expect.objectContaining({ name: 'attach_exercise_routine_card' }),
+    )
     const oldToolContractFingerprint = buildAssistantCodexContractFingerprint({
-      developerInstructions: (await resolveAssistantRouteTurnPlan({
-        executionContext: null,
-        input: createMessageInput(),
-        profile: {
-          promptProfile: 'conversation',
-          threadScope: 'session-thread',
-          toolProfile: 'provider-turn',
-        },
-        promptTimeContext: {
-          currentLocalDate: '2026-05-04',
-          currentTimeZone: 'Asia/Kuala_Lumpur',
-        },
-        route,
-        session: createSession(),
-        sharedPlan: createSharedPlan(),
-      })).developerInstructions,
-      dynamicTools: resolveMurphDynamicTools({}).slice(0, 1),
+      developerInstructions: currentPlan.developerInstructions,
+      dynamicTools: oldDynamicTools,
       routeFingerprint: route.routeFingerprint ?? route.routeId,
     })
 
@@ -7713,6 +8133,7 @@ function createUnreachableInboxServices(): InboxServices {
     showAttachmentStatus: unreachable,
     show: unreachable,
     search: unreachable,
+    preserveDocumentAttachment: unreachable,
     preserveDocumentAttachments: unreachable,
     promoteMeal: unreachable,
     promoteDocument: unreachable,

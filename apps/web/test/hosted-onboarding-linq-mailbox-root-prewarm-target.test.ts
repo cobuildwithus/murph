@@ -28,12 +28,10 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
 
 import {
   parseHostedLinqWebhookEvent,
-  requireHostedLinqTypingIndicatorStartedEvent,
 } from "@/src/lib/hosted-onboarding/linq";
 import {
   resolveHostedLinqDirectPreparationMemberId,
   resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
-  resolveHostedLinqTypingPrewarmMemberId,
 } from "@/src/lib/hosted-onboarding/webhook-provider-linq";
 
 function buildMessageEvent(input: {
@@ -72,20 +70,6 @@ function buildMessageEvent(input: {
     event_type: "message.received",
     webhook_version: "2026-02-03",
   }));
-}
-
-function buildTypingEvent() {
-  return requireHostedLinqTypingIndicatorStartedEvent(
-    parseHostedLinqWebhookEvent(JSON.stringify({
-      api_version: "v3",
-      created_at: "2026-08-09T12:00:00.000Z",
-      data: {
-        chat_id: "chat_prewarm_target",
-      },
-      event_id: "evt_typing_prewarm_target",
-      event_type: "chat.typing_indicator.started",
-    })),
-  );
 }
 
 function buildPrisma(input: {
@@ -234,82 +218,7 @@ describe("hosted Linq mailbox-root prewarm target", () => {
     });
   });
 
-  it("resolves typing only through an established eligible home chat", async () => {
-    const prisma = buildPrisma({
-      homeMemberIds: ["member_typing"],
-      phoneMemberIds: ["member_unrelated"],
-    });
-
-    await expect(resolveHostedLinqTypingPrewarmMemberId({
-      event: buildTypingEvent(),
-      prisma: prisma as never,
-    })).resolves.toBe("member_typing");
-
-    expect(prisma.hostedMemberRouting.findMany).toHaveBeenCalledWith({
-      select: {
-        member: {
-          select: {
-            billingStatus: true,
-            createdAt: true,
-            id: true,
-            suspendedAt: true,
-            updatedAt: true,
-          },
-        },
-        memberId: true,
-      },
-      where: {
-        linqChatLookupKey: {
-          in: expect.arrayContaining([
-            expect.stringMatching(/^hbidx:linq-chat:/u),
-          ]),
-        },
-      },
-    });
-    expect(prisma.hostedMemberIdentity.findMany).not.toHaveBeenCalled();
-    expect(prisma.hostedMemberEmailAuthorization.findMany).not.toHaveBeenCalled();
-    expect(accessMocks.readActiveHostedMemberAccess).toHaveBeenCalledWith({
-      memberId: "member_typing",
-      prisma,
-    });
-    expect(accessMocks.hasActiveHostedCryptoDomainRootsForUserTx)
-      .toHaveBeenCalledWith({
-        tx: prisma,
-        userId: "member_typing",
-      });
-  });
-
-  it("fails typing prewarm closed for missing, ambiguous, or ineligible home chats", async () => {
-    const missingPrisma = buildPrisma();
-    await expect(resolveHostedLinqTypingPrewarmMemberId({
-      event: buildTypingEvent(),
-      prisma: missingPrisma as never,
-    })).resolves.toBeNull();
-    expect(accessMocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
-
-    const ambiguousPrisma = buildPrisma({
-      homeMemberIds: ["member_one", "member_two"],
-    });
-    await expect(resolveHostedLinqTypingPrewarmMemberId({
-      event: buildTypingEvent(),
-      prisma: ambiguousPrisma as never,
-    })).rejects.toMatchObject({
-      code: "LINQ_HOME_CHAT_ROUTING_LOOKUP_AMBIGUOUS",
-      retryable: true,
-    });
-
-    accessMocks.readActiveHostedMemberAccess.mockResolvedValueOnce(false);
-    const inactivePrisma = buildPrisma({
-      homeMemberIds: ["member_inactive"],
-    });
-    await expect(resolveHostedLinqTypingPrewarmMemberId({
-      event: buildTypingEvent(),
-      prisma: inactivePrisma as never,
-    })).resolves.toBeNull();
-    expect(accessMocks.hasActiveHostedCryptoDomainRootsForUserTx).not.toHaveBeenCalled();
-  });
-
-  it("uses only verified email blind indexes for an active email participant", async () => {
+  it("checks handle and verified email blind indexes for an active email participant", async () => {
     const prisma = buildPrisma({
       emailMemberIds: ["member_email"],
     });
@@ -345,7 +254,27 @@ describe("hosted Linq mailbox-root prewarm target", () => {
         },
       },
     });
-    expect(prisma.hostedMemberIdentity.findMany).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberIdentity.findMany).toHaveBeenCalledExactlyOnceWith({
+      select: {
+        member: {
+          select: {
+            billingStatus: true,
+            createdAt: true,
+            id: true,
+            suspendedAt: true,
+            updatedAt: true,
+          },
+        },
+        memberId: true,
+      },
+      where: {
+        linqEmailHandleLookupKey: {
+          in: expect.arrayContaining([
+            expect.stringMatching(/^hbidx:email:/u),
+          ]),
+        },
+      },
+    });
   });
 
   it("fails the speculative prewarm closed on an ambiguous identity lookup", async () => {

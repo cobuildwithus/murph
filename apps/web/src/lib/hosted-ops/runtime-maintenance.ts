@@ -4,16 +4,43 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 
 import {
   signalHostedRuntimeMaintenanceRuntime,
+  signalHostedRuntimeRecheckRuntime,
   type HostedRuntimeSignalResult,
 } from "../hosted-orchestration/signal-runtime";
+import {
+  createHostedPostCommitDeadline,
+  waitForHostedPostCommitOperation,
+} from "../hosted-onboarding/bounded-post-commit";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { activeHostedMemberAccessWhere } from "../hosted-onboarding/member-access";
+import {
+  readHostedRuntimeStalledRecheckCandidates,
+  type HostedRuntimeStalledRecheckCandidate,
+  type HostedRuntimeStalledRecheckCandidateScan,
+} from "../hosted-runtime-progress/alert-monitor";
 import { getPrisma } from "../prisma";
+import {
+  captureHostedRuntimeRecoveryWitnesses,
+  isHostedRuntimeRecoveryMemberId,
+  type HostedRuntimeRecoveryVerificationResult,
+  type HostedRuntimeRecoveryWitness,
+  verifyHostedRuntimeRecoveryWitnesses,
+} from "./runtime-recheck-verification";
+
+export type {
+  HostedRuntimeRecoveryVerificationResult,
+  HostedRuntimeRecoveryVerificationStatus,
+  HostedRuntimeRecoveryVerificationUserResult,
+  HostedRuntimeRecoveryWitness,
+} from "./runtime-recheck-verification";
 
 export const HOSTED_RUNTIME_MAINTENANCE_DEFAULT_READ_LIMIT = 20;
 export const HOSTED_RUNTIME_MAINTENANCE_MAX_READ_LIMIT = 100;
 export const HOSTED_RUNTIME_MAINTENANCE_DEFAULT_WAKE_LIMIT = 1;
 export const HOSTED_RUNTIME_MAINTENANCE_MAX_WAKE_LIMIT = 3;
+export const HOSTED_RUNTIME_STALLED_RECHECK_DEFAULT_READ_LIMIT = 100;
+export const HOSTED_RUNTIME_STALLED_RECHECK_MAX_READ_LIMIT = 100;
+export const HOSTED_RUNTIME_RECHECK_MAX_SIGNAL_LIMIT = 3;
 
 export interface HostedRuntimeMaintenanceWorkspace {
   checkpointedAt: string | null;
@@ -38,6 +65,33 @@ export interface HostedRuntimeMaintenanceWakeResult {
   results: HostedRuntimeMaintenanceWakeUserResult[];
 }
 
+export interface HostedRuntimeStalledRecheckOverview {
+  candidates: HostedRuntimeStalledRecheckCandidate[];
+  generatedAt: string;
+  limit: number;
+  scanTruncated: boolean;
+  totalCandidateCount: number;
+}
+
+export interface HostedRuntimeRecheckResult {
+  generatedAt: string;
+  requestedCount: number;
+  results: HostedRuntimeRecheckUserResult[];
+}
+
+export type HostedRuntimeRecheckUserResult =
+  | {
+      status: "signaled";
+      userId: string;
+      witness: HostedRuntimeRecoveryWitness;
+    }
+  | {
+      errorMessage: string;
+      errorName: string;
+      status: "failed";
+      userId: string;
+    };
+
 export type HostedRuntimeMaintenanceWakeUserResult =
   | {
       checkpointedAt: string | null;
@@ -59,6 +113,12 @@ export type HostedRuntimeMaintenanceWakeUserResult =
 
 type HostedRuntimeMaintenanceSignal =
   (input: Parameters<typeof signalHostedRuntimeMaintenanceRuntime>[0]) => Promise<HostedRuntimeSignalResult>;
+
+type HostedRuntimeRecheckSignal =
+  (input: Parameters<typeof signalHostedRuntimeRecheckRuntime>[0]) => Promise<HostedRuntimeSignalResult>;
+
+type ReadHostedRuntimeStalledRecheckCandidates =
+  (input: Parameters<typeof readHostedRuntimeStalledRecheckCandidates>[0]) => Promise<HostedRuntimeStalledRecheckCandidateScan>;
 
 export async function readHostedRuntimeMaintenanceOverview(input: {
   cursor?: string | null;
@@ -175,6 +235,112 @@ export async function signalHostedRuntimeMaintenanceBatch(input: {
   };
 }
 
+export async function readHostedRuntimeStalledRecheckOverview(input: {
+  limit?: number | string | null;
+  now?: Date;
+  prisma?: PrismaClient;
+  readCandidates?: ReadHostedRuntimeStalledRecheckCandidates;
+} = {}): Promise<HostedRuntimeStalledRecheckOverview> {
+  const now = input.now ?? new Date();
+  const limit = normalizePositiveInteger(
+    input.limit,
+    HOSTED_RUNTIME_STALLED_RECHECK_DEFAULT_READ_LIMIT,
+    HOSTED_RUNTIME_STALLED_RECHECK_MAX_READ_LIMIT,
+  );
+  const readCandidates = input.readCandidates
+    ?? readHostedRuntimeStalledRecheckCandidates;
+  const scan = await readCandidates({
+    now,
+    prisma: input.prisma ?? getPrisma(),
+  });
+
+  return {
+    candidates: scan.candidates.slice(0, limit),
+    generatedAt: now.toISOString(),
+    limit,
+    scanTruncated: scan.scanTruncated,
+    totalCandidateCount: scan.candidates.length,
+  };
+}
+
+export async function signalHostedRuntimeRecheckBatch(input: {
+  abortSignal?: AbortSignal;
+  now?: Date;
+  prisma?: PrismaClient;
+  signalRuntimeRecheck?: HostedRuntimeRecheckSignal;
+  userIds: readonly string[];
+}): Promise<HostedRuntimeRecheckResult> {
+  const prisma = input.prisma ?? getPrisma();
+  const userIds = normalizeRuntimeRecheckUserIds(input.userIds);
+  const witnesses = await captureHostedRuntimeRecoveryWitnesses({
+    now: input.now ?? new Date(),
+    prisma,
+    userIds,
+  });
+  const orderedWitnesses = userIds.map((userId) => {
+    const witness = witnesses.get(userId);
+    if (!witness) {
+      throw new Error("Runtime recovery witness capture returned an incomplete batch.");
+    }
+    return witness;
+  });
+  const signalRuntimeRecheck = input.signalRuntimeRecheck
+    ?? signalHostedRuntimeRecheckRuntime;
+  const deadlineMs = createHostedPostCommitDeadline(undefined);
+  const results: HostedRuntimeRecheckUserResult[] = [];
+
+  for (const [index, userId] of userIds.entries()) {
+    const witness = orderedWitnesses[index]!;
+    if (witness.workspaceVersion === null) {
+      results.push({
+        errorMessage: "No hosted runtime workspace exists for this member id.",
+        errorName: "HostedRuntimeWorkspaceNotFound",
+        status: "failed",
+        userId,
+      });
+      break;
+    }
+    try {
+      await waitForHostedPostCommitOperation({
+        deadlineMs,
+        operation: (abortSignal) => signalRuntimeRecheck({
+          abortSignal,
+          prisma,
+          userId,
+        }),
+        signal: input.abortSignal,
+      });
+      results.push({
+        status: "signaled",
+        userId,
+        witness,
+      });
+    } catch (error) {
+      results.push({
+        errorMessage: describeStalledRecheckSignalError(error),
+        errorName: error instanceof Error ? error.name : typeof error,
+        status: "failed",
+        userId,
+      });
+      break;
+    }
+  }
+
+  return {
+    generatedAt: new Date().toISOString(),
+    requestedCount: userIds.length,
+    results,
+  };
+}
+
+export async function verifyHostedRuntimeRecheckBatch(input: {
+  baselines: readonly unknown[];
+  now?: Date;
+  prisma?: PrismaClient;
+}): Promise<HostedRuntimeRecoveryVerificationResult> {
+  return await verifyHostedRuntimeRecoveryWitnesses(input);
+}
+
 async function readHostedRuntimeMaintenanceCandidateForUser(input: {
   prisma: PrismaClient;
   userId: string;
@@ -262,8 +428,44 @@ function normalizeOptionalIdentifier(value: string | null | undefined): string |
   return normalized ? normalized : null;
 }
 
+function normalizeRuntimeRecheckUserIds(
+  values: readonly string[],
+): string[] {
+  const userIds = [...new Set(values
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0))];
+  if (userIds.length === 0) {
+    throw hostedOnboardingError({
+      code: "HOSTED_RUNTIME_RECHECK_USER_IDS_REQUIRED",
+      httpStatus: 400,
+      message: "At least one runtime member id is required.",
+    });
+  }
+  if (userIds.length > HOSTED_RUNTIME_RECHECK_MAX_SIGNAL_LIMIT) {
+    throw hostedOnboardingError({
+      code: "HOSTED_RUNTIME_RECHECK_LIMIT_EXCEEDED",
+      httpStatus: 400,
+      message: `At most ${HOSTED_RUNTIME_RECHECK_MAX_SIGNAL_LIMIT} runtime member ids can be rechecked at once.`,
+    });
+  }
+  if (userIds.some((userId) => !isHostedRuntimeRecoveryMemberId(userId))) {
+    throw hostedOnboardingError({
+      code: "HOSTED_RUNTIME_RECHECK_USER_ID_INVALID",
+      httpStatus: 400,
+      message: "Every runtime recheck target must be a valid hosted member id.",
+    });
+  }
+  return userIds;
+}
+
 function describeMaintenanceSignalError(error: unknown): string {
   return error instanceof Error
     ? "Maintenance signal failed. Check server logs for details."
     : "Maintenance signal failed.";
+}
+
+function describeStalledRecheckSignalError(error: unknown): string {
+  return error instanceof Error
+    ? "Runtime recheck status is unknown. Refresh progress before retrying."
+    : "Runtime recheck status is unknown.";
 }

@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { isAbsolute } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 export type AssistantRealCodexAuthMode = 'provider' | 'subscription'
 
@@ -42,13 +42,21 @@ const DEFAULT_OPTIONS: AssistantRealCodexRunOptions = {
   testPattern: null,
 }
 const REAL_CODEX_E2E_TAG = 'real-codex-live'
+export const ASSISTANT_REAL_CODEX_COMMAND = fileURLToPath(
+  new URL(
+    `../packages/assistant-engine/node_modules/.bin/${
+      process.platform === 'win32' ? 'codex.cmd' : 'codex'
+    }`,
+    import.meta.url,
+  ),
+)
 
 const USAGE = [
   'Usage: pnpm test:assistant:live -- --test <name-pattern> [options]',
   '',
   'Options:',
   '  --auth subscription|provider  Use local ChatGPT auth (default) or provider env.',
-  '  --codex-home <absolute-path>   Use an explicit local Codex home for subscription auth.',
+  '  --codex-home <absolute-path>   Use a dedicated local Codex home for subscription auth.',
   '  --model <model>               Override the default gpt-5.6-terra model.',
   '  -h, --help                    Show this help.',
 ].join('\n')
@@ -126,13 +134,13 @@ export function buildAssistantRealCodexRunEnv(input: {
 
   if (input.options.authMode === 'subscription') {
     env.MURPH_REAL_CODEX_AUTH = 'subscription'
-    delete env.MURPH_REAL_CODEX_COMMAND
     delete env.MURPH_REAL_CODEX_MODEL_PROVIDER
     delete env.MURPH_REAL_CODEX_PROVIDER_ENV_KEY
   } else {
     delete env.MURPH_REAL_CODEX_AUTH
     delete env.MURPH_REAL_CODEX_HOME
   }
+  env.MURPH_REAL_CODEX_COMMAND = ASSISTANT_REAL_CODEX_COMMAND
 
   if (input.options.model) {
     env.MURPH_REAL_CODEX_MODEL = input.options.model
@@ -268,7 +276,7 @@ export function executeAssistantRealCodexRun(
   if (options.authMode === 'subscription') {
     const loginStatus = dependencies.runCommand({
       args: ['login', 'status'],
-      command: 'codex',
+      command: ASSISTANT_REAL_CODEX_COMMAND,
       env: buildAssistantRealCodexLoginEnv(
         dependencies.sourceEnv,
         options.codexHome,
@@ -290,6 +298,11 @@ export function executeAssistantRealCodexRun(
   dependencies.writeStdout(
     `Running one real Murph assistant journey with ${effectiveModel} via ${options.authMode} auth.\n`,
   )
+  if (options.authMode === 'subscription') {
+    dependencies.writeStdout(
+      'Subscription runs keep the selected Codex home configuration; use a dedicated home for production-like evidence.\n',
+    )
+  }
 
   const liveCommand = buildPnpmCommand(
     buildAssistantRealCodexVitestArgs(fullTestName),

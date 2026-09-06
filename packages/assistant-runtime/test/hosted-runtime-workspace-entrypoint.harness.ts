@@ -172,6 +172,7 @@ type HostedWorkspaceEntrypointMockName =
   | "drainHostedPreparedAssistantDeliveries"
   | "enqueueHostedPendingAssistantInputId"
   | "executeConsentedReadOnlyAssistantAsk"
+  | "executeOperatorDiagnostic"
   | "executeReadOnlyAssistantAsk"
   | "hasCompleteAssistantAutoReplyDeliveryTerminalEvidence"
   | "maintainAssistantAutoReplyRouteState"
@@ -229,6 +230,7 @@ const mocks: HostedWorkspaceEntrypointMocks = vi.hoisted(() => ({
     vi.fn<DrainHostedPreparedAssistantDeliveries>(),
   enqueueHostedPendingAssistantInputId: vi.fn(),
   executeConsentedReadOnlyAssistantAsk: vi.fn(),
+  executeOperatorDiagnostic: vi.fn(),
   executeReadOnlyAssistantAsk: vi.fn(),
   hasCompleteAssistantAutoReplyDeliveryTerminalEvidence:
     vi.fn<HasCompleteAssistantAutoReplyDeliveryTerminalEvidence>(),
@@ -306,6 +308,10 @@ vi.mock("@murphai/assistant-engine/assistant-ask", async (importOriginal) => {
     executeConsentedReadOnlyAssistantAsk:
       mocks.executeConsentedReadOnlyAssistantAsk.mockImplementation(
         actual.executeConsentedReadOnlyAssistantAsk,
+      ),
+    executeOperatorDiagnostic:
+      mocks.executeOperatorDiagnostic.mockImplementation(
+        actual.executeOperatorDiagnostic,
       ),
     executeReadOnlyAssistantAsk:
       mocks.executeReadOnlyAssistantAsk.mockImplementation(
@@ -448,7 +454,7 @@ import {
   HostedWorkspaceRunnerUserMismatchError,
   drainHostedRuntimeDeferredUsageCompletionsBestEffort,
   parseHostedAssistantWorkspaceRuntimeJobInput,
-  runHostedWorkspaceRuntimeJobInProcess,
+  runHostedWorkspaceRuntimeJobInProcess as runHostedWorkspaceRuntimeJobInProcessWithoutDrain,
   type HostedWorkspaceRuntimeJobOptions,
   type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
@@ -1120,8 +1126,8 @@ function sha256Hex(bytes: Uint8Array): string {
 
 function listHostedCanonicalWriteReceiptLogArtifacts(
   artifacts: ReadonlyMap<string, Uint8Array>,
-): Array<{ entries: unknown[]; sha256: string }> {
-  const logs: Array<{ entries: unknown[]; sha256: string }> = [];
+): Array<{ entries: unknown[]; entryCount: number; sha256: string }> {
+  const logs: Array<{ entries: unknown[]; entryCount: number; sha256: string }> = [];
   for (const [sha256, bytes] of artifacts) {
     const parsed = parseJsonArtifact(bytes);
     if (
@@ -1133,6 +1139,10 @@ function listHostedCanonicalWriteReceiptLogArtifacts(
     }
     logs.push({
       entries: parsed.entries,
+      entryCount:
+        typeof parsed.entryCount === "number"
+          ? parsed.entryCount
+          : parsed.entries.length,
       sha256,
     });
   }
@@ -1335,6 +1345,16 @@ function createWorkspacePort(input: {
             ? input.checkpointWorkspace(request)
             : createWorkspaceState({
                 inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
+                ...(request.systemMailboxProgressGeneration === undefined
+                  ? {}
+                  : {
+                      nextDefaultProcessingWakeAt:
+                        request.nextDefaultProcessingWakeAt ?? null,
+                      nextDefaultProcessingWakeReason:
+                        request.nextDefaultProcessingWakeReason ?? null,
+                      systemMailboxProgressGeneration:
+                        request.systemMailboxProgressGeneration,
+                    }),
                 nextWakeAt: request.nextWakeAt ?? null,
                 nextWakeReason: request.nextWakeReason ?? null,
                 redactedStatus: request.redactedStatus ?? null,
@@ -1347,7 +1367,12 @@ function createWorkspacePort(input: {
   };
 }
 
-function createSaturatedCanonicalReceiptLogArtifacts(): {
+function createCanonicalReceiptLogArtifacts(
+  entryCount: number,
+  options: {
+    activeEntryCount?: number;
+  } = {},
+): {
   artifactBytesByHash: Map<string, Uint8Array>;
   receiptHash: string;
   receiptLogBytes: Buffer;
@@ -1358,21 +1383,30 @@ function createSaturatedCanonicalReceiptLogArtifacts(): {
     committedAt: TEST_NOW,
     createdAt: TEST_NOW,
     occurredAt: TEST_NOW,
-    operationId: "op_saturated_receipt_log_restore",
+    operationId: "op_receipt_log_restore",
     operationType: "hosted_canonical_write_test",
     schema: HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
-    summary: "Restore a saturated hosted canonical receipt log.",
+    summary: "Restore a hosted canonical write receipt log.",
     updatedAt: TEST_NOW,
   }, null, 2)}\n`, "utf8");
   const receiptHash = sha256Hex(receiptBytes);
+  const physicalEntryCount = options.activeEntryCount === undefined
+    ? entryCount
+    : HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES;
   const receiptLogBytes = Buffer.from(`${JSON.stringify({
     entries: Array.from(
-      { length: HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES },
+      { length: physicalEntryCount },
       () => ({
         byteSize: receiptBytes.byteLength,
         sha256: receiptHash,
       }),
     ),
+    ...(options.activeEntryCount === undefined
+      ? {}
+      : {
+          activeEntryCount: options.activeEntryCount,
+          entryCount,
+        }),
     schema: "murph.hosted-canonical-write-receipt-log.v1",
   }, null, 2)}\n`, "utf8");
   const receiptLogHash = sha256Hex(receiptLogBytes);
@@ -1385,6 +1419,14 @@ function createSaturatedCanonicalReceiptLogArtifacts(): {
     receiptLogBytes,
     receiptLogHash,
   };
+}
+
+function createSaturatedCanonicalReceiptLogArtifacts(): ReturnType<
+  typeof createCanonicalReceiptLogArtifacts
+> {
+  return createCanonicalReceiptLogArtifacts(
+    HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES,
+  );
 }
 
 function createMailboxItem(overrides: Partial<HostedMailboxItem> = {}): HostedMailboxItem {
@@ -1704,6 +1746,25 @@ function createConsentedMemberAssistantAskRequestedWake(input: {
         kind: "consented_member",
         membershipId: "membership_synthetic_entrypoint_ask",
         permissionDigest: "e".repeat(64),
+      },
+    },
+    eventId: input.eventId,
+    kind: "assistant.ask.requested",
+    occurredAt: TEST_NOW,
+    userId: TEST_USER_ID,
+  };
+}
+
+function createOperatorTaskAssistantAskRequestedWake(input: {
+  eventId: string;
+}): HostedExecutionAssistantAskRequestedWake {
+  return {
+    ask: {
+      expiresAt: "2026-04-27T00:10:00.000Z",
+      question: "Inspect the selected synthetic runtime state.",
+      target: {
+        kind: "operator_task",
+        taskId: "opt_synthetic_entrypoint_ask",
       },
     },
     eventId: input.eventId,
@@ -2531,6 +2592,16 @@ async function waitUntil(assertion: () => void, timeoutMs = 1_000): Promise<void
   throw lastError instanceof Error ? lastError : new Error("Timed out waiting for assertion.");
 }
 
+async function runHostedWorkspaceRuntimeJobInProcess(
+  ...args: Parameters<typeof runHostedWorkspaceRuntimeJobInProcessWithoutDrain>
+) {
+  try {
+    return await runHostedWorkspaceRuntimeJobInProcessWithoutDrain(...args);
+  } finally {
+    await drainHostedRuntimeLogWritesBestEffort();
+  }
+}
+
 export {
   HOSTED_CONTAINER_CA_ENV_KEYS,
   HOSTED_UNSTABLE_PROCESS_ENV_KEYS,
@@ -2548,6 +2619,7 @@ export {
   createBrowserVaultReplicaRef,
   createBundleRef,
   createConsentedMemberAssistantAskRequestedWake,
+  createCanonicalReceiptLogArtifacts,
   createDeferred,
   createDeviceSyncResolvedConfig,
   createDeviceSyncSystemWakeForMailboxItem,
@@ -2557,6 +2629,7 @@ export {
   createMailboxItem,
   createMailboxPort,
   createOpenAiProbeCertificateFiles,
+  createOperatorTaskAssistantAskRequestedWake,
   createPlatform,
   createPrivateCurrentSenderAssistantAskRequestedWake,
   createResolvedAssistantAskSystemMailboxItem,
@@ -2591,6 +2664,7 @@ export {
   readConversationImportedSeqs,
   removeTempRoot,
   requireEventIndex,
+  runHostedWorkspaceRuntimeJobInProcess,
   runOpenAiHttpsProbe,
   sha256Hex,
   stageAssistantInputEventForMailboxItem,

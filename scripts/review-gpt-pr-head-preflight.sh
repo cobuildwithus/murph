@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
-review_gpt_completion_specialists_prompt_max_bytes=6500
+review_gpt_toolchain_install_lock_wait_seconds=300
 
 usage() {
   cat >&2 <<'EOF'
@@ -35,6 +35,92 @@ review_gpt_fetch_pr_base_under_lock() {
   if ! git fetch --quiet origin "$base_ref"; then
     echo "Error: could not fetch PR base branch '$base_ref' for ReviewGPT." >&2
     return 1
+  fi
+}
+
+review_gpt_local_toolchain_is_ready() {
+  [[ -d "$ROOT_DIR/node_modules" ]] \
+    && [[ ! -L "$ROOT_DIR/node_modules" ]] \
+    && [[ -x "$ROOT_DIR/node_modules/.bin/cobuild-review-gpt" ]] \
+    && [[ -x "$ROOT_DIR/node_modules/.bin/tsx" ]] \
+    && [[ -f "$ROOT_DIR/node_modules/@cobuild/repo-tools/src/consumer-shell.sh" ]]
+}
+
+review_gpt_redact_local_paths() {
+  REVIEW_GPT_REDACT_HOME="${HOME:-}" REVIEW_GPT_REDACT_ROOT="$ROOT_DIR" \
+    node -e '
+      let input = "";
+      process.stdin.setEncoding("utf8");
+      process.stdin.on("data", (chunk) => { input += chunk; });
+      process.stdin.on("end", () => {
+        const root = process.env.REVIEW_GPT_REDACT_ROOT || "";
+        const home = process.env.REVIEW_GPT_REDACT_HOME || "";
+        if (root) input = input.replaceAll(root, "<repo>");
+        if (home) input = input.replaceAll(home, "<home>");
+        process.stdout.write(input);
+      });
+    '
+}
+
+review_gpt_prepare_local_toolchain_under_lock() {
+  local install_output
+  local install_status
+
+  if ! command -v pnpm >/dev/null 2>&1; then
+    echo "Error: pnpm is required to prepare the repository ReviewGPT toolchain." >&2
+    return 127
+  fi
+
+  echo "Reconciling the frozen root workspace importer for ReviewGPT." >&2
+  if install_output="$(
+    pnpm install --frozen-lockfile --filter . --ignore-scripts 2>&1
+  )"; then
+    :
+  else
+    install_status=$?
+    printf '%s\n' "$install_output" | review_gpt_redact_local_paths >&2
+    return "$install_status"
+  fi
+
+  if ! review_gpt_local_toolchain_is_ready; then
+    echo "Error: the frozen root workspace importer did not provide the complete ReviewGPT toolchain." >&2
+    return 1
+  fi
+}
+
+review_gpt_prepare_local_toolchain() {
+  local git_dir
+  local lock_dir
+  local lock_file
+  local lock_status=0
+  local script_path="$ROOT_DIR/scripts/review-gpt-pr-head-preflight.sh"
+
+  if ! git_dir="$(
+    git -C "$ROOT_DIR" rev-parse --path-format=absolute --git-dir 2>/dev/null
+  )" || [[ -z "$git_dir" ]]; then
+    echo "Error: could not resolve the current worktree Git directory for ReviewGPT setup." >&2
+    return 1
+  fi
+
+  lock_dir="$git_dir/murph-locks"
+  lock_file="$lock_dir/review-gpt-toolchain-install.lock"
+  mkdir -p "$lock_dir"
+  if command -v flock >/dev/null 2>&1; then
+    flock -w "$review_gpt_toolchain_install_lock_wait_seconds" "$lock_file" \
+      bash "$script_path" --prepare-toolchain-under-lock \
+      || lock_status=$?
+  elif command -v lockf >/dev/null 2>&1; then
+    lockf -t "$review_gpt_toolchain_install_lock_wait_seconds" "$lock_file" \
+      bash "$script_path" --prepare-toolchain-under-lock \
+      || lock_status=$?
+  else
+    echo "Error: flock or lockf is required for ReviewGPT toolchain setup." >&2
+    return 1
+  fi
+
+  if (( lock_status != 0 )); then
+    echo "Error: serialized ReviewGPT toolchain setup failed or timed out." >&2
+    return "$lock_status"
   fi
 }
 
@@ -141,9 +227,6 @@ review_gpt_require_pr_head() {
 
 review_gpt_phase_for_preset() {
   case "$1" in
-    completion-specialists | completion-review | specialist-review | prompt-frontend-coverage)
-      printf 'preliminary\n'
-      ;;
     pr-review | pr-deep-review | deep-pr-review | pr-bugs-and-architecture)
       printf 'final\n'
       ;;
@@ -224,7 +307,6 @@ review_gpt_detect_pr_phase() {
   local phase
   local positional_preset_seen=0
   local preset_token
-  local preset_token_count=0
   local preset_value
 
   while (( index < ${#arguments[@]} )); do
@@ -262,118 +344,15 @@ review_gpt_detect_pr_phase() {
     if [[ -n "$preset_value" ]]; then
       while IFS= read -r preset_token; do
         [[ -z "$preset_token" ]] && continue
-        preset_token_count=$((preset_token_count + 1))
         phase="$(review_gpt_phase_for_preset "$preset_token")"
         [[ -z "$phase" ]] && continue
-        if [[ -n "$detected_phase" && "$detected_phase" != "$phase" ]]; then
-          echo "Error: preliminary and final PR ReviewGPT presets cannot run together." >&2
-          return 64
-        fi
         detected_phase="$phase"
       done < <(printf '%s\n' "$preset_value" | tr ',' '\n')
     fi
     index=$((index + 1))
   done
 
-  if [[ "$detected_phase" == "preliminary" ]] \
-    && [[ "$preset_token_count" != "1" ]]; then
-    echo "Error: completion-specialists must run as the only preset so its assembled prompt budget is complete." >&2
-    return 64
-  fi
-
   printf '%s\n' "$detected_phase"
-}
-
-review_gpt_trimmed_prompt_file_bytes() {
-  local prompt_file="$1"
-
-  if [[ "$prompt_file" != /* ]]; then
-    prompt_file="$ROOT_DIR/$prompt_file"
-  fi
-  if [[ ! -f "$prompt_file" ]]; then
-    echo "Error: cannot measure missing completion-specialists prompt file: $1" >&2
-    return 1
-  fi
-  node -e \
-    'const fs = require("node:fs"); process.stdout.write(String(Buffer.byteLength(fs.readFileSync(process.argv[1], "utf8").trimEnd())));' \
-    "$prompt_file"
-}
-
-review_gpt_require_completion_specialists_prompt_budget() {
-  local argument
-  local assembled_bytes=0
-  local part_bytes
-  local part_count=0
-  local pending_prompt_part=""
-  local prompt_file_value
-  local -a prompt_part_bytes
-
-  if ! command -v node >/dev/null 2>&1; then
-    echo "Error: node is required to measure the assembled completion-specialists prompt." >&2
-    return 127
-  fi
-
-  part_bytes="$(
-    review_gpt_trimmed_prompt_file_bytes \
-      "scripts/chatgpt-review-presets/completion-specialists.md"
-  )" || return
-  prompt_part_bytes=("$part_bytes")
-
-  for argument in "$@"; do
-    if [[ -n "$pending_prompt_part" ]]; then
-      if [[ "$pending_prompt_part" == "file" ]]; then
-        part_bytes="$(review_gpt_trimmed_prompt_file_bytes "$argument")" || return
-      else
-        part_bytes="$(printf '%s' "$argument" | LC_ALL=C wc -c | tr -d '[:space:]')"
-      fi
-      prompt_part_bytes+=("$part_bytes")
-      pending_prompt_part=""
-      continue
-    fi
-
-    case "$argument" in
-      --prompt)
-        pending_prompt_part="inline"
-        ;;
-      --prompt=*)
-        part_bytes="$(
-          printf '%s' "${argument#--prompt=}" | LC_ALL=C wc -c | tr -d '[:space:]'
-        )"
-        prompt_part_bytes+=("$part_bytes")
-        ;;
-      --prompt-file | --promptFile)
-        pending_prompt_part="file"
-        ;;
-      --prompt-file=* | --promptFile=*)
-        prompt_file_value="${argument#*=}"
-        part_bytes="$(
-          review_gpt_trimmed_prompt_file_bytes "$prompt_file_value"
-        )" || return
-        prompt_part_bytes+=("$part_bytes")
-        ;;
-    esac
-  done
-
-  if [[ -n "$pending_prompt_part" ]]; then
-    echo "Error: --prompt and --prompt-file require a value." >&2
-    return 64
-  fi
-
-  for part_bytes in "${prompt_part_bytes[@]}"; do
-    if [[ "$part_bytes" == "0" ]]; then
-      continue
-    fi
-    if (( part_count > 0 )); then
-      assembled_bytes=$((assembled_bytes + 2))
-    fi
-    assembled_bytes=$((assembled_bytes + part_bytes))
-    part_count=$((part_count + 1))
-  done
-
-  if (( assembled_bytes > review_gpt_completion_specialists_prompt_max_bytes )); then
-    echo "Error: assembled completion-specialists prompt is ${assembled_bytes} bytes; the canonical budget is ${review_gpt_completion_specialists_prompt_max_bytes}. Keep --prompt to target/head metadata and remove duplicated PR or lens text." >&2
-    return 1
-  fi
 }
 
 review_gpt_run() {
@@ -388,9 +367,6 @@ review_gpt_run() {
       echo "Error: REVIEW_GPT_REVIEW_PHASE=$explicit_phase conflicts with the selected $detected_phase PR review preset." >&2
       exit 64
     fi
-    if [[ "$detected_phase" == "preliminary" ]]; then
-      review_gpt_require_completion_specialists_prompt_budget "$@"
-    fi
     if [[ -z "$pr_ref" ]]; then
       if ! command -v gh >/dev/null 2>&1; then
         echo "Error: gh is required to resolve the current branch PR for ReviewGPT." >&2
@@ -402,6 +378,11 @@ review_gpt_run() {
       echo "Error: could not resolve a PR for the current branch." >&2
       exit 1
     fi
+  fi
+
+  review_gpt_prepare_local_toolchain
+
+  if [[ -n "$detected_phase" ]]; then
     review_gpt_require_pr_head "$pr_ref"
     export REVIEW_GPT_PR_URL="$pr_ref"
     export REVIEW_GPT_REVIEW_PHASE="$detected_phase"
@@ -409,7 +390,7 @@ review_gpt_run() {
 
   exec pnpm exec cobuild-review-gpt \
     --config scripts/review-gpt.config.sh \
-    --minimum-marked-response-time 5m \
+    --minimum-marked-response-time 270s \
     "$@"
 }
 
@@ -435,6 +416,14 @@ review_gpt_main() {
       fi
       shift
       review_gpt_fetch_pr_base_under_lock "$@"
+      return
+      ;;
+    --prepare-toolchain-under-lock)
+      if [[ "$#" -ne 1 ]]; then
+        echo "Error: --prepare-toolchain-under-lock accepts no arguments." >&2
+        exit 64
+      fi
+      review_gpt_prepare_local_toolchain_under_lock
       return
       ;;
   esac

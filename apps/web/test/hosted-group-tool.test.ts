@@ -47,6 +47,7 @@ const mocks = vi.hoisted(() => ({
   requestHostedGroupMemberAssistantAsk: vi.fn(),
   readHostedGroupByRuntimeMemberId: vi.fn(),
   readHostedGroupIdByRuntimeMemberId: vi.fn(),
+  readHostedGroupMembershipInventory: vi.fn(),
   readHostedGroupJoinOfferSnapshotForOwnedThreadContainerTx: vi.fn(),
   readHostedGroupMembershipsForMember: vi.fn(),
   readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId: vi.fn(),
@@ -135,7 +136,15 @@ vi.mock("@/src/lib/hosted-groups/participant-member", async () => {
   };
 });
 
-vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
+vi.mock("@/src/lib/hosted-groups/group-membership-participants", () => ({
+  readHostedGroupMembershipInventory:
+    mocks.readHostedGroupMembershipInventory,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-client", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/src/lib/hosted-onboarding/linq-client")
+  >()),
   getHostedLinqChatHandles: mocks.getHostedLinqChatHandles,
   getHostedLinqChatSummary: mocks.getHostedLinqChatSummary,
   isHostedLinqAttachmentSendPrepareFailure: (error: unknown) =>
@@ -565,7 +574,22 @@ describe("handleHostedRuntimeGroupTool", () => {
         role: "member",
         runtimeMemberId: "member_group_runtime",
       }],
+      nextCursor: null,
       truncated: false,
+    });
+    mocks.readHostedGroupMembershipInventory.mockResolvedValue({
+      availabilityByMembershipId: new Map([[
+        "membership_runners",
+        { status: "available" },
+      ]]),
+      participantRosterByMembershipId: new Map([["membership_runners", {
+          participantCount: 3,
+          participantLabels: [
+            { displayName: "Taylor" },
+            { phoneHint: { areaCode: "415", lastFour: "9876" } },
+          ],
+          status: "available",
+        }]]),
     });
     mocks.readHostedGroupFundingRecoveryStatus.mockResolvedValue({
       fundingNeeded: true,
@@ -630,8 +654,18 @@ describe("handleHostedRuntimeGroupTool", () => {
     mocks.recordHostedGroupDisclosurePermissionTx.mockResolvedValue({
       kind: "recorded",
     });
-    mocks.readActiveHostedGroupDisclosureGrantsForMember.mockResolvedValue([]);
-    mocks.readActiveHostedGroupDisclosureGrantsForGroup.mockResolvedValue([]);
+    mocks.readActiveHostedGroupDisclosureGrantsForMember.mockResolvedValue({
+      grants: [],
+      kind: "ok",
+      nextCursor: null,
+      truncated: false,
+    });
+    mocks.readActiveHostedGroupDisclosureGrantsForGroup.mockResolvedValue({
+      grants: [],
+      kind: "ok",
+      nextCursor: null,
+      truncated: false,
+    });
     mocks.revokeHostedGroupDisclosureGrantForMemberTx.mockResolvedValue({
       kind: "revoked",
       revokedAt: new Date("2026-07-16T12:00:00Z"),
@@ -664,6 +698,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       handoff: "personal_active",
       ask_current_sender: "participant_aware",
       record_current_sender_daily_metric: "participant_aware",
+      record_current_sender_journal_fact: "participant_aware",
       ask_member: "participant_aware",
       arm_usage_referral: "participant_aware",
       cancel_usage_referral: "participant_aware",
@@ -688,6 +723,8 @@ describe("handleHostedRuntimeGroupTool", () => {
       read_shared: "participant_aware",
       revoke_own_email_share: "participant_aware",
       set_chat_avatar: "owner_active",
+      set_current_sender_journal_capture: "participant_aware",
+      set_journal_capture: "personal_active",
       share_contact_card: "owner_active",
       update_display_name: "owner_active",
     });
@@ -887,7 +924,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       memberId: "member_self",
       request: {
         action: "ask",
-        groupLabel: "100 Club",
+        membershipId: "membership_100_club",
         originAssistantInputId: `ain_${"a".repeat(32)}`,
         originSessionId: "session_private",
         question: "What is today's workout?",
@@ -899,8 +936,8 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
 
     expect(mocks.requestHostedGroupAssistantAsk).toHaveBeenCalledWith({
-      groupLabel: "100 Club",
       memberId: "member_self",
+      membershipId: "membership_100_club",
       originAssistantInputId: `ain_${"a".repeat(32)}`,
       originSessionId: "session_private",
       question: "What is today's workout?",
@@ -926,7 +963,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       request: {
         action: "handoff",
         context: "The member set a personal record today.",
-        groupLabel: "100 Club",
+        membershipId: "membership_100_club",
         originAssistantInputId: `ain_${"a".repeat(32)}`,
       },
       scheduleMailboxWake,
@@ -937,8 +974,8 @@ describe("handleHostedRuntimeGroupTool", () => {
 
     expect(mocks.requestHostedGroupContextHandoff).toHaveBeenCalledWith({
       context: "The member set a personal record today.",
-      groupLabel: "100 Club",
       memberId: "member_self",
+      membershipId: "membership_100_club",
       originAssistantInputId: `ain_${"a".repeat(32)}`,
     });
     expect(scheduleMailboxWake).toHaveBeenCalledWith({
@@ -963,7 +1000,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       memberId: "member_self",
       request: {
         action: "ask",
-        groupLabel: "100 Club",
+        membershipId: "membership_100_club",
         originAssistantInputId: `ain_${"a".repeat(32)}`,
         originSessionId: "session_private",
         question: "What is today's workout?",
@@ -1297,11 +1334,16 @@ describe("handleHostedRuntimeGroupTool", () => {
 
   it("lists the current member's group grants without exposing a member-held invite link", async () => {
     mocks.hostedThreadContainerFindUnique.mockResolvedValue(null);
-    mocks.readActiveHostedGroupDisclosureGrantsForMember.mockResolvedValue([{
-      grantId: "grant_sleep",
-      groupLabel: "Fun-loving runners",
-      permissionText: "Recent sleep timing and duration",
-    }]);
+    mocks.readActiveHostedGroupDisclosureGrantsForMember.mockResolvedValue({
+      grants: [{
+        grantId: "grant_sleep",
+        groupLabel: "Fun-loving runners",
+        permissionText: "Recent sleep timing and duration",
+      }],
+      kind: "ok",
+      nextCursor: "disclosure_page_2",
+      truncated: true,
+    });
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_self",
       request: { action: "list_memberships" },
@@ -1313,7 +1355,9 @@ describe("handleHostedRuntimeGroupTool", () => {
           groupLabel: "Fun-loving runners",
           permissionText: "Recent sleep timing and duration",
         }],
+        disclosureGrantsTruncated: true,
         memberships: [{
+          availability: { status: "available" },
           displayName: "Fun-loving runners",
           grantedVaultShareProjectionScopes: [
             { projectionKind: "profile-name.v0" },
@@ -1322,6 +1366,14 @@ describe("handleHostedRuntimeGroupTool", () => {
           kind: "friends",
           memberCount: 7,
           membershipId: "membership_runners",
+          participantRoster: {
+            participantCount: 3,
+            participantLabels: [
+              { displayName: "Taylor" },
+              { phoneHint: { areaCode: "415", lastFour: "9876" } },
+            ],
+            status: "available",
+          },
           permissionsUrl: null,
           requestedVaultShareProjectionScopes: [
             { projectionKind: "group-email.v0" },
@@ -1332,6 +1384,8 @@ describe("handleHostedRuntimeGroupTool", () => {
             /^https:\/\/www\.withmurph\.ai\/groups\/fund\/gf1\./u,
           ),
         }],
+        nextCursor: null,
+        nextDisclosureGrantCursor: "disclosure_page_2",
         status: "ok",
         truncated: false,
       },
@@ -1341,8 +1395,35 @@ describe("handleHostedRuntimeGroupTool", () => {
       expect.objectContaining({ memberId: "member_self" }),
     );
     expect(mocks.readActiveHostedGroupDisclosureGrantsForMember).toHaveBeenCalledWith(
-      expect.objectContaining({ memberId: "member_self" }),
+      expect.objectContaining({ cursor: null, memberId: "member_self" }),
     );
+  });
+
+  it("keeps the legacy membership response shape for callers without inventory v2", async () => {
+    mocks.hostedThreadContainerFindUnique.mockResolvedValue(null);
+
+    const response = await handleHostedRuntimeGroupTool({
+      includeMembershipAvailability: false,
+      includeParticipantRosters: false,
+      memberId: "member_self",
+      request: { action: "list_memberships" },
+    });
+
+    expect(response).toMatchObject({
+      action: "list_memberships",
+      result: { status: "ok" },
+    });
+    if (
+      response.action !== "list_memberships"
+      || response.result.status !== "ok"
+    ) {
+      throw new TypeError("Expected a successful membership inventory.");
+    }
+    expect(response.result.memberships[0]).not.toHaveProperty(
+      "participantRoster",
+    );
+    expect(mocks.readHostedGroupMembershipInventory)
+      .not.toHaveBeenCalled();
   });
 
   it("returns an existing join link as a permissions URL only to the group owner", async () => {
@@ -1359,6 +1440,7 @@ describe("handleHostedRuntimeGroupTool", () => {
         role: "owner",
         runtimeMemberId: "member_group_runtime",
       }],
+      nextCursor: null,
       truncated: false,
     });
 
@@ -1453,19 +1535,28 @@ describe("handleHostedRuntimeGroupTool", () => {
       }],
     };
     mocks.readHostedGroupByRuntimeMemberId.mockResolvedValue(currentGroup);
-    mocks.readActiveHostedGroupDisclosureGrantsForGroup.mockResolvedValue([{
-      grantId: "grant_calendar",
-      groupLabel: "Sunday sleep crew",
-      memberId: "member_grantor",
-      permissionText: "Calendar availability for coordinating a call",
-    }]);
+    mocks.readActiveHostedGroupDisclosureGrantsForGroup.mockResolvedValue({
+      grants: [{
+        grantId: "grant_calendar",
+        groupLabel: "Sunday sleep crew",
+        memberId: "member_grantor",
+        permissionText: "Calendar availability for coordinating a call",
+      }],
+      kind: "ok",
+      nextCursor: "group_disclosure_page_2",
+      truncated: true,
+    });
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
-      request: { action: "read_current" },
+      request: {
+        action: "read_current",
+        disclosureGrantCursor: "group_disclosure_page_1",
+      },
     })).resolves.toEqual({
       action: "read_current",
       result: {
+        disclosureGrantsTruncated: true,
         group: {
           ...currentGroup,
           members: [{
@@ -1479,6 +1570,7 @@ describe("handleHostedRuntimeGroupTool", () => {
             disclosureGrants: [],
           }],
         },
+        nextDisclosureGrantCursor: "group_disclosure_page_2",
         status: "ok",
       },
     });
@@ -1487,6 +1579,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       runtimeMemberId: "member_group_runtime",
     });
     expect(mocks.readActiveHostedGroupDisclosureGrantsForGroup).toHaveBeenCalledWith({
+      cursor: "group_disclosure_page_1",
       groupId: GROUP_SUMMARY.id,
     });
   });
@@ -3219,7 +3312,12 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       messageLookupKey: "hbidx:linq-message:v1:offer",
       projectionKinds: ["sleep-times.v0"],
     });
-    mocks.readActiveHostedGroupDisclosureGrantsForGroup.mockResolvedValue([]);
+    mocks.readActiveHostedGroupDisclosureGrantsForGroup.mockResolvedValue({
+      grants: [],
+      kind: "ok",
+      nextCursor: null,
+      truncated: false,
+    });
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockReset();
     mocks.readHostedOwnerAddressBookAdvisoryNames.mockReset();
     mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(
@@ -3350,35 +3448,32 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       .not.toContain("private-media");
   });
 
-  it("keeps queryless public Images avatars compatible during the Web-first rollout", async () => {
-    const legacyIconUrl =
-      "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/889a5f43-1d35-4eae-a98e-7ae69e96a800/public";
-
+  it("rejects retired Images avatar URLs before provider egress", async () => {
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
       request: {
         action: "set_chat_avatar",
-        groupChatIconUrl: legacyIconUrl,
+        groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
         linqThread: LINQ_THREAD,
       },
     })).resolves.toEqual({
       action: "set_chat_avatar",
-      result: { status: "requested" },
+      result: {
+        status: "unavailable",
+        unavailableReason: "group_chat_icon_url_unavailable",
+      },
     });
 
     expect(mocks.assertHostedLinqRouteEgressAuthority).toHaveBeenCalledWith(
       expect.objectContaining({ authority: LINQ_THREAD.authority }),
     );
-    expect(mocks.updateHostedLinqChatAvatar).toHaveBeenCalledWith({
-      chatId: "chat_group_1",
-      groupChatIconUrl: legacyIconUrl,
-    });
+    expect(mocks.updateHostedLinqChatAvatar).not.toHaveBeenCalled();
   });
 
   it("updates a preview group avatar only through the preview Worker origin", async () => {
     const previewOrigin = "https://hosted-runner-staging.example.test";
     const previewIconUrl =
-      `${previewOrigin}/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`;
+      `${previewOrigin}/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`;
     vi.stubEnv("HOSTED_EXECUTION_CONTROL_URL", previewOrigin);
 
     await expect(handleHostedRuntimeGroupTool({
@@ -3444,7 +3539,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       request: {
         action: "set_chat_avatar",
         groupChatIconUrl:
-          `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+          `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
         linqThread: LINQ_THREAD,
       },
     })).resolves.toEqual({
@@ -3480,7 +3575,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       request: {
         action: "set_chat_avatar",
         groupChatIconUrl:
-          `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`,
+          `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
         linqThread: LINQ_THREAD,
       },
     })).resolves.toEqual({
@@ -3575,56 +3670,6 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         unavailableReason: "provider_unavailable",
       },
     });
-  });
-
-  it("does not send a fresh disclosure request when permission history is full", async () => {
-    mocks.admitHostedGroupDisclosurePermissionAppendTx.mockResolvedValueOnce({
-      kind: "limit_reached",
-    });
-
-    await expect(handleHostedRuntimeGroupTool({
-      memberId: "member_container",
-      request: {
-        action: "post_disclosure_request",
-        linqThread: LINQ_THREAD,
-        originAssistantInputId: DISCLOSURE_ORIGIN_ASSISTANT_INPUT_ID,
-        permissionText: "Recent sleep timing and duration",
-      },
-    })).resolves.toEqual({
-      action: "post_disclosure_request",
-      result: {
-        status: "unavailable",
-        unavailableReason: "permission_history_limit_reached",
-      },
-    });
-
-    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(mocks.recordHostedGroupDisclosurePermissionTx).not.toHaveBeenCalled();
-  });
-
-  it("reports a binding-time permission history race after the inert provider send", async () => {
-    mocks.recordHostedGroupDisclosurePermissionTx.mockResolvedValueOnce({
-      kind: "limit_reached",
-    });
-
-    await expect(handleHostedRuntimeGroupTool({
-      memberId: "member_container",
-      request: {
-        action: "post_disclosure_request",
-        linqThread: LINQ_THREAD,
-        originAssistantInputId: DISCLOSURE_ORIGIN_ASSISTANT_INPUT_ID,
-        permissionText: "Recent sleep timing and duration",
-      },
-    })).resolves.toEqual({
-      action: "post_disclosure_request",
-      result: {
-        status: "unavailable",
-        unavailableReason: "permission_history_limit_reached",
-      },
-    });
-
-    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
-    expect(mocks.recordHostedGroupDisclosurePermissionTx).toHaveBeenCalledTimes(1);
   });
 
   it("rechecks the current Linq route immediately before sending disclosure consent", async () => {

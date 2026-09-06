@@ -1,6 +1,6 @@
 # Murph New-Member Onboarding
 
-Last verified: 2026-08-11
+Last verified: 2026-09-05
 
 ## Product Decision
 
@@ -119,8 +119,12 @@ privacy, authorization, or provider boundaries.
   product truth.
 - Route useful facts to their canonical owner in the same turn they are
   learned. The parent normally saves the smallest truthful fact or raw source
-  before a visible reply. For the dense foundation memo, the accepted current
-  input is the durable raw source and three bounded children own the independent
+  before a visible reply. At the visible minimal-identity answer, one native
+  one-shot child saves supplied name and demographics from the durably accepted
+  input while the root asks the aspiration question. The root retains the
+  early-stall check-in and saves identity itself if spawning is unavailable.
+  Never claim a child save before canonical readback. For the dense foundation
+  memo, the accepted current input is the durable raw source and three bounded children own the independent
   movement/protocol, supplement, and medical/safety persistence families. Use
   the resume snapshot to avoid repeating known facts.
 - Hosted Codex admits root plus three concurrent V2 children. Every child is a
@@ -130,14 +134,27 @@ privacy, authorization, or provider boundaries.
   A spawn proves work started, not that writes completed. Claim saved or
   enriched details only after canonical readback. Do not add a queue or second
   state owner.
-- The onboarding skill owns conversation policy. The system-prompt overlay
-  routes the open lifecycle into that skill, and the managed automation resumes
-  it when a useful continuation exists.
+- The injected onboarding instructions own the visible opening exchanges
+  through the first aspiration question, including identity persistence and
+  the early-stall check-in. No skill or resume read is needed for those proven
+  exchanges. The onboarding skill owns ambiguous/resumed and later-stage
+  conversation policy; the managed automation resumes it when useful.
+- For eligible new direct text-only iMessage conversations, the existing Web
+  Luna path may send at most two replies: the welcome and the bundled identity
+  question. The second requires the immediately preceding confirmed canonical
+  welcome and exactly one earlier opening delivery. Resolve its member through
+  the existing direct identity/home-chat lookup; a thread-container route
+  excludes this private-chat path. Existing delivery rows
+  enforce the cap under the chat lock; there is no stage counter. Supplied
+  identity, a skip, or a concrete request goes directly to the normal runtime.
+  Existing encrypted conversation import carries both sides and suppresses
+  duplicate replies. Container/process warmup retains its existing owner; this
+  flow adds no speculative model turn or preparation mailbox.
 - The skill uses one package-owned progressive-disclosure asset. Its top-level
   `SKILL.md` is a complete router capped at 12 KiB and directly owns the goal,
   bounded resume check, immediate-need override, relationship promise, exact
-  welcome, and minimal-identity checkpoint. Aspiration/foundation/delegation,
-  persistence/recovery/follow-up, and return/launch/completion each live in one
+  welcome. The injected opening owner holds the minimal-identity checkpoint.
+  Aspiration/foundation/delegation, persistence/recovery/follow-up, and return/launch/completion each live in one
   directly referenced file under the same skill asset. A rule has one owner;
   references do not restate the top-level policy or each other.
 - A fresh greeting or vague first message reads only the compact top-level
@@ -438,14 +455,17 @@ questions below.
 Once the member selects or confirms a desired change likely to depend on
 repeated behavior, read the behavior-followthrough owner and make one bounded
 evidence pass across the foundation, relevant canonical records, connected
-data, and confirmed enrichment. When that pass spans more than one source or
-owner, Murph sends one short natural progress update before the first read,
-names the few member-facing areas being checked and why they matter to the
-chosen next step, and continues immediately. This is required even when each
-individual read is routine, is omitted for one targeted read, and is not
-repeated in the substantive reply. Before selecting a first behavior, ground the
-member's outcome and reason, current routine or baseline, relevant data, prior
-attempts, and the main conditions that help or disrupt follow-through. Ask up
+data, and confirmed enrichment. Multiple sources or owners do not trigger a
+progress update by themselves. Routine onboarding context reads and a
+straightforward first-step question stay silent and answer directly. When the
+evidence pass is genuinely likely to leave the member waiting noticeably
+through slow inspection or several substantive actions, Murph sends one short
+natural update before the first read, names the few member-facing areas being
+checked and why they matter to the chosen next step, and continues immediately.
+The update is not repeated in the substantive reply. Before selecting a first
+behavior, ground the member's outcome and reason, current routine or baseline,
+relevant data, prior attempts, and the main conditions that help or disrupt
+follow-through. Ask up
 to three short questions across separate turns to fill only decision-changing gaps—
 usually two or three when those answers remain unknown, and fewer when context
 already supplies them. Reuse the outcome and reason already learned. Never
@@ -536,9 +556,13 @@ detail progressively at the first just-in-time instructional touchpoint.
   Preferences memory in the member's words. Use Context memory only when the
   factual answer remains useful outside onboarding and has no structured owner.
   Never create an opaque onboarding-step marker in memory.
-- A simple defer remains unresolved. Save timing or contact guidance only when
-  it is durable enough to outlive the current thread, and update or forget that
-  memory when the preference changes.
+- Interpret a defer by its object. Deferring an unanswered checkpoint leaves it
+  unresolved. The always-visible onboarding overlay owns the connection-only
+  exception: after the source is known, postponing only its optional connection
+  neither reopens the data-source checkpoint nor pauses the next foundation
+  beat, while an explicit onboarding pause still stops advancement. Save timing
+  or contact guidance only when it is durable enough to outlive the current
+  thread, and update or forget that memory when the preference changes.
 - Use the global health-record ingestion path for files, labs, labels, and
   other slow evidence. Do not complete onboarding until each
   foundation-critical accepted input, minimum fact, or raw source has a

@@ -16,7 +16,7 @@ import {
   isDeletedEventSpineRecord,
   selectLatestEventSpineEntry,
 } from "../../history/event-spine.ts";
-import { readJsonlRecords } from "../../jsonl.ts";
+import { readEventLedgerShardRecords } from "../../event-ledger-storage.ts";
 import { withCanonicalWriteLock } from "../../operations/canonical-write-lock.ts";
 import {
   runCanonicalWrite,
@@ -511,7 +511,7 @@ async function readLookupEventRecords(input: {
   if (cached) {
     return cached;
   }
-  const rawRecords = await readJsonlRecords({
+  const rawRecords = await readEventLedgerShardRecords({
     relativePath: input.ledgerFile,
     vaultRoot: input.vaultRoot,
   });
@@ -530,7 +530,7 @@ async function readLookupEventRecords(input: {
   return records;
 }
 
-function isGeneratedImageCaptureEvent(record: EventRecord): boolean {
+export function isGeneratedImageCaptureEvent(record: EventRecord): boolean {
   return isCaptureLookupBackedEvent(record) &&
     record.source === "derived" &&
     GENERATED_IMAGE_CAPTURE_TAGS.every((tag) => record.tags?.includes(tag) === true);

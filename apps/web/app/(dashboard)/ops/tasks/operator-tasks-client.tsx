@@ -88,7 +88,7 @@ export function OperatorTasksClient({
           Murph tasks
         </h1>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-          Ask one member&apos;s Murph for a private read-only diagnostic, or have Murph send one direct message through the normal conversation.
+          Ask a member or group Murph for one private read-only diagnostic, or have a member&apos;s Murph send one direct message through the normal conversation.
         </p>
       </header>
 
@@ -113,7 +113,7 @@ export function OperatorTasksClient({
         </div>
         <p className="mt-3 text-sm text-muted-foreground">
           {kind === "diagnostic"
-            ? "The result returns here only. Nothing is sent to the member."
+            ? "The result returns here only. Nothing is sent to the member or group."
             : "Murph writes one message using the current private conversation and normal delivery safeguards."}
         </p>
         <form
@@ -124,7 +124,11 @@ export function OperatorTasksClient({
           }}
         >
           <div className="grid gap-2">
-            <Label htmlFor="operator-task-member-id">Member ID or phone last four</Label>
+            <Label htmlFor="operator-task-member-id">
+              {kind === "diagnostic"
+                ? "Murph workspace ID or member phone last four"
+                : "Member ID or phone last four"}
+            </Label>
             <Input
               autoComplete="off"
               id="operator-task-member-id"

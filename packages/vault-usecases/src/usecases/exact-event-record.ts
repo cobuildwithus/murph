@@ -27,6 +27,29 @@ interface ExactEventCoreRuntime {
   }>
 }
 
+const storedEventReadErrorMappings = {
+  EVENT_CONTRACT_INVALID: {
+    code: 'contract_invalid',
+    message: 'Stored event data does not match the event contract.',
+    details: {
+      retryable: false,
+      stage: 'read',
+      hint: 'Run vault validate, then repair or restore the event ledger before retrying.',
+    },
+    preserveDetails: false,
+  },
+  VAULT_INVALID_JSONL: {
+    code: 'contract_invalid',
+    message: 'The stored event ledger is not valid JSONL.',
+    details: {
+      retryable: false,
+      stage: 'read',
+      hint: 'Run vault validate, then repair or restore the event ledger before retrying.',
+    },
+    preserveDetails: false,
+  },
+} as const
+
 export interface ExactEventRecord {
   event: EventRecord
   ledgerFile: string
@@ -71,6 +94,7 @@ export async function readExactEventRecord(input: {
     }
   } catch (error) {
     throw toVaultCliError(error, {
+      ...storedEventReadErrorMappings,
       EVENT_MISSING: {
         code: 'not_found',
         message: `No ${input.entityLabel} found for "${input.lookup}".`,
@@ -99,6 +123,7 @@ export async function readOwnedEventRecord(input: {
     }
   } catch (error) {
     throw toVaultCliError(error, {
+      ...storedEventReadErrorMappings,
       EVENT_MISSING: {
         code: 'not_found',
         message: `No ${input.kind} found for "${input.lookup}".`,

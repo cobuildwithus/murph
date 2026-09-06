@@ -66,6 +66,7 @@ export interface HostedLocalDevHarness {
     cleared: boolean;
     ok: true;
   }>;
+  cloudflareStdoutTail(maxChars?: number): string;
   armForegroundPriorityOrderingObservationForTest(
     userId: string,
     barrierTarget:
@@ -146,6 +147,7 @@ export interface HostedLocalDevHarness {
 }
 
 export async function startHostedLocalDevHarness(input: {
+  abortSignal?: AbortSignal;
   env: NodeJS.ProcessEnv;
   persistDirOverride?: string | null;
   persistDirPrefix: string;
@@ -218,6 +220,7 @@ export async function startHostedLocalDevHarness(input: {
     stack = await startHostedLocalDevStack({
       env: runtimeEnv,
       pipeOutput: streamLogs,
+      ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
       ...(input.webProcessEnvOverrides
         ? { webProcessEnvOverrides: input.webProcessEnvOverrides }
         : {}),
@@ -243,6 +246,7 @@ export async function startHostedLocalDevHarness(input: {
           stderr,
         ));
     }
+    input.abortSignal?.throwIfAborted();
 
     return {
       ageActiveRuntimeFenceForTest: async (
@@ -365,6 +369,8 @@ export async function startHostedLocalDevHarness(input: {
       workerRuntimeEnv: stack.workerRuntimeEnv,
       stop,
       testControls,
+      cloudflareStdoutTail: (maxChars = 2_000_000): string =>
+        stack?.processes.cloudflare?.stdoutTail(maxChars) ?? "",
       stdoutTail: (maxChars?: number): string => stack?.stdoutTail(maxChars) ?? "",
       stderrTail: (maxChars?: number): string => stack?.stderrTail(maxChars) ?? "",
       waitForHostedCompletion: async (

@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { healthEntityDefinitions } from "@murphai/contracts";
 import { projectVaultCliError } from "@murphai/operator-config/vault-cli-error-projection";
+import { formatStructuredErrorMessage } from "@murphai/operator-config/text/shared";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 
 import * as helperApi from "@murphai/vault-usecases/helpers";
@@ -47,9 +48,13 @@ import {
   relativePathStrings,
   resolveVaultRelativePath,
   stringArray,
+  toAssessmentProjectVaultCliError,
+  toAssessmentImportVaultCliError,
   toEventUpsertVaultCliError,
+  toImporterInputFileVaultCliError,
   toRegimenUpsertVaultCliError,
   toVaultCliError,
+  toVaultCliFilesystemError,
   toVaultInitializationCliError,
   toVaultMetadataCliError,
   uniqueStrings,
@@ -431,23 +436,250 @@ describe("helper barrel exports", () => {
     const passthrough = new Error("boom");
     expect(toVaultCliError(passthrough)).toBe(passthrough);
 
-    expect(
-      toEventUpsertVaultCliError(
-        Object.assign(new Error("Bad event"), {
-          name: "VaultError",
-          code: "EVENT_CONTRACT_INVALID",
-          details: { field: "kind" },
-        }),
-      ),
-    ).toEqual(
+    const eventContractError = toEventUpsertVaultCliError(
+      Object.assign(new Error("Bad event"), {
+        name: "VaultError",
+        code: "EVENT_CONTRACT_INVALID",
+        details: {
+          field: "kind",
+          errors: [
+            "$.title: private-submitted-title is too long",
+            "$.links[2].targetId: private-submitted-id is invalid",
+            "$.fields.private-submitted-key: private-submitted-value is invalid",
+            "$.private_submitted_top.private_nested_key: private-submitted-value is invalid",
+          ],
+        },
+      }),
+    );
+    expect(eventContractError).toEqual(
       expect.objectContaining({
         code: "contract_invalid",
         context: expect.objectContaining({
           vaultCode: "EVENT_CONTRACT_INVALID",
-          field: "kind",
+          stage: "validation",
         }),
       }),
     );
+    expect(eventContractError).toBeInstanceOf(VaultCliError);
+    if (!(eventContractError instanceof VaultCliError)) {
+      throw new Error("expected event validation to map to VaultCliError");
+    }
+    expect(eventContractError.context?.issues).toEqual([
+        {
+          publicPath: ["title"],
+          code: "custom",
+        },
+        {
+          publicPath: ["links"],
+          code: "custom",
+        },
+        {
+          publicPath: ["fields"],
+          code: "custom",
+        },
+        {
+          publicPath: [],
+          code: "custom",
+        },
+    ]);
+    expect(JSON.stringify(eventContractError.context?.issues)).not.toContain("private-submitted");
+    expect(eventContractError.context).not.toHaveProperty("errors");
+    expect(eventContractError.context).not.toHaveProperty("hint");
+    expect(formatStructuredErrorMessage(eventContractError)).not.toContain("private-submitted");
+
+    const storedEventContractError = toEventUpsertVaultCliError(
+      Object.assign(new Error("Bad stored event"), {
+        name: "VaultError",
+        code: "EVENT_CONTRACT_INVALID",
+        details: {
+          stage: "read",
+          errors: ["$.title: private-stored-title is invalid"],
+        },
+      }),
+    );
+    expect(storedEventContractError).toEqual(
+      expect.objectContaining({
+        code: "contract_invalid",
+        context: expect.objectContaining({
+          stage: "read",
+          hint: "Run vault validate, then repair or restore the event ledger before retrying.",
+          issues: [{ code: "custom", publicPath: ["title"] }],
+        }),
+      }),
+    );
+    expect(formatStructuredErrorMessage(storedEventContractError)).not.toContain(
+      "private-stored-title",
+    );
+
+    const assessmentContractError = toAssessmentImportVaultCliError(
+      Object.assign(new Error("Bad assessment"), {
+        name: "VaultError",
+        code: "ASSESSMENT_RESPONSE_INVALID",
+        details: {
+          errors: ["$.title: private-assessment-value is invalid"],
+        },
+      }),
+      "/input.json",
+    );
+    expect(assessmentContractError).toBeInstanceOf(VaultCliError);
+    expect((assessmentContractError as VaultCliError).context).toEqual(
+      expect.objectContaining({
+        issues: [{ code: "custom", publicPath: ["title"] }],
+        stage: "validation",
+        vaultCode: "ASSESSMENT_RESPONSE_INVALID",
+      }),
+    );
+    expect((assessmentContractError as VaultCliError).context).not.toHaveProperty("errors");
+    expect(formatStructuredErrorMessage(assessmentContractError)).not.toContain(
+      "private-assessment-value",
+    );
+
+    const missingEventTitle = toEventUpsertVaultCliError(
+      Object.assign(new Error("Event payload requires a title."), {
+        name: "VaultError",
+        code: "INVALID_INPUT",
+      }),
+    );
+    expect(missingEventTitle).toEqual(expect.objectContaining({
+      code: "contract_invalid",
+      context: expect.objectContaining({
+        stage: "validation",
+        issues: [expect.objectContaining({ publicPath: ["title"], code: "invalid_type" })],
+      }),
+    }));
+
+    const unrelatedInvalidInput = toEventUpsertVaultCliError(
+      Object.assign(new Error("Capture lookup key is required."), {
+        name: "VaultError",
+        code: "INVALID_INPUT",
+      }),
+    );
+    expect(unrelatedInvalidInput).toEqual(expect.objectContaining({
+      code: "contract_invalid",
+      context: expect.objectContaining({ stage: "validation" }),
+    }));
+    expect((unrelatedInvalidInput as VaultCliError).context).not.toEqual(
+      expect.objectContaining({ issues: expect.anything() }),
+    );
+
+    const missingEvent = toEventUpsertVaultCliError(
+      Object.assign(new Error("Missing event"), {
+        name: "VaultError",
+        code: "EVENT_MISSING",
+      }),
+    );
+    expect(missingEvent).toEqual(expect.objectContaining({
+      code: "not_found",
+      context: expect.objectContaining({ stage: "read" }),
+    }));
+
+    const eventConflict = toEventUpsertVaultCliError(
+      Object.assign(new Error("Conflicting event revision"), {
+        name: "VaultError",
+        code: "EVENT_REVISION_CONFLICT",
+      }),
+    );
+    expect(eventConflict).toEqual(expect.objectContaining({
+      code: "conflict",
+      context: expect.objectContaining({ stage: "conflict" }),
+    }));
+
+    const inputFileError = toImporterInputFileVaultCliError(
+      Object.assign(new Error("missing synthetic input"), {
+        code: "ENOENT",
+        path: "/synthetic/member-file.json",
+      }),
+      "/synthetic/member-file.json",
+    );
+    expect(inputFileError).toEqual(expect.objectContaining({
+      code: "not_found",
+      message: "The input file was not found.",
+      context: expect.objectContaining({
+        stage: "filesystem",
+        issues: [expect.objectContaining({ publicPath: ["file"], code: "custom" })],
+      }),
+    }));
+    expect(JSON.stringify(inputFileError)).not.toContain("/synthetic/member-file.json");
+
+    const vaultPermissionError = Object.assign(new Error("vault metadata is unreadable"), {
+      code: "EACCES",
+      path: "/synthetic/vault/vault.json",
+    });
+    expect(
+      toImporterInputFileVaultCliError(
+        vaultPermissionError,
+        "/synthetic/member-file.json",
+      ),
+    ).toBe(vaultPermissionError);
+
+    const exportWriteError = toVaultCliFilesystemError(
+      Object.assign(new Error("ENOSPC at /private/output"), { code: "ENOSPC" }),
+      {
+        message: "The export pack could not be written.",
+        fieldPath: "out",
+      },
+    );
+    expect(exportWriteError).toEqual(expect.objectContaining({
+      code: "storage_unavailable",
+      context: expect.objectContaining({
+        retryable: false,
+        stage: "filesystem",
+        issues: [expect.objectContaining({ publicPath: ["out"] })],
+      }),
+    }));
+    expect(JSON.stringify(exportWriteError)).not.toContain("/private/output");
+
+    const missingAssessmentError = toAssessmentProjectVaultCliError(
+      Object.assign(new Error('Assessment response "private-id" was not found.'), {
+        name: "VaultError",
+        code: "ASSESSMENT_RESPONSE_NOT_FOUND",
+        details: { assessmentId: "private-id" },
+      }),
+    );
+    expect(missingAssessmentError).toEqual(expect.objectContaining({
+      code: "not_found",
+      message: "The requested assessment response was not found.",
+      context: expect.objectContaining({
+        stage: "read",
+        issues: [expect.objectContaining({ publicPath: ["id"] })],
+      }),
+    }));
+    expect((missingAssessmentError as VaultCliError).message).not.toContain("private-id");
+
+    for (const storedError of [
+      Object.assign(new Error("Invalid private ledger JSON."), {
+        name: "VaultError",
+        code: "VAULT_INVALID_JSONL",
+        details: {
+          assessmentId: "private-assessment-id",
+          cause: "private-ledger-contents",
+          relativePath: "ledger/assessments/private.jsonl",
+        },
+      }),
+      Object.assign(new Error("Private assessment row failed validation."), {
+        name: "VaultError",
+        code: "ASSESSMENT_RESPONSE_INVALID",
+        details: {
+          assessmentId: "private-assessment-id",
+          errors: ["private-assessment-value"],
+          rawPath: "raw/assessments/private/source.json",
+        },
+      }),
+    ]) {
+      const mapped = toAssessmentProjectVaultCliError(storedError);
+
+      expect(mapped).toEqual(expect.objectContaining({
+        code: "assessment_store_invalid",
+        context: expect.objectContaining({
+          retryable: false,
+          stage: "read",
+          vaultCode: storedError.code,
+        }),
+      }));
+      expect(JSON.stringify(mapped)).not.toMatch(
+        /private-assessment-id|private-ledger-contents|private\.jsonl|private-assessment-value|raw\/assessments\/private/u,
+      );
+    }
 
     const invalidMetadata = toVaultMetadataCliError(
       Object.assign(new Error("private metadata parser detail"), {

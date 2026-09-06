@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   CloudflareHostedControlBrowserVaultReplicaNotFoundError,
@@ -90,6 +90,7 @@ vi.mock("@/src/lib/prisma", () => ({
 
 vi.mock("@/src/lib/hosted-workspace/store", () => ({
   readHostedWorkspace: mocks.readHostedWorkspace,
+  readHostedBrowserVaultReplicaState: mocks.readHostedWorkspace,
   readHostedWorkspaceBrowserVaultSourceStateHash:
     mocks.readHostedWorkspaceBrowserVaultSourceStateHash,
 }));
@@ -119,6 +120,10 @@ describe("browser vault session route", () => {
   beforeAll(async () => {
     browserVaultSessionRoute = await import("../app/api/browser-vault/session/route");
     settingsVaultExportSessionRoute = await import("../app/api/settings/vault-export/session/route");
+  });
+
+  afterEach(async () => {
+    await vi.dynamicImportSettled();
   });
 
   beforeEach(() => {
@@ -197,6 +202,7 @@ describe("browser vault session route", () => {
     expect(mocks.hasPendingDirtyConnectionForUser).toHaveBeenCalledWith("member_123");
     expect(createBrowserVaultSession).not.toHaveBeenCalled();
     expect(scheduleBrowserVaultRefresh).not.toHaveBeenCalled();
+    await vi.dynamicImportSettled();
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
       userId: "member_123",
     });
@@ -303,7 +309,7 @@ describe("browser vault session route", () => {
     expect(mocks.readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
   });
 
-  it("includes pending device import state without gating browser vault refresh", async () => {
+  it("lets a pending device import create the first browser vault replica", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     const createBrowserVaultSession = vi.fn();
     mocks.hasPendingDirtyConnectionForUser.mockResolvedValue(true);
@@ -317,9 +323,7 @@ describe("browser vault session route", () => {
 
     expect(response.status).toBe(200);
     expect(createBrowserVaultSession).not.toHaveBeenCalled();
-    expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
-      userId: "member_123",
-    });
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       deviceSyncImportPending: true,
       refreshPending: true,
@@ -774,6 +778,7 @@ describe("browser vault session route", () => {
       replicaRef,
       userId: "member_123",
     });
+    await vi.dynamicImportSettled();
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
       userId: "member_123",
     });
@@ -825,6 +830,7 @@ describe("browser vault session route", () => {
     expect(mocks.verifySensitiveActionChallenge).toHaveBeenCalledTimes(1);
     expect(mocks.consumeSensitiveActionChallenge).toHaveBeenCalledTimes(1);
     expect(createBrowserVaultSession).toHaveBeenCalledTimes(1);
+    await vi.dynamicImportSettled();
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
       userId: "member_123",
     });
@@ -877,6 +883,7 @@ describe("browser vault session route", () => {
     expect(response.status).toBe(200);
     expect(mocks.consumeSensitiveActionChallenge).toHaveBeenCalledTimes(1);
     expect(createBrowserVaultSession).toHaveBeenCalledTimes(1);
+    await vi.dynamicImportSettled();
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
       userId: "member_123",
     });
@@ -1038,6 +1045,7 @@ describe("browser vault session route", () => {
       replicaRef: createReplicaRef(),
       userId: "member_123",
     });
+    await vi.dynamicImportSettled();
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
       userId: "member_123",
     });
@@ -1286,6 +1294,7 @@ describe("browser vault session route", () => {
         retryable: true,
       },
     });
+    await vi.dynamicImportSettled();
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
       userId: "member_123",
     });
@@ -1998,6 +2007,7 @@ describe("browser vault session route", () => {
     );
 
     expect(response.status).toBe(200);
+    await vi.dynamicImportSettled();
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
       userId: "member_123",
@@ -2202,6 +2212,7 @@ describe("browser vault session route", () => {
       refreshPending: true,
       state: "empty",
     });
+    await vi.dynamicImportSettled();
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
       userId: "member_123",
     });

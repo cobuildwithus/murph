@@ -131,60 +131,32 @@ export default async function SettingsPage({
   searchParams: Promise<SettingsSearchParams>;
 }) {
   const resolvedSearchParams = await searchParams;
-  const familyInviteReturnPath = parseHostedFamilyInviteReturnPath(
-    readOnlySearchParamValue(
-      resolvedSearchParams[HOSTED_FAMILY_INVITE_RETURN_PARAM],
-    ),
-  );
-  const openEmailLink =
-    readFirstSearchParamValue(resolvedSearchParams.addEmail) === "true";
-  const addUsageTarget = readOnlySearchParamValue(resolvedSearchParams.addUsage);
-  const openPersonalUsageTopUp = addUsageTarget === "true";
-  const requestedFamilyOwnerUsageTopUp = addUsageTarget === "family";
-  const familyRecoveryRequested = hasExactSettingsSearchParam(
-    resolvedSearchParams,
-    "familyRecovery",
-    "true",
-  );
-  const usageRecoveryInitialOpen = hasExactSettingsSearchParam(
-    resolvedSearchParams,
-    "usageRecovery",
-    "true",
-  );
-  const openVoiceLink =
-    readFirstSearchParamValue(resolvedSearchParams.voice) === "true";
-  const usageTopUpPurchaseReturn = readUsageTopUpPurchaseReturn(
-    resolvedSearchParams,
-  );
-  const groupPaymentMethodSaved =
-    readFirstSearchParamValue(
-      resolvedSearchParams[HOSTED_START_PAID_GROUP_RETURN_PARAM],
-    ) === HOSTED_START_PAID_GROUP_RETURN_VALUE;
-  const planChangeReturn = parseHostedBillingPlanChangeReturnValue(
-    readOnlySearchParamValue(resolvedSearchParams.planUpdate),
-  );
+  const request = resolveSettingsPageRequest(resolvedSearchParams);
   const { authenticated, authenticatedMember, session } =
     await getHostedDashboardPageAuthSnapshot();
   if (!authenticated) {
     if (
-      familyInviteReturnPath === null
-      && !groupPaymentMethodSaved
-      && planChangeReturn === null
-      && usageTopUpPurchaseReturn === null
-      && !familyRecoveryRequested
-      && !usageRecoveryInitialOpen
+      request.familyInviteReturnPath === null
+      && !request.groupPaymentMethodSaved
+      && request.planChangeReturn === null
+      && request.usageTopUpPurchaseReturn === null
+      && !request.familyRecoveryRequested
+      && !request.usageRecoveryInitialOpen
     ) {
       redirect("/");
     }
     return (
       <SettingsAuthRequired
-        familyRecovery={familyRecoveryRequested}
-        usageRecovery={usageRecoveryInitialOpen}
+        familyRecovery={request.familyRecoveryRequested}
+        usageRecovery={request.usageRecoveryInitialOpen}
       />
     );
   }
 
-  if (planChangeReturn === HOSTED_BILLING_PLAN_CHANGE_CANCELED_RETURN_VALUE) {
+  if (
+    request.planChangeReturn
+      === HOSTED_BILLING_PLAN_CHANGE_CANCELED_RETURN_VALUE
+  ) {
     redirect("/settings#subscription");
   }
 
@@ -194,341 +166,150 @@ export default async function SettingsPage({
         memberId: authenticatedMember.id,
         prisma,
         privyUserId: session?.privyUserId,
-        usageReturnPurchaseId: usageTopUpPurchaseReturn?.purchaseId ?? null,
+        usageReturnPurchaseId:
+          request.usageTopUpPurchaseReturn?.purchaseId ?? null,
       })
     : null;
-  const settingsSnapshot = settingsData?.settingsSnapshot ?? null;
-  const consentStatus = settingsData?.consentStatus ?? null;
-  const freshPrivySession = settingsData?.freshPrivySession ?? null;
-  const familyOwner = settingsData?.familyOwner ?? null;
-  const familyDraftRecovery = settingsData?.familyDraftRecovery ?? null;
-  const familyAccess = settingsData?.familyAccess ?? null;
-  const secureApprovalStatus =
-    settingsData?.secureApprovalStatus ?? ({ status: "unavailable" } as const);
-  const usageStatus = settingsData?.usageStatus ?? null;
-  const hasConfirmedGroupMembership =
-    settingsData?.hasConfirmedGroupMembership === true;
-  const usageActivity = settingsData?.usageActivity ?? null;
-  const usageTopUpOfferCodes = settingsData?.usageTopUpOfferCodes ?? [];
-  const usageTopUpActivePurchase = settingsData?.usageTopUpActivePurchase ?? null;
-  const usageTopUpReturnTarget = settingsData?.usageTopUpReturnTarget ?? null;
-  const inferenceConnection = settingsData?.inferenceConnection ?? null;
+  return renderAuthenticatedSettingsPage({
+    authenticated,
+    authenticatedMember,
+    request,
+    session,
+    settingsData,
+  });
+}
+
+type HostedDashboardPageAuthSnapshot = Awaited<
+  ReturnType<typeof getHostedDashboardPageAuthSnapshot>
+>;
+
+function renderAuthenticatedSettingsPage(input: {
+  authenticated: boolean;
+  authenticatedMember: HostedDashboardPageAuthSnapshot["authenticatedMember"];
+  request: ReturnType<typeof resolveSettingsPageRequest>;
+  session: HostedDashboardPageAuthSnapshot["session"];
+  settingsData: Awaited<ReturnType<typeof readSettingsPageData>> | null;
+}) {
+  const {
+    authenticated,
+    authenticatedMember,
+    request: {
+      familyInviteReturnPath,
+      groupPaymentMethodSaved,
+      openEmailLink,
+      openPersonalUsageTopUp,
+      openVoiceLink,
+      planChangeReturn,
+      requestedFamilyOwnerUsageTopUp,
+      resolvedSearchParams,
+      usageRecoveryInitialOpen,
+      usageTopUpPurchaseReturn,
+    },
+    session,
+    settingsData,
+  } = input;
+  const {
+    consentStatus,
+    familyAccess,
+    familyDraftRecovery,
+    familyOwner,
+    freshPrivySession,
+    hasConfirmedGroupMembership,
+    inferenceConnection,
+    secureApprovalStatus,
+    settingsSnapshot,
+    usageActivity,
+    usageStatus,
+    usageTopUpActivePurchase,
+    usageTopUpOfferCodes,
+    usageTopUpReturnTarget,
+  } = normalizeSettingsPageData(settingsData);
   const account = settingsSnapshot?.account ?? null;
+  const assistant = account?.assistant;
   const billingRef = settingsSnapshot?.billingRef ?? null;
   const routing = settingsSnapshot?.routing ?? null;
-  const activeFamilyOwner = familyOwner?.billingActive === true;
-  const familyBillingOwner = familyOwner !== null
-    && isHostedFamilyBillingPortalManageable(familyOwner.billingStatus);
-  const familyOwnerUsageTopUpMember =
-    resolveActiveFamilyOwnerUsageTopUpMember(familyOwner);
-  const sponsoredMember = familyAccess !== null && familyOwner === null;
-  const familyRecurringUpgradeAvailable =
-    activeFamilyOwner && hasHigherHostedFamilyOwnerTier(familyOwner);
-  const usageTopUpOffers = usageTopUpActivePurchase
-    ? []
-    : projectHostedUsageTopUpOffers(usageTopUpOfferCodes);
-  const familyUsageTopUpOffers = activeFamilyOwner && !usageTopUpActivePurchase
-    ? projectHostedUsageTopUpOffers(readHostedConfiguredUsageCreditOfferCodesSafely())
-    : [];
-  const familyUsageTopUpActivePurchase =
-    usageTopUpActivePurchase?.target.kind === "family"
-    && usageTopUpActivePurchase.target.familyGroupId === familyOwner?.groupId
-      ? usageTopUpActivePurchase
-      : null;
-  const personalUsageTopUpActivePurchase =
-    usageTopUpActivePurchase?.target.kind === "personal"
-      ? usageTopUpActivePurchase
-      : usageTopUpActivePurchase && !familyUsageTopUpActivePurchase
-        ? {
-            ...usageTopUpActivePurchase,
-            retryAllowed: false,
-            targetConflict: true as const,
-            url: undefined,
-          }
-        : null;
-  const familyUsageTopUpActiveMemberId =
-    familyUsageTopUpActivePurchase?.target.beneficiaryMemberId ?? null;
-  const familyOwnerUsageTopUpActivePurchase = familyOwnerUsageTopUpMember
-    ? familyUsageTopUpActivePurchase?.target.beneficiaryMemberId ===
-        familyOwnerUsageTopUpMember.memberId
-      ? familyUsageTopUpActivePurchase
-      : usageTopUpActivePurchase
-        ? {
-            ...usageTopUpActivePurchase,
-            retryAllowed: false,
-            targetConflict: true as const,
-            url: undefined,
-          }
-        : null
-    : null;
-  const personalUsageTopUpPurchaseReturn =
-    usageTopUpPurchaseReturn
-    && usageTopUpReturnTarget?.kind === "personal"
-    && resolvedSearchParams.usageFamily === undefined
-    && resolvedSearchParams.usageMember === undefined
-      ? usageTopUpPurchaseReturn
-      : null;
-  const familyUsageTopUpPurchaseReturn =
-    usageTopUpPurchaseReturn
-    && usageTopUpReturnTarget?.kind === "family"
-    && usageTopUpReturnTarget.familyGroupId === familyOwner?.groupId
-    && readOnlySearchParamValue(resolvedSearchParams.usageFamily)
-      === usageTopUpReturnTarget.familyGroupId
-    && readOnlySearchParamValue(resolvedSearchParams.usageMember)
-      === usageTopUpReturnTarget.beneficiaryMemberId
-      ? usageTopUpPurchaseReturn
-      : null;
-  const familyUsageTopUpReturnMemberId =
-    familyUsageTopUpPurchaseReturn
-      ? usageTopUpReturnTarget?.beneficiaryMemberId ?? null
-      : null;
-  const familyOwnerUsageTopUpAvailable =
-    familyOwnerUsageTopUpMember !== null;
-  const familyOwnerUsageTopUpPurchaseReturn =
-    familyOwnerUsageTopUpMember
-    && familyUsageTopUpPurchaseReturn
-    && usageTopUpReturnTarget?.beneficiaryMemberId ===
-      familyOwnerUsageTopUpMember.memberId
-      ? familyUsageTopUpPurchaseReturn
-      : null;
-  const familySettingsUsageTopUpPurchaseReturn =
-    familyOwnerUsageTopUpPurchaseReturn ? null : familyUsageTopUpPurchaseReturn;
-  const familySettingsUsageTopUpReturnMemberId =
-    familyOwnerUsageTopUpPurchaseReturn ? null : familyUsageTopUpReturnMemberId;
-  const billingUsageTopUpUsesFamilyOwner =
-    familyOwnerUsageTopUpAvailable
-    && usageTopUpActivePurchase?.target.kind !== "personal"
-    && personalUsageTopUpPurchaseReturn === null;
-  const billingUsageTopUpPurchaseReturn = billingUsageTopUpUsesFamilyOwner
-    ? familyOwnerUsageTopUpPurchaseReturn
-    : personalUsageTopUpPurchaseReturn;
-  const billingUsageTopUpActivePurchase = billingUsageTopUpPurchaseReturn
-    ? null
-    : billingUsageTopUpUsesFamilyOwner
-      ? familyOwnerUsageTopUpActivePurchase
-      : personalUsageTopUpActivePurchase;
-  const usageRecoveryIsCurrent =
-    usageRecoveryInitialOpen && usageStatus?.status === "exhausted";
-  const usageRecoveryPresentationOpen =
-    usageRecoveryIsCurrent
-    && usageTopUpActivePurchase === null
-    && usageTopUpPurchaseReturn === null;
-  const familyUsageRecoveryAvailable =
-    activeFamilyOwner
-    && usageStatus?.status === "exhausted"
-    && usageTopUpActivePurchase === null
-    && usageTopUpPurchaseReturn === null;
-  const billingUsagePurchaseRecoveryOpen =
-    usageRecoveryIsCurrent
-    && (
-      billingUsageTopUpActivePurchase !== null
-      || billingUsageTopUpPurchaseReturn !== null
-    );
-  const billingUsageTopUpOffers = billingUsageTopUpUsesFamilyOwner
-    ? familyUsageTopUpOffers
-    : usageTopUpOffers;
-  const canStartFamily =
-    authenticatedMember != null &&
-    !familyBillingOwner &&
-    !sponsoredMember &&
-    !authenticatedMember.suspendedAt;
-  const currentPlanCode = parseHostedBillingPlanCode(
-    billingRef?.currentBillingPlanCode,
-  );
-  const directPlanUpdateTarget =
-    !activeFamilyOwner &&
-    !sponsoredMember &&
-    (
-      planChangeReturn === "launch_edge_monthly" ||
-      planChangeReturn === "launch_max_monthly" ||
-      planChangeReturn === "launch_monthly"
-    )
-      ? planChangeReturn
-      : null;
-  const directPlanUpdateActive =
-    directPlanUpdateTarget !== null &&
-    authenticatedMember !== null &&
-    hasHostedMemberOwnActiveAccess(authenticatedMember) &&
-    parseHostedBillingPhase(billingRef?.currentBillingPhase) === "paid" &&
-    currentPlanCode === directPlanUpdateTarget;
-  const planChangePending =
-    directPlanUpdateTarget !== null && !directPlanUpdateActive;
-  const scheduledPlanCode = parseHostedBillingPlanCode(
-    billingRef?.scheduledBillingPlanCode,
-  );
-  const hasScheduledPlanChange = scheduledPlanCode !== null;
-  const groupPlanConfigured = settingsData?.groupPlanAvailable === true;
-  const maxPlanConfigured = settingsData?.maxPlanAvailable === true;
-  const visiblePlanCodes = resolveVisibleHostedBillingPlanCodes({
+  const {
+    activeFamilyOwner,
+    billingUsagePurchaseRecoveryOpen,
+    billingUsageTopUpActivePurchase,
+    billingUsageTopUpOffers,
+    billingUsageTopUpPurchaseReturn,
+    billingUsageTopUpUsesFamilyOwner,
+    familyBillingOwner,
+    familyOwnerUsageTopUpMember,
+    familyRecurringUpgradeAvailable,
+    familySettingsUsageTopUpPurchaseReturn,
+    familySettingsUsageTopUpReturnMemberId,
+    familyUsageRecoveryAvailable,
+    familyUsageTopUpActiveMemberId,
+    familyUsageTopUpActivePurchase,
+    familyUsageTopUpOffers,
+    sponsoredMember,
+    usageRecoveryPresentationOpen,
+  } = resolveSettingsUsagePresentation({
+    familyAccess,
+    familyOwner,
+    resolvedSearchParams,
+    usageRecoveryInitialOpen,
+    usageStatus,
+    usageTopUpActivePurchase,
+    usageTopUpOfferCodes,
+    usageTopUpPurchaseReturn,
+    usageTopUpReturnTarget,
+  });
+  const {
+    canManageBilling,
+    canStartDirectPlan,
+    canStartFamily,
     currentPlanCode,
+    directPlanUpdateActive,
+    directPlanUpdateTarget,
+    groupPlanConfigured,
+    hasScheduledPlanChange,
+    maxPlanConfigured,
+    planChangePending,
+    showGroupPlan,
+    showMaxPlan,
+  } = resolveSettingsBillingPresentation({
+    activeFamilyOwner,
+    authenticatedMember,
+    billingRef,
+    familyBillingOwner,
+    hasConfirmedGroupMembership,
+    planChangeReturn,
+    settingsData,
+    sponsoredMember,
+  });
+  const {
+    canSwitchToEdge,
+    canSwitchToGroup,
+    canUpgradeToEdge,
+    canUpgradeToMax,
+    canUpgradeToPulse,
+  } = resolveSettingsBillingActions({
+    authenticatedMember,
+    billingRef,
     groupPlanConfigured,
     hasConfirmedGroupMembership,
+    hasScheduledPlanChange,
     maxPlanConfigured,
-    scheduledPlanCode,
   });
-  const showGroupPlan = visiblePlanCodes.includes("launch_group_monthly");
-  const showMaxPlan = visiblePlanCodes.includes("launch_max_monthly");
-  const ownPaidBillingActive =
-    authenticatedMember !== null &&
-    hasHostedMemberOwnPaidBilling({
-      billingStatus: authenticatedMember.billingStatus,
-      billingRef: {
-        currentBillingPhase: billingRef?.currentBillingPhase ?? null,
-        currentCheckoutOffer: billingRef?.currentCheckoutOffer ?? null,
-        stripeSubscriptionLookupKey: billingRef?.stripeSubscriptionId
-          ? "configured"
-          : null,
-      },
-      suspendedAt: authenticatedMember.suspendedAt,
-    });
-  const hasRecoverableBilling =
-    authenticatedMember !== null &&
-    hasHostedRecoverableBilling({
-      billingStatus: authenticatedMember.billingStatus,
-      hasExistingSubscription: Boolean(billingRef?.stripeSubscriptionId),
-    });
-  const canStartDirectPlan =
-    !hasScheduledPlanChange &&
-    authenticatedMember !== null &&
-    !activeFamilyOwner &&
-    !sponsoredMember &&
-    !authenticatedMember.suspendedAt &&
-    !ownPaidBillingActive &&
-    !hasRecoverableBilling;
-  const canManageBilling =
-    activeFamilyOwner ||
-    (
-      authenticatedMember !== null &&
-      !authenticatedMember.suspendedAt &&
-      Boolean(billingRef?.stripeCustomerId) &&
-      (ownPaidBillingActive || hasRecoverableBilling)
-    );
-  const canUpgradeToPulse =
-    !hasScheduledPlanChange &&
-    authenticatedMember !== null &&
-    hasHostedMemberOwnActiveAccess(authenticatedMember) &&
-    canUpgradeHostedBillingPlan({
-      currentBillingPhase: billingRef?.currentBillingPhase,
-      currentBillingPlanCode: billingRef?.currentBillingPlanCode,
-      currentCheckoutOffer: billingRef?.currentCheckoutOffer,
-      targetPlanCode: "launch_monthly",
-    });
-  const canUpgradeToEdge =
-    !hasScheduledPlanChange &&
-    authenticatedMember !== null &&
-    hasHostedMemberOwnActiveAccess(authenticatedMember) &&
-    canUpgradeHostedBillingPlan({
-      currentBillingPhase: billingRef?.currentBillingPhase,
-      currentBillingPlanCode: billingRef?.currentBillingPlanCode,
-      currentCheckoutOffer: billingRef?.currentCheckoutOffer,
-      targetPlanCode: "launch_edge_monthly",
-    });
-  const canUpgradeToMax =
-    !hasScheduledPlanChange &&
-    maxPlanConfigured &&
-    authenticatedMember !== null &&
-    hasHostedMemberOwnActiveAccess(authenticatedMember) &&
-    canUpgradeHostedBillingPlan({
-      currentBillingPhase: billingRef?.currentBillingPhase,
-      currentBillingPlanCode: billingRef?.currentBillingPlanCode,
-      currentCheckoutOffer: billingRef?.currentCheckoutOffer,
-      targetPlanCode: "launch_max_monthly",
-    });
-  const canSwitchToEdge =
-    !hasScheduledPlanChange &&
-    authenticatedMember !== null &&
-    canScheduleHostedBillingPlanChange({
-      billingStatus: authenticatedMember.billingStatus,
-      currentBillingPhase: billingRef?.currentBillingPhase,
-      currentBillingPlanCode: billingRef?.currentBillingPlanCode,
-      currentCheckoutOffer: billingRef?.currentCheckoutOffer,
-      stripeCustomerId: billingRef?.stripeCustomerId,
-      stripeSubscriptionId: billingRef?.stripeSubscriptionId,
-      suspendedAt: authenticatedMember.suspendedAt,
-      targetPlanCode: "launch_edge_monthly",
-    });
-  const canSwitchToGroup =
-    !hasScheduledPlanChange &&
-    authenticatedMember !== null &&
-    groupPlanConfigured &&
-    hasConfirmedGroupMembership &&
-    canScheduleHostedBillingPlanChange({
-      billingStatus: authenticatedMember.billingStatus,
-      currentBillingPhase: billingRef?.currentBillingPhase,
-      currentBillingPlanCode: billingRef?.currentBillingPlanCode,
-      currentCheckoutOffer: billingRef?.currentCheckoutOffer,
-      stripeCustomerId: billingRef?.stripeCustomerId,
-      stripeSubscriptionId: billingRef?.stripeSubscriptionId,
-      suspendedAt: authenticatedMember.suspendedAt,
-      targetPlanCode: "launch_group_monthly",
-    });
-  const privySessionMatchesAppSession =
-    freshPrivySession !== null && freshPrivySession.identity.userId === session?.privyUserId;
-  const serverApprovedPrivyLinkedAccounts = privySessionMatchesAppSession
-    ? freshPrivySession.linkedAccounts
-    : null;
-  const accountWithPrivyDisplay = account
-    ? withServerApprovedPrivyAccountHints({
-        snapshot: account,
-        serverApprovedPrivyLinkedAccounts,
-      })
-    : account;
-  const privyAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID?.trim() || null;
-  const privyClientId = process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID?.trim() || null;
-  const murphPhoneNumber =
-    routing?.linqRecipientPhone ?? routing?.pendingLinqRecipientPhone ?? null;
-  // The member sends this to Murph right after picking a voice, so the reply
-  // comes back as a voice memo in the new voice. Voice memos only deliver over
-  // text and Telegram, so an email-only member gets no redirect.
-  const resolvedVoiceTestOption = account
-    ? resolveMurphContactOptions({
-        contactChannels: {
-          email: Boolean(account.email.murphEmailAddress),
-          telegram: Boolean(account.telegram.telegramUserId),
-          text: Boolean(account.phone.number),
-        },
-        message: {
-          body: "just picked a new voice for you! send me a voice memo so I can hear it",
-        },
-        murphEmailAddress: account.email.murphEmailAddress ?? null,
-        murphPhoneNumber: routing?.linqRecipientPhone ?? null,
-        preferredKind: "text",
-        userEmailAddress: account.email.address,
-      })[0] ?? null
-    : null;
-  const voiceTestContactOption =
-    resolvedVoiceTestOption && resolvedVoiceTestOption.kind !== "email"
-      ? resolvedVoiceTestOption
-      : null;
-  const usageMissionContactOption =
-    usageActivity?.missionsEnabled === true && account
-      ? resolveMurphContactOptions({
-          contactChannels: {
-            email: false,
-            telegram: Boolean(account.telegram.telegramUserId),
-            text: Boolean(account.phone.number),
-          },
-          message: {
-            body: "Hey Murph, what referral options can I choose from?",
-          },
-          murphEmailAddress: account.email.murphEmailAddress ?? null,
-          murphPhoneNumber: routing?.linqRecipientPhone ?? null,
-          preferredKind: "text",
-          userEmailAddress: account.email.address,
-        })[0] ?? null
-      : null;
-  const canStartUsageMissions =
-    usageActivity?.missionsEnabled === true
-    && usageMissionContactOption !== null;
-  const visibleUsageActivity =
-    usageActivity
-    && (
-      canStartUsageMissions
-      || usageActivity.credits.length > 0
-      || usageActivity.missions.length > 0
-    )
-      ? usageActivity
-      : null;
+  const {
+    accountWithPrivyDisplay,
+    murphPhoneNumber,
+    privyAppId,
+    privyClientId,
+    privySessionMatchesAppSession,
+    usageMissionContactOption,
+    visibleUsageActivity,
+    voiceTestContactOption,
+  } = resolveSettingsAccountPresentation({
+    account,
+    freshPrivySession,
+    routing,
+    session,
+    usageActivity,
+  });
 
   const settingsContent = (
     <div className="flex flex-col gap-12">
@@ -629,9 +410,10 @@ export default async function SettingsPage({
           AI model
         </div>
         <HostedAssistantModelSettings
+          availableModels={assistant?.availableModels}
           canUpgradeToEdge={canUpgradeToEdge && !planChangePending}
           chatCompletionsAvailable={isHostedCustomChatCompletionsEnabled()}
-          configurationAvailable={account?.assistant?.configurationAvailable === true}
+          configurationAvailable={assistant?.configurationAvailable === true}
           customInferenceAvailable={isHostedCustomInferenceEnabled()}
           expectedCurrentPlanCode={
             currentPlanCode === "launch_group_monthly"
@@ -643,13 +425,13 @@ export default async function SettingsPage({
             isHostedCustomInferenceEnabled() ? inferenceConnection : null
           }
           initialDormantSolPreference={
-            account?.assistant?.dormantSolPreference === true
+            assistant?.dormantSolPreference === true
           }
-          initialModel={account?.assistant?.model ?? HOSTED_ASSISTANT_TERRA_MODEL}
+          initialModel={assistant?.model ?? HOSTED_ASSISTANT_TERRA_MODEL}
           initialProvider={
-            account?.assistant?.provider ?? HOSTED_ASSISTANT_DEFAULT_PROVIDER
+            assistant?.provider ?? HOSTED_ASSISTANT_DEFAULT_PROVIDER
           }
-          solAvailable={account?.assistant?.solAvailable === true}
+          solAvailable={assistant?.solAvailable === true}
           veniceAvailable={isHostedVeniceAssistantEnabled()}
         />
       </section>
@@ -718,46 +500,30 @@ export default async function SettingsPage({
       </section>
 
       {privyAppId ? (
-        <>
-          <section className="flex flex-col gap-4">
-            <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-              Security
-            </div>
-            <HostedPasskeySettings
-              authenticated={authenticated}
-              secureApprovalStatus={secureApprovalStatus}
-            />
-          </section>
-
-          <section id="data-privacy" className="flex scroll-mt-24 flex-col gap-4">
-            <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-              Data & privacy
-            </div>
-            <HostedHealthDataConsentSettings
-              authenticated={authenticated}
-              initialStatus={consentStatus}
-            />
-            <HostedDataPrivacySettings
-              authenticated={authenticated}
-              authorizationEnabled
-            />
-          </section>
-        </>
-      ) : (
-        <section id="data-privacy" className="flex scroll-mt-24 flex-col gap-4">
+        <section className="flex flex-col gap-4">
           <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-            Data & privacy
+            Security
           </div>
-          <HostedHealthDataConsentSettings
+          <HostedPasskeySettings
             authenticated={authenticated}
-            initialStatus={consentStatus}
-          />
-          <HostedDataPrivacySettings
-            authenticated={authenticated}
-            authorizationEnabled={false}
+            secureApprovalStatus={secureApprovalStatus}
           />
         </section>
-      )}
+      ) : null}
+
+      <section id="data-privacy" className="flex scroll-mt-24 flex-col gap-4">
+        <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Data & privacy
+        </div>
+        <HostedHealthDataConsentSettings
+          authenticated={authenticated}
+          initialStatus={consentStatus}
+        />
+        <HostedDataPrivacySettings
+          authenticated={authenticated}
+          authorizationEnabled={Boolean(privyAppId)}
+        />
+      </section>
     </div>
   );
 
@@ -766,6 +532,474 @@ export default async function SettingsPage({
       {settingsContent}
     </HostedPrivyProvider>
   ) : settingsContent;
+}
+
+type NormalizedSettingsPageData = ReturnType<typeof normalizeSettingsPageData>;
+type ResolvedSettingsPageRequest = ReturnType<
+  typeof resolveSettingsPageRequest
+>;
+
+type SettingsBillingRef = NonNullable<
+  NormalizedSettingsPageData["settingsSnapshot"]
+>["billingRef"];
+type SettingsAccount = NonNullable<
+  NormalizedSettingsPageData["settingsSnapshot"]
+>["account"];
+type SettingsRouting = NonNullable<
+  NormalizedSettingsPageData["settingsSnapshot"]
+>["routing"];
+
+function resolveSettingsAccountPresentation(input: {
+  account: SettingsAccount | null;
+  freshPrivySession: NormalizedSettingsPageData["freshPrivySession"];
+  routing: SettingsRouting | null;
+  session: HostedDashboardPageAuthSnapshot["session"];
+  usageActivity: NormalizedSettingsPageData["usageActivity"];
+}) {
+  const { account, freshPrivySession, routing, session, usageActivity } = input;
+  const privySessionMatchesAppSession =
+    freshPrivySession !== null
+    && freshPrivySession.identity.userId === session?.privyUserId;
+  const serverApprovedPrivyUser = privySessionMatchesAppSession
+    ? freshPrivySession.verifiedPrivyUser
+    : null;
+  const accountWithPrivyDisplay = account
+    ? withServerApprovedPrivyAccountHints({
+        snapshot: account,
+        serverApprovedPrivyUser,
+      })
+    : account;
+  const murphPhoneNumber =
+    routing?.linqRecipientPhone ?? routing?.pendingLinqRecipientPhone ?? null;
+  // The member sends this to Murph right after picking a voice, so the reply
+  // comes back as a voice memo in the new voice. Voice memos only deliver over
+  // text and Telegram, so an email-only member gets no redirect.
+  const resolvedVoiceTestOption = account
+    ? resolveMurphContactOptions({
+        contactChannels: {
+          email: Boolean(account.email.murphEmailAddress),
+          telegram: Boolean(account.telegram.telegramUserId),
+          text: Boolean(account.phone.number),
+        },
+        message: {
+          body: "just picked a new voice for you! send me a voice memo so I can hear it",
+        },
+        murphEmailAddress: account.email.murphEmailAddress ?? null,
+        murphPhoneNumber: routing?.linqRecipientPhone ?? null,
+        preferredKind: "text",
+        userEmailAddress: account.email.address,
+      })[0] ?? null
+    : null;
+  const voiceTestContactOption =
+    resolvedVoiceTestOption && resolvedVoiceTestOption.kind !== "email"
+      ? resolvedVoiceTestOption
+      : null;
+  const usageMissionContactOption =
+    usageActivity?.missionsEnabled === true && account
+      ? resolveMurphContactOptions({
+          contactChannels: {
+            email: false,
+            telegram: Boolean(account.telegram.telegramUserId),
+            text: Boolean(account.phone.number),
+          },
+          message: {
+            body: "Hey Murph, what referral options can I choose from?",
+          },
+          murphEmailAddress: account.email.murphEmailAddress ?? null,
+          murphPhoneNumber: routing?.linqRecipientPhone ?? null,
+          preferredKind: "text",
+          userEmailAddress: account.email.address,
+        })[0] ?? null
+      : null;
+  const canStartUsageMissions =
+    usageActivity?.missionsEnabled === true
+    && usageMissionContactOption !== null;
+  const visibleUsageActivity =
+    usageActivity
+    && (
+      canStartUsageMissions
+      || usageActivity.credits.length > 0
+      || usageActivity.missions.length > 0
+    )
+      ? usageActivity
+      : null;
+
+  return {
+    accountWithPrivyDisplay,
+    murphPhoneNumber,
+    privyAppId: process.env.NEXT_PUBLIC_PRIVY_APP_ID?.trim() || null,
+    privyClientId: process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID?.trim() || null,
+    privySessionMatchesAppSession,
+    usageMissionContactOption,
+    visibleUsageActivity,
+    voiceTestContactOption,
+  };
+}
+
+function resolveSettingsBillingPresentation(input: {
+  activeFamilyOwner: boolean;
+  authenticatedMember: HostedDashboardPageAuthSnapshot["authenticatedMember"];
+  billingRef: SettingsBillingRef | null;
+  familyBillingOwner: boolean;
+  hasConfirmedGroupMembership: boolean;
+  planChangeReturn: ResolvedSettingsPageRequest["planChangeReturn"];
+  settingsData: Awaited<ReturnType<typeof readSettingsPageData>> | null;
+  sponsoredMember: boolean;
+}) {
+  const {
+    activeFamilyOwner,
+    authenticatedMember,
+    billingRef,
+    familyBillingOwner,
+    hasConfirmedGroupMembership,
+    planChangeReturn,
+    settingsData,
+    sponsoredMember,
+  } = input;
+  const canStartFamily =
+    authenticatedMember != null
+    && !familyBillingOwner
+    && !sponsoredMember
+    && !authenticatedMember.suspendedAt;
+  const currentPlanCode = parseHostedBillingPlanCode(
+    billingRef?.currentBillingPlanCode,
+  );
+  const directPlanUpdateTarget =
+    !activeFamilyOwner
+    && !sponsoredMember
+    && (
+      planChangeReturn === "launch_edge_monthly"
+      || planChangeReturn === "launch_max_monthly"
+      || planChangeReturn === "launch_monthly"
+    )
+      ? planChangeReturn
+      : null;
+  const directPlanUpdateActive =
+    directPlanUpdateTarget !== null
+    && authenticatedMember !== null
+    && hasHostedMemberOwnActiveAccess(authenticatedMember)
+    && parseHostedBillingPhase(billingRef?.currentBillingPhase) === "paid"
+    && currentPlanCode === directPlanUpdateTarget;
+  const planChangePending =
+    directPlanUpdateTarget !== null && !directPlanUpdateActive;
+  const scheduledPlanCode = parseHostedBillingPlanCode(
+    billingRef?.scheduledBillingPlanCode,
+  );
+  const hasScheduledPlanChange = scheduledPlanCode !== null;
+  const groupPlanConfigured = settingsData?.groupPlanAvailable === true;
+  const maxPlanConfigured = settingsData?.maxPlanAvailable === true;
+  const visiblePlanCodes = resolveVisibleHostedBillingPlanCodes({
+    currentPlanCode,
+    groupPlanConfigured,
+    hasConfirmedGroupMembership,
+    maxPlanConfigured,
+    scheduledPlanCode,
+  });
+  const ownPaidBillingActive =
+    authenticatedMember !== null
+    && hasHostedMemberOwnPaidBilling({
+      billingStatus: authenticatedMember.billingStatus,
+      billingRef: {
+        currentBillingPhase: billingRef?.currentBillingPhase ?? null,
+        currentCheckoutOffer: billingRef?.currentCheckoutOffer ?? null,
+        stripeSubscriptionLookupKey: billingRef?.stripeSubscriptionId
+          ? "configured"
+          : null,
+      },
+      suspendedAt: authenticatedMember.suspendedAt,
+    });
+  const hasRecoverableBilling =
+    authenticatedMember !== null
+    && hasHostedRecoverableBilling({
+      billingStatus: authenticatedMember.billingStatus,
+      hasExistingSubscription: Boolean(billingRef?.stripeSubscriptionId),
+    });
+  const canStartDirectPlan =
+    !hasScheduledPlanChange
+    && authenticatedMember !== null
+    && !activeFamilyOwner
+    && !sponsoredMember
+    && !authenticatedMember.suspendedAt
+    && !ownPaidBillingActive
+    && !hasRecoverableBilling;
+  const canManageBilling =
+    activeFamilyOwner
+    || (
+      authenticatedMember !== null
+      && !authenticatedMember.suspendedAt
+      && Boolean(billingRef?.stripeCustomerId)
+      && (ownPaidBillingActive || hasRecoverableBilling)
+    );
+
+  return {
+    canManageBilling,
+    canStartDirectPlan,
+    canStartFamily,
+    currentPlanCode,
+    directPlanUpdateActive,
+    directPlanUpdateTarget,
+    groupPlanConfigured,
+    hasScheduledPlanChange,
+    maxPlanConfigured,
+    planChangePending,
+    showGroupPlan: visiblePlanCodes.includes("launch_group_monthly"),
+    showMaxPlan: visiblePlanCodes.includes("launch_max_monthly"),
+  };
+}
+
+function resolveSettingsBillingActions(input: {
+  authenticatedMember: HostedDashboardPageAuthSnapshot["authenticatedMember"];
+  billingRef: SettingsBillingRef | null;
+  groupPlanConfigured: boolean;
+  hasConfirmedGroupMembership: boolean;
+  hasScheduledPlanChange: boolean;
+  maxPlanConfigured: boolean;
+}) {
+  const {
+    authenticatedMember,
+    billingRef,
+    groupPlanConfigured,
+    hasConfirmedGroupMembership,
+    hasScheduledPlanChange,
+    maxPlanConfigured,
+  } = input;
+  const hasActiveAccess = authenticatedMember !== null
+    && hasHostedMemberOwnActiveAccess(authenticatedMember);
+  const upgradeInput = {
+    currentBillingPhase: billingRef?.currentBillingPhase,
+    currentBillingPlanCode: billingRef?.currentBillingPlanCode,
+    currentCheckoutOffer: billingRef?.currentCheckoutOffer,
+  };
+  const switchInput = authenticatedMember
+    ? {
+        billingStatus: authenticatedMember.billingStatus,
+        currentBillingPhase: billingRef?.currentBillingPhase,
+        currentBillingPlanCode: billingRef?.currentBillingPlanCode,
+        currentCheckoutOffer: billingRef?.currentCheckoutOffer,
+        stripeCustomerId: billingRef?.stripeCustomerId,
+        stripeSubscriptionId: billingRef?.stripeSubscriptionId,
+        suspendedAt: authenticatedMember.suspendedAt,
+      }
+    : null;
+
+  return {
+    canSwitchToEdge:
+      !hasScheduledPlanChange
+      && switchInput !== null
+      && canScheduleHostedBillingPlanChange({
+        ...switchInput,
+        targetPlanCode: "launch_edge_monthly",
+      }),
+    canSwitchToGroup:
+      !hasScheduledPlanChange
+      && groupPlanConfigured
+      && hasConfirmedGroupMembership
+      && switchInput !== null
+      && canScheduleHostedBillingPlanChange({
+        ...switchInput,
+        targetPlanCode: "launch_group_monthly",
+      }),
+    canUpgradeToEdge:
+      !hasScheduledPlanChange
+      && hasActiveAccess
+      && canUpgradeHostedBillingPlan({
+        ...upgradeInput,
+        targetPlanCode: "launch_edge_monthly",
+      }),
+    canUpgradeToMax:
+      !hasScheduledPlanChange
+      && maxPlanConfigured
+      && hasActiveAccess
+      && canUpgradeHostedBillingPlan({
+        ...upgradeInput,
+        targetPlanCode: "launch_max_monthly",
+      }),
+    canUpgradeToPulse:
+      !hasScheduledPlanChange
+      && hasActiveAccess
+      && canUpgradeHostedBillingPlan({
+        ...upgradeInput,
+        targetPlanCode: "launch_monthly",
+      }),
+  };
+}
+
+function resolveSettingsUsagePresentation(input: {
+  familyAccess: NormalizedSettingsPageData["familyAccess"];
+  familyOwner: NormalizedSettingsPageData["familyOwner"];
+  resolvedSearchParams: ResolvedSettingsPageRequest["resolvedSearchParams"];
+  usageRecoveryInitialOpen: boolean;
+  usageStatus: NormalizedSettingsPageData["usageStatus"];
+  usageTopUpActivePurchase: NormalizedSettingsPageData["usageTopUpActivePurchase"];
+  usageTopUpOfferCodes: NormalizedSettingsPageData["usageTopUpOfferCodes"];
+  usageTopUpPurchaseReturn: ResolvedSettingsPageRequest["usageTopUpPurchaseReturn"];
+  usageTopUpReturnTarget: NormalizedSettingsPageData["usageTopUpReturnTarget"];
+}) {
+  const {
+    familyAccess,
+    familyOwner,
+    resolvedSearchParams,
+    usageRecoveryInitialOpen,
+    usageStatus,
+    usageTopUpActivePurchase,
+    usageTopUpOfferCodes,
+    usageTopUpPurchaseReturn,
+    usageTopUpReturnTarget,
+  } = input;
+  const activeFamilyOwner = familyOwner?.billingActive === true;
+  const familyBillingOwner = familyOwner !== null
+    && isHostedFamilyBillingPortalManageable(familyOwner.billingStatus);
+  const familyOwnerUsageTopUpMember =
+    resolveActiveFamilyOwnerUsageTopUpMember(familyOwner);
+  const sponsoredMember = familyAccess !== null && familyOwner === null;
+  const familyRecurringUpgradeAvailable =
+    activeFamilyOwner && hasHigherHostedFamilyOwnerTier(familyOwner);
+  const usageTopUpOffers = usageTopUpActivePurchase
+    ? []
+    : projectHostedUsageTopUpOffers(usageTopUpOfferCodes);
+  const familyUsageTopUpOffers = activeFamilyOwner && !usageTopUpActivePurchase
+    ? projectHostedUsageTopUpOffers(
+        readHostedConfiguredUsageCreditOfferCodesSafely(),
+      )
+    : [];
+  const familyUsageTopUpActivePurchase =
+    usageTopUpActivePurchase?.target.kind === "family"
+    && usageTopUpActivePurchase.target.familyGroupId === familyOwner?.groupId
+      ? usageTopUpActivePurchase
+      : null;
+  const personalUsageTopUpActivePurchase =
+    usageTopUpActivePurchase?.target.kind === "personal"
+      ? usageTopUpActivePurchase
+      : usageTopUpActivePurchase && !familyUsageTopUpActivePurchase
+        ? {
+            ...usageTopUpActivePurchase,
+            retryAllowed: false,
+            targetConflict: true as const,
+            url: undefined,
+          }
+        : null;
+  const familyUsageTopUpActiveMemberId =
+    familyUsageTopUpActivePurchase?.target.beneficiaryMemberId ?? null;
+  const familyOwnerUsageTopUpActivePurchase = familyOwnerUsageTopUpMember
+    ? familyUsageTopUpActivePurchase?.target.beneficiaryMemberId ===
+        familyOwnerUsageTopUpMember.memberId
+      ? familyUsageTopUpActivePurchase
+      : usageTopUpActivePurchase
+        ? {
+            ...usageTopUpActivePurchase,
+            retryAllowed: false,
+            targetConflict: true as const,
+            url: undefined,
+          }
+        : null
+    : null;
+  const personalUsageTopUpPurchaseReturn =
+    usageTopUpPurchaseReturn
+    && usageTopUpReturnTarget?.kind === "personal"
+    && resolvedSearchParams.usageFamily === undefined
+    && resolvedSearchParams.usageMember === undefined
+      ? usageTopUpPurchaseReturn
+      : null;
+  const familyUsageTopUpPurchaseReturn =
+    usageTopUpPurchaseReturn
+    && usageTopUpReturnTarget?.kind === "family"
+    && usageTopUpReturnTarget.familyGroupId === familyOwner?.groupId
+    && readOnlySearchParamValue(resolvedSearchParams.usageFamily)
+      === usageTopUpReturnTarget.familyGroupId
+    && readOnlySearchParamValue(resolvedSearchParams.usageMember)
+      === usageTopUpReturnTarget.beneficiaryMemberId
+      ? usageTopUpPurchaseReturn
+      : null;
+  const familyUsageTopUpReturnMemberId = familyUsageTopUpPurchaseReturn
+    ? usageTopUpReturnTarget?.beneficiaryMemberId ?? null
+    : null;
+  const familyOwnerUsageTopUpAvailable =
+    familyOwnerUsageTopUpMember !== null;
+  const familyOwnerUsageTopUpPurchaseReturn =
+    familyOwnerUsageTopUpMember
+    && familyUsageTopUpPurchaseReturn
+    && usageTopUpReturnTarget?.beneficiaryMemberId ===
+      familyOwnerUsageTopUpMember.memberId
+      ? familyUsageTopUpPurchaseReturn
+      : null;
+  const familySettingsUsageTopUpPurchaseReturn =
+    familyOwnerUsageTopUpPurchaseReturn ? null : familyUsageTopUpPurchaseReturn;
+  const familySettingsUsageTopUpReturnMemberId =
+    familyOwnerUsageTopUpPurchaseReturn ? null : familyUsageTopUpReturnMemberId;
+  const billingUsageTopUpUsesFamilyOwner =
+    familyOwnerUsageTopUpAvailable
+    && usageTopUpActivePurchase?.target.kind !== "personal"
+    && personalUsageTopUpPurchaseReturn === null;
+  const billingUsageTopUpPurchaseReturn = billingUsageTopUpUsesFamilyOwner
+    ? familyOwnerUsageTopUpPurchaseReturn
+    : personalUsageTopUpPurchaseReturn;
+  const billingUsageTopUpActivePurchase = billingUsageTopUpPurchaseReturn
+    ? null
+    : billingUsageTopUpUsesFamilyOwner
+      ? familyOwnerUsageTopUpActivePurchase
+      : personalUsageTopUpActivePurchase;
+  const usageRecoveryIsCurrent =
+    usageRecoveryInitialOpen && usageStatus?.status === "exhausted";
+  const usageRecoveryPresentationOpen =
+    usageRecoveryIsCurrent
+    && usageTopUpActivePurchase === null
+    && usageTopUpPurchaseReturn === null;
+  const familyUsageRecoveryAvailable =
+    activeFamilyOwner
+    && usageStatus?.status === "exhausted"
+    && usageTopUpActivePurchase === null
+    && usageTopUpPurchaseReturn === null;
+  const billingUsagePurchaseRecoveryOpen =
+    usageRecoveryIsCurrent
+    && (
+      billingUsageTopUpActivePurchase !== null
+      || billingUsageTopUpPurchaseReturn !== null
+    );
+
+  return {
+    activeFamilyOwner,
+    billingUsagePurchaseRecoveryOpen,
+    billingUsageTopUpActivePurchase,
+    billingUsageTopUpOffers: billingUsageTopUpUsesFamilyOwner
+      ? familyUsageTopUpOffers
+      : usageTopUpOffers,
+    billingUsageTopUpPurchaseReturn,
+    billingUsageTopUpUsesFamilyOwner,
+    familyBillingOwner,
+    familyOwnerUsageTopUpMember,
+    familyRecurringUpgradeAvailable,
+    familySettingsUsageTopUpPurchaseReturn,
+    familySettingsUsageTopUpReturnMemberId,
+    familyUsageRecoveryAvailable,
+    familyUsageTopUpActiveMemberId,
+    familyUsageTopUpActivePurchase,
+    familyUsageTopUpOffers,
+    sponsoredMember,
+    usageRecoveryPresentationOpen,
+  };
+}
+
+function normalizeSettingsPageData(
+  settingsData: Awaited<ReturnType<typeof readSettingsPageData>> | null,
+) {
+  return {
+    consentStatus: settingsData?.consentStatus ?? null,
+    familyAccess: settingsData?.familyAccess ?? null,
+    familyDraftRecovery: settingsData?.familyDraftRecovery ?? null,
+    familyOwner: settingsData?.familyOwner ?? null,
+    freshPrivySession: settingsData?.freshPrivySession ?? null,
+    hasConfirmedGroupMembership:
+      settingsData?.hasConfirmedGroupMembership === true,
+    inferenceConnection: settingsData?.inferenceConnection ?? null,
+    secureApprovalStatus:
+      settingsData?.secureApprovalStatus ?? ({ status: "unavailable" } as const),
+    settingsSnapshot: settingsData?.settingsSnapshot ?? null,
+    usageActivity: settingsData?.usageActivity ?? null,
+    usageStatus: settingsData?.usageStatus ?? null,
+    usageTopUpActivePurchase: settingsData?.usageTopUpActivePurchase ?? null,
+    usageTopUpOfferCodes: settingsData?.usageTopUpOfferCodes ?? [],
+    usageTopUpReturnTarget: settingsData?.usageTopUpReturnTarget ?? null,
+  };
 }
 
 async function readSettingsPageData(input: {
@@ -920,6 +1154,49 @@ function readFirstSearchParamValue(
   value: string | string[] | undefined,
 ): string | undefined {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function resolveSettingsPageRequest(
+  resolvedSearchParams: SettingsSearchParams,
+) {
+  const addUsageTarget = readOnlySearchParamValue(
+    resolvedSearchParams.addUsage,
+  );
+
+  return {
+    familyInviteReturnPath: parseHostedFamilyInviteReturnPath(
+      readOnlySearchParamValue(
+        resolvedSearchParams[HOSTED_FAMILY_INVITE_RETURN_PARAM],
+      ),
+    ),
+    familyRecoveryRequested: hasExactSettingsSearchParam(
+      resolvedSearchParams,
+      "familyRecovery",
+      "true",
+    ),
+    groupPaymentMethodSaved:
+      readFirstSearchParamValue(
+        resolvedSearchParams[HOSTED_START_PAID_GROUP_RETURN_PARAM],
+      ) === HOSTED_START_PAID_GROUP_RETURN_VALUE,
+    openEmailLink:
+      readFirstSearchParamValue(resolvedSearchParams.addEmail) === "true",
+    openPersonalUsageTopUp: addUsageTarget === "true",
+    openVoiceLink:
+      readFirstSearchParamValue(resolvedSearchParams.voice) === "true",
+    planChangeReturn: parseHostedBillingPlanChangeReturnValue(
+      readOnlySearchParamValue(resolvedSearchParams.planUpdate),
+    ),
+    requestedFamilyOwnerUsageTopUp: addUsageTarget === "family",
+    resolvedSearchParams,
+    usageRecoveryInitialOpen: hasExactSettingsSearchParam(
+      resolvedSearchParams,
+      "usageRecovery",
+      "true",
+    ),
+    usageTopUpPurchaseReturn: readUsageTopUpPurchaseReturn(
+      resolvedSearchParams,
+    ),
+  };
 }
 
 function hasExactSettingsSearchParam(

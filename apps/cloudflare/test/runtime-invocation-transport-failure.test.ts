@@ -245,7 +245,7 @@ describe("runtime invocation transport failure fence handling", () => {
       readActiveRuntimeUserFence: async (token) => ({
         active: true,
         attemptId: token.attemptId,
-        leaseGeneration: token.leaseGeneration,
+        leaseGeneration: token.generation,
         userId: TEST_USER_ID,
       }),
     });
@@ -287,7 +287,7 @@ describe("runtime invocation transport failure fence handling", () => {
         readActiveRuntimeUserFence: async (token) => ({
           active: true,
           attemptId: token.attemptId,
-          leaseGeneration: token.leaseGeneration,
+          leaseGeneration: token.generation,
           userId: TEST_USER_ID,
         }),
       });
@@ -336,7 +336,7 @@ describe("runtime invocation transport failure fence handling", () => {
       readActiveRuntimeUserFence: async (token) => ({
         active: true,
         attemptId: token.attemptId,
-        leaseGeneration: token.leaseGeneration,
+        leaseGeneration: token.generation,
         userId: TEST_USER_ID,
       }),
     });
@@ -354,6 +354,7 @@ describe("runtime invocation transport failure fence handling", () => {
         attemptId: harness.token.attemptId,
         errorCode: "runtime_error",
         eventCode: "runner.accepted_attempt_failed",
+        leaseGeneration: harness.token.generation,
         redactedJson: expect.objectContaining({
           attemptStillActive: true,
           errorCode: "runtime_error",
@@ -610,7 +611,7 @@ describe("runtime invocation transport failure fence handling", () => {
       readActiveRuntimeUserFence: async (token) => ({
         active: true,
         attemptId: token.attemptId,
-        leaseGeneration: token.leaseGeneration,
+        leaseGeneration: token.generation,
         userId: "member_999",
       }),
     });
@@ -682,7 +683,7 @@ describe("runtime invocation transport failure fence handling", () => {
       readActiveRuntimeUserFence: async (token) => ({
         active: true,
         attemptId: token.attemptId,
-        leaseGeneration: token.leaseGeneration,
+        leaseGeneration: token.generation,
         userId: TEST_USER_ID,
       }),
     });
@@ -1067,6 +1068,7 @@ async function createTransportFailureHarness(input: {
     runnerRuntimeEnvSource: {},
     runnerStoreCache: new TestRunnerStoreCache({}),
     stateStore,
+    waitUntil: (promise) => durable.state.waitUntil(promise),
   });
 
   const prepared: PreparedRuntimeInvocation = {

@@ -569,13 +569,20 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK).toBe(generatedPrivateJwkJson);
   });
 
-  it("preserves matching persisted local authority signing keys and key version", () => {
+  it("migrates matching persisted local authority keys from a legacy version name", () => {
+    const legacyKeyVersionName =
+      "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/legacy-local";
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
       existing: {
         HOSTED_CRYPTO_ENV: "local",
-        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION:
-          "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/legacy-local",
+        HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON: JSON.stringify({
+          [legacyKeyVersionName]: {
+            publicKeyPem: existingAuthorityPublicPem.trim(),
+            status: "active",
+          },
+        }),
+        HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION: legacyKeyVersionName,
         HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM: existingAuthorityPublicPem,
         HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK: existingAuthorityPrivateJwkJson,
         HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY: "existing-wrap-key",
@@ -592,8 +599,11 @@ describe("mergeCloudflareLocalEnv", () => {
       }),
     });
 
-    expect(merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION).toBe(
-      "projects/murph-local/locations/global/keyRings/hosted-local/cryptoKeys/authority-sign/cryptoKeyVersions/legacy-local",
+    expect(merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION).toMatch(
+      /^projects\/murph-local\/locations\/global\/keyRings\/hosted-local\/cryptoKeys\/authority-sign\/cryptoKeyVersions\/[1-9][0-9]*$/u,
+    );
+    expect(merged.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION).toBe(
+      merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION,
     );
     expect(merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM).toBe(
       existingAuthorityPublicPem.trim(),
@@ -601,6 +611,16 @@ describe("mergeCloudflareLocalEnv", () => {
     expect(merged.HOSTED_CRYPTO_LOCAL_AUTHORITY_SIGN_PRIVATE_JWK).toBe(
       existingAuthorityPrivateJwkJson,
     );
+    expect(JSON.parse(merged.HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON)).toEqual({
+      [legacyKeyVersionName]: {
+        publicKeyPem: existingAuthorityPublicPem.trim(),
+        status: "verify_only",
+      },
+      [merged.HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION]: {
+        publicKeyPem: existingAuthorityPublicPem.trim(),
+        status: "active",
+      },
+    });
   });
 
   it("rejects mismatched persisted local authority signing keys instead of regenerating", () => {
@@ -1121,6 +1141,28 @@ describe("buildHostedLocalDevOverrides", () => {
     expect(overrides.DEVICE_SYNC_PUBLIC_BASE_URL).toBe("http://127.0.0.1:3205/api/device-sync");
   });
 
+  it("publishes the canonical HTTPS browser origin without changing local ports", () => {
+    const overrides = buildHostedLocalDevOverrides(localConfig, {}, {
+      webPublicBaseUrl: "https://local.withmurph.ai:3443",
+    });
+
+    expect(overrides.HOSTED_ONBOARDING_PUBLIC_BASE_URL).toBe(
+      "https://local.withmurph.ai:3443",
+    );
+    expect(overrides.HOSTED_WEB_BASE_URL).toBe(
+      "https://local.withmurph.ai:3443",
+    );
+    expect(overrides.DEVICE_SYNC_PUBLIC_BASE_URL).toBe(
+      "https://local.withmurph.ai:3443/api/device-sync",
+    );
+    expect(overrides.HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS).toBe(
+      "https://local.withmurph.ai:3443,http://localhost:3000,http://127.0.0.1:3000",
+    );
+    expect(overrides.HOSTED_EXECUTION_CONTROL_URL).toBe(
+      "http://127.0.0.1:8787",
+    );
+  });
+
   it("preserves an explicit wake fetch proof key override", () => {
     const overrides = buildHostedLocalDevOverrides(localConfig, {
     });
@@ -1339,11 +1381,23 @@ describe("buildWranglerVarArgs", () => {
     expect(
       buildWranglerVarArgs({
         HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "CUSTOM_API_KEY",
+        HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: "bundle-fingerprint",
+        HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: "source-fingerprint",
+        HOSTED_EXECUTION_STANDBY_MODE: "allocate",
+        HOSTED_EXECUTION_STANDBY_TARGET: "3",
         HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "45000",
       }),
     ).toEqual([
       "--var",
       "HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS:CUSTOM_API_KEY",
+      "--var",
+      "HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT:bundle-fingerprint",
+      "--var",
+      "HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT:source-fingerprint",
+      "--var",
+      "HOSTED_EXECUTION_STANDBY_MODE:allocate",
+      "--var",
+      "HOSTED_EXECUTION_STANDBY_TARGET:3",
       "--var",
       "HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS:45000",
     ]);
@@ -1473,6 +1527,10 @@ describe("buildWranglerEnvFileText", () => {
       EXA_API_KEY: "exa-secret",
       HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph",
       HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS: "CUSTOM_API_KEY",
+      HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: "bundle-fingerprint",
+      HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: "source-fingerprint",
+      HOSTED_EXECUTION_STANDBY_MODE: "allocate",
+      HOSTED_EXECUTION_STANDBY_TARGET: "3",
       HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "45000",
       MURPH_ELEVENLABS_MODEL_ID: "eleven_multilingual_v2",
       MURPH_ELEVENLABS_VOICE_ID: "voice-murph",
@@ -1482,6 +1540,10 @@ describe("buildWranglerEnvFileText", () => {
     expect(text).toContain('EXA_API_KEY="exa-secret"');
     expect(text).toContain('HOSTED_EMAIL_DEFAULT_SUBJECT="Murph"');
     expect(text).toContain('HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS="CUSTOM_API_KEY"');
+    expect(text).toContain('HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT="bundle-fingerprint"');
+    expect(text).toContain('HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT="source-fingerprint"');
+    expect(text).toContain('HOSTED_EXECUTION_STANDBY_MODE="allocate"');
+    expect(text).toContain('HOSTED_EXECUTION_STANDBY_TARGET="3"');
     expect(text).toContain('HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS="45000"');
     expect(text).toContain('MURPH_ELEVENLABS_MODEL_ID="eleven_multilingual_v2"');
     expect(text).toContain('MURPH_ELEVENLABS_VOICE_ID="voice-murph"');
@@ -1586,6 +1648,37 @@ describe("buildWranglerEnvFileText", () => {
 });
 
 describe("buildWranglerLocalDevConfig", () => {
+  it.each(["off", "shadow", "allocate"])("preserves %s mode and target overrides", (mode) => {
+    const source = {
+      HOSTED_EXECUTION_STANDBY_MODE: mode,
+      HOSTED_EXECUTION_STANDBY_TARGET: "0",
+      CF_CONTAINER_MAX_INSTANCES: "748",
+      CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES: "100",
+    };
+    expect(buildWranglerLocalDevConfig(source).vars).toMatchObject({
+      HOSTED_EXECUTION_STANDBY_MODE: mode,
+      HOSTED_EXECUTION_STANDBY_TARGET: "0",
+    });
+    expect(buildWranglerVarArgs(source)).toEqual([
+      "--var", `HOSTED_EXECUTION_STANDBY_MODE:${mode}`,
+      "--var", "HOSTED_EXECUTION_STANDBY_TARGET:0",
+    ]);
+    const envFile = buildWranglerEnvFileText(source);
+    expect(envFile).toContain(`HOSTED_EXECUTION_STANDBY_MODE="${mode}"`);
+    expect(envFile).toContain('HOSTED_EXECUTION_STANDBY_TARGET="0"');
+    expect(envFile).not.toContain("CF_CONTAINER_MAX_INSTANCES");
+    expect(envFile).not.toContain("CF_LEGACY_STANDBY_CONTAINER_MAX_INSTANCES");
+  });
+
+  it("passes an explicit account to Wrangler local dev", () => {
+    expect(
+      buildWranglerLocalDevConfig({
+        CLOUDFLARE_ACCOUNT_ID: "stub-account-id",
+      }),
+    ).toMatchObject({ account_id: "stub-account-id" });
+    expect(buildWranglerLocalDevConfig({})).not.toHaveProperty("account_id");
+  });
+
   it("keeps repo-relative defaults for the checked-in local dev location", () => {
     const config = buildWranglerLocalDevConfig({});
     const containers = config.containers as {
@@ -1599,17 +1692,27 @@ describe("buildWranglerLocalDevConfig", () => {
     }[];
     const container = containers[0]!;
     const smokeContainer = containers[1]!;
+    const standbyContainer = containers[2]!;
 
     expect(config.main).toBe("../src/index.ts");
     expect(config.name).toBe("murph-hosted");
+    expect(container.max_instances).toBe(50);
+    expect(container).not.toHaveProperty("constraints");
+    expect(standbyContainer).not.toHaveProperty("rollout_step_percentage");
+    expect(config.vars).toMatchObject({
+      HOSTED_EXECUTION_STANDBY_MODE: "off",
+      HOSTED_EXECUTION_STANDBY_TARGET: "2",
+    });
     expect(config.vars).not.toHaveProperty("HOSTED_EXECUTION_RUNNER_DESTROY_TIMEOUT_MS");
     expect(containers.map((entry) => entry.class_name)).toEqual([
       "RunnerContainer",
       "DeploySmokeRunnerContainer",
+      "StandbyRunnerContainer",
     ]);
     expect(config.compatibility_flags).toEqual([
       "nodejs_compat",
       "containers_pid_namespace",
+      "enable_request_signal",
     ]);
     for (const entry of containers) {
       expect(entry.ssh).toEqual({ enabled: false });
@@ -1625,6 +1728,18 @@ describe("buildWranglerLocalDevConfig", () => {
           class_name: "DeviceWebhookQueueHealthDurableObject",
           name: "DEVICE_WEBHOOK_QUEUE_MONITOR",
         },
+        {
+          class_name: "OpenAiAuthorizationAlertDurableObject",
+          name: "OPENAI_AUTHORIZATION_ALERT_MONITOR",
+        },
+        {
+          class_name: "StandbyRunnerCoordinatorDurableObject",
+          name: "STANDBY_COORDINATOR",
+        },
+        {
+          class_name: "StandbyRunnerContainer",
+          name: "STANDBY_RUNNER_CONTAINER",
+        },
       ]),
     });
     expect(config.migrations).toEqual(expect.arrayContaining([
@@ -1635,6 +1750,17 @@ describe("buildWranglerLocalDevConfig", () => {
       {
         new_sqlite_classes: ["DeviceWebhookQueueHealthDurableObject"],
         tag: "v5",
+      },
+      {
+        new_sqlite_classes: ["OpenAiAuthorizationAlertDurableObject"],
+        tag: "v6",
+      },
+      {
+        new_sqlite_classes: [
+          "StandbyRunnerCoordinatorDurableObject",
+          "StandbyRunnerContainer",
+        ],
+        tag: "v7",
       },
     ]));
     expect(config.triggers).toEqual({
@@ -1651,6 +1777,7 @@ describe("buildWranglerLocalDevConfig", () => {
     expect(container.image_vars).toEqual({
       HOSTED_RUNNER_CONTAINER_CLASS: "RunnerContainer",
       HOSTED_RUNNER_LOCAL_BUILD_ID: "local",
+      HOSTED_RUNNER_LOCAL_WORKER_NAME: "murph-hosted",
     });
     expect(smokeContainer).toMatchObject({
       image: container.image,
@@ -1662,8 +1789,19 @@ describe("buildWranglerLocalDevConfig", () => {
       image_vars: {
         HOSTED_RUNNER_CONTAINER_CLASS: "DeploySmokeRunnerContainer",
         HOSTED_RUNNER_LOCAL_BUILD_ID: "local",
+        HOSTED_RUNNER_LOCAL_WORKER_NAME: "murph-hosted",
       },
       max_instances: 1,
+    });
+    expect(standbyContainer).toMatchObject({
+      image: container.image,
+      image_build_context: container.image_build_context,
+      image_vars: {
+        HOSTED_RUNNER_CONTAINER_CLASS: "StandbyRunnerContainer",
+        HOSTED_RUNNER_LOCAL_BUILD_ID: "local",
+        HOSTED_RUNNER_LOCAL_WORKER_NAME: "murph-hosted",
+      },
+      max_instances: 0,
     });
   });
 
@@ -1674,9 +1812,16 @@ describe("buildWranglerLocalDevConfig", () => {
       MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "worktree-feature-a",
     };
     const workerName = resolveWranglerLocalDevWorkerName(source);
+    const config = buildWranglerLocalDevConfig(source);
+    const containers = config.containers as Array<{
+      image_vars: Record<string, string>;
+    }>;
 
     expect(workerName).toMatch(/^murph-worktree-[a-f0-9]{24}$/u);
     expect(workerName.startsWith("murph-hosted-")).toBe(false);
+    expect(containers.every((container) =>
+      container.image_vars.HOSTED_RUNNER_LOCAL_WORKER_NAME === workerName
+    )).toBe(true);
     expect(buildWranglerEnvFileText(source)).not.toContain("MURPH_DEV_WORKTREE_SCOPE");
     expect(buildWranglerVarArgs(source).join("\n")).not.toContain("MURPH_DEV_WORKTREE_SCOPE");
   });
@@ -1768,6 +1913,7 @@ describe("buildWranglerLocalDevConfig", () => {
       expect(container.image_vars).toEqual({
         HOSTED_RUNNER_CONTAINER_CLASS: container.class_name,
         HOSTED_RUNNER_LOCAL_BUILD_ID: buildHostedRunnerLocalBuildId("stack-test-build-id"),
+        HOSTED_RUNNER_LOCAL_WORKER_NAME: "murph-hosted",
       });
     }
     expect(

@@ -113,6 +113,7 @@ export interface AssistantProviderRequestStartedEvent
 export interface AssistantProviderFinishWithoutReplyAcceptedEvent {
   deliveryContextOrdinal: number
   messageReactionPending: boolean
+  precedingReplyDeliveryContextOrdinal: number | null
 }
 
 /**
@@ -148,7 +149,6 @@ export interface AssistantProviderTurn {
   automationRelativeDateReferenceWindow?: AssistantAcceptedTurnInputReferenceWindow | null
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   abortSignal?: AbortSignal
-  codexConfigOverrides?: readonly string[] | null
   codexThreadConfig?: Readonly<Record<string, unknown>> | null
   conversationHistoryMessages?: ReadonlyArray<AssistantProviderConversationMessage>
   developerInstructions?: string | null
@@ -156,6 +156,7 @@ export interface AssistantProviderTurn {
   environments?: readonly Readonly<Record<string, unknown>>[] | null
   env?: NodeJS.ProcessEnv
   generateSongPolicy?: AssistantGenerateSongTurnPolicy | null
+  followUpAttachmentAllowed?: boolean | null
   groupConversation?: boolean | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
   memberMemoryMaintenanceAuthorized?: boolean | null
@@ -292,6 +293,7 @@ export interface AssistantProviderTurnExecutionResult {
   /** Accepted input selected as the native target for this response, if any. */
   targetInputId?: string | null
   responseMedia?: readonly AssistantResponseMedia[] | null
+  followUpRequest?: import("@murphai/contracts").AutomationFollowUpRequest | null
   responseCard?: AssistantResponseCard | null
   stderr: string
   stdout: string
@@ -299,6 +301,7 @@ export interface AssistantProviderTurnExecutionResult {
 }
 
 export interface AssistantProviderResponseSegment {
+  followUpRequest?: import("@murphai/contracts").AutomationFollowUpRequest | null
   /**
    * Per-response override: undefined inherits its ordinal; null/empty clears;
    * non-empty replaces.

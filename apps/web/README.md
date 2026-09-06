@@ -85,6 +85,28 @@ workspace-runtime pass, and checkpoints through the web-owned workspace CAS. It 
 opaque encrypted runtime blobs and explicit execution-time callback data, but it is not the
 canonical owner of hosted product facts.
 
+## Reconciliation-facts failure observability
+
+The Web-owned reconciliation-facts route emits one additional failure-only
+Vercel record with the fixed message
+`Hosted runtime reconciliation facts failed.` and schema
+`murph.hosted-runtime.reconciliation-facts.failure.v1`. Its `stage` is one of
+`canonical_access_workspace`, `canonical_consent`, `canonical_mailbox`,
+`canonical_projection`, `canonical_usage`, `visible_access`,
+`blocked_access_notice`, or `canonical_recheck`; its `errorClass` is one of
+`hosted_onboarding`, `type_error`, `error`, or `non_error`. Its structured
+metadata contains only `schema`, `stage`, and `errorClass`. It never includes
+raw errors, messages,
+stacks, causes, identifiers, route or request data, payloads, provider or query
+text, or arbitrary metadata. No record is emitted on success.
+
+Verification uses natural traffic only. From the Web deployment-ready timestamp
+through the next natural occurrence, filter Vercel logs by the exact message and
+schema, then count grouped only by message, `stage`, and `errorClass`. The record
+is additive and Web-only: older deployments and readers tolerate its absence,
+and recovery uses a fresh revert or forward-fix commit on `main` so the replacement
+deployment receives current production admission.
+
 ## Health-data withdrawal rollback floor
 
 Deploy the consent-aware Cloudflare Worker before the Web deployment that can
@@ -109,6 +131,16 @@ consent-aware Worker. Focused proof covers a revoked Worker runtime admission,
 a revoked Web webhook/sync admission, and a revoked grantor shared-data read.
 Missing legacy grants remain compatible within those current artifacts; they
 are not a reason to restore pre-consent readers.
+
+## Browser-vault dashboard loading
+
+Browser-vault dashboard sessions and public-homepage preparation read only the
+published replica ref and workspace version. Refresh orchestration is imported
+only when the existing after-response refresh path needs it. The browser loader
+constructs one query client for the route's requested capability; the combined
+metrics/labs client reuses its metrics client's core access. Patterns reads its
+precomputed report directly. Session reauthorization, exact replica identity,
+route-scoped shard retention, and encrypted transport remain unchanged.
 
 ## Browser-vault member-proof rollback floor
 
@@ -482,12 +514,21 @@ The hosted Prisma schema keeps ownership sharp and nested:
 
   Canonical account deletion also inserts one foreign-key-free, KMS-encrypted
   external-cleanup receipt in the same transaction before removing member
-  rows. The immediate attempt and existing hourly retention sweep share that
-  idempotent owner for Cloudflare runner/R2, Stripe-customer, and Privy cleanup;
-  unconfigured or partial targets stay pending, completed targets are skipped,
-  and the receipt is removed only after convergence. Immediate target calls are
-  bounded to five seconds plus a small receipt-settlement margin; hourly retries
-  use fifteen-second target bounds and four-receipt concurrency. Cloudflare is
+  rows. The immediate attempt and hourly external-retention cron share that
+  idempotent owner for Cloudflare runner/R2, isolated runtime logs, Temporal
+  workflow termination, Stripe-customer, and Privy cleanup; unconfigured or
+  partial targets stay pending, completed targets are skipped, and the receipt
+  is removed only after convergence. Temporal completion requires every
+  captured runtime workflow to be terminated or confirmed absent. One
+  receipt-owned cursor resumes deterministic batches of four at the first
+  unconfirmed runtime; progress is immediately eligible to continue, while
+  attempts with no progress back off. Predeploy adds that cursor nullable with
+  a zero default so existing receipts and old-Web inserts remain compatible;
+  after the cursor-aware Web is live and prior functions drain, the contract
+  lane rejects any unexpected null before setting `NOT NULL`. Immediate
+  cleanup uses one five-second shared target deadline plus a small
+  receipt-settlement margin; hourly retries use a fifteen-second shared target
+  deadline and four-receipt concurrency. Cloudflare is
   terminal only when the capability-bearing Worker explicitly confirms
   `deleteAllCompleted`, so a legacy response cannot erase retry ownership.
 
@@ -693,6 +734,7 @@ Optional but recommended:
 - `HOSTED_WEB_BASE_URL`
 - `MURPH_LABELS_DB_URL` for the shared product labels Postgres database required by `/api/foods` and `/api/supplements`
 - `MURPH_DATA_API_KEY` for server-to-server data API auth on `/api/foods` and `/api/supplements`; hosted Cloudflare owns the same secret for Worker-side injection and the key must not be exposed to browsers or runner env
+- `BRANDFETCH_CLIENT_ID` enables brand logos on the public `/food` page. It is a browser-safe Brandfetch client identifier, not server authority. The page searches Brandfetch with a bounded brand and broad food category, accepts only matching brand names from the fixed Brandfetch CDN, falls back to local category art, and keeps results only in page memory.
 - `CRON_SECRET`
 - `HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK`
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID`
@@ -763,21 +805,33 @@ product-threshold application rows.
 Attribution lives under `sql/product-tests/`.
 
 The current search path uses built-in Postgres full-text search plus the
-`pg_trgm` extension for indexed name similarity. Public food searches retain
-their existing 250-candidate SQL bound, and supplement searches retain their
-existing ranking path. Private food-name search uses a separate bounded
-retrieval contract for the roughly two-million-row foods corpus: it admits at
-most 250 literal exact-name rows, 10,000 GIN full-text matches, and 10,000 GiST
-nearest-name candidates before similarity scoring, canonical-key deduplication,
-and window sorting. Exactly one GiST branch is realized: full-text searches use
-strict-word-nearest names, while no-FTS typo searches use whole-name distance
+`pg_trgm` extension for indexed name similarity. Public and private food-name
+searches share the bounded retrieval path for the roughly two-million-row foods
+corpus. Public search keeps at most 250 deduplicated candidates before its
+optional comparison-readiness filter and bounded page selection. Food callers
+can request an evidence-first order for related comparison choices. That order
+checks exact indexed `product_tests.food_id` links inside the bounded candidate
+set, then prefers records with a reported package size, then keeps the existing
+relevance order. It does not claim sales or usage popularity. Supplement
+searches retain their existing ranking path. Food retrieval admits at
+most 250 literal exact-name rows and 10,000 GIN full-text matches before
+similarity scoring, canonical-key deduplication, and window sorting. When the
+GIN set reaches that cap and may be truncated, one GiST branch admits up to
+10,000 strict-word-nearest names to recover stronger full-text candidates. An
+unsaturated GIN set is already exhaustive and skips that whole-catalog scan.
+When FTS finds nothing, the one GiST branch instead uses whole-name distance
 and its matching whole-name threshold. That shared metric keeps eligible typo
 matches ahead of ineligible names before the cap. The bounded admissions
 preserve representative choice and canonical diversity across the established
 5,000-row boundary and ineligible-neighbor fixtures. Ranking is deterministic
 within the admitted set; it is intentionally not an exhaustive whole-catalog
 ranking. Exact IDs and UPCs continue to use direct lookup
-paths.
+paths. On `foods_api_failed` failures from private food lookup, including exact
+ID/UPC dispatch and ranked search, the existing safe structured log adds only
+the closed `failureStage` value `search_rows` or `contaminant_summary`;
+PostgreSQL error codes remain in the existing safe error fields, and SQL/query
+text, search values, product data, rows, identifiers, raw error messages, and
+stacks remain excluded. No success event is added.
 
 For an existing labels database, run
 `psql -f sql/foods/private-search-indexes.sql` with the labels schema owner to
@@ -816,18 +870,40 @@ fields; an older importer requires an explicit constraint rollback first.
 
 ## Murph Safe public product data
 
-`/search` exposes the public Murph Safe product-evidence experience. Its browser
-search calls `POST /api/public/v1/products/search`; server-rendered product
-details use the same service as
+`/search` exposes the public Murph Safe product-evidence experience. `/food`
+uses the same records for a conclusion-first comparison of up to ten branded
+foods. Browser searches call `POST /api/public/v1/products/search`;
+server-rendered product details use the same service as
 `GET /api/public/v1/products/[productRef]`. The generated OpenAPI 3.1 document
 is available at `/api/public/v1/openapi.json`, and the current schema id is
 `murph.public-products.v1`.
+
+On `/food`, autocomplete keeps relevance order. Category comparisons and the
+related-product grid use a dated US Google Shopping brand snapshot for 342 food
+queries. The database keeps category relevance and usable nutrition as gates,
+spreads results across brands, then uses exact-linked test count as a secondary
+signal. It rejects empty, zero-only, and physically impossible nutrition rows.
+A single exact food derives a peer category when the local food taxonomy can
+identify one, so a branded soda can lead to other sodas.
+Share URLs contain only public product references and the nutrition basis. They
+never contain the typed search query.
 
 The public catalog includes current supplement and branded-food sources and
 excludes generic food origins. Search and detail DTOs are bounded normalized
 projections; product tests join only through the selected row's exact
 `food_id` or `supplement_id`. Search terms stay in POST bodies and are not
 echoed, persisted, analyzed, or logged.
+
+Compatible browsers expose four page-scoped, read-only WebMCP tools while
+`/food` is open: `search_food_products`, `compare_food_products`,
+`get_food_comparison`, and `show_food_evidence`. The tools use exact public
+product references and update the same visible page state as manual controls.
+Comparison results carry returned, total, and truncated observation scope so a
+bounded evidence response cannot look complete to an agent. They also include
+the same four nutrition values, complete-row winners, ties, and the row-win
+counts behind the visible rows-led caption.
+One abort signal removes every registration when the page unmounts. This is a
+browser surface, not a remote MCP server, and it adds no account or vault access.
 
 Before a production build, configure these Production-scoped server values:
 
@@ -867,15 +943,19 @@ Hosted onboarding extras:
 - `HOSTED_MAILBOX_FINGERPRINT_KEY`
 - `HOSTED_ONBOARDING_SIGNUP_PHONE_NUMBER`
 - `RESEND_API_KEY`, `HOSTED_SIGNUP_WELCOME_EMAIL_FROM`, and `HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME` enable the plain-text post-activation signup welcome email to the member's verified email address, or to the Stripe checkout email when no verified email is linked yet. Leave any of them unset to disable the send path.
-- `HOSTED_SIGNUP_NOTIFICATION_EMAILS` optionally enables a plain-text internal notification to comma-separated recipients after hosted onboarding commits a member activation. Starter enrollment, the Checkout success return, Stripe reconciliation, and Family invite acceptance from the browser, Linq, or Telegram register one post-response task at their first post-commit boundary and share the same canonical-access, durable per-member notification gate. When available, the email uses temporary encrypted context to add approximate network city/region/country, local time, and the exact signup surface. A context-free direct path can label its exact activation surface; batch activation omits source when per-member provenance is unavailable. The email never includes the member ID, request IP, coordinates, or provider event identifiers. Leave the variable unset to disable the internal notification path.
+- `HOSTED_SIGNUP_NOTIFICATION_EMAILS` optionally enables a plain-text internal notification to comma-separated recipients after hosted onboarding commits a member activation. Starter enrollment, the Checkout success return, Stripe reconciliation, and Family invite acceptance from the browser, Linq, or Telegram register one post-response task at their first post-commit boundary and share the same canonical-access, durable per-member notification gate. The fixed identity configured by `HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_PHONE_NUMBER` is skipped before that gate and is also omitted from operator Growth member reporting and reply-latency email alerts; the protected postdeploy canary workflow remains the owner of its latency SLO. When available, the email uses temporary encrypted context to add approximate network city/region/country, local time, and the exact signup surface. A context-free direct path can label its exact activation surface; batch activation omits source when per-member provenance is unavailable. The email never includes the member ID, request IP, coordinates, or provider event identifiers. Leave the variable unset to disable the internal notification path.
 - `HOSTED_SIGNUP_WELCOME_EMAIL_TIMEOUT_MS` optionally bounds the Resend request timeout; the default is 10 seconds.
 - `HOSTED_LINQ_ALERT_EMAIL_FROM` and `HOSTED_LINQ_ALERT_EMAILS`, together with
   `RESEND_API_KEY`, enable the shared plain-text operational channel. Stripe
   uses it for metadata-only alerts when a provider rejection aborts a complete
   billing action, for new verified payment-failure events, and for the first
-  failed reconciliation attempt. Both website and iMessage Assistant billing
-  use the same Web-owned Stripe services, so there is no separate
-  channel-specific configuration.
+  failed reconciliation attempt. Every verified positive subscription invoice
+  or fulfilled usage-credit payment also sends one metadata-only notification
+  through this channel. Production must configure all three values: a missing
+  configuration or provider failure keeps that payment's existing receipt
+  retryable while its already-committed billing result remains intact. Both
+  website and iMessage Assistant billing use the same Web-owned Stripe
+  services, so there is no separate channel-specific configuration.
 - `NEXT_PUBLIC_PRIVY_APP_ID`
 - `NEXT_PUBLIC_PRIVY_CLIENT_ID`
 - `PRIVY_CUSTOM_AUTH_DOMAIN`
@@ -936,8 +1016,8 @@ Hosted onboarding extras:
   row cap; execution that starts after denial is measured from its earliest
   milestone even when ingress is older than that window. The monitor sends
   no alert for scheduled automation turns, including Flex-tier turns, because
-  they do not own a user-ingress reply trace. The monitor sends one email per
-  continuous incident, suppresses sends from 11 PM through 7 AM
+  they do not own a user-ingress reply trace. The latency monitor sends one
+  email per continuous incident, suppresses sends from 11 PM through 7 AM
   operator-local time, and adds up to ten minutes of stable wake/retry jitter.
   The existing seven-day trace cleanup retires a trace only when both ingress
   and latest activity are stale, so recent resumed work remains observable
@@ -970,8 +1050,10 @@ Hosted onboarding extras:
   lane, age, and pending-item counts only. It has its own singleton incident
   row, so an active reply-latency incident cannot suppress a newly discovered
   progress stall. While one progress incident remains anomalous, the same row
-  sends a fresh aggregate reminder every six hours plus stable jitter, outside
-  quiet hours. Each fresh reminder claim persists a new generation identity
+  sends a fresh aggregate reminder every six hours plus stable jitter,
+  including during quiet hours. The first progress alert also bypasses the
+  shared quiet-hours deferral. Each fresh reminder claim persists a new
+  generation identity
   before Resend, while an ambiguous retry reuses that identity and the exact
   body. The latency monitor remains one email per continuous incident. Recovery
   silently rearms each monitor independently and sends no recovery email.
@@ -1049,6 +1131,16 @@ Hosted managed crypto:
 Hosted AI usage metering:
 
 - Hosted AI usage rows are recorded locally for allowance, audit, and future billing analysis. The hosted app no longer attaches Stripe usage prices at checkout or posts Stripe meter events.
+- GPT-6 Astra is an optional managed OpenAI model for active paid individual Edge/Max
+  and active Family Edge/Max seats. The existing assistant preference owner enforces
+  eligibility on writes and runtime reads; losing Edge/Max access retains the preference
+  while using Terra until access returns. Group rooms retain Luna/Terra/Sol.
+  Astra uses $10 input, $1 cache reads, $12.50 cache writes, and $50 output per
+  million tokens; OpenAI Flex uses half those rates. Exact requests above 272K
+  input use twice the input/cache rates and 1.5 times the output rate. Hosted
+  Codex keeps Astra context at 272K, so cumulative turn/subagent usage is charged
+  at ordinary rates even when several requests together exceed that threshold.
+  Rates: https://developers.openai.com/api/docs/models/gpt-6-astra
 - Hosted AI included-allowance accounting is app-owned: web prices recorded `HostedAiUsage` rows by canonical model and recorded provider into allowance columns and maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state. OpenAI and Venice GPT-5.6 usage therefore use their respective documented input, cache-read, cache-write, and output rates. Settings discloses Venice's higher provider-rate capacity use both while it is selected as a pending choice and after it is saved. Subsequent usage-bearing work is blocked when included capacity and usage credit are both exhausted. The operation that crosses the boundary may finish; its accepted input is not discarded.
 - Retell phone calls use the same ledger through a web-internal deterministic row keyed by the Murph call id. Web records Retell's final provider-reported combined cost, including discounts and transfer-leg cost, and never accepts that cost field from the hosted-runtime usage callback. `transfer_ended` and the pre-armed phone-call reconciliation workflow prevent a provisional transfer cost or lost callback from becoming permanent undercounting.
 - Usage credit is separate from the included-allowance period. A beneficiary-serialized transaction consumes included capacity first, then purchase/referral grant entries with remaining capacity in FIFO order, while `HostedMember` carries the bounded balance/version hot-path projection. Unused credit carries across allowance periods and does not create subscription entitlement. Stripe refunds and disputes may reverse only purchase-backed entries; earned referral grants are final.
@@ -1254,9 +1346,24 @@ Callback auth contract:
   the signature to a null member, rejects a presented member header, consumes
   the nonce under a reserved system owner in the same replay table, and returns
   only the `bindings-v1` Web owner/key identity with `Cache-Control: no-store`.
-- the existing hourly hosted-retention cron removes only strictly expired nonce
+- the dedicated hourly nonce-retention cron removes only strictly expired nonce
   rows in bounded `expires_at`, `nonce_hash` order with `FOR UPDATE SKIP LOCKED`;
-  account deletion still independently deletes the member's nonce rows
+  it finishes the small browser-assertion nonce lane first so callback catch-up
+  cannot starve that owner;
+  each statement remains capped at 5,000 rows, while callback nonces alone use
+  a 100-times-higher max-batch ceiling to drain sustained control-plane volume.
+  It runs at minute 5 with an explicit 800-second duration, independently of
+  the control-plane, external-provider, and runtime-maintenance crons; a
+  caught-up hour still stops after the first short batch. Account deletion
+  still independently deletes the member's nonce rows
+- the other hourly retention routes are staggered and independently bounded:
+  `/api/internal/hosted-execution/retention/control-plane/cron` at minute 20
+  for ordinary primary-database cleanup,
+  `/api/internal/hosted-execution/retention/external/cron` at minute 35 for
+  account and computer provider cleanup, and
+  `/api/internal/hosted-execution/retention/runtime/cron` at minute 50 for
+  runtime signals followed by best-effort isolated diagnostic-log cleanup. Each has a 300-second
+  duration; none invokes the nonce owner
 - Hosted member private fields, device-sync credentials, mailbox payloads, and
   runtime execution state use signed hosted domain-root secure-box envelopes;
   lookup fingerprints/indexes use separate HMAC-only keys.
@@ -1266,17 +1373,22 @@ Callback auth contract:
   authority and seals only from that scoped cache entry, with one full retry on
   typed root drift. Legacy transaction append surfaces remain for separately
   migrated callers and are not the transaction-safe generic entrypoint.
-- `POST /api/internal/hosted-runtime/owner-released` is the payload-free
-  completion handoff. Web accepts a zero-byte body and either no query or the
-  exact signature-bound `immediateRecheckRequested=1` positive edge, binds the
-  user through the signed request plus normal nonce protection, and emits the
-  existing `runtime_recheck_requested` Temporal signal. Without the edge, Web
-  signals only for current runnable mailbox lag; a persisted default or
-  retention wake is not itself signal authority. The edge means the completed
-  invocation newly committed an unserviced schedule and carries no wake data.
-  Known future mailbox retry continuations remain deferred. Cloudflare calls the
-  route at most once, with a timeout capped at two seconds, only after exact
-  write-fence completion; failure is non-fatal and has no callback retry.
+- `POST /api/internal/hosted-runtime/owner-released` is the pointer-only
+  completion handoff. Web accepts a zero-byte body and a signed query containing
+  the opaque released `runtimeAttemptId`, plus the optional exact
+  `immediateRecheckRequested=1` positive edge. It binds the user through the
+  signed request plus normal nonce protection. Without the positive edge, Web
+  emits a signal only when current runnable mailbox lag or a live system mailbox
+  item beyond the handled-through frontier remains. Exact callbacks use
+  `runtime_owner_released`, which Temporal matches before releasing an
+  accepted-owner horizon; legacy pointerless callbacks use the facts-only
+  `runtime_recheck_requested` signal during rollout. A persisted default or
+  retention wake alone is not signal authority. The positive edge means the
+  completed invocation newly committed an unserviced schedule and carries no
+  wake data. Known future mailbox retry continuations remain deferred.
+  Cloudflare calls the route at most once, with a timeout capped at two seconds,
+  only after exact write-fence completion; failure is non-fatal and has no
+  callback retry.
 
 When you set `DEVICE_SYNC_PUBLIC_BASE_URL`, use the same stable production
 hostname as every first-party hosted app-session URL that can serve the OAuth
@@ -1353,11 +1465,16 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
   with it, incomplete Resend email config or an invalid time zone fails the
   cron visibly. The latency path has no Linq/iMessage fallback.
 - The same `RESEND_API_KEY`, `HOSTED_LINQ_ALERT_EMAIL_FROM`, and
-  `HOSTED_LINQ_ALERT_EMAILS` configuration enables Stripe failure alerts. No
-  time-zone setting is required for Stripe alerts. Confirm that the Stripe
-  webhook endpoint subscribes to `checkout.session.async_payment_failed`,
-  `payment_intent.payment_failed`, `invoice.payment_failed`, and
-  `invoice.finalization_failed`. Checkout action owners cover mandatory
+  `HOSTED_LINQ_ALERT_EMAILS` configuration enables Stripe failure alerts and
+  positive-payment notifications. No time-zone setting is required. Confirm
+  that the Stripe webhook endpoint subscribes to positive `invoice.paid`,
+  `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+  and `payment_intent.succeeded` events as well as
+  `checkout.session.async_payment_failed`, `payment_intent.payment_failed`,
+  `invoice.payment_failed`, and `invoice.finalization_failed`. Positive
+  `invoice.paid` events with `billing_reason: subscription_cycle` still drive
+  billing reconciliation but intentionally do not send a positive-payment
+  notification. Checkout action owners cover mandatory
   price reads, customer provisioning, saved-card preparation, and Checkout
   Session create/resume. Paid-plan upgrades, paid-trial transitions, and
   scheduled plan switches use the same complete-action ownership. An owner
@@ -1377,6 +1494,17 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
   is dependency-free so production migration line sync and standalone Stripe
   tooling can continue importing the general onboarding runtime under ordinary
   Node conditions.
+  Positive invoice and fulfilled usage-credit events send one privacy-safe
+  operator email from the existing receipt after canonical reconciliation.
+  An activation attempt retains its exact mailbox pointers on that receipt in
+  the same transaction as activation. Every positive-payment attempt restores
+  and hands those pointers to the existing runtime-wake owner before
+  notification work, including a retry where the email sent marker already
+  exists. Provider, configuration, sent-marker, or receipt-completion failure
+  can therefore leave delivery pending without losing the activation retry
+  target. The receipt-local sent marker plus provider idempotency prevents a
+  later replay from sending twice. Deploy the additive
+  `payment_notification_email_sent_at` column before or with the Web build.
 - Configure the hosted public-origin envs and `HOSTED_WEB_CALLBACK_SIGNING_*`
   values exactly as described above.
 - Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`. Keep
@@ -1410,7 +1538,7 @@ policy, so it remains admissible through the millisecond before
 `(exp + 61) * 1000` and is first invalid exactly at that instant. New nonce
 rows persist that first-invalid horizon, while request admission performs one
 primary-key insert and treats only the exact nonce conflict as replay. The
-bounded hourly hosted-retention owner deletes only rows whose stored
+bounded hourly nonce-retention owner deletes only rows whose stored
 `expiresAt <= now - 61 seconds`; this retains legacy raw-`exp` rows through the
 full acceptance window and deliberately retains new-format rows for an
 additional 61 seconds.
@@ -1445,9 +1573,14 @@ pnpm --dir apps/web release:production:contract-migrate
 ```
 
 Use `prisma:validate` for focused schema verification. It checks the schema
-without rewriting it. Run `prisma format` only when a repository-wide schema
-layout change is intentional, and review that mechanical diff separately from
-the migration change.
+without rewriting it. The hosted-Web Prisma config rejects `prisma format` by
+default because Prisma formats the entire schema rather than one edited model.
+For an intentional repository-wide schema layout change, opt in explicitly and
+review that mechanical diff separately from the migration change:
+
+```bash
+MURPH_ALLOW_FULL_PRISMA_FORMAT=1 pnpm --dir apps/web exec prisma format
+```
 
 The checked-in Vercel build command runs the guarded production migration
 wrapper before building. That wrapper generates the Prisma client because the
@@ -1583,11 +1716,12 @@ registers it with Vercel Fluid Compute, and passes that same pool to
 its existing cleanup contract. Keep session-persistent setup such as connection
 `SET` hooks out of this path because transaction pooling can move consecutive
 transactions between backend connections. The default pool limit is 15 clients
-per module runtime, with five seconds for connection acquisition and 30 seconds
-for idle retirement; tune those values only from measured pool and database
-pressure. Connection failure logs expose only fixed operation/source labels,
-retry attempt and disposition, the configured pool limit, and numeric
-pre-attempt and post-failure pool counts.
+per module runtime, with five seconds each for connection acquisition and idle
+retirement. Vercel's pool attachment extends the active invocation through that
+idle window, so keep it short and tune it only from measured invocation, pool,
+and database pressure. Connection failure logs expose only fixed
+operation/source labels, retry attempt and disposition, the configured pool
+limit, and numeric pre-attempt and post-failure pool counts.
 
 That module permits one jittered retry only for ambiguous transient failures
 that prove the database did no work. A `pool_checkout_timeout` means the
@@ -1630,10 +1764,9 @@ Destructive contract cleanup belongs under
 `Hosted Web Contract Migrations` GitHub workflow after Vercel reports a
 successful production deployment. That workflow only accepts Vercel-originated
 completed production deployment statuses, checks out the exact deployed commit,
-verifies it is reachable from `origin/main`, and requires the current main tip
-to be the deployment serving the configured production base domain. A stale
-current-main release fails instead of being reported as a successful no-op;
-late events for older main ancestors remain safe no-op candidates. The workflow
+requires it to equal current `origin/main`, and requires that exact commit to be
+the deployment serving the configured production base domain. Stale or late
+deployment events fail before database authority is exposed. The workflow
 then enumerates and proves every production custom domain against the event's
 exact deployment id, waits
 `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` seconds for prior production
@@ -1647,9 +1780,9 @@ It requires
 `HOSTED_WEB_PRODUCTION_BASE_URL`, and `HOSTED_WEB_DIRECT_DATABASE_URL` in
 GitHub Actions; `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` defaults to
 `300` and is capped at `600` unless the workflow timeout is raised. The workflow
-does not use GitHub Actions concurrency for this lane; the final alias check and
-the contract migration advisory lock make stale or duplicate runs skip safely
-without letting stale events replace valid pending runs. After those gates, it calls
+does not use GitHub Actions concurrency for this lane; the final alias check
+rejects stale runs, and the contract migration advisory lock serializes exact
+deployment retries before the migration ledger is evaluated. After those gates, it calls
 `pnpm --dir apps/web release:production:contract-migrate` with explicit opt-in.
 The public workflow is verification-only: it does not assign aliases, promote a
 deployment, or roll production back.
@@ -1796,14 +1929,25 @@ production `next build` in a root-level cgroup-v2 child for accounting only. It
 does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`.
 
 The production runner first performs route type generation and an explicit
-app-local generated-contract TypeScript check with a 3.5 GiB limit. It marks
-only that prepared check complete before starting Webpack. Compilation then
-runs in the Next CLI process with a 3 GiB old-space limit; the runner preserves
-unrelated inherited Node options while replacing inherited old-space flags.
-These phases are sequential, so their limits do not compose. The same runner is
-used by the Vercel package build and the CI memory-observation lane. Forced-cold
-Standard previews remain the direct acceptance evidence, and a Next upgrade
-must revalidate the heap boundary.
+app-local generated-contract TypeScript check with a 6 GiB limit. It marks
+only that prepared check complete before starting Webpack. The Next CLI parent
+uses a 1 GiB old-space limit and the isolated Webpack worker uses 3 GiB. The
+worker exits and releases compiler memory before static-generation workers
+start. The runner preserves unrelated inherited Node options while replacing
+inherited old-space flags. TypeScript, Webpack compilation, and static
+generation are sequential, so their heap limits do not compose. The same
+runner is used by the Vercel package build and the CI memory-observation lane.
+Forced-cold Standard previews remain the direct acceptance evidence, and a
+Next upgrade must revalidate the parent/worker heap boundary.
+
+The worker boundary is required by measured composed memory, not by the duration
+of an individual route. A cold single-process GitHub build reached 9.11 GB
+immediately before static generation and 11.18 GB when export workers started,
+including 8.06 GB of anonymous memory. Vercel Standard provides 8 GB total and
+the repository reserves 0.8 GB for host overhead, so reducing only page
+concurrency cannot make that single-process shape fit the 7.2 GB build budget.
+The isolated worker preserves the ordinary `next build` output while removing
+compiler residency from the static-generation peak.
 
 Next's static-generation export loop defaults to eight concurrent pages in each
 of the two configured export workers, allowing up to sixteen page renders at
@@ -1814,25 +1958,38 @@ skipping any static output; exact-head Vercel builds remain the duration and
 capacity proof.
 
 Production builds use Next 16.3's supported Webpack fallback. The production
-script passes `--webpack` and enables `webpackMemoryOptimizations`. The Workflow
-integration contributes custom Webpack configuration, so Next's canonical
-default is to compile in the CLI process. Do not force `webpackBuildWorker`:
-that creates a second compiler-process owner and previously left Standard
-deployments stuck inside an opaque worker after compilation stopped making
-progress. The hosted local-development wrapper remains on Turbopack and rejects
-an explicit Webpack flag. The production runner also owns a versioned cache
-epoch inside `.next/cache`.
+runner passes `--webpack`, and the config enables `webpackBuildWorker` and
+`webpackMemoryOptimizations`. The Workflow integration contributes custom
+Webpack configuration, which disables Next's automatic worker selection, so
+the worker must be enabled explicitly. Three consecutive forced-cold Webpack
+previews, a later integration preview, and the final corrected head previously
+completed on the Standard builder with this worker boundary. The later
+single-process simplification is no longer acceptable: an exact-head cgroup
+trace measured 11.18 GB at static generation, and production reproduced the
+same intermittent 70-page stall. The hosted local-development wrapper remains
+on Turbopack and rejects an explicit Webpack flag.
+
+The Next config disables Webpack's production cache. The runner already
+required every production compile to start cold, so a generated Webpack cache
+could never produce a later hit; one measured cold build nevertheless wrote 2.74 GB beneath
+`.next/cache/webpack` and peaked at 5.52 GB RSS before two adjacent Standard
+deployments were OOM-killed during compilation. Removing that dead artifact
+eliminates its serialization and page-cache pressure without changing compiler
+inputs or output. The paired production-faithful build left the Webpack cache
+absent, lowered peak RSS from 5.52 GB to 3.96 GB, and shortened compilation
+from 144 seconds to 117 seconds. Development caching remains available.
+
+The production runner also owns a versioned cache epoch inside `.next/cache`.
 When that stamp is absent or differs, it removes the incompatible cache before
-compilation and writes the epoch only after Next succeeds. Production Webpack
-compiles are additionally cold-cache by policy: the runner removes
-`.next/cache/webpack` before every compile, and because that removal precedes
-the only Next invocation and aborts the build on failure, a restored warm
-Webpack cache can never reach the compiler regardless of what an earlier
-deployment uploaded. Warm restored Webpack caches on Vercel's 8 GB Standard builder
-were the trigger for the August 2026 steady-state OOM kills and silent
-compile hangs; only the cold path is proven. Other cache subtrees such as SWC
-remain warm. Vercel owns cancellation and build deadlines. The production
-package script therefore runs directly instead of passing through the local
+compilation and writes the epoch only after Next succeeds. The disabled-cache
+epoch clears restored caches from the preceding policy once; compatible later
+builds retain non-Webpack cache subtrees such as SWC. Warm restored Webpack
+caches on Vercel's 8 GB Standard builder were the trigger for the August 2026
+steady-state OOM kills and silent compile hangs, and writing the unused cold
+cache later consumed the remaining capacity margin.
+
+Vercel owns cancellation and build deadlines. The production package script
+therefore runs directly instead of passing through the local
 shared-host verification slot or adding a second watchdog and process-group
 reaper. Bump the epoch only when a proven compiler/cache transition requires
 another full invalidation.
@@ -1955,24 +2112,21 @@ This branch is a greenfield hosted-runtime cutover. If you have an older local
 database from the superseded run/ingress/cursor chain, reset it before
 reapplying migrations.
 
-## Local Vercel prebuilt deployment
+## Production deployment ownership
 
-Use the repository-owned local prebuilt boundary instead of running a bare
-`vercel build` followed by `vercel deploy --prebuilt`:
+The Vercel Git integration is the only production deployment owner. Every
+commit pushed to `main` creates one managed production candidate; no
+repository ignore command may suppress that candidate. The candidate remains
+off the production domains until its configured Deployment Checks, including
+`Temporal Web production admission`, pass for that exact current commit.
 
-```bash
-pnpm --dir apps/web vercel:deploy:prebuilt -- --prod
-```
-
-Omit `--prod` for a preview deployment. The command runs `vercel build`,
-captures the SDK-generated Workflow function config in an ephemeral local file
-before the normal generated-source cleanup, and applies every exact generated
-trigger to the resolved final function bundle. It handles distinct functions
-and Next.js-deduplicated route links, revalidates the finished Build Output
-artifact, removes the captured evidence, and starts `vercel deploy --prebuilt`
-only after that proof succeeds. Missing, malformed, escaping, or conflicting
-evidence stops before upload. Managed Vercel builds continue to use the
-checked-in `vercel.json` build command and do not use this local boundary.
+Do not deploy production from the local CLI, promote an existing deployment,
+use Instant Rollback, or force-promote past a Deployment Check. Those paths do
+not create fresh compatibility evidence against current private `main` and live
+Temporal readers. Vercel access must withhold Full Production Deployment
+authority from ordinary operators and automation. Recover by reverting or
+forward-fixing on `main`; the new commit creates a fresh managed deployment and
+reruns production admission before domains move.
 
 ## Local dev aids
 
@@ -2105,7 +2259,7 @@ deleted sharing CRUD, local-vault import callbacks, or an outbox drain route. It
 still uses narrow signed hosted-web callbacks for execution-time device-sync
 runtime snapshot/apply, device connect-link starts, direct hosted usage
 recording, member-bound plan-usage reads, mailbox/workspace runtime status plus
-log callbacks, and the payload-free runtime owner-release recheck handoff.
+log callbacks, and the pointer-only runtime owner-release recheck handoff.
 
 ## Hosted onboarding routes
 

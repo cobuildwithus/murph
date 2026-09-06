@@ -29,6 +29,7 @@ import type {
 import type { AssistantCronJob } from "@murphai/operator-config/assistant-cli-contracts";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
+  buildHostedMemberSignupWelcomeInstructions,
   createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
@@ -516,6 +517,7 @@ async function seedOnboardingFollowupAutomation(input: {
     // Linq participant routes without a Linq delivery source).
     const result = await seedMurphOnboardingFollowupFromStartedOnboarding({
       route: buildOnboardingFollowupAutomationRoute(input.route),
+      routeValidationProfile: "hosted",
       stableKey: input.stableKey,
       vault: input.vaultRoot,
     });
@@ -872,14 +874,6 @@ function requireMemberActivationSignupWelcome(
   }
 
   return wake.signupWelcome;
-}
-
-function buildHostedMemberSignupWelcomeInstructions(text: string): string {
-  return [
-    "Prepare the first in-chat onboarding reply.",
-    "Use this user-facing reply only:",
-    text,
-  ].join("\n\n");
 }
 
 function buildAssistantNotificationInput(
@@ -1295,8 +1289,19 @@ function resolveAssistantNotificationBindingDeliveryTarget(input: {
     return delivery.target;
   }
 
-  const authority = input.externalThreadRouteAuthority;
   const hostedMemberId = input.executionContext.hosted?.memberId ?? null;
+  // Direct email is re-bound to this member's current verified address at the
+  // signed Web-control boundary immediately before provider entry.
+  if (
+    input.route.channel === "email"
+    && input.route.threadIsDirect === true
+    && hostedMemberId
+    && input.wake.userId === hostedMemberId
+  ) {
+    return delivery.target;
+  }
+
+  const authority = input.externalThreadRouteAuthority;
   return (
     authority
     && hostedMemberId

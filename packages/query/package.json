@@ -90,6 +90,7 @@
   },
   "dependencies": {
     "@murphai/contracts": "workspace:*",
+    "@murphai/core": "workspace:*",
     "@murphai/health-metrics": "workspace:*",
     "@murphai/runtime-state": "workspace:*"
   },

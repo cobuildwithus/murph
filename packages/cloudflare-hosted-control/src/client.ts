@@ -275,6 +275,8 @@ export interface CloudflareHostedControlClient {
     userId: string;
   }): Promise<CloudflareHostedControlRuntimeEnsureProcessingResponse>;
   prewarmRuntimeShell(input: {
+    orchestrationAttemptId: string;
+    requestStartedAtEpochMs: number;
     source: CloudflareHostedControlRuntimeShellPrewarmSource;
     userId: string;
   }): Promise<CloudflareHostedControlRuntimeShellPrewarmAcceptedAck>;
@@ -316,6 +318,7 @@ export interface CloudflareHostedControlRuntimeShellPrewarmAcceptedAck {
 
 export type CloudflareHostedControlRuntimeShellPrewarmSource =
   | "linq-instant-start"
+  | "linq-message-routing"
   | "linq-typing-started";
 
 export type CloudflareHostedControlRuntimeEnsureProcessingResponse =
@@ -672,7 +675,11 @@ export function createCloudflareHostedControlClient(
         parse: parseCloudflareHostedControlRuntimeShellPrewarmResponse,
         path: buildCloudflareHostedControlRuntimeShellPrewarmPath(expectedUserId),
         request: {
-          body: JSON.stringify({ source: input.source }),
+          body: JSON.stringify({
+            orchestrationAttemptId: input.orchestrationAttemptId,
+            requestStartedAtEpochMs: input.requestStartedAtEpochMs,
+            source: input.source,
+          }),
           headers: {
             "content-type": "application/json; charset=utf-8",
           },

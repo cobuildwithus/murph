@@ -10,25 +10,13 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@murphai/assistant-runtime", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/assistant-runtime")>(
+    "@murphai/assistant-runtime",
+  );
   return {
     clearHostedBrowserVaultWarmSourceStateHash:
       mocks.clearHostedBrowserVaultWarmSourceStateHash,
-    createCoalescingRuntimeWakeSignal: () => {
-      let pending = false;
-      return {
-        consumePending: () => {
-          if (!pending) {
-            return null;
-          }
-          pending = false;
-          return { notifiedAtEpochMs: Date.now() };
-        },
-        notify: () => {
-          pending = true;
-        },
-        wait: async () => ({ notifiedAtEpochMs: Date.now() }),
-      };
-    },
+    createCoalescingRuntimeWakeSignal: actual.createCoalescingRuntimeWakeSignal,
   };
 });
 
@@ -247,7 +235,10 @@ describe("runHostedWorkspaceInvocation", () => {
         TELEGRAM_API_BASE_URL: "https://telegram.example.test",
       },
       waitForBackgroundAssistantWork,
-    })).resolves.toEqual(runtimeResult);
+    })).resolves.toEqual({
+      ...runtimeResult,
+      immediateRecheckRequested: true,
+    });
 
     const expectedVaultRoot = resolveHostedRunnerWarmWorkspaceVaultRoot(job.request.userId);
     const capturedInput = capturedInvocationInputs[0];
@@ -379,11 +370,73 @@ describe("runHostedWorkspaceInvocation", () => {
     );
   });
 
+  it("does not lose a runtime wake accepted after the package's final drain", async () => {
+    let reachFinalDrain!: () => void;
+    const finalDrainReached = new Promise<void>((resolve) => {
+      reachFinalDrain = resolve;
+    });
+    let releasePackage!: () => void;
+    const packageReleased = new Promise<void>((resolve) => {
+      releasePackage = resolve;
+    });
+    let resolveRuntimeWakeReady!: (sendWake: () => boolean) => void;
+    const runtimeWakeReady = new Promise<() => boolean>((resolve) => {
+      resolveRuntimeWakeReady = resolve;
+    });
+    mocks.runPackageHostedWorkspaceInvocation.mockImplementation(
+      async (input: Record<string, unknown>) => {
+        const runtimeWakeSignal = requireObjectRecord(
+          input.runtimeWakeSignal,
+          "captured runtimeWakeSignal",
+        );
+        const consumePending = requireCallable(
+          runtimeWakeSignal.consumePending,
+          "captured runtimeWakeSignal.consumePending",
+        );
+        expect(consumePending()).toBeNull();
+        reachFinalDrain();
+        await packageReleased;
+        return {
+          nextWakeAt: null,
+          redactedStatus: { importedCount: 0 },
+          status: "idle" as const,
+        };
+      },
+    );
+
+    const invocation = runHostedWorkspaceInvocation(createWorkspaceJob({
+      forwardedEnv: {
+        HOSTED_ASSISTANT_MODEL: "gpt-job",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        NODE_ENV: "production",
+      },
+    }), {
+      onRuntimeWakeReady(sendWake) {
+        resolveRuntimeWakeReady(sendWake);
+      },
+      supervisorEnv: {
+        HOSTED_ASSISTANT_MODEL: "gpt-supervisor",
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        NODE_ENV: "production",
+      },
+      waitForBackgroundAssistantWork,
+    });
+
+    await finalDrainReached;
+    const sendRuntimeWake = await runtimeWakeReady;
+    const wakeAccepted = sendRuntimeWake();
+    releasePackage();
+    const result = await invocation;
+
+    expect(wakeAccepted).toBe(true);
+    expect(result.immediateRecheckRequested).toBe(true);
+  });
+
   it("validates preview private-image publication from the per-job platform origin", async () => {
     const previewOrigin = "https://preview-worker.example.test";
     const expiresAt = "2026-07-28T00:00:00.000Z";
     const capabilityUrl = new URL(
-      `/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}`,
+      `/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png`,
       previewOrigin,
     );
     capabilityUrl.searchParams.set(

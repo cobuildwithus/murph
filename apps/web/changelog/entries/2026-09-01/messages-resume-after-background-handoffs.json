@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-09-01",
+  "order": 200,
+  "item": {
+    "id": "messages-resume-after-background-handoffs",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Messages resume after background handoffs",
+    "summary": "When a message arrives as background work finishes, Murph now starts the reply as soon as that work releases instead of waiting for an older retry timer.",
+    "details": "The handoff is matched to the exact finished runtime, so a delayed callback cannot interrupt newer work; durable reconciliation remains the recovery path if the handoff signal fails.",
+    "relevanceTags": ["assistant", "messaging", "reliability"],
+    "sourcePullRequests": [2699, 2730]
+  }
+}

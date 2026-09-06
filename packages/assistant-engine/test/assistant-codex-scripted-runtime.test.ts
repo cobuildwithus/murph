@@ -1,3 +1,4 @@
+import { MURPH_ATTACH_FOLLOW_UP_TOOL } from '../src/assistant-codex/dynamic-tools/automation.ts'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createServer, type Server, type ServerResponse } from 'node:http'
@@ -11,10 +12,7 @@ import { crc32, deflateSync } from 'node:zlib'
 import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from '@murphai/hosted-execution/env'
-import {
-  HOSTED_ASSISTANT_PRODUCT_MODELS,
-} from '@murphai/hosted-execution/assistant-model'
-import { goalMetricTargetSchema } from '@murphai/contracts'
+import { buildCalendarEventUrl, goalMetricTargetSchema } from '@murphai/contracts'
 import {
   listHostedBundleInlineFiles,
   snapshotHostedExecutionContext,
@@ -89,6 +87,9 @@ import type {
 import {
   isCanonicalOnboardingFirstPersonalReadAutomationSaveRequest,
 } from '../src/assistant/onboarding-first-personal-read-automation.ts'
+import {
+  writeHostedOpenAiMixedModeModelCatalogJson,
+} from './support/codex-model-catalog.ts'
 import { sendAssistantAskContinuationLocal } from '../src/assistant/ask-continuation.ts'
 import { conversationRefFromBinding } from '../src/assistant/conversation-ref.ts'
 import { listAssistantOutboxIntents } from '../src/assistant/outbox.ts'
@@ -282,6 +283,7 @@ async function prepareGroupChallengeVault(
 }
 
 interface ScriptedResponseRoute {
+  beforeRespond?: () => Promise<void>
   completionLabel?: string
   delayMs?: number
   requestExcludes?: readonly string[]
@@ -603,6 +605,7 @@ async function requireScriptedStub(): Promise<ScriptedStub> {
 
 afterEach(async () => {
   await stopWarmCodexAppServer().catch(() => {})
+  stub?.resetQueue()
 })
 
 afterAll(async () => {
@@ -616,6 +619,21 @@ afterAll(async () => {
 }, 180_000)
 
 describe('real codex app-server with scripted provider', () => {
+  it.each([true, false])('enforces follow-up attachment authority through real App Server (%s)', async (allowed) => {
+    const scenario = await prepareScriptedTurnScenario()
+    const request = { action: 'attach_follow_up', afterMinutes: 20, instructions: 'Check the pending choice; skip if resolved.' }
+    scenario.stub.queue({ functionCall: { name: 'automation', namespace: 'murph', arguments: request } }, { text: 'Which arrival window works?' })
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput, dynamicTools: [MURPH_ATTACH_FOLLOW_UP_TOOL],
+      followUpAttachmentAllowed: allowed, groupConversation: false,
+      prompt: 'Ask the pending arrival-window question.',
+    })
+    expect(result.followUpRequest).toEqual(allowed
+      ? { afterMinutes: 20, instructions: request.instructions } : null)
+    expect(result.finalMessage).toBe('Which arrival window works?')
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
   it('streams a scripted turn through the real app-server protocol', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
@@ -632,6 +650,42 @@ describe('real codex app-server with scripted provider', () => {
     expect(result.turnId).toEqual(expect.any(String))
     expect(result.sessionId).toEqual(expect.any(String))
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+  })
+
+  it('preserves native Astra async-question text and additive app-server fields', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario({ model: 'gpt-6-astra' })
+    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
+      astraAllowed: true,
+      codexCommand: scenario.turnInput.codexCommand,
+      directory: scenario.turnInput.codexHome,
+    })
+    const questions = [{ title: 'Which day works?', options: ['Monday', 'Tuesday'] }]
+    scenario.stub.queue(
+      { functionCall: { name: 'request_user_input_async', arguments: { questions } } },
+      { text: '' },
+    )
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [],
+      env: {
+        ...scenario.turnInput.env,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+      },
+      prompt: 'Ask which day works using the asynchronous question tool.',
+    })
+    expect(result.finalMessage).toBe('Which day works?\n- Monday\n- Tuesday')
+    expect(result.transcriptMessage).toBe(result.finalMessage)
+    expect(result.jsonEvents).toContainEqual(expect.objectContaining({
+      method: 'item/completed',
+      params: expect.objectContaining({
+        item: expect.objectContaining({
+          type: 'agentMessage', delivery: 'async', questions,
+        }),
+      }),
+    }))
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
   it('executes the unfamiliar workout CSV skill with exact-byte batch safety', {
@@ -1736,18 +1790,31 @@ text(result.output);
         skillSlug: 'daily-activity',
       },
       {
-        answer: 'Your connected device recorded a 48-minute workout on July 12.',
-        command: 'measurement entry list --metric workout_duration --from 2026-07-12 --to 2026-07-12 --limit 50 --format json',
+        answer: 'Your connected device recorded one workout totaling 48 minutes on July 12.',
+        command: 'wearables activity list --date 2026-07-12 --format json',
         evidence: {
           count: 1,
           items: [{
-            eventId: 'evt_workout_duration_summary',
-            metric: 'workout-minutes',
-            occurredAt: '2026-07-12T15:00:00.000Z',
-            recordKind: 'observation',
-            source: 'device',
-            unit: 'minutes',
-            value: 48,
+            activityTypes: ['running'],
+            date: '2026-07-12',
+            sessionCount: {
+              confidence: 'high',
+              metric: 'sessionCount',
+              provider: 'garmin',
+              unit: 'count',
+              value: 1,
+            },
+            sessionMinutes: {
+              confidence: 'high',
+              metric: 'sessionMinutes',
+              provider: 'garmin',
+              unit: 'minutes',
+              value: 48,
+            },
+            summaryConfidence: {
+              level: 'high',
+              selectedProviders: ['garmin'],
+            },
           }],
         },
         prompt: 'How long was my workout on July 12?',
@@ -1756,7 +1823,7 @@ text(result.output);
       },
       {
         answer: 'Your morning run averaged 142 bpm and its corrected record has no retained splits. Your evening ride averaged 150 bpm with 90 rpm cadence, 5 m/s speed, and 220 W power; its first 1 km split took 300 seconds at 225 W.',
-        command: 'wearables activity list --date 2026-07-12 --format json',
+        command: 'wearables activity list --date 2026-07-12 --include-workout-details --format json',
         evidence: {
           count: 1,
           items: [{
@@ -2442,6 +2509,9 @@ text(result.output);
         },
       },
       {
+        requestIncludes: [
+          'accept any self-description, partial answer, or skip without pressing or inferring missing details.',
+        ],
         text: ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
       },
     )
@@ -2467,7 +2537,7 @@ text(result.output);
       .join('\n')
     expect(toolOutputs).toContain('## Progressive disclosure')
     expect(toolOutputs).toContain(
-      'Never re-ask solely for optional demographics.',
+      'The injected onboarding instructions own the visible opening exchanges:',
     )
     expect(toolOutputs).toContain('"hasPriorSetupContext":false')
     expect(toolOutputs).not.toContain(laterStageMarker)
@@ -3364,16 +3434,21 @@ text(result.output);
     expect((await readFile(requestLog, 'utf8')).trim().split('\n')).toHaveLength(3)
   })
 
-  it.each(['direct', 'group'] as const)(
-    'carries a delayed V2 child completion into a later %s root turn without waiting',
+  it.each([
+    ['direct', 'gpt-5.6-luna', false],
+    ['group', 'gpt-5.6-luna', false],
+    ['direct', 'gpt-6-astra', true],
+  ] as const)(
+    'carries a delayed V2 %s %s child completion into a later root turn without waiting',
     { timeout: TURN_TIMEOUT_MS },
-    async (conversationScope) => {
+    async (conversationScope, childModel, astraAllowed) => {
       const scenario = await prepareScriptedTurnScenario({
         multiAgentV2: true,
       })
-      const modelCatalogJson = await writeHostedOpenAiFlexModelCatalogJson({
+      const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
         codexCommand: scenario.turnInput.codexCommand,
         directory: scenario.turnInput.codexHome,
+        astraAllowed,
       })
       const scopeLabel = conversationScope.toUpperCase()
       const childResult = `LATE_CHILD_RESULT_${scopeLabel}`
@@ -3385,7 +3460,7 @@ text(result.output);
             arguments: {
               fork_turns: 'none',
               message: `Return exactly ${childResult}.`,
-              model: 'gpt-5.6-luna',
+              model: childModel,
               task_name: `late_child_${conversationScope}`,
             },
             name: 'spawn_agent',
@@ -3438,7 +3513,7 @@ text(result.output);
       ).toContain(childResult)
       expect(
         scenario.stub.requestSummariesSinceBaseline().map(({ model }) => model),
-      ).toContain('gpt-5.6-luna')
+      ).toContain(childModel)
       await delay(100)
 
       scenario.stub.queue({
@@ -3465,13 +3540,13 @@ text(result.output);
     },
   )
 
-  it('rejects a non-product child model before a provider request', {
+  it.each(['gpt-5.5', 'gpt-6-astra'])('rejects an unavailable child model %s before a provider request', {
     timeout: TURN_TIMEOUT_MS,
-  }, async () => {
+  }, async (model) => {
     const scenario = await prepareScriptedTurnScenario({
       multiAgentV2: true,
     })
-    const modelCatalogJson = await writeHostedOpenAiFlexModelCatalogJson({
+    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
       codexCommand: scenario.turnInput.codexCommand,
       directory: scenario.turnInput.codexHome,
     })
@@ -3481,7 +3556,7 @@ text(result.output);
           arguments: {
             fork_turns: 'none',
             message: 'Return exactly NON_PRODUCT_CHILD_SHOULD_NOT_RUN.',
-            model: 'gpt-5.5',
+            model,
             task_name: 'non_product_child',
           },
           name: 'spawn_agent',
@@ -3509,7 +3584,7 @@ text(result.output);
     expect(summaries.flatMap(
       (summary) => summary.functionCallOutputs ?? [],
     )).toEqual([
-      'Unknown model `gpt-5.5` for spawn_agent. Available models: gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna',
+      `Unknown model \`${model}\` for spawn_agent. Available models: gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna`,
     ])
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
@@ -3554,12 +3629,19 @@ text(result.output);
     })
     expect(currentSpeaker.session.sessionId).toBe(resolved.session.sessionId)
     expect(currentSpeaker.session.binding.actorId).toBe(laterParticipantId)
+    const canCommit = vi.fn()
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(true)
+      .mockReturnValue(false)
+    const canFinalize = vi.fn(() => true)
 
     const result = await sendAssistantAskContinuationLocal({
       actorId: currentSpeaker.session.binding.actorId,
       answeredMailboxItemIds: ['aask_done_reviewed_continuation'],
       bindingDeliveryTarget: threadId,
-      canCommit: () => true,
+      canCommit,
+      canFinalize,
       channel: 'telegram',
       conversation: conversationRefFromBinding(currentSpeaker.session.binding),
       deliveryIdempotencyKey: 'assistant-ask-reviewed-continuation',
@@ -3593,6 +3675,8 @@ text(result.output);
       response: 'First reviewed fact.\n---\nSecond reviewed fact.',
       status: 'completed',
     })
+    expect(canCommit).toHaveBeenCalledTimes(3)
+    expect(canFinalize).toHaveBeenCalledOnce()
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
     expect(scenario.stub.requestSummariesSinceBaseline()).toEqual([
       expect.objectContaining({
@@ -3620,35 +3704,138 @@ text(result.output);
     ])
   })
 
-  it('defers broad Murph schemas through native Codex code-mode discovery', {
+  it('documents why pinned Codex code-only metadata cannot replace native automation schema search', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const modelCatalogJson = await writeHostedOpenAiFlexModelCatalogJson({
+    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
+      codexCommand: scenario.turnInput.codexCommand,
+      directory: scenario.turnInput.codexHome,
+    })
+    const catalog = readRecord(JSON.parse(await readFile(modelCatalogJson, 'utf8')))
+    if (!catalog || !Array.isArray(catalog.models)) {
+      throw new Error('Expected a test model catalog.')
+    }
+    for (const candidate of catalog.models) {
+      const model = readRecord(candidate)
+      if (model) model.tool_mode = 'code_mode_only'
+    }
+    await writeFile(modelCatalogJson, JSON.stringify(catalog), 'utf8')
+    scenario.stub.captureProviderRequestDiagnostics()
+    scenario.stub.queue(
+      { customToolCall: {
+        name: 'exec',
+        input: `
+const tool = ALL_TOOLS.find(({ name }) => name === "murph__automation");
+if (!tool) throw new Error("Deferred automation metadata missing");
+text(tool.description.split("exec tool declaration:")[1]);
+`,
+      } },
+      { text: 'CODE_ONLY_SCHEMA_CHARACTERIZED' },
+    )
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      env: {
+        ...scenario.turnInput.env,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+      },
+      prompt: 'Inspect the automation declaration without calling automation.',
+    })
+    const summaries = scenario.stub.requestSummariesSinceBaseline()
+    expect(result.finalMessage).toBe('CODE_ONLY_SCHEMA_CHARACTERIZED')
+    expect(summaries[0]?.providerRequestDiagnostics).toMatchObject({
+      includesAutomation: false,
+      includesToolSearch: false,
+    })
+    const declaration = summaries[1]?.customToolCallOutputs?.join('\n') ?? ''
+    expect(declaration).toContain('murph__automation')
+    expect(declaration).toContain('contextReferences?: unknown')
+    expect(declaration).not.toContain('entityKind')
+    expect(declaration).not.toContain('entityId')
+    // The schema itself retains the shared fields; Codex 0.151's TypeScript
+    // renderer follows oneOf branches without combining sibling properties.
+    const properties = readRecord(MURPH_AUTOMATION_TOOL.inputSchema.properties)
+    expect(properties?.contextReferences).toMatchObject({
+      items: { required: ['entityKind', 'entityId'] },
+      type: 'array',
+    })
+  })
+
+  it('uses exact Terra mixed mode to discover a condition reminder schema before one save', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    expect(MURPH_AUTOMATION_TOOL.deferLoading).toBe(true)
+    const scenario = await prepareScriptedTurnScenario()
+    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
       codexCommand: scenario.turnInput.codexCommand,
       directory: scenario.turnInput.codexHome,
     })
     scenario.stub.captureProviderRequestDiagnostics()
+    const conditionId = 'condition_rehabilitation_knee'
+    await writeFile(
+      path.join(scenario.turnInput.workingDirectory, 'vault-cli'),
+      [
+        '#!/bin/sh',
+        'set -eu',
+        `if [ "$*" != "condition show ${conditionId} --format json" ]; then`,
+        '  printf \'unsupported canonical read: %s\\n\' "$*" >&2',
+        '  exit 64',
+        'fi',
+        `printf '%s\\n' '${JSON.stringify({
+          entity: {
+            data: { clinicalStatus: 'active' },
+            id: conditionId,
+            kind: 'condition',
+            title: 'Knee rehabilitation',
+          },
+          vault: 'synthetic-vault',
+        })}'`,
+        '',
+      ].join('\n'),
+      { encoding: 'utf8', mode: 0o755 },
+    )
     const automationRequests: unknown[] = []
     scenario.stub.queue(
       {
         customToolCall: {
           input: `
-const tool = ALL_TOOLS.find(({ name }) => name === "murph__automation");
-const groupTool = ALL_TOOLS.find(({ name }) => name === "murph__group_chat");
-if (!tool) {
-  text(JSON.stringify({ found: false, foundGroup: Boolean(groupTool) }));
-} else {
-  const result = await tools.murph__automation({
-    action: "save",
-    instructions: "Send a short reminder.",
-    schedule: { kind: "dailyLocal", localTime: "09:00" },
-    title: "Morning reminder",
-  });
-  text(JSON.stringify({ found: true, foundGroup: Boolean(groupTool), result }));
+const result = await tools.exec_command({
+  cmd: "./vault-cli condition show ${conditionId} --format json",
+});
+if (result.exit_code !== 0) {
+  throw new Error("Canonical condition read failed: " + JSON.stringify({
+    exitCode: result.exit_code,
+    output: result.output,
+  }));
 }
+text(result.output);
 `,
           name: 'exec',
+        },
+      },
+      {
+        toolSearchCall: {
+          limit: 8,
+          query: 'Murph automation save reminder contextReferences entityKind entityId',
+        },
+      },
+      {
+        functionCall: {
+          arguments: {
+            action: 'save',
+            assistantTargetOverride: { model: 'gpt-5.6-luna' },
+            contextReferences: [{
+              entityId: conditionId,
+              entityKind: 'condition',
+            }],
+            instructions:
+              'Send a short reminder to complete the knee rehabilitation exercises.',
+            schedule: { kind: 'dailyLocal', localTime: '09:00' },
+            title: 'Knee rehabilitation reminder',
+          },
+          name: 'automation',
+          namespace: 'murph',
         },
       },
       { text: 'NATIVE_DEFERRED_TOOL_OK' },
@@ -3693,33 +3880,82 @@ if (!tool) {
         },
         vaultFileSendAvailable: false,
       },
-      prompt: 'Save the reminder, then reply exactly NATIVE_DEFERRED_TOOL_OK.',
+      prompt: [
+        `Read condition ${conditionId} with vault-cli.`,
+        'Use native tool search to discover the exact deferred automation schema.',
+        'Then save one daily 9:00 AM knee rehabilitation reminder with that exact condition reference.',
+        'Reply exactly NATIVE_DEFERRED_TOOL_OK after the save succeeds.',
+      ].join(' '),
+      // This proof intentionally executes a staged fake vault CLI. Match the
+      // existing scripted exec lane because GitHub's restricted Linux runner
+      // cannot let nested bubblewrap configure loopback.
+      sandbox: 'danger-full-access',
     })
 
     const summaries = scenario.stub.requestSummariesSinceBaseline()
     expect(summaries[0]).toMatchObject({
+      model: 'gpt-5.6-terra',
       providerRequestDiagnostics: {
         includesAllTools: true,
         includesAutomation: false,
         includesGroup: false,
         includesGroupEmail: false,
+        includesToolSearch: true,
       },
     })
     expect(summaries[0]?.providerRequestDiagnostics?.bytes).toBeGreaterThan(0)
-    const automationOutput =
+    const conditionReadOutput =
       summaries[1]?.customToolCallOutputs?.join('\n') ?? ''
-    expect(automationOutput).toContain('"foundGroup":true')
-    expect(automationOutput).toContain('automation-native-deferred')
-    expect(automationOutput).not.toContain('lookupId')
-    expect(automationOutput).toContain('active')
+    expect(conditionReadOutput).toContain(conditionId)
+    expect(conditionReadOutput).toContain('"kind":"condition"')
+    const automationSearchTools = summaries[2]?.toolSearchOutputTools ?? []
+    const automationSearchTool = automationSearchTools
+      .flatMap((candidate) => {
+        const tool = readRecord(candidate)
+        if (tool?.name === 'automation') {
+          return [tool]
+        }
+        return Array.isArray(tool?.tools)
+          ? tool.tools.map(readRecord).filter((item) => item !== null)
+          : []
+      })
+      .find((tool) => tool.name === 'automation')
+    expect(automationSearchTool).not.toBeUndefined()
+    const automationParameters = readRecord(automationSearchTool?.parameters)
+    const automationProperties = readRecord(automationParameters?.properties)
+    const contextReferences = readRecord(
+      automationProperties?.contextReferences,
+    )
+    const contextReferenceItem = readRecord(contextReferences?.items)
+    const contextReferenceProperties = readRecord(
+      contextReferenceItem?.properties,
+    )
+    expect(contextReferences).toMatchObject({
+      items: {
+        additionalProperties: false,
+        required: expect.arrayContaining(['entityKind', 'entityId']),
+        type: 'object',
+      },
+      type: 'array',
+    })
+    expect(contextReferenceProperties).toMatchObject({
+      entityId: { type: 'string' },
+      entityKind: { type: 'string' },
+    })
     expect(automationRequests).toEqual([{
       action: 'save',
-      instructions: 'Send a short reminder.',
+      assistantTargetOverride: { model: 'gpt-5.6-luna' },
+      contextReferences: [{
+        entityId: conditionId,
+        entityKind: 'condition',
+      }],
+      instructions:
+        'Send a short reminder to complete the knee rehabilitation exercises.',
       schedule: { kind: 'dailyLocal', localTime: '09:00' },
-      title: 'Morning reminder',
+      title: 'Knee rehabilitation reminder',
     }])
     expect(result.finalMessage).toBe('NATIVE_DEFERRED_TOOL_OK')
-    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(4)
 
     const deferredRequestBytes =
       summaries[0]?.providerRequestDiagnostics?.bytes ?? 0
@@ -4543,6 +4779,14 @@ text(JSON.stringify(result));
       title: 'Gap reminder',
     }
     const recoveryKey = buildTestAutomationLocalAtRecoveryKey(failedRequest)
+    let markResponseStarted!: () => void
+    const responseStarted = new Promise<void>((resolve) => {
+      markResponseStarted = resolve
+    })
+    let releaseResponse!: () => void
+    const responseReleased = new Promise<void>((resolve) => {
+      releaseResponse = resolve
+    })
     let steered: Promise<void> | null = null
     scenario.stub.queue(
       {
@@ -4555,7 +4799,10 @@ text(JSON.stringify(result));
         },
       },
       {
-        delayMs: 4_000,
+        beforeRespond: async () => {
+          markResponseStarted()
+          await responseReleased
+        },
         text: 'That time does not exist on March 8. What should I do?',
       },
       {
@@ -4596,14 +4843,19 @@ text(JSON.stringify(result));
         vaultFileSendAvailable: false,
       },
       onLiveTurn: (turn: CodexAppServerLiveTurn) => {
-        steered = delay(1_000).then(() =>
-          turn.steer({
-            prompt: 'Never mind. Do not create that reminder.',
-            relativeDateReferenceWindow: {
-              earliestAt: '2026-03-08T05:01:00.000Z',
-              latestAt: '2026-03-08T05:01:00.000Z',
-            },
-          }))
+        steered = responseStarted.then(async () => {
+          try {
+            await turn.steer({
+              prompt: 'Never mind. Do not create that reminder.',
+              relativeDateReferenceWindow: {
+                earliestAt: '2026-03-08T05:01:00.000Z',
+                latestAt: '2026-03-08T05:01:00.000Z',
+              },
+            })
+          } finally {
+            releaseResponse()
+          }
+        })
       },
       prompt: 'Remind me tomorrow at 2:30 AM in New York.',
     })
@@ -6347,7 +6599,7 @@ text(JSON.stringify(result));
         },
       },
       {
-        text: 'The reminder wording is updated and the daily schedule remains active. The scheduler is finishing the current reminder work and will project the next occurrence automatically, so no action is needed.',
+        text: 'I updated your reminder. It is still active on its daily schedule.',
       },
     )
 
@@ -6407,7 +6659,8 @@ text(JSON.stringify(result));
     )
     expect(toolOutputs).not.toContain('"timingVerified"')
     expect(result.finalMessage).toMatch(/updated|active/iu)
-    expect(result.finalMessage).toMatch(/automatically|no action is needed/iu)
+    expect(result.finalMessage).toMatch(/daily/iu)
+    expect(result.finalMessage).not.toMatch(/scheduler|projection|occurrence|processing/iu)
     expect(result.finalMessage).not.toMatch(
       /if you want|inspect|10:30|tomorrow|unconfirmed|not confirmed|could not verify/iu,
     )
@@ -6835,6 +7088,7 @@ if (!tool) {
       const scenario = await prepareScriptedTurnScenario()
       scenario.stub.captureProviderRequestDiagnostics()
       scenario.stub.queue(
+        { toolSearchCall: { query: 'murph attach_response_card private structured compact_table daily_nutrition', limit: 1 } },
         {
           functionCall: {
             arguments: { card },
@@ -6856,9 +7110,16 @@ if (!tool) {
         scenario.stub.requestSummariesSinceBaseline()[0]
           ?.providerRequestDiagnostics,
       ).toMatchObject({
-        includesResponseCardCompactTableShape: true,
-        includesResponseCardNutritionV2Shape: true,
+        includesResponseCardCompactTableShape: false,
+        includesResponseCardNutritionV2Shape: false,
       })
+      const discovered = scenario.stub.requestSummariesSinceBaseline()[1]?.toolSearchOutputTools
+      expect(JSON.stringify(discovered)).toContain('compact_table')
+      expect(JSON.stringify(discovered)).toContain('daily_nutrition')
+      expect(JSON.stringify(discovered)).toContain(
+        'meal totals --from <date> --to <same-date> --resolve-goals --format json',
+      )
+      expect(JSON.stringify(discovered)).not.toContain('goal list --status active')
       expect(result.runtimeIssueInputs).toEqual([])
       if ('workout' in card) {
         expect(result.responseCard).toMatchObject({
@@ -7452,9 +7713,18 @@ if (!tool) {
       {
         functionCall: {
           arguments: {
+            action: 'list_memberships',
+          },
+          name: 'group_membership',
+          namespace: 'murph',
+        },
+      },
+      {
+        functionCall: {
+          arguments: {
             action: 'handoff',
             context: 'I finished the race.',
-            groupLabel: 'Running Club',
+            membershipId: 'membership_running_club',
           },
           name: 'group_consult',
           namespace: 'murph',
@@ -7469,6 +7739,32 @@ if (!tool) {
       hostedToolContext: {
         ...createScriptedGroupToolContext(async (request) => {
           groupRequests.push(request)
+          if (request.action === 'list_memberships') {
+            return {
+              action: 'list_memberships',
+              result: {
+                disclosureGrants: [],
+                memberships: [{
+                  displayName: 'Running Club',
+                  grantedVaultShareProjectionScopes: [],
+                  kind: 'friends',
+                  memberCount: 2,
+                  membershipId: 'membership_running_club',
+                  participantRoster: {
+                    participantCount: 3,
+                    participantLabels: [{ displayName: 'Taylor' }, { phoneHint: { areaCode: '415', lastFour: '9876' } }],
+                    status: 'available',
+                  },
+                  permissionsUrl: null,
+                  requestedVaultShareProjectionScopes: [],
+                  role: 'member',
+                  sponsorshipUrl: null,
+                }],
+                status: 'ok',
+                truncated: false,
+              },
+            }
+          }
           return {
             action: 'handoff',
             result: { status: 'accepted', targetLabel: 'Running Club' },
@@ -7491,16 +7787,17 @@ if (!tool) {
       '"name":"group_consult"',
     )
     expect(groupRequests).toEqual([
+      { action: 'list_memberships' },
       expect.objectContaining({
         action: 'handoff',
         context: 'I finished the race.',
-        groupLabel: 'Running Club',
+        membershipId: 'membership_running_club',
       }),
     ])
     expect(result.finalMessage).toBe(
       'I queued that for Running Club; it has not been sent yet.',
     )
-    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(4)
   })
 
   it('keeps physical-note recovery deferred until an explicit request discovers it', {
@@ -7546,7 +7843,7 @@ if (!tool) {
       : null
 
     const ordinaryScenario = await prepareScriptedTurnScenario()
-    const modelCatalogJson = await writeHostedOpenAiFlexModelCatalogJson({
+    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
       codexCommand: ordinaryScenario.turnInput.codexCommand,
       directory: ordinaryScenario.turnInput.codexHome,
     })
@@ -7657,7 +7954,7 @@ if (!tool) {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const modelCatalogJson = await writeHostedOpenAiFlexModelCatalogJson({
+    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
       codexCommand: scenario.turnInput.codexCommand,
       directory: scenario.turnInput.codexHome,
     })
@@ -7716,7 +8013,7 @@ text(JSON.stringify(result));
       providerRequestDiagnostics: {
         includesAllTools: true,
         includesAutomation: false,
-        includesGroup: false,
+        includesGroup: true,
         includesReadShared: true,
         includesGroupEmail: false,
       },
@@ -7893,7 +8190,7 @@ text(JSON.stringify(result));
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
-    const modelCatalogJson = await writeHostedOpenAiFlexModelCatalogJson({
+    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
       codexCommand: scenario.turnInput.codexCommand,
       directory: scenario.turnInput.codexHome,
     })
@@ -7918,7 +8215,85 @@ text(JSON.stringify(result));
     ])
   })
 
-  it('compacts a 95k personal warm thread off-turn and keeps its task resumable', {
+  it('cold-resumes a skipped 49,999-token group thread with its task context', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const goalSentinel = 'IDLE_COMPACTION_GOAL'
+    const constraintSentinel = 'IDLE_COMPACTION_CONSTRAINT'
+    const toolResultSentinel = 'IDLE_COMPACTION_TOOL_RESULT'
+    const skippedResumeReply = [
+      'POST_SKIP_OK',
+      goalSentinel,
+      constraintSentinel,
+      toolResultSentinel,
+    ].join(' ')
+    scenario.stub.queue({ text: 'SKIP_SEED_OK' })
+    const seeded = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      groupConversation: true,
+      prompt: 'Reply exactly SKIP_SEED_OK.',
+      serviceTier: 'flex',
+    })
+    expect(seeded.finalMessage).toBe('SKIP_SEED_OK')
+
+    scenario.stub.queue({
+      text: 'SKIP_STANDARD_OK',
+      usageInputTokens: 49_999,
+    })
+    const standard = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      groupConversation: true,
+      prompt: [
+        'Preserve this task across the next idle checkpoint.',
+        `Goal: ${goalSentinel}`,
+        `Constraint: ${constraintSentinel}`,
+        `Completed tool result: ${toolResultSentinel}`,
+        'Reply exactly SKIP_STANDARD_OK.',
+      ].join('\n'),
+      resumeSessionId: seeded.sessionId,
+    })
+    expect(standard.finalMessage).toBe('SKIP_STANDARD_OK')
+    expect(standard.threadId).toBe(seeded.threadId)
+
+    // Below threshold: no provider traffic, warm process untouched. The
+    // reported size must be the real observed thread context from the latest
+    // turn's tokenUsage events, not a placeholder.
+    scenario.stub.markRequestBaseline()
+    const skipped = await compactWarmCodexThread({
+      groupMinThreadTokens: 50_000,
+      minThreadTokens: 90_000,
+      timeoutMs: 30_000,
+    })
+    expect(skipped).toMatchObject({
+      kind: 'skipped',
+      reason: 'below_threshold',
+    })
+    expect(
+      skipped.kind === 'skipped' && typeof skipped.threadContextTokensBefore === 'number'
+        && skipped.threadContextTokensBefore === 49_999,
+    ).toBe(true)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(0)
+
+    // Changed-path proof: kill the warm process after the below-threshold skip
+    // so the next turn must reconstruct the uncompacted thread from disk and
+    // continue from the provider response that received the task sentinels.
+    await stopWarmCodexAppServer('post-skip-cold-resume')
+    scenario.stub.queue({
+      requestIncludes: [goalSentinel, constraintSentinel, toolResultSentinel],
+      text: skippedResumeReply,
+    })
+    const resumedAfterSkip = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      groupConversation: true,
+      prompt: 'Continue the preserved task after the skipped idle checkpoint.',
+      resumeSessionId: seeded.sessionId,
+    })
+    expect(resumedAfterSkip.finalMessage).toBe(skippedResumeReply)
+    expect(resumedAfterSkip.threadId).toBe(seeded.threadId)
+  })
+
+  it('compacts a 50k group warm thread off-turn and keeps its task resumable', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
@@ -7931,7 +8306,7 @@ text(JSON.stringify(result));
       constraintSentinel,
       toolResultSentinel,
     ].join(' ')
-    const resumedReply = [
+    const compactedResumeReply = [
       'POST_COMPACT_OK',
       goalSentinel,
       constraintSentinel,
@@ -7940,6 +8315,7 @@ text(JSON.stringify(result));
     scenario.stub.queue({ text: 'COMPACT_SEED_OK' })
     const seeded = await executeCodexAppServerTurn({
       ...scenario.turnInput,
+      groupConversation: true,
       prompt: 'Reply exactly COMPACT_SEED_OK.',
       serviceTier: 'flex',
     })
@@ -7947,10 +8323,11 @@ text(JSON.stringify(result));
 
     scenario.stub.queue({
       text: 'COMPACT_STANDARD_OK',
-      usageInputTokens: 95_000,
+      usageInputTokens: 50_000,
     })
     const standard = await executeCodexAppServerTurn({
       ...scenario.turnInput,
+      groupConversation: true,
       prompt: [
         'Preserve this task across the next idle checkpoint.',
         `Goal: ${goalSentinel}`,
@@ -7963,28 +8340,11 @@ text(JSON.stringify(result));
     expect(standard.finalMessage).toBe('COMPACT_STANDARD_OK')
     expect(standard.threadId).toBe(seeded.threadId)
 
-    // Below threshold: no provider traffic, warm process untouched. The
-    // reported size must be the real observed thread context from the latest
-    // turn's tokenUsage events, not a placeholder.
-    scenario.stub.markRequestBaseline()
-    const skipped = await compactWarmCodexThread({
-      minThreadTokens: 100_000,
-      timeoutMs: 30_000,
-    })
-    expect(skipped).toMatchObject({
-      kind: 'skipped',
-      reason: 'below_threshold',
-    })
-    expect(
-      skipped.kind === 'skipped' && typeof skipped.threadContextTokensBefore === 'number'
-        && skipped.threadContextTokensBefore === 95_000,
-    ).toBe(true)
-    expect(scenario.stub.requestCountSinceBaseline()).toBe(0)
-
-    // Above threshold: the local-provider compaction summarization request is
+    // Exact boundary: the local-provider compaction summarization request is
     // served by the stub and the thread reports compacted.
     scenario.stub.queue({ text: compactedSummary })
     const compacted = await compactWarmCodexThread({
+      groupMinThreadTokens: 50_000,
       minThreadTokens: 90_000,
       timeoutMs: 60_000,
     })
@@ -7994,22 +8354,19 @@ text(JSON.stringify(result));
       serviceTier: null,
       threadId: seeded.threadId,
     })
-    // Usage attribution must never regress to the zero-row production failure:
-    // Codex 0.135 does not expose a compact-specific usage event, so the engine
-    // records a nonzero lower-bound estimate from the pre-compact thread size.
+    // The pinned runtime exposes the scripted provider's exact usage through
+    // raw completion events for this opted-in warm thread.
     expect(compacted.kind).toBe('compacted')
     if (compacted.kind !== 'compacted') {
       throw new Error('Expected idle compaction to complete.')
     }
     expect(compacted.usage).toMatchObject({
-      cachedInputTokens: null,
-      inputTokens: expect.any(Number),
-      outputTokens: null,
-      source: 'estimated',
-      totalTokens: expect.any(Number),
+      cachedInputTokens: 0,
+      inputTokens: 12,
+      outputTokens: 7,
+      source: 'measured',
+      totalTokens: 19,
     })
-    expect(compacted.usage.inputTokens).toBeGreaterThan(0)
-    expect(compacted.usage.totalTokens).toBeGreaterThan(0)
 
     // Repeat guard: a successful compact clears the thread vitals, so an
     // immediate second idle pass must skip without provider traffic instead
@@ -8017,6 +8374,7 @@ text(JSON.stringify(result));
     scenario.stub.markRequestBaseline()
     expect(
       await compactWarmCodexThread({
+        groupMinThreadTokens: 1,
         minThreadTokens: 1,
         timeoutMs: 30_000,
       }),
@@ -8034,15 +8392,16 @@ text(JSON.stringify(result));
     await stopWarmCodexAppServer('post-compact-cold-resume')
     scenario.stub.queue({
       requestIncludes: [goalSentinel, constraintSentinel, toolResultSentinel],
-      text: resumedReply,
+      text: compactedResumeReply,
     })
-    const resumed = await executeCodexAppServerTurn({
+    const resumedAfterCompact = await executeCodexAppServerTurn({
       ...scenario.turnInput,
+      groupConversation: true,
       prompt: 'Finish the preserved task after the idle checkpoint.',
       resumeSessionId: seeded.sessionId,
     })
-    expect(resumed.finalMessage).toBe(resumedReply)
-    expect(resumed.threadId).toBe(seeded.threadId)
+    expect(resumedAfterCompact.finalMessage).toBe(compactedResumeReply)
+    expect(resumedAfterCompact.threadId).toBe(seeded.threadId)
   })
 
   it('keeps a warm thread reusable when its model cannot be accounted', {
@@ -8337,6 +8696,171 @@ text(JSON.stringify(result));
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
+  it('delivers the exact runtime-owned calendar link instead of model-copied text', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const event = {
+      title: 'Care appointment',
+      startsAt: '2026-10-14T14:30:00-04:00',
+      endsAt: '2026-10-14T15:15:00-04:00',
+      location: 'Downtown Clinic',
+    } as const
+    const exactUrl = buildCalendarEventUrl(event)
+    const modelCopiedUrl = `${exactUrl.slice(0, -1)}A`
+    const modelFinalMessage = `The details are ready.\n${modelCopiedUrl}`
+    const exactFinalMessage = `The details are ready.\n${exactUrl}`
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: event,
+          name: 'create_calendar_link',
+          namespace: 'murph',
+        },
+      },
+      {
+        text: modelFinalMessage,
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: resolveMurphDynamicTools({
+        calendarLinkAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      prompt: 'Prepare my exact appointment as a calendar link.',
+    })
+
+    expect(result.providerAuthoredFinalMessage).toBe(modelFinalMessage)
+    expect(result.finalMessage).toBe(exactFinalMessage)
+    expect(result.transcriptMessage).toBe(exactFinalMessage)
+    expect(result.finalMessage).not.toContain(modelCopiedUrl)
+  })
+
+  it.each([
+    {
+      calendarFirst: true,
+      name: 'calendar link first with resolved reminder timing',
+      occurrenceProjection: {
+        nextOccurrenceAt: '2026-10-14T12:00:00.000Z',
+        status: 'resolved' as const,
+      },
+      reminderMessage: 'I set your appointment reminder for 8:00 AM Eastern.',
+    },
+    {
+      calendarFirst: false,
+      name: 'pending reminder first',
+      occurrenceProjection: { status: 'pending' as const },
+      reminderMessage:
+        'I saved your appointment reminder for 8:00 AM Eastern. Its timing is still being confirmed.',
+    },
+  ])('preserves the semantic reminder result and exact calendar suffix with $name', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({ calendarFirst, occurrenceProjection, reminderMessage }) => {
+    const scenario = await prepareScriptedTurnScenario()
+    const event = {
+      title: 'Care appointment',
+      startsAt: '2026-10-14T14:30:00-04:00',
+      endsAt: '2026-10-14T15:15:00-04:00',
+      location: 'Downtown Clinic',
+    } as const
+    const exactUrl = buildCalendarEventUrl(event)
+    const modelCopiedUrl = `${exactUrl.slice(0, -1)}A`
+    const modelFinalMessage = `${reminderMessage}\n${modelCopiedUrl}`
+    const exactFinalMessage = `${reminderMessage}\n${exactUrl}`
+    const providerReminderRequest = {
+      action: 'save' as const,
+      instructions: 'Remind me about my care appointment.',
+      schedule: {
+        kind: 'at' as const,
+        localAt: {
+          date: '2026-10-14',
+          time: '08:00',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Care appointment reminder',
+    }
+    const calendarCall = {
+      functionCall: {
+        arguments: event,
+        name: 'create_calendar_link',
+        namespace: 'murph',
+      },
+    }
+    const reminderCall = {
+      customToolCall: {
+        input: `
+const result = await tools.murph__automation(${JSON.stringify(providerReminderRequest)});
+text(JSON.stringify(result));
+`,
+        name: 'exec',
+      },
+    }
+    if (calendarFirst) {
+      scenario.stub.queue(calendarCall, reminderCall, { text: modelFinalMessage })
+    } else {
+      scenario.stub.queue(reminderCall, calendarCall, { text: modelFinalMessage })
+    }
+    const automationRequests: AssistantHostedAutomationToolRequest[] = []
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: resolveMurphDynamicTools({
+        automationAvailable: true,
+        calendarLinkAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      groupConversation: false,
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            automationRequests.push(request)
+            if (request.action !== 'save') {
+              throw new Error('Expected an automation save request.')
+            }
+            return {
+              action: 'save',
+              automationId: 'automation-care-appointment',
+              created: true,
+              effectiveTimeZone: 'America/New_York',
+              lookupId: 'care-appointment-reminder',
+              occurrenceProjection,
+              routeBinding: 'current_conversation',
+              schedule: request.schedule,
+              status: 'active',
+              updatedAt: '2026-10-01T16:00:00.000Z',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Prepare my appointment reminder and calendar link.',
+    })
+
+    expect(automationRequests).toEqual([{
+      action: 'save',
+      instructions: providerReminderRequest.instructions,
+      schedule: { at: '2026-10-14T12:00:00.000Z', kind: 'at' },
+      title: providerReminderRequest.title,
+    }])
+    expect(result.providerAuthoredFinalMessage).toBe(modelFinalMessage)
+    expect(result.finalMessage).toBe(exactFinalMessage)
+    expect(result.transcriptMessage).toBe(exactFinalMessage)
+    expect(result.finalMessage).not.toContain(modelCopiedUrl)
+    expect(result.finalMessage.match(
+      /https:\/\/www\.withmurph\.ai\/calendar\/[A-Za-z0-9_-]+/gu,
+    )).toEqual([exactUrl])
+    expect(result.finalMessage.endsWith(exactUrl)).toBe(true)
+  })
+
   it.each([
     {
       expectedFinalMessage:
@@ -8347,7 +8871,7 @@ text(JSON.stringify(result));
     },
     {
       expectedFinalMessage:
-        'I could not analyze that video because the provider is rate-limited right now. Please try again later.',
+        'Video analysis was rate-limited; no analysis was retrieved. Please try again later.',
       expectedToolOutput:
         'Video analysis was rate-limited; no analysis was retrieved',
       geminiStatus: 429,
@@ -8437,11 +8961,17 @@ text(JSON.stringify(result));
   it.each([
     {
       allowFinishWithoutReply: false,
+      expectedFallback:
+        'Video analysis was rate-limited; no analysis was retrieved. Please try again later.',
+      geminiStatus: 429,
       name: 'the model returns empty text',
       providerResponses: [{ text: '' }],
     },
     {
       allowFinishWithoutReply: true,
+      expectedFallback:
+        'Video analysis was rate-limited; no analysis was retrieved. Please try again later.',
+      geminiStatus: 429,
       name: 'the model explicitly selects no reply',
       providerResponses: [
         {
@@ -8454,25 +8984,53 @@ text(JSON.stringify(result));
         { text: '' },
       ],
     },
+    {
+      allowFinishWithoutReply: false,
+      expectedFallback:
+        'Video analysis returned no usable answer. Please try again later.',
+      expectedFinalMessage:
+        'I could not analyze that video because no result returned.',
+      expectedProviderMessage:
+        'I could not analyze that video because no result returned.',
+      geminiStatus: 200,
+      name: 'Gemini returns no usable observation and the model claims no result returned',
+      providerResponses: [{
+        text: 'I could not analyze that video because no result returned.',
+      }],
+    },
   ] satisfies readonly {
     allowFinishWithoutReply: boolean
+    expectedFallback: string
+    expectedFinalMessage?: string
+    expectedProviderMessage?: string
+    geminiStatus: 200 | 429
     name: string
     providerResponses: readonly ScriptedResponse[]
   }[])(
     'delivers the trusted video-analysis failure fallback when $name',
     { timeout: TURN_TIMEOUT_MS },
-    async ({ allowFinishWithoutReply, providerResponses }) => {
+    async ({
+      allowFinishWithoutReply,
+      expectedFallback,
+      expectedFinalMessage,
+      expectedProviderMessage,
+      geminiStatus,
+      providerResponses,
+    }) => {
       const scenario = await prepareScriptedTurnScenario()
       const fixture = await prepareScriptedAnalyzeVideoFixture(
         scenario.turnInput.workingDirectory,
       )
-      const expectedFallback =
-        'Video analysis was rate-limited; no analysis was retrieved. Please try again later.'
       const geminiFetch = vi.fn<typeof fetch>(async () =>
-        new Response(JSON.stringify({ error: 'rate limited' }), {
-          headers: { 'content-type': 'application/json' },
-          status: 429,
-        }),
+        geminiStatus === 200
+          ? Response.json({
+              candidates: [],
+              usageMetadata: { promptTokenCount: 100, totalTokenCount: 100 },
+            })
+          : new Response(JSON.stringify({ error: 'rate limited' }), {
+              headers: { 'content-type': 'application/json' },
+              status: geminiStatus,
+            }),
       )
       scenario.stub.queue(
         {
@@ -8509,14 +9067,132 @@ text(JSON.stringify(result));
       expect(geminiFetch).toHaveBeenCalledOnce()
       expect(result.finalAction).toBeNull()
       expect(result.finalActionExplicit).toBe(false)
-      expect(result.finalMessage).toBe(expectedFallback)
-      expect(result.providerAuthoredFinalMessage).toBe('')
-      expect(result.transcriptMessage).toBe(expectedFallback)
+      expect(result.finalMessage).toBe(
+        expectedFinalMessage ?? expectedFallback,
+      )
+      expect(result.providerAuthoredFinalMessage).toBe(
+        expectedProviderMessage ?? '',
+      )
+      expect(result.transcriptMessage).toBe(result.finalMessage)
       expect(scenario.stub.requestCountSinceBaseline()).toBe(
         allowFinishWithoutReply ? 3 : 2,
       )
     },
   )
+
+  it.each([
+    {
+      name: 'completion first',
+      providerMessage:
+        'The push-up reminder is set for tomorrow. Video analysis was rate-limited; no analysis was retrieved. Please try again later.',
+    },
+    {
+      name: 'video status first',
+      providerMessage:
+        'Video analysis was rate-limited; no analysis was retrieved. Please try again later. The push-up reminder is set for tomorrow.',
+    },
+  ])('preserves a completed reminder and exact video status with $name', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({ providerMessage }) => {
+    const scenario = await prepareScriptedTurnScenario()
+    const fixture = await prepareScriptedAnalyzeVideoFixture(
+      scenario.turnInput.workingDirectory,
+    )
+    const providerReminderRequest = {
+      action: 'save' as const,
+      instructions: 'Send the push-up reminder.',
+      schedule: {
+        kind: 'at' as const,
+        localAt: {
+          date: '2026-08-28',
+          time: '09:00',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Push-up reminder',
+    }
+    const expectedReminderAt = '2026-08-28T13:00:00.000Z'
+    const reminderRequest: AssistantHostedAutomationToolRequest = {
+      action: 'save',
+      instructions: providerReminderRequest.instructions,
+      schedule: {
+        at: expectedReminderAt,
+        kind: 'at',
+      },
+      title: providerReminderRequest.title,
+    }
+    const automationRequests: AssistantHostedAutomationToolRequest[] = []
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: {
+            message_ref: fixture.inputId,
+            question: 'Count the visible push-ups and describe the form.',
+          },
+          name: 'analyze_video',
+          namespace: 'murph',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation(${JSON.stringify(providerReminderRequest)});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      { text: providerMessage },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      analyzeVideoRuntime: {
+        apiKey: 'scripted-gemini-key',
+        fetchImpl: vi.fn<typeof fetch>(async () =>
+          new Response(JSON.stringify({ error: 'rate limited' }), {
+            headers: { 'content-type': 'application/json' },
+            status: 429,
+          })),
+      },
+      dynamicTools: resolveMurphDynamicTools({
+        analyzeVideoAvailable: true,
+        automationAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      groupConversation: false,
+      hostedToolContext: {
+        ...fixture.hostedToolContext,
+        automationTool: {
+          request: async (request) => {
+            automationRequests.push(request)
+            return {
+              action: 'save',
+              automationId: 'automation-push-up-reminder',
+              created: true,
+              effectiveTimeZone: 'America/New_York',
+              lookupId: 'push-up-reminder',
+              occurrenceProjection: {
+                nextOccurrenceAt: expectedReminderAt,
+                status: 'resolved',
+              },
+              routeBinding: 'current_conversation',
+              schedule: reminderRequest.schedule,
+              status: 'active',
+              updatedAt: '2026-08-27T20:00:00.000Z',
+            }
+          },
+        },
+      },
+      prompt: 'Analyze my push-ups and remind me tomorrow.',
+      vaultRoot: fixture.vaultRoot,
+    })
+
+    expect(automationRequests).toEqual([reminderRequest])
+    expect(result.providerAuthoredFinalMessage).toBe(providerMessage)
+    expect(result.finalMessage).toBe(providerMessage)
+    expect(result.transcriptMessage).toBe(result.finalMessage)
+  })
 
   it.each([
     {
@@ -8538,14 +9214,44 @@ text(JSON.stringify(result));
         { text: '' },
       ],
     },
+    {
+      allowFinishWithoutReply: false,
+      expectedProviderMessage:
+        'I could not retrieve a usable analysis of the video.',
+      expectedFinalMessage:
+        'I could not retrieve a usable analysis of the video.',
+      name: 'the model falsely claims the successful result was unavailable',
+      providerResponses: [{
+        text: 'I could not retrieve a usable analysis of the video.',
+      }],
+    },
+    {
+      allowFinishWithoutReply: false,
+      expectedFinalMessage:
+        'This video cannot establish a diagnosis. I can see the left knee moving inward. The legs leave frame, so I can only count at least eight reps.',
+      expectedProviderMessage:
+        'This video cannot establish a diagnosis. I can see the left knee moving inward. The legs leave frame, so I can only count at least eight reps.',
+      name: 'the model preserves health and camera limits around the observation',
+      providerResponses: [{
+        text:
+          'This video cannot establish a diagnosis. I can see the left knee moving inward. The legs leave frame, so I can only count at least eight reps.',
+      }],
+    },
   ] satisfies readonly {
     allowFinishWithoutReply: boolean
+    expectedFinalMessage?: string
+    expectedProviderMessage?: string
     name: string
     providerResponses: readonly ScriptedResponse[]
   }[])(
     'delivers the trusted video-analysis success fallback when $name',
     { timeout: TURN_TIMEOUT_MS },
-    async ({ allowFinishWithoutReply, providerResponses }) => {
+    async ({
+      allowFinishWithoutReply,
+      expectedFinalMessage,
+      expectedProviderMessage,
+      providerResponses,
+    }) => {
       const scenario = await prepareScriptedTurnScenario()
       const fixture = await prepareScriptedAnalyzeVideoFixture(
         scenario.turnInput.workingDirectory,
@@ -8599,25 +9305,29 @@ text(JSON.stringify(result));
       expect(geminiFetch).toHaveBeenCalledOnce()
       expect(result.finalAction).toBeNull()
       expect(result.finalActionExplicit).toBe(false)
-      expect(result.finalMessage).toContain('Eight visible push-ups')
-      expect(result.finalMessage).toContain('Gemini video analysis below')
-      expect(result.providerAuthoredFinalMessage).toBe('')
-      expect(result.transcriptMessage).toContain('Eight visible push-ups')
+      expect(result.finalMessage).toBe(
+        expectedFinalMessage ??
+          'Eight visible push-ups. The hips rise before the shoulders on the last two reps.',
+      )
+      expect(result.finalMessage).not.toContain('Gemini video observation below')
+      expect(result.providerAuthoredFinalMessage).toBe(
+        expectedProviderMessage ?? '',
+      )
+      expect(result.transcriptMessage).toBe(result.finalMessage)
       expect(scenario.stub.requestCountSinceBaseline()).toBe(
         allowFinishWithoutReply ? 3 : 2,
       )
     },
   )
 
-  it('preserves the first successful video-analysis fallback after a later limit failure', {
-    timeout: TURN_TIMEOUT_MS,
-  }, async () => {
-    const scenario = await prepareScriptedTurnScenario()
-    const fixture = await prepareScriptedAnalyzeVideoFixture(
-      scenario.turnInput.workingDirectory,
-    )
-    const geminiFetch = vi.fn<typeof fetch>(async () =>
-      Response.json({
+  it.each([
+    {
+      allowFinishWithoutReply: false,
+      expectedFinalFallback:
+        'Eight visible push-ups. The hips rise before the shoulders on the last two reps.',
+      expectedFirstFallback: 'Eight visible push-ups',
+      expectedSecondToolOutput: 'Eight visible push-ups',
+      geminiPayload: {
         candidates: [{
           content: {
             parts: [{
@@ -8628,7 +9338,89 @@ text(JSON.stringify(result));
           },
           finishReason: 'STOP',
         }],
-      }),
+      },
+      name: 'successful observation after an exact repeat',
+      providerResponses: [{ text: '' }],
+      secondQuestion: 'Count the visible push-ups and describe the form.',
+    },
+    {
+      allowFinishWithoutReply: false,
+      expectedFinalFallback:
+        'Video analysis returned no usable answer. Please try again later.',
+      expectedFirstFallback: 'Video analysis returned no usable answer',
+      expectedSecondToolOutput: 'Video analysis returned no usable answer',
+      geminiPayload: {
+        candidates: [],
+        usageMetadata: { promptTokenCount: 100, totalTokenCount: 100 },
+      },
+      name: 'failure status after an exact repeat',
+      providerResponses: [{ text: '' }],
+      secondQuestion: 'Count the visible push-ups and describe the form.',
+    },
+    {
+      allowFinishWithoutReply: false,
+      expectedFinalFallback:
+        'Eight visible push-ups. The hips rise before the shoulders on the last two reps.\n\nI did not analyze the later video request.',
+      expectedFirstFallback: 'Eight visible push-ups',
+      expectedSecondToolOutput:
+        'later video request was not analyzed because this turn already used its one video-analysis attempt',
+      geminiPayload: {
+        candidates: [{
+          content: {
+            parts: [{
+              text:
+                'Eight visible push-ups. The hips rise before the shoulders on the last two reps.',
+            }],
+            role: 'model',
+          },
+          finishReason: 'STOP',
+        }],
+      },
+      name: 'successful observation plus a distinct unanalyzed request',
+      providerResponses: [{ text: '' }],
+      secondQuestion: 'Check whether the hips rise before the shoulders.',
+    },
+    {
+      allowFinishWithoutReply: true,
+      expectedFinalFallback:
+        'Video analysis returned no usable answer. Please try again later.\n\nThe later video request was not analyzed.',
+      expectedFirstFallback: 'Video analysis returned no usable answer',
+      expectedSecondToolOutput:
+        'later video request was not analyzed because this turn already used its one video-analysis attempt',
+      geminiPayload: {
+        candidates: [],
+        usageMetadata: { promptTokenCount: 100, totalTokenCount: 100 },
+      },
+      name: 'failure status plus a distinct unanalyzed request after no reply',
+      providerResponses: [
+        {
+          functionCall: {
+            arguments: {},
+            name: 'finish_without_reply',
+            namespace: 'murph',
+          },
+        },
+        { text: '' },
+      ],
+      secondQuestion: 'Check whether the hips rise before the shoulders.',
+    },
+  ])('recovers the first video-analysis $name', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({
+    allowFinishWithoutReply,
+    expectedFinalFallback,
+    expectedFirstFallback,
+    expectedSecondToolOutput,
+    geminiPayload,
+    providerResponses,
+    secondQuestion,
+  }) => {
+    const scenario = await prepareScriptedTurnScenario()
+    const fixture = await prepareScriptedAnalyzeVideoFixture(
+      scenario.turnInput.workingDirectory,
+    )
+    const geminiFetch = vi.fn<typeof fetch>(async () =>
+      Response.json(geminiPayload),
     )
     const analyzeCall = {
       functionCall: {
@@ -8642,17 +9434,27 @@ text(JSON.stringify(result));
     } satisfies ScriptedResponse
     scenario.stub.queue(
       analyzeCall,
-      analyzeCall,
-      { text: '' },
+      {
+        functionCall: {
+          ...analyzeCall.functionCall,
+          arguments: {
+            ...analyzeCall.functionCall.arguments,
+            question: secondQuestion,
+          },
+        },
+      },
+      ...providerResponses,
     )
 
     const result = await executeCodexAppServerTurn({
       ...scenario.turnInput,
+      allowFinishWithoutReply,
       analyzeVideoRuntime: {
         apiKey: 'scripted-gemini-key',
         fetchImpl: geminiFetch,
       },
       dynamicTools: resolveMurphDynamicTools({
+        allowFinishWithoutReply,
         analyzeVideoAvailable: true,
         progressUpdatesAvailable: false,
       }),
@@ -8663,17 +9465,18 @@ text(JSON.stringify(result));
     })
 
     const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
-      .flatMap((summary) => summary.functionCallOutputs ?? [])
-    expect(toolOutputs).toEqual(expect.arrayContaining([
-      expect.stringContaining('Eight visible push-ups'),
-      expect.stringContaining('Video analysis limit reached for this turn'),
-    ]))
+      .find((summary) => (summary.functionCallOutputs?.length ?? 0) >= 2)
+      ?.functionCallOutputs ?? []
+    expect(toolOutputs).toHaveLength(2)
+    expect(toolOutputs[0]).toContain(expectedFirstFallback)
+    expect(toolOutputs[1]).toContain(expectedSecondToolOutput)
     expect(geminiFetch).toHaveBeenCalledOnce()
-    expect(result.finalMessage).toContain('Eight visible push-ups')
-    expect(result.finalMessage).not.toContain('Video analysis limit reached')
+    expect(result.finalMessage).toBe(expectedFinalFallback)
     expect(result.providerAuthoredFinalMessage).toBe('')
-    expect(result.transcriptMessage).toContain('Eight visible push-ups')
-    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+    expect(result.transcriptMessage).toBe(expectedFinalFallback)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(
+      allowFinishWithoutReply ? 4 : 3,
+    )
   })
 
   it('ends an accepted group email effect without another provider request', {
@@ -9456,62 +10259,6 @@ async function prepareScriptedTurnScenario(
   }
 }
 
-async function writeHostedOpenAiFlexModelCatalogJson(input: {
-  codexCommand: string
-  directory: string
-}): Promise<string> {
-  const { stdout } = await execFileAsync(
-    input.codexCommand,
-    ['debug', 'models', '--bundled'],
-    {
-      encoding: 'utf8',
-      maxBuffer: 10 * 1024 * 1024,
-    },
-  )
-  const catalog = readRecord(JSON.parse(stdout))
-  if (!catalog) {
-    throw new Error('Bundled Codex model catalog was not an object.')
-  }
-  const bundledModels = Array.isArray(catalog.models)
-    ? catalog.models.map(readRecord)
-    : []
-  const productModels = HOSTED_ASSISTANT_PRODUCT_MODELS.map((slug) => {
-    const model = bundledModels.find((candidate) => candidate?.slug === slug)
-    if (!model) {
-      throw new Error(`Bundled Codex model catalog did not include ${slug}.`)
-    }
-
-    const serviceTiers = Array.isArray(model.service_tiers)
-      ? model.service_tiers
-      : []
-    const hasFlex = serviceTiers
-      .map(readRecord)
-      .some((tier) => tier?.id === 'flex')
-    if (!hasFlex) {
-      model.service_tiers = [
-        ...serviceTiers,
-        {
-          description: 'Lower-cost flexible processing',
-          id: 'flex',
-          name: 'Flex',
-        },
-      ]
-    }
-    return model
-  })
-  catalog.models = productModels
-
-  const modelCatalogJson = path.join(
-    input.directory,
-    'codex-model-catalog.openai-flex.json',
-  )
-  await writeFile(modelCatalogJson, `${JSON.stringify(catalog)}\n`, {
-    encoding: 'utf8',
-    mode: 0o600,
-  })
-  return modelCatalogJson
-}
-
 function buildScriptedCodexConfigToml(
   baseUrl: string,
   options: {
@@ -9631,6 +10378,8 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
       }))
       return
     }
+
+    await scripted.beforeRespond?.()
 
     if (scripted.delayMs) {
       await new Promise((resolve) => {
@@ -9824,9 +10573,18 @@ function readScriptedProviderRequestSummary(
           .filter((width): width is number => width !== null)
       })
     : []
-  const tools = Array.isArray(body?.tools)
+  const directTools = Array.isArray(body?.tools)
     ? body.tools.map(readRecord)
     : []
+  const additionalTools = Array.isArray(body?.input)
+    ? body.input
+      .map(readRecord)
+      .filter((item) => item?.type === 'additional_tools')
+      .flatMap((item) =>
+        Array.isArray(item?.tools) ? item.tools.map(readRecord) : []
+      )
+    : []
+  const tools = [...directTools, ...additionalTools]
   return {
     ...(customToolCallOutputs.length > 0 ? { customToolCallOutputs } : {}),
     ...(functionCallOutputs.length > 0 ? { functionCallOutputs } : {}),

@@ -1,6 +1,6 @@
 # iOS Companion App — MVP Build Spec
 
-Last verified: 2026-08-15
+Last verified: 2026-08-28
 
 Parent spec: `agent-docs/product-specs/companion-app.md` (strategy, phases,
 review posture). This doc is the concrete build plan for the first shippable
@@ -118,14 +118,17 @@ installed build rather than the static fallback.
 
 ### Login methods: verified constraint
 
-Privy's Swift SDK natively supports **email OTP and SMS OTP**. Its native
-OAuth support is currently **Google-only — Telegram login is web-only and
-not available in the iOS SDK**. MVP ships **phone + email**; Telegram joins
-when Privy lands it on iOS.
+Privy's Swift SDK natively supports **email OTP and SMS OTP** for primary
+authentication. Pinned Privy 2.12 also supports post-authentication Telegram
+OAuth linking. Telegram is a messaging setup choice, not a login method.
+Email-only authentication therefore remains at the canonical setup gate until
+the member links a phone number or Telegram account.
 
 Guideline note: Apple's 4.8 (must offer Sign in with Apple) is triggered by
-third-party *social* login. Email/SMS OTP does not trigger it. The day we
-add Telegram or Google, we must add Sign in with Apple in the same release.
+third-party *social* login. Email/SMS OTP does not trigger it, and the bounded
+post-authentication Telegram link does not authenticate app access. If
+Telegram or Google becomes a login method, add Sign in with Apple in the same
+release.
 
 ## Stack (verified 2026-06-10)
 
@@ -163,6 +166,10 @@ Launch
 Login screen
   └─ phone → privy.sms.sendCode(to:) → privy.sms.loginWithCode(_:sentTo:)
   └─ email → equivalent email OTP flow
+Messaging setup after canonical admission
+  ├─ verified phone or linked Telegram → continue
+  └─ email only → link phone by OTP or Telegram by OAuth → repeat admission
+       → continue only after the canonical projection clears the gate
 Token exchange (on demand, immediately before SDK exchange; retry = new token)
   └─ app sends Privy auth token to Murph web API
   └─ backend verifies Privy identity (@privy-io/node, already a dependency)
@@ -505,39 +512,19 @@ licensing unresolved.
 
 ## Automated hosted/native E2E acceptance
 
-The required automated acceptance lane for companion auth/control/device-sync
-changes is documented in `agent-docs/references/testing-ci-map.md`. It supersedes
-any plan language that treats mocked or hermetic native/client flow as acceptance
-proof; lower-level route, SDK-wrapper, hosted-local, and fixture tests cannot
-satisfy this gate.
+The automated production canary for companion auth/control/device-sync is
+documented in `agent-docs/references/testing-ci-map.md`. Protected default-branch
+Actions runs it every six hours after `main` advances, using the exact deployed
+production Web SHA and committed immutable native source policy. The private
+lane runs the normally compiled app on an Apple simulator through the existing
+canary identity, companion onboarding/legal consent/sign-in-token persistence,
+real Junction/Vital Health SDK connection, the real iOS HealthKit permission
+UI, sign-out, and returning sign-in. The public controller creates no candidate
+deployment and owns no database, Privy, or Junction reset authority.
 
-For a selected PR, trusted default-branch Actions code deploys the exact PR SHA
-as a normal minified build into Vercel custom environment `native-ios-e2e`, using
-an isolated real database, the dedicated real non-production Privy app/test
-credential, and a real Junction sandbox API key/team dedicated exclusively to
-this lane. Trusted orchestration proves the exact candidate origin is publicly
-reachable without a Vercel bypass or login before native dispatch. The private
-lane runs the normally compiled app on an Apple simulator through fresh Privy OTP signup,
-companion onboarding/legal consent/sign-in-token persistence, real Junction/Vital
-Health SDK connection and the real iOS HealthKit permission UI, sign-out, and
-returning sign-in. No synthetic token, fake provider, fixture transport, local
-hosted substitute, or product test bypass is allowed. Native completion alone is
-not acceptance: before cleanup, trusted orchestration must re-read the fixed
-Privy principal and prove it was created inside this run, then resolve the
-corresponding real Junction sandbox user and require a connected
-`apple_health_kit` provider.
-
-Fresh-signup reset is `orchestrator_owned_reset` and fail-closed: before and
-after the PR lane it retires only lane-owned E2E deployments, deleting aliases
-enumerated from each exact validated deployment before the deployment itself.
-It then enumerates the lane-exclusive Junction sandbox team, rejects more than
-one or any unexpected user, deletes the production-derived user when the
-isolated member exists or the sole orphan when that member is already absent,
-proves the team empty, resets only the explicitly E2E-named isolated database
-through the real Prisma migration toolchain, and deletes only the fixed Privy
-test user. This does not add or restore an internal/admin member-reset route.
-Production canary mode keeps an existing identity and performs no destructive
-cleanup.
+Lower-level route, SDK-wrapper, hosted-local, fixture, and deterministic PR
+tests remain required for changed behavior; they supplement but do not replace
+the deployed production canary.
 
 The main repo consumes only the exact private workflow run status/conclusion.
 Auth, OTP, legal/HealthKit consent, and provider-token stages must not export
@@ -577,3 +564,27 @@ boundary.
   production keys for TestFlight.
 - Telegram-on-iOS support tracking with Privy.
 - AGPL/commercial confirmation from Junction (gate above).
+
+## Authentication recovery telemetry
+
+The existing `POST /api/device-sync/companion/auth-diagnostics` route accepts
+legacy OTP diagnostics and closed session_restore, session_refresh,
+backend_request, and sign_out stages (`method: session`). Optional appBuild,
+osVersion, and diagnosticSessionId are strictly numeric/version/UUIDv4-shaped;
+unsupported values become null, unknown fields reject the envelope. The UUID
+is generated once per native process, never persisted or bound to a member.
+No raw errors, request paths, contact details, tokens, device IDs, or health data
+are accepted. Client reports remain spoofable operational evidence.
+
+Vercel runtime logs can be filtered by `companion_auth_diagnostic` (message
+`Companion auth diagnostic.`), then stage, diagnosticCode, appVersion/appBuild,
+and diagnosticSessionId. Successful session restoration and ordinary sign-out
+state use info; failure events use warning. New iOS clients retain a bounded
+memory-only queue for transient failures and flush on another event or
+foreground. Process termination loses unsent events intentionally.
+
+Deploy the backward-compatible backend first, then the native app. An older
+backend can reject new events without affecting sign-in. Keep the existing
+production enablement flag and verified WAF cap; do not bypass them for
+observability. Rollback of the backend may lose newer telemetry only. No
+runtime Worker deployment or data migration is required.

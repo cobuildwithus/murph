@@ -24,6 +24,7 @@ overrides:
   '@metamask/utils@9.3.0>uuid': 11.1.1
   '@metamask/utils@11.11.0>uuid': 11.1.1
   '@modelcontextprotocol/sdk@1.29.0>hono': 4.12.25
+  'incur@0.4.5>@modelcontextprotocol/server': 2.0.0-alpha.2
   '@privy-io/js-sdk-core@0.62.0>js-cookie': 3.0.8
   '@privy-io/react-auth@3.24.0>js-cookie': 3.0.8
   '@solana/rpc-subscriptions-channel-websocket@5.5.1>ws': 8.21.0
@@ -61,9 +62,8 @@ overrides:
   'ajv@8.20.0>fast-uri': 3.1.2
   'fast-xml-parser@5.7.2>fast-xml-builder': 1.2.0
 minimumReleaseAgeExclude:
-  - incur@0.4.4
   - '@cobuild/repo-tools@0.1.17'
-  - '@cobuild/review-gpt@0.5.138'
+  - '@cobuild/review-gpt@0.5.145'
   - '@next/env@16.3.0'
   - '@next/eslint-plugin-next@16.3.0'
   - '@next/swc-darwin-arm64@16.3.0'
@@ -77,7 +77,7 @@ minimumReleaseAgeExclude:
   - '@onkernel/sdk@0.76.0'
   - eslint-config-next@16.3.0
   - next@16.3.0
-  - '@openai/codex@0.149.1||0.149.1-darwin-arm64||0.149.1-darwin-x64||0.149.1-linux-arm64||0.149.1-linux-x64||0.149.1-win32-arm64||0.149.1-win32-x64'
+  - '@openai/codex@0.153.4||0.153.4-darwin-arm64||0.153.4-darwin-x64||0.153.4-linux-arm64||0.153.4-linux-x64||0.153.4-win32-arm64||0.153.4-win32-x64'
   - '@temporalio/activity@1.16.3'
   - '@temporalio/client@1.16.3'
   - '@temporalio/common@1.16.3'
@@ -91,8 +91,13 @@ minimumReleaseAgeExclude:
 nodeVersion: 24.14.1
 packageManagerStrictVersion: true
 patchedDependencies:
+  '@cloudflare/containers@0.3.7': patches/@cloudflare__containers@0.3.7.patch
+  '@cobuild/repo-tools@0.1.17': patches/@cobuild__repo-tools@0.1.17.patch
+  '@cobuild/review-gpt@0.5.145': patches/@cobuild__review-gpt@0.5.145.patch
   incur@0.4.5: patches/incur@0.4.5.patch
+  incur@0.5.1: patches/incur@0.5.1.patch
   ink@6.8.0: patches/ink@6.8.0.patch
+  wrangler@4.90.0: patches/wrangler@4.90.0.patch
 savePrefix: ''
 trustPolicy: no-downgrade
 # Ignore provenance-era drift for older releases that predate broad trusted publishing.

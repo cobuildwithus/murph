@@ -9,6 +9,7 @@ import {
   FRONTMATTER_DOC_TYPES,
   GOAL_HORIZONS as CONTRACT_GOAL_HORIZONS,
   GOAL_STATUSES as CONTRACT_GOAL_STATUSES,
+  type CommonsGoalRef,
   type GoalFrontmatter,
   type FoodNutrition,
   REGIMEN_KINDS as CONTRACT_REGIMEN_KINDS,
@@ -325,6 +326,7 @@ export interface GoalEntity {
   relatedGoalIds?: string[];
   relatedExperimentIds?: string[];
   metricTargets?: GoalMetricTarget[];
+  commonsGoalRef?: CommonsGoalRef;
   domains?: string[];
   links: GoalLink[];
 }
@@ -334,6 +336,7 @@ export type GoalStoredDocument = StoredMarkdownRegistryEntity<GoalEntity>;
 export interface UpsertGoalInput {
   vaultRoot: string;
   goalId?: string;
+  requireExistingGoalId?: boolean;
   slug?: string;
   title?: string;
   status?: GoalStatus;
@@ -348,6 +351,7 @@ export interface UpsertGoalInput {
   relatedExperimentIds?: string[];
   links?: GoalLink[] | null;
   metricTargets?: GoalMetricTarget[];
+  commonsGoalRef?: CommonsGoalRef;
   domains?: string[];
 }
 
@@ -509,6 +513,7 @@ export type RegimenStoredDocument = StoredMarkdownRegistryEntity<RegimenEntity>;
 export interface UpsertRegimenInput {
   vaultRoot: string;
   regimenId?: string;
+  requireExistingRegimenId?: boolean;
   slug?: string;
   allowSlugRename?: boolean;
   rejectExistingSlug?: boolean;

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,7 +36,9 @@ import {
 } from "../src/deploy-smoke-live-model.ts";
 
 import {
+  assertSmokeCodexShellResult,
   buildVersionOverrideHeaders,
+  resolveSmokeExpectedStandbyMode,
   resolveSmokeRunnerManifestPath,
   resolveSmokeWorkerBaseUrl,
   runSmokeHostedDeploy,
@@ -73,6 +75,27 @@ describe("resolveSmokeWorkerBaseUrl", () => {
   });
 });
 
+describe("resolveSmokeExpectedStandbyMode", () => {
+  it.each(["off", "shadow", "allocate"] as const)(
+    "accepts the canonical %s mode",
+    (mode) => {
+      expect(resolveSmokeExpectedStandbyMode({
+        HOSTED_EXECUTION_SMOKE_EXPECTED_STANDBY_MODE: mode,
+      })).toBe(mode);
+    },
+  );
+
+  it("leaves local smoke checks unchanged when no expected mode is configured", () => {
+    expect(resolveSmokeExpectedStandbyMode({})).toBeNull();
+  });
+
+  it("rejects a non-canonical expected mode", () => {
+    expect(() => resolveSmokeExpectedStandbyMode({
+      HOSTED_EXECUTION_SMOKE_EXPECTED_STANDBY_MODE: "ready",
+    })).toThrow("HOSTED_EXECUTION_STANDBY_MODE must be off, shadow, or allocate.");
+  });
+});
+
 const CONTAINER_SMOKE_PATH = "/internal/deploy/container-smoke";
 
 // The smoke appends a per-attempt query param, so match on pathname rather than
@@ -93,8 +116,9 @@ function isBundleOnlyContainerSmokeRequest(url: string): boolean {
 function createCodexShellSmokeResult() {
   return {
     cliSurfaceContractBytes: 37282,
-    cliSurfaceHotPathProofCount: 4,
+    cliSurfaceHotPathProofCount: 5,
     client: "codex-app-server",
+    healthCommonsCliGoalProofCount: 6,
     murphPathBytes: 28,
     noteAddBytes: 128,
     stderrBytes: 0,
@@ -103,6 +127,22 @@ function createCodexShellSmokeResult() {
     vaultShowBytes: 256,
   };
 }
+
+describe("assertSmokeCodexShellResult", () => {
+  it("requires the exact bounded public Goal proof count", () => {
+    for (const healthCommonsCliGoalProofCount of [5, 7, 6.5]) {
+      expect(() => assertSmokeCodexShellResult({
+        ...createCodexShellSmokeResult(),
+        healthCommonsCliGoalProofCount,
+      })).toThrow(
+        "runner container Codex shell smoke did not prove public Goal CLI round trips.",
+      );
+    }
+    expect(() => assertSmokeCodexShellResult(
+      createCodexShellSmokeResult(),
+    )).not.toThrow();
+  });
+});
 
 describe("buildVersionOverrideHeaders", () => {
   it("formats the Cloudflare version override header when the worker name and version id are present", () => {
@@ -164,6 +204,49 @@ describe("resolveSmokeRunnerManifestPath", () => {
 });
 
 describe("runSmokeHostedDeploy", () => {
+  it.each([
+    { label: "current ready inventory", proof: { ready: true, readyCount: 2, provisioningCount: 0, target: 2, releaseMatches: true }, passes: true },
+    { label: "missing inventory", proof: null, passes: false },
+    { label: "wrong target", proof: { ready: true, readyCount: 1, provisioningCount: 0, target: 1, releaseMatches: true }, passes: false },
+    { label: "stale release", proof: { ready: true, readyCount: 2, provisioningCount: 0, target: 2, releaseMatches: false }, passes: false },
+    { label: "pending preparation", proof: { ready: true, readyCount: 2, provisioningCount: 1, target: 2, releaseMatches: true }, passes: false },
+  ])("requires $label proof in the protected standby smoke", async ({ proof, passes }) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-standby-smoke-"));
+    const manifestPath = path.join(root, "manifest.json");
+    const manifest = { buildSkipped: false, bundleFingerprint: "expected-bundle", sourceFingerprint: "expected-source" };
+    try {
+      await writeFile(manifestPath, JSON.stringify(manifest));
+      const fetchImpl = async (url: RequestInfo | URL) => new Response(JSON.stringify(
+        isContainerSmokeRequest(String(url))
+          ? {
+              ok: true,
+              standbyInventory: proof,
+              runnerContainer: {
+                codexShell: createCodexShellSmokeResult(), ok: true,
+                runnerBundle: manifest, service: "cloudflare-hosted-runner-node",
+              },
+            }
+          : { ok: true, service: "cloudflare-hosted-runner", standbyMode: "shadow" },
+      ), { status: 200 });
+      const smoke = runSmokeHostedDeploy({
+        fetchImpl, log() {},
+        source: {
+          HOSTED_EXECUTION_SMOKE_EXPECTED_STANDBY_MODE: "shadow",
+          HOSTED_EXECUTION_STANDBY_TARGET: "2",
+          HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+          HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: manifestPath,
+          HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS: "1",
+          HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+          HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+        },
+      });
+      if (passes) await expect(smoke).resolves.toBeUndefined();
+      else await expect(smoke).rejects.toThrow("standby inventory");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("pins the candidate-version header and performs the authenticated status check", async () => {
     const fetchCalls: Array<{
       body: string | undefined;
@@ -183,6 +266,7 @@ describe("runSmokeHostedDeploy", () => {
         return new Response(JSON.stringify({
           ok: true,
           service: "cloudflare-hosted-runner",
+          standbyMode: "shadow",
           workerVersionId: "version-123",
         }), {
           status: 200,
@@ -192,6 +276,7 @@ describe("runSmokeHostedDeploy", () => {
       if (String(url).endsWith("/health")) {
         return new Response(JSON.stringify({
           ok: true,
+          standbyMode: "shadow",
           workerVersionId: "version-123",
         }), { status: 200 });
       }
@@ -217,6 +302,7 @@ describe("runSmokeHostedDeploy", () => {
       source: {
         CF_WORKER_NAME: "hosted-worker",
         HOSTED_EXECUTION_SMOKE_OIDC_TOKEN: "vercel-oidc-token",
+        HOSTED_EXECUTION_SMOKE_EXPECTED_STANDBY_MODE: "shadow",
         HOSTED_EXECUTION_SMOKE_USER_ID: "member_123",
         HOSTED_EXECUTION_SMOKE_VERSION_ID: "version-123",
         HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
@@ -249,6 +335,48 @@ describe("runSmokeHostedDeploy", () => {
         },
         method: "GET",
         url: "https://worker.example.test/internal/users/member_123/status",
+      },
+    ]);
+  });
+
+  it.each([
+    ["an omitted", undefined],
+    ["a malformed", "ready"],
+    ["a mismatched", "off"],
+  ])("fails when health reports %s standby mode", async (_label, standbyMode) => {
+    const fetchHeaders: Array<HeadersInit | undefined> = [];
+    await expect(runSmokeHostedDeploy({
+      fetchImpl: async (url: RequestInfo | URL, init?: RequestInit) => {
+        fetchHeaders.push(init?.headers);
+        if (String(url).endsWith("/")) {
+          return new Response(JSON.stringify({
+            ok: true,
+            service: "cloudflare-hosted-runner",
+            workerVersionId: "version-123",
+          }), { status: 200 });
+        }
+
+        return new Response(JSON.stringify({
+          ok: true,
+          ...(standbyMode === undefined ? {} : { standbyMode }),
+          workerVersionId: "version-123",
+        }), { status: 200 });
+      },
+      log() {},
+      source: {
+        CF_WORKER_NAME: "hosted-worker",
+        HOSTED_EXECUTION_SMOKE_EXPECTED_STANDBY_MODE: "shadow",
+        HOSTED_EXECUTION_SMOKE_VERSION_ID: "version-123",
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+      },
+    })).rejects.toThrow("worker health check did not report standby mode shadow.");
+
+    expect(fetchHeaders).toEqual([
+      {
+        "Cloudflare-Workers-Version-Overrides": "hosted-worker=\"version-123\"",
+      },
+      {
+        "Cloudflare-Workers-Version-Overrides": "hosted-worker=\"version-123\"",
       },
     ]);
   });
@@ -990,6 +1118,82 @@ describe("runSmokeHostedDeploy", () => {
     // Distinct attempt values are what give each retry a fresh smoke Durable
     // Object, so a pre-rollout container cannot be re-read for the whole run.
     expect(smokeAttempts).toEqual(["1", "2", "3"]);
+  });
+
+  it("retries a pre-rollout container before asserting the current smoke schema", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-smoke-stale-schema-"));
+    const manifestPath = path.join(
+      root,
+      ".deploy",
+      "runner-bundle",
+      ".murph-runner-bundle-manifest.json",
+    );
+    await mkdir(path.dirname(manifestPath), { recursive: true });
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify({
+        buildSkipped: false,
+        bundleFingerprint: "expected-bundle",
+        releaseSha: TEST_PUBLIC_RELEASE_SHA,
+        sourceFingerprint: "expected-source",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+
+    const smokeAttempts: (string | null)[] = [];
+    const fetchImpl = async (url: RequestInfo | URL) => {
+      if (String(url).endsWith("/")) {
+        return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner" }), {
+          status: 200,
+        });
+      }
+      if (String(url).endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      if (isContainerSmokeRequest(String(url))) {
+        const attempt = new URL(String(url)).searchParams.get("attempt");
+        smokeAttempts.push(attempt);
+        const stale = smokeAttempts.length === 1;
+        return new Response(JSON.stringify({
+          ok: true,
+          runnerContainer: {
+            codexShell: stale ? null : createCodexShellSmokeResult(),
+            ok: true,
+            runnerBundle: stale
+              ? {
+                  buildSkipped: false,
+                  bundleFingerprint: "stale-bundle",
+                  releaseSha: "89abcdef0123456789abcdef0123456789abcdef",
+                  sourceFingerprint: "stale-source",
+                }
+              : {
+                  buildSkipped: false,
+                  bundleFingerprint: "expected-bundle",
+                  releaseSha: TEST_PUBLIC_RELEASE_SHA,
+                  sourceFingerprint: "expected-source",
+                },
+            service: "cloudflare-hosted-runner-node",
+          },
+        }), { status: 200 });
+      }
+
+      throw new Error(`Unexpected smoke request: ${String(url)}`);
+    };
+
+    await runSmokeHostedDeploy({
+      fetchImpl,
+      log() {},
+      source: {
+        HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+        HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: manifestPath,
+        HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS: "2",
+        HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS: "0",
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+      },
+    });
+
+    expect(smokeAttempts).toEqual(["1", "2"]);
   });
 
   it("runs the live model turn against the container the bundle phase proved current", async () => {

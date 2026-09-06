@@ -1,3 +1,4 @@
+import { readWorkflowSkillPolicy } from './support/workflow-skill-policy.js'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -17,10 +18,7 @@ describe('experiment onboarding skill guidance', () => {
       throw new Error('experiment-onboarding skill is not registered')
     }
 
-    return readFile(
-      path.join(resolveAssistantSkillsRoot(), skill.slug, 'SKILL.md'),
-      'utf8',
-    )
+    return readWorkflowSkillPolicy('experiment-onboarding')
   }
 
   async function readBehaviorFollowthroughSkill() {
@@ -271,7 +269,10 @@ describe('experiment onboarding skill guidance', () => {
       'do not leave related future session-support automations blindly active',
     )
     expect(raw).toContain(
-      'vault-cli automation list --support-series-id experiment:<experimentId>',
+      'vault-cli automation list --support-series-id experiment:<experimentId> --compact',
+    )
+    expect(raw).toContain(
+      'vault-cli automation show <automationId>` only when a fact needed for the reconciliation decision is absent from that compact inventory',
     )
     expect(raw).toContain(
       'never infer ownership from an experiment slug, generic tag, title, or text prefix',

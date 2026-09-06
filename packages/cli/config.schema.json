@@ -1375,7 +1375,10 @@
                           "type": "string",
                           "enum": [
                             "whoop",
-                            "whoop_v2"
+                            "whoop_v2",
+                            "garmin",
+                            "oura",
+                            "fitbit"
                           ]
                         },
                         "activityKind": {
@@ -1622,7 +1625,10 @@
                           "type": "string",
                           "enum": [
                             "whoop",
-                            "whoop_v2"
+                            "whoop_v2",
+                            "garmin",
+                            "oura",
+                            "fitbit"
                           ]
                         },
                         "activityKind": {
@@ -1824,6 +1830,11 @@
                           "description": "Continue an exact support-series listing after this automation id.",
                           "type": "string",
                           "minLength": 1
+                        },
+                        "compact": {
+                          "default": false,
+                          "description": "Return identifiers and basic lifecycle and schedule state only; use automation show for complete details.",
+                          "type": "boolean"
                         },
                         "limit": {
                           "default": 10,
@@ -3173,9 +3184,12 @@
                           "minLength": 1
                         },
                         "status": {
-                          "description": "Optional audit status filter such as success, warning, or error.",
+                          "description": "Optional audit status filter: success or failure.",
                           "type": "string",
-                          "minLength": 1
+                          "enum": [
+                            "success",
+                            "failure"
+                          ]
                         },
                         "from": {
                           "description": "Inclusive lower occurredAt date bound in YYYY-MM-DD form.",
@@ -3571,6 +3585,62 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
+                "goal": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "commands": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "list": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "query": {
+                                  "description": "Optional text filter over title, goal phrase, summary, aliases, and category.",
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "category": {
+                                  "description": "Optional goal category. Repeat --category for multiple values.",
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "enum": [
+                                      "sleep",
+                                      "nutrition",
+                                      "cardio",
+                                      "strength",
+                                      "mind",
+                                      "biomarkers",
+                                      "life-stages"
+                                    ]
+                                  }
+                                },
+                                "limit": {
+                                  "default": 10,
+                                  "description": "Maximum number of public goal guides to return.",
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 500
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "show": {
+                          "type": "object",
+                          "additionalProperties": false
+                        }
+                      }
+                    }
+                  }
+                },
                 "protocol": {
                   "type": "object",
                   "additionalProperties": false,
@@ -4359,11 +4429,39 @@
               "properties": {
                 "show": {
                   "type": "object",
-                  "additionalProperties": false
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "recordOnly": {
+                          "description": "Return only the exact requested record, including its verification metadata. Requires a memory id; omit for complete memory context.",
+                          "type": "boolean"
+                        },
+                        "compact": {
+                          "description": "Return only document existence plus each record's id, section, and text.",
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
                 },
                 "set-name": {
                   "type": "object",
-                  "additionalProperties": false
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "compact": {
+                          "description": "Return the mutation outcome and exact affected record without the full memory document.",
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
                 },
                 "upsert": {
                   "type": "object",
@@ -4373,6 +4471,10 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
+                        "compact": {
+                          "description": "Return the mutation outcome and exact affected record without the full memory document.",
+                          "type": "boolean"
+                        },
                         "section": {
                           "type": "string",
                           "enum": [
@@ -4395,6 +4497,10 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
+                        "compact": {
+                          "description": "Return the mutation outcome and exact affected record without the full memory document.",
+                          "type": "boolean"
+                        },
                         "section": {
                           "description": "Optional replacement memory section. Defaults to the current section.",
                           "type": "string",
@@ -4411,7 +4517,19 @@
                 },
                 "forget": {
                   "type": "object",
-                  "additionalProperties": false
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "compact": {
+                          "description": "Return the mutation outcome and exact affected record without the full memory document.",
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -5292,6 +5410,10 @@
                           "minLength": 1,
                           "maxLength": 128
                         },
+                        "resolveGoals": {
+                          "description": "Resolve applicable nutrition goal points with conflicts and provenance. Requires identical explicit from/to dates; read-only and never approves suitability or activates proposals.",
+                          "type": "boolean"
+                        },
                         "from": {
                           "description": "Optional inclusive lower date bound in YYYY-MM-DD form.",
                           "type": "string",
@@ -5964,7 +6086,7 @@
                           "minLength": 1
                         },
                         "exercise": {
-                          "description": "Initial exercise grammar: name=... with optional sets/reps/targetWeight/targetWeightUnit/sourceExerciseId/groupId/mode/unitOverride/note. reps and targetWeight are exact member-stated values for every set; targetWeight requires targetWeightUnit. Repeat --exercise; repeat order becomes canonical order. Commas are preserved.",
+                          "description": "Initial exercise grammar: name=...;mode=... with required mode and optional sets/reps/targetWeight/targetWeightUnit/sourceExerciseId/groupId/unitOverride/note. weight_reps also requires unitOverride unless targetWeightUnit is present. reps and targetWeight are exact member-stated values for every set; targetWeight requires targetWeightUnit. Repeat --exercise; repeat order becomes canonical order. Commas are preserved.",
                           "maxItems": 100,
                           "type": "array",
                           "items": {
@@ -6078,7 +6200,8 @@
                                     "weighted_bodyweight",
                                     "duration",
                                     "cardio"
-                                  ]
+                                  ],
+                                  "description": "Required result family for the native workout editor."
                                 },
                                 "unitOverride": {
                                   "type": "string",
@@ -6332,19 +6455,19 @@
                           "maxLength": 240
                         },
                         "duration": {
-                          "description": "Optional duration override in minutes when the note is missing or ambiguous.",
+                          "description": "Typed duration in minutes. Required unless an applicable saved default or workout timestamps supply it.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 1440
                         },
                         "type": {
-                          "description": "Optional workout type override such as \"run\" or \"strength training\".",
+                          "description": "Typed workout type such as \"run\" or \"strength training\".",
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 120
                         },
                         "distanceKm": {
-                          "description": "Optional workout distance override in kilometers.",
+                          "description": "Typed workout distance in kilometers.",
                           "type": "number",
                           "exclusiveMinimum": 0,
                           "maximum": 1000
@@ -6484,7 +6607,7 @@
                           "maxLength": 240
                         },
                         "duration": {
-                          "description": "Optional duration override in minutes when the payload is missing or ambiguous.",
+                          "description": "Optional typed duration in minutes when the payload omits it.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 1440
@@ -6842,6 +6965,70 @@
                     }
                   }
                 },
+                "defaults": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "commands": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "show": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "set": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "duration": {
+                                  "description": "Default duration in minutes when a reported workout omits it.",
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 1440
+                                },
+                                "clearDuration": {
+                                  "description": "Clear the saved workout duration default.",
+                                  "type": "boolean"
+                                },
+                                "recordedAt": {
+                                  "description": "Optional preferences update timestamp override in ISO 8601 form.",
+                                  "type": "string",
+                                  "format": "date-time",
+                                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
                 "units": {
                   "type": "object",
                   "additionalProperties": false,
@@ -7118,19 +7305,19 @@
                                   }
                                 },
                                 "duration": {
-                                  "description": "Optional default duration override in minutes when the saved note is missing or ambiguous.",
+                                  "description": "Typed default duration in minutes.",
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 1440
                                 },
                                 "type": {
-                                  "description": "Optional default workout type override such as \"run\" or \"strength training\".",
+                                  "description": "Typed default workout type such as \"run\" or \"strength training\".",
                                   "type": "string",
                                   "minLength": 1,
                                   "maxLength": 120
                                 },
                                 "distanceKm": {
-                                  "description": "Optional default workout distance override in kilometers.",
+                                  "description": "Typed default workout distance in kilometers.",
                                   "type": "number",
                                   "exclusiveMinimum": 0,
                                   "maximum": 1000
@@ -8433,7 +8620,7 @@
                             "minLength": 1,
                             "maxLength": 256
                           },
-                          "description": "Food product, brand, or generic ingredient search text. Repeat --query for multiple values."
+                          "description": "Food product, brand, USDA FDC id, UPC, or generic ingredient search text. Repeat --query for multiple values."
                         },
                         "limit": {
                           "description": "Maximum label matches to return per query. Defaults to 1.",
@@ -9057,7 +9244,29 @@
                         "kind": {
                           "description": "Optional canonical event kind filter such as encounter, procedure, test, adverse_effect, or exposure.",
                           "type": "string",
-                          "minLength": 1
+                          "enum": [
+                            "adverse_effect",
+                            "body_measurement",
+                            "clinical_assertion",
+                            "document",
+                            "encounter",
+                            "exposure",
+                            "meal",
+                            "measurement",
+                            "symptom",
+                            "note",
+                            "observation",
+                            "experiment_event",
+                            "experiment_context",
+                            "immunization",
+                            "medication_intake",
+                            "procedure",
+                            "supplement_intake",
+                            "test",
+                            "activity_session",
+                            "sleep_session",
+                            "intervention_session"
+                          ]
                         },
                         "from": {
                           "description": "Optional inclusive lower date bound in YYYY-MM-DD form.",
@@ -9714,11 +9923,92 @@
                                   "minLength": 1,
                                   "maxLength": 128
                                 },
+                                "icon": {
+                                  "description": "Journal icon from existing artwork. Choose note when none fits; never guess an asset name.",
+                                  "type": "string",
+                                  "enum": [
+                                    "note",
+                                    "bath",
+                                    "shower",
+                                    "headache",
+                                    "fatigue",
+                                    "muscle-soreness",
+                                    "abdominal-pain",
+                                    "nausea",
+                                    "congestion",
+                                    "activity",
+                                    "walking",
+                                    "running",
+                                    "cycling",
+                                    "swimming",
+                                    "rowing",
+                                    "strength",
+                                    "mobility",
+                                    "mind-body",
+                                    "racket-sports",
+                                    "ball-sports",
+                                    "combat-sports",
+                                    "winter-sports",
+                                    "water-sports",
+                                    "outdoor-sports",
+                                    "golf",
+                                    "dance",
+                                    "housework",
+                                    "yardwork",
+                                    "parenting",
+                                    "dog-walking",
+                                    "travel",
+                                    "commute",
+                                    "meal",
+                                    "medication",
+                                    "alcohol",
+                                    "recovery",
+                                    "wellness",
+                                    "sleep",
+                                    "caffeine",
+                                    "hydration",
+                                    "sauna",
+                                    "cold-plunge",
+                                    "sunlight",
+                                    "red-light",
+                                    "smoking",
+                                    "temperature",
+                                    "work",
+                                    "screens",
+                                    "noise"
+                                  ]
+                                },
+                                "timing": {
+                                  "description": "Use all_day for ongoing symptoms, including symptoms continuing since morning. Use morning/afternoon/evening/night only for an event limited to that period. Use unknown when time is missing. Use timed only with an explicit clock time. Never guess a time.",
+                                  "type": "string",
+                                  "enum": [
+                                    "timed",
+                                    "all_day",
+                                    "morning",
+                                    "afternoon",
+                                    "evening",
+                                    "night",
+                                    "unknown"
+                                  ]
+                                },
                                 "note": {
                                   "type": "string",
                                   "minLength": 1,
                                   "maxLength": 4000,
-                                  "description": "Freeform note text to store on the event."
+                                  "description": "Journal detail only, in English. Omit the event name and synonyms: title \"Cycling\", note \"20 min\", never \"Cycling for 20 min\". Separate symptoms/actions need separate entries. With no extra detail, use the title exactly so the view hides it."
+                                },
+                                "noteType": {
+                                  "description": "Optional structured note type, such as journal-factor or journal-outcome.",
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                                },
+                                "relatedId": {
+                                  "description": "Optional related event ids. Repeat --related-id for multiple events.",
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "pattern": "^evt_[0-9A-HJKMNP-TV-Z]{26}$"
+                                  }
                                 },
                                 "occurredAt": {
                                   "description": "Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.",
@@ -9747,7 +10037,7 @@
                                   ]
                                 },
                                 "title": {
-                                  "description": "Optional event title. If omitted, the command derives a short title.",
+                                  "description": "Short event name. For Journal, use English without relative-day words or dates.",
                                   "type": "string",
                                   "minLength": 1,
                                   "maxLength": 160
@@ -10546,7 +10836,16 @@
                         },
                         "stream": {
                           "type": "string",
-                          "minLength": 1,
+                          "enum": [
+                            "heart_rate",
+                            "spo2",
+                            "hrv",
+                            "steps",
+                            "sleep_stage",
+                            "respiratory_rate",
+                            "temperature",
+                            "glucose"
+                          ],
                           "description": "Sample stream to summarize, such as spo2 or heart_rate."
                         },
                         "from": {
@@ -10618,7 +10917,16 @@
                         },
                         "stream": {
                           "type": "string",
-                          "minLength": 1
+                          "enum": [
+                            "heart_rate",
+                            "spo2",
+                            "hrv",
+                            "steps",
+                            "sleep_stage",
+                            "respiratory_rate",
+                            "temperature",
+                            "glucose"
+                          ]
                         },
                         "from": {
                           "type": "string",
@@ -10686,7 +10994,16 @@
                                 },
                                 "stream": {
                                   "type": "string",
-                                  "minLength": 1
+                                  "enum": [
+                                    "heart_rate",
+                                    "spo2",
+                                    "hrv",
+                                    "steps",
+                                    "sleep_stage",
+                                    "respiratory_rate",
+                                    "temperature",
+                                    "glucose"
+                                  ]
                                 },
                                 "from": {
                                   "type": "string",
@@ -10754,11 +11071,10 @@
                           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         },
                         "provider": {
-                          "description": "Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.",
+                          "description": "Optional public source filter. Repeat --provider for multiple values such as fitbit, withings, or google-health. Run an unfiltered `wearables sources list` to discover sources in this vault.",
                           "type": "array",
                           "items": {
-                            "type": "string",
-                            "minLength": 1
+                            "type": "string"
                           }
                         }
                       }
@@ -10780,11 +11096,10 @@
                           "maxLength": 128
                         },
                         "provider": {
-                          "description": "Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.",
+                          "description": "Optional public source filter. Repeat --provider for multiple values such as fitbit, withings, or google-health. Run an unfiltered `wearables sources list` to discover sources in this vault.",
                           "type": "array",
                           "items": {
-                            "type": "string",
-                            "minLength": 1
+                            "type": "string"
                           }
                         }
                       }
@@ -10821,11 +11136,10 @@
                           "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                         },
                         "provider": {
-                          "description": "Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.",
+                          "description": "Optional public source filter. Repeat --provider for multiple values such as fitbit, withings, or google-health. Run an unfiltered `wearables sources list` to discover sources in this vault.",
                           "type": "array",
                           "items": {
-                            "type": "string",
-                            "minLength": 1
+                            "type": "string"
                           }
                         },
                         "windowDays": {
@@ -10907,11 +11221,10 @@
                                   "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                                 },
                                 "provider": {
-                                  "description": "Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.",
+                                  "description": "Optional public source filter. Repeat --provider for multiple values such as fitbit, withings, or google-health. Run an unfiltered `wearables sources list` to discover sources in this vault.",
                                   "type": "array",
                                   "items": {
-                                    "type": "string",
-                                    "minLength": 1
+                                    "type": "string"
                                   }
                                 },
                                 "windowDays": {
@@ -10955,11 +11268,10 @@
                                   "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                                 },
                                 "provider": {
-                                  "description": "Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.",
+                                  "description": "Optional public source filter. Repeat --provider for multiple values such as fitbit, withings, or google-health. Run an unfiltered `wearables sources list` to discover sources in this vault.",
                                   "type": "array",
                                   "items": {
-                                    "type": "string",
-                                    "minLength": 1
+                                    "type": "string"
                                   }
                                 },
                                 "windowDays": {
@@ -11015,11 +11327,10 @@
                                   "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                                 },
                                 "provider": {
-                                  "description": "Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.",
+                                  "description": "Optional public source filter. Repeat --provider for multiple values such as fitbit, withings, or google-health. Run an unfiltered `wearables sources list` to discover sources in this vault.",
                                   "type": "array",
                                   "items": {
-                                    "type": "string",
-                                    "minLength": 1
+                                    "type": "string"
                                   }
                                 },
                                 "limit": {
@@ -11063,11 +11374,10 @@
                                   "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                                 },
                                 "provider": {
-                                  "description": "Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.",
+                                  "description": "Optional public source filter. Repeat --provider for multiple values such as fitbit, withings, or google-health. Run an unfiltered `wearables sources list` to discover sources in this vault.",
                                   "type": "array",
                                   "items": {
-                                    "type": "string",
-                                    "minLength": 1
+                                    "type": "string"
                                   }
                                 },
                                 "timeZone": {
@@ -11128,11 +11438,10 @@
                                   "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                                 },
                                 "provider": {
-                                  "description": "Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.",
+                                  "description": "Optional public source filter. Repeat --provider for multiple values such as fitbit, withings, or google-health. Run an unfiltered `wearables sources list` to discover sources in this vault.",
                                   "type": "array",
                                   "items": {
-                                    "type": "string",
-                                    "minLength": 1
+                                    "type": "string"
                                   }
                                 },
                                 "limit": {
@@ -11141,6 +11450,16 @@
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 200
+                                },
+                                "includeWorkoutSummaries": {
+                                  "default": false,
+                                  "description": "Include bounded per-workout facts without lap/split rows. Use for workout counts, types, start times, duration, distance, heart rate, cadence, power, or speed. Each workout marks splitsOmitted true; this never proves splits are absent. Use --include-workout-details instead when the question needs splits; full detail wins if both options are true.",
+                                  "type": "boolean"
+                                },
+                                "includeWorkoutDetails": {
+                                  "default": false,
+                                  "description": "Include bounded workoutFeatures and splits (up to 32 workouts per day and 64 splits per workout). Use when the question needs lap or split rows. Prefer --include-workout-summaries for individual workout facts without splits; omit both options for day totals. Choose the required level before the first and only activity-list data read; never use a smaller output as a probe before retrying with detail.",
+                                  "type": "boolean"
                                 }
                               }
                             }
@@ -11188,11 +11507,10 @@
                                   "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                                 },
                                 "provider": {
-                                  "description": "Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.",
+                                  "description": "Optional public source filter. Repeat --provider for multiple values such as fitbit, withings, or google-health. Run an unfiltered `wearables sources list` to discover sources in this vault.",
                                   "type": "array",
                                   "items": {
-                                    "type": "string",
-                                    "minLength": 1
+                                    "type": "string"
                                   }
                                 },
                                 "limit": {
@@ -11248,11 +11566,10 @@
                                   "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                                 },
                                 "provider": {
-                                  "description": "Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.",
+                                  "description": "Optional public source filter. Repeat --provider for multiple values such as fitbit, withings, or google-health. Run an unfiltered `wearables sources list` to discover sources in this vault.",
                                   "type": "array",
                                   "items": {
-                                    "type": "string",
-                                    "minLength": 1
+                                    "type": "string"
                                   }
                                 },
                                 "limit": {
@@ -11308,11 +11625,10 @@
                                   "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                                 },
                                 "provider": {
-                                  "description": "Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.",
+                                  "description": "Optional public source filter. Repeat --provider for multiple values such as fitbit, withings, or google-health. Run an unfiltered `wearables sources list` to discover sources in this vault.",
                                   "type": "array",
                                   "items": {
-                                    "type": "string",
-                                    "minLength": 1
+                                    "type": "string"
                                   }
                                 },
                                 "limit": {
@@ -12814,15 +13130,32 @@
                           "type": "array",
                           "items": {
                             "type": "string",
-                            "minLength": 1
+                            "pattern": "^(?:\\s*evt_[0-9A-HJKMNP-TV-Z]{26}\\s*|\\s+)$"
                           }
                         },
                         "stream": {
                           "description": "Optional sample streams to mutate. Repeat --stream for multiple values. Mutually exclusive with --event-id.",
                           "type": "array",
                           "items": {
-                            "type": "string",
-                            "minLength": 1
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "heart_rate",
+                                  "spo2",
+                                  "hrv",
+                                  "steps",
+                                  "sleep_stage",
+                                  "respiratory_rate",
+                                  "temperature",
+                                  "glucose"
+                                ]
+                              },
+                              {
+                                "type": "string",
+                                "pattern": "^(?:\\s*(?:heart_rate|spo2|hrv|steps|sleep_stage|respiratory_rate|temperature|glucose)\\s*|\\s+)$"
+                              }
+                            ]
                           }
                         }
                       }
@@ -12848,15 +13181,32 @@
                           "type": "array",
                           "items": {
                             "type": "string",
-                            "minLength": 1
+                            "pattern": "^(?:\\s*evt_[0-9A-HJKMNP-TV-Z]{26}\\s*|\\s+)$"
                           }
                         },
                         "stream": {
                           "description": "Optional sample streams to mutate. Repeat --stream for multiple values. Mutually exclusive with --event-id.",
                           "type": "array",
                           "items": {
-                            "type": "string",
-                            "minLength": 1
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "heart_rate",
+                                  "spo2",
+                                  "hrv",
+                                  "steps",
+                                  "sleep_stage",
+                                  "respiratory_rate",
+                                  "temperature",
+                                  "glucose"
+                                ]
+                              },
+                              {
+                                "type": "string",
+                                "pattern": "^(?:\\s*(?:heart_rate|spo2|hrv|steps|sleep_stage|respiratory_rate|temperature|glucose)\\s*|\\s+)$"
+                              }
+                            ]
                           }
                         }
                       }
@@ -12900,7 +13250,7 @@
                   "maxLength": 128
                 },
                 "recordType": {
-                  "description": "Optional query record families. Repeat --record-type for multiple values: allergy, assessment, audit, condition, core, event, experiment, family, food, genetics, goal, habitat, journal, protocol, provider, regimen, recipe, sample, workout_format.",
+                  "description": "Optional query record families. Repeat --record-type for multiple values: allergy, assessment, condition, core, event, experiment, family, food, genetics, goal, habitat, journal, protocol, provider, regimen, recipe, sample, workout_format.",
                   "type": "array",
                   "items": {
                     "type": "string",
@@ -12986,7 +13336,7 @@
                           "minLength": 1
                         },
                         "recordType": {
-                          "description": "Optional query record families. Repeat --record-type for multiple values: allergy, assessment, audit, condition, core, event, experiment, family, food, genetics, goal, habitat, journal, protocol, provider, regimen, recipe, sample, workout_format.",
+                          "description": "Optional query record families. Repeat --record-type for multiple values: allergy, assessment, condition, core, event, experiment, family, food, genetics, goal, habitat, journal, protocol, provider, regimen, recipe, sample, workout_format.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -13676,7 +14026,8 @@
                         "title": {
                           "description": "Optional assessment title stored on the imported record.",
                           "type": "string",
-                          "minLength": 1
+                          "minLength": 1,
+                          "maxLength": 160
                         },
                         "occurredAt": {
                           "description": "Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.",
@@ -13981,6 +14332,21 @@
                             "type": "string",
                             "minLength": 1
                           }
+                        },
+                        "commonsGoalKey": {
+                          "description": "Public Health Commons goal_template key used to create this private goal.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "commonsPageRevisionId": {
+                          "description": "Exact Health Commons goal page sha256 revision id.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "commonsWorkflowRevisionId": {
+                          "description": "Exact Health Commons goal workflow sha256 revision id.",
+                          "type": "string",
+                          "minLength": 1
                         },
                         "domain": {
                           "description": "Optional goal domain. Repeat --domain for multiple values.",
@@ -15370,7 +15736,12 @@
                         "status": {
                           "description": "Optional supplement status to filter by.",
                           "type": "string",
-                          "minLength": 1
+                          "enum": [
+                            "active",
+                            "paused",
+                            "completed",
+                            "stopped"
+                          ]
                         }
                       }
                     }
@@ -15632,7 +16003,12 @@
                                 "status": {
                                   "description": "Optional supplement status to filter by. Defaults to active for compound rollups.",
                                   "type": "string",
-                                  "minLength": 1
+                                  "enum": [
+                                    "active",
+                                    "paused",
+                                    "completed",
+                                    "stopped"
+                                  ]
                                 }
                               }
                             }
@@ -15655,7 +16031,12 @@
                                 "status": {
                                   "description": "Optional supplement status to filter by. Defaults to active for compound rollups.",
                                   "type": "string",
-                                  "minLength": 1
+                                  "enum": [
+                                    "active",
+                                    "paused",
+                                    "completed",
+                                    "stopped"
+                                  ]
                                 }
                               }
                             }
@@ -15712,7 +16093,12 @@
                         "status": {
                           "description": "Optional regimen status to filter by.",
                           "type": "string",
-                          "minLength": 1
+                          "enum": [
+                            "active",
+                            "paused",
+                            "completed",
+                            "stopped"
+                          ]
                         },
                         "limit": {
                           "default": 10,
@@ -16006,7 +16392,10 @@
                         "status": {
                           "description": "Optional private protocol status to filter by.",
                           "type": "string",
-                          "minLength": 1
+                          "enum": [
+                            "available",
+                            "archived"
+                          ]
                         },
                         "commonsProtocol": {
                           "description": "Optional public Health Commons protocol key, slug, or route id to filter by.",

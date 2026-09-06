@@ -80,6 +80,8 @@ import {
   assertHostedRunNoProviderEgressAuthFailures,
   buildHostedLocalRuntimeLogDatabaseNameForTest,
   buildHostedLocalFullStackWebProcessEnvOverrides,
+  cleanupActiveHostedLocalFullStackScenarioSetups,
+  shouldReuseExplicitHostedLocalScenarioDatabaseUrl,
 } from "./hosted-local-full-stack-scenario.js";
 
 afterEach(() => {
@@ -117,6 +119,20 @@ it("bounds the derived runtime-log database name to PostgreSQL's identifier limi
 
   expect(runtimeLogDatabaseName).toBe(`${"p".repeat(50)}_runtime_logs`);
   expect(runtimeLogDatabaseName).toHaveLength(63);
+});
+
+describe("hosted local database reuse authority", () => {
+  it("does not treat generic CI mode as database reuse authority", () => {
+    expect(shouldReuseExplicitHostedLocalScenarioDatabaseUrl({
+      CI: "true",
+    })).toBe(false);
+  });
+
+  it("requires the dedicated database reuse control", () => {
+    expect(shouldReuseExplicitHostedLocalScenarioDatabaseUrl({
+      MURPH_HOSTED_LOCAL_E2E_REUSE_DATABASE_URL: "1",
+    })).toBe(true);
+  });
 });
 
 it("fails the negative runtime-log oracle when no evidence was persisted", async () => {
@@ -313,6 +329,31 @@ it("retries startup with fresh port reservations after an address-in-use race", 
   }
 });
 
+it("does not restart a cancelled setup after a retryable port failure", async () => {
+  let rejectAttempt: (error: Error) => void = () => {};
+  mocks.startHostedLocalDevHarness.mockImplementationOnce(() => new Promise((_, reject) => {
+    rejectAttempt = reject;
+  }));
+  const startup = startScenario();
+  const outcome = startup.then(() => "started", () => "cancelled");
+  await vi.waitFor(() => expect(mocks.startHostedLocalDevHarness).toHaveBeenCalledOnce());
+  const cleanup = cleanupActiveHostedLocalFullStackScenarioSetups();
+  rejectAttempt(new Error("Address already in use (0.0.0.0:4300)."));
+  await cleanup;
+  expect(await outcome).toBe("cancelled");
+  expect(mocks.startHostedLocalDevHarness).toHaveBeenCalledOnce();
+});
+
+it("stops a ready scenario gracefully without aborting its startup signal", async () => {
+  const harness = createScenarioHarness();
+  mocks.startHostedLocalDevHarness.mockResolvedValueOnce(harness);
+  const scenario = await startScenario();
+  const signal = mocks.startHostedLocalDevHarness.mock.calls.at(-1)?.[0].abortSignal;
+  await scenario.stop();
+  expect(signal?.aborted).toBe(false);
+  expect(harness.stop).toHaveBeenCalledOnce();
+});
+
 it("does not retry non-port startup failures", async () => {
   mocks.startHostedLocalDevHarness.mockRejectedValueOnce(
     new Error("Hosted local database migration failed."),
@@ -320,6 +361,35 @@ it("does not retry non-port startup failures", async () => {
 
   await expect(startScenario()).rejects.toThrow("Hosted local database migration failed.");
   expect(mocks.startHostedLocalDevHarness).toHaveBeenCalledOnce();
+});
+
+it("aborts and joins a full-stack setup that suite teardown reaches before startup returns", async () => {
+  let startupSignal: AbortSignal | undefined;
+  let setupRejected = false;
+  mocks.startHostedLocalDevHarness.mockImplementationOnce(async (input) => {
+    startupSignal = input.abortSignal;
+    return await new Promise((_, reject) => {
+      input.abortSignal?.addEventListener("abort", () => {
+        setupRejected = true;
+        const error = new Error("Hosted-local startup was interrupted.");
+        error.name = "AbortError";
+        reject(error);
+      }, { once: true });
+    });
+  });
+
+  const startup = startScenario();
+  await vi.waitFor(() => {
+    expect(mocks.startHostedLocalDevHarness).toHaveBeenCalledOnce();
+  });
+
+  await cleanupActiveHostedLocalFullStackScenarioSetups();
+
+  expect(startupSignal?.aborted).toBe(true);
+  expect(setupRejected).toBe(true);
+  await expect(startup).rejects.toMatchObject({ name: "AbortError" });
+  const oidcFixture = await mocks.startHostedLocalOidcFixture.mock.results.at(-1)?.value;
+  expect(oidcFixture?.stop).toHaveBeenCalledOnce();
 });
 
 it("forwards explicitly supplied provider credentials to the worker harness", async () => {
@@ -356,6 +426,7 @@ function createScenarioHarness(input: {
 
   return {
     assertNoInterventions: vi.fn(input.assertNoInterventions ?? (() => {})),
+    cloudflareStdoutTail: vi.fn(() => ""),
     readUserStatus: vi.fn(async () => fallbackStatus),
     runtimeEnv: {},
     stderrTail: vi.fn(() => ""),

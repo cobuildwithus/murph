@@ -3,6 +3,8 @@ import {
 } from '@murphai/contracts'
 import * as z from '@murphai/contracts/zod-runtime'
 import {
+  forgetMemory,
+  MemoryRecordConflictError,
   readMemoryDocument,
   updateMemory,
   upsertMemory,
@@ -22,9 +24,15 @@ const memberMemoryArgumentsSchema = z.discriminatedUnion('action', [
   }).strict(),
   z.object({
     action: z.literal('update'),
+    expectedUpdatedAt: z.string().trim().min(1),
     memoryId: z.string().trim().min(1),
     section: memorySectionSchema.optional(),
     text: z.string().trim().min(1),
+  }).strict(),
+  z.object({
+    action: z.literal('forget'),
+    expectedUpdatedAt: z.string().trim().min(1),
+    memoryId: z.string().trim().min(1),
   }).strict(),
 ])
 
@@ -32,8 +40,9 @@ export const MURPH_MEMBER_MEMORY_TOOL = {
   namespace: 'murph',
   name: 'member_memory',
   description: [
-    'Read, add, or update canonical saved memory during engine-authorized silent member-memory consolidation.',
-    'Call show first. Existing memory is only for deduplication and update targeting. Upsert one concise supported fact at a time; update only by an id returned by show. This tool cannot delete memory and is unavailable outside the exact managed maintenance turn.',
+    'Read, add, update, or forget canonical saved memory during engine-authorized silent member-memory consolidation.',
+    'Call show exactly once per maintenance turn and use that one result for deduplication and mutation targeting. Upsert one concise supported fact at a time. Update or forget only by an id returned by show, and pass that record\'s exact updatedAt as expectedUpdatedAt.',
+    'A successful mutation result is authoritative. If a record changed after show, leave the newer value unchanged and end the write attempt; never call show again in the same turn merely to retry or verify.',
   ].join(' '),
   inputSchema: z.toJSONSchema(memberMemoryArgumentsSchema, { io: 'input' }),
 } as const
@@ -60,7 +69,13 @@ export function readMemberMemoryDynamicToolRequest(input: {
 
   const parsed = parseDynamicToolArguments({
     schema: memberMemoryArgumentsSchema,
-    schemaRootKeys: ['action', 'memoryId', 'section', 'text'],
+    schemaRootKeys: [
+      'action',
+      'expectedUpdatedAt',
+      'memoryId',
+      'section',
+      'text',
+    ],
     toolName: 'murph.member_memory',
     value: input.arguments,
   })
@@ -74,7 +89,7 @@ export function readMemberMemoryDynamicToolRequest(input: {
 }
 
 export async function executeMemberMemoryDynamicTool(input: {
-  available: boolean
+  abortSignal?: AbortSignal | null
   managedMaintenanceAuthorized: boolean
   request: Extract<MemberMemoryDynamicToolRequest, { kind: 'member-memory' }>
   vaultRoot: string | null
@@ -84,7 +99,7 @@ export async function executeMemberMemoryDynamicTool(input: {
     success: boolean
   }
 }> {
-  if (!input.available || !input.managedMaintenanceAuthorized) {
+  if (!input.managedMaintenanceAuthorized) {
     return memberMemoryTextResult(
       false,
       'member-memory maintenance is unavailable for this turn',
@@ -99,14 +114,27 @@ export async function executeMemberMemoryDynamicTool(input: {
 
   try {
     if (input.request.args.action === 'show') {
+      input.abortSignal?.throwIfAborted()
       const document = await readMemoryDocument(input.vaultRoot)
       return memberMemoryTextResult(
         true,
-        JSON.stringify({ document, memory: null }),
+        JSON.stringify({
+          document: {
+            exists: document.exists,
+            records: document.records.map(({ id, section, text, updatedAt }) => ({
+              id,
+              section,
+              text,
+              updatedAt,
+            })),
+          },
+          memory: null,
+        }),
       )
     }
 
     if (input.request.args.action === 'upsert') {
+      input.abortSignal?.throwIfAborted()
       const result = await upsertMemory(input.vaultRoot, {
         section: input.request.args.section,
         text: input.request.args.text,
@@ -115,26 +143,57 @@ export async function executeMemberMemoryDynamicTool(input: {
         true,
         JSON.stringify({
           created: result.created,
-          document: result.document,
-          memory: result.record,
+          memory: {
+            id: result.record.id,
+            section: result.record.section,
+            text: result.record.text,
+            updatedAt: result.record.updatedAt,
+          },
         }),
       )
     }
 
-    const result = await updateMemory(input.vaultRoot, {
+    if (input.request.args.action === 'update') {
+      input.abortSignal?.throwIfAborted()
+      const result = await updateMemory(input.vaultRoot, {
+        expectedUpdatedAt: input.request.args.expectedUpdatedAt,
+        recordId: input.request.args.memoryId,
+        section: input.request.args.section ?? null,
+        text: input.request.args.text,
+      })
+      return memberMemoryTextResult(
+        true,
+        JSON.stringify({
+          created: false,
+          memory: {
+            id: result.record.id,
+            section: result.record.section,
+            text: result.record.text,
+            updatedAt: result.record.updatedAt,
+          },
+        }),
+      )
+    }
+
+    input.abortSignal?.throwIfAborted()
+    const result = await forgetMemory(input.vaultRoot, {
+      expectedUpdatedAt: input.request.args.expectedUpdatedAt,
       recordId: input.request.args.memoryId,
-      section: input.request.args.section ?? null,
-      text: input.request.args.text,
     })
     return memberMemoryTextResult(
       true,
       JSON.stringify({
-        created: false,
-        document: result.document,
-        memory: result.record,
+        forgotten: result.existed,
+        memory: null,
       }),
     )
-  } catch {
+  } catch (error) {
+    if (error instanceof MemoryRecordConflictError) {
+      return memberMemoryTextResult(
+        false,
+        'saved memory changed after show; leave the newer value unchanged and end this maintenance write attempt',
+      )
+    }
     return memberMemoryTextResult(
       false,
       'member-memory maintenance could not be completed',

@@ -82,6 +82,7 @@ import {
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_MISSED_LOG_POLICIES,
   HEALTH_COMMONS_EXPERIMENT_ONBOARDING_POSITIVE_DISPOSITIONS,
   healthCommonsActivitySessionEvidenceSchema,
+  healthCommonsGoalTemplateKeySchema,
   healthCommonsKeySchema,
   healthCommonsStableIdSchema,
 } from "./health-commons.ts";
@@ -1776,8 +1777,8 @@ export const auditRecordSchema = withContractMetadata(
   "Murph Audit Record",
 );
 
-const INBOX_CAPTURE_ID_PATTERN = "^[A-Za-z0-9][A-Za-z0-9_-]*$";
-const INBOX_ATTACHMENT_ID_PATTERN = "^att_[A-Za-z0-9][A-Za-z0-9_-]*_[0-9]{2}$";
+export const INBOX_CAPTURE_ID_PATTERN = "^[A-Za-z0-9][A-Za-z0-9_-]*$";
+export const INBOX_ATTACHMENT_ID_PATTERN = "^att_[A-Za-z0-9][A-Za-z0-9_-]*_[0-9]{2}$";
 const INBOX_CAPTURE_ATTACHMENT_KIND_VALUES = ["image", "audio", "video", "document", "other"] as const;
 const INBOX_RETENTION_ATTACHMENT_KIND_VALUES = ["image", "audio", "video"] as const;
 const HEX_SHA256_PATTERN = "^[a-f0-9]{64}$";
@@ -1880,28 +1881,47 @@ export const inboxCaptureRecordSchema = withContractMetadata(
 );
 
 export const inboxAttachmentRetentionRecordSchema = withContractMetadata(
-  z
-    .object({
-      schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.inboxAttachmentRetention),
-      captureId: patternedString(INBOX_CAPTURE_ID_PATTERN),
-      attachmentId: patternedString(INBOX_ATTACHMENT_ID_PATTERN),
-      ordinal: integerSchema(1),
-      kind: z.enum(INBOX_RETENTION_ATTACHMENT_KIND_VALUES),
-      mime: boundedString(1, 255).nullable().optional(),
-      fileName: boundedString(1, 255).nullable().optional(),
-      byteSize: integerSchema(0).nullable().optional(),
-      storedPath: patternedString(RELATIVE_PATH_PATTERN),
-      sha256: patternedString(HEX_SHA256_PATTERN),
-      captureOccurredAt: isoDateTimeString(),
-      recordedAt: isoDateTimeString(),
-      purgedAt: isoDateTimeString(),
-      reason: z.literal("inbox_media_retention"),
-    })
-    .strict(),
+  z.discriminatedUnion("schemaVersion", [
+    z
+      .object({
+        schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.inboxAttachmentRetention),
+        captureId: patternedString(INBOX_CAPTURE_ID_PATTERN),
+        attachmentId: patternedString(INBOX_ATTACHMENT_ID_PATTERN),
+        ordinal: integerSchema(1),
+        kind: z.enum(INBOX_RETENTION_ATTACHMENT_KIND_VALUES),
+        mime: boundedString(1, 255).nullable().optional(),
+        fileName: boundedString(1, 255).nullable().optional(),
+        byteSize: integerSchema(0).nullable().optional(),
+        storedPath: patternedString(RELATIVE_PATH_PATTERN),
+        sha256: patternedString(HEX_SHA256_PATTERN),
+        captureOccurredAt: isoDateTimeString(),
+        recordedAt: isoDateTimeString(),
+        purgedAt: isoDateTimeString(),
+        reason: z.literal("inbox_media_retention"),
+      })
+      .strict(),
+    z
+      .object({
+        schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.inboxDocumentRetention),
+        captureId: patternedString(INBOX_CAPTURE_ID_PATTERN),
+        attachmentId: patternedString(INBOX_ATTACHMENT_ID_PATTERN),
+        ordinal: integerSchema(1),
+        kind: z.literal("document"),
+        mime: boundedString(1, 255).nullable().optional(),
+        fileName: boundedString(1, 255).nullable().optional(),
+        byteSize: integerSchema(0),
+        storedPath: patternedString(RELATIVE_PATH_PATTERN),
+        sha256: patternedString(HEX_SHA256_PATTERN),
+        captureOccurredAt: isoDateTimeString(),
+        recordedAt: isoDateTimeString(),
+        purgedAt: isoDateTimeString(),
+        reason: z.literal("inbox_document_copy_retention"),
+      })
+      .strict(),
+  ]),
   "@murphai/contracts/inbox-attachment-retention-record.schema.json",
   "Murph Inbox Attachment Retention Record",
 );
-
 
 export const coreFrontmatterSchema = withContractMetadata(
   z
@@ -1943,6 +1963,14 @@ export const commonsProtocolRefSchema = z
   .strict();
 
 const sha256DigestSchema = patternedString(SHA256_DIGEST_PATTERN);
+
+export const commonsGoalRefSchema = z
+  .object({
+    key: healthCommonsGoalTemplateKeySchema,
+    pageRevisionId: sha256DigestSchema,
+    workflowSpecRevisionId: sha256DigestSchema,
+  })
+  .strict();
 
 export const protocolRefSchema = z
   .object({
@@ -3469,6 +3497,7 @@ export const goalFrontmatterSchema = withContractMetadata(
       parentGoalId: z.union([idSchema(ID_PREFIXES.goal), z.null()]).optional(),
       relatedGoalIds: uniqueArray(idSchema(ID_PREFIXES.goal), { uniqueItems: true }).optional(),
       relatedExperimentIds: uniqueArray(idSchema(ID_PREFIXES.experiment), { uniqueItems: true }).optional(),
+      commonsGoalRef: commonsGoalRefSchema.optional(),
       links: uniqueArray(goalRelationLinkSchema, { uniqueItems: true }).optional(),
       domains: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
       metricTargets: uniqueArray(goalMetricTargetSchema, { maxItems: 20, uniqueItems: true }).optional(),
@@ -3722,6 +3751,7 @@ export type InboxAttachmentRetentionRecord = z.infer<typeof inboxAttachmentReten
 export type CoreFrontmatter = z.infer<typeof coreFrontmatterSchema>;
 export type JournalDayFrontmatter = z.infer<typeof journalDayFrontmatterSchema>;
 export type CommonsProtocolRef = z.infer<typeof commonsProtocolRefSchema>;
+export type CommonsGoalRef = z.infer<typeof commonsGoalRefSchema>;
 export type ProtocolRef = z.infer<typeof protocolRefSchema>;
 export type ProtocolActivitySessionEvidence = z.infer<
   typeof protocolActivitySessionEvidenceSchema

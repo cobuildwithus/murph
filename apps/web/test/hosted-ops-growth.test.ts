@@ -84,6 +84,7 @@ const mocks = vi.hoisted(() => ({
   hostedMember: {
     count: vi.fn(),
     findMany: vi.fn(),
+    groupBy: vi.fn(),
     updateMany: vi.fn(),
   },
   hostedMemberBillingRef: {
@@ -98,6 +99,8 @@ const mocks = vi.hoisted(() => ({
     findMany: vi.fn(),
   },
   queryRaw: vi.fn(),
+  readHostedLinqProductionCanaryMemberId: vi.fn(),
+  readHostedMemberRoutingRecord: vi.fn(),
   requireActiveHostedAppSession: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
   requireVercelCronRequest: vi.fn(),
@@ -111,6 +114,15 @@ vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedDashboardPageAuthSnapshot: mocks.getHostedDashboardPageAuthSnapshot,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-production-canary", () => ({
+  readHostedLinqProductionCanaryMemberId:
+    mocks.readHostedLinqProductionCanaryMemberId,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  readHostedMemberRoutingRecord: mocks.readHostedMemberRoutingRecord,
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
@@ -194,6 +206,9 @@ describe("hosted ops growth metrics", () => {
     mocks.hostedMemberIdentity.findMany.mockResolvedValue([]);
     mocks.hostedMemberRouting.findMany.mockResolvedValue([]);
     mocks.hostedMember.findMany.mockResolvedValue([]);
+    mocks.hostedMember.groupBy.mockResolvedValue([]);
+    mocks.readHostedLinqProductionCanaryMemberId.mockResolvedValue(null);
+    mocks.readHostedMemberRoutingRecord.mockResolvedValue(null);
     mocks.decodeHostedMailboxStoredPayloads.mockImplementation(async (input: {
       entries: Array<{ payloadInlineCiphertext: unknown }>;
     }) => {
@@ -239,6 +254,67 @@ describe("hosted ops growth metrics", () => {
     } else {
       process.env.HOSTED_OPS_MEMBER_IDS = originalHostedOpsMemberIds;
     }
+  });
+
+  it("excludes the configured production canary from member-derived dashboard queries", async () => {
+    const now = new Date("2026-07-31T12:00:00.000Z");
+    mocks.readHostedLinqProductionCanaryMemberId.mockResolvedValue(
+      "member_canary",
+    );
+    queueCurrentMetricMocks();
+
+    await readHostedGrowthDashboard(now);
+
+    expect(mocks.readHostedLinqProductionCanaryMemberId).toHaveBeenCalledWith({
+      prisma,
+    });
+    for (const [input] of mocks.hostedMember.count.mock.calls) {
+      expect(input.where).toMatchObject({
+        id: {
+          not: "member_canary",
+        },
+      });
+    }
+    expect(mocks.hostedMember.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: {
+            not: "member_canary",
+          },
+        }),
+      }),
+    );
+    for (const [input] of mocks.hostedMember.findMany.mock.calls.slice(0, 4)) {
+      expect(input.where).toMatchObject({
+        id: {
+          not: "member_canary",
+        },
+      });
+    }
+    expect(mocks.hostedUsageCreditEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          beneficiary: {
+            is: expect.objectContaining({
+              id: {
+                not: "member_canary",
+              },
+            }),
+          },
+        }),
+      }),
+    );
+    expect(mocks.hostedMailboxItem.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          member: expect.objectContaining({
+            id: {
+              not: "member_canary",
+            },
+          }),
+        }),
+      }),
+    );
   });
 
   it("counts paid individuals, family seats, covered members, and unpriced paid members", () => {
@@ -1269,6 +1345,11 @@ describe("hosted ops growth metrics", () => {
   it("bounds dashboard database fanout while preserving the computed metrics", async () => {
     const now = new Date("2026-07-06T12:00:00.000Z");
     queueCurrentMetricMocks();
+    mocks.hostedMember.groupBy.mockReset().mockResolvedValue([
+      { _count: { _all: 2 }, billingStatus: HostedBillingStatus.past_due },
+      { _count: { _all: 3 }, billingStatus: HostedBillingStatus.canceled },
+      { _count: { _all: 5 }, billingStatus: HostedBillingStatus.unpaid },
+    ]);
     mocks.hostedUsageCreditEntry.count.mockResolvedValue(0);
     const guarded = createDatabaseConcurrencyGuard(
       prisma as unknown as Record<string, unknown>,
@@ -1284,6 +1365,12 @@ describe("hosted ops growth metrics", () => {
       coveredMembers: 2,
       mrrUsdCents: 2_800,
       payingCustomers: 2,
+      statusCounts: {
+        canceled: 3,
+        past_due: 2,
+        paused: 0,
+        unpaid: 5,
+      },
       totalMembers: 4,
       trialingMembers: 1,
     });
@@ -1296,6 +1383,23 @@ describe("hosted ops growth metrics", () => {
       today: 0,
       trailing30Days: 0,
       trailing7Days: 0,
+    });
+    expect(mocks.hostedMember.groupBy).toHaveBeenCalledOnce();
+    expect(mocks.hostedMember.groupBy).toHaveBeenCalledWith({
+      _count: { _all: true },
+      by: ["billingStatus"],
+      where: {
+        billingStatus: {
+          in: [
+            HostedBillingStatus.past_due,
+            HostedBillingStatus.canceled,
+            HostedBillingStatus.paused,
+            HostedBillingStatus.unpaid,
+          ],
+        },
+        hostedGroupRuntime: null,
+        threadContainer: null,
+      },
     });
   });
 
@@ -1578,27 +1682,30 @@ describe("hosted ops growth metrics", () => {
     ).toHaveLength(7);
   });
 
-  it("decodes more than fifteen retained group messages in one mailbox batch", async () => {
+  it("pages retained group ciphertext with a stable equal-time cursor", async () => {
     const now = new Date("2026-07-06T12:00:00.000Z");
-    const contacts = Array.from({ length: 16 }, (_, index) =>
+    const contacts = Array.from({ length: 101 }, (_, index) =>
       requireLinqContact(
         "phone",
-        `+155500000${String(index + 1).padStart(2, "0")}`,
+        `+1555${String(index + 1).padStart(7, "0")}`,
       )
     );
+    const sharedCreatedAt = new Date("2026-07-05T12:00:00.000Z");
+    const groupRows = contacts.map((contact, index) => buildLinqGroupMailboxRow({
+      contact,
+      containerMemberId: `thread_container_${index + 1}`,
+      createdAt: sharedCreatedAt,
+      occurredAt: new Date(sharedCreatedAt.getTime() + index * 1_000),
+    }));
     queueCurrentMetricMocks();
     mocks.hostedMailboxItem.groupBy
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
-    mocks.hostedMailboxItem.findMany.mockResolvedValueOnce(
-      contacts.map((contact, index) => buildLinqGroupMailboxRow({
-        contact,
-        containerMemberId: `thread_container_${index + 1}`,
-        occurredAt: new Date(`2026-07-05T${String(index).padStart(2, "0")}:00:00.000Z`),
-      })),
-    );
+    mocks.hostedMailboxItem.findMany
+      .mockResolvedValueOnce(groupRows.slice(0, 100))
+      .mockResolvedValueOnce(groupRows.slice(100));
     mocks.hostedMemberIdentity.findMany.mockResolvedValueOnce(
       contacts.map((contact, index) => ({
         memberId: `member_group_${index + 1}`,
@@ -1616,15 +1723,38 @@ describe("hosted ops growth metrics", () => {
 
     expect(dashboard.activeUsers).toMatchObject({
       today: 0,
-      trailing30Days: 16,
-      trailing7Days: 16,
+      trailing30Days: 101,
+      trailing7Days: 101,
       wowPercent: null,
     });
     expect(dashboard.current.totalMembers).toBe(4);
-    expect(mocks.decodeHostedMailboxStoredPayloads).toHaveBeenCalledTimes(1);
+    expect(mocks.hostedMailboxItem.findMany).toHaveBeenCalledTimes(2);
+    expect(mocks.hostedMailboxItem.findMany.mock.calls[0]?.[0]).toMatchObject({
+      orderBy: [
+        { createdAt: "asc" },
+        { id: "asc" },
+      ],
+      take: 100,
+    });
+    expect(mocks.hostedMailboxItem.findMany.mock.calls[0]?.[0]).not.toHaveProperty(
+      "cursor",
+    );
+    expect(mocks.hostedMailboxItem.findMany.mock.calls[1]?.[0]).toMatchObject({
+      cursor: { id: groupRows[99]?.id },
+      orderBy: [
+        { createdAt: "asc" },
+        { id: "asc" },
+      ],
+      skip: 1,
+      take: 100,
+    });
+    expect(mocks.decodeHostedMailboxStoredPayloads).toHaveBeenCalledTimes(2);
     expect(
       mocks.decodeHostedMailboxStoredPayloads.mock.calls[0]?.[0].entries,
-    ).toHaveLength(16);
+    ).toHaveLength(100);
+    expect(
+      mocks.decodeHostedMailboxStoredPayloads.mock.calls[1]?.[0].entries,
+    ).toHaveLength(1);
   });
 
   it("assigns late provider events to the durable receipt window", async () => {
@@ -1683,9 +1813,10 @@ describe("hosted ops growth metrics", () => {
       },
     });
     expect(mocks.hostedMailboxItem.findMany.mock.calls[0]?.[0]).toMatchObject({
-      orderBy: {
-        createdAt: "asc",
-      },
+      orderBy: [
+        { createdAt: "asc" },
+        { id: "asc" },
+      ],
       select: {
         createdAt: true,
         occurredAt: true,
@@ -2808,8 +2939,15 @@ describe("hosted ops growth metrics", () => {
     ).toEqual(startOfUtcDay(now));
   });
 
-  it("records prior-day message counts in the snapshot", async () => {
+  it("records prior-day message counts without configured canary traffic", async () => {
     const now = new Date("2026-07-06T12:00:00.000Z");
+    mocks.readHostedLinqProductionCanaryMemberId.mockResolvedValue(
+      "member_canary",
+    );
+    mocks.readHostedMemberRoutingRecord.mockResolvedValue({
+      linqChatLookupKey: "v1:canary-chat",
+      pendingLinqChatLookupKey: "v1:canary-chat-pending",
+    });
     queueCurrentMetricMocks();
     mocks.hostedMailboxItem.count.mockResolvedValueOnce(42);
     mocks.hostedLinqDelivery.count.mockResolvedValueOnce(57);
@@ -2823,6 +2961,11 @@ describe("hosted ops growth metrics", () => {
     expect(mocks.hostedMailboxItem.count.mock.calls[0]?.[0]).toEqual({
       where: {
         kind: "conversation.message",
+        member: {
+          id: {
+            not: "member_canary",
+          },
+        },
         occurredAt: {
           gte: new Date("2026-07-05T00:00:00.000Z"),
           lt: new Date("2026-07-06T00:00:00.000Z"),
@@ -2831,6 +2974,14 @@ describe("hosted ops growth metrics", () => {
     });
     expect(mocks.hostedLinqDelivery.count.mock.calls[0]?.[0]).toEqual({
       where: {
+        OR: [
+          { linqChatLookupKey: null },
+          {
+            linqChatLookupKey: {
+              notIn: ["v1:canary-chat", "v1:canary-chat-pending"],
+            },
+          },
+        ],
         attemptedAt: {
           gte: new Date("2026-07-05T00:00:00.000Z"),
           lt: new Date("2026-07-06T00:00:00.000Z"),
@@ -2839,6 +2990,10 @@ describe("hosted ops growth metrics", () => {
           in: ["accepted", "delivered", "sent_no_receipt_expected"],
         },
       },
+    });
+    expect(mocks.readHostedMemberRoutingRecord).toHaveBeenCalledWith({
+      memberId: "member_canary",
+      prisma,
     });
     expect(
       mocks.hostedOutboundMessageVolumeReceipt.count.mock.calls[0]?.[0],
@@ -2921,9 +3076,10 @@ describe("hosted ops growth metrics", () => {
       },
     });
     expect(mocks.hostedMailboxItem.findMany.mock.calls[0]?.[0]).toMatchObject({
-      orderBy: {
-        createdAt: "asc",
-      },
+      orderBy: [
+        { createdAt: "asc" },
+        { id: "asc" },
+      ],
       where: {
         createdAt: {
           gte: new Date("2026-06-22T12:00:00.000Z"),
@@ -3352,11 +3508,8 @@ describe("hosted ops growth metrics", () => {
 
 function queueCurrentMetricMocks(input: { includeMax?: boolean } = {}) {
   mocks.hostedMember.count
-    .mockResolvedValueOnce(4)
-    .mockResolvedValueOnce(0)
-    .mockResolvedValueOnce(0)
-    .mockResolvedValueOnce(0)
-    .mockResolvedValueOnce(0);
+    .mockResolvedValueOnce(4);
+  mocks.hostedMember.groupBy.mockResolvedValueOnce([]);
   mocks.hostedMember.findMany
     .mockResolvedValueOnce([
       {

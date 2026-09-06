@@ -4,9 +4,11 @@ import type { ActivitySessionEventRecord, EventRecord } from "@murphai/contracts
 import { eventRecordSchema, safeParseContract } from "@murphai/contracts";
 
 import { emitAuditRecord } from "./audit.ts";
-import { VAULT_LAYOUT } from "./constants.ts";
 import { VaultError } from "./errors.ts";
-import { readUtf8File, walkVaultFiles } from "./fs.ts";
+import {
+  listEventLedgerShardPaths,
+  readEventLedgerShardText,
+} from "./event-ledger-storage.ts";
 import {
   buildEventSpineLifecycle,
   eventSpineRevision,
@@ -133,9 +135,7 @@ async function collectJunctionHrZoneRepairCandidates(
   scannedEventCount: number;
   unverifiedCandidateCount: number;
 }> {
-  const shardPaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
-    extension: ".jsonl",
-  });
+  const shardPaths = await listEventLedgerShardPaths(vaultRoot);
   // Track every schema-valid event under each id, regardless of kind. If the
   // latest revision is something other than an activity_session, we must not
   // resurrect an older workout row by ignoring it.
@@ -160,7 +160,7 @@ async function collectJunctionHrZoneRepairCandidates(
     // `vault repair` / `validate`; one torn legacy row must not abort
     // this command from acting on valid Junction workout candidates in
     // other shards.
-    const shardContent = await readUtf8File(vaultRoot, relativePath);
+    const shardContent = await readEventLedgerShardText({ vaultRoot, relativePath });
 
     for (const line of shardContent.split("\n")) {
       if (!line) {

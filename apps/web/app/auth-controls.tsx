@@ -6,7 +6,6 @@ import { type ReactNode, useState } from "react";
 import {
   AuthDialog,
   preloadHostedAuthPanelIsland,
-  useHostedAuthPanelIslandIdlePreload,
 } from "@/src/components/hosted-onboarding/auth-dialog";
 import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { navigateHostedAuthRedirect } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
@@ -24,6 +23,7 @@ export function LandingAuthDialogButton({
   requireLaunchConsentOnCompletion = false,
   showArrow = false,
   showPassiveLegalNotice = false,
+  trailingIcon,
 }: {
   buttonClassName: string;
   buttonLabel: string;
@@ -31,6 +31,7 @@ export function LandingAuthDialogButton({
   requireLaunchConsentOnCompletion?: boolean;
   showArrow?: boolean;
   showPassiveLegalNotice?: boolean;
+  trailingIcon?: ReactNode;
 }) {
   const auth = useAuth();
   const [open, setOpen] = useState(false);
@@ -56,6 +57,11 @@ export function LandingAuthDialogButton({
           </span>
         ) : null}
         <span>{buttonLabel}</span>
+        {trailingIcon ? (
+          <span aria-hidden="true" className="inline-flex shrink-0">
+            {trailingIcon}
+          </span>
+        ) : null}
         {showArrow ? (
           <span
             aria-hidden="true"
@@ -159,7 +165,6 @@ export function LandingAuthActions({
   leadingIcon,
   loginLabel = "Log in",
   onDarkSurface = false,
-  preloadAuthPanel = false,
   splitUnauthenticated = false,
   signupLabel = "Signup",
 }: {
@@ -169,15 +174,10 @@ export function LandingAuthActions({
   leadingIcon?: ReactNode;
   loginLabel?: string;
   onDarkSurface?: boolean;
-  preloadAuthPanel?: boolean;
   splitUnauthenticated?: boolean;
   signupLabel?: string;
 }) {
-  const auth = useAuth();
   const styles = getLandingAuthClasses(context, onDarkSurface);
-  const shouldPreload = preloadAuthPanel && !authenticated;
-
-  useHostedAuthPanelIslandIdlePreload(shouldPreload && !auth.shared);
 
   if (authenticated) {
     const showArrow = context !== "nav";

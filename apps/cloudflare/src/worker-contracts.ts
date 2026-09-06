@@ -1,5 +1,6 @@
 import type {
   HostedWorkspaceInvocationResult,
+  HostedRuntimeShellPrewarmOrchestrationDiagnostics,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
   CloudflareHostedControlRuntimeShellPrewarmSource,
@@ -10,6 +11,12 @@ import type {
   HostedPrivateMediaPublishInput,
   HostedPrivateMediaPublishResult,
 } from "./private-media.ts";
+import type {
+  HostedMediaAssetDeletionInput,
+  HostedMediaAssetDescriptor,
+  HostedMediaAssetReadAdmissionResult,
+  HostedMediaAssetRegistrationInput,
+} from "./user-runner/hosted-media-retention.ts";
 import { toStringEnvSource, type StringEnvSource } from "./string-env.ts";
 import type {
   HostedWorkspaceSnapshotOrphanCandidate,
@@ -20,6 +27,10 @@ import type { DatabaseHealthStoredSample } from "./database-health/store.ts";
 import type {
   DeviceWebhookQueueEnvelopeV1,
 } from "@murphai/cloudflare-hosted-control/device-webhook-queue";
+import type {
+  HostedStandbyCoordinatorNamespaceLike,
+  HostedStandbyRunnerContainerNamespaceLike,
+} from "./standby-runner-contract.js";
 import type { DeviceWebhookQueueHealthMonitorResult } from "./device-webhook-queue-health/monitor.ts";
 import type {
   DeviceWebhookQueueHealthObservation,
@@ -141,6 +152,7 @@ export interface WorkerUserRunnerStubLike {
   prewarmRuntimeShellForUser?(
     userId: string,
     source?: CloudflareHostedControlRuntimeShellPrewarmSource,
+    orchestration?: HostedRuntimeShellPrewarmOrchestrationDiagnostics,
   ): Promise<void>;
   reconcileRuntimeHealthDataConsentForUser?(userId: string): Promise<unknown>;
   publishHostedPrivateMedia?(
@@ -200,6 +212,15 @@ export interface WorkerUserRunnerStubLike {
     generation: string;
     userId: string;
   }): Promise<boolean>;
+  admitHostedMediaRead?(
+    input: HostedMediaAssetDescriptor,
+  ): Promise<HostedMediaAssetReadAdmissionResult>;
+  recordHostedMediaAsset?(
+    input: HostedMediaAssetRegistrationInput,
+  ): Promise<boolean>;
+  forgetHostedMediaAsset?(
+    input: HostedMediaAssetDeletionInput,
+  ): Promise<boolean>;
   recordRuntimeCompletionFromContainer?(
     input: WorkerRuntimeCompletionReceipt,
   ): Promise<{ completed: boolean }>;
@@ -264,6 +285,20 @@ export interface WorkerDeviceWebhookQueueHealthNamespaceLike<
   getByName(name: string): TStub;
 }
 
+export interface WorkerOpenAiAuthorizationAlertStubLike {
+  reportFailure(input: {
+    observedAtMs: number;
+    status: 401 | 403;
+  }): Promise<{ accepted: true }>;
+}
+
+export interface WorkerOpenAiAuthorizationAlertNamespaceLike<
+  TStub extends WorkerOpenAiAuthorizationAlertStubLike =
+    WorkerOpenAiAuthorizationAlertStubLike,
+> {
+  getByName(name: string): TStub;
+}
+
 export interface WorkerEnvironmentContract<
   TStub extends WorkerUserRunnerStubLike = WorkerUserRunnerStubLike,
 > extends Readonly<Record<string, unknown>> {
@@ -301,6 +336,7 @@ export interface WorkerEnvironmentContract<
   HOSTED_ASSISTANT_SANDBOX?: string;
   ELEVENLABS_API_KEY?: string;
   OPENAI_API_KEY?: string;
+  OPENAI_AUTHORIZATION_ALERT_MONITOR?: WorkerOpenAiAuthorizationAlertNamespaceLike;
   VENICE_API_KEY?: string;
   HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET?: string;
   HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON?: string;
@@ -308,6 +344,7 @@ export interface WorkerEnvironmentContract<
   HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS?: string;
   HOSTED_EXECUTION_RETRY_DELAY_MS?: string;
   HOSTED_EXECUTION_RUNNER_ENV_PROFILES?: string;
+  HOSTED_EXECUTION_STANDBY_MODE?: string;
   HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS?: string;
   HOSTED_R2_PRESIGN_ACCESS_KEY_ID?: string;
   HOSTED_R2_PRESIGN_ACCOUNT_ID?: string;
@@ -350,6 +387,8 @@ export interface WorkerEnvironmentContract<
   RUNNER_CONTAINER_SMOKE?: WorkerRunnerContainerNamespaceLike<
     WorkerDeploySmokeRunnerContainerStubLike
   >;
+  STANDBY_COORDINATOR?: HostedStandbyCoordinatorNamespaceLike;
+  STANDBY_RUNNER_CONTAINER?: HostedStandbyRunnerContainerNamespaceLike;
   TELEGRAM_API_BASE_URL?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_FILE_BASE_URL?: string;

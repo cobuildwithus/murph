@@ -53,7 +53,7 @@ interface WorkoutAddResult {
   durationMinutes: number
   distanceKm: number | null
   workout: WorkoutSession | null
-  note: string
+  note: string | null
 }
 
 interface WorkoutShowResult {
@@ -321,6 +321,101 @@ test('workout add schema exposes typed fields without raw input fallback', async
     /Supported keys: exercise, order, type, weightUnit, note, reps, weight, durationSeconds, distanceMeters, rpe, bodyweightKg, assistanceKg, addedWeightKg/u,
   )
   assert.match(optionDescription(schema, 'workoutSet'), /Shell-quote each semicolon-separated value/u)
+})
+
+test('workout add honors explicit titles with and without positional note text', async () => {
+  const cli = createWorkoutCli()
+  const { vaultRoot } = await createTempVaultContext('murph-workout-note-less-add-')
+  await initializeVault({ vaultRoot, title: 'Workout note-less add vault' })
+
+  const noteLessCreated = await runInProcessJsonCli<WorkoutAddResult>(cli, [
+    'workout',
+    'add',
+    '--title',
+    'Morning track session',
+    '--type',
+    'running',
+    '--duration',
+    '30',
+    '--occurred-at',
+    '2026-08-30T12:00:00.000Z',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(noteLessCreated.exitCode, null)
+  assert.equal(noteLessCreated.envelope.ok, true)
+  const noteLessData = requireData(noteLessCreated.envelope)
+  assert.equal(noteLessData.title, 'Morning track session')
+  assert.equal(noteLessData.activityType, 'running')
+  assert.equal(noteLessData.durationMinutes, 30)
+  assert.equal(noteLessData.note, null)
+
+  const noteLessShown = await showWorkout(
+    cli,
+    vaultRoot,
+    noteLessData.lookupId,
+  )
+  assert.equal(noteLessShown.entity.title, 'Morning track session')
+  assert.equal(noteLessShown.entity.data.note, undefined)
+  assert.equal(noteLessShown.entity.data.activityType, 'running')
+  assert.equal(noteLessShown.entity.data.durationMinutes, 30)
+  assert.equal(noteLessShown.entity.data.workout?.sessionNote, undefined)
+
+  const notedCreated = await runInProcessJsonCli<WorkoutAddResult>(cli, [
+    'workout',
+    'add',
+    'Easy neighborhood run.',
+    '--title',
+    'Easy aerobic run',
+    '--type',
+    'running',
+    '--duration',
+    '25',
+    '--occurred-at',
+    '2026-08-30T13:00:00.000Z',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(notedCreated.exitCode, null)
+  assert.equal(notedCreated.envelope.ok, true)
+  const notedData = requireData(notedCreated.envelope)
+  assert.equal(notedData.title, 'Easy aerobic run')
+  assert.equal(notedData.note, 'Easy neighborhood run.')
+
+  const notedShown = await showWorkout(cli, vaultRoot, notedData.lookupId)
+  assert.equal(notedShown.entity.title, 'Easy aerobic run')
+  assert.equal(notedShown.entity.data.note, 'Easy neighborhood run.')
+  assert.equal(
+    notedShown.entity.data.workout?.sessionNote,
+    'Easy neighborhood run.',
+  )
+})
+
+test('workout add missing duration fails before writing a note-less typed capture', async () => {
+  const cli = createWorkoutCli()
+  const { vaultRoot } = await createTempVaultContext('murph-workout-note-less-invalid-')
+  await initializeVault({ vaultRoot, title: 'Workout note-less invalid vault' })
+  const before = await snapshotVaultFiles(vaultRoot)
+
+  const result = await runInProcessJsonCli(cli, [
+    'workout',
+    'add',
+    '--title',
+    'Missing duration',
+    '--type',
+    'running',
+    '--vault',
+    vaultRoot,
+  ])
+
+  assert.equal(result.exitCode, 1)
+  assert.equal(result.envelope.ok, false)
+  assert.equal(result.envelope.error.code, 'invalid_option')
+  assert.match(
+    result.envelope.error.message ?? '',
+    /Workout duration is missing\. Pass --duration <minutes>/u,
+  )
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), before)
 })
 
 test('workout add and edit help teach compact media, exercise, and set examples', async () => {
@@ -800,9 +895,14 @@ test('workout add and edit reject incomplete or ambiguous typed workout input', 
   ])
   assert.equal(mixedInputAndNestedSessionFlag.exitCode, 1)
   assert.equal(mixedInputAndNestedSessionFlag.envelope.ok, false)
-  assert.match(
-    mixedInputAndNestedSessionFlag.envelope.error.message ?? '',
-    /input/u,
+  assert.equal(mixedInputAndNestedSessionFlag.envelope.error.code, 'VALIDATION_ERROR')
+  assert.equal(
+    mixedInputAndNestedSessionFlag.envelope.error.message,
+    'The command arguments are invalid.',
+  )
+  assert.equal(
+    mixedInputAndNestedSessionFlag.envelope.error.fieldErrors?.[0]?.path,
+    'arguments',
   )
   assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeInvalidAdds)
 

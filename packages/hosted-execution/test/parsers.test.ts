@@ -5,6 +5,8 @@ import {
 } from "../src/contracts.ts";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+  HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
   HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
 } from "../src/runtime-control.ts";
@@ -992,8 +994,10 @@ describe("parseHostedRuntimeGroupTool", () => {
   it("parses read, join-link, and join-offer requests and rejects other mutations", () => {
     expect(parseHostedRuntimeGroupToolRequest({
       action: "read_current",
+      disclosureGrantCursor: "disclosure_page_2",
     })).toEqual({
       action: "read_current",
+      disclosureGrantCursor: "disclosure_page_2",
     });
     expect(() => parseHostedRuntimeGroupToolRequest({
       action: "read_current",
@@ -1004,6 +1008,21 @@ describe("parseHostedRuntimeGroupTool", () => {
     })).toEqual({
       action: "list_memberships",
     });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "list_memberships",
+      cursor: "membership_page_64",
+      disclosureGrantCursor: "disclosure_page_2",
+    })).toEqual({
+      action: "list_memberships",
+      cursor: "membership_page_64",
+      disclosureGrantCursor: "disclosure_page_2",
+    });
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "read_current",
+      disclosureGrantCursor: "x".repeat(
+        HOSTED_RUNTIME_GROUP_DISCLOSURE_CURSOR_MAX_CODE_POINTS + 1,
+      ),
+    })).toThrow(/disclosureGrantCursor/u);
     expect(parseHostedRuntimeGroupToolRequest({
       action: "leave_membership",
       membershipId: "hgm_self_123",
@@ -1116,16 +1135,9 @@ describe("parseHostedRuntimeGroupTool", () => {
     });
     const extensionlessIconUrl =
       `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`;
-    expect(parseHostedRuntimeGroupToolRequest({
-      action: "set_chat_avatar",
-      groupChatIconUrl: extensionlessIconUrl,
-    })).toEqual({
-      action: "set_chat_avatar",
-      groupChatIconUrl: extensionlessIconUrl,
-    });
     const previewOrigin = "https://hosted-runner-staging.example.test";
     const previewIconUrl =
-      `${previewOrigin}/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000`;
+      `${previewOrigin}/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`;
     expect(parseHostedRuntimeGroupToolRequest({
       action: "set_chat_avatar",
       groupChatIconUrl: previewIconUrl,
@@ -1139,37 +1151,14 @@ describe("parseHostedRuntimeGroupTool", () => {
       action: "set_chat_avatar",
       groupChatIconUrl: previewIconUrl,
     })).toThrow(/groupChatIconUrl is invalid/u);
-    expect(parseHostedRuntimeGroupToolRequest({
-      action: "set_chat_avatar",
-      groupChatIconUrl:
-        `https://imagedelivery.net/account/avatar/private?exp=2000000000&sig=${"a".repeat(64)}`,
-    })).toEqual({
-      action: "set_chat_avatar",
-      groupChatIconUrl:
-        `https://imagedelivery.net/account/avatar/private?exp=2000000000&sig=${"a".repeat(64)}`,
-    });
-    const querylessLegacyIconUrl =
-      "https://imagedelivery.net/TDuhqfLDl0Fb8RGwGw6mYw/889a5f43-1d35-4eae-a98e-7ae69e96a800/public";
-    expect(parseHostedRuntimeGroupToolRequest({
-      action: "set_chat_avatar",
-      groupChatIconUrl: querylessLegacyIconUrl,
-    })).toEqual({
-      action: "set_chat_avatar",
-      groupChatIconUrl: querylessLegacyIconUrl,
-    });
-    for (const invalidLegacyIconUrl of [
-      "https://imagedelivery.net/account/avatar/private",
-      "https://imagedelivery.net/account/avatar/public/extra",
-      "https://imagedelivery.net/account/avatar/public/",
-      "https://imagedelivery.net/account//avatar/public",
-      "https://imagedelivery.net/account/avatar/public?tracking=1",
-      "https://imagedelivery.net/account/avatar/public?",
-      "https://imagedelivery.net/account/avatar/public#",
-      "https://imagedelivery.net/account/avatar%2Fother/public",
+    for (const retiredIconUrl of [
+      extensionlessIconUrl,
+      `https://imagedelivery.net/account/avatar/private?exp=2000000000&sig=${"a".repeat(64)}`,
+      "https://imagedelivery.net/account/avatar/public",
     ]) {
       expect(() => parseHostedRuntimeGroupToolRequest({
         action: "set_chat_avatar",
-        groupChatIconUrl: invalidLegacyIconUrl,
+        groupChatIconUrl: retiredIconUrl,
       })).toThrow(/groupChatIconUrl is invalid/u);
     }
     expect(parseHostedRuntimeGroupToolRequest({
@@ -1373,7 +1362,7 @@ describe("parseHostedRuntimeGroupTool", () => {
       parseHostedRuntimeGroupToolRequest({
         action: "set_chat_avatar",
         groupChatIconUrl:
-          `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}?exp=2000000000&tracking=1`,
+          `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000&tracking=1`,
       })
     ).toThrow(/groupChatIconUrl is invalid/u);
     expect(() =>
@@ -1415,7 +1404,7 @@ describe("parseHostedRuntimeGroupTool", () => {
     ).toThrow(/senderHandle is invalid/u);
   });
 
-  it("parses bounded self-membership responses without accepting roster fields", () => {
+  it("parses bounded self-membership responses with per-group participant rosters", () => {
     const response = {
       action: "list_memberships",
       result: {
@@ -1424,7 +1413,9 @@ describe("parseHostedRuntimeGroupTool", () => {
           groupLabel: "Fun-loving runners",
           permissionText: "Recent sleep timing and duration",
         }],
+        disclosureGrantsTruncated: true,
         memberships: [{
+          availability: { status: "available" },
           displayName: "Fun-loving runners",
           grantedVaultShareProjectionScopes: [
             { projectionKind: "profile-name.v0" },
@@ -1438,6 +1429,15 @@ describe("parseHostedRuntimeGroupTool", () => {
           kind: "friends",
           memberCount: 7,
           membershipId: "hgm_self_123",
+          participantRoster: {
+            participantCount: 4,
+            participantLabels: [
+              { displayName: "Taylor" },
+              { phoneHint: { areaCode: "415", lastFour: "9876" } },
+              { emailParticipant: true },
+            ],
+            status: "available",
+          },
           permissionsUrl: "https://example.com/groups/join/abc123",
           sponsorshipUrl: "https://example.com/groups/fund/funding-locator",
           requestedVaultShareProjectionScopes: [
@@ -1450,12 +1450,74 @@ describe("parseHostedRuntimeGroupTool", () => {
           ],
           role: "member",
         }],
+        nextCursor: "membership_page_64",
+        nextDisclosureGrantCursor: "disclosure_page_2",
         status: "ok",
         truncated: false,
       },
     };
 
     expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
+    const {
+      availability: _omittedAvailability,
+      ...legacyMembershipWithoutAvailability
+    } = response.result.memberships[0];
+    void _omittedAvailability;
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: [legacyMembershipWithoutAvailability],
+        status: "ok",
+        truncated: false,
+      },
+    })).not.toHaveProperty("result.memberships.0.availability");
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: [{
+          ...response.result.memberships[0],
+          availability: {
+            status: "unavailable",
+            unavailableReason: "   ",
+          },
+        }],
+        status: "ok",
+        truncated: false,
+      },
+    })).toThrow(/availability unavailableReason must not be blank/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: [{
+          ...response.result.memberships[0],
+          availability: { status: "unknown" },
+        }],
+        status: "ok",
+        truncated: false,
+      },
+    })).toThrow(/availability status is invalid/u);
+    const {
+      participantRoster: _omittedParticipantRoster,
+      ...legacyMembershipWithoutRoster
+    } = response.result.memberships[0];
+    void _omittedParticipantRoster;
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "list_memberships",
+      result: {
+        memberships: [legacyMembershipWithoutRoster],
+        status: "ok",
+        truncated: false,
+      },
+    })).toMatchObject({
+      result: {
+        memberships: [{
+          participantRoster: {
+            status: "unavailable",
+            unavailableReason: "participant_roster_not_reported",
+          },
+        }],
+      },
+    });
     const {
       sponsorshipUrl: _omittedSponsorshipUrl,
       ...legacyMembershipWithoutSponsorship
@@ -1572,13 +1634,61 @@ describe("parseHostedRuntimeGroupTool", () => {
       action: "list_memberships",
       result: {
         memberships: Array.from(
-          { length: 26 },
+          { length: HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX + 1 },
           () => response.result.memberships[0],
         ),
         status: "ok",
         truncated: true,
       },
     })).toThrow(/at most 25 entries/u);
+  });
+
+  describe.each([
+    "read_current",
+    "create_join_link",
+    "update_display_name",
+    "post_join_offer",
+  ])("%s group-summary response boundary", (action) => {
+    it.each([undefined, null, false, 0, "ignored", {}, []])(
+      "normalizes unavailable group payload %j without widening result keys",
+      (group) => {
+        expect(parseHostedRuntimeGroupToolResponse({
+          action,
+          result: { group, status: "unavailable", unavailableReason: "offline" },
+        })).toEqual({
+          action,
+          result: { group: null, status: "unavailable", unavailableReason: "offline" },
+        });
+      },
+    );
+
+    it("preserves unavailable key and reason validation order", () => {
+      expect(() => parseHostedRuntimeGroupToolResponse({
+        action,
+        result: { status: "unavailable", unavailableReason: null, extra: true },
+      })).toThrow(`Hosted runtime group tool ${action} unavailable response result.extra is not allowed.`);
+      expect(() => parseHostedRuntimeGroupToolResponse({
+        action,
+        result: { status: "unavailable", unavailableReason: null },
+      })).toThrow("Hosted runtime group unavailableReason must be a non-empty string.");
+      expect(() => parseHostedRuntimeGroupToolResponse({ action, result: null }))
+        .toThrow(`Hosted runtime group tool ${action} response result must be an object.`);
+      expect(() => parseHostedRuntimeGroupToolResponse({ action, result: {} }))
+        .toThrow(`Hosted runtime group tool ${action} response status must be a non-empty string.`);
+    });
+
+    const acceptedStatuses = action === "read_current"
+      ? ["ok", "none"]
+      : [action === "post_join_offer" ? "sent" : "ok"];
+    it.each(["none", "sent", "ok", "unknown"].filter((status) => !acceptedStatuses.includes(status)))(
+      "keeps status %s specific to its action",
+      (status) => {
+        expect(() => parseHostedRuntimeGroupToolResponse({
+          action,
+          result: { group: null, status },
+        })).toThrow("Hosted runtime group tool response action/status is not supported.");
+      },
+    );
   });
 
   it("parses create_join_link responses", () => {
@@ -1969,6 +2079,7 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(parseHostedRuntimeGroupToolResponse({
       action: "read_current",
       result: {
+        disclosureGrantsTruncated: true,
         group: {
           ...GROUP_SUMMARY,
           members: [
@@ -1993,11 +2104,13 @@ describe("parseHostedRuntimeGroupTool", () => {
             },
           ],
         },
+        nextDisclosureGrantCursor: "disclosure_page_2",
         status: "ok",
       },
     })).toEqual({
       action: "read_current",
       result: {
+        disclosureGrantsTruncated: true,
         group: {
           ...GROUP_SUMMARY,
           members: [
@@ -2022,6 +2135,7 @@ describe("parseHostedRuntimeGroupTool", () => {
             },
           ],
         },
+        nextDisclosureGrantCursor: "disclosure_page_2",
         status: "ok",
       },
     });

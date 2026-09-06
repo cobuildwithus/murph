@@ -340,7 +340,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       }
     });
 
-    it("accepts three ordered edit contenders across two stale snapshots", async () => {
+    it("serializes edit contenders and preserves the newest revision", async () => {
       const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
       const firstBlocker = createPrismaClient({ databaseUrl, poolMax: 1 });
       const retryBlocker = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -522,11 +522,16 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         releaseRetryBlocker.resolve();
         const plans = await Promise.all(editRequests);
 
-        expect(plans.map((plan) => plan.response.reason)).toEqual([
+        const secondReason = plans[1]?.response.reason;
+        expect(plans[0]?.response.reason).toBe("wake-appended-message-edit");
+        expect([
           "wake-appended-message-edit",
-          "wake-appended-message-edit",
-          "wake-appended-message-edit",
-        ]);
+          "message-edit-revision-stale",
+        ]).toContain(secondReason);
+        expect(plans[2]?.response.reason).toBe("wake-appended-message-edit");
+        if (secondReason === "message-edit-revision-stale") {
+          expect(plans[1]?.wakeHandoffs).toBeUndefined();
+        }
         expect(plans[2]?.wakeHandoffs).toEqual([
           expect.objectContaining({
             eventId: events[2]?.event_id,
@@ -537,12 +542,23 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           prisma: observer,
           sourceMessageLookupKeys: sourceMessageLookupKeyReadCandidates,
         });
-        await expect(observer.$transaction((tx) =>
+        const finalEntries = await observer.$transaction((tx) =>
           readHostedMailboxSourceConversationEntriesTx({
             preparation: finalPreparation,
             sourceMessageLookupKeys: sourceMessageLookupKeyReadCandidates,
             tx,
-          }), transactionOptions)).resolves.toHaveLength(4);
+          }), transactionOptions);
+        expect(finalEntries).toHaveLength(
+          secondReason === "wake-appended-message-edit" ? 4 : 3,
+        );
+        expect(finalEntries.at(-1)?.wake).toMatchObject({
+          eventId: events[2]?.event_id,
+          message: {
+            linqMessage: {
+              parts: [{ type: "text", value: "Corrected wording 3" }],
+            },
+          },
+        });
       } finally {
         releaseFirstBlocker.resolve();
         releaseRetryBlocker.resolve();
@@ -2042,8 +2058,8 @@ describe.skipIf(!runPostgresConcurrencyProof)(
 
         const telegramRouteUpserted = createDeferred();
         const releaseTelegramUpsert = createDeferred();
-        const linqRouteUpsertReached = createDeferred();
-        const releaseLinqUpsert = createDeferred();
+        const linqRouteLockAcquired = createDeferred();
+        const releaseLinqRouteLock = createDeferred();
         const activationUpdated = createDeferred();
         const releaseActivation = createDeferred();
         const telegramPid = createDeferred<number>();
@@ -2064,14 +2080,18 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         });
         const linqClient = linqBase.$extends({
           query: {
-            hostedMemberRouting: {
-              async upsert({ args, query }) {
-                if (startOrder === "linq-first") {
-                  linqRouteUpsertReached.resolve();
-                  await releaseLinqUpsert.promise;
-                }
-                return query(args);
-              },
+            async $queryRaw({ args, query }) {
+              const result = await query(args);
+              // An unchanged home route skips its upsert. Hold the actual
+              // member-row lock before the planner reaches mailbox writes.
+              if (
+                startOrder === "linq-first"
+                && args.sql.includes("FOR NO KEY UPDATE")
+              ) {
+                linqRouteLockAcquired.resolve();
+                await releaseLinqRouteLock.promise;
+              }
+              return result;
             },
           },
         });
@@ -2124,7 +2144,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           const runLinq = () => {
             linqTransaction = linqClient.$transaction(async (tx) => {
               // Keep production planners on their ordinary transaction type;
-              // the extension changes only this test's routing-upsert timing.
+              // the extension changes only this test's route-lock timing.
               const prisma = tx as Prisma.TransactionClient;
               linqPid.resolve(await readBackendPid(prisma));
               const plan = await planHostedOnboardingLinqWebhook({
@@ -2167,7 +2187,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
               });
               releaseActivation.resolve();
               await activationTransaction;
-              await linqRouteUpsertReached.promise;
+              await linqRouteLockAcquired.promise;
             }
           }
 
@@ -2185,14 +2205,14 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           } else {
             if (memberState === "active") {
               runLinq();
-              await linqRouteUpsertReached.promise;
+              await linqRouteLockAcquired.promise;
             }
             runTelegram();
             await waitForBlockedBackend({
               observer,
               pid: await telegramPid.promise,
             });
-            releaseLinqUpsert.resolve();
+            releaseLinqRouteLock.resolve();
           }
 
           await expect(
@@ -2233,7 +2253,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           });
         } finally {
           releaseTelegramUpsert.resolve();
-          releaseLinqUpsert.resolve();
+          releaseLinqRouteLock.resolve();
           releaseActivation.resolve();
           await Promise.allSettled([
             activationTransaction,

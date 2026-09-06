@@ -3682,6 +3682,75 @@ describe("Linq explicit external-thread routing", () => {
     expect(prisma.readPendingParticipantAddition()).toBe(false);
   });
 
+  it("locks the routed group before its verified participant and reuses both locks", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+      routeParticipantActive: true,
+    });
+    vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber)
+      .mockResolvedValueOnce({
+        core: {
+          billingStatus: HostedBillingStatus.active,
+          createdAt: new Date("2026-06-24T00:00:00.000Z"),
+          id: "member_active_participant_123",
+          suspendedAt: null,
+          updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+        },
+        identity: {},
+        matchedBy: "phoneNumber",
+      } as Awaited<
+        ReturnType<typeof memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber>
+      >);
+    vi.mocked(usageAllowance.checkHostedAiUsageGate).mockResolvedValueOnce({
+      allowed: true,
+      allowanceSource: "thread_container",
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 4_500_000n,
+      memberId: "member_thread_container_123",
+      periodEnd: new Date("2026-07-01T00:00:00.000Z"),
+      periodStart: new Date("2026-06-01T00:00:00.000Z"),
+      planResetAt: null,
+      remainingUsdMicros: 4_500_000n,
+      spentUsdMicros: 0n,
+      usageCreditBalanceUsdMicros: 0n,
+      usageCreditLedgerVersion: 0n,
+    });
+
+    await expect(planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      response: {
+        ignored: false,
+        ok: true,
+        reason: "wake-appended-thread-route",
+      },
+    });
+
+    expect(prisma.$executeRaw).toHaveBeenCalled();
+    expect(
+      memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx,
+    ).toHaveBeenCalledOnce();
+    const memberLockCallIndex = prisma.$queryRaw.mock.calls.findIndex(
+      ([query]) =>
+        Array.isArray(query)
+        && query.join("").includes('from "hosted_member"')
+        && query.join("").includes("for update"),
+    );
+    expect(memberLockCallIndex).toBeGreaterThanOrEqual(0);
+    const memberLockCallOrder =
+      prisma.$queryRaw.mock.invocationCallOrder[memberLockCallIndex];
+    const chatLockCallOrder = prisma.$executeRaw.mock.invocationCallOrder[0];
+    const demotionCallOrder = vi.mocked(
+      memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx,
+    ).mock.invocationCallOrder[0];
+    expect(chatLockCallOrder).toBeLessThan(memberLockCallOrder);
+    expect(memberLockCallOrder).toBeLessThan(demotionCallOrder!);
+    expect(
+      memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber,
+    ).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps the newest ten reaction contexts in insertion order", async () => {
     const prisma = createPrisma({
       routeContainerMemberId: "member_thread_container_123",
@@ -5974,6 +6043,40 @@ describe("Linq group chat auto-provision", () => {
     });
   });
 
+  it.each([
+    { participantMemberIds: [] },
+    { participantMemberIds: ["member_recognized_peer"] },
+  ])("keeps handle-only group admission consistent with roster $participantMemberIds", async ({ participantMemberIds }) => {
+    const prisma = {
+      ...createStatefulThreadRoutePrisma(),
+      hostedMemberIdentity: {
+        findMany: vi.fn().mockResolvedValue([{ member: senderCore, memberId: senderCore.id }]),
+      },
+    };
+    prisma.seedActiveManagedLinqLine("+15550000000");
+    pendingGroupSetupMocks.readHostedPendingGroupSetupCandidatesForParticipantsTx
+      .mockImplementation(async ({ participantMemberIds }: { participantMemberIds: string[] }) =>
+        participantMemberIds.includes(senderCore.id)
+          ? [{ id: "hpgs_handle_owner", ownerMemberId: senderCore.id }]
+          : []);
+    const event = buildLinqMessageReceivedEvent({ sender: "group-handle@example.test" });
+
+    const admission = await prepareHostedLinqThreadContainerAdmission({
+      event, participantMemberIds, prisma: prisma as never,
+    });
+    expect(admission.shouldPrepareThreadContainer).toBe(false);
+    const plan = await planHostedOnboardingLinqWebhook({
+      event, prisma: prisma as never,
+      pendingGroupParticipantMemberIds: participantMemberIds,
+      ...(admission.preparedPendingGroupSetup
+        ? { preparedPendingGroupSetup: admission.preparedPendingGroupSetup }
+        : {}),
+    });
+    expect(plan.response).toMatchObject({ ok: true, reason: "sent-group-setup" });
+    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+    expect(prisma.hostedMemberIdentity.findMany).not.toHaveBeenCalled();
+  });
+
   it("prepares new-container crypto for an active pending-contact sender", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     prisma.seedActiveManagedLinqLine("+15550000000");
@@ -6448,6 +6551,10 @@ describe("Linq group chat auto-provision", () => {
 
   it.each([
     {
+      description: "reported group",
+      webhookIsGroup: true,
+    },
+    {
       description: "reported direct",
       webhookIsGroup: false,
     },
@@ -6511,7 +6618,7 @@ describe("Linq group chat auto-provision", () => {
           "Hosted onboarding diagnostic: hosted-onboarding.webhook.linq.chat-classification.",
           {
             diagnostic: "hosted-onboarding.webhook.linq.chat-classification",
-            outcome: "thread-route-group",
+            outcome: webhookIsGroup === true ? "webhook-group" : "thread-route-group",
           },
         );
       } finally {
@@ -6665,6 +6772,11 @@ describe("Linq group chat auto-provision", () => {
 
   it.each([
     {
+      description: "says group",
+      service: "iMessage",
+      webhookIsGroup: true,
+    },
+    {
       description: "incorrectly says direct",
       service: "iMessage",
       webhookIsGroup: false,
@@ -6684,7 +6796,7 @@ describe("Linq group chat auto-provision", () => {
       service: "RCS",
       webhookIsGroup: null,
     },
-  ] as const)("uses canonical chat metadata when a $service webhook $description", async ({
+  ] as const)("uses group roster metadata when a $service webhook $description", async ({
     service,
     webhookIsGroup,
   }) => {
@@ -6702,7 +6814,10 @@ describe("Linq group chat auto-provision", () => {
     ]);
     mockSuccessfulGroupProvision({ prisma, senderCore });
     vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
+      displayName: "Weekend Warriors",
+      handleCount: 0,
       handles: [],
+      handlesComplete: true,
       isGroup: true,
     });
     vi.mocked(linqClient.getHostedLinqChatHandles).mockResolvedValue([]);
@@ -6723,6 +6838,7 @@ describe("Linq group chat auto-provision", () => {
         chatId: "chat_group_123",
         timeoutMs: 1_500,
       });
+      expect(linqClient.getHostedLinqChatSummary).toHaveBeenCalledTimes(1);
       expect(
         memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx,
       ).toHaveBeenCalledWith({
@@ -6732,6 +6848,15 @@ describe("Linq group chat auto-provision", () => {
         prisma,
       });
       expect(prisma.hostedThreadContainer.create).toHaveBeenCalledTimes(1);
+      const createdContainerMemberId = prisma.hostedThreadContainer.create
+        .mock.calls[0]?.[0].data.memberId;
+      expect(groupStoreMocks.ensureHostedGroupStructureForThreadContainerTx)
+        .toHaveBeenCalledWith({
+          containerMemberId: createdContainerMemberId,
+          initialDisplayName: "Weekend Warriors",
+          now: new Date("2026-06-24T12:00:00.000Z"),
+          tx: prisma,
+        });
       expect(
         vi.mocked(memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx)
           .mock.invocationCallOrder[0],
@@ -6752,7 +6877,7 @@ describe("Linq group chat auto-provision", () => {
         "Hosted onboarding diagnostic: hosted-onboarding.webhook.linq.chat-classification.",
         {
           diagnostic: "hosted-onboarding.webhook.linq.chat-classification",
-          outcome: "canonical-group",
+          outcome: webhookIsGroup === true ? "webhook-group" : "canonical-group",
         },
       );
     } finally {
@@ -9166,16 +9291,32 @@ describe("Linq group chat auto-provision", () => {
     }
   });
 
-  it("ignores group messages received on an unknown unmanaged recipient", async () => {
+  it.each([
+    ["unmanaged", "recipient-line-unmanaged"],
+    ["conflicting", "recipient-line-conflicting"],
+    ["structurally_unavailable", "recipient-line-structurally-unavailable"],
+    ["degraded_unavailable", "recipient-line-degraded-unavailable"],
+  ] as const)("ignores group messages on a %s recipient line", async (kind, reason) => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const prisma = createStatefulThreadRoutePrisma();
-    prisma.seedActiveManagedLinqLine("+15550000000");
+    const recipient = "+15558889999";
+    if (kind === "conflicting") {
+      // The production line-state reader rejects ambiguous row cardinality
+      // before it inspects either row's fields.
+      prisma.hostedLinqLine.findMany.mockResolvedValueOnce([{}, {}]);
+    } else if (kind !== "unmanaged") {
+      prisma.seedActiveManagedLinqLine(recipient, {
+        egressPolicy: kind === "structurally_unavailable" ? "disabled" : "enabled",
+        healthStatus: "degraded",
+        providerReputationStatus: "HEALTHY",
+      });
+    }
     mockSenderLookup(senderCore);
 
     try {
       const plan = await planHostedOnboardingLinqWebhook({
         event: buildLinqMessageReceivedEvent({
-          recipient: "+15558889999",
+          recipient,
         }),
         prisma: prisma as never,
       });
@@ -9185,16 +9326,18 @@ describe("Linq group chat auto-provision", () => {
         ok: true,
         reason: "group-chat-line-unavailable",
       });
-      expectManagedLineAuthorityLookup(prisma, "+15558889999");
+      expectManagedLineAuthorityLookup(prisma, recipient);
+      expect(plan.desiredSideEffects).toEqual([]);
       expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
       expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+      expect(prisma.hostedLinqLine.updateMany).not.toHaveBeenCalled();
 
       const plannerDetails = info.mock.calls.find(
         ([message]) => message === "Hosted Linq webhook planner decision.",
       )?.[1];
       expect(plannerDetails).toMatchObject({
         existingMemberMatch: "phone-identity",
-        reason: "recipient-line-unmanaged",
+        reason,
         responseReason: "group-chat-line-unavailable",
         routeStage: "new-group-admission-ignored",
       });
@@ -9203,20 +9346,26 @@ describe("Linq group chat auto-provision", () => {
     }
   });
 
-  it("ignores echoed own messages in unbound group threads without provisioning", async () => {
+  it.each([true, false, null] as const)("ignores unbound own-message echoes without provider reads when group flag is %s", async (isGroup) => {
     const prisma = createStatefulThreadRoutePrisma();
+    vi.mocked(prismaModule.getPrisma).mockReturnValue(prisma as never);
+    vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest)
+      .mockReturnValue(buildLinqMessageReceivedEvent({ isFromMe: true, isGroup }) as never);
 
-    const plan = await planHostedOnboardingLinqWebhook({
-      event: buildLinqMessageReceivedEvent({ isFromMe: true }),
-      prisma: prisma as never,
+    const response = await handleHostedOnboardingLinqWebhook({
+      rawBody: "{}",
+      signature: null,
+      timestamp: null,
     });
 
-    expect(plan.response).toMatchObject({
+    expect(response).toMatchObject({
       ignored: true,
       ok: true,
-      reason: "group-chat",
+      reason: isGroup === true ? "group-chat" : "own-message",
     });
-    expect(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber).not.toHaveBeenCalled();
+    expect(linqClient.getHostedLinqChatSummary).not.toHaveBeenCalled();
+    expect(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber)
+      .toHaveBeenCalledTimes(isGroup === true ? 0 : 1);
     expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });

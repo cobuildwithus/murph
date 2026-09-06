@@ -5,6 +5,7 @@ import { afterEach, expect, test, vi } from 'vitest'
 
 import {
   buildLinqIMessageAppCardUrl,
+  buildLinqIMessageAppLayout,
   renderAssistantWorkoutResponseCardText,
   type CompactTableWorkoutResponseCardV1,
 } from '../src/assistant-response-cards.ts'
@@ -283,8 +284,8 @@ test('linq runtime normalizes happy-path payloads and retries retryable GET fail
 
     if (url.endsWith('/chats/chat-123/messages')) {
       return createJsonResponse({
-        id: 'message-1',
         chat_id: 'chat-123',
+        message: { id: 'message-1' },
       })
     }
 
@@ -354,7 +355,12 @@ test('linq runtime normalizes happy-path payloads and retries retryable GET fail
     ),
     {
       chat_id: 'chat-123',
-      id: 'message-1',
+      message: { id: 'message-1' },
+      providerMessageEffects: [{
+        carriesIntentMedia: true,
+        message: 'hello from Murph',
+        providerMessageId: 'message-1',
+      }],
     },
   )
 
@@ -486,8 +492,7 @@ test('linq runtime checks iMessage capability and sends the exact one-part app c
             name: 'Murph',
             team_id: 'G9DJH2XUMK',
           },
-          fallback_text:
-            'Your daily nutrition. Ask Murph for this card in text',
+          fallback_text: 'Your daily nutrition.',
           interactive: true,
           layout: {
             caption: 'Jul 28 · 4 meals',
@@ -504,6 +509,53 @@ test('linq runtime checks iMessage capability and sends the exact one-part app c
     },
     method: 'POST',
     url: 'https://linq.example.test/api/partner/v3/chats/chat-123/messages',
+  })
+})
+
+test('linq app-card 2xx without provider identity remains ambiguous after one request', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  let requestBody: Record<string, unknown> | null = null
+  const fetchImplementation: LinqFetch = vi.fn(async (_url, init) => {
+    requestBody = parseJsonRequestBody(init.body)
+    return createJsonResponse({ message: {} })
+  })
+
+  await assert.rejects(
+    () => sendLinqIMessageAppCard({
+      card: NUTRITION_CARD,
+      chatId: 'chat-123',
+      idempotencyKey: 'card-delivery-1',
+    }, { env, fetchImplementation }),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.context?.failureStage === 'http' &&
+      error.context?.operation === 'send_imessage_app_card' &&
+      error.context?.retryable === true &&
+      'deliveryMayHaveSucceeded' in error &&
+      error.deliveryMayHaveSucceeded === true,
+  )
+  expect(fetchImplementation).toHaveBeenCalledOnce()
+  assert.deepEqual(requestBody, {
+    message: {
+      idempotency_key: 'card-delivery-1',
+      parts: [{
+        app: {
+          bundle_id: 'ai.withmurph.app.messages',
+          name: 'Murph',
+          team_id: 'G9DJH2XUMK',
+        },
+        fallback_text: 'Your daily nutrition.',
+        interactive: true,
+        layout: buildLinqIMessageAppLayout(NUTRITION_CARD),
+        type: 'imessage_app',
+        url: buildLinqIMessageAppCardUrl(NUTRITION_CARD),
+      }],
+      preferred_service: 'iMessage',
+    },
   })
 })
 
@@ -746,7 +798,7 @@ test('linq runtime serializes reply targets only for marked native replies', asy
     bodies.push(parseJsonRequestBody(init.body))
     return createJsonResponse({
       chat_id: 'chat-123',
-      id: 'message-1',
+      message: { id: 'message-1' },
     })
   })
 
@@ -795,6 +847,89 @@ test('linq runtime serializes reply targets only for marked native replies', asy
     (error) => error instanceof VaultCliError && error.code === 'LINQ_INVALID_INPUT',
   )
   expect(fetchImplementation).toHaveBeenCalledTimes(2)
+})
+
+test('linq runtime keeps an accepted message without provider identity retryable', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  let requestBody: Record<string, unknown> | null = null
+  const fetchImplementation = vi.fn(async (_url: string, init: RequestInit) => {
+    requestBody = parseJsonRequestBody(requireStringRequestBody(init.body))
+    return createJsonResponse({
+      chat_id: 'chat-123',
+      message: {},
+    })
+  })
+
+  await assert.rejects(
+    () => sendLinqChatMessage(
+      {
+        chatId: 'chat-123',
+        idempotencyKey: 'reply-key-1',
+        message: 'hello',
+      },
+      { env, fetchImplementation },
+    ),
+    (error) =>
+      error instanceof VaultCliError
+      && error.code === 'LINQ_API_REQUEST_FAILED'
+      && error.context?.operation === 'send_message'
+      && error.context?.retryable === true
+      && 'deliveryMayHaveSucceeded' in error
+      && error.deliveryMayHaveSucceeded === true,
+  )
+  expect(fetchImplementation).toHaveBeenCalledOnce()
+  assert.deepEqual(requestBody, {
+    message: {
+      idempotency_key: 'reply-key-1',
+      parts: [{ type: 'text', value: 'hello' }],
+    },
+  })
+})
+
+test('linq runtime keeps an accepted unselected link-only message without provider identity retryable', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  let requestBody: Record<string, unknown> | null = null
+  const fetchImplementation = vi.fn(async (_url: string, init: RequestInit) => {
+    requestBody = parseJsonRequestBody(requireStringRequestBody(init.body))
+    return createJsonResponse({
+      chat_id: 'chat-123',
+      message: {},
+    })
+  })
+
+  await assert.rejects(
+    () => sendLinqChatMessage(
+      {
+        chatId: 'chat-123',
+        idempotencyKey: 'payment-message-123',
+        message: 'https://pay.example.test/checkout/session_123',
+      },
+      { env, fetchImplementation },
+    ),
+    (error) =>
+      error instanceof VaultCliError
+      && error.code === 'LINQ_API_REQUEST_FAILED'
+      && error.context?.operation === 'send_message'
+      && error.context?.retryable === true
+      && 'deliveryMayHaveSucceeded' in error
+      && error.deliveryMayHaveSucceeded === true,
+  )
+  expect(fetchImplementation).toHaveBeenCalledOnce()
+  assert.deepEqual(requestBody, {
+    message: {
+      idempotency_key: 'payment-message-123',
+      parts: [{
+        type: 'link',
+        value: 'https://pay.example.test/checkout/session_123',
+      }],
+    },
+  })
 })
 
 const incompleteTwoPartMessageIdentityCases = [
@@ -1315,6 +1450,39 @@ test('linq runtime keeps created-chat media on the primary message before the ri
   ])
 })
 
+test('linq runtime keeps an identity-less ordinary chat creation retryable', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const fetchImplementation = vi.fn(async () => createJsonResponse({
+    chat: {
+      id: 'chat-created',
+      message: {},
+    },
+  }))
+
+  await assert.rejects(
+    () => createLinqChat(
+      {
+        from: '+15550000000',
+        idempotencyKey: 'create-ordinary-123',
+        message: 'Hello',
+        to: ['+15550000001'],
+      },
+      { env, fetchImplementation },
+    ),
+    (error) => error instanceof VaultCliError
+      && error.code === 'LINQ_API_REQUEST_FAILED'
+      && error.context?.failureStage === 'http'
+      && error.context?.operation === 'create_chat'
+      && error.context?.retryable === true
+      && 'deliveryMayHaveSucceeded' in error
+      && error.deliveryMayHaveSucceeded === true,
+  )
+  expect(fetchImplementation).toHaveBeenCalledTimes(1)
+})
+
 test.each(incompleteTwoPartMessageIdentityCases)(
   'linq runtime keeps a new-chat rich-link delivery terminal with $label',
   async ({
@@ -1580,7 +1748,7 @@ test('linq runtime omits the text part for media-only messages and rejects empty
     body = parseJsonRequestBody(init.body)
     return createJsonResponse({
       chat_id: 'chat-123',
-      id: 'message-media-only',
+      message: { id: 'message-media-only' },
     })
   })
 
@@ -2807,7 +2975,7 @@ test('linq runtime preserves path-prefixed base urls when building requests', as
         seenUrls.push(url)
         return createJsonResponse({
           chat_id: 'chat:123',
-          id: 'message-1',
+          message: { id: 'message-1' },
         })
       },
     },
@@ -3548,7 +3716,7 @@ test('linq runtime covers optional payload omissions, fallback http messages, an
           chat: {
             id: '   ',
             message: {
-              id: null,
+              id: 'message-default',
             },
           },
         })
@@ -3558,7 +3726,11 @@ test('linq runtime covers optional payload omissions, fallback http messages, an
 
   assert.deepEqual(defaultBaseResult, {
     chatId: null,
-    messageId: null,
+    messageId: 'message-default',
+    providerMessageEffects: [{
+      message: 'hello',
+      providerMessageId: 'message-default',
+    }],
   })
   assert.equal(
     seenRequests[0]?.url,
@@ -3936,9 +4108,10 @@ test('device sync client wraps transport and http failures with control-plane co
       'context' in error &&
       typeof error.context === 'object' &&
       error.context !== null &&
-      (error.context as { baseUrl?: string }).baseUrl ===
-        'http://127.0.0.1:8788' &&
-      (error.context as { cause?: string }).cause === 'connect ECONNREFUSED',
+      (error.context as { retryable?: boolean }).retryable === true &&
+      (error.context as { stage?: string }).stage === 'transport' &&
+      (error.context as { baseUrl?: string }).baseUrl === undefined &&
+      (error.context as { cause?: string }).cause === undefined,
   )
 
   const httpClient = createDeviceSyncClient({
@@ -3966,8 +4139,9 @@ test('device sync client wraps transport and http failures with control-plane co
       typeof error.context === 'object' &&
       error.context !== null &&
       (error.context as { retryable?: boolean }).retryable === true &&
-      ((error.context as { details?: { provider?: string } }).details?.provider ===
-        'oura'),
+      (error.context as { stage?: string }).stage === 'response' &&
+      (error.context as { status?: number }).status === 503 &&
+      (error.context as { details?: unknown }).details === undefined,
   )
 
   const missingTokenClient = createDeviceSyncClient({
@@ -4016,6 +4190,8 @@ test('device sync client wraps transport and http failures with control-plane co
       'context' in error &&
       typeof error.context === 'object' &&
       error.context !== null &&
-      (error.context as { path?: string }).path === '/providers',
+      (error.context as { retryable?: boolean }).retryable === false &&
+      (error.context as { stage?: string }).stage === 'response' &&
+      (error.context as { path?: string }).path === undefined,
   )
 })

@@ -99,22 +99,23 @@ describe("murph computer dynamic tools", () => {
     expect(actDescription.length).toBeLessThanOrEqual(320);
     expect(actDescription).toMatch(/macro-step/iu);
     expect(actDescription).toContain("current authorized run");
-    expect(actDescription).toContain("No missing or sensitive input or final confirmation");
-    expect(actDescription).toContain("Before browser call two this turn");
     expect(actDescription).toContain(
-      "call send_progress_update if available and not yet sent",
+      "specifically authorized non-credential identity/health input",
     );
-    expect(actDescription).toContain("outcome uncertain");
-    expect(actDescription).toContain("call computer_open before retry/next action");
+    expect(actDescription).toContain("approved final terms");
+    expect(actDescription).toContain("Never invent data");
+    expect(actDescription).toContain("enter credentials/OTP/payment");
+    expect(actDescription).toContain("bypass CAPTCHA");
+    expect(actDescription).toContain("accept material consent");
+    expect(actDescription).toContain("retry unknown effects");
+    expect(actDescription).toContain("After failure, call computer_open");
 
     expect(openDescription.length).toBeLessThanOrEqual(250);
     expect(openDescription).toContain("authorized browser");
     expect(openDescription).toContain("Returns runId, URL, title, text");
-    expect(openDescription).toContain("Before multi-step browsing each turn");
-    expect(openDescription).toContain("call send_progress_update if available");
-    expect(openDescription).toContain("prior-turn progress does not count");
     expect(openDescription).toContain("reopen after handoff/uncertainty");
     expect(openDescription).toContain("prior outcome stays unknown");
+    expect(openDescription).not.toContain("send_progress_update");
 
     expect(osControlDescription.length).toBeLessThanOrEqual(310);
     expect(osControlDescription).toContain("only when Playwright cannot operate");
@@ -752,6 +753,33 @@ describe("murph computer dynamic tools", () => {
   });
 
   it("parses the generic pause-for-user checkpoint tool", () => {
+    for (const argumentsValue of [
+      {
+        reason: "other",
+        runId: "run_123",
+      },
+      {
+        handoffPurpose: null,
+        reason: "other",
+        runId: "run_123",
+        suggestedReply: null,
+      },
+    ]) {
+      expect(readTestMurphDynamicToolRequest(dynamicToolCall({
+        argumentsValue,
+        tool: "computer_pause_for_user",
+      }))).toEqual({
+        args: {
+          handoffPurpose: null,
+          pauseDeliveryContext: null,
+          reason: "other",
+          runId: "run_123",
+          suggestedReply: null,
+        },
+        kind: "computer-pause-for-user",
+      });
+    }
+
     const request = readTestMurphDynamicToolRequest(dynamicToolCall({
       argumentsValue: {
         handoffPurpose: "manual_browser_help",
@@ -793,6 +821,147 @@ describe("murph computer dynamic tools", () => {
       },
       kind: "computer-pause-for-user",
     });
+  });
+
+  it("records only schema-owned paths and bounded shapes for invalid pause fields", () => {
+    const invalidHandoffPurpose = "private-invalid-purpose";
+    const privateRunId = "run_private_123";
+    const privateSuggestedReply = "private reply text";
+    const privateReason = {
+      message: "private message text",
+      secret: "private secret value",
+      url: "https://private.example.test/handoff",
+    };
+    const request = readTestMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: {
+        handoffPurpose: invalidHandoffPurpose,
+        reason: privateReason,
+        runId: privateRunId,
+        suggestedReply: privateSuggestedReply,
+      },
+      tool: "computer_pause_for_user",
+    }));
+
+    if (!request || request.kind !== "invalid-computer-arguments") {
+      throw new Error("Expected invalid computer pause arguments.");
+    }
+
+    expect(request.validationDigest).toMatchObject({
+      detailsSchema: "murph.tool-call-validation-digest.v1",
+      inputShape: [
+        "root.object.count_1_10",
+        "handoffPurpose.string.len_1_32",
+        "reason.object.count_1_10",
+        "runId.string.len_1_32",
+        "suggestedReply.string.len_1_32",
+      ],
+      invalidPaths: ["handoffPurpose", "reason"],
+      issueCodes: ["custom"],
+      pathIssues: [
+        {
+          code: "custom",
+          path: "handoffPurpose",
+          received: "string.len_1_32",
+        },
+        {
+          code: "custom",
+          path: "reason",
+          received: "object.count_1_10",
+        },
+      ],
+      rootKeyCount: 4,
+      rootKeysPresent: [
+        "handoffPurpose",
+        "reason",
+        "runId",
+        "suggestedReply",
+      ],
+      rootType: "object",
+      schemaName: "murph.computer_pause_for_user.input",
+      toolName: "murph.computer_pause_for_user",
+    });
+    const serialized = JSON.stringify(request.validationDigest);
+    expect(serialized).not.toContain(invalidHandoffPurpose);
+    expect(serialized).not.toContain(privateRunId);
+    expect(serialized).not.toContain(privateSuggestedReply);
+    expect(serialized).not.toContain(privateReason.message);
+    expect(serialized).not.toContain(privateReason.secret);
+    expect(serialized).not.toContain(privateReason.url);
+  });
+
+  it("distinguishes a missing pause field without retaining submitted values", () => {
+    const privateSuggestedReply = "private missing-field reply";
+    const request = readTestMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: {
+        reason: "other",
+        suggestedReply: privateSuggestedReply,
+      },
+      tool: "computer_pause_for_user",
+    }));
+
+    if (!request || request.kind !== "invalid-computer-arguments") {
+      throw new Error("Expected invalid computer pause arguments.");
+    }
+
+    expect(request.validationDigest).toMatchObject({
+      inputShape: [
+        "root.object.count_1_10",
+        "reason.string.len_1_32",
+        "suggestedReply.string.len_1_32",
+      ],
+      invalidPaths: ["runId"],
+      issueCodes: ["custom"],
+      pathIssues: [{
+        code: "custom",
+        path: "runId",
+        received: "undefined",
+      }],
+      rootKeyCount: 2,
+      rootKeysPresent: ["reason", "suggestedReply"],
+    });
+    expect(JSON.stringify(request.validationDigest)).not.toContain(
+      privateSuggestedReply,
+    );
+  });
+
+  it("counts an unadvertised pause root key without retaining its name or value", () => {
+    const privateRunId = "run_private_456";
+    const unknownKey = "privateArbitraryField";
+    const unknownValue = "private arbitrary secret";
+    const request = readTestMurphDynamicToolRequest(dynamicToolCall({
+      argumentsValue: {
+        [unknownKey]: unknownValue,
+        reason: "other",
+        runId: privateRunId,
+      },
+      tool: "computer_pause_for_user",
+    }));
+
+    if (!request || request.kind !== "invalid-computer-arguments") {
+      throw new Error("Expected invalid computer pause arguments.");
+    }
+
+    expect(request.validationDigest).toMatchObject({
+      inputShape: [
+        "root.object.count_1_10",
+        "reason.string.len_1_32",
+        "runId.string.len_1_32",
+      ],
+      invalidPaths: ["root"],
+      issueCodes: ["custom"],
+      pathIssues: [{
+        code: "custom",
+        path: "root",
+        received: "object.count_1_10",
+      }],
+      rootKeyCount: 3,
+      rootKeysPresent: ["reason", "runId"],
+      unsafeRootKeyCount: 1,
+    });
+    const serialized = JSON.stringify(request.validationDigest);
+    expect(serialized).not.toContain(privateRunId);
+    expect(serialized).not.toContain(unknownKey);
+    expect(serialized).not.toContain(unknownValue);
   });
 
   it("pauses through web-control and returns the hosted handoff URL to the model", async () => {

@@ -1,3 +1,4 @@
+import { prepareAssistantFollowUpEvaluationInput } from './follow-ups.js'
 import * as z from '@murphai/contracts/zod-runtime'
 import type {
   AssistantResponseMedia,
@@ -9,6 +10,9 @@ import {
 import {
   createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
 } from '@murphai/hosted-execution/assistant-identifiers'
+import type {
+  HostedAssistantNotificationValidationFailureReason,
+} from '@murphai/hosted-execution'
 import type {
   HostedRuntimeGroupEmailEffectResponse,
 } from '@murphai/hosted-execution/runtime-control'
@@ -58,9 +62,11 @@ import {
 } from './channel-adapters.js'
 import { withAssistantTurnLock } from './turn-lock.js'
 import {
-  buildAssistantMaintenanceConversationEvidence,
+  readAssistantMaintenanceConversationEvidence,
+  type AssistantMaintenanceConversationEvidence,
   type AssistantMaintenanceProfile,
 } from './maintenance-evidence.js'
+import { readAssistantGroupRoomModelState } from './group-room-model.js'
 import type {
   AssistantDeliveryOutcome,
   AssistantMessageInput,
@@ -184,11 +190,6 @@ const ASSISTANT_ONBOARDING_GOAL_CHECKIN_TURN_PROFILE: Required<
   threadScope: 'isolated-thread',
   toolProfile: 'provider-turn',
 }
-const ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES = [
-  'memories.use_memories=false',
-  'memories.generate_memories=false',
-] as const
-
 export type AssistantNotificationDecision = z.infer<
   typeof assistantNotificationDecisionSchema
 >
@@ -292,6 +293,7 @@ export interface AssistantNotificationInput
   instructions: string
   onGroupEmailPendingDeliveryIntentId?: ((intentId: string) => void) | null
   notificationPromptProfile?: AssistantNotificationPromptProfile | null
+  recurringReminderConversation?: boolean | null
   turnPolicy?: AssistantNotificationTurnPolicy | null
   responsePolicy?: AssistantNotificationResponsePolicy | null
   scheduledAutomationScheduleKind?: AutomationScheduleKind | null
@@ -320,12 +322,13 @@ export async function sendAssistantNotificationLocal(
   // Built before the turn lock so evidence reads never extend the window in
   // which fresh foreground input waits on lock admission.
   const maintenanceEvidence = isAssistantNotificationMaintenanceExactSkip(input)
-    ? await buildAssistantMaintenanceConversationEvidence({
+    ? await readAssistantMaintenanceConversationEvidence({
         now: new Date(),
         profile: requireAssistantNotificationMaintenanceProfile(input),
         vault: input.vault,
       })
     : null
+  const maintenanceEvidencePrompt = maintenanceEvidence?.prompt ?? null
 
   return withAssistantTurnLock({
     abortSignal: input.abortSignal,
@@ -338,7 +341,7 @@ export async function sendAssistantNotificationLocal(
       }
       const resolutionMessageInput = buildAssistantNotificationMessageInput(
         input,
-        maintenanceEvidence,
+        maintenanceEvidencePrompt,
       )
       let groupEmailSendResult:
         | AssistantNotificationPostTurnDeliveryExpectations['groupEmailSendResult']
@@ -359,12 +362,12 @@ export async function sendAssistantNotificationLocal(
       const preparedInput = await prepareAssistantCronNotificationInput(input, {
         sessionId: resolved.session.sessionId,
       })
-      const messageInput = preparedInput === input
+      const messageInput = await prepareAssistantFollowUpEvaluationInput(preparedInput === input
         ? resolutionMessageInput
         : buildAssistantNotificationMessageInput(
             preparedInput,
-            maintenanceEvidence,
-          )
+            maintenanceEvidencePrompt,
+          ))
       await emitHostedAssistantContextSessionResolvedTrace({
         message: messageInput,
         resolved,
@@ -401,36 +404,14 @@ export async function sendAssistantNotificationLocal(
         sharedPlan,
       })
 
-      if (
-        input.firstContactPolicy?.markSeenOnDeliveryAccepted === true &&
-        firstContactDocIds.length > 0 &&
-        await hasAssistantSeenFirstContact({
-          docIds: firstContactDocIds,
-          vault: input.vault,
-        })
-      ) {
+      const skipSummary = await resolveAssistantNotificationSkipSummary({
+        firstContactDocIds,
+        input,
+        maintenanceEvidence,
+      })
+      if (skipSummary !== null) {
         return withPostTurnDeliveryExpectations({
-          decision: {
-            kind: 'skip',
-            privateSummary: 'First-contact notification already accepted for this route.',
-          },
-          response: null,
-          session: resolved.session,
-        })
-      }
-
-      if (
-        shouldSkipAutomationOccurrenceForAvailability({
-          instructions: input.instructions,
-          occurrenceAt: input.scheduledOccurrenceAt,
-          scheduleKind: input.scheduledAutomationScheduleKind,
-        })
-      ) {
-        return withPostTurnDeliveryExpectations({
-          decision: {
-            kind: 'skip',
-            privateSummary: 'Scheduled occurrence overlaps an authorized calendar conflict.',
-          },
+          decision: { kind: 'skip', privateSummary: skipSummary },
           response: null,
           session: resolved.session,
         })
@@ -680,8 +661,8 @@ export async function sendAssistantNotificationLocal(
                   runtimeResponse: providerResult.response,
                 })
           if (runtimeOwnsFinalPresentation && decision.kind !== 'send_message') {
-            throw new VaultCliError(
-              'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+            throw createAssistantNotificationInvalidResponseError(
+              'runtime_presentation_non_send_decision',
               'A runtime-owned notification presentation requires a send_message decision.',
             )
           }
@@ -799,6 +780,7 @@ export async function sendAssistantNotificationLocal(
             dedupeToken: input.deliveryDedupeToken ?? null,
             decisionSubject: decision.subject ?? null,
             input: messageInput,
+            followUpRequest: providerResult.followUpRequest,
             card: providerResult.responseCard ?? null,
             media: responseMedia,
             message: responseText,
@@ -864,6 +846,7 @@ export async function sendAssistantNotificationLocal(
           dedupeToken: input.deliveryDedupeToken ?? null,
           decisionSubject: decision.subject ?? null,
           input: messageInput,
+          followUpRequest: providerResult.followUpRequest,
           card: providerResult.responseCard ?? null,
           media: responseMedia,
           message: responseText,
@@ -1273,6 +1256,15 @@ async function runAssistantNotificationBeforeCommit(
   input: AssistantNotificationInput,
   context: AssistantNotificationCommitContext,
 ): Promise<void> {
+  const deliveryAccepted =
+    context.deliveryOutcome?.kind === 'sent' ||
+    (input.deliveryDispatchMode === 'queue-only' &&
+      context.deliveryOutcome?.kind === 'queued')
+  if (deliveryAccepted) {
+    await input.beforeCommit?.(context)
+    return
+  }
+
   throwIfAssistantNotificationAborted(input.abortSignal)
   await input.beforeCommit?.(context)
   throwIfAssistantNotificationAborted(input.abortSignal)
@@ -1555,15 +1547,10 @@ function buildAssistantNotificationMessageInput(
   )
   const maintenanceTurn = isAssistantNotificationMaintenanceExactSkip(input)
   const scheduledOccurrence = isAssistantNotificationScheduledOccurrence(input)
-  const firstContactExactText =
-    input.responsePolicy?.kind === 'require_send_exact_text' &&
-    input.firstContactPolicy?.markSeenOnDeliveryAccepted === true
   // One overlay for each non-user turn boundary, so provider-audit policy
   // cannot drift across caller-specific configuration.
   const executionOverlay = maintenanceTurn
     ? {
-        codexConfigOverrides:
-          ASSISTANT_NOTIFICATION_MAINTENANCE_CODEX_CONFIG_OVERRIDES,
         suppressProviderFailureTranscriptAudit: true,
       }
     : scheduledOccurrence
@@ -1623,13 +1610,7 @@ function buildAssistantNotificationMessageInput(
     provider: input.provider,
     receiptMetadata: null,
     reasoningEffort: input.reasoningEffort,
-    // First-contact exact text does not start a provider. Keep its durable
-    // conversation session on the ordinary target so the next attended turn
-    // continues from the welcome that was already delivered.
-    sandbox:
-      scheduledOccurrence || firstContactExactText
-        ? input.sandbox
-        : 'read-only',
+    sandbox: input.sandbox,
     scheduledAutomationAuthority: input.scheduledAutomationAuthority ?? null,
     scheduledInvocationAuthority: input.scheduledInvocationAuthority ?? null,
     scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
@@ -1650,6 +1631,7 @@ function buildAssistantNotificationMessageInput(
 }
 
 async function deliverAssistantNotificationMessage(input: {
+  followUpRequest?: import("@murphai/contracts").AutomationFollowUpRequest | null
   card?: AssistantResponseCard | null
   dedupeToken: string | null
   decisionSubject: string | null
@@ -1695,6 +1677,8 @@ async function deliverAssistantNotificationMessage(input: {
     answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
     reviewedAssistantAskCompletionExpiresAt:
       input.input.reviewedAssistantAskCompletionExpiresAt ?? null,
+    followUpRequest: input.followUpRequest ?? undefined,
+    followUpEvaluatedThrough: input.input.outboxFollowUpEvaluatedThrough,
     automationAuthority: input.input.outboxAutomationAuthority ?? null,
     automationContextReferences:
       input.input.outboxAutomationContextReferences ?? null,
@@ -1764,6 +1748,9 @@ function resolveAssistantNotificationProviderResumeStateAction(input: {
   input: AssistantNotificationInput
   providerResult: { codexThreadId?: string | null }
 }): AssistantProviderResumeStateAction {
+  if (input.input.notificationPromptProfile === 'context-handoff') {
+    return 'clear'
+  }
   if (
     isAssistantNotificationMaintenanceExactSkip(input.input) ||
     isAssistantOnboardingGoalCheckinNotification(input.input) ||
@@ -1825,6 +1812,59 @@ function isAssistantNotificationMaintenanceExactSkip(
   input: AssistantNotificationInput,
 ): boolean {
   return input.turnPolicy?.kind === 'maintenance-exact-skip'
+}
+
+async function resolveAssistantNotificationSkipSummary(input: {
+  firstContactDocIds: readonly string[]
+  input: AssistantNotificationInput
+  maintenanceEvidence: AssistantMaintenanceConversationEvidence | null
+}): Promise<string | null> {
+  const maintenanceSummary = await resolveEmptyAssistantMaintenanceSummary(input)
+  if (maintenanceSummary !== null) {
+    return maintenanceSummary
+  }
+  if (
+    input.input.firstContactPolicy?.markSeenOnDeliveryAccepted === true &&
+    input.firstContactDocIds.length > 0 &&
+    await hasAssistantSeenFirstContact({
+      docIds: input.firstContactDocIds,
+      vault: input.input.vault,
+    })
+  ) {
+    return 'First-contact notification already accepted for this route.'
+  }
+  if (shouldSkipAutomationOccurrenceForAvailability({
+    instructions: input.input.instructions,
+    occurrenceAt: input.input.scheduledOccurrenceAt,
+    scheduleKind: input.input.scheduledAutomationScheduleKind,
+  })) {
+    return 'Scheduled occurrence overlaps an authorized calendar conflict.'
+  }
+  return null
+}
+
+async function resolveEmptyAssistantMaintenanceSummary(input: {
+  input: AssistantNotificationInput
+  maintenanceEvidence: AssistantMaintenanceConversationEvidence | null
+}): Promise<string | null> {
+  const policy = input.input.turnPolicy
+  if (
+    policy?.kind !== 'maintenance-exact-skip' ||
+    input.maintenanceEvidence?.status !== 'empty'
+  ) {
+    return null
+  }
+  // Existing room pages can need cleanup even without new conversation.
+  // Unreadable pages and evidence retain the ordinary maintenance path.
+  if (policy.maintenanceProfile === 'group-room-model') {
+    const state = await readAssistantGroupRoomModelState({
+      vaultRoot: input.input.vault,
+    })
+    if (state.kind !== 'missing') {
+      return null
+    }
+  }
+  return policy.privateSummary
 }
 
 function requireAssistantNotificationMaintenanceProfile(
@@ -1899,7 +1939,7 @@ function assistantMaintenanceRawEventsIncludeMutation(
     const dynamicMutationActions = profile === 'group-room-model'
       ? ['delete', 'upsert'] as const
       : profile === 'member-memory'
-        ? ['update', 'upsert'] as const
+        ? ['forget', 'update', 'upsert'] as const
         : null
     const dynamicMutationTool = profile === 'group-room-model'
       ? 'group_room_model'
@@ -2074,19 +2114,27 @@ export function parseAssistantNotificationDecision(
   } catch (error) {
     const extracted = tryExtractAssistantNotificationDecisionObject(normalized)
     if (!extracted) {
-      throw new VaultCliError(
-        'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+      throw createAssistantNotificationInvalidResponseError(
+        'decision_json_unparseable',
         'Assistant notification turn must return a single valid JSON decision object.',
       )
     }
 
+    let parsedDecision: unknown
     try {
-      return assistantNotificationDecisionSchema.parse(
-        JSON.parse(extracted),
-      )
+      parsedDecision = JSON.parse(extracted)
     } catch {
-      throw new VaultCliError(
-        'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+      throw createAssistantNotificationInvalidResponseError(
+        'decision_json_unparseable',
+        'Assistant notification turn returned an invalid decision object.',
+      )
+    }
+
+    try {
+      return assistantNotificationDecisionSchema.parse(parsedDecision)
+    } catch {
+      throw createAssistantNotificationInvalidResponseError(
+        'decision_schema_invalid',
         'Assistant notification turn returned an invalid decision object.',
       )
     }
@@ -2151,12 +2199,23 @@ function resolveAssistantNotificationResponseMedia(input: {
   }
   const media = normalizeAssistantResponseMediaList(input.responseMedia)
   if (media.length !== 1 || media[0]?.kind !== 'voice_memo') {
-    throw new VaultCliError(
-      'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+    throw createAssistantNotificationInvalidResponseError(
+      'creative_response_media_invalid',
       'A song notification requires exactly one generated song attachment.',
     )
   }
   return media
+}
+
+function createAssistantNotificationInvalidResponseError(
+  reason: HostedAssistantNotificationValidationFailureReason,
+  message: string,
+): VaultCliError {
+  return new VaultCliError(
+    'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+    message,
+    { assistantNotificationValidationFailureReason: reason },
+  )
 }
 
 function normalizeAssistantNotificationDecisionJson(value: string): string {

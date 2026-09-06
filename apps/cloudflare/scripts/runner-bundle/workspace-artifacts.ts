@@ -8,13 +8,15 @@ import {
   hostedRunnerRuntimePackageName,
 } from "../runner-bundle-contract.js";
 
-import { runNpmCommand, runPnpmCommand } from "./process.js";
+import { runNodeCommand, runNpmCommand, runPnpmCommand } from "./process.js";
 
 const HEALTH_COMMONS_PACKAGE_NAME = "@murphai/health-commons";
 const CONTRACTS_PACKAGE_NAME = "@murphai/contracts";
 const CLI_PACKAGE_NAME = "@murphai/murph";
+const ASSISTANT_ENGINE_PACKAGE_NAME = "@murphai/assistant-engine";
 const HEALTH_COMMONS_RUNTIME_GENERATED_FILES = [
   "generated/biomarker-desired-directions.json",
+  "generated/web/browse/goals.json",
   "generated/knowledge.sqlite",
   "generated/protocol-index.json",
   "generated/protocol-run-specs.json",
@@ -52,10 +54,46 @@ export async function buildHostedRunnerWorkspaceArtifacts(
     return;
   }
 
-  await runPnpmCommand(
-    buildHostedRunnerWorkspaceBuildArgs(sortedPackageNames),
-    { cwd: input.repoRoot },
+  const plan = buildHostedRunnerWorkspaceArtifactPlan(sortedPackageNames, {
+    env: process.env,
+    repoRoot: input.repoRoot,
+  });
+  await runPnpmCommand(plan.buildArgs, {
+    cwd: input.repoRoot,
+  });
+  if (plan.assistantCliSurfaceAssemblyArgs) {
+    await runNodeCommand(plan.assistantCliSurfaceAssemblyArgs, {
+      cwd: input.repoRoot,
+    });
+  }
+}
+
+export function buildHostedRunnerWorkspaceArtifactPlan(
+  packageNames: readonly string[],
+  input: {
+    env?: NodeJS.ProcessEnv;
+    repoRoot: string;
+  },
+): {
+  assistantCliSurfaceAssemblyArgs: string[] | null;
+  buildArgs: string[];
+} {
+  const shouldAssembleAssistantCliSurface = packageNames.includes(
+    ASSISTANT_ENGINE_PACKAGE_NAME,
   );
+
+  return {
+    assistantCliSurfaceAssemblyArgs: shouldAssembleAssistantCliSurface
+      ? [
+          path.join(
+            input.repoRoot,
+            "scripts",
+            "assemble-assistant-cli-surface.mjs",
+          ),
+        ]
+      : null,
+    buildArgs: buildHostedRunnerWorkspaceBuildArgs(packageNames, input.env),
+  };
 }
 
 export async function stageHostedRunnerRuntimeArtifact(

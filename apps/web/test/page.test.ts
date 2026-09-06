@@ -22,7 +22,6 @@ const mocks = vi.hoisted(() => ({
       signupLabel?: string;
       leadingIcon?: React.ReactNode;
       splitUnauthenticated?: boolean;
-      preloadAuthPanel?: boolean;
     }) =>
       createElement(
         "div",
@@ -67,6 +66,10 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedDashboardPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
 
+vi.mock("@/src/lib/goals/public-murph-line", () => ({
+  resolvePublicMurphLinePhoneNumber: async () => "+15550100001",
+}));
+
 vi.mock("@/src/lib/browser-vault/homepage-preparation", () => ({
   scheduleHomepageBrowserVaultPreparation:
     mocks.scheduleHomepageBrowserVaultPreparation,
@@ -106,6 +109,18 @@ vi.mock("@/src/lib/hosted-onboarding/landing", () => ({
 vi.mock("../app/auth-controls", () => ({
   LandingAuthActions: mocks.LandingAuthActions,
   LandingAuthDialog: () => null,
+  LandingAuthDialogButton: ({
+    buttonClassName,
+    buttonLabel,
+  }: {
+    buttonClassName: string;
+    buttonLabel: string;
+  }) =>
+    createElement(
+      "button",
+      { className: buttonClassName, type: "button" },
+      buttonLabel,
+    ),
 }));
 
 afterEach(() => {
@@ -138,7 +153,6 @@ test("HomePage renders the canonical landing page at the root route", async () =
       authenticated: false,
       context: "nav",
       authLabel: "Dashboard",
-      preloadAuthPanel: true,
       splitUnauthenticated: true,
     },
     undefined
@@ -150,7 +164,6 @@ test("HomePage renders the canonical landing page at the root route", async () =
       context: "hero",
       authLabel: "Meet Murph",
       leadingIcon: expect.anything(),
-      preloadAuthPanel: true,
     }),
     undefined
   );
@@ -170,7 +183,6 @@ test("HomePage renders the canonical landing page at the root route", async () =
       authenticated: false,
       context: "footer",
       authLabel: "Get started",
-      preloadAuthPanel: true,
       signupLabel: "Get started",
     },
     undefined
@@ -181,16 +193,16 @@ test("HomePage renders the canonical landing page at the root route", async () =
       authenticated: false,
       context: "footer",
       authLabel: "Get started",
-      preloadAuthPanel: true,
       signupLabel: "Get started",
     },
     undefined
   );
   assert.match(markup, /aria-label="Open menu"/);
   assert.equal((markup.match(/href="\/knowledge"/g) ?? []).length, 1);
+  assert.match(markup, /href="\/goals"[^>]*>Goals<\/a>/s);
   assert.match(
     markup,
-    /href="\/knowledge"[^>]*>Knowledge<\/a>.*href="\/security"[^>]*>Security<\/a>/s,
+    /href="\/goals"[^>]*>Goals<\/a>.*href="\/knowledge"[^>]*>Knowledge<\/a>.*href="\/security"[^>]*>Security<\/a>/s,
   );
   assert.match(markup, /data-root-landing-auth-actions-context="nav"/);
   assert.match(markup, /data-root-landing-auth-actions-context="hero"/);
@@ -212,10 +224,8 @@ test("HomePage renders the canonical landing page at the root route", async () =
   );
   assert.match(markup, /Start a health challenge with your friends/);
   assert.match(markup, /referees the week/);
-  assert.match(markup, /Better together/);
+  assert.doesNotMatch(markup, /Better together/);
   assert.match(markup, /Do it with your people\./);
-  assert.match(markup, /Walk challenge · Day 5 of 7/);
-  assert.match(markup, /Weekly newsletter · Sunday 8:02 AM/);
   assert.match(markup, /No group\? You’re still not doing this alone\./);
   const pricingStart = markup.indexOf('<section id="pricing"');
   assert.ok(pricingStart >= 0, "signup pricing section missing");
@@ -225,7 +235,7 @@ test("HomePage renders the canonical landing page at the root route", async () =
   );
   assert.match(pricingSection, /Free starter usage/);
   assert.match(pricingSection, /Open source/);
-  assert.match(pricingSection, /Starter usage does not expire\./);
+  assert.doesNotMatch(pricingSection, /Starter usage does not expire\./);
   assert.doesNotMatch(pricingSection, /free trial/i);
   assert.match(markup, /data-root-landing-auth-actions-label="Dashboard"/);
   assert.match(
@@ -468,7 +478,6 @@ test("HomePage keeps the final CTA consistent for authenticated sessions", async
       authenticated: true,
       context: "footer",
       authLabel: "Go to dashboard",
-      preloadAuthPanel: true,
       signupLabel: "Go to dashboard",
     },
     undefined

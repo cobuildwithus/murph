@@ -35,6 +35,7 @@ import {
   type HostedAssistantNotificationDestination,
 } from "../hosted-routing/assistant-notification-destination";
 import { getPrisma } from "../prisma";
+import { HOSTED_OPERATOR_TASK_RESULT_RETENTION_MS } from "./operator-task-retention";
 
 const OPERATOR_TASK_ID_NAMESPACE = "murph.hosted-operator-task.v1";
 const OPERATOR_TASK_RESULT_PURPOSE = "hosted-operator-task-result";
@@ -190,6 +191,7 @@ export async function admitHostedOperatorTask(
 }
 
 export async function listHostedOperatorTasks(input: {
+  now?: Date;
   prisma?: PrismaClient;
   requestedByMemberId: string;
 }): Promise<HostedOperatorTaskView[]> {
@@ -199,9 +201,12 @@ export async function listHostedOperatorTasks(input: {
     take: OPERATOR_TASK_LIST_LIMIT,
     where: { requestedByMemberId: input.requestedByMemberId },
   });
+  const resultCutoff = new Date(
+    (input.now ?? new Date()).getTime() - HOSTED_OPERATOR_TASK_RESULT_RETENTION_MS,
+  );
   return Promise.all(rows.map(async (row) => serializeOperatorTask(
     row,
-    row.resultEncrypted
+    row.resultEncrypted && row.completedAt && row.completedAt > resultCutoff
       ? await decryptOperatorTaskResult({
           memberId: row.memberId,
           taskId: row.id,
@@ -301,10 +306,6 @@ export async function tryHandleHostedOperatorDiagnosticControl(input: {
       mailboxWake: null,
       response: {
         action: "prepare",
-        disclosure: {
-          permissionText:
-            "An authorized Murph operator requested one private, read-only diagnostic. Inspect only this member's Murph context needed to answer the question. Do not send a member message, change state, invoke tools, or disclose anyone else's information. Return the concise diagnostic only to the authorized operator.",
-        },
         question: wake.ask.question,
         status: "ready",
         targetLabel: null,
