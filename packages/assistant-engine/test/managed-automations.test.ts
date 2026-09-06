@@ -1316,6 +1316,15 @@ describe('applyMurphManagedAutomations', () => {
     expect(patternsUpdateRecord?.instructions).toContain('Send at most one compact message')
     expect(patternsUpdateRecord?.instructions).toContain('factorId + outcomeId')
     expect(patternsUpdateRecord?.instructions).toContain(
+      'Determine new identities against the notification ledger read at the start of this run, after alias migration',
+    )
+    expect(patternsUpdateRecord?.instructions).toContain(
+      'report stages such as `seen_again` describe evidence strength, not notification history',
+    )
+    expect(patternsUpdateRecord?.instructions).toContain(
+      'Preserve this decision when adding identities to the ledger before sending',
+    )
+    expect(patternsUpdateRecord?.instructions).toContain(
       'Grade changes belong in the weekly health insight',
     )
     expect(patternsUpdateRecord?.instructions).toContain(

@@ -32642,7 +32642,7 @@ async function materializePersonalPatternsBaselineVaultCli(input: {
           grade: 'A',
           lagDays: 1,
           outcomeId: 'hrv',
-          stage: 'seen_again',
+          stage: 'worth_testing',
         },
         ...[
           { outcomeId: 'sleep_score', grade: 'C', count: 6, mean: 72, delta: 8 },
@@ -32662,7 +32662,7 @@ async function materializePersonalPatternsBaselineVaultCli(input: {
           grade,
           lagDays: 1,
           outcomeId,
-          stage: 'seen_again',
+          stage: grade === 'C' ? 'seen_again' : 'new_clue',
         })),
       ],
       factors: [
