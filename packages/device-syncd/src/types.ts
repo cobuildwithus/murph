@@ -1142,6 +1142,9 @@ export interface DeviceWebhookHandler {
 }
 
 export interface DeviceJobExecutor {
+  // Optional execution scope for one bounded worker drain. Never retains live
+  // authorization; a new drain or standalone worker call gets a fresh scope.
+  createPassExecutor?(): DeviceJobExecutor;
   createScheduledJobs?(
     account: StoredDeviceSyncAccount,
     now: string,

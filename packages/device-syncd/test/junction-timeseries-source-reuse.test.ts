@@ -91,3 +91,106 @@ test.each([
   assert.deepEqual(events, [...expectedEvents, ...expectedEvents]);
   assert.deepEqual(snapshots[1], snapshots[0]);
 });
+
+
+test("Junction resource pass shares inventory but reads live import authority for every job", async () => {
+  let inventoryReads = 0;
+  let sourceReads = 0;
+  let imports = 0;
+  let liveSource = createConnectionSource();
+  let disconnectDuringFetch = false;
+  let sourceReadFailure = false;
+  const sourceFailure = new Error("Synthetic live source read failed");
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      inventoryReads += 1;
+      return createJsonResponse({ providers: [{
+        slug: "garmin", name: "Garmin", status: "connected",
+        resource_availability: { blood_oxygen: true },
+      }] });
+    }
+    assert.equal(url.pathname, "/v2/timeseries/junction-user-1/blood_oxygen/grouped");
+    if (disconnectDuringFetch) {
+      liveSource = createConnectionSource({ status: "disconnected" });
+    }
+    return createJsonResponse({ groups: { garmin: [{
+      data: [{ timestamp: "2026-04-02T14:00:00.000Z", unit: "%", value: 97 }],
+      source: { provider: "garmin", type: "watch" },
+    }] } });
+  }, { summaryResources: [], timeseriesResources: ["blood_oxygen"] });
+  const context = createJunctionJobContext({
+    now: "2026-04-04T12:00:00.000Z",
+    account: createAccount({ sources: [{ ...liveSource, resourceCount: 1 }] }),
+    connectionSourceAdmissionMode: "listed_only",
+    listConnectionSources: async () => {
+      sourceReads += 1;
+      if (sourceReadFailure) throw sourceFailure;
+      return [liveSource];
+    },
+    importSnapshot: async () => { imports += 1; return { imported: true }; },
+  });
+  const job = createJob("resource", {
+    resource: "blood_oxygen", resourceCategory: "timeseries", sourceProviderSlug: "garmin",
+    windowEnd: "2026-04-03T00:00:00.000Z", windowStart: "2026-04-02T00:00:00.000Z",
+  });
+  assert.ok(provider.jobExecutor);
+  await provider.jobExecutor.executeJob(context, job);
+  await provider.jobExecutor.executeJob(context, job);
+  assert.equal(inventoryReads, 2);
+  assert.equal(sourceReads, 4);
+  assert.equal(imports, 2);
+  inventoryReads = 0;
+  sourceReads = 0;
+  imports = 0;
+
+  const pass = provider.jobExecutor.createPassExecutor?.() ?? provider.jobExecutor;
+  await pass.executeJob(context, job);
+  await pass.executeJob(context, job);
+  assert.equal(inventoryReads, 1);
+  assert.equal(sourceReads, 3); // one projection plus two live import reads
+  assert.equal(imports, 2);
+
+  disconnectDuringFetch = true;
+  await pass.executeJob(context, job);
+  assert.equal(inventoryReads, 1);
+  assert.equal(sourceReads, 4);
+  assert.equal(imports, 2);
+
+  disconnectDuringFetch = false;
+  liveSource = createConnectionSource({ firstSeenAt: "2026-04-04T00:00:00.000Z", lifecycleEpoch: 2 });
+  context.account.sources = [{ ...liveSource, resourceCount: 1 }];
+  await pass.executeJob(context, job);
+  assert.equal(inventoryReads, 2);
+  assert.equal(sourceReads, 6);
+  assert.equal(imports, 3);
+
+  const nextPass = provider.jobExecutor.createPassExecutor?.() ?? provider.jobExecutor;
+  await nextPass.executeJob(context, job);
+  assert.equal(inventoryReads, 3);
+  assert.equal(sourceReads, 8);
+  assert.equal(imports, 4);
+
+  sourceReadFailure = true;
+  await assert.rejects(nextPass.executeJob(context, job), (error) => error === sourceFailure);
+  assert.equal(imports, 4);
+  sourceReadFailure = false;
+  await nextPass.executeJob(context, job);
+  assert.equal(inventoryReads, 4);
+  assert.equal(sourceReads, 11);
+  assert.equal(imports, 5);
+
+  context.account.disconnectGeneration += 1;
+  await nextPass.executeJob(context, job);
+  assert.equal(inventoryReads, 5);
+  assert.equal(imports, 6);
+
+  const historicalJob = { ...job, payload: { ...job.payload, historicalBackfill: true } };
+  await nextPass.executeJob(context, historicalJob);
+  await nextPass.executeJob(context, historicalJob);
+  assert.equal(inventoryReads, 7);
+  assert.equal(imports, 8);
+  await nextPass.executeJob(context, job);
+  assert.equal(inventoryReads, 8);
+  assert.equal(imports, 9);
+});
