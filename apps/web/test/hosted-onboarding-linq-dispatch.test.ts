@@ -559,19 +559,19 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
   });
   const prepareRoot = vi.fn(async (input: {
     domain: "control" | "ingress";
-    reusableCandidates?: ReadonlyMap<string, {
+    preparedCandidates?: ReadonlyMap<string, {
       domain: "control" | "ingress";
       rootKeyId: string;
       userId: string;
     }>;
     userId: string;
   }) => {
-    const candidate = input.reusableCandidates?.get(input.domain);
+    const candidate = input.preparedCandidates?.get(input.domain);
     let rootKeyId: string;
     if (candidate) {
       await prewarmPrepared({
         domain: input.domain,
-        prepared: input.reusableCandidates ?? new Map(),
+        prepared: input.preparedCandidates ?? new Map(),
         userId: input.userId,
       });
       rootKeyId = candidate.rootKeyId;
