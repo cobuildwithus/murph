@@ -1385,6 +1385,9 @@ describe('applyMurphManagedAutomations', () => {
       'let the concrete detail show its significance',
     )
     expect(digestRecord?.instructions).toContain(
+      'For simple recognition, stop there: do not add a lesson about the behavior or a disclaimer about unmeasured benefits',
+    )
+    expect(digestRecord?.instructions).toContain(
       'Express necessary uncertainty within the claim',
     )
     expect(digestRecord?.instructions).toContain(

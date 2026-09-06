@@ -11466,7 +11466,7 @@ describeRealCodex('real Codex weekly digest natural recognition e2e', () => {
       expect(decision.text).toMatch(/cycl|rides?/iu)
       expect(decision.text).toMatch(/hik/iu)
       expect(decision.text).not.toMatch(
-        /meaningful new pattern|rather than a one-off|too early to say|not proof|does not prove|grade [A-E]|evidence days|score/iu,
+        /meaningful new pattern|rather than a one-off|too early to say|not proof|(?:do|does) not prove|(?:don['’]t|doesn['’]t) prove|grade [A-E]|evidence days|score/iu,
       )
       expect(decision.text).not.toMatch(
         /(?:endurance|fitness|capacity) (?:has|have) improved|you(?:’re|'re| are) (?:already )?less winded|will (?:improve|build|make)|you should|keep (?:it|this|going)|scheduled|weekly (?:digest|report)|automation/iu,

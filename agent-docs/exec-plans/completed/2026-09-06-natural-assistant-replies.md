@@ -48,3 +48,40 @@ its compass metaphor and explanatory contrast. Eligibility remains unchanged.
 
 Patterns PR 2967 passed required CI and merged separately. This follow-up remains
 an active task until its own final live proof and required exact-head CI pass.
+
+## Final local proof
+
+All three selected journeys are Ready on the final instructions. Onboarding
+used one resume read, no memory or completion commands, and a plain pause
+explanation. Reminder confirmation used exactly one inspect and one versioned
+patch, with no shell command or extra verification; its short reply confirmed
+the saved change and active cadence without a next-delivery promise. The weekly
+digest made no tool calls, sent one bounded observation tied to the stated
+intention, and used a light qualifier within the interpretation without a
+standalone disclaimer or claim of demonstrated personal improvement.
+
+Live commands used `pnpm test:assistant:live -- --test` with these exact selectors:
+
+- `reports terminal canonical memory repair without a mutation or retry loop during onboarding resume`
+- `confirms a pending recurring reminder naturally without scheduler terminology`
+- `recognizes a new cycling routine without pattern jargon or disclaimer padding`
+
+All used gpt-5.6-terra and local subscription authentication. Reminder and digest
+used the first usable alternate login after earlier attempts failed before any
+provider action. No auth material was copied. The final digest wording followed
+observed misses on intermediate prompts; its regression now rejects both singular
+and plural versions of the unnecessary proof disclaimer. These are inspected
+samples, not a universal model success-rate claim.
+
+Final local checks: 57 managed-automation tests, focused onboarding skill-assets
+proof, 25 hosted-domain tests, 117 scripted-runtime tests, Assistant Engine and
+Web typechecks, 9 changelog tests, complexity guard, and diff/privacy review pass.
+The earlier combined deterministic run saw one stale imported instruction after
+a concurrent edit; the fresh hosted-domain rerun passed on the final text.
+
+Implementation and local verification are complete. The parent continues the
+PR's required exact-head CI and authorized merge; no production test messages
+were sent.
+Status: completed
+Updated: 2026-09-06
+Completed: 2026-09-06
