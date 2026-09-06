@@ -486,6 +486,22 @@ Cloudflare keeps only the wake-payload decryption lane plus the worker-owned cal
 
 ## Private Operational Telemetry
 
+Existing hosted fetch-failure logs may include `fetchNetworkErrorCode`: the first
+exact allowlisted code (`ECONNREFUSED`, `ECONNRESET`, `ENOTFOUND`, `EPIPE`,
+`ETIMEDOUT`, `UND_ERR_SOCKET`, `UND_ERR_CONNECT_TIMEOUT`, `UND_ERR_HEADERS_TIMEOUT`,
+`UND_ERR_BODY_TIMEOUT`) in at most four cause-chain objects, including the direct
+fetch error. Capture reads only own `code`/`cause` data properties, stops on cycles
+or unsafe inspection, and revalidates the optional wrapper field before safe
+metadata projection; unavailable or unapproved values are omitted, not inferred.
+It adds no error text, stack, endpoint, socket, header, or payload data and changes
+no classification, abort, retry, authority, persistence, request, or event count.
+Existing Workers log volume, sampling, and retention settings remain unchanged;
+see the documented [maximum seven-day Workers Logs retention](https://developers.cloudflare.com/workers/observability/logs/workers-logs/#limits).
+After a separately gated rollout, observe existing
+aggregates for 24 hours for known socket/DNS/connection/timeout codes versus
+unavailable; do not induce production failures or replay. Retain the field only
+while it has diagnostic value under that policy.
+
 ### Web-control preflight rejections
 
 Ordinary runtime callers select a branded route descriptor from the same
