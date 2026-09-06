@@ -33,3 +33,14 @@ included in this change. Keep the existing outer snapshot compression and query 
   24) retain their prior complexity and behavior; only archive dispatch changes.
 - No dependency, wire receipt, query schema or provider-input changes.
 - Required CI and final review pending.
+
+## Canonical writer and export follow-through
+
+The full write-batch rollback probe exposed a separate archive suffix list in the
+write-policy owner. Export and reuse that list in the ingest reader, including
+Brotli, so generic writes and canonical archived amendments agree. The probe now
+passes without creating a raw sibling. Standalone data-bundle conflict detection
+also recognizes Brotli; a synthetic export retained exact archive bytes and rejected
+an ambiguous raw/Brotli pair. Core typecheck, codec tests, complexity and shell syntax
+checks passed again. The first external review was already running on the prior
+head; a follow-up review is required for this production delta.
