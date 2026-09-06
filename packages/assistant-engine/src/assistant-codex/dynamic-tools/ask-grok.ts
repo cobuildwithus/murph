@@ -1,3 +1,4 @@
+import { toolFailureMetadata } from '../tool-failure-diagnostics.js'
 import * as z from '@murphai/contracts/zod-runtime'
 
 import type { SafeToolCallValidationDigest } from '../../assistant/tool-validation-digest.js'
@@ -64,6 +65,7 @@ export async function executeAskGrokDynamicTool(input: {
     turnState: input.askGrokTurnState ?? null,
   })
   return {
+    ...toolFailureMetadata(result),
     rpcResult: {
       success: result.rpcSuccess,
       contentItems: [{ type: 'inputText', text: result.rpcText }],

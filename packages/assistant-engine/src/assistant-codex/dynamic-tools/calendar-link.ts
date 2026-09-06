@@ -1,3 +1,4 @@
+import { toolFailureDiagnostic } from '../tool-failure-diagnostics.js'
 import {
   buildCalendarEventUrl,
   calendarEventV1Bounds,
@@ -84,6 +85,7 @@ export function executeCreateCalendarLinkDynamicTool(
     url = buildCalendarEventUrl(event)
   } catch {
     return {
+      failureDiagnostic: toolFailureDiagnostic('oversized_result'),
       rpcResult: {
         success: false,
         contentItems: [{

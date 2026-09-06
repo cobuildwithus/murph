@@ -37,8 +37,11 @@ describe('automation definition inspection', () => {
 
     expect(result.rpcResult.success).toBe(success)
     if (!success) {
-      expect(result.runtimeIssueInputs).toHaveLength(1)
-      expect(result.runtimeIssueInputs?.[0]?.details).toEqual({ failureReason: 'oversized_result' })
+      expect(result.failureDiagnostic).toStrictEqual({
+        failureStage: 'result',
+        failureReason: 'oversized_result',
+      })
+      expect(result.runtimeIssueInputs).toBeUndefined()
       expect(result.rpcResult.contentItems[0]!.text).toBe('automation result is too large')
       return
     }

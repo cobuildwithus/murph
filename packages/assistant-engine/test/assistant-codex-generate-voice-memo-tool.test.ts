@@ -110,6 +110,7 @@ describe('executeGenerateVoiceMemoTool', () => {
         runtime: null,
       }),
     ).resolves.toEqual({
+      failureDiagnostic: { failureStage: 'execution', failureReason: 'unavailable' },
       rpcSuccess: false,
       rpcText:
         'voice memo generation is only available for deliverable iMessage or Telegram replies',
@@ -125,6 +126,7 @@ describe('executeGenerateVoiceMemoTool', () => {
         runtime: createTelegramRuntime({ apiKeyAvailable: false }),
       }),
     ).resolves.toEqual({
+      failureDiagnostic: { failureStage: 'execution', failureReason: 'unavailable' },
       rpcSuccess: false,
       rpcText: 'ELEVENLABS_API_KEY is required for voice memo generation',
     })
@@ -137,6 +139,7 @@ describe('executeGenerateVoiceMemoTool', () => {
         runtime: createTelegramRuntime({ modelId: null }),
       }),
     ).resolves.toEqual({
+      failureDiagnostic: { failureStage: 'execution', failureReason: 'unavailable' },
       rpcSuccess: false,
       rpcText:
         'MURPH_ELEVENLABS_MODEL_ID must be a priced ElevenLabs TTS model',
@@ -150,6 +153,7 @@ describe('executeGenerateVoiceMemoTool', () => {
         runtime: createTelegramRuntime({ voiceId: null }),
       }),
     ).resolves.toEqual({
+      failureDiagnostic: { failureStage: 'execution', failureReason: 'unavailable' },
       rpcSuccess: false,
       rpcText:
         'MURPH_ELEVENLABS_VOICE_ID is required for voice memo generation',
@@ -426,6 +430,7 @@ describe('executeGenerateVoiceMemoTool', () => {
         runtime: missingTokenRuntime,
       }),
     ).resolves.toEqual({
+      failureDiagnostic: { failureStage: 'execution', failureReason: 'unavailable' },
       rpcSuccess: false,
       rpcText:
         'LINQ_API_TOKEN is required for voice memo attachment upload',
@@ -438,6 +443,7 @@ describe('executeGenerateVoiceMemoTool', () => {
         runtime: generationFailureRuntime,
       }),
     ).resolves.toEqual({
+      failureDiagnostic: { failureStage: 'execution', failureReason: 'reported_failure' },
       rpcSuccess: false,
       rpcText:
         'voice memo generation failed: ELEVENLABS_API_REQUEST_FAILED (http 503)',
@@ -450,6 +456,7 @@ describe('executeGenerateVoiceMemoTool', () => {
         runtime: invalidAudioRuntime,
       }),
     ).resolves.toEqual({
+      failureDiagnostic: { failureStage: 'result', failureReason: 'invalid_result' },
       rpcSuccess: false,
       rpcText: 'voice memo generation returned invalid audio data',
     })
@@ -461,6 +468,7 @@ describe('executeGenerateVoiceMemoTool', () => {
         runtime: uploadFailureRuntime,
       }),
     ).resolves.toEqual({
+      failureDiagnostic: { failureStage: 'delivery', failureReason: 'reported_failure' },
       rpcSuccess: false,
       rpcText:
         'voice memo generated but Linq attachment upload failed: LINQ_API_REQUEST_FAILED (http 503)',
@@ -532,6 +540,7 @@ describe('executeGenerateVoiceMemoTool', () => {
         runtime,
       }),
     ).resolves.toEqual({
+      failureDiagnostic: { failureStage: 'execution', failureReason: 'conflict' },
       rpcSuccess: false,
       rpcText:
         'voice memo generation cannot be combined with other response media',

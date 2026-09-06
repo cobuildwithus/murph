@@ -1,3 +1,5 @@
+import type { MurphDynamicToolExecutionResult } from '../dynamic-tools.js'
+import { toolTextResult as assistantStyleTextResult } from '../tool-failure-diagnostics.js'
 import * as z from '@murphai/contracts/zod-runtime'
 
 import {
@@ -102,18 +104,14 @@ export async function executeAssistantStyleDynamicTool(input: {
   hostedSettingsOverlay?: AssistantStyleTurnSettingsOverlay | null
   request: Extract<AssistantStyleDynamicToolRequest, { kind: 'assistant-style' }>
   vaultRoot: string | null
-}): Promise<{
-  rpcResult: {
-    contentItems: Array<{ text: string; type: 'inputText' }>
-    success: boolean
-  }
-}> {
+}): Promise<MurphDynamicToolExecutionResult> {
   try {
     const { args } = input.request
     if (!input.vaultRoot) {
       return assistantStyleTextResult(
         false,
         'assistant style settings require a vault',
+        'unavailable',
       )
     }
     const usecases = await import('@murphai/vault-usecases/preferences')
@@ -134,6 +132,7 @@ export async function executeAssistantStyleDynamicTool(input: {
         return assistantStyleTextResult(
           false,
           'assistant style settings could not be updated',
+          'authority_rejected',
         )
       }
 
@@ -213,8 +212,8 @@ export async function executeAssistantStyleDynamicTool(input: {
             })
 
     return assistantStyleTextResult(true, JSON.stringify(result))
-  } catch {
-    return assistantStyleTextResult(false, 'assistant style settings could not be updated')
+  } catch (error) {
+    return assistantStyleTextResult(false, 'assistant style settings could not be updated', 'handler_exception', error)
   }
 }
 
@@ -299,18 +298,4 @@ function haveSameKeys(
   const rightKeys = Object.keys(right).sort()
   return leftKeys.length === rightKeys.length &&
     leftKeys.every((key, index) => key === rightKeys[index])
-}
-
-function assistantStyleTextResult(success: boolean, text: string): {
-  rpcResult: {
-    contentItems: Array<{ text: string; type: 'inputText' }>
-    success: boolean
-  }
-} {
-  return {
-    rpcResult: {
-      contentItems: [{ text, type: 'inputText' }],
-      success,
-    },
-  }
 }

@@ -6,7 +6,6 @@ import {
   readMurphDynamicToolRequest,
 } from '../src/assistant-codex/dynamic-tools.js'
 import {
-  executeAutomationDynamicTool,
   readAutomationDynamicToolRequest,
 } from '../src/assistant-codex/dynamic-tools/automation.js'
 import {
@@ -62,22 +61,23 @@ function parseAutomation(argumentsValue: unknown) {
   return parsed
 }
 
-function expectedFailure(operation: string, failureReason: string, handlerErrorCode?: string) {
-  return [{
-    component: 'assistant.automation', operation, errorCode: 'AUTOMATION_TOOL_FAILED',
-    phase: 'tool_call', issueKind: 'tool_error', severity: 'warning',
-    summary: 'Automation tool failed during provider turn.',
-    details: { failureReason, ...(handlerErrorCode === undefined ? {} : { handlerErrorCode }) },
-  }]
-}
-
 function expectFailure(
-  result: Pick<Awaited<ReturnType<typeof executeMurphDynamicToolRequest>>, 'rpcResult' | 'runtimeIssueInputs'>,
-  action: string, reason: string, text: string, handlerErrorCode?: string,
+  result: Awaited<ReturnType<typeof executeMurphDynamicToolRequest>>,
+  action: string, reason: string, text: string, errorCategory?: string,
+  failureStage = 'execution',
 ) {
+  const requestKind = action === 'attach_follow_up' ? 'attach-follow-up' : 'automation'
+  const diagnostic = { failureStage, failureReason: reason,
+    ...(errorCategory === undefined ? {} : { errorCategory }) }
   expect(result).toEqual({
     rpcResult: { success: false, contentItems: [{ type: 'inputText', text }] },
-    runtimeIssueInputs: expectedFailure(action, reason, handlerErrorCode),
+    failureDiagnostic: diagnostic,
+    runtimeIssueInputs: [{
+      component: 'assistant.codex-dynamic-tool', operation: requestKind,
+      errorCode: 'ASSISTANT_DYNAMIC_TOOL_FAILED', phase: 'tool_call',
+      issueKind: 'tool_error', severity: 'warning', summary: 'Murph dynamic tool execution failed.',
+      details: { requestKind, ...diagnostic, diagnosticRole: 'classification' },
+    }],
   })
   expect(JSON.stringify(result.runtimeIssueInputs)).not.toContain(sentinel)
 }
@@ -99,6 +99,7 @@ function envelope(code: string, stage?: string) {
 
 async function dispatch(argumentsValue: unknown, options: {
   automationTool?: AssistantHostedAutomationTool | null
+  abortSignal?: AbortSignal
   followUpAttachmentAllowed?: boolean
 } = {}) {
   const request = readMurphDynamicToolRequest({ id: 1, method: 'item/tool/call', params: {
@@ -111,6 +112,7 @@ async function dispatch(argumentsValue: unknown, options: {
   const nextUsageOrdinal = vi.fn(() => 0)
   const result = await executeMurphDynamicToolRequest({
     env: {}, fetchImpl, nextUsageOrdinal, progressDelivery: null, request,
+    abortSignal: options.abortSignal,
     followUpAttachmentAllowed: options.followUpAttachmentAllowed,
     hostedToolContext: {
       automationTool: options.automationTool ?? null, deviceTool: null,
@@ -150,15 +152,15 @@ describe('automation branch diagnostics', () => {
 
   it('keeps onboarding rejection before the port and follow-up authority/patch unchanged', async () => {
     const port = vi.fn<AssistantHostedAutomationTool['request']>()
-    const result = await executeAutomationDynamicTool({ automationTool: { request: port },
-      request: parseAutomation({ action: 'save_onboarding_first_personal_read' }) })
+    const result = await dispatch({ action: 'save_onboarding_first_personal_read' },
+      { automationTool: { request: port } })
     expectFailure(result, 'save', 'authority_rejected',
-      'onboarding first read is unavailable outside its completion transition')
+      'onboarding first read is unavailable outside its completion transition', undefined, 'admission')
     expect(port).not.toHaveBeenCalled()
     const followUp = { afterMinutes: 20, instructions: sentinel }
     const args = { action: 'attach_follow_up', ...followUp }
     expectFailure(await dispatch(args), 'attach_follow_up', 'authority_rejected',
-      'follow-up attachment is unavailable for this turn')
+      'follow-up attachment is unavailable for this turn', undefined, 'admission')
     expect(await dispatch(args, { followUpAttachmentAllowed: true })).toEqual({
       rpcResult: { success: true, contentItems: [{ type: 'inputText',
         text: 'One optional follow-up is attached to this final message, subject to delivery and conversation limits. Do not promise it will send.' }] },
@@ -167,10 +169,10 @@ describe('automation branch diagnostics', () => {
   })
 
   it.each([
-    ['VAULT_AUTOMATION_CONFLICT', 'version_conflict', undefined,
+    ['VAULT_AUTOMATION_CONFLICT', 'conflict', undefined,
       'automation changed since the last readback; inspect it again and decide from the current stored schedule before retrying'],
-    ['invalid_option', 'handler_exception', 'invalid_option', 'automation operation is unavailable'],
-    ['automation_not_found', 'handler_exception', 'automation_not_found', 'automation operation is unavailable'],
+    ['invalid_option', 'handler_exception', 'invalid_input', 'automation operation is unavailable'],
+    ['automation_not_found', 'handler_exception', 'not_found', 'automation operation is unavailable'],
     [sentinel, 'handler_exception', 'unknown', 'automation operation is unavailable'],
     [undefined, 'handler_exception', 'unknown', 'automation operation is unavailable'],
   ] as const)('labels only the owned top-level handler code %s', async (code, reason, handlerCode, text) => {
@@ -180,7 +182,7 @@ describe('automation branch diagnostics', () => {
     const port = vi.fn<AssistantHostedAutomationTool['request']>().mockRejectedValue(error)
     const abortSignal = new AbortController().signal
     const request = parseAutomation(requests[1])
-    const result = await executeAutomationDynamicTool({ automationTool: { request: port }, request, abortSignal })
+    const result = await dispatch(requests[1], { automationTool: { request: port }, abortSignal })
     expectFailure(result, 'patch', reason, text, handlerCode)
     expect(port).toHaveBeenCalledExactlyOnceWith(request.request, { signal: abortSignal })
     expect(writes.write).not.toHaveBeenCalled()
@@ -210,13 +212,13 @@ describe('automation branch diagnostics', () => {
       const port = vi.fn<AssistantHostedAutomationTool['request']>().mockResolvedValue(response)
       expectFailure(await dispatch(requests[0], { automationTool: { request: port } }), 'inspect', reason,
         reason === 'action_result_mismatch'
-          ? 'automation operation returned an unexpected result' : 'automation result is too large')
+          ? 'automation operation returned an unexpected result' : 'automation result is too large', undefined, 'result')
       expect(port).toHaveBeenCalledTimes(1)
     },
   )
 })
 
-describe('event CLI failure diagnostics', () => {
+describe('recognized CLI failure diagnostics', () => {
   it.each([
     ['VALIDATION_ERROR', undefined, 'invalid_input'], ['invalid_option', undefined, 'invalid_input'],
     ['invalid_payload', undefined, 'invalid_input'], ['VAULT_INVALID_INPUT', undefined, 'invalid_input'],
@@ -231,7 +233,8 @@ describe('event CLI failure diagnostics', () => {
         component: 'assistant.codex-action', operation: 'command.execution', phase: 'provider_turn',
         issueKind: 'tool_error', severity: 'warning', errorCode: 'CODEX_COMMAND_EXIT_NONZERO',
         summary: 'Codex command execution failed during provider turn.',
-        details: { actionKind: 'command.execution', durationMsBucket: 'unknown', outputBytesBucket: 'lt_1kb',
+        details: { failureStage: 'execution', failureReason: 'nonzero_exit', diagnosticRole: 'completion',
+          errorCategory: category, actionKind: 'command.execution', durationMsBucket: 'unknown', outputBytesBucket: 'lt_1kb',
           commandFamily: 'vault-cli event', commandOrdinal: 1, exitCode: 1, vaultCliErrorCategory: category },
       })
       expect(JSON.stringify(issue)).not.toContain(sentinel)
@@ -276,11 +279,35 @@ describe('event CLI failure diagnostics', () => {
     } finally { parse.mockRestore() }
   })
 
-  it.each(['false', 'echo vault-cli event show', "bash -lc 'vault-cli event show synthetic; false'", 'vault-cli journal show synthetic', 'vault-cli knowledge show synthetic'])(
-    'does not attribute another shell/family to event CLI: %s', (command) => {
+  it.each(['false', 'echo vault-cli event show', "bash -lc 'vault-cli event show synthetic; false'", 'unknown-cli event show synthetic', 'node script.js'])(
+    'does not classify another executable as Vault CLI: %s', (command) => {
       expect(commandIssue(JSON.stringify(envelope('not_found')), command)?.details).not.toHaveProperty('vaultCliErrorCategory')
     },
   )
+
+  it.each([
+    ['vault-cli automation inspect synthetic', 'vault-cli automation'],
+    ['vault-cli knowledge show synthetic', 'vault-cli knowledge'],
+    ['vault-cli meal add synthetic', 'meal.add'],
+    ['vault-cli meal edit synthetic', 'meal.edit'],
+    ['vault-cli meal nutrients synthetic', 'meal.nutrients'],
+    ['vault-cli meal show synthetic', 'meal.show'],
+    ['vault-cli meal totals synthetic', 'meal.totals'],
+    ['vault-cli food search-labels synthetic', 'food.search-labels'],
+    ['vault-cli food search-labels-batch synthetic', 'food.search-labels-batch'],
+    ['vault-cli goal list', 'goal.list'],
+    ['vault-cli goal show synthetic', 'goal.show'],
+    ['vault-cli memory show', 'vault-cli memory show'],
+    ['vault-cli memory forget synthetic', 'command'],
+    ['vault-cli batch synthetic', 'vault-cli batch'],
+    ['vault-cli future-command synthetic', 'command'],
+    ['vault-cli --format json event show synthetic', 'command'],
+  ])('recognizes the executable independently of finite family %s', (command, family) => {
+    expect(commandIssue(JSON.stringify(envelope('not_found')), command)?.details).toMatchObject({
+      commandFamily: family, vaultCliErrorCategory: 'not_found', errorCategory: 'not_found',
+      failureStage: 'execution', failureReason: 'nonzero_exit', diagnosticRole: 'completion',
+    })
+  })
 
   it('keeps successes/no-match quiet and started-only family, wrappers and dedupe intact', () => {
     const output = JSON.stringify(envelope('not_found'))
@@ -297,6 +324,38 @@ describe('event CLI failure diagnostics', () => {
       commandFamily: 'vault-cli event', commandOrdinal: 1, vaultCliErrorCategory: 'not_found',
     })
     expect(tracker.recordEvent(eventInput(complete))).toBeNull()
+  })
+})
+
+describe('opaque MCP and command failures', () => {
+  it.each([
+    ['mcpToolCall', { success: false }, 'result', 'reported_failure'],
+    ['mcpToolCall', { status: 'failed' }, 'execution', 'unknown'],
+    ['dynamicToolCall', { success: false }, 'result', 'reported_failure'],
+  ] as const)('adds structural coverage for %s without reading provider prose', (type, outcome, stage, reason) => {
+    const rawEvent = { method: 'item/completed', params: { turnId: 'synthetic-turn', item: {
+      id: 'synthetic-mcp', type, tool: 'synthetic_lookup', server: 'synthetic_provider',
+      ...outcome, durationMs: 2500, arguments: { content: sentinel },
+      error: { code: 'invalid_option', message: sentinel, stack: sentinel },
+    } } }
+    const issue = createCodexActionRuntimeIssueTracker().recordEvent(eventInput(rawEvent))
+    expect(issue?.details).toMatchObject({ failureStage: stage, failureReason: reason,
+      diagnosticRole: 'completion', errorCategory: 'unknown', durationMsBucket: '1_5s' })
+    expect(JSON.stringify(issue)).not.toContain(sentinel)
+    const completed = { ...rawEvent, params: { ...rawEvent.params,
+      item: { ...rawEvent.params.item, success: true, status: 'completed' } } }
+    expect(createCodexActionRuntimeIssueTracker().recordEvent(eventInput(completed))).toBeNull()
+  })
+
+  it('does not parse arbitrary shell JSON even when its code is allowlisted', () => {
+    const parse = vi.spyOn(JSON, 'parse')
+    try {
+      const issue = commandIssue(JSON.stringify(envelope('not_found')), 'node synthetic.js', 2)
+      expect(parse).not.toHaveBeenCalled()
+      expect(issue?.details).toMatchObject({ failureStage: 'execution', failureReason: 'nonzero_exit',
+        errorCategory: 'unknown', exitCode: 2, commandFamily: 'node' })
+      expect(issue?.details).not.toHaveProperty('vaultCliErrorCategory')
+    } finally { parse.mockRestore() }
   })
 })
 

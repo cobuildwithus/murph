@@ -1,3 +1,5 @@
+import type { MurphDynamicToolExecutionResult } from '../dynamic-tools.js'
+import { toolTextResult as automationTextResult } from '../tool-failure-diagnostics.js'
 import { createHash } from 'node:crypto'
 
 import * as z from '@murphai/contracts/zod-runtime'
@@ -31,7 +33,6 @@ import type {
   AssistantHostedAutomationToolRequest,
   AssistantHostedAutomationToolResponse,
 } from '../../assistant/execution-context.js'
-import type { AssistantRuntimeIssueInput } from '../../assistant/issue-reporting.js'
 import {
   buildOnboardingFirstPersonalReadAutomationSaveRequest,
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION,
@@ -896,11 +897,7 @@ export function executeFollowUpAttachmentDynamicTool(input: {
   request: AutomationFollowUpRequest
 }) {
   if (input.allowed !== true) {
-    return automationFailureResult(
-      'attach_follow_up',
-      'authority_rejected',
-      'follow-up attachment is unavailable for this turn',
-    )
+    return automationTextResult(false, 'follow-up attachment is unavailable for this turn', 'authority_rejected')
   }
   return {
     ...automationTextResult(true, 'One optional follow-up is attached to this final message, subject to delivery and conversation limits. Do not promise it will send.'),
@@ -913,30 +910,15 @@ export async function executeAutomationDynamicTool(input: {
   automationTool: AssistantHostedAutomationTool | null
   onboardingFirstReadCompletionTransitionAvailable?: boolean | null
   request: Extract<AutomationDynamicToolRequest, { kind: 'automation' }>
-}): Promise<{
-  runtimeIssueInputs?: readonly AssistantRuntimeIssueInput[]
-  rpcResult: {
-    contentItems: Array<{ text: string; type: 'inputText' }>
-    success: boolean
-  }
-}> {
-  const action = input.request.request.action
+}): Promise<MurphDynamicToolExecutionResult> {
   if (!input.automationTool) {
-    return automationFailureResult(
-      action,
-      'unavailable',
-      'automation management is unavailable for this turn',
-    )
+    return automationTextResult(false, 'automation management is unavailable for this turn', 'unavailable')
   }
   if (
     input.request.onboardingFirstReadCompletionRequested === true
     && input.onboardingFirstReadCompletionTransitionAvailable !== true
   ) {
-    return automationFailureResult(
-      action,
-      'authority_rejected',
-      'onboarding first read is unavailable outside its completion transition',
-    )
+    return automationTextResult(false, 'onboarding first read is unavailable outside its completion transition', 'authority_rejected')
   }
 
   try {
@@ -947,16 +929,12 @@ export async function executeAutomationDynamicTool(input: {
       signal: input.abortSignal ?? null,
     })
     if (response.action !== input.request.request.action) {
-      return automationFailureResult(
-        action,
-        'action_result_mismatch',
-        'automation operation returned an unexpected result',
-      )
+      return automationTextResult(false, 'automation operation returned an unexpected result', 'action_result_mismatch')
     }
 
     const text = serializeAutomationToolResponse(response)
     if (typeof text !== 'string') {
-      return automationFailureResult(action, text.failureReason, 'automation result is too large')
+      return automationTextResult(false, 'automation result is too large', text.failureReason)
     }
     return automationTextResult(true, text)
   } catch (error) {
@@ -970,20 +948,9 @@ export async function executeAutomationDynamicTool(input: {
       )
     }
     if (isAutomationConflictError(error)) {
-      return automationFailureResult(
-        action,
-        'version_conflict',
-        'automation changed since the last readback; inspect it again and decide from the current stored schedule before retrying',
-      )
+      return automationTextResult(false, 'automation changed since the last readback; inspect it again and decide from the current stored schedule before retrying', 'conflict')
     }
-    return automationFailureResult(
-      action,
-      'handler_exception',
-      'automation operation is unavailable',
-      isUnknownRecord(error) && error.code === 'invalid_option'
-        ? 'invalid_option'
-        : isAutomationNotFoundError(error) ? 'automation_not_found' : 'unknown',
-    )
+    return automationTextResult(false, 'automation operation is unavailable', 'handler_exception', error)
   }
 }
 
@@ -1058,49 +1025,5 @@ function serializeAutomationToolResponse(
       : { failureReason: 'oversized_result' }
   } catch {
     return { failureReason: 'result_serialization_failed' }
-  }
-}
-
-// Only owner-known branches/codes enter telemetry; never inspect exception prose.
-function automationFailureResult(
-  action: AssistantHostedAutomationToolRequest['action'] | 'attach_follow_up',
-  failureReason:
-    | 'unavailable'
-    | 'authority_rejected'
-    | 'version_conflict'
-    | 'action_result_mismatch'
-    | 'oversized_result'
-    | 'result_serialization_failed'
-    | 'handler_exception',
-  text: string,
-  handlerErrorCode?: 'invalid_option' | 'automation_not_found' | 'unknown',
-) {
-  const issue: AssistantRuntimeIssueInput = {
-    component: 'assistant.automation',
-    operation: action,
-    errorCode: 'AUTOMATION_TOOL_FAILED',
-    phase: 'tool_call',
-    issueKind: 'tool_error',
-    severity: 'warning',
-    summary: 'Automation tool failed during provider turn.',
-    details: {
-      failureReason,
-      ...(handlerErrorCode === undefined ? {} : { handlerErrorCode }),
-    },
-  }
-  return { ...automationTextResult(false, text), runtimeIssueInputs: [issue] }
-}
-
-function automationTextResult(success: boolean, text: string): {
-  rpcResult: {
-    contentItems: Array<{ text: string; type: 'inputText' }>
-    success: boolean
-  }
-} {
-  return {
-    rpcResult: {
-      contentItems: [{ text, type: 'inputText' }],
-      success,
-    },
   }
 }

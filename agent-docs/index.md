@@ -140,6 +140,7 @@ not a guarantee that every claim was checked in this cleanup.
 | `agent-docs/operations/device-sync-ingestion-invariants.md` | Device-sync push/pull ingestion invariants. | Device-sync ingestion contract | High | 2026-08-20 |
 | `agent-docs/PLANS.md` | Execution-plan lifecycle and storage rules. | Plan workflow | Medium | 2026-03-31 |
 | `agent-docs/exec-plans/completed/README.md` | Completed-plan archive interpretation. | Completed-plan archive interpretation | Medium | 2026-07-22 |
+| `agent-docs/exec-plans/completed/2026-09-06-all-tool-failure-diagnostics-extension.md` | Separate PR #2985 telemetry extension record; original completed plan unchanged. | Historical implementation evidence | Low | 2026-09-06 |
 | `agent-docs/generated/README.md` | Meaning and expectations for generated doc artifacts. | Generated-doc conventions | Low | 2026-04-02 |
 | `agent-docs/exec-plans/active/` | Task-owned in-flight execution plans. | Active plan lifecycle | Medium | 2026-08-20 |
 | `agent-docs/exec-plans/tech-debt-tracker.md` | Current debt register with owner/priority/status. | Rolling debt tracker | Medium | 2026-03-12 |

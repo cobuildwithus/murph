@@ -1,3 +1,10 @@
+import {
+  completeDynamicToolFailureDiagnostics,
+  createDynamicToolFailureIssue,
+  createDynamicToolRuntimeIssueInput,
+  toolFailureDiagnostic,
+  type ToolFailureReason,
+} from './assistant-codex/tool-failure-diagnostics.js'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdtemp, rm, stat } from 'node:fs/promises'
@@ -4563,6 +4570,10 @@ async function runCodexAppServerTurnOnProcess(
       isInvocationScopedRootToolRequest(dynamicToolRequest) &&
       (turnId === null || extractCodexTurnIdFromMessage(message) !== turnId)
     ) {
+      pushRuntimeIssueInput(createDynamicToolFailureIssue(
+        dynamicToolRequest,
+        toolFailureDiagnostic('authority_rejected'),
+      ))
       void tryWriteRpcMessage({
         id: requestId,
         result: {
@@ -4595,6 +4606,10 @@ async function runCodexAppServerTurnOnProcess(
 
     const dynamicToolKey = readCodexDynamicToolKey(message)
     if (!dynamicToolKey || !offeredDynamicToolKeys.has(dynamicToolKey)) {
+      pushRuntimeIssueInput(createDynamicToolFailureIssue(
+        dynamicToolRequest,
+        toolFailureDiagnostic('authority_rejected'),
+      ))
       void tryWriteRpcMessage({
         id: requestId,
         result: {
@@ -4617,6 +4632,23 @@ async function runCodexAppServerTurnOnProcess(
       }))
     }
 
+    const recordDynamicToolRejection = (
+      reason: ToolFailureReason,
+      error?: unknown,
+      result?: { runtimeIssueInputs?: readonly AssistantRuntimeIssueInput[] },
+    ): void => {
+      // Intake/returned failures already have a classification. Native admission
+      // and successful-result finalization refusals bypass the dispatch boundary.
+      if (
+        isInvalidDynamicToolRequest(dynamicToolRequest) ||
+        result?.runtimeIssueInputs?.length
+      ) return
+      pushRuntimeIssueInput(createDynamicToolFailureIssue(
+        dynamicToolRequest,
+        toolFailureDiagnostic(reason, error),
+      ))
+    }
+
     const currentSenderDecisionClaim = claimCurrentSenderTurnDecision({
       request: dynamicToolRequest,
       turnState: groupSharedReadTurnState,
@@ -4625,6 +4657,7 @@ async function runCodexAppServerTurnOnProcess(
       currentSenderDecisionClaim === 'conflict'
       || currentSenderDecisionClaim === 'unavailable'
     ) {
+      recordDynamicToolRejection(currentSenderDecisionClaim)
       void tryWriteRpcMessage({
         id: requestId,
         result: {
@@ -4645,6 +4678,7 @@ async function runCodexAppServerTurnOnProcess(
       (dynamicToolRequest.kind === 'finish-without-reply' ||
         dynamicToolRequest.kind === 'invalid-finish-without-reply-arguments')
     ) {
+      recordDynamicToolRejection('authority_rejected')
       void tryWriteRpcMessage({
         id: requestId,
         result: {
@@ -4664,6 +4698,7 @@ async function runCodexAppServerTurnOnProcess(
       computerToolsLockedAfterUserPause &&
       dynamicToolRequest.kind === 'finish-without-reply'
     ) {
+      recordDynamicToolRejection('conflict')
       void tryWriteRpcMessage({
         id: requestId,
         result: {
@@ -4683,6 +4718,7 @@ async function runCodexAppServerTurnOnProcess(
       requiredVaultFileApprovalUrls.length > 0 &&
       dynamicToolRequest.kind === 'finish-without-reply'
     ) {
+      recordDynamicToolRejection('conflict')
       void tryWriteRpcMessage({
         id: requestId,
         result: {
@@ -4702,6 +4738,7 @@ async function runCodexAppServerTurnOnProcess(
       computerToolsLockedAfterUserPause &&
       isComputerDynamicToolRequest(dynamicToolRequest)
     ) {
+      recordDynamicToolRejection('conflict')
       void tryWriteRpcMessage({
         id: requestId,
         result: {
@@ -4743,6 +4780,7 @@ async function runCodexAppServerTurnOnProcess(
       dynamicToolRequest.kind === 'send-progress-update' &&
       shouldSuppressDeliveryContext(dynamicToolDeliveryContextOrdinal ?? 0)
     ) {
+      recordDynamicToolRejection('conflict')
       void tryWriteRpcMessage({
         id: requestId,
         result: {
@@ -4762,6 +4800,7 @@ async function runCodexAppServerTurnOnProcess(
       dynamicToolRequest.kind === 'select-reply-target' &&
       shouldSuppressDeliveryContext(dynamicToolDeliveryContextOrdinal ?? 0)
     ) {
+      recordDynamicToolRejection('conflict')
       void tryWriteRpcMessage({
         id: requestId,
         result: {
@@ -4819,7 +4858,8 @@ async function runCodexAppServerTurnOnProcess(
           !vaultFileMayClassifyAfterGenericNoReply &&
           isResponseAttachmentDynamicToolRequest(dynamicToolRequest)
         ) {
-          return {
+          return completeDynamicToolFailureDiagnostics(dynamicToolRequest, {
+            failureDiagnostic: toolFailureDiagnostic('conflict'),
             rpcResult: {
               contentItems: [{
                 text: dynamicToolRequest.kind === 'send-vault-file'
@@ -4831,7 +4871,7 @@ async function runCodexAppServerTurnOnProcess(
               }],
               success: false,
             },
-          }
+          })
         }
         const hostedToolContext = resolveCodexAppServerHostedToolContext(input)
         await hostedToolContext?.beforeToolExecution?.(
@@ -4864,7 +4904,8 @@ async function runCodexAppServerTurnOnProcess(
               targetKey: requestedLocalAtRecovery.recoveryKey,
             })
           if (!requiredAutomationLocalAtClarifications.has(clarificationKey)) {
-            return {
+            return completeDynamicToolFailureDiagnostics(dynamicToolRequest, {
+              failureDiagnostic: toolFailureDiagnostic('authority_rejected'),
               rpcResult: {
                 contentItems: [{
                   text:
@@ -4873,7 +4914,7 @@ async function runCodexAppServerTurnOnProcess(
                 }],
                 success: false,
               },
-            }
+            })
           }
           if (
             dynamicToolRequest.kind ===
@@ -5063,6 +5104,7 @@ async function runCodexAppServerTurnOnProcess(
             dynamicToolRequestDeliveryContextOrdinal,
           )
         } catch {
+          recordDynamicToolRejection('conflict', undefined, result)
           void tryWriteRpcMessage({
             id: requestId,
             result: {
@@ -5083,6 +5125,7 @@ async function runCodexAppServerTurnOnProcess(
             dynamicToolRequestDeliveryContextOrdinal,
           )
         } catch {
+          recordDynamicToolRejection('conflict', undefined, result)
           void tryWriteRpcMessage({
             id: requestId,
             result: {
@@ -5103,6 +5146,7 @@ async function runCodexAppServerTurnOnProcess(
             dynamicToolRequestDeliveryContextOrdinal,
           )
         } catch (error) {
+          recordDynamicToolRejection('handler_exception', error, result)
           const text = error instanceof VaultCliError &&
             error.code === 'ASSISTANT_RESPONSE_MEDIA_AFTER_NO_REPLY'
             ? 'response media unavailable after finish_without_reply'
@@ -5131,6 +5175,7 @@ async function runCodexAppServerTurnOnProcess(
           dynamicToolRequestDeliveryContextOrdinal,
         )
         if (!applied) {
+          recordDynamicToolRejection('conflict', undefined, result)
           void tryWriteRpcMessage({
             id: requestId,
             result: {
@@ -5211,6 +5256,7 @@ async function runCodexAppServerTurnOnProcess(
       pushRuntimeIssueInput(createDynamicToolRuntimeIssueInput({
         request: dynamicToolRequest,
         reason: 'execution_failed',
+        error,
       }))
       if (dynamicToolRequest.kind === 'finish-without-reply') {
         throw error
@@ -6500,61 +6546,6 @@ function isInvocationScopedRootToolRequest(
     request.kind === 'select-reply-target' ||
     request.kind === 'invalid-reaction-arguments' ||
     request.kind === 'invalid-reply-target-arguments'
-}
-
-function createDynamicToolRuntimeIssueInput(input: {
-  request: MurphDynamicToolRequest
-  reason: 'execution_failed' | 'invalid_arguments' | 'unsupported'
-}): AssistantRuntimeIssueInput {
-  if (input.reason === 'unsupported') {
-    return {
-      component: 'assistant.codex-dynamic-tool',
-      operation: 'unsupported-dynamic-tool',
-      phase: 'tool_call',
-      issueKind: 'schema_rejection',
-      severity: 'warning',
-      errorCode: 'ASSISTANT_DYNAMIC_TOOL_UNSUPPORTED',
-      summary: 'Codex requested an unsupported Murph dynamic tool.',
-      details: {
-        requestKind: 'unsupported-dynamic-tool',
-        namespacePresent:
-          input.request.kind === 'unsupported-dynamic-tool'
-            ? input.request.namespace !== null
-            : false,
-        toolPresent:
-          input.request.kind === 'unsupported-dynamic-tool'
-            ? input.request.tool !== null
-            : false,
-      },
-    }
-  }
-
-  if (input.reason === 'invalid_arguments' && isInvalidDynamicToolRequest(input.request)) {
-    const validationDigest = input.request.validationDigest
-    return {
-      component: 'assistant.tool-validation',
-      operation: validationDigest.toolName ?? input.request.kind,
-      phase: 'tool_call',
-      issueKind: 'schema_rejection',
-      severity: 'warning',
-      errorCode: 'TOOL_INPUT_SCHEMA_REJECTION',
-      summary: 'Tool input failed schema validation.',
-      details: validationDigest,
-    }
-  }
-
-  return {
-    component: 'assistant.codex-dynamic-tool',
-    operation: input.request.kind,
-    phase: 'tool_call',
-    issueKind: 'tool_error',
-    severity: 'warning',
-    errorCode: 'ASSISTANT_DYNAMIC_TOOL_FAILED',
-    summary: 'Murph dynamic tool execution failed.',
-    details: {
-      requestKind: input.request.kind,
-    },
-  }
 }
 
 function resolveCodexRolloutRelativePath(input: {

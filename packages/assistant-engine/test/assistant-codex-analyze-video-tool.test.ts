@@ -313,6 +313,7 @@ describe('executeAnalyzeVideoTool', () => {
     expect(result).toEqual({
       rpcSuccess: false,
       rpcText: 'The selected video message is not available for this action',
+      failureDiagnostic: { failureStage: 'admission', failureReason: 'authority_rejected' },
     })
     expect(fetchImpl).not.toHaveBeenCalled()
   })
@@ -385,20 +386,23 @@ describe('executeAnalyzeVideoTool', () => {
       expected:
         'Video analysis was rate-limited; no analysis was retrieved. Please try again later.',
       status: 429,
+      failureDiagnostic: { failureStage: 'result', failureReason: 'reported_failure', errorCategory: 'rate_limited' },
     },
     {
       expected:
         'Video analysis is unavailable right now; no analysis was retrieved. Please try again later.',
       status: 503,
+      failureDiagnostic: { failureStage: 'result', failureReason: 'reported_failure', errorCategory: 'unavailable' },
     },
     {
       expected:
         'Video analysis returned no usable answer. Please try again later.',
       status: 200,
+      failureDiagnostic: { failureStage: 'result', failureReason: 'empty_result' },
     },
   ])(
     'returns an actionable provider failure for HTTP $status',
-    async ({ expected, status }) => {
+    async ({ expected, status, failureDiagnostic }) => {
       const fixture = await createVideoFixture([{ ordinal: 1, mime: 'video/mp4' }])
       const fetchImpl = vi.fn<typeof fetch>(async () =>
         status === 200
@@ -414,7 +418,7 @@ describe('executeAnalyzeVideoTool', () => {
         vaultRoot: fixture.vaultRoot,
       })
 
-      expect(result).toEqual({ rpcSuccess: false, rpcText: expected })
+      expect(result).toEqual({ rpcSuccess: false, rpcText: expected, failureDiagnostic })
     },
   )
 

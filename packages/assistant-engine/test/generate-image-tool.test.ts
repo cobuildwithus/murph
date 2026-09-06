@@ -75,6 +75,7 @@ describe('executeGenerateImageTool reference images', () => {
     expect(result).toEqual({
       rpcSuccess: false,
       rpcText: 'hosted private image delivery requires the owning vault',
+      failureDiagnostic: { failureStage: 'execution', failureReason: 'unavailable' },
     })
   })
 
@@ -254,6 +255,7 @@ describe('executeGenerateImageTool reference images', () => {
         rpcSuccess: false,
         rpcText:
           'image edit failed: ASSISTANT_IMAGE_GENERATION_FAILED (http 400, invalid_image, request req_image_edit_failed): The reference image could not be decoded.',
+        failureDiagnostic: { failureStage: 'execution', failureReason: 'handler_exception', errorCategory: 'invalid_input' },
       })
     })
   })

@@ -1,3 +1,5 @@
+import type { MurphDynamicToolExecutionResult } from '../dynamic-tools.js'
+import { toolTextResult as groupRoomModelTextResult } from '../tool-failure-diagnostics.js'
 import * as z from '@murphai/contracts/zod-runtime'
 
 import type {
@@ -92,12 +94,7 @@ export async function executeGroupRoomModelDynamicTool(input: {
   vaultRoot: string | null
   managedMaintenanceAuthorized?: boolean
   readGroupRoomModelState?: typeof readAssistantGroupRoomModelState
-}): Promise<{
-  rpcResult: {
-    contentItems: Array<{ text: string; type: 'inputText' }>
-    success: boolean
-  }
-}> {
+}): Promise<MurphDynamicToolExecutionResult> {
   if (
     input.managedMaintenanceAuthorized !== true &&
     (
@@ -108,12 +105,14 @@ export async function executeGroupRoomModelDynamicTool(input: {
     return groupRoomModelTextResult(
       false,
       'group room-model updates are unavailable for this conversation',
+      'authority_rejected',
     )
   }
   if (!input.vaultRoot) {
     return groupRoomModelTextResult(
       false,
       'group room-model updates require a vault',
+      'unavailable',
     )
   }
 
@@ -127,6 +126,7 @@ export async function executeGroupRoomModelDynamicTool(input: {
       return groupRoomModelTextResult(
         false,
         'group room-model state could not be read; no update was made',
+        'unavailable',
       )
     }
 
@@ -162,6 +162,7 @@ export async function executeGroupRoomModelDynamicTool(input: {
       return groupRoomModelTextResult(
         false,
         'silent maintenance must not reactivate inactive group room-model state; no update was made',
+        'authority_rejected',
       )
     }
 
@@ -185,27 +186,11 @@ export async function executeGroupRoomModelDynamicTool(input: {
       true,
       JSON.stringify({ status: 'updated' }),
     )
-  } catch {
+  } catch (error) {
     return groupRoomModelTextResult(
       false,
       'group room-model update could not be completed',
+      'handler_exception', error,
     )
-  }
-}
-
-function groupRoomModelTextResult(
-  success: boolean,
-  text: string,
-): {
-  rpcResult: {
-    contentItems: Array<{ text: string; type: 'inputText' }>
-    success: boolean
-  }
-} {
-  return {
-    rpcResult: {
-      contentItems: [{ text, type: 'inputText' }],
-      success,
-    },
   }
 }
