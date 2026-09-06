@@ -1949,6 +1949,17 @@ Last verified: 2026-09-04
   idempotency key. Concurrent failures therefore produce at most one operator
   email for that occurrence without adding a database row, queue, or second
   retry owner.
+  The generic body explicitly covers both expiry and terminal failure; expiry
+  does not establish that model execution or automatic retry occurred. The
+  expiry event carries `priorFailureCount` from the existing cron state
+  (`failurePriorFailureCount` in hosted logs), where zero means no retained
+  prior failures, not proof that no attempt ran. Snapshot lifecycle diagnostics
+  classify ordinary and default-processing wake timestamps as `omitted`,
+  `none`, `invalid`, `due`, or `future`, with signed millisecond offsets measured
+  when the diagnostic is built. Negative means overdue. These describe the
+  requested checkpoint; only the finished event's `webCheckpointAccepted`
+  establishes Web acceptance. Malformed timestamp values and raw wake reasons
+  are never copied into these fields.
 - The hosted reply-latency operator alert remains one singleton incident owner.
   Fresh conversation mailbox rows that the existing Web AI usage gate
   intentionally denies receive one assign-once timestamp at the mutating

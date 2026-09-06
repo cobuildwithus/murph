@@ -2734,6 +2734,7 @@ function emitAssistantCronOccurrenceExpiredEvent(input: {
       automationSlug,
       latenessMinutes: input.latenessMinutes,
       occurrenceAt: input.occurrenceAt,
+      priorFailureCount: input.job.job.state.consecutiveFailures,
     },
     providerKind: 'status',
     providerState: 'completed',

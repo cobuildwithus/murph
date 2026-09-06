@@ -82,7 +82,8 @@ describe("Personal Patterns run alerts", () => {
 
     expect(sent).toHaveLength(1);
     expect(sent[0]?.subject).toBe("Murph Personal Patterns runs need attention");
-    expect(sent[0]?.text).toContain("did not complete after automatic recovery");
+    expect(sent[0]?.text).toContain("expired or ended with a terminal failure");
+    expect(sent[0]?.text).not.toContain("after automatic recovery");
     expect(sent[0]?.text).toContain(
       "scheduled occurrence: 2026-08-31T13:00:00.000Z",
     );
@@ -118,6 +119,53 @@ describe("Personal Patterns run alerts", () => {
 
     expect(new Set(sends.map((send) => send.idempotencyKey)).size).toBe(1);
     expect(new Set(sends.map((send) => send.text)).size).toBe(1);
+    expect(sends[0]?.text).toContain("may not have reached model execution");
+    expect(sends[0]?.text).toContain("cron.occurrence.expired");
+    expect(sends[0]?.text).toContain("nextDefaultProcessingWakeState");
+    expect(sends[0]?.text).toContain("nextDefaultProcessingWakeOffsetMs");
+  });
+
+  it("keeps one stable email across terminal failures and expirations", async () => {
+    const sends: SendAlertEmailInput[] = [];
+    const common = {
+      at: "2026-08-31T17:00:00.000Z",
+      redactedJson: {
+        failureAutomationSlug: "personal-patterns-update",
+        failureOccurrenceAt: "2026-08-31T13:00:00.000Z",
+      },
+    };
+    const expired = {
+      ...common,
+      redactedJson: {
+        ...common.redactedJson,
+        failureLatenessMinutes: 240,
+        failurePriorFailureCount: 0,
+        type: "cron.occurrence.expired",
+      },
+    };
+    const failed = {
+      ...common,
+      redactedJson: {
+        ...common.redactedJson,
+        failureRetryScheduled: false,
+        failureRunOutcome: "failed",
+        type: "cron.job.completed",
+      },
+    };
+    for (const entries of [[expired], [failed], [failed, expired]]) {
+      await sendHostedPersonalPatternsRunAlerts({
+        entries,
+        env: alertEnv,
+        sendEmail: async (input) => {
+          sends.push(input);
+          return { providerMessageId: "email_1" };
+        },
+      });
+    }
+    expect(sends).toHaveLength(3);
+    expect(new Set(sends.map((send) => send.idempotencyKey)).size).toBe(1);
+    expect(new Set(sends.map((send) => send.text)).size).toBe(1);
+    expect(sends[0]?.text).not.toContain("240");
   });
 
   it("ignores other automations and successful Patterns runs", async () => {

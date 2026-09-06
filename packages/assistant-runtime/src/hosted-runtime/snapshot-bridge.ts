@@ -1085,6 +1085,9 @@ function recordHostedWorkspaceSnapshotOptionalTiming(
 function createHostedCheckpointSnapshotRequestLogDetails(
   request: HostedWorkspaceSnapshotCheckpointRequest,
 ): HostedRuntimeRedactedJson {
+  const nowMs = Date.now();
+  const wake = describeHostedCheckpointWake(request.nextWakeAt, nowMs);
+  const defaultWake = describeHostedCheckpointWake(request.nextDefaultProcessingWakeAt, nowMs);
   return {
     checkpointReason: request.reason,
     handledConversationFrontierSelected:
@@ -1096,6 +1099,12 @@ function createHostedCheckpointSnapshotRequestLogDetails(
       : {}),
     nextWakeAtPresent: request.nextWakeAt != null,
     nextWakeReasonPresent: request.nextWakeReason != null,
+    nextWakeState: wake.state,
+    nextWakeOffsetMs: wake.offsetMs,
+    nextDefaultProcessingWakeState: defaultWake.state,
+    nextDefaultProcessingWakeOffsetMs: defaultWake.offsetMs,
+    nextDefaultProcessingWakeReasonPresent: request.nextDefaultProcessingWakeReason != null,
+    systemMailboxProgressGenerationPresent: request.systemMailboxProgressGeneration != null,
     redactedStatusPresent: request.redactedStatus !== null,
     ...(request.runtimeWakePendingAtCheckpoint === undefined
       ? {}
@@ -1103,6 +1112,23 @@ function createHostedCheckpointSnapshotRequestLogDetails(
           runtimeWakePendingAtCheckpoint:
             request.runtimeWakePendingAtCheckpoint,
         }),
+  };
+}
+
+function describeHostedCheckpointWake(
+  wakeAt: string | null | undefined,
+  nowMs: number,
+): {
+  state: "omitted" | "none" | "invalid" | "due" | "future";
+  offsetMs: number | null;
+} {
+  if (wakeAt === undefined) return { state: "omitted", offsetMs: null };
+  if (wakeAt === null) return { state: "none", offsetMs: null };
+  const wakeMs = Date.parse(wakeAt);
+  if (!Number.isFinite(wakeMs)) return { state: "invalid", offsetMs: null };
+  return {
+    state: wakeMs <= nowMs ? "due" : "future",
+    offsetMs: wakeMs - nowMs,
   };
 }
 
