@@ -1817,25 +1817,24 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       reason: "wake-appended-active-member",
     });
 
-    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(4);
-    const initialAccessReadOrder =
-      prisma.hostedMember.findUnique.mock.invocationCallOrder[1]!;
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(3);
     const exactAccessReadOrder =
-      prisma.hostedMember.findUnique.mock.invocationCallOrder[2]!;
+      prisma.hostedMember.findUnique.mock.invocationCallOrder[1]!;
     const refreshedAccessReadOrder =
-      prisma.hostedMember.findUnique.mock.invocationCallOrder[3]!;
-    const preparedRoutingLockOrder =
-      mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[0]!;
+      prisma.hostedMember.findUnique.mock.invocationCallOrder[2]!;
+    const selectedMemberLockIndex = prisma.$queryRaw.mock.calls.findIndex(([sql]) =>
+      sql.join(" ").toLowerCase().includes('from "hosted_member"'),
+    );
+    expect(selectedMemberLockIndex).toBeGreaterThanOrEqual(0);
+    const selectedMemberLockOrder =
+      prisma.$queryRaw.mock.invocationCallOrder[selectedMemberLockIndex]!;
     const reclassificationLockOrder =
-      mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[1]!;
-    expect(initialAccessReadOrder).toBeLessThan(exactAccessReadOrder);
-    expect(exactAccessReadOrder).toBeLessThan(preparedRoutingLockOrder);
-    expect(preparedRoutingLockOrder).toBeLessThan(reclassificationLockOrder);
+      mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[0]!;
+    expect(selectedMemberLockOrder).toBeLessThan(exactAccessReadOrder);
+    expect(exactAccessReadOrder).toBeLessThan(reclassificationLockOrder);
     expect(reclassificationLockOrder).toBeLessThan(refreshedAccessReadOrder);
-    expect(
-      refreshedAccessReadOrder,
-    ).toBeLessThan(
-      mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[2],
+    expect(refreshedAccessReadOrder).toBeLessThan(
+      mocks.appendHostedMailboxEnvelopeTx.mock.invocationCallOrder[0]!,
     );
     expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
   });
