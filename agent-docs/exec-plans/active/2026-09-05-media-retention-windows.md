@@ -42,12 +42,13 @@ No private production conversation was replayed and no production mutation ran.
 - 30 inbox-retention tests and 57 runtime artifact/idle tests passed, including
   exact 14/30/90-day boundaries, selected cold loading, cached expiry, saved
   media, terminal retirement, legacy deadlines, and parser protection.
-- Assistant-engine, inboxd, and assistant-runtime typechecks passed.
+- Assistant-engine, contracts, inboxd, assistant-runtime, and Web typechecks
+  passed. Nine production changelog rendering tests passed.
 - Live local-subscription gpt-5.6-terra video journey passed: fresh second
   session without earlier text or local bytes, discovery, one materialization,
   one analysis, correct concise reply, no resend request.
 - Live image journey passed: dated discovery, one selected materialization,
-  and correct visual answer. Native image-view assertion is being finalized.
+  native imageView, and correct visual answer.
 - Complexity guard passed with no debt growth; dispatcher debt decreased by 4.
 - Full native first-request captures compare identical synthetic direct/group
   fixtures with the merged tool catalog versus the added attachment tool.
@@ -58,8 +59,9 @@ No private production conversation was replayed and no production mutation ran.
 
 - [x] Implement full-window storage and lookup with recoverable selection.
 - [x] Review source ownership, privacy, and focused behavior.
-- [ ] Finalize changelog provenance, rendered proof, and remaining typechecks.
-- [ ] Commit the candidate, open a draft PR, and run routed external review/CI.
+- [x] Finalize changelog provenance, rendered proof, and remaining typechecks.
+- [x] Commit the candidate and open draft PR #2972.
+- [ ] Run routed external review and exact-head CI.
 - [ ] Close this plan and report exact completion state and rollout limits.
 
 ## Rollout
@@ -70,3 +72,16 @@ old warm runners can still clear references or shorten lifetimes. No migration
 or backfill extends existing deadlines. Rollback may shorten availability but
 must stay above #2874's retirement ordering floor. Verify cold-restored image
 and video follow-ups after runner convergence.
+
+## Initial provider input measurement
+
+Complete native Responses requests with identical synthetic direct/group
+fixtures: direct 28,590 -> 28,821 o200k tokens (+231, +0.808%) and
+131,980 -> 133,083 UTF-8 bytes (+1,103); group 24,711 -> 24,942 tokens
+(+231, +0.935%) and 114,371 -> 115,474 bytes (+1,103). Uses tiktoken 0.14.0,
+production prompt/catalog builders and the existing local scripted server.
+Transport metadata/cache/item IDs are excluded and temporary paths/UUIDs are
+normalized. No saved history or connected integrations are present. Base is
+merged #2874's catalog with the new capability off; head enables only that tool.
+These are full synthetic request counts, not billed usage or every member's
+production input.
